@@ -1,0 +1,27 @@
+{
+  "name": "nexus-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nexus open-source monorepo - CLI, daemon, and wire contracts",
+  "author": "42ch",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/42ch/nexus"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "clean": "pnpm -r run clean"
+  }
+}

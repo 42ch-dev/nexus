@@ -1,0 +1,42 @@
+{
+  "name": "@42ch/nexus-contracts",
+  "version": "0.1.0",
+  "description": "Nexus Wire Contracts - TypeScript types generated from JSON Schema",
+  "author": "42ch",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/42ch/nexus"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0"
+  },
+  "peerDependencies": {},
+  "keywords": [
+    "nexus",
+    "contracts",
+    "wire-types",
+    "json-schema"
+  ]
+}
