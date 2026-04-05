@@ -22,6 +22,7 @@
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
-    "clean": "pnpm -r run clean"
+    "clean": "pnpm -r run clean",
+    "validate-schemas": "node tooling/validation/schema-validator.js"
   }
 }

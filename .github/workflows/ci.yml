@@ -12,8 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check schemas directory exists
-        run: test -d schemas || echo "schemas/ not yet populated"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install validation dependencies
+        run: cd tooling/validation && npm install
+      - name: Validate schemas
+        run: node tooling/validation/schema-validator.js
 
   rust-checks:
     name: Rust fmt & clippy

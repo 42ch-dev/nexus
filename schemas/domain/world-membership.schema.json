@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/domain/world-membership.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldMembership",
+  "description": "WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4.",
+  "type": "object",
+  "required": ["schema_version", "membership_id", "world_id", "creator_id", "role", "membership_status", "joined_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "membership_id": {
+      "type": "string",
+      "pattern": "^mbr_[a-zA-Z0-9]+$",
+      "description": "Unique membership identifier (prefix: 'mbr_')"
+    },
+    "world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "creator_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+    },
+    "role": {
+      "type": "string",
+      "enum": ["owner", "maintainer", "collaborator", "official_creator"],
+      "description": "Membership role"
+    },
+    "membership_status": {
+      "type": "string",
+      "enum": ["active", "invited", "suspended", "removed"],
+      "description": "Membership status"
+    },
+    "joined_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "can_sync_kb": {
+          "type": "boolean",
+          "default": true
+        },
+        "can_publish": {
+          "type": "boolean",
+          "default": true
+        },
+        "can_fork": {
+          "type": "boolean",
+          "default": true
+        },
+        "can_invite_official_creator": {
+          "type": "boolean",
+          "default": false
+        },
+        "can_confirm_canon": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "description": "Permission flags"
+    }
+  },
+  "additionalProperties": false
+}

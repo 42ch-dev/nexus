@@ -1,0 +1,14 @@
+{
+  "name": "nexus-schema-validator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JSON Schema validation tool for Nexus schemas",
+  "main": "schema-validator.js",
+  "scripts": {
+    "validate": "node schema-validator.js"
+  },
+  "dependencies": {
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1"
+  }
+}
