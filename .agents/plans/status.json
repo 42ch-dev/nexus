@@ -27,7 +27,7 @@
       "completed_at": "2026-04-06"
     },
     "2025-04-05-codegen-pipeline": {
-      "status": "in_review",
+      "status": "done",
       "phase": "Phase 0",
       "branch_policy": "direct on main — initialization",
       "priority": "high",
@@ -35,7 +35,8 @@
       "updated": "2026-04-06",
       "title": "Codegen Pipeline",
       "description": "Implement schema-to-code generation pipeline (JSON Schema → TypeScript + Rust)",
-      "progress": 100
+      "progress": 100,
+      "completed_at": "2026-04-06"
     },
     "2025-04-05-domain-models": {
       "status": "pending",
@@ -91,6 +92,10 @@
       {
         "updated_at": "2026-04-05",
         "message": "Phase 0 plans execute on main branch for initialization. Phase 1+ plans require feature branches."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Phase 0 complete: monorepo-structure, json-schema-foundation, codegen-pipeline all done. 15 commits on main. Ready for Phase 1."
       }
     ]
   }
