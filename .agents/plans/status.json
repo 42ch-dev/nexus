@@ -39,13 +39,19 @@
       "completed_at": "2026-04-06"
     },
     "2025-04-05-domain-models": {
-      "status": "pending",
+      "status": "blocked",
       "phase": "Phase 1",
       "branch_policy": "feature branch from main",
-      "priority": "medium",
+      "priority": "high",
       "created": "2025-04-05",
+      "updated": "2026-04-06",
       "title": "Domain Models Implementation",
-      "description": "Implement domain models (Key Block, Timeline, Memory, SourceAnchor) with consistency rules"
+      "description": "Implement domain models (Key Block, Timeline, Memory, SourceAnchor) with consistency rules",
+      "blocked_since": "2026-04-06",
+      "blocked_reason": "Architecture review found critical field/enum deviations from frozen v1-spec. Wave 0 spec revision complete. Ready for Wave 1 implementation.",
+      "review_outcome": "critical-gaps",
+      "next_action": "Wave 1: @fullstack-dev to implement revised spec from docs/revised-domain-models-spec-v1.md",
+      "wave_0_spec": "docs/revised-domain-models-spec-v1.md (1381 lines, 15 aggregates, 38+ TDD tests)"
     },
     "2025-04-05-cli-daemon-foundation": {
       "status": "pending",
@@ -75,13 +81,20 @@
       "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract"
     },
     "2025-04-05-context-assembly": {
-      "status": "pending",
+      "status": "blocked",
       "phase": "Phase 1",
       "branch_policy": "feature branch from main",
-      "priority": "medium",
+      "priority": "high",
       "created": "2025-04-05",
+      "updated": "2026-04-06",
       "title": "Context Assembly Basic",
-      "description": "Implement Context Assembly basic version (Neo4j + Postgres/pgvector + HybridRAG baseline)"
+      "description": "Implement Context Assembly basic version (Neo4j + Postgres/pgvector + HybridRAG baseline)",
+      "blocked_since": "2026-04-06",
+      "blocked_reason": "Architecture review found fundamental tech stack conflict. Wave 0 restructure complete. Blocked on sync-contract for bundle metadata.",
+      "review_outcome": "critical-gaps",
+      "next_action": "Wave 2+: @fullstack-dev to implement CLI-side scope after sync-contract completion",
+      "wave_0_spec": "docs/restructured-context-assembly-v1.md (592 lines, CLI-side-only scope)",
+      "dependency": "Blocked by sync-contract plan for bundle metadata fields"
     }
   },
   "metadata": {
@@ -96,6 +109,10 @@
       {
         "updated_at": "2026-04-06",
         "message": "Phase 0 complete: monorepo-structure, json-schema-foundation, codegen-pipeline all done. 15 commits on main. Ready for Phase 1."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Phase 1 architecture review by @architect: domain-models and context-assembly blocked due to critical gaps against v1-spec. cli-daemon-foundation, sync-contract, acp-client require expansion but can proceed after Wave 0 revision. Missing V1.0 mandatory items: Creator domain model, StoryManifest, ForkBranch, manuscript/research commands."
       }
     ]
   }
