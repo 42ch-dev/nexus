@@ -1,4 +1,6 @@
 {
+  "version": 1,
+  "updated_at": "2026-04-05",
   "plans": {
     "2025-04-05-monorepo-structure": {
       "status": "pending",
@@ -74,12 +76,14 @@
     }
   },
   "metadata": {
-    "created": "2025-04-05",
-    "last_updated": "2025-04-05",
     "versioning": {
-      "phase_0_complete_tag": "v0.1.0-codegen",
       "phase_1_branch_prefix": "feature/v1.0-"
     },
-    "notes": "Phase 0 plans execute on main branch for initialization. Phase 1+ plans require feature branches."
+    "notes": [
+      {
+        "updated_at": "2026-04-05",
+        "message": "Phase 0 plans execute on main branch for initialization. Phase 1+ plans require feature branches."
+      }
+    ]
   }
 }
