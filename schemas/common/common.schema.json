@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/common/common.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Common Types",
+  "description": "Common type definitions shared across all Nexus domain schemas. All enums aligned with data-model-v1.md §7.",
+  "type": "object",
+  "definitions": {
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 / RFC 3339 UTC datetime string"
+    },
+    "WorldId": {
+      "type": "string",
+      "pattern": "^wld_[a-zA-Z0-9]+$",
+      "description": "World ID (prefix: 'wld_')"
+    },
+    "CreatorId": {
+      "type": "string",
+      "pattern": "^ctr_[a-zA-Z0-9]+$",
+      "description": "Creator ID (prefix: 'ctr_')"
+    },
+    "UserId": {
+      "type": "string",
+      "pattern": "^usr_[a-zA-Z0-9]+$",
+      "description": "User ID (prefix: 'usr_')"
+    },
+    "KeyBlockId": {
+      "type": "string",
+      "pattern": "^kb_[a-zA-Z0-9]+$",
+      "description": "KeyBlock ID (prefix: 'kb_')"
+    },
+    "TimelineEventId": {
+      "type": "string",
+      "pattern": "^evt_[a-zA-Z0-9]+$",
+      "description": "TimelineEvent ID (prefix: 'evt_')"
+    },
+    "BundleId": {
+      "type": "string",
+      "pattern": "^bdl_[a-zA-Z0-9]+$",
+      "description": "DeltaBundle ID (prefix: 'bdl_')"
+    },
+    "CommandId": {
+      "type": "string",
+      "pattern": "^cmd_[a-zA-Z0-9]+$",
+      "description": "SyncCommand ID (prefix: 'cmd_')"
+    },
+    "WorkspaceId": {
+      "type": "string",
+      "pattern": "^wrk_[a-zA-Z0-9]+$",
+      "description": "Workspace ID (prefix: 'wrk_')"
+    },
+    "DeltaSequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonically increasing sequence number for deltas"
+    },
+    "ManuscriptPhase": {
+      "type": "string",
+      "enum": ["brainstorm", "draft", "review", "finalize", "published"],
+      "description": "Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)"
+    },
+    "TimePolicy": {
+      "type": "string",
+      "enum": ["manual", "owner_driven", "event_driven"],
+      "description": "World timeline evolution policy (data-model-v1.md §5.3)"
+    },
+    "Visibility": {
+      "type": "string",
+      "enum": ["private", "unlisted", "public"],
+      "description": "Visibility/access level (data-model-v1.md §5.3)"
+    },
+    "BlockType": {
+      "type": "string",
+      "enum": ["character", "ability", "scene", "organization", "item", "conflict", "info_point", "event"],
+      "description": "KeyBlock content type (data-model-v1.md §5.5)"
+    },
+    "MemoryType": {
+      "type": "string",
+      "enum": ["canon", "working", "experience"],
+      "description": "MemoryItem type (data-model-v1.md §5.8)"
+    },
+    "BundleType": {
+      "type": "string",
+      "enum": ["world_sync", "memory_sync", "publish_metadata"],
+      "description": "DeltaBundle type (data-model-v1.md §5.11)"
+    },
+    "SchemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version as integer (e.g., 1)"
+    }
+  }
+}

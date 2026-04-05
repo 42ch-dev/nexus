@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/domain/key-block.schema.json",
+  "schema_version": 1,
+  "title": "Nexus KeyBlock",
+  "description": "KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5.",
+  "type": "object",
+  "required": ["schema_version", "key_block_id", "world_id", "block_type", "canonical_name", "status", "created_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "key_block_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/KeyBlockId",
+      "description": "Unique KeyBlock identifier"
+    },
+    "world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "World this KB belongs to"
+    },
+    "block_type": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BlockType",
+      "description": "KeyBlock content type"
+    },
+    "canonical_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Canonical name for this KeyBlock"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["provisional", "confirmed", "deprecated", "merged", "deleted"],
+      "description": "KeyBlock status"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "KeyBlock revision number"
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Structured summary"
+        },
+        "attributes": {
+          "type": "object",
+          "description": "Key-value attributes"
+        },
+        "tags": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Classification tags"
+        }
+      },
+      "description": "KeyBlock body content"
+    },
+    "source_anchor": {
+      "$ref": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
+      "description": "Source anchor for provenance"
+    },
+    "created_from_command_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId",
+      "description": "SyncCommand that created this KB"
+    },
+    "created_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "KB creation timestamp"
+    },
+    "updated_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Last update timestamp"
+    }
+  },
+  "additionalProperties": false
+}

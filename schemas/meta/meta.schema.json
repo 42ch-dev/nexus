@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/meta/meta.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Meta Schema",
+  "description": "Meta schema defining schema versioning and structure rules for all Nexus schemas",
+  "type": "object",
+  "required": ["$schema", "$id", "schema_version", "title", "type"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "http://json-schema.org/draft-07/schema#",
+      "description": "Must use JSON Schema Draft-07"
+    },
+    "$id": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://nexus\\.42ch\\.io/schemas/.+\\.schema\\.json$",
+      "description": "Schema identifier URI following Nexus namespace convention"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version as integer (e.g., 1)"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable schema title"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed schema description"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["object", "array", "string", "number", "integer", "boolean", "null"],
+      "description": "Root type of schema"
+    }
+  },
+  "additionalProperties": true
+}

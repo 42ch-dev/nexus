@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/domain/creator.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Creator Entity",
+  "description": "Creator entity - a first-class creative agent that can be user-owned or agent-registered. Aligned with data-model-v1.md §5.2.",
+  "type": "object",
+  "required": ["schema_version", "creator_id", "display_name", "status", "registration_source", "created_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "creator_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Unique creator identifier"
+    },
+    "user_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId",
+      "description": "Default paired User ID (null if unpaired)"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Creator display name"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "archived", "locked"],
+      "description": "Creator status"
+    },
+    "is_platform_owned": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this is a platform-hosted creator"
+    },
+    "api_key_ref": {
+      "type": "string",
+      "description": "Reference to platform-stored ACP/agent credential"
+    },
+    "registration_source": {
+      "type": "string",
+      "enum": ["cli", "web_agent", "platform"],
+      "description": "How this creator was registered"
+    },
+    "persona_summary": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Optional creator persona summary"
+    },
+    "style_profile": {
+      "type": "object",
+      "properties": {
+        "tone": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Style tone tags"
+        },
+        "narrative_preferences": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Narrative preference tags"
+        },
+        "forbidden_patterns": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Forbidden pattern tags"
+        }
+      },
+      "description": "Optional style profile"
+    },
+    "experience_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Current experience revision (0 = template-only)"
+    },
+    "created_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Creator registration timestamp"
+    },
+    "updated_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Last update timestamp"
+    }
+  },
+  "additionalProperties": false
+}

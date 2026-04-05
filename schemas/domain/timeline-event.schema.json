@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/domain/timeline-event.schema.json",
+  "schema_version": 1,
+  "title": "Nexus TimelineEvent",
+  "description": "TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.",
+  "type": "object",
+  "required": ["schema_version", "timeline_event_id", "world_id", "branch_id", "event_type", "status", "sequence_no", "created_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "timeline_event_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "description": "Unique TimelineEvent identifier"
+    },
+    "world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "World this event belongs to"
+    },
+    "branch_id": {
+      "type": "string",
+      "description": "Fork branch ID (root branch or specific fork)"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["story_advance", "state_update", "fork_marker", "official_progression", "publish_marker"],
+      "description": "Type of timeline event"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["canon", "provisional", "rejected"],
+      "description": "Event status"
+    },
+    "sequence_no": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sequence number within the branch"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Event title"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Event summary"
+    },
+    "caused_by_event_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId"
+      },
+      "description": "Preceding events that caused this one"
+    },
+    "affected_key_block_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/KeyBlockId"
+      },
+      "description": "KeyBlocks affected by this event"
+    },
+    "source_command_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId",
+      "description": "SyncCommand that triggered this event"
+    },
+    "created_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Event creation timestamp"
+    }
+  },
+  "additionalProperties": false
+}
