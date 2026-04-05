@@ -20,14 +20,44 @@ jobs:
       - name: Validate schemas
         run: node tooling/validation/schema-validator.js
 
+  verify-codegen:
+    name: Verify Codegen Output
+    runs-on: ubuntu-latest
+    needs: validate-schemas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install codegen dependencies
+        run: cd tooling/codegen && npm install
+      - name: Run codegen
+        run: pnpm run codegen
+      - name: Verify TypeScript generated
+        run: test -d packages/nexus-contracts/src/generated && test -f packages/nexus-contracts/src/generated/index.ts
+      - name: Verify Rust generated
+        run: test -d crates/nexus-contracts/src/generated && test -f crates/nexus-contracts/src/generated/mod.rs
+      - name: Archive generated types
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-types
+          path: |
+            packages/nexus-contracts/src/generated/
+            crates/nexus-contracts/src/generated/
+
   rust-checks:
     name: Rust fmt & clippy
     runs-on: ubuntu-latest
+    needs: verify-codegen
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-types
+          path: .
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run clippy
@@ -36,6 +66,7 @@ jobs:
   typescript-checks:
     name: TypeScript typecheck
     runs-on: ubuntu-latest
+    needs: verify-codegen
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v2
@@ -45,6 +76,10 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-types
+          path: .
       - name: Install dependencies
         run: pnpm install
       - name: Typecheck

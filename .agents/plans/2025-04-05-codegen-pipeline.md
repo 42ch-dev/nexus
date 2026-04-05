@@ -35,13 +35,13 @@
 - Create: `tooling/codegen/package.json`
 - Create: `tooling/codegen/tsconfig.json`
 
-- [ ] **Step 1: Create codegen directory structure**
+- [x] **Step 1: Create codegen directory structure**
 
 Run: `mkdir -p tooling/codegen/src`
 
 Expected: Directory created
 
-- [ ] **Step 2: Create codegen package.json**
+- [x] **Step 2: Create codegen package.json**
 
 Create file: `tooling/codegen/package.json`
 
@@ -75,7 +75,7 @@ Create file: `tooling/codegen/package.json`
 
 Expected: Package manifest created
 
-- [ ] **Step 3: Create codegen tsconfig.json**
+- [x] **Step 3: Create codegen tsconfig.json**
 
 Create file: `tooling/codegen/tsconfig.json`
 
@@ -105,13 +105,13 @@ Create file: `tooling/codegen/tsconfig.json`
 
 Expected: TypeScript config created
 
-- [ ] **Step 4: Install codegen dependencies**
+- [x] **Step 4: Install codegen dependencies**
 
 Run: `cd tooling/codegen && npm install`
 
 Expected: Dependencies installed
 
-- [ ] **Step 5: Commit codegen tooling setup**
+- [x] **Step 5: Commit codegen tooling setup**
 
 Run: `git add tooling/codegen && git commit -m "feat(tooling): initialize codegen tooling structure"`
 
@@ -125,7 +125,7 @@ Expected: Commit successful
 - Create: `tooling/codegen/src/schema-loader.ts`
 - Create: `tooling/codegen/src/utils.ts`
 
-- [ ] **Step 1: Create utilities module**
+- [x] **Step 1: Create utilities module**
 
 Create file: `tooling/codegen/src/utils.ts`
 
@@ -197,7 +197,7 @@ export const logger = {
 
 Expected: Utilities module created
 
-- [ ] **Step 2: Create schema loader module**
+- [x] **Step 2: Create schema loader module**
 
 Create file: `tooling/codegen/src/schema-loader.ts`
 
@@ -290,7 +290,7 @@ export function validateSchemaStructure(schema: LoadedSchema): boolean {
 
 Expected: Schema loader created
 
-- [ ] **Step 3: Commit schema loader**
+- [x] **Step 3: Commit schema loader**
 
 Run: `git add tooling/codegen/src/utils.ts tooling/codegen/src/schema-loader.ts && git commit -m "feat(codegen): implement schema loader with utilities"`
 
@@ -304,13 +304,13 @@ Expected: Commit successful
 - Create: `tooling/codegen/src/ts-generator.ts`
 - Create: `packages/nexus-contracts/src/generated/.gitkeep`
 
-- [ ] **Step 1: Create generated directory placeholder**
+- [x] **Step 1: Create generated directory placeholder**
 
 Run: `mkdir -p packages/nexus-contracts/src/generated && touch packages/nexus-contracts/src/generated/.gitkeep`
 
 Expected: Placeholder created
 
-- [ ] **Step 2: Create TypeScript generator module**
+- [x] **Step 2: Create TypeScript generator module**
 
 Create file: `tooling/codegen/src/ts-generator.ts`
 
@@ -592,7 +592,7 @@ export interface CommonTypes {
 
 Expected: TypeScript generator created
 
-- [ ] **Step 3: Commit TypeScript generator**
+- [x] **Step 3: Commit TypeScript generator**
 
 Run: `git add tooling/codegen/src/ts-generator.ts packages/nexus-contracts/src/generated && git commit -m "feat(codegen): implement TypeScript type generator"`
 
@@ -606,13 +606,13 @@ Expected: Commit successful
 - Create: `tooling/codegen/src/rust-generator.ts`
 - Create: `crates/nexus-contracts/src/generated/.gitkeep`
 
-- [ ] **Step 1: Create generated directory placeholder**
+- [x] **Step 1: Create generated directory placeholder**
 
 Run: `mkdir -p crates/nexus-contracts/src/generated && touch crates/nexus-contracts/src/generated/.gitkeep`
 
 Expected: Placeholder created
 
-- [ ] **Step 2: Create Rust generator module**
+- [x] **Step 2: Create Rust generator module**
 
 Create file: `tooling/codegen/src/rust-generator.ts`
 
@@ -948,7 +948,7 @@ impl Default for Visibility {
 
 Expected: Rust generator created
 
-- [ ] **Step 3: Update nexus-contracts lib.rs to import generated**
+- [x] **Step 3: Update nexus-contracts lib.rs to import generated**
 
 Read `crates/nexus-contracts/src/lib.rs`, replace placeholder with:
 
@@ -968,7 +968,7 @@ pub use generated::*;
 
 Expected: lib.rs updated
 
-- [ ] **Step 4: Commit Rust generator**
+- [x] **Step 4: Commit Rust generator**
 
 Run: `git add tooling/codegen/src/rust-generator.ts crates/nexus-contracts/src/generated crates/nexus-contracts/src/lib.rs && git commit -m "feat(codegen): implement Rust type generator"`
 
@@ -981,7 +981,7 @@ Expected: Commit successful
 **Files:**
 - Create: `tooling/codegen/src/index.ts`
 
-- [ ] **Step 1: Create main codegen orchestrator**
+- [x] **Step 1: Create main codegen orchestrator**
 
 Create file: `tooling/codegen/src/index.ts`
 
@@ -1045,31 +1045,31 @@ if (require.main === module) {
 
 Expected: Main orchestrator created
 
-- [ ] **Step 2: Build codegen tool**
+- [x] **Step 2: Build codegen tool**
 
 Run: `cd tooling/codegen && npm run build`
 
 Expected: Codegen tool compiled successfully
 
-- [ ] **Step 3: Run codegen**
+- [x] **Step 3: Run codegen**
 
 Run: `cd tooling/codegen && npm run codegen`
 
 Expected: Codegen runs successfully, generates TS and Rust types
 
-- [ ] **Step 4: Verify generated TypeScript types**
+- [x] **Step 4: Verify generated TypeScript types**
 
 Run: `ls packages/nexus-contracts/src/generated`
 
 Expected: Shows generated TS type files (index.ts, Bundle.ts, Creator.ts, etc.)
 
-- [ ] **Step 5: Verify generated Rust types**
+- [x] **Step 5: Verify generated Rust types**
 
 Run: `ls crates/nexus-contracts/src/generated`
 
 Expected: Shows generated Rust type files (mod.rs, bundle.rs, creator.rs, etc.)
 
-- [ ] **Step 6: Update packages/nexus-contracts/src/index.ts to import generated**
+- [x] **Step 6: Update packages/nexus-contracts/src/index.ts to import generated**
 
 Read `packages/nexus-contracts/src/index.ts`, replace placeholder with:
 
@@ -1090,7 +1090,7 @@ export const SCHEMA_VERSION = "1.0.0";
 
 Expected: index.ts updated
 
-- [ ] **Step 7: Commit codegen orchestrator**
+- [x] **Step 7: Commit codegen orchestrator**
 
 Run: `git add tooling/codegen/src/index.ts packages/nexus-contracts/src/index.ts && git commit -m "feat(codegen): implement main codegen orchestrator and update index exports"`
 
@@ -1104,7 +1104,7 @@ Expected: Commit successful
 - Modify: `package.json` (root) - add codegen scripts
 - Modify: `.github/workflows/ci.yml` - add codegen verification
 
-- [ ] **Step 1: Add codegen scripts to root package.json**
+- [x] **Step 1: Add codegen scripts to root package.json**
 
 Read `package.json`, add to scripts section:
 
@@ -1120,7 +1120,7 @@ Read `package.json`, add to scripts section:
 
 Expected: Scripts added
 
-- [ ] **Step 2: Update CI workflow to verify codegen**
+- [x] **Step 2: Update CI workflow to verify codegen**
 
 Read `.github/workflows/ci.yml`, add new job after `validate-schemas`:
 
@@ -1155,19 +1155,19 @@ Read `.github/workflows/ci.yml`, add new job after `validate-schemas`:
 
 Expected: CI workflow updated
 
-- [ ] **Step 3: Run pnpm install to update lockfile**
+- [x] **Step 3: Run pnpm install to update lockfile**
 
 Run: `pnpm install`
 
 Expected: Lockfile updated
 
-- [ ] **Step 4: Test full pipeline**
+- [x] **Step 4: Test full pipeline**
 
 Run: `pnpm run validate-schemas && pnpm run codegen`
 
 Expected: Validation passes, codegen generates types
 
-- [ ] **Step 5: Commit scripts and CI update**
+- [x] **Step 5: Commit scripts and CI update**
 
 Run: `git add package.json .github/workflows/ci.yml pnpm-lock.yaml && git commit -m "feat(codegen): add codegen scripts to root package and CI verification"`
 
@@ -1181,7 +1181,7 @@ Expected: Commit successful
 - Create: `tooling/codegen/README.md`
 - Create: `docs/CODEGEN.md`
 
-- [ ] **Step 1: Create codegen tool README**
+- [x] **Step 1: Create codegen tool README**
 
 Create file: `tooling/codegen/README.md`
 
@@ -1257,7 +1257,7 @@ CI workflow (`validate-schemas` → `verify-codegen`) ensures:
 
 Expected: README created
 
-- [ ] **Step 2: Create user documentation**
+- [x] **Step 2: Create user documentation**
 
 Create file: `docs/CODEGEN.md`
 
@@ -1367,7 +1367,7 @@ If codegen fails, CI fails - no drift allowed.
 
 Expected: User documentation created
 
-- [ ] **Step 3: Commit documentation**
+- [x] **Step 3: Commit documentation**
 
 Run: `git add tooling/codegen/README.md docs/CODEGEN.md && git commit -m "docs(codegen): add codegen tool and user documentation"`
 
@@ -1377,25 +1377,25 @@ Expected: Commit successful
 
 ## Verification
 
-- [ ] **Final verification: Run full codegen pipeline**
+- [x] **Final verification: Run full codegen pipeline**
 
 Run: `pnpm run validate-schemas && pnpm run codegen`
 
 Expected: No errors, all types generated
 
-- [ ] **Verify TypeScript compilation**
+- [x] **Verify TypeScript compilation**
 
 Run: `cd packages/nexus-contracts && pnpm run typecheck`
 
 Expected: TypeScript compiles without errors
 
-- [ ] **Verify Rust compilation**
+- [x] **Verify Rust compilation**
 
 Run: `cargo check --workspace`
 
 Expected: Rust workspace compiles without errors
 
-- [ ] **Verify generated file count**
+- [x] **Verify generated file count**
 
 Run: `ls packages/nexus-contracts/src/generated/*.ts | wc -l && ls crates/nexus-contracts/src/generated/*.rs | wc -l`
 
@@ -1406,7 +1406,7 @@ Expected: Shows count matching schema count (6 schemas → 6 TS files + 1 mod.rs
 ## Completion
 
 After all tasks complete:
-- [ ] Update `.agents/plans/status.json` with completion status
+- [x] Update `.agents/plans/status.json` with completion status
 - [ ] Create git tag: `git tag v0.1.0-codegen -a -m "Phase 0: Codegen pipeline implemented"`
 - [ ] Push to remote: `git push origin main --tags`
 

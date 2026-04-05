@@ -15,7 +15,7 @@
       "completed_at": "2026-04-06"
     },
     "2025-04-05-json-schema-foundation": {
-      "status": "in_review",
+      "status": "done",
       "phase": "Phase 0",
       "branch_policy": "direct on main — initialization",
       "priority": "high",
@@ -25,6 +25,17 @@
       "description": "Create foundational JSON Schema files for Nexus wire contracts, validation tooling, and CI integration",
       "progress": 100,
       "completed_at": "2026-04-06"
+    },
+    "2025-04-05-codegen-pipeline": {
+      "status": "in_review",
+      "phase": "Phase 0",
+      "branch_policy": "direct on main — initialization",
+      "priority": "high",
+      "created": "2025-04-05",
+      "updated": "2026-04-06",
+      "title": "Codegen Pipeline",
+      "description": "Implement schema-to-code generation pipeline (JSON Schema → TypeScript + Rust)",
+      "progress": 100
     },
     "2025-04-05-domain-models": {
       "status": "pending",
