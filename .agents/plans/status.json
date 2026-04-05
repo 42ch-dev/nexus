@@ -1,0 +1,85 @@
+{
+  "plans": {
+    "2025-04-05-monorepo-structure": {
+      "status": "pending",
+      "phase": "Phase 0",
+      "branch_policy": "direct on main — initialization",
+      "priority": "high",
+      "created": "2025-04-05",
+      "title": "Monorepo Structure Implementation",
+      "description": "Create foundational monorepo directory structure, Rust workspace, TypeScript workspace"
+    },
+    "2025-04-05-json-schema-foundation": {
+      "status": "pending",
+      "phase": "Phase 0",
+      "branch_policy": "direct on main — initialization",
+      "priority": "high",
+      "created": "2025-04-05",
+      "title": "JSON Schema Foundation",
+      "description": "Define foundational JSON Schema files for Nexus wire contracts (Bundle, Creator, World, KB, Timeline, Memory)"
+    },
+    "2025-04-05-codegen-pipeline": {
+      "status": "pending",
+      "phase": "Phase 0",
+      "branch_policy": "direct on main — initialization",
+      "priority": "high",
+      "created": "2025-04-05",
+      "title": "Codegen Pipeline",
+      "description": "Implement schema-to-code generation pipeline (JSON Schema → TypeScript + Rust)"
+    },
+    "2025-04-05-domain-models": {
+      "status": "pending",
+      "phase": "Phase 1",
+      "branch_policy": "feature branch from main",
+      "priority": "medium",
+      "created": "2025-04-05",
+      "title": "Domain Models Implementation",
+      "description": "Implement domain models (Key Block, Timeline, Memory, SourceAnchor) with consistency rules"
+    },
+    "2025-04-05-cli-daemon-foundation": {
+      "status": "pending",
+      "phase": "Phase 1",
+      "branch_policy": "feature branch from main",
+      "priority": "medium",
+      "created": "2025-04-05",
+      "title": "CLI + Daemon Foundation",
+      "description": "Implement nexus42 CLI and nexus42d daemon skeleton with auth and workspace basics"
+    },
+    "2025-04-05-sync-contract": {
+      "status": "pending",
+      "phase": "Phase 1",
+      "branch_policy": "feature branch from main",
+      "priority": "medium",
+      "created": "2025-04-05",
+      "title": "Sync Contract Implementation",
+      "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with conflict handling"
+    },
+    "2025-04-05-acp-client": {
+      "status": "pending",
+      "phase": "Phase 1",
+      "branch_policy": "feature branch from main",
+      "priority": "medium",
+      "created": "2025-04-05",
+      "title": "ACP Client Integration",
+      "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract"
+    },
+    "2025-04-05-context-assembly": {
+      "status": "pending",
+      "phase": "Phase 1",
+      "branch_policy": "feature branch from main",
+      "priority": "medium",
+      "created": "2025-04-05",
+      "title": "Context Assembly Basic",
+      "description": "Implement Context Assembly basic version (Neo4j + Postgres/pgvector + HybridRAG baseline)"
+    }
+  },
+  "metadata": {
+    "created": "2025-04-05",
+    "last_updated": "2025-04-05",
+    "versioning": {
+      "phase_0_complete_tag": "v0.1.0-codegen",
+      "phase_1_branch_prefix": "feature/v1.0-"
+    },
+    "notes": "Phase 0 plans execute on main branch for initialization. Phase 1+ plans require feature branches."
+  }
+}
