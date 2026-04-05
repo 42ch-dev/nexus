@@ -23,6 +23,8 @@
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "clean": "pnpm -r run clean",
-    "validate-schemas": "node tooling/validation/schema-validator.js"
+    "validate-schemas": "node tooling/validation/schema-validator.js",
+    "codegen": "cd tooling/codegen && npm run build && npm run codegen",
+    "codegen:watch": "cd tooling/codegen && npm run build && npm run dev"
   }
 }
