@@ -174,22 +174,25 @@
       "id": "2025-04-05-acp-client",
       "title": "ACP Client Integration",
       "file": ".agents/plans/2025-04-05-acp-client.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
+      "agents": ["@architect", "@fullstack-dev"],
+      "progress": 10,
       "tags": ["phase-1", "acp"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Ready for implementation. Plan approved with residuals (ACP-R1, ACP-R2 deferred to implementation start).",
+      "notes": "Tech spec refined by @architect. ACP-R1 and ACP-R2 resolved in spec. 6 tasks defined. Ready for implementation.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-acp-client from main",
-        "priority": "medium",
+        "priority": "high",
         "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract",
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
-        "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)"
+        "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)",
+        "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
+        "qc_status": "spec refined — ACP-R1, ACP-R2 resolved",
+        "residual_summary": "ACP-R1/R2 resolved in tech spec. 9 new V1.1+ residuals (ACP-R3..R11) identified."
       }
     },
     {
@@ -227,25 +230,25 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
-      "total_open": 29,
+      "total_open": 32,
       "by_severity": {
-        "high": 10,
-        "medium": 10,
-        "low": 5,
+        "high": 7,
+        "medium": 13,
+        "low": 12,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 5,
-        "V1.1": 18,
+        "V1.1": 27,
         "V1.1+": 4,
         "implementation-start": 1,
         "requires-daemon-context": 1
       },
       "by_plan": {
         "domain-models": 4,
-        "cli-daemon-foundation": 11,
+        "cli-daemon-foundation": 7,
         "sync-contract": 10,
-        "acp-client": 2,
+        "acp-client": 9,
         "context-assembly": 1,
         "cross-cutting": 1
       },
@@ -320,6 +323,14 @@
       {
         "updated_at": "2026-04-06",
         "message": "Residual findings lifecycle: archived 7 resolved items (CLI-R1..R4, SYNC-R1..R3) to archived/residuals/. 29 open residuals remain. tech_debt_summary added to metadata."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Tech debt assessment: no blocking items. 25 open residuals (7 high, all V1.1+). ACP Client (2025-04-05-acp-client) is next plan. CLI-R1..R4 stale entries cleaned from open list. ACP-R1/R2 resolved in tech spec and archived."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "ACP Client tech spec refined by @architect. SDK choice: agent-client-protocol v0.10.4. 6 tasks defined with parallel execution plan. ACP-R1/R2 resolved, 9 new V1.1+ residuals (ACP-R3..R11) added. Plan status: InProgress."
       }
     ],
     "residual_findings": {
@@ -370,50 +381,6 @@
         }
       ],
       "2025-04-05-cli-daemon-foundation": [
-        {
-          "id": "CLI-R1",
-          "title": "Missing Creator command surface",
-          "severity": "high",
-          "source": "Architecture Review",
-          "scope": "nexus42 creator subcommand — register, status, use, list, pair, unpair, logout, credentials rotate",
-          "decision": "resolve",
-          "owner": "@fullstack-dev",
-          "target": "Added Task 6: Creator Command Module to plan",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R2",
-          "title": "Missing Manuscript command surface",
-          "severity": "high",
-          "source": "Architecture Review",
-          "scope": "nexus42 manuscript subcommand — status, phase, output, promote, verify",
-          "decision": "resolve",
-          "owner": "@fullstack-dev",
-          "target": "Added Task 7: Manuscript Command Module to plan",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R3",
-          "title": "Missing Research command surface",
-          "severity": "medium",
-          "source": "Architecture Review",
-          "scope": "nexus42 research subcommand — scan, list, extract",
-          "decision": "resolve",
-          "owner": "@fullstack-dev",
-          "target": "Added Task 8: Research Command Module (V1.0 minimal) to plan",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R4",
-          "title": "Auth model covers only single-user tokens, missing dual-subject auth",
-          "severity": "high",
-          "source": "Architecture Review",
-          "scope": "Auth module — needs User tokens + Creator API keys as separate subjects",
-          "decision": "resolve",
-          "owner": "@fullstack-dev",
-          "target": "Task 3 redesigned: split into user_auth.rs and creator_auth.rs for dual-subject auth",
-          "tracking": null
-        },
         {
           "id": "CLI-R5",
           "title": "Local API Unix socket support for better IPC performance",
@@ -650,25 +617,102 @@
       ],
       "2025-04-05-acp-client": [
         {
-          "id": "ACP-R1",
-          "title": "Missing frozen capability ID contract reference",
-          "severity": "medium",
-          "source": "Architecture Review",
-          "scope": "ACP skill/capability registration — must reference frozen capability ID list from ACP Registry",
+          "id": "ACP-R3",
+          "title": "Terminal kill/wait_for_exit capability",
+          "severity": "low",
+          "source": "Tech Spec §Appendix B",
+          "scope": "V1.1 — add terminal kill and wait_for_exit to capability set",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Wire frozen capability IDs during implementation start (implementation-start gate)",
+          "target": "V1.1",
           "tracking": null
         },
         {
-          "id": "ACP-R2",
-          "title": "Missing nexus42 acp probe command",
+          "id": "ACP-R4",
+          "title": "Slash commands UI integration",
           "severity": "low",
-          "source": "Architecture Review",
-          "scope": "CLI command — probe ACP Registry or local agent to verify connectivity and capability set",
+          "source": "Tech Spec §Appendix B",
+          "scope": "Agent-provided slash commands not surfaced in CLI UX",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Add probe command during implementation start (implementation-start gate)",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R5",
+          "title": "Agent plan display support",
+          "severity": "low",
+          "source": "Tech Spec §Appendix B",
+          "scope": "ACP Plan protocol not rendered in CLI output",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R6",
+          "title": "Session persistence across CLI invocations",
+          "severity": "medium",
+          "source": "Tech Spec §Appendix B",
+          "scope": "ACP sessions lost when nexus42 exits; no session/load support",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R7",
+          "title": "Permission policy engine (grant/deny UI)",
+          "severity": "medium",
+          "source": "Tech Spec §Appendix B",
+          "scope": "V1.0 auto-grants all permissions; need configurable policy",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R8",
+          "title": "Daemon-mediated agent tool access",
+          "severity": "medium",
+          "source": "Tech Spec §Appendix B",
+          "scope": "V1.0 agents access fs directly; daemon could mediate tool calls",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R9",
+          "title": "Skills manifest file for multi-agent hosts",
+          "severity": "low",
+          "source": "Tech Spec §Appendix B",
+          "scope": "No persistent skills manifest file for host discovery",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R10",
+          "title": "Binary agent auto-update mechanism",
+          "severity": "low",
+          "source": "Tech Spec §Appendix B",
+          "scope": "Downloaded binary agents not auto-updated",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R11",
+          "title": "Session modes (ask/act) switching",
+          "severity": "low",
+          "source": "Tech Spec §Appendix B",
+          "scope": "ACP session modes not exposed in CLI",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1",
           "tracking": null
         }
       ],
