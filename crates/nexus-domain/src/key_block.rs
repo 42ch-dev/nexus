@@ -130,6 +130,7 @@ impl KeyBlock {
         membership: &MembershipPermissionCheck,
         base_revision: u64,
         conflict_check: &ConflictCheckResult,
+        visible_manifests: &[&str],
     ) -> Result<(), DomainError> {
         // Gate 1: Permission check
         if !membership.can_confirm_canon {
@@ -152,6 +153,15 @@ impl KeyBlock {
             return Err(DomainError::ValidationError(
                 "canonical_name is required".to_string(),
             ));
+        }
+
+        // Gate 4: Source anchor traceability (consistency-rules-v1.md §3.2)
+        // When a source_anchor is present, all its story_summary_refs must
+        // point to visible manifests in the same world.
+        if let Some(ref anchor) = self.source_anchor {
+            anchor
+                .validate_refs(&self.world_id, visible_manifests)
+                .map_err(|e| DomainError::ValidationError(format!("{}", e)))?;
         }
 
         // Gate 5: No unresolved conflicts
@@ -328,7 +338,8 @@ mod tests {
     #[test]
     fn test_confirm_with_permission() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
-        kb.confirm(&owner_membership(), 0, &no_conflicts()).unwrap();
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
         assert_eq!(kb.status, "confirmed");
         assert_eq!(kb.revision, Some(1));
     }
@@ -336,7 +347,7 @@ mod tests {
     #[test]
     fn test_confirm_without_permission() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
-        let result = kb.confirm(&collaborator_membership(), 0, &no_conflicts());
+        let result = kb.confirm(&collaborator_membership(), 0, &no_conflicts(), &[]);
         assert!(matches!(result, Err(DomainError::PermissionDenied(_))));
     }
 
@@ -344,7 +355,7 @@ mod tests {
     fn test_confirm_with_conflict() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
         let conflict = ConflictCheckResult::hard_conflict("conflicting KB entry");
-        let result = kb.confirm(&owner_membership(), 0, &conflict);
+        let result = kb.confirm(&owner_membership(), 0, &conflict, &[]);
         assert!(matches!(result, Err(DomainError::UnresolvedConflict(_))));
     }
 
@@ -352,14 +363,15 @@ mod tests {
     fn test_confirm_with_revision_mismatch() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Event, "Battle");
         // kb.revision is None (i.e., 0 internally), but base_revision is 1
-        let result = kb.confirm(&owner_membership(), 1, &no_conflicts());
+        let result = kb.confirm(&owner_membership(), 1, &no_conflicts(), &[]);
         assert!(matches!(result, Err(DomainError::RevisionMismatch { .. })));
     }
 
     #[test]
     fn test_modify_confirmed_body_rejected() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Scene, "Forest");
-        kb.confirm(&owner_membership(), 0, &no_conflicts()).unwrap();
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
         let result = kb.set_body(KeyBlockBody {
             summary: Some("new summary".to_string()),
             attributes: None,
@@ -408,7 +420,8 @@ mod tests {
     #[test]
     fn test_deprecate_keyblock() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Item, "Old Sword");
-        kb.confirm(&owner_membership(), 0, &no_conflicts()).unwrap();
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
         kb.deprecate(Some("kb_new_sword")).unwrap();
         assert_eq!(kb.status, "deprecated");
     }
@@ -416,7 +429,8 @@ mod tests {
     #[test]
     fn test_merge_keyblock() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero v1");
-        kb.confirm(&owner_membership(), 0, &no_conflicts()).unwrap();
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
         kb.merge_into("kb_hero_v2").unwrap();
         assert_eq!(kb.status, "merged");
     }
@@ -432,7 +446,8 @@ mod tests {
     fn test_is_confirmed() {
         let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
         assert!(!kb.is_confirmed());
-        kb.confirm(&owner_membership(), 0, &no_conflicts()).unwrap();
+        kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
+            .unwrap();
         assert!(kb.is_confirmed());
     }
 
@@ -454,5 +469,36 @@ mod tests {
         assert!(kb
             .validate_source_anchor("wld_test", &["stm_visible1"])
             .is_err());
+    }
+
+    /// C-1: confirm() must enforce Gate 4 — source_anchor traceability.
+    /// When source_anchor references a non-visible manifest, confirm() should fail.
+    #[test]
+    fn test_confirm_without_valid_source_anchor_fails() {
+        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        // Set source_anchor pointing to a non-visible manifest
+        let anchor = SourceAnchor::new("stm_hidden", "sum_1", None);
+        kb.set_source_anchor(anchor).unwrap();
+
+        // visible_manifests does NOT include stm_hidden → should fail Gate 4
+        let visible_manifests: &[&str] = &["stm_visible1"];
+        let result = kb.confirm(&owner_membership(), 0, &no_conflicts(), visible_manifests);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DomainError::ValidationError(_)
+        ));
+    }
+
+    /// C-1: confirm() succeeds when source_anchor references visible manifests.
+    #[test]
+    fn test_confirm_with_valid_source_anchor_succeeds() {
+        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let anchor = SourceAnchor::new("stm_visible1", "sum_1", None);
+        kb.set_source_anchor(anchor).unwrap();
+
+        let visible_manifests: &[&str] = &["stm_visible1"];
+        let result = kb.confirm(&owner_membership(), 0, &no_conflicts(), visible_manifests);
+        assert!(result.is_ok());
     }
 }
