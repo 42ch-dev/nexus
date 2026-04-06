@@ -249,27 +249,25 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
-      "total_open": 32,
+      "total_open": 35,
       "by_severity": {
-        "high": 7,
-        "medium": 13,
-        "low": 12,
+        "high": 10,
+        "medium": 11,
+        "low": 13,
         "warning": 1
       },
       "by_target": {
-        "V1.0 GA": 5,
+        "V1.0 GA": 3,
         "V1.1": 27,
         "V1.1+": 4,
-        "implementation-start": 1,
-        "requires-daemon-context": 1
+        "implementation-start": 1
       },
       "by_plan": {
         "domain-models": 4,
-        "cli-daemon-foundation": 7,
+        "cli-daemon-foundation": 11,
         "sync-contract": 10,
         "acp-client": 9,
-        "context-assembly": 1,
-        "cross-cutting": 1
+        "context-assembly": 1
       },
       "cross_cutting": [
         {
