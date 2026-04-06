@@ -37,7 +37,7 @@
 - Implement fallback to cached manifest on network failure
 
 ### Task 3: Implement Local API Contract
-- Define minimum Local API endpoints (per `local-runtime-boundary-v1.md`)
+- Define minimum Local API endpoints (per frozen Local API contract)
 - Implement Local API server in daemon
 - Add agent-to-daemon communication layer
 

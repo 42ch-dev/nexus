@@ -3,7 +3,7 @@
 > **Author**: @architect
 > **Date**: 2026-04-06
 > **Status**: Draft — ready for PM review before plan revision
-> **Inputs**: Architecture Review Report v1, `schemas/domain/*.schema.json`, `schemas/common/*.schema.json`, `data-model-v1.md`, `consistency-rules-v1.md`, `roadmap.md` §3.1
+> **Inputs**: `schemas/domain/*.schema.json`, `schemas/common/*.schema.json`
 > **Relationship**: This spec serves as the **authoritative revision input** for `.agents/plans/2025-04-05-domain-models.md`. It does NOT modify the plan file directly.
 
 ---
@@ -12,12 +12,12 @@
 
 ### 1.1 Revision Goal
 
-The existing plan (`.agents/plans/2025-04-05-domain-models.md`) was written against an earlier understanding of the domain model. After Architecture Review Report v1 identified **6 P1 critical gaps** and **2 P2 gaps**, this document provides a comprehensive field-by-field revision that:
+The existing plan (`.agents/plans/2025-04-05-domain-models.md`) was written against an earlier understanding of the domain model. Architecture review identified **6 P1 critical gaps** and **2 P2 gaps**, this document provides a comprehensive field-by-field revision that:
 
 1. **Aligns every field definition** with the canonical JSON Schema truth source (`schemas/domain/`, `schemas/common/`)
-2. **Replaces all wrong enum values** with spec-correct ones from `data-model-v1.md` §7
+2. **Replaces all wrong enum values** with spec-correct ones from the domain model specification (§7)
 3. **Adds all missing V1.0 mandatory aggregates** (Creator, Pairing, StoryManifest, ForkBranch, ReferenceSource)
-4. **Rewrites domain logic methods** to match consistency-rules-v1.md gate requirements
+4. **Rewrites domain logic methods** to match consistency gate requirements
 5. **Defines integration strategy** with `nexus-contracts` generated types
 
 ### 1.2 Alignment Strategy
@@ -26,12 +26,12 @@ The existing plan (`.agents/plans/2025-04-05-domain-models.md`) was written agai
 |--------|----------------|-------|
 | `schemas/domain/*.schema.json` | **Truth source** — field names, types, constraints, required/optional | Every field definition must match exactly |
 | `schemas/common/*.schema.json` | **Truth source** — shared enums, type aliases, value objects | BlockType, MemoryType, SourceAnchor, etc. |
-| `data-model-v1.md` | **Normative spec** — domain semantics, lifecycle, storage | Business logic, state transitions, responsibilities |
-| `consistency-rules-v1.md` | **Normative spec** — hard invariants, gates | confirm/promote logic, validation rules |
-| `roadmap.md` §3.1 | **Scope gate** — V1.0 mandatory items | Determines which aggregates are in-scope |
+| `schemas/domain/*.schema.json` | **Truth source** — field names, types, constraints, required/optional | Domain semantics are documented inline in §2 below |
+| Consistency rules | **Normative spec** — hard invariants, gates | confirm/promote logic, validation rules (inlined in §2) |
+| V1.0 scope | **Scope gate** — V1.0 mandatory items | Determines which aggregates are in-scope |
 | `crates/nexus-contracts/src/generated/` | **Generated types** — Rust structs from codegen | Integration testing baseline (must match schemas) |
 
-### 1.3 Gap Summary (from Architecture Review Report v1)
+### 1.3 Gap Summary (from Architecture Review)
 
 | ID | Aggregate | Severity | Gap Description |
 |----|-----------|----------|----------------|
@@ -48,7 +48,7 @@ The existing plan (`.agents/plans/2025-04-05-domain-models.md`) was written agai
 
 ### 2.1 KeyBlock (P1 Critical — G1)
 
-**Spec Anchor**: `data-model-v1.md` §5.5, `schemas/domain/key-block.schema.json`
+**Spec Anchor**: `schemas/domain/key-block.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/key_block.rs` → `KeyBlock`
 **Generated TS type**: `packages/nexus-contracts/src/generated/KeyBlock.ts` → `KeyBlock`
 
@@ -122,7 +122,7 @@ impl KeyBlock {
 
     /// Transition provisional → confirmed.
     ///
-    /// Gate requirements (consistency-rules-v1.md §3.2):
+    /// Gate requirements:
     /// 1. Initiator must have can_confirm_canon permission on the world
     /// 2. base_versions / revision must match server current (no version mismatch)
     /// 3. All required fields present and schema-valid
@@ -178,7 +178,7 @@ impl KeyBlock {
 
 ### 2.2 SourceAnchor (P1 Critical — G2)
 
-**Spec Anchor**: `data-model-v1.md` §6.1, `schemas/common/source-anchor.schema.json`
+**Spec Anchor**: `schemas/common/source-anchor.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/common_types.rs` → `SourceAnchor`, `SourceSummaryRef`
 
 > **Note**: SourceAnchor is a **value object**, not an aggregate. It is embedded in KeyBlock, Delta, and other entities.
@@ -198,7 +198,7 @@ impl KeyBlock {
 | # | Field | Type | Required | Default | Constraint | Schema Location |
 |---|-------|------|----------|---------|-----------|-----------------|
 | 1 | `story_summary_refs` | `Option<Vec<SourceSummaryRef>>` | ❌ | None | Array of references | source-anchor.schema.json L9-31 |
-| 2 | `excerpt` | `Option<String>` | ❌ | None | Max 1024 chars (consistency-rules-v1.md G6, pending OpenAPI freeze) | source-anchor.schema.json L33-35 |
+| 2 | `excerpt` | `Option<String>` | ❌ | None | Max 1024 chars (G6 traceability rule, pending OpenAPI freeze) | source-anchor.schema.json L33-35 |
 | 3 | `summary` | `Option<String>` | ❌ | None | Optional anchor summary | source-anchor.schema.json L37-39 |
 
 **SourceSummaryRef sub-structure**:
@@ -251,7 +251,7 @@ impl SourceAnchor {
 
 ### 2.3 MemoryItem (P1 Critical — G3)
 
-**Spec Anchor**: `data-model-v1.md` §5.8, `schemas/domain/memory.schema.json`
+**Spec Anchor**: `schemas/domain/memory.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/memory.rs` → `Memory`
 **Note**: The generated struct is named `Memory` (not `MemoryItem`) — this is a codegen artifact; the domain spec name is `MemoryItem`.
 
@@ -341,7 +341,6 @@ impl MemoryItem {
     pub fn add_source_ref(&mut self, kind: &str, id: &str);
 
     /// Validate creator/world scope and quota.
-    /// Per consistency-rules-v1.md §3.6.
     pub fn validate_scope(&self, creator_quota: &CreatorQuota) -> Result<(), DomainError>;
 
     /// Check if this memory is active and accessible.
@@ -366,13 +365,13 @@ impl MemoryItem {
 
 ### 2.4 Creator (P1 Critical — New Aggregate — G4)
 
-**Spec Anchor**: `data-model-v1.md` §5.2, `schemas/domain/creator.schema.json`
+**Spec Anchor**: `schemas/domain/creator.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/creator.rs` → `Creator`
-**Roadmap Reference**: §3.1.2 — "Creator 独立注册、Pairing、权限分层"
+**V1.0 Scope**: Creator independent registration, Pairing, and permission layering are mandatory for V1.0.
 
 #### 2.4.1 Current Plan Deviations
 
-The existing plan has **no Creator aggregate at all**. This is a V1.0 mandatory item per roadmap §3.1.1 and §3.1.2.
+The existing plan has **no Creator aggregate at all**. This is a V1.0 mandatory item.
 
 #### 2.4.2 Revised Field Definitions
 
@@ -405,7 +404,7 @@ The existing plan has **no Creator aggregate at all**. This is a V1.0 mandatory 
 ```rust
 impl Creator {
     /// Register a new creator (independent of User).
-    /// Per roadmap §3.1.2: Creator can register without User login.
+    /// Creator can register without User login (V1.0 mandatory).
     pub fn register(
         display_name: &str,
         registration_source: RegistrationSource,
@@ -453,13 +452,13 @@ impl Creator {
 
 ### 2.5 Pairing (P1 Critical — New Aggregate — G4)
 
-**Spec Anchor**: `data-model-v1.md` §5.2A, `schemas/domain/pairing.schema.json`
+**Spec Anchor**: `schemas/domain/pairing.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/pairing.rs` → `Pairing`
-**Roadmap Reference**: §3.1.2 — "Pairing、权限分层"
+**V1.0 Scope**: Pairing and permission layering are mandatory for V1.0.
 
 #### 2.5.1 Current Plan Deviations
 
-The existing plan has **no Pairing aggregate**. This is a V1.0 mandatory item per roadmap §3.1.2.
+The existing plan has **no Pairing aggregate**. This is a V1.0 mandatory item.
 
 #### 2.5.2 Revised Field Definitions
 
@@ -513,13 +512,13 @@ impl Pairing {
 
 ### 2.6 StoryManifest (P1 Critical — New Aggregate — G4)
 
-**Spec Anchor**: `data-model-v1.md` §5.9, `schemas/domain/story-manifest.schema.json`
+**Spec Anchor**: `schemas/domain/story-manifest.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/story_manifest.rs` → `StoryManifest`
-**Roadmap Reference**: §3.1.2 — "StoryManifest 承担平台概要权威"
+**V1.0 Scope**: StoryManifest is mandatory for V1.0 as platform summary authority.
 
 #### 2.6.1 Current Plan Deviations
 
-The existing plan has **no StoryManifest aggregate**. This is a V1.0 mandatory item per roadmap §3.1.2 (blocking correction).
+The existing plan has **no StoryManifest aggregate**. This is a V1.0 mandatory item (blocking correction).
 
 #### 2.6.2 Revised Field Definitions
 
@@ -607,27 +606,27 @@ impl StoryManifest {
 
 ### 2.7 ForkBranch (P1 Critical — New Aggregate — G4)
 
-**Spec Anchor**: `data-model-v1.md` §5.7
+**Spec Anchor**: Domain specification (ForkBranch aggregate defined from V1.0 data model; schema not yet created)
 **Schema Status**: ❌ **No schema file exists yet** — `schemas/domain/fork-branch.schema.json` is MISSING
 **Generated Rust type**: ❌ Not generated
-**Roadmap Reference**: §3.1.1 — "World Fork"
+**V1.0 Scope**: World Fork is mandatory for V1.0.
 
-> **IMPORTANT**: This aggregate is defined in `data-model-v1.md` §5.7 but has no corresponding JSON Schema. A schema file MUST be created before codegen can generate types. This is a prerequisite task.
+> **IMPORTANT**: This aggregate has no corresponding JSON Schema. A schema file MUST be created before codegen can generate types. This is a prerequisite task.
 
 #### 2.7.1 Field Definitions (from spec only)
 
 | # | Field | Type | Required | Default | Constraint | Spec Location |
 |---|-------|------|----------|---------|-----------|---------------|
-| 1 | `schema_version` | `SchemaVersion` (u32) | ✅ | — | `minimum: 1` | data-model-v1.md §5.7 |
-| 2 | `fork_branch_id` | String | ✅ | — | `pattern: ^fbk_[a-zA-Z0-9]+$` (convention) | data-model-v1.md §5.7 |
-| 3 | `world_id` | `WorldId` (String) | ✅ | — | Child world ID | data-model-v1.md §5.7 |
-| 4 | `parent_world_id` | `WorldId` (String) | ✅ | — | Parent world ID | data-model-v1.md §5.7 |
-| 5 | `parent_branch_id` | String | ✅ | — | Parent fork branch ID | data-model-v1.md §5.7 |
-| 6 | `forked_from_event_id` | `TimelineEventId` (String) | ✅ | — | Event where fork occurred | data-model-v1.md §5.7 |
-| 7 | `status` | `String` | ✅ | — | enum: active/archived | data-model-v1.md §5.7 |
-| 8 | `verification_status` | `String` | ✅ | — | enum: unverified/requested/verified/rejected | data-model-v1.md §5.7 |
-| 9 | `created_by_creator_id` | `CreatorId` (String) | ✅ | — | Creator who initiated fork | data-model-v1.md §5.7 |
-| 10 | `created_at` | `Timestamp` (String) | ✅ | — | RFC 3339 UTC | data-model-v1.md §5.7 |
+| 1 | `schema_version` | `SchemaVersion` (u32) | ✅ | — | `minimum: 1` | (V1.0 spec) |
+| 2 | `fork_branch_id` | String | ✅ | — | `pattern: ^fbk_[a-zA-Z0-9]+$` (convention) | (V1.0 spec) |
+| 3 | `world_id` | `WorldId` (String) | ✅ | — | Child world ID | (V1.0 spec) |
+| 4 | `parent_world_id` | `WorldId` (String) | ✅ | — | Parent world ID | (V1.0 spec) |
+| 5 | `parent_branch_id` | String | ✅ | — | Parent fork branch ID | (V1.0 spec) |
+| 6 | `forked_from_event_id` | `TimelineEventId` (String) | ✅ | — | Event where fork occurred | (V1.0 spec) |
+| 7 | `status` | `String` | ✅ | — | enum: active/archived | (V1.0 spec) |
+| 8 | `verification_status` | `String` | ✅ | — | enum: unverified/requested/verified/rejected | (V1.0 spec) |
+| 9 | `created_by_creator_id` | `CreatorId` (String) | ✅ | — | Creator who initiated fork | (V1.0 spec) |
+| 10 | `created_at` | `Timestamp` (String) | ✅ | — | RFC 3339 UTC | (V1.0 spec) |
 
 **ForkBranch status enum**: `active, archived`
 **ForkBranch verification_status enum**: `unverified, requested, verified, rejected`
@@ -637,8 +636,7 @@ impl StoryManifest {
 ```rust
 impl ForkBranch {
     /// Create a new fork from a parent world at a specific event.
-    /// Per consistency-rules-v1.md §3.4: must reference valid parent_world_id,
-    /// parent_branch_id, and forked_from_event_id.
+    /// Must reference valid parent_world_id, parent_branch_id, and forked_from_event_id.
     pub fn fork_from(
         world_id: &str,
         parent_world_id: &str,
@@ -660,7 +658,6 @@ impl ForkBranch {
     pub fn archive(&mut self) -> Result<(), DomainError>;
 
     /// Validate that structured writes only go to child world/branch.
-    /// Per consistency-rules-v1.md §3.4.
     pub fn validate_write_scope(&self, target_world_id: &str) -> Result<(), DomainError>;
 }
 ```
@@ -679,7 +676,7 @@ impl ForkBranch {
 
 ### 2.8 ReferenceSource (P1 Critical — New Aggregate — G4)
 
-**Spec Anchor**: `data-model-v1.md` §5.9A
+**Spec Anchor**: Domain specification (ReferenceSource aggregate defined from V1.0 data model; schema not yet created)
 **Schema Status**: ❌ **No schema file exists yet** — `schemas/domain/reference-source.schema.json` is MISSING
 **Generated Rust type**: ❌ Not generated
 **Note**: **Local-only** — does NOT sync to platform. Shared excerpts go through `MemoryItem(memory_kind=research_material)`.
@@ -688,17 +685,17 @@ impl ForkBranch {
 
 | # | Field | Type | Required | Default | Constraint | Spec Location |
 |---|-------|------|----------|---------|-----------|---------------|
-| 1 | `schema_version` | `SchemaVersion` (u32) | ✅ | — | `minimum: 1` | data-model-v1.md §5.9A |
-| 2 | `reference_source_id` | String | ✅ | — | `pattern: ^ref_[a-zA-Z0-9]+$` (convention) | data-model-v1.md §5.9A |
-| 3 | `workspace_id` | `WorkspaceId` (String) | ✅ | — | `pattern: ^wrk_[a-zA-Z0-9]+$` | data-model-v1.md §5.9A |
-| 4 | `source_type` | `String` | ✅ | — | enum: file/pdf/url/note | data-model-v1.md §5.9A |
-| 5 | `uri` | `String` | ✅ | — | File path or URL | data-model-v1.md §5.9A |
-| 6 | `title` | `String` | ✅ | — | Display title | data-model-v1.md §5.9A |
-| 7 | `tags` | `Option<Vec<String>>` | ❌ | None | Classification tags | data-model-v1.md §5.9A |
-| 8 | `content_hash` | `Option<String>` | ❌ | None | `sha256:xxx` | data-model-v1.md §5.9A |
-| 9 | `scan_status` | `String` | ✅ | — | enum: pending/scanned/failed/ignored | data-model-v1.md §5.9A |
-| 10 | `created_at` | `Timestamp` (String) | ✅ | — | RFC 3339 UTC | data-model-v1.md §5.9A |
-| 11 | `updated_at` | `Option<Timestamp>` | ❌ | None | RFC 3339 UTC | data-model-v1.md §5.9A |
+| 1 | `schema_version` | `SchemaVersion` (u32) | ✅ | — | `minimum: 1` | (V1.0 spec) |
+| 2 | `reference_source_id` | String | ✅ | — | `pattern: ^ref_[a-zA-Z0-9]+$` (convention) | (V1.0 spec) |
+| 3 | `workspace_id` | `WorkspaceId` (String) | ✅ | — | `pattern: ^wrk_[a-zA-Z0-9]+$` | (V1.0 spec) |
+| 4 | `source_type` | `String` | ✅ | — | enum: file/pdf/url/note | (V1.0 spec) |
+| 5 | `uri` | `String` | ✅ | — | File path or URL | (V1.0 spec) |
+| 6 | `title` | `String` | ✅ | — | Display title | (V1.0 spec) |
+| 7 | `tags` | `Option<Vec<String>>` | ❌ | None | Classification tags | (V1.0 spec) |
+| 8 | `content_hash` | `Option<String>` | ❌ | None | `sha256:xxx` | (V1.0 spec) |
+| 9 | `scan_status` | `String` | ✅ | — | enum: pending/scanned/failed/ignored | (V1.0 spec) |
+| 10 | `created_at` | `Timestamp` (String) | ✅ | — | RFC 3339 UTC | (V1.0 spec) |
+| 11 | `updated_at` | `Option<Timestamp>` | ❌ | None | RFC 3339 UTC | (V1.0 spec) |
 
 #### 2.8.2 Revised Domain Logic Methods
 
@@ -743,7 +740,7 @@ impl ReferenceSource {
 
 ### 2.9 TimelineEvent (P2 — G5)
 
-**Spec Anchor**: `data-model-v1.md` §5.6, `schemas/domain/timeline-event.schema.json`
+**Spec Anchor**: `schemas/domain/timeline-event.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/timeline_event.rs` → `TimelineEvent`
 
 #### 2.9.1 Current Plan Deviations
@@ -788,7 +785,7 @@ impl TimelineEvent {
     ) -> Self;
 
     /// Promote provisional → canon.
-    /// Per consistency-rules-v1.md §3.3:
+    /// Gate requirements:
     /// - Must not reorder existing canon sequence
     /// - Must revalidate branch_id, causality, sequence constraints, permissions, current head
     /// - Any promotion causing canon order conflict → return timeline conflict
@@ -810,7 +807,6 @@ impl TimelineEvent {
     pub fn add_affected_kb(&mut self, kb_id: &str);
 
     /// Validate causality: caused_by_event_ids must reference same world.
-    /// Per consistency-rules-v1.md §3.3.
     pub fn validate_causality(&self, world_id: &str) -> Result<(), DomainError>;
 
     /// Validate sequence is monotonic within branch.
@@ -833,7 +829,7 @@ impl TimelineEvent {
 
 ### 2.10 ManuscriptPhase / ManuscriptState (P2 — G6)
 
-**Spec Anchor**: `data-model-v1.md` §5.9B, `common.schema.json` (ManuscriptPhase enum)
+**Spec Anchor**: `common.schema.json` (ManuscriptPhase enum)
 **Note**: `ManuscriptState` is a **local-only aggregate** — platform does not own it in V1.0.
 
 #### 2.10.1 Current Plan Deviations
@@ -854,7 +850,7 @@ impl TimelineEvent {
 | `finalize` | ~~Canon~~ | Final approval phase |
 | `published` | ❌ Missing | Published state |
 
-#### 2.10.3 ManuscriptState Aggregate Fields (from `data-model-v1.md` §5.9B)
+#### 2.10.3 ManuscriptState Aggregate Fields (from V1.0 spec)
 
 | # | Field | Type | Required | Constraint |
 |---|-------|------|----------|-----------|
@@ -889,8 +885,7 @@ impl ManuscriptStateMachine {
     pub fn can_transition_to(&self, target: ManuscriptPhase) -> bool;
 
     /// Validate provisional cleanup before finalize/published gate.
-    /// Per consistency-rules-v1.md §3.3: provisional records must be promoted
-    /// or cleaned before entering finalize/published.
+    /// Provisional records must be promoted or cleaned before entering finalize/published.
     pub fn validate_pre_gate_cleanup(&self, provisional_count: usize) -> Result<(), DomainError>;
 }
 ```
@@ -909,12 +904,12 @@ impl ManuscriptStateMachine {
 
 ### 2.11 World (Existing — Alignment Check)
 
-**Spec Anchor**: `data-model-v1.md` §5.3, `schemas/domain/world.schema.json`
+**Spec Anchor**: `schemas/domain/world.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/world.rs` → `World`
 
 #### 2.11.1 Schema Alignment Status: ✅ ALIGNED
 
-All fields in `schemas/domain/world.schema.json` match `data-model-v1.md` §5.3 exactly. No plan deviations detected.
+All fields in `schemas/domain/world.schema.json` match exactly. No plan deviations detected.
 
 Key fields: `world_id`, `owner_creator_id`, `title`, `slug`, `status`, `visibility`, `time_policy`, `canon_revision`, `current_timeline_head_id`, `current_time_pointer`, `root_fork_branch_id`, `world_rules`, `created_at`, `updated_at`.
 
@@ -945,7 +940,7 @@ impl World {
 
 ### 2.12 WorldMembership (Existing — Alignment Check)
 
-**Spec Anchor**: `data-model-v1.md` §5.4, `schemas/domain/world-membership.schema.json`
+**Spec Anchor**: `schemas/domain/world-membership.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/world_membership.rs` → `WorldMembership`
 
 #### 2.12.1 Schema Alignment Status: ✅ ALIGNED
@@ -956,7 +951,7 @@ All fields match. Permissions object includes: `can_sync_kb`, `can_publish`, `ca
 
 ### 2.13 DeltaBundle (Existing — Alignment Check)
 
-**Spec Anchor**: `data-model-v1.md` §5.11, `schemas/domain/bundle.schema.json`
+**Spec Anchor**: `schemas/domain/bundle.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/bundle.rs` → `DeltaBundle`
 
 #### 2.13.1 Schema Alignment Status: ✅ ALIGNED
@@ -967,7 +962,7 @@ All fields match. Notable additions in schema vs spec: `submitting_creator_id`, 
 
 ### 2.14 SyncCommand (Existing — Alignment Check)
 
-**Spec Anchor**: `data-model-v1.md` §5.10, `schemas/domain/sync-command.schema.json`
+**Spec Anchor**: `schemas/domain/sync-command.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/sync_command.rs` → `SyncCommand`
 
 #### 2.14.1 Schema Alignment Status: ✅ ALIGNED
@@ -978,7 +973,7 @@ All fields match. Command types: `advance_world`, `inject_future_event`, `extrac
 
 ### 2.15 OutboxEntry (Existing — Alignment Check)
 
-**Spec Anchor**: `data-model-v1.md` §5.13, `schemas/domain/outbox-entry.schema.json`
+**Spec Anchor**: `schemas/domain/outbox-entry.schema.json`
 **Generated Rust type**: `crates/nexus-contracts/src/generated/outbox_entry.rs` → `OutboxEntry`
 
 #### 2.15.1 Schema Alignment Status: ✅ ALIGNED
@@ -1139,11 +1134,11 @@ mod integration_tests {
 
 Before domain logic can be implemented for ForkBranch, ReferenceSource, and ManuscriptState, their JSON Schema files must be created:
 
-| Schema File | Spec Section | Priority |
+| Schema File | Spec Source | Priority |
 |-------------|-------------|----------|
-| `schemas/domain/fork-branch.schema.json` | `data-model-v1.md` §5.7 | **P1** — blocks domain implementation |
-| `schemas/domain/reference-source.schema.json` | `data-model-v1.md` §5.9A | **P1** — blocks domain implementation |
-| `schemas/domain/manuscript-state.schema.json` | `data-model-v1.md` §5.9B | **P2** — local-only, can defer |
+| `schemas/domain/fork-branch.schema.json` | Fork branch aggregate (V1.0 mandatory) | **P1** — blocks domain implementation |
+| `schemas/domain/reference-source.schema.json` | Reference source aggregate (V1.0 mandatory) | **P1** — blocks domain implementation |
+| `schemas/domain/manuscript-state.schema.json` | Manuscript state aggregate (local-only) | **P2** — local-only, can defer |
 
 After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run to generate Rust and TypeScript types.
 
@@ -1155,11 +1150,11 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
 
 ### Task 0: Prerequisites — Create Missing Schemas
 
-- [ ] **Step 1**: Create `schemas/domain/fork-branch.schema.json` from `data-model-v1.md` §5.7 field definitions
+- [ ] **Step 1**: Create `schemas/domain/fork-branch.schema.json` from §2.7 field definitions
   - Validate: `npx ajv validate -s schemas/common/common.schema.json -d schemas/domain/fork-branch.schema.json`
-- [ ] **Step 2**: Create `schemas/domain/reference-source.schema.json` from `data-model-v1.md` §5.9A field definitions
+- [ ] **Step 2**: Create `schemas/domain/reference-source.schema.json` from §2.8 field definitions
   - Validate: same as above
-- [ ] **Step 3**: Create `schemas/domain/manuscript-state.schema.json` from `data-model-v1.md` §5.9B field definitions
+- [ ] **Step 3**: Create `schemas/domain/manuscript-state.schema.json` from §2.10 field definitions
   - Validate: same as above
 - [ ] **Step 4**: Run codegen pipeline: `pnpm run codegen`
   - Expected: New Rust types in `crates/nexus-contracts/src/generated/`
@@ -1204,7 +1199,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
   - Run: `cargo test -p nexus-domain --lib creator::tests` → FAIL
 - [ ] **Step 2**: Implement Creator domain logic
   - Fields must match `schemas/domain/creator.schema.json` exactly
-  - Enum values must match `data-model-v1.md` §7
+  - Enum values must match the domain specification (§7)
 - [ ] **Step 3**: Run Creator tests → PASS
 - [ ] **Step 4**: Write failing tests for Pairing (TC-PR-1 through TC-PR-6)
   - File: `crates/nexus-domain/src/pairing.rs`
@@ -1228,7 +1223,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
   - File: `crates/nexus-domain/src/key_block.rs`
   - Must use `BlockType` enum with 8 values from common.schema.json
   - Must use `key_block_id`, `canonical_name` (not `kb_ref`, `title`)
-  - `confirm()` must implement full gate from consistency-rules-v1.md §3.2
+  - `confirm()` must implement full multi-gate check (role, base_versions, completeness, traceability, no conflicts)
 - [ ] **Step 5**: Implement KeyBlock domain logic
 - [ ] **Step 6**: Run KeyBlock tests → PASS
 - [ ] **Step 7**: Integration test: KeyBlock JSON validates against `key-block.schema.json`
@@ -1241,14 +1236,14 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
   - File: `crates/nexus-domain/src/timeline_event.rs`
   - Replace `Timeline` struct with `TimelineEvent` aggregate
 - [ ] **Step 2**: Implement TimelineEvent domain logic
-  - Causality validation per consistency-rules-v1.md §3.3
-  - Provisional → canon gate per consistency-rules-v1.md §3.3
+  - Causality validation: caused_by_event_ids must reference same world
+  - Provisional → canon gate: no reorder, revalidate branch/sequence/permissions/head
 - [ ] **Step 3**: Run TimelineEvent tests → PASS
 - [ ] **Step 4**: Write failing tests for ForkBranch (TC-FB-1 through TC-FB-5)
   - File: `crates/nexus-domain/src/fork_branch.rs`
   - **Requires**: Task 0 schema creation to be complete
 - [ ] **Step 5**: Implement ForkBranch domain logic
-  - Write scope validation per consistency-rules-v1.md §3.4
+  - Write scope validation: structured writes only to child world/branch
 - [ ] **Step 6**: Run ForkBranch tests → PASS
 - [ ] **Step 7**: Commit: `feat(domain): implement TimelineEvent and ForkBranch`
 
@@ -1264,7 +1259,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
   - Must use `MemoryType` enum: canon/working/experience (not Experience/Soul/Knowledge/ReferenceExcerpt)
   - Must include all 15 fields from schema
 - [ ] **Step 5**: Implement MemoryItem domain logic
-  - Scope and quota validation per consistency-rules-v1.md §3.6
+  - Scope and quota validation: creator/world scope, quota limits
 - [ ] **Step 6**: Run MemoryItem tests → PASS
 - [ ] **Step 7**: Integration test: MemoryItem ↔ `contracts::generated::Memory` roundtrip
 - [ ] **Step 8**: Commit: `feat(domain): implement StoryManifest and MemoryItem`
@@ -1287,7 +1282,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
   - Must use spec phase names: brainstorm/draft/review/finalize/published
   - Must NOT use: write/provisional/canon
 - [ ] **Step 2**: Implement ManuscriptState aggregate and ManuscriptStateMachine
-  - Pre-gate provisional cleanup per consistency-rules-v1.md §3.3
+  - Pre-gate provisional cleanup: provisional records must be promoted or cleaned before finalize/published
 - [ ] **Step 3**: Run ManuscriptState tests → PASS
 - [ ] **Step 4**: Commit: `feat(domain): implement ManuscriptState and phase machine`
 
@@ -1295,7 +1290,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
 
 - [ ] **Step 1**: Implement domain error types
   - File: `crates/nexus-domain/src/errors.rs`
-  - Cover all error variants from consistency-rules-v1.md
+  - Cover all error variants from consistency rules (G1-G6 inlined in §2)
 - [ ] **Step 2**: Implement consistency validator
   - File: `crates/nexus-domain/src/consistency.rs`
   - Global invariants G1-G6
@@ -1358,7 +1353,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
 
 ## 7. Implementation Effort
 
-- **Complexity**: M — see `~/.config/opencode/docs/agents/effort-estimation.md`
+- **Complexity**: M (medium)
 - **Agent session band**: ~2-3 focused sessions for full domain crate implementation
   - Session 1: Tasks 0-3 (schemas, crate init, Creator, Pairing, KeyBlock, SourceAnchor)
   - Session 2: Tasks 4-7 (TimelineEvent, ForkBranch, StoryManifest, MemoryItem, ReferenceSource, ManuscriptState)
@@ -1372,7 +1367,7 @@ After schema creation, the codegen pipeline (`pnpm run codegen`) must be re-run 
 |------|--------|-----------|
 | ForkBranch/ReferenceSource schemas not yet created | Blocks domain implementation for those aggregates | Task 0 is prerequisite; schema creation follows existing schema patterns |
 | Domain logic diverges from generated types | Runtime serialization failures | Compile-time assertions (Task 9 Step 1) + serde roundtrip tests |
-| `consistency-rules-v1.md` gate logic is complex | confirm()/promote() methods may be incomplete | Start with simplified gates; mark TODO for full implementation; add integration tests |
+| Consistency gate logic is complex | confirm()/promote() methods may be incomplete | Start with simplified gates; mark TODO for full implementation; add integration tests |
 | `jsonschema` crate adds build complexity | CI/CD impact | Use only in dev-dependencies; validate in tests only |
 | ManuscriptState is local-only but needs schema for consistency | Schema creation may not align with local-only intent | Create schema but mark as `local_authority: true`; platform sync excludes this type |
 
