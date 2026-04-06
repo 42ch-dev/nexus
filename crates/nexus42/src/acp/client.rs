@@ -431,14 +431,15 @@ impl NexusAcpClient for AcpSdkAdapter {
         // TODO: Implement actual stream subscription when full LocalSet integration is ready
         tracing::warn!(
             agent_id = %self.agent_id,
-            "subscribe() called — stream receiver not fully implemented in placeholder"
+            "subscribe() called — returning empty receiver (pending LocalSet integration)"
         );
 
-        // For the placeholder, we can't easily create a StreamReceiver without
-        // an actual connection. This is a known limitation.
-        // When the full LocalSet integration is implemented, this will be
-        // connection.subscribe()
-        unimplemented!("StreamReceiver requires active connection — pending LocalSet integration")
+        // Create a broadcast channel and immediately drop the sender.
+        // The receiver's recv() will return Err(RecvError::Closed) instead of
+        // panicking via unimplemented!().
+        let (tx, rx) = async_broadcast::broadcast(1);
+        drop(tx);
+        StreamReceiver::from(rx)
     }
 }
 

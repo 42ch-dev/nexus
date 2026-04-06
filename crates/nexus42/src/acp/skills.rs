@@ -33,6 +33,7 @@
 //! (ACP-R3 through ACP-R11) for future implementation.
 
 use crate::acp::client::ClientCapabilities;
+use agent_client_protocol::FileSystemCapabilities;
 
 /// Frozen capability IDs for V1.0.
 ///
@@ -91,10 +92,11 @@ pub mod capabilities {
 /// ```
 #[allow(dead_code)]
 pub fn build_v1_0_capabilities() -> ClientCapabilities {
-    // Note: The exact structure of ClientCapabilities depends on the ACP SDK version.
-    // This implementation will be finalized in Task 4 when we wire the SDK.
-    // For now, we return a placeholder that lists the capability IDs.
-    ClientCapabilities::default()
+    ClientCapabilities::new()
+        .fs(FileSystemCapabilities::new()
+            .read_text_file(true)
+            .write_text_file(true))
+        .terminal(true)
 }
 
 #[cfg(test)]
