@@ -91,15 +91,15 @@
       "id": "2025-04-05-cli-daemon-foundation",
       "title": "CLI + Daemon Foundation",
       "file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
-      "progress": 0,
+      "progress": 100,
       "tags": ["phase-1", "cli", "daemon"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Ready for implementation. Plan expanded with 4 new tasks (Creator/Manuscript/Research commands + dual-subject auth). Architecture review complete: Request Changes → Resolved.",
+      "notes": "All 9 tasks implemented. 16 CLI integration tests + 7 daemon integration tests. Binary verified. Awaiting QC review.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-cli-daemon from main",
@@ -113,7 +113,12 @@
           "Task 8: Research Command Module (V1.0 minimal)",
           "Task 9: Integration Tests"
         ],
-        "task_modified": "Task 3: Dual-subject auth (User + Creator)"
+        "task_modified": "Task 3: Dual-subject auth (User + Creator)",
+        "tests": {
+          "cli_integration": "16 passed, 0 failed",
+          "daemon_integration": "7 passed, 0 failed",
+          "workspace_total": "156 passed, 0 failed"
+        }
       }
     },
     {
