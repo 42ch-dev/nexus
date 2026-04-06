@@ -2,7 +2,7 @@
 //!
 //! Calls POST /v1/local/context/assemble through the DaemonClient (nexus42d loopback).
 
-use crate::api::daemon_client::DaemonClient;
+use crate::api::DaemonClient;
 use crate::context::types::{ContextAssembleRequest, ContextAssembleResponse};
 use crate::errors::Result;
 
@@ -61,8 +61,8 @@ mod tests {
 
     #[tokio::test]
     async fn assemble_success_with_mock() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         let success_response = json!({
@@ -88,7 +88,10 @@ mod tests {
         let daemon = DaemonClient::new(&mock_server.uri());
         let client = ContextClient::new(daemon);
         let req = make_request();
-        let response = client.assemble(&req).await.expect("assemble should succeed");
+        let response = client
+            .assemble(&req)
+            .await
+            .expect("assemble should succeed");
 
         assert!(response.success);
         assert_eq!(response.world_id, "wld_001");
@@ -97,8 +100,8 @@ mod tests {
 
     #[tokio::test]
     async fn assemble_error_response() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         let error_response = json!({
@@ -124,7 +127,10 @@ mod tests {
         let daemon = DaemonClient::new(&mock_server.uri());
         let client = ContextClient::new(daemon);
         let req = make_request();
-        let response = client.assemble(&req).await.expect("assemble should succeed");
+        let response = client
+            .assemble(&req)
+            .await
+            .expect("assemble should succeed");
 
         assert!(!response.success);
         assert_eq!(response.error_code, Some("world_not_found".to_string()));
@@ -136,8 +142,8 @@ mod tests {
 
     #[tokio::test]
     async fn assemble_http_error() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -157,8 +163,8 @@ mod tests {
 
     #[tokio::test]
     async fn assemble_with_full_data() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         let full_response = json!({
@@ -211,7 +217,10 @@ mod tests {
         let daemon = DaemonClient::new(&mock_server.uri());
         let client = ContextClient::new(daemon);
         let req = make_request();
-        let response = client.assemble(&req).await.expect("assemble should succeed");
+        let response = client
+            .assemble(&req)
+            .await
+            .expect("assemble should succeed");
 
         assert_eq!(response.key_blocks.len(), 1);
         assert_eq!(response.key_blocks[0].name, "Hero");
