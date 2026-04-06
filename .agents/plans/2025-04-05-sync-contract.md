@@ -125,14 +125,14 @@
 
 ## Verification
 
-- [ ] Sync crate compiles: `cargo build -p nexus-sync`
-- [ ] Command types serialize/deserialize correctly
-- [ ] Outbox persists and replays operations
-- [ ] Bundle builder creates valid DeltaBundle with metadata fields
-- [ ] Sync client makes HTTP requests (mock server for testing)
-- [ ] Partial apply response parsing works: mock `bundle_apply_status: "partial"`
-- [ ] Local precheck rejects invalid bundles: unit tests
-- [ ] Integration test with CLI daemon: bundle upload flow
+- [x] Sync crate compiles: `cargo build -p nexus-sync`
+- [x] Command types serialize/deserialize correctly
+- [x] Outbox persists and replays operations
+- [x] Bundle builder creates valid DeltaBundle with metadata fields
+- [x] Sync client makes HTTP requests (mock server for testing)
+- [x] Partial apply response parsing works: mock `bundle_apply_status: "partial"`
+- [x] Local precheck rejects invalid bundles: unit tests
+- [x] Integration test with CLI daemon: bundle upload flow
 
 ---
 

@@ -133,15 +133,15 @@
       "id": "2025-04-05-sync-contract",
       "title": "Sync Contract Implementation",
       "file": ".agents/plans/2025-04-05-sync-contract.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
-      "progress": 0,
+      "progress": 100,
       "tags": ["phase-1", "sync", "bundle"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Ready for implementation. Plan expanded with bundle metadata fields, partial apply, and local precheck. Architecture review complete: Request Changes → Resolved.",
+      "notes": "QC三审 complete. All 10 blocking issues fixed (SYNC-C1..C5, SYNC-H1..H5). 70 nexus-sync tests, 226 total workspace tests passing. Clippy clean. Ready for merge.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-sync-contract from main",
@@ -154,7 +154,23 @@
           "Task 7: Local Precheck Stage"
         ],
         "task_modified": "Task 1: Schema-anchored (use generated types)",
-        "task_modified_2": "Task 3: Add bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript)"
+        "task_modified_2": "Task 3: Add bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript)",
+        "tests": "70 nexus-sync tests, 226 workspace total — all passing",
+        "clippy": "clean — 0 warnings with -D warnings",
+        "qc_status": "APPROVE — 10 blocking issues fixed (SYNC-C1..C5, SYNC-H1..H5)",
+        "qc_report": ".agents/plans/reports/2025-04-05-sync-contract/2025-04-05-sync-contract-qc-consolidated.md",
+        "qc_fixed": [
+          "SYNC-C1: Formatting violations fixed",
+          "SYNC-C2: Fragile conflict detection replaced with JSON parsing",
+          "SYNC-C3: Outbox write methods wrapped in transactions (append, stage, mark_failed)",
+          "SYNC-C4: cli-sync bundle schema delta required fields added",
+          "SYNC-C5: ConflictDetail parsing uses safe conversion",
+          "SYNC-H1: Unsafe unwrap replaced with expect()",
+          "SYNC-H2: ConflictResponse::from_json returns error on missing success field",
+          "SYNC-H3: Duplicate create detection only checks creates WITH target_id",
+          "SYNC-H4: mark_sent no longer allows failed→sent transition",
+          "SYNC-H5: Exponential backoff uses saturating arithmetic"
+        ]
       }
     },
     {
@@ -488,6 +504,116 @@
           "decision": "resolve",
           "owner": "@fullstack-dev",
           "target": "Added Task 7: Local Precheck Stage to plan",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R4",
+          "title": "Missing outbox transaction atomicity tests",
+          "severity": "high",
+          "source": "QC Consolidated (QC#1)",
+          "scope": "crates/nexus-sync/src/outbox.rs — no tests for concurrent writes, rollback, crash recovery",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add concurrent append tests, transaction rollback tests",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R5",
+          "title": "No HTTP request body size limit on SyncClient",
+          "severity": "high",
+          "source": "QC Consolidated (QC#3)",
+          "scope": "crates/nexus-sync/src/sync_client.rs — Client::builder() has no max body size",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add body_max_size to client builder",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R6",
+          "title": "No auth match validation in precheck",
+          "severity": "high",
+          "source": "QC Consolidated (QC#3)",
+          "scope": "crates/nexus-sync/src/precheck.rs — submitting_creator_id not validated against authenticated identity",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Requires daemon context — add when daemon exposes authenticated creator info",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R7",
+          "title": "BundleBuilder missing monotonicity validation",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#1)",
+          "scope": "crates/nexus-sync/src/delta_bundle.rs:226-231",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — precheck already handles; add optional validate() to builder",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R8",
+          "title": "Schema allOf may not enforce constraints correctly",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#2)",
+          "scope": "schemas/cli-sync/bundle.schema.json:8-11",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — verify codegen output; inline constraints if needed",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R9",
+          "title": "SyncClient auth token format validation",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#1)",
+          "scope": "crates/nexus-sync/src/sync_client.rs:81-85",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add basic format validation",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R10",
+          "title": "Outbox schema migration path not documented",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#1)",
+          "scope": "crates/nexus-sync/src/outbox.rs:81-104",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add schema_version column and migration strategy",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R11",
+          "title": "No retry logic based on retry_after field",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#3)",
+          "scope": "crates/nexus-sync/src/conflict.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — honor retry_after from conflict response",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R12",
+          "title": "Partial apply doesn't persist retry state",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#3)",
+          "scope": "crates/nexus-sync/src/partial_apply.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — persist partial apply state to outbox for retry",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R13",
+          "title": "AutoReject resolution safety mechanism",
+          "severity": "medium",
+          "source": "QC Consolidated (QC#3)",
+          "scope": "crates/nexus-sync/src/conflict.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add confirmation prompt for auto-reject in CLI",
           "tracking": null
         }
       ],
