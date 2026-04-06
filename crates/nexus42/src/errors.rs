@@ -15,6 +15,9 @@ pub enum CliError {
     #[error("Daemon not running. Start it with `nexus42 daemon start`.")]
     DaemonNotRunning,
 
+    #[error("Daemon error: {message}")]
+    Daemon { message: String },
+
     #[error("Authentication required. Run `nexus42 auth login` first.")]
     AuthenticationRequired,
 
