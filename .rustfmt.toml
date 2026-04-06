@@ -1,0 +1,2 @@
+# `ignore` is honored only by nightly rustfmt; stable prints a warning and still formats generated sources.
+ignore = ["crates/nexus-contracts/src/generated"]
