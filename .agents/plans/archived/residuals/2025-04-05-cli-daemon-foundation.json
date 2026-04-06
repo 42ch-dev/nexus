@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from cli-daemon-foundation plan. These items were identified during architecture review and have been implemented in the cli-daemon-foundation plan (merged to main).",
+  "archived_at": "2026-04-06",
+  "plan_id": "2025-04-05-cli-daemon-foundation",
+  "entries": [
+    {
+      "id": "CLI-R1",
+      "title": "Missing Creator command surface",
+      "severity": "high",
+      "source": "Architecture Review",
+      "scope": "nexus42 creator subcommand — register, status, use, list, pair, unpair, logout, credentials rotate",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Added Task 6: Creator Command Module to plan",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    },
+    {
+      "id": "CLI-R2",
+      "title": "Missing Manuscript command surface",
+      "severity": "high",
+      "source": "Architecture Review",
+      "scope": "nexus42 manuscript subcommand — status, phase, output, promote, verify",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Added Task 7: Manuscript Command Module to plan",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    },
+    {
+      "id": "CLI-R3",
+      "title": "Missing Research command surface",
+      "severity": "medium",
+      "source": "Architecture Review",
+      "scope": "nexus42 research subcommand — scan, list, extract",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Added Task 8: Research Command Module (V1.0 minimal) to plan",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    },
+    {
+      "id": "CLI-R4",
+      "title": "Auth model covers only single-user tokens, missing dual-subject auth",
+      "severity": "high",
+      "source": "Architecture Review",
+      "scope": "Auth module — needs User tokens + Creator API keys as separate subjects",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Task 3 redesigned: split into user_auth.rs and creator_auth.rs for dual-subject auth",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    }
+  ]
+}
