@@ -3,6 +3,7 @@
 //! A command-line interface for managing creative worlds, manuscripts,
 //! and Creator entities through the Nexus platform.
 
+mod acp;
 mod api;
 mod auth;
 mod commands;
@@ -11,8 +12,9 @@ mod errors;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    auth::AuthCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
-    init::InitCommand, manuscript::ManuscriptCommand, research::ResearchCommand, sync::SyncCommand,
+    agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
+    daemon::DaemonCommand, init::InitCommand, manuscript::ManuscriptCommand,
+    research::ResearchCommand, sync::SyncCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -86,6 +88,12 @@ enum Commands {
         #[command(subcommand)]
         command: ContextCommand,
     },
+
+    /// Agent management (ACP integration)
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
 }
 
 #[tokio::main]
@@ -108,6 +116,7 @@ async fn main() {
         Some(Commands::Manuscript { command }) => commands::manuscript::run(command, &config).await,
         Some(Commands::Research { command }) => commands::research::run(command, &config).await,
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
+        Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())
