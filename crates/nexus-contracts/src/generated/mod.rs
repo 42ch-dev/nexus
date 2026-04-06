@@ -21,6 +21,8 @@ pub mod fork_branch;
 pub mod creator;
 pub mod bundle;
 pub mod version_ref;
+pub mod conflict_response;
+pub mod bundle;
 
 // Re-export all types at the generated module level
 pub use common_types::*;
@@ -41,6 +43,8 @@ pub use fork_branch::*;
 pub use creator::*;
 pub use bundle::*;
 pub use version_ref::*;
+pub use conflict_response::*;
+pub use bundle::*;
 
 /// Schema version constants
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
@@ -60,6 +64,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("Creator", 1),
     ("Bundle", 1),
     ("VersionRef", 1),
+    ("ConflictResponse", 1),
+    ("Bundle", 1),
 ];
 
 /// Latest schema version
