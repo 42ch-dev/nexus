@@ -78,16 +78,13 @@ async fn daemon_status(config: &CliConfig) -> Result<()> {
     if client.health_check().await? {
         println!("  Status: ✓ Running");
         // Try to get more info
-        match client
+        if let Ok(status) = client
             .get::<serde_json::Value>("/v1/local/runtime/status")
             .await
         {
-            Ok(status) => {
-                if let Some(version) = status.get("version") {
-                    println!("  Version: {}", version);
-                }
+            if let Some(version) = status.get("version") {
+                println!("  Version: {}", version);
             }
-            Err(_) => {}
         }
     } else {
         println!("  Status: ✗ Not running");

@@ -2,10 +2,7 @@
 
 use axum::Router;
 use axum_test::TestServer;
-use nexus42d::{
-    api::handlers,
-    workspace::WorkspaceState,
-};
+use nexus42d::{api::handlers, workspace::WorkspaceState};
 use tempfile::TempDir;
 
 /// Create a test workspace state with temp directory
@@ -46,13 +43,34 @@ fn create_test_state() -> (WorkspaceState, TempDir) {
 
 fn build_test_app(state: WorkspaceState) -> Router {
     Router::new()
-        .route("/v1/local/runtime/health", axum::routing::get(handlers::runtime::health))
-        .route("/v1/local/runtime/status", axum::routing::get(handlers::runtime::status))
-        .route("/v1/local/workspace", axum::routing::get(handlers::workspace::info))
-        .route("/v1/local/auth/status", axum::routing::get(handlers::auth::status))
-        .route("/v1/local/creators", axum::routing::get(handlers::creators::list))
-        .route("/v1/local/manuscript", axum::routing::get(handlers::manuscript::status))
-        .route("/v1/local/references", axum::routing::get(handlers::references::list))
+        .route(
+            "/v1/local/runtime/health",
+            axum::routing::get(handlers::runtime::health),
+        )
+        .route(
+            "/v1/local/runtime/status",
+            axum::routing::get(handlers::runtime::status),
+        )
+        .route(
+            "/v1/local/workspace",
+            axum::routing::get(handlers::workspace::info),
+        )
+        .route(
+            "/v1/local/auth/status",
+            axum::routing::get(handlers::auth::status),
+        )
+        .route(
+            "/v1/local/creators",
+            axum::routing::get(handlers::creators::list),
+        )
+        .route(
+            "/v1/local/manuscript",
+            axum::routing::get(handlers::manuscript::status),
+        )
+        .route(
+            "/v1/local/references",
+            axum::routing::get(handlers::references::list),
+        )
         .with_state(state)
 }
 

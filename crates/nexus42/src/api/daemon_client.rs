@@ -55,6 +55,7 @@ impl DaemonClient {
     }
 
     /// Send a POST request with JSON body
+    #[allow(dead_code)] // For upcoming sync / local API commands
     pub async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.post(&url).json(body).send().await?;
@@ -73,6 +74,7 @@ impl DaemonClient {
     }
 
     /// Send a POST request with JSON body, returning raw response
+    #[allow(dead_code)] // For upcoming sync / local API commands
     pub async fn post_raw<B: Serialize>(&self, path: &str, body: &B) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.post(&url).json(body).send().await?;

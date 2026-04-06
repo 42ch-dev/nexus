@@ -63,10 +63,11 @@ impl AuthStore {
     }
 
     /// Check if user is authenticated
+    #[allow(dead_code)] // Public helper for auth-aware commands
     pub fn is_user_authenticated(&self) -> bool {
         self.user
             .as_ref()
-            .map_or(false, |u| !u.access_token.is_empty())
+            .is_some_and(|u| !u.access_token.is_empty())
     }
 
     /// Check if a specific creator is authenticated
@@ -74,7 +75,7 @@ impl AuthStore {
         self.creators
             .as_ref()
             .and_then(|m| m.get(creator_id))
-            .map_or(false, |c| !c.access_token.is_empty())
+            .is_some_and(|c| !c.access_token.is_empty())
     }
 
     /// Get user access token

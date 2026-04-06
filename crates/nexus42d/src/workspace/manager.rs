@@ -1,6 +1,5 @@
 //! Workspace Manager — higher-level workspace operations
 
-use crate::workspace::WorkspaceState;
 use anyhow::Result;
 
 /// Initialize workspace directory structure

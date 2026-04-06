@@ -8,6 +8,7 @@ pub type Result<T> = std::result::Result<T, CliError>;
 /// Nexus CLI errors
 #[derive(Debug, Error)]
 pub enum CliError {
+    #[allow(dead_code)]
     #[error("Workspace not initialized. Run `nexus42 init` first.")]
     WorkspaceNotInitialized,
 
