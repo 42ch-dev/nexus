@@ -258,12 +258,24 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
-      "total_open": 37,
+      "total_open": 38,
       "by_severity": {
         "high": 11,
-        "medium": 13,
+        "medium": 14,
         "low": 12,
         "warning": 1
+      },
+      "by_target": {
+        "V1.0 GA": 0,
+        "V1.1": 34,
+        "V1.1+": 4
+      },
+      "by_plan": {
+        "domain-models": 2,
+        "cli-daemon-foundation": 11,
+        "sync-contract": 10,
+        "acp-client": 9,
+        "context-assembly": 6
       },
       "by_target": {
         "V1.0 GA": 0,
@@ -349,34 +361,6 @@
     "residual_findings": {
       "2025-04-05-domain-models": [
         {
-          "id": "DM-R1",
-          "title": "SourceAnchor.unit_kind not marked required in schema",
-          "severity": "warning",
-          "source": "QC-#1",
-          "scope": "schemas/common/source-anchor.schema.json — SourceSummaryRef.unit_kind field",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-06",
-          "closure_note": "Removed unit_kind from required array — codegen already treats it as optional due to nested allOf/items limitation. Schema now matches generated output.",
-          "target": "Before V1.0 GA — add \"required\": [\"unit_kind\"] when platform confirms all sources provide unit_kind",
-          "tracking": null
-        },
-        {
-          "id": "DM-R2",
-          "title": "Integration test coverage for World and WorldMembership contract roundtrip",
-          "severity": "low",
-          "source": "QC-#2",
-          "scope": "crates/nexus-domain/src/contract_assertions.rs",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-06",
-          "closure_note": "Added test_world_domain_contract_roundtrip and test_world_membership_domain_contract_roundtrip. MembershipRole schema/domain drift documented in test comment.",
-          "target": "Before Wave 2 — add domain↔contract roundtrip tests for World and WorldMembership",
-          "tracking": null
-        },
-        {
           "id": "DM-R3",
           "title": "Edge-case test coverage for Pairing and ForkBranch lifecycle",
           "severity": "low",
@@ -384,21 +368,18 @@
           "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Before V1.0 GA — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
+          "target": "V1.1 — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
         },
         {
-          "id": "DM-R4",
-          "title": "Error message ergonomics and domain error variant coverage",
-          "severity": "low",
-          "source": "QC-#2",
-          "scope": "crates/nexus-domain/src/errors.rs",
-          "decision": "defer",
+          "id": "DM-R5",
+          "title": "MembershipRole enum drift between schema and domain",
+          "severity": "medium",
+          "source": "GA Residual QC-#1",
+          "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs — schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
+          "decision": "accept",
           "owner": "@fullstack-dev",
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-06",
-          "closure_note": "Added Display/ToString tests for all 18 error variants. Added #[allow(dead_code)] to unused CreatorQuotaExceeded and InvalidIdFormat with V1.1 TODO comment.",
-          "target": "Before V1.0 GA — review error messages for user-facing clarity, add Display impl tests",
+          "target": "V1.1 — align schema enum with domain MembershipRole or vice versa",
           "tracking": null
         }
       ],

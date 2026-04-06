@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "plan_id": "2025-04-05-domain-models",
+  "archived_at": "2026-04-06",
+  "entries": [
+    {
+      "id": "DM-R1",
+      "title": "SourceAnchor.unit_kind not marked required in schema",
+      "severity": "warning",
+      "source": "QC-#1",
+      "scope": "schemas/common/source-anchor.schema.json — SourceSummaryRef.unit_kind field",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.0 GA",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-06",
+      "closure_note": "Removed unit_kind from required array — codegen already treats it as optional due to nested allOf/items limitation. Schema now matches generated output."
+    },
+    {
+      "id": "DM-R2",
+      "title": "Integration test coverage for World and WorldMembership contract roundtrip",
+      "severity": "low",
+      "source": "QC-#2",
+      "scope": "crates/nexus-domain/src/contract_assertions.rs",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "Before V1.0 GA",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-06",
+      "closure_note": "Added test_world_domain_contract_roundtrip and test_world_membership_domain_contract_roundtrip. MembershipRole schema/domain drift documented in test comment."
+    },
+    {
+      "id": "DM-R4",
+      "title": "Error message ergonomics and domain error variant coverage",
+      "severity": "low",
+      "source": "QC-#2",
+      "scope": "crates/nexus-domain/src/errors.rs",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "Before V1.0 GA",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-06",
+      "closure_note": "Added Display/ToString tests for all 18 error variants. Added #[allow(dead_code)] to unused CreatorQuotaExceeded and InvalidIdFormat with V1.1 TODO comment."
+    }
+  ]
+}
