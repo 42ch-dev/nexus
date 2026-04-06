@@ -177,22 +177,35 @@
       "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@architect", "@fullstack-dev"],
-      "progress": 10,
+      "progress": 42,
       "tags": ["phase-1", "acp"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Tech spec refined by @architect. ACP-R1 and ACP-R2 resolved in spec. 6 tasks defined. Ready for implementation.",
+      "notes": "Task 1 of 6 complete: ACP SDK dependency + Adapter Trait. Task 2 of 6 complete: Registry Manifest Fetcher + Cache. Task 5 (Skills) also complete. Tasks 3+4 can now proceed.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-acp-client from main",
         "priority": "high",
         "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract",
+        "working_branch": "feature/v1.0-acp-client",
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
         "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)",
         "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
         "qc_status": "spec refined — ACP-R1, ACP-R2 resolved",
-        "residual_summary": "ACP-R1/R2 resolved in tech spec. 9 new V1.1+ residuals (ACP-R3..R11) identified."
+        "residual_summary": "ACP-R1/R2 resolved in tech spec. 9 new V1.1+ residuals (ACP-R3..R11) identified.",
+        "tests": {
+          "unit": "38 passed, 0 failed (acp::error 10, acp::registry 28)",
+          "integration": "16 passed, 0 failed (existing CLI tests)"
+        },
+        "task_status": {
+          "task_1": "done",
+          "task_2": "done",
+          "task_3": "todo",
+          "task_4": "todo",
+          "task_5": "done",
+          "task_6": "todo"
+        }
       }
     },
     {
@@ -330,7 +343,11 @@
       },
       {
         "updated_at": "2026-04-06",
-        "message": "ACP Client tech spec refined by @architect. SDK choice: agent-client-protocol v0.10.4. 6 tasks defined with parallel execution plan. ACP-R1/R2 resolved, 9 new V1.1+ residuals (ACP-R3..R11) added. Plan status: InProgress."
+        "message": "ACP Client Task 1 complete: ACP SDK dependency (=0.10.4), NexusAcpClient trait, AcpError enum, AcpSdkAdapter placeholder, Agent CLI command placeholder. 10 new unit tests, all passing. Branch: feature/v1.0-acp-client. Tasks 2+4 unblocked for parallel execution."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "ACP Client Task 2 complete: Registry Manifest Fetcher + Cache. 28 unit tests covering parsing, cache hit/miss/expiry, offline fallback, agent lookup, stale-while-revalidate. JSON Schema created and validated. Registry types hand-written (codegen flat struct insufficient for nested structure). Codegen regenerated to include registry_manifest module."
       }
     ],
     "residual_findings": {
