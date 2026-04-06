@@ -80,7 +80,7 @@
         "branch_policy": "feature/v1.0-domain-models from main",
         "priority": "high",
         "description": "Implement domain models (15 aggregates) with consistency rules and gates",
-        "wave_0_spec": "docs/revised-domain-models-spec-v1.md",
+        "wave_0_spec": ".agents/plans/knowledge/revised-domain-models-spec-v1.md",
         "qc_status": "APPROVE — C-1 and C-2 fixed and verified",
         "commits": "4 commits (a22a2cd, 476866a, c782ec8, 6a100b5)",
         "tests": "133 passed, 0 failed",
@@ -169,7 +169,7 @@
         "blocked_reason": "Architecture review found fundamental tech stack conflict. Wave 0 restructure complete. Blocked on sync-contract for bundle metadata.",
         "review_outcome": "critical-gaps",
         "next_action": "Wave 2+: @fullstack-dev to implement CLI-side scope after sync-contract completion",
-        "wave_0_spec": "docs/restructured-context-assembly-v1.md (592 lines, CLI-side-only scope)",
+        "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md (CLI-side-only scope)",
         "dependency": "Blocked by sync-contract plan for bundle metadata fields"
       }
     }
