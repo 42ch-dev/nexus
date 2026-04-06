@@ -125,18 +125,7 @@ fn cache_scan_results(files: &[String]) -> Result<()> {
     }
 
     let conn = rusqlite::Connection::open(&db_path)?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS reference_sources (
-            reference_source_id TEXT PRIMARY KEY,
-            workspace_id TEXT NOT NULL DEFAULT 'local',
-            source_type TEXT NOT NULL,
-            uri TEXT NOT NULL,
-            title TEXT NOT NULL,
-            scan_status TEXT NOT NULL DEFAULT 'scanned',
-            created_at TEXT NOT NULL,
-            updated_at TEXT
-        );",
-    )?;
+    crate::db::Schema::init(&conn)?;
 
     let now = chrono::Utc::now().to_rfc3339();
 

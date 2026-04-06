@@ -1,7 +1,9 @@
 //! Creator handlers
 
+use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
-use axum::{extract::State, Json};
+use axum::extract::State;
+use axum::Json;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -18,35 +20,32 @@ pub struct ListCreatorsResponse {
 }
 
 /// GET /v1/local/creators
-pub async fn list(State(state): State<WorkspaceState>) -> Json<ListCreatorsResponse> {
-    let conn = match state.db().await {
-        Some(conn) => conn,
-        None => return Json(ListCreatorsResponse { creators: vec![] }),
-    };
+pub async fn list(
+    State(state): State<WorkspaceState>,
+) -> Result<Json<ListCreatorsResponse>, NexusApiError> {
+    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_UNAVAILABLE".into(),
+        message: format!("Database connection error: {}", e),
+    })?;
 
-    let mut creators = Vec::new();
-    let mut stmt = match conn.prepare(
-        "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC",
-    ) {
-        Ok(s) => s,
-        Err(_) => return Json(ListCreatorsResponse { creators: vec![] }),
-    };
+    let creators = conn
+        .query_map(
+            "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC",
+            [],
+            |row| {
+                Ok(CreatorInfo {
+                    creator_id: row.get(0)?,
+                    display_name: row.get(1)?,
+                    status: row.get(2)?,
+                    cached_at: row.get(3)?,
+                })
+            },
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
-    let rows = match stmt.query_map([], |row| {
-        Ok(CreatorInfo {
-            creator_id: row.get(0)?,
-            display_name: row.get(1)?,
-            status: row.get(2)?,
-            cached_at: row.get(3)?,
-        })
-    }) {
-        Ok(r) => r,
-        Err(_) => return Json(ListCreatorsResponse { creators: vec![] }),
-    };
-
-    for row in rows.flatten() {
-        creators.push(row);
-    }
-
-    Json(ListCreatorsResponse { creators })
+    Ok(Json(ListCreatorsResponse { creators }))
 }

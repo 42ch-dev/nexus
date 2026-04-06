@@ -1,7 +1,9 @@
 //! Workspace handlers
 
+use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
-use axum::{extract::State, Json};
+use axum::extract::State;
+use axum::Json;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -35,15 +37,25 @@ pub struct InitWorkspaceResponse {
 pub async fn init_workspace(
     State(state): State<WorkspaceState>,
     Json(req): Json<InitWorkspaceRequest>,
-) -> Json<InitWorkspaceResponse> {
-    match state.init_workspace(&req.path).await {
-        Ok(()) => Json(InitWorkspaceResponse {
-            success: true,
-            message: format!("Workspace initialized at {}", req.path),
-        }),
-        Err(e) => Json(InitWorkspaceResponse {
-            success: false,
-            message: format!("Failed to initialize: {}", e),
-        }),
+) -> Result<Json<InitWorkspaceResponse>, NexusApiError> {
+    // Validate input
+    if req.path.trim().is_empty() {
+        return Err(NexusApiError::InvalidInput {
+            field: "path".into(),
+            reason: "must not be empty".into(),
+        });
     }
+
+    state
+        .init_workspace(&req.path)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "WORKSPACE_INIT_FAILED".into(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(InitWorkspaceResponse {
+        success: true,
+        message: format!("Workspace initialized at {}", req.path),
+    }))
 }
