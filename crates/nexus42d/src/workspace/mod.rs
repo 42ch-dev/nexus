@@ -64,14 +64,11 @@ impl WorkspaceState {
         // For now, return a direct reference through the lock
         // In production, we'd use a connection pool
         let guard = self.db.lock().await;
-        guard
-            .as_ref()
-            .map(|_c| {
-                // SQLite Connection isn't Clone; in production use r2d2 connection pool.
-                // For V1.0 skeleton, open a new connection per request.
-                Connection::open(&self.db_path).ok()
-            })
-            .flatten()
+        guard.as_ref().and_then(|_c| {
+            // SQLite Connection isn't Clone; in production use r2d2 connection pool.
+            // For V1.0 skeleton, open a new connection per request.
+            Connection::open(&self.db_path).ok()
+        })
     }
 
     /// Check if workspace is initialized

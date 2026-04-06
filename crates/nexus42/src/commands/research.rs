@@ -141,10 +141,8 @@ fn cache_scan_results(files: &[String]) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
 
     for file in files {
-        let id = format!(
-            "ref_{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
-        );
+        let hex = uuid::Uuid::new_v4().to_string().replace('-', "");
+        let id = format!("ref_{}", &hex[..12]);
         let ext = file.rsplit('.').next().unwrap_or("unknown");
         let source_type = match ext {
             "pdf" => "pdf",
