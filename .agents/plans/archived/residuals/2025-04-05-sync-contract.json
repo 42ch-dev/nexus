@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from sync-contract plan. These items were identified during architecture review and have been implemented in the sync-contract plan (merged to main).",
+  "archived_at": "2026-04-06",
+  "plan_id": "2025-04-05-sync-contract",
+  "entries": [
+    {
+      "id": "SYNC-R1",
+      "title": "Missing bundle metadata fields",
+      "severity": "high",
+      "source": "Architecture Review",
+      "scope": "bundle.schema.json — submitting_creator_id, manuscript_phase, output_manuscript",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Added to Task 3: Bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript, story_manifest delta)",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    },
+    {
+      "id": "SYNC-R2",
+      "title": "Missing partial apply semantics",
+      "severity": "medium",
+      "source": "Architecture Review",
+      "scope": "DeltaBundle apply pipeline — platform must support partial success (some deltas applied, some rejected)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Added Task 6: Partial Apply Semantics to plan",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    },
+    {
+      "id": "SYNC-R3",
+      "title": "Missing local precheck (Stage 0)",
+      "severity": "medium",
+      "source": "Architecture Review",
+      "scope": "Sync client — CLI should validate bundle locally before pushing to platform",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Added Task 7: Local Precheck Stage to plan",
+      "tracking": null,
+      "closed_reason": "resolved_in_plan",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    }
+  ]
+}
