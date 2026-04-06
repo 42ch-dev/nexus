@@ -42,6 +42,10 @@ pub enum NexusApiError {
     /// Resource not found
     #[error("Not found: {0}")]
     NotFound(String),
+
+    /// Feature not yet implemented
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 }
 
 impl NexusApiError {
@@ -53,6 +57,7 @@ impl NexusApiError {
             NexusApiError::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             NexusApiError::AuthRequired => StatusCode::UNAUTHORIZED,
             NexusApiError::NotFound(_) => StatusCode::NOT_FOUND,
+            NexusApiError::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
         }
     }
 
@@ -64,6 +69,7 @@ impl NexusApiError {
             NexusApiError::Internal { .. } => "INTERNAL",
             NexusApiError::AuthRequired => "AUTH_REQUIRED",
             NexusApiError::NotFound(_) => "NOT_FOUND",
+            NexusApiError::NotImplemented(_) => "NOT_IMPLEMENTED",
         }
     }
 

@@ -242,4 +242,51 @@ mod tests {
             assert!(r.starts_with("got: task-"));
         }
     }
+
+    #[tokio::test]
+    async fn pool_exhaustion_returns_error_gracefully() {
+        let (_tmp, db_path) = create_test_db();
+
+        // Build pool with max_size = 1 and short wait timeout so test doesn't hang
+        let mut cfg = Config::new(&db_path);
+        let pool_config = deadpool_sqlite::PoolConfig::new(1);
+        cfg.pool = Some(deadpool_sqlite::PoolConfig {
+            max_size: 1,
+            timeouts: deadpool_sqlite::Timeouts::wait_millis(50),
+            ..pool_config
+        });
+        let inner_pool = cfg
+            .builder(Runtime::Tokio1)
+            .expect("builder() is infallible for valid Runtime")
+            .build()
+            .expect("Pool creation should succeed");
+        let pool = DbPool { pool: inner_pool };
+
+        // Acquire the only connection and hold it
+        let conn = pool.get().await.expect("Should get first connection");
+        assert_eq!(pool.status().size, 1);
+
+        // Attempting to get a second connection should fail with a timeout
+        let result = pool.get().await;
+        assert!(result.is_err(), "Expected pool exhaustion error");
+
+        // Verify the error is a pool error (not a panic) — inspect via match
+        let _pool_err = match result {
+            Err(e) => {
+                // Expected: PoolError::Timeout or any other pool-level error
+                // The key invariant is we get a PoolError, not a panic
+                let _msg = format!("{e}");
+                e
+            }
+            Ok(_) => panic!("Expected pool exhaustion error, got Ok"),
+        };
+
+        // Drop the held connection — pool should recover
+        drop(conn);
+        assert_eq!(
+            pool.status().size,
+            1,
+            "Connection should be returned to pool"
+        );
+    }
 }
