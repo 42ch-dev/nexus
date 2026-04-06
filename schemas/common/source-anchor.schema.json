@@ -10,7 +10,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["story_manifest_id", "summary_unit_id", "unit_kind"],
+        "required": ["story_manifest_id", "summary_unit_id"],
         "properties": {
           "story_manifest_id": {
             "type": "string",

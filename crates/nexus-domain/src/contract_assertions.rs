@@ -279,3 +279,83 @@ fn test_all_aggregates_have_schema_version_1() {
     let ms = ManuscriptState::new("wrk_test", "wld_test", "ctr_test");
     assert_eq!(ms.schema_version, 1);
 }
+
+#[test]
+fn test_world_domain_contract_roundtrip() {
+    let domain_world = World::new(
+        "wld_roundtrip",
+        "ctr_owner",
+        "Roundtrip World",
+        "roundtrip-world",
+        Visibility::Private,
+        TimePolicy::Manual,
+    );
+
+    // Domain → Contract
+    let contract_world: nexus_contracts::World = nexus_contracts::World::from(domain_world.clone());
+    assert_eq!(contract_world.world_id, "wld_roundtrip");
+    assert_eq!(contract_world.owner_creator_id, "ctr_owner");
+    assert_eq!(contract_world.title, "Roundtrip World");
+    assert_eq!(contract_world.slug, "roundtrip-world");
+    assert_eq!(contract_world.status, "active");
+    assert_eq!(
+        contract_world.visibility,
+        nexus_contracts::Visibility::Private
+    );
+    assert_eq!(
+        contract_world.time_policy,
+        nexus_contracts::TimePolicy::Manual
+    );
+    assert_eq!(contract_world.schema_version, 1);
+    assert_eq!(contract_world.canon_revision, Some(0));
+
+    // Contract → Domain
+    let roundtrip_domain: World = World::from(contract_world.clone());
+    assert_eq!(roundtrip_domain.world_id, domain_world.world_id);
+    assert_eq!(
+        roundtrip_domain.owner_creator_id,
+        domain_world.owner_creator_id
+    );
+    assert_eq!(roundtrip_domain.title, domain_world.title);
+    assert_eq!(roundtrip_domain.slug, domain_world.slug);
+    assert_eq!(roundtrip_domain.visibility, domain_world.visibility);
+    assert_eq!(roundtrip_domain.time_policy, domain_world.time_policy);
+    assert_eq!(roundtrip_domain.schema_version, domain_world.schema_version);
+}
+
+#[test]
+fn test_world_membership_domain_contract_roundtrip() {
+    let domain_membership =
+        WorldMembership::new("wld_roundtrip", "ctr_owner", MembershipRole::Owner);
+
+    // Domain → Contract
+    let contract_membership: nexus_contracts::WorldMembership =
+        nexus_contracts::WorldMembership::from(domain_membership.clone());
+    assert_eq!(contract_membership.world_id, "wld_roundtrip");
+    assert_eq!(contract_membership.creator_id, "ctr_owner");
+    assert_eq!(contract_membership.role, "owner");
+    assert_eq!(contract_membership.membership_status, "active");
+    assert_eq!(contract_membership.schema_version, 1);
+    assert!(contract_membership.permissions.is_some());
+
+    // Contract → Domain
+    let roundtrip_domain: WorldMembership = WorldMembership::from(contract_membership.clone());
+    assert_eq!(roundtrip_domain.world_id, domain_membership.world_id);
+    assert_eq!(roundtrip_domain.creator_id, domain_membership.creator_id);
+    assert_eq!(roundtrip_domain.role, domain_membership.role);
+    assert_eq!(
+        roundtrip_domain.membership_status,
+        domain_membership.membership_status
+    );
+    assert_eq!(
+        roundtrip_domain.schema_version,
+        domain_membership.schema_version
+    );
+
+    // NOTE: Schema/domain drift on MembershipRole enum values.
+    // Schema defines: ["owner", "maintainer", "collaborator", "official_creator"]
+    // Domain defines: [Owner, Admin, Curator, Collaborator, Viewer]
+    // The roundtrip itself (serialize → deserialize → serialize) works because
+    // role is stored as String, not an enum variant. A future plan should
+    // reconcile these enum values.
+}
