@@ -206,6 +206,7 @@ cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-c
 - Use official ACP Rust SDK (not custom protocol implementations)
 - CLI and daemon share generated contract types from `crates/nexus-contracts`
 - Daemon is `nexus42d`, started via `nexus42 daemon start`
+- **Formatting:** use `cargo +nightly fmt --all` before commit. The workspace `.rustfmt.toml` ignores `crates/nexus-contracts/src/generated/` (stable `cargo fmt` cannot apply `ignore`, and formatting generated Rust would desync CI `verify-codegen` from `pnpm run codegen`). Install once: `rustup toolchain install nightly --component rustfmt`
 
 **TypeScript contract package:**
 
