@@ -44,7 +44,10 @@ impl DaemonClient {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            return Err(CliError::Api { status, message: body });
+            return Err(CliError::Api {
+                status,
+                message: body,
+            });
         }
 
         let data: T = resp.json().await?;
@@ -59,7 +62,10 @@ impl DaemonClient {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            return Err(CliError::Api { status, message: body });
+            return Err(CliError::Api {
+                status,
+                message: body,
+            });
         }
 
         let data: T = resp.json().await?;
@@ -74,7 +80,10 @@ impl DaemonClient {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            return Err(CliError::Api { status, message: body });
+            return Err(CliError::Api {
+                status,
+                message: body,
+            });
         }
 
         let data: serde_json::Value = resp.json().await?;

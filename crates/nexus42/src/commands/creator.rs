@@ -73,13 +73,11 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::List => list_creators(config).await,
         CreatorCommand::Pair { creator_id } => pair_creator(config, creator_id).await,
         CreatorCommand::Unpair { creator_id } => unpair_creator(config, creator_id).await,
-        CreatorCommand::Credentials { action } => {
-            match action {
-                CredentialsAction::Rotate { creator_id } => {
-                    rotate_credentials(config, creator_id).await
-                }
+        CreatorCommand::Credentials { action } => match action {
+            CredentialsAction::Rotate { creator_id } => {
+                rotate_credentials(config, creator_id).await
             }
-        }
+        },
     }
 }
 
@@ -109,7 +107,10 @@ async fn register_creator(config: &CliConfig, name: String, summary: Option<Stri
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        return Err(crate::errors::CliError::Api { status, message: body });
+        return Err(crate::errors::CliError::Api {
+            status,
+            message: body,
+        });
     }
 
     let creator: Creator = resp.json().await?;
@@ -209,7 +210,10 @@ async fn pair_creator(config: &CliConfig, creator_id: String) -> Result<()> {
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        return Err(crate::errors::CliError::Api { status, message: body });
+        return Err(crate::errors::CliError::Api {
+            status,
+            message: body,
+        });
     }
 
     let result: serde_json::Value = resp.json().await?;
@@ -239,7 +243,10 @@ async fn unpair_creator(config: &CliConfig, creator_id: String) -> Result<()> {
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        return Err(crate::errors::CliError::Api { status, message: body });
+        return Err(crate::errors::CliError::Api {
+            status,
+            message: body,
+        });
     }
 
     println!("✓ Creator unpaired: {}", creator_id);
@@ -277,7 +284,7 @@ fn cache_creator_locally(creator: &Creator) -> Result<()> {
             status TEXT NOT NULL,
             cached_at TEXT NOT NULL,
             data TEXT NOT NULL
-        );"
+        );",
     )?;
 
     conn.execute(

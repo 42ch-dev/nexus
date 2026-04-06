@@ -7,8 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
 /// Nexus TimelineEvent
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

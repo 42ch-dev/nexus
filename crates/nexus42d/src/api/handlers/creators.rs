@@ -1,8 +1,8 @@
 //! Creator handlers
 
+use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use serde::Serialize;
-use crate::workspace::WorkspaceState;
 
 #[derive(Serialize)]
 pub struct CreatorInfo {
@@ -26,7 +26,7 @@ pub async fn list(State(state): State<WorkspaceState>) -> Json<ListCreatorsRespo
 
     let mut creators = Vec::new();
     let mut stmt = match conn.prepare(
-        "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC"
+        "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC",
     ) {
         Ok(s) => s,
         Err(_) => return Json(ListCreatorsResponse { creators: vec![] }),

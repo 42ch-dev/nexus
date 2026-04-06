@@ -1,8 +1,8 @@
 //! Reference source handlers
 
+use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use serde::Serialize;
-use crate::workspace::WorkspaceState;
 
 #[derive(Serialize)]
 pub struct ReferenceInfo {
@@ -28,7 +28,7 @@ pub async fn list(State(state): State<WorkspaceState>) -> Json<ListReferencesRes
     let mut references = Vec::new();
     let mut stmt = match conn.prepare(
         "SELECT reference_source_id, source_type, title, scan_status, created_at
-         FROM reference_sources ORDER BY created_at DESC"
+         FROM reference_sources ORDER BY created_at DESC",
     ) {
         Ok(s) => s,
         Err(_) => return Json(ListReferencesResponse { references: vec![] }),

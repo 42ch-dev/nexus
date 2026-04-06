@@ -51,7 +51,11 @@ pub async fn login(config: &CliConfig) -> Result<()> {
 }
 
 /// Login with a raw access token (development/testing mode)
-pub fn login_with_token(access_token: String, refresh_token: String, user_id: String) -> Result<()> {
+pub fn login_with_token(
+    access_token: String,
+    refresh_token: String,
+    user_id: String,
+) -> Result<()> {
     let mut store = AuthStore::load()?;
     let now = chrono::Utc::now();
     let expires_at = now + chrono::Duration::hours(24);

@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::{MemoryType};
+use crate::generated::common_types::MemoryType;
 
 /// Nexus MemoryItem
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

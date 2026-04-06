@@ -14,17 +14,17 @@ use crate::errors::{CliError, Result};
 ///
 /// Calls `POST /v1/creators/{id}/credentials` on the platform API
 /// to obtain a new short-lived token.
-pub async fn rotate_credentials(
-    config: &CliConfig,
-    creator_id: &str,
-) -> Result<()> {
+pub async fn rotate_credentials(config: &CliConfig, creator_id: &str) -> Result<()> {
     let store = AuthStore::load()?;
 
     // We need a user token to call the platform API
     let user_token = store.user_token()?;
 
     let client = reqwest::Client::new();
-    let url = format!("{}/v1/creators/{}/credentials", config.platform_url, creator_id);
+    let url = format!(
+        "{}/v1/creators/{}/credentials",
+        config.platform_url, creator_id
+    );
 
     tracing::info!("Rotating credentials for creator {}", creator_id);
 
@@ -51,7 +51,9 @@ pub async fn rotate_credentials(
     let expires_at = now + chrono::Duration::seconds(token_resp.expires_in as i64);
 
     let mut store = AuthStore::load()?;
-    let creators = store.creators.get_or_insert_with(std::collections::HashMap::new);
+    let creators = store
+        .creators
+        .get_or_insert_with(std::collections::HashMap::new);
     creators.insert(
         creator_id.to_string(),
         CreatorAuthState {
@@ -77,10 +79,7 @@ pub struct CredentialsResponse {
 }
 
 /// Validate cached Creator token, refresh if expired
-pub async fn ensure_valid_token(
-    config: &CliConfig,
-    creator_id: &str,
-) -> Result<String> {
+pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<String> {
     let store = AuthStore::load()?;
 
     if let Some(creators) = &store.creators {
@@ -96,7 +95,7 @@ pub async fn ensure_valid_token(
     rotate_credentials(config, creator_id).await?;
     let store = AuthStore::load()?;
     let creators = store.creators.as_ref().and_then(|c| c.get(creator_id));
-    creators
-        .map(|s| s.access_token.clone())
-        .ok_or_else(|| CliError::Other(format!("Failed to obtain token for creator {}", creator_id)))
+    creators.map(|s| s.access_token.clone()).ok_or_else(|| {
+        CliError::Other(format!("Failed to obtain token for creator {}", creator_id))
+    })
 }

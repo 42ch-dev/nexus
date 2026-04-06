@@ -11,14 +11,8 @@ mod errors;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    auth::AuthCommand,
-    context::ContextCommand,
-    creator::CreatorCommand,
-    daemon::DaemonCommand,
-    init::InitCommand,
-    manuscript::ManuscriptCommand,
-    research::ResearchCommand,
-    sync::SyncCommand,
+    auth::AuthCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
+    init::InitCommand, manuscript::ManuscriptCommand, research::ResearchCommand, sync::SyncCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface

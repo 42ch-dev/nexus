@@ -12,11 +12,11 @@
 
 pub mod handlers;
 
+use crate::workspace::WorkspaceState;
 use axum::{
     routing::{get, post},
     Router,
 };
-use crate::workspace::WorkspaceState;
 use tower_http::cors::CorsLayer;
 
 /// Create the Local API router
@@ -27,19 +27,20 @@ pub fn create_router(state: WorkspaceState) -> Router {
 
     let workspace_routes = Router::new()
         .route("/v1/local/workspace", get(handlers::workspace::info))
-        .route("/v1/local/workspace/init", post(handlers::workspace::init_workspace));
+        .route(
+            "/v1/local/workspace/init",
+            post(handlers::workspace::init_workspace),
+        );
 
-    let auth_routes = Router::new()
-        .route("/v1/local/auth/status", get(handlers::auth::status));
+    let auth_routes = Router::new().route("/v1/local/auth/status", get(handlers::auth::status));
 
-    let creator_routes = Router::new()
-        .route("/v1/local/creators", get(handlers::creators::list));
+    let creator_routes = Router::new().route("/v1/local/creators", get(handlers::creators::list));
 
-    let manuscript_routes = Router::new()
-        .route("/v1/local/manuscript", get(handlers::manuscript::status));
+    let manuscript_routes =
+        Router::new().route("/v1/local/manuscript", get(handlers::manuscript::status));
 
-    let reference_routes = Router::new()
-        .route("/v1/local/references", get(handlers::references::list));
+    let reference_routes =
+        Router::new().route("/v1/local/references", get(handlers::references::list));
 
     Router::new()
         .merge(runtime_routes)

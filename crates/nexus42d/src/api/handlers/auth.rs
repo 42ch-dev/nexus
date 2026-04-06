@@ -1,8 +1,8 @@
 //! Auth status handler
 
+use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use serde::Serialize;
-use crate::workspace::WorkspaceState;
 
 #[derive(Serialize)]
 pub struct AuthStatusResponse {

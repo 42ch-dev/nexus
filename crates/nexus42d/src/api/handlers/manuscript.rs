@@ -1,8 +1,8 @@
 //! Manuscript handler
 
+use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use serde::Serialize;
-use crate::workspace::WorkspaceState;
 
 #[derive(Serialize)]
 pub struct ManuscriptStatusResponse {
@@ -14,10 +14,12 @@ pub struct ManuscriptStatusResponse {
 pub async fn status(State(state): State<WorkspaceState>) -> Json<ManuscriptStatusResponse> {
     let conn = match state.db().await {
         Some(conn) => conn,
-        None => return Json(ManuscriptStatusResponse {
-            phase: None,
-            active_manifest_id: None,
-        }),
+        None => {
+            return Json(ManuscriptStatusResponse {
+                phase: None,
+                active_manifest_id: None,
+            })
+        }
     };
 
     let phase: Option<String> = conn

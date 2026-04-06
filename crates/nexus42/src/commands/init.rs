@@ -1,6 +1,8 @@
 //! Init Command — Initialize a Nexus workspace
 
-use crate::config::{find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig};
+use crate::config::{
+    find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
+};
 use crate::errors::Result;
 use clap::Subcommand;
 
@@ -55,10 +57,14 @@ async fn init_workspace(name: Option<String>) -> Result<()> {
     });
 
     let config_path = workspace_config_path(&current_dir);
-    std::fs::write(&config_path, serde_json::to_string_pretty(&workspace_config)?)?;
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&workspace_config)?,
+    )?;
 
     // Create .gitignore in nexus directory
-    let gitignore_content = "# Nexus local state (do not commit)\n*.db\n*.db-wal\n*.db-shm\nstate.db\n";
+    let gitignore_content =
+        "# Nexus local state (do not commit)\n*.db\n*.db-wal\n*.db-shm\nstate.db\n";
     std::fs::write(nexus_dir.join(".gitignore"), gitignore_content)?;
 
     // Update global config with workspace path
