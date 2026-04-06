@@ -91,15 +91,15 @@
       "id": "2025-04-05-cli-daemon-foundation",
       "title": "CLI + Daemon Foundation",
       "file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
       "progress": 100,
       "tags": ["phase-1", "cli", "daemon"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
-      "done_at": null,
-      "notes": "All 9 tasks implemented. 16 CLI integration tests + 7 daemon integration tests. Binary verified. Awaiting QC review.",
+      "done_at": "2026-04-06",
+      "notes": "Merged to feature branch. QC三审 passed (2 blocking issues fixed). 156/156 tests passing. Ready for merge to main after final review.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-cli-daemon from main",
@@ -107,6 +107,12 @@
         "description": "Implement nexus42 CLI and nexus42d daemon with dual-subject auth, Creator/Manuscript/Research command surfaces, HTTP Local API, and SQLite workspace state",
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
         "review_verdict": "Request Changes → Resolved (CLI-R1..R4)",
+        "qc_status": "APPROVE — CONS-H1 and CONS-H2 fixed",
+        "qc_report": ".agents/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc-consolidated.md",
+        "qc_resolved": [
+          "CONS-H1: Formatting violations",
+          "CONS-H2: Auth file permissions"
+        ],
         "tasks_added": [
           "Task 6: Creator Command Module",
           "Task 7: Manuscript Command Module",
@@ -118,7 +124,8 @@
           "cli_integration": "16 passed, 0 failed",
           "daemon_integration": "7 passed, 0 failed",
           "workspace_total": "156 passed, 0 failed"
-        }
+        },
+        "commits": "3 commits (c230e24..0c39a5f)"
       }
     },
     {
@@ -364,6 +371,83 @@
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "V1.1+ — add `--extract-text` flag to enable content extraction for PDF and URL sources; may require external tools (pdftotext, http client)",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R9",
+          "title": "SQLite connection per request (performance impact)",
+          "severity": "high",
+          "source": "QC Consolidated (CONS-H3)",
+          "scope": "crates/nexus42d/src/workspace/mod.rs:62-72 — WorkspaceState::db() opens new SQLite connection per request instead of using connection pool",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add r2d2 or deadpool-sqlite connection pooling for production load handling",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R10",
+          "title": "SQLite schema duplication across CLI and daemon",
+          "severity": "high",
+          "source": "QC Consolidated (CONS-H4)",
+          "scope": "crates/nexus42/src/commands/creator.rs:273, research.rs:132, crates/nexus42d/src/workspace/mod.rs:122 — creators and reference_sources tables defined in 3 places",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — extract schema definitions to shared module or centralize SQLite operations through daemon API",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R11",
+          "title": "Inconsistent error propagation across command handlers",
+          "severity": "high",
+          "source": "QC Consolidated (CONS-H5)",
+          "scope": "Multiple command handlers use `.unwrap_or_default()` on HTTP responses, silently swallowing errors",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — standardize error propagation with logging before fallback, extract helper methods in errors.rs",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R12",
+          "title": "Missing workspace validation before operations",
+          "severity": "high",
+          "source": "QC Consolidated (CONS-H6)",
+          "scope": "Command handlers (init, creator, manuscript) don't validate workspace state before performing operations",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add workspace state validation checks to prevent operations on uninitialized or corrupted workspaces",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R13",
+          "title": "Unsafe unwrap in error paths",
+          "severity": "high",
+          "source": "QC Consolidated (CONS-H7)",
+          "scope": "Multiple instances of `.unwrap()` in production code paths that could panic on unexpected errors",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — replace unwrap with proper error handling using Result types and error_chain/thiserror",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R14",
+          "title": "Concurrent workspace access race condition",
+          "severity": "high",
+          "source": "QC Consolidated (CONS-H8)",
+          "scope": "Mutex<Option<Connection>> pattern in workspace state may cause race conditions under concurrent access",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — use async-aware RwLock or switch to connection pool pattern to handle concurrent access safely",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R15",
+          "title": "No tracing in daemon API handlers",
+          "severity": "medium",
+          "source": "QC Consolidated (CONS-H9)",
+          "scope": "crates/nexus42d/src/api/handlers/*.rs — HTTP handlers lack tracing/logging statements for request tracking and debugging",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add tracing::info/debug statements to handlers for request lifecycle observability",
           "tracking": null
         }
       ],
