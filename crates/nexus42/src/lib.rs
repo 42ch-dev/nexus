@@ -8,6 +8,7 @@ pub mod api;
 pub mod auth;
 pub mod commands;
 pub mod config;
+pub mod context;
 pub mod errors;
 
 // Re-export commonly used types for convenience
