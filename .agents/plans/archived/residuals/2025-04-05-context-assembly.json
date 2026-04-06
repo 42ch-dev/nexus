@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "plan_id": "2025-04-05-context-assembly",
+  "archived_at": "2026-04-06",
+  "entries": [
+    {
+      "id": "CTX-R1",
+      "title": "Original plan file still contains incorrect scope (Neo4j/pgvector in Rust)",
+      "severity": "high",
+      "source": "Architecture Review",
+      "scope": ".agents/plans/2025-04-05-context-assembly.md — entire plan needs replacement",
+      "decision": "resolved",
+      "owner": "@project-manager",
+      "target": "Rewrite plan file from .agents/plans/knowledge/restructured-context-assembly-v1.md",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-06",
+      "closure_note": "Plan completely rewritten by @architect (1469 lines, 5 CLI-side-only tasks). All Neo4j/pgvector scope removed. CTX-R1 resolved."
+    }
+  ]
+}
