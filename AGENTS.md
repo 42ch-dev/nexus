@@ -176,6 +176,19 @@ cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-c
 - Both packages must be published and version-locked with `schema_version`
 - CI validates schemas before generating code
 
+**⚠️ Mandatory: run codegen after any schema change**
+
+The CI job `verify-codegen` runs `pnpm run codegen` and then checks `git diff` on the generated output directories (`packages/nexus-contracts/src/generated/`, `crates/nexus-contracts/src/generated/`). If generated files are out of sync with committed versions, **CI will fail**.
+
+Rule: **any commit that touches files under `schemas/` MUST also include the corresponding regenerated output**. Before committing:
+
+```bash
+pnpm run codegen
+git add packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/generated/
+```
+
+If you modify schemas without regenerating, the commit will be rejected by CI. Do NOT hand-edit files under `*/generated/` — always regenerate from schemas.
+
 **Rust development:**
 
 - Use official ACP Rust SDK (not custom protocol implementations)
