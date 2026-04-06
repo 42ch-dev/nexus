@@ -75,6 +75,14 @@ jobs:
         with:
           name: generated-types
           path: .
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
       - name: Run clippy
@@ -113,6 +121,14 @@ jobs:
         with:
           name: generated-types
           path: .
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
       - name: Run ACP integration tests
         run: cargo test -p nexus42 --test acp_registry --test cli_agent
       - name: Run all tests
