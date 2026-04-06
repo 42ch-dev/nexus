@@ -14,7 +14,7 @@ pub struct WorkspaceState {
     nexus_home: PathBuf,
     db_path: PathBuf,
     started_at: std::time::Instant,
-    workspace_path: Option<String>,
+    workspace_path: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl WorkspaceState {
@@ -31,7 +31,7 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
-            workspace_path,
+            workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
         }
     }
 
@@ -54,7 +54,7 @@ impl WorkspaceState {
             nexus_home: home,
             db_path,
             started_at: std::time::Instant::now(),
-            workspace_path: None,
+            workspace_path: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -73,12 +73,12 @@ impl WorkspaceState {
 
     /// Check if workspace is initialized
     pub async fn is_initialized(&self) -> bool {
-        self.workspace_path.is_some()
+        self.workspace_path.lock().unwrap().is_some()
     }
 
     /// Get workspace path
     pub fn workspace_path(&self) -> Option<String> {
-        self.workspace_path.clone()
+        self.workspace_path.lock().unwrap().clone()
     }
 
     /// Get database path
@@ -114,7 +114,55 @@ impl WorkspaceState {
             )?;
         }
 
+        // Update in-memory state so is_initialized() returns true
+        *self.workspace_path.lock().unwrap() = Some(path.to_string());
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn init_workspace_sets_is_initialized() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_dir = tmp.path().join("my-workspace");
+
+        let nexus_home = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).unwrap();
+        let db_path = nexus_home.join("state.db");
+
+        // Set up the database schema (same as init_db_schema)
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')));"
+        ).unwrap();
+        drop(conn);
+
+        let state = WorkspaceState::new_for_testing(
+            nexus_home, db_path, None, // no workspace path set initially
+        );
+
+        // Before init: is_initialized should be false
+        assert!(
+            !state.is_initialized().await,
+            "is_initialized() should return false before init_workspace()"
+        );
+
+        // Initialize workspace
+        let path_str = workspace_dir.display().to_string();
+        state.init_workspace(&path_str).await.unwrap();
+
+        // After init: is_initialized should be true
+        assert!(
+            state.is_initialized().await,
+            "is_initialized() should return true after init_workspace()"
+        );
+
+        // workspace_path() should return the path
+        assert_eq!(state.workspace_path(), Some(path_str));
     }
 }
 

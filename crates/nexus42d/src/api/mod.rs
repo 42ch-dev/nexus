@@ -5,6 +5,7 @@
 //! - GET  /v1/local/runtime/status   — Runtime status
 //! - GET  /v1/local/workspace        — Workspace info
 //! - POST /v1/local/workspace/init   — Initialize workspace
+//! - POST /v1/local/context/assemble — Context assembly (placeholder)
 //! - GET  /v1/local/auth/status      — Auth status
 //! - GET  /v1/local/creators         — List creators
 //! - GET  /v1/local/manuscript       — Manuscript status
@@ -42,6 +43,11 @@ pub fn create_router(state: WorkspaceState) -> Router {
     let reference_routes =
         Router::new().route("/v1/local/references", get(handlers::references::list));
 
+    let context_routes = Router::new().route(
+        "/v1/local/context/assemble",
+        post(handlers::context::assemble),
+    );
+
     Router::new()
         .merge(runtime_routes)
         .merge(workspace_routes)
@@ -49,6 +55,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(creator_routes)
         .merge(manuscript_routes)
         .merge(reference_routes)
+        .merge(context_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
