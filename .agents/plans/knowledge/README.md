@@ -10,6 +10,7 @@ For the distinction between this directory and `docs/`, see [`AGENTS.md`](../../
 |----------|-------------|-------------|--------|
 | [revised-domain-models-spec-v1.md](revised-domain-models-spec-v1.md) | `2025-04-05-domain-models` | Field-by-field revision of all 15 domain aggregates, aligned with JSON Schema truth source. Resolves 6 P1 critical gaps (G1–G6) found in architecture review. | Superseded by implementation (Wave 1 complete) |
 | [restructured-context-assembly-v1.md](restructured-context-assembly-v1.md) | `2025-04-05-context-assembly` | Restructured spec narrowing scope to CLI-side only (summary generation + Local API call + bundle metadata). Removes 5 critical deviations from frozen specs. | Input for Wave 2+ implementation |
+| [acp-client-tech-spec-v1.md](acp-client-tech-spec-v1.md) | `2025-04-05-acp-client` | Complete technical specification for ACP Client integration: SDK selection (agent-client-protocol v0.10.4), architecture, registry caching, CLI commands, capability IDs, schema definitions. Resolves ACP-R1 and ACP-R2. | Input for implementation |
 
 ## Maintenance
 

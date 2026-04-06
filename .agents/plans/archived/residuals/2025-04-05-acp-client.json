@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from acp-client plan. ACP-R1 (frozen capability IDs) and ACP-R2 (probe command) were resolved during tech spec refinement by @architect.",
+  "archived_at": "2026-04-06",
+  "plan_id": "2025-04-05-acp-client",
+  "entries": [
+    {
+      "id": "ACP-R1",
+      "title": "Missing frozen capability ID contract reference",
+      "severity": "medium",
+      "source": "Architecture Review",
+      "scope": "ACP skill/capability registration — must reference frozen capability ID list from ACP Registry",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved in tech spec §5.2 — 6 frozen capability IDs defined (FILE_SYSTEM_READ, FILE_SYSTEM_WRITE, TERMINAL_CREATE, TERMINAL_OUTPUT, TERMINAL_RELEASE)",
+      "tracking": null,
+      "closed_reason": "resolved_in_spec",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    },
+    {
+      "id": "ACP-R2",
+      "title": "Missing nexus42 acp probe command",
+      "severity": "low",
+      "source": "Architecture Review",
+      "scope": "CLI command — probe ACP Registry or local agent to verify connectivity and capability set",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved in tech spec §6.2 — `nexus42 agent probe` command defined with registry probe and local agent probe modes",
+      "tracking": null,
+      "closed_reason": "resolved_in_spec",
+      "closed_at": "2026-04-06",
+      "archived_at": "2026-04-06"
+    }
+  ]
+}

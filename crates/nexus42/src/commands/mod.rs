@@ -1,5 +1,6 @@
 //! Command modules for nexus42 CLI
 
+pub mod agent;
 pub mod auth;
 pub mod context;
 pub mod creator;

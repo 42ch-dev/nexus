@@ -22,6 +22,7 @@ pub mod creator;
 pub mod bundle;
 pub mod version_ref;
 pub mod conflict_response;
+pub mod registry_manifest;
 
 // Re-export all types at the generated module level
 pub use common_types::*;
@@ -43,6 +44,7 @@ pub use creator::*;
 pub use bundle::*;
 pub use version_ref::*;
 pub use conflict_response::*;
+pub use registry_manifest::*;
 
 /// Schema version constants
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
@@ -63,6 +65,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("Bundle", 1),
     ("VersionRef", 1),
     ("ConflictResponse", 1),
+    ("RegistryManifest", 1),
 ];
 
 /// Latest schema version
