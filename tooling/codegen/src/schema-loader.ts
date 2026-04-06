@@ -21,6 +21,13 @@ const SKIP_STRUCT_GENERATION = new Set([
 ]);
 
 /**
+ * Schema paths (relative to schemas/, POSIX slashes) that must not emit TS/Rust structs.
+ * Used when a JSON Schema refines another file with the same basename (e.g. cli-sync/bundle
+ * allOf domain/bundle): codegen only produces types from the canonical envelope schema.
+ */
+const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['cli-sync/bundle.schema.json']);
+
+/**
  * Map of definition names from common.schema.json to their base types.
  * Updated when common schema is loaded.
  */
@@ -65,6 +72,7 @@ export function loadAllSchemas(): LoadedSchema[] {
 
   for (const filePath of files) {
     const fileName = path.basename(filePath);
+    const relPath = path.relative(schemasDir, filePath).replace(/\\/g, '/');
     const typeName = schemaToTypeName(fileName);
     const schemaContent = readJSON<Record<string, unknown>>(filePath);
     const schemaVersion = extractSchemaVersion(schemaContent);
@@ -72,6 +80,7 @@ export function loadAllSchemas(): LoadedSchema[] {
     // Determine if this schema should be skipped for struct generation
     const properties = schemaContent.properties as Record<string, unknown> | undefined;
     const isDefinitionsOnly = SKIP_STRUCT_GENERATION.has(fileName)
+      || SKIP_STRUCT_GENERATION_REL_PATHS.has(relPath)
       || !properties || Object.keys(properties).length === 0;
 
     loadedSchemas.push({

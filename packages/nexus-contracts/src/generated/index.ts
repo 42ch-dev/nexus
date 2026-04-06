@@ -28,7 +28,6 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   Bundle: 1,
   VersionRef: 1,
   ConflictResponse: 1,
-  Bundle: 1,
 };
 
 // Latest schema version

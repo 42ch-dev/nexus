@@ -46,7 +46,7 @@ docs/                   # User & contributor docs (installation, architecture, c
 .agents/plans/
   knowledge/            # Dev-process knowledge (architecture reviews, spec revisions, design decisions)
   reports/              # QC/QA review reports
-.github/workflows/      # CI: schema validation, Rust fmt/clippy/test, npm publish
+.github/workflows/      # CI: see `.github/workflows/ci.yml` (schemas, codegen diff, fmt, clippy, TS typecheck)
 ```
 
 ## Content Boundary: `docs/` vs `.agents/plans/knowledge/`
@@ -188,6 +188,29 @@ git add packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/gener
 ```
 
 If you modify schemas without regenerating, the commit will be rejected by CI. Do NOT hand-edit files under `*/generated/` — always regenerate from schemas.
+
+**Before opening a PR or merging to `main`:** run the same checks as the `CI` workflow (`.github/workflows/ci.yml`) so local results match GitHub Actions.
+
+```bash
+# 1) JSON Schemas (install once: cd tooling/validation && npm install)
+node tooling/validation/schema-validator.js
+
+# 2) Codegen matches committed output (must produce no diff on generated dirs)
+pnpm run codegen
+git diff --exit-code packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/generated/
+
+# 3) Rust formatting (nightly rustfmt required — see below)
+cargo +nightly fmt --all -- --check
+
+# 4) Rust lints (warnings fail CI)
+cargo clippy --all -- -D warnings
+
+# 5) TypeScript contract package
+pnpm install   # if needed
+pnpm run typecheck
+```
+
+`CI` does not run `cargo test`; run `cargo test --all` locally when you touch Rust behavior.
 
 **Rust development:**
 
