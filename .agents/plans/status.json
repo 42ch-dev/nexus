@@ -218,15 +218,15 @@
       "id": "2025-04-05-context-assembly",
       "title": "Context Assembly Basic",
       "file": ".agents/plans/2025-04-05-context-assembly.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@architect", "@fullstack-dev", "@fullstack-dev-2"],
+      "agents": ["@architect", "@fullstack-dev", "@fullstack-dev-2", "@qc-specialist", "@qc-specialist-2", "@qc-specialist-3", "@qa-engineer"],
       "progress": 100,
       "tags": ["phase-1", "context-assembly"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
-      "done_at": null,
-      "notes": "All 5 tasks implemented. 416 workspace tests pass. QC三审 in progress.",
+      "done_at": "2026-04-06",
+      "notes": "Merged to main. QC三审 APPROVE (3 blocking fixed: status.json key, fmt, import path). QA PASS. 425 tests passing. 13 files changed, 1925 insertions. 7 commits + merge.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-context-assembly from main",
@@ -235,22 +235,18 @@
         "working_branch": "feature/v1.0-context-assembly",
         "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
         "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
-        "next_action": "QC三审 → QA verification → merge to main",
-        "task_status": {
-          "task_1": "done",
-          "task_2": "done",
-          "task_3": "done",
-          "task_4": "done",
-          "task_5": "done"
-        },
+        "qc_status": "APPROVE — status.json key, fmt, import path fixed",
+        "qc_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc-consolidated.md",
+        "qa_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qa.md",
+        "qa_status": "PASS — all 12 acceptance criteria met, 425 workspace tests pass",
+        "residual_summary": "11 V1.1+ residuals (QC-#1 L1-L7, QC-#2 H2-H3, QC-#3 M3-M4)",
         "tests": {
           "context_unit": "25 passed, 0 failed",
           "context_integration": "2 passed, 0 failed",
-          "workspace": "416 passed, 0 failed, 2 ignored"
+          "workspace": "425 passed, 0 failed, 2 ignored"
         },
-        "commits": "6 commits (bfdeca2..924d388)",
-        "files_changed": "schema + 6 Rust files (context module + commands + lib + tests)",
-        "qc_status": "pending",
+        "commits": "7 commits (bfdeca2..6b3b7c2) + merge",
+        "files_changed": "13 files (1925 insertions, 21 deletions)",
         "clippy": "clean — 0 warnings with -D warnings",
         "effort": "M — ~1-2 focused agent sessions"
       }
@@ -262,23 +258,24 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
-      "total_open": 34,
+      "total_open": 40,
       "by_severity": {
-        "high": 9,
-        "medium": 11,
-        "low": 13,
+        "high": 11,
+        "medium": 13,
+        "low": 15,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 3,
-        "V1.1": 27,
+        "V1.1": 33,
         "V1.1+": 4
       },
       "by_plan": {
         "domain-models": 4,
         "cli-daemon-foundation": 11,
         "sync-contract": 10,
-        "acp-client": 9
+        "acp-client": 9,
+        "context-assembly": 6
       },
       "cross_cutting": [
         {
@@ -732,7 +729,74 @@
           "tracking": null
         }
       ],
-      "2025-04-05-context-assembly": []
+      "2025-04-05-context-assembly": [
+        {
+          "id": "CTX-R2",
+          "title": "Summary generator lacks file size limit",
+          "severity": "low",
+          "source": "QC-#1",
+          "scope": "crates/nexus42/src/context/summary.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add max_file_size parameter",
+          "tracking": null
+        },
+        {
+          "id": "CTX-R3",
+          "title": "Path traversal not explicitly validated in scan_recursive",
+          "severity": "low",
+          "source": "QC-#1",
+          "scope": "crates/nexus42/src/context/summary.rs",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — scope is local manuscript dirs under user control",
+          "tracking": null
+        },
+        {
+          "id": "CTX-R4",
+          "title": "CLI doesn't validate WorldId format at input",
+          "severity": "high",
+          "source": "QC-#2",
+          "scope": "crates/nexus42/src/commands/context.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add clap validator for wld_ prefix pattern",
+          "tracking": null
+        },
+        {
+          "id": "CTX-R5",
+          "title": "UTF-8 truncation safety in opening excerpt",
+          "severity": "high",
+          "source": "QC-#2",
+          "scope": "crates/nexus42/src/context/summary.rs",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — is_char_boundary already checked; add multi-byte safety tests",
+          "tracking": null
+        },
+        {
+          "id": "CTX-R6",
+          "title": "MemoryKind as String not enum",
+          "severity": "medium",
+          "source": "QC-#3",
+          "scope": "crates/nexus42/src/context/types.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — extract MemoryKind enum matching schema",
+          "tracking": null
+        },
+        {
+          "id": "CTX-R7",
+          "title": "Missing file I/O edge case tests (permissions, symlinks)",
+          "severity": "medium",
+          "source": "QC-#3",
+          "scope": "crates/nexus42/src/context/summary.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1 — add permission-denied and symlink test cases",
+          "tracking": null
+        }
+      ]
     }
   }
 }
