@@ -1,0 +1,28 @@
+/**
+ * Nexus ForkBranch
+ *
+ * ForkBranch - describes a world branch forked from a parent world at a specific event. Aligned with data-model-v1.md §5.7.
+ *
+ * @schema_version 1
+ * @source fork-branch.schema.json
+ */
+import type { SchemaVersion } from './CommonTypes';
+
+/** Inline enum type */
+export type Status = 'active' | 'archived';
+
+/** Inline enum type */
+export type VerificationStatus = 'unverified' | 'requested' | 'verified' | 'rejected';
+
+export interface ForkBranch {
+  schema_version: number;
+  fork_branch_id: string;
+  world_id: string;
+  parent_world_id: string;
+  parent_branch_id: string;
+  forked_from_event_id: string;
+  status: Status;
+  verification_status: VerificationStatus;
+  created_by_creator_id: string;
+  created_at: string;
+}
