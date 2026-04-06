@@ -115,7 +115,7 @@ impl TimelineEvent {
         &mut self,
         membership: &MembershipPermissionCheck,
         current_head: &str,
-        _branch_events: &[TimelineEvent],
+        branch_events: &[TimelineEvent],
     ) -> Result<(), DomainError> {
         // Must be provisional to promote
         if self.status != TimelineEventStatus::Provisional.as_str() {
@@ -137,6 +137,22 @@ impl TimelineEvent {
             return Err(DomainError::TimelineConflict(
                 "event cannot be promoted as it is already the head".to_string(),
             ));
+        }
+
+        // Gate 3: Sequence monotonicity (consistency-rules-v1.md §3.3)
+        // Event's sequence_no must be greater than all existing canon events in the branch
+        let max_canon_sequence = branch_events
+            .iter()
+            .filter(|e| e.status == TimelineEventStatus::Canon.as_str())
+            .map(|e| e.sequence_no)
+            .max()
+            .unwrap_or(0);
+
+        if self.sequence_no <= max_canon_sequence {
+            return Err(DomainError::TimelineConflict(format!(
+                "sequence {} conflicts with existing canon sequence {}; events must be promoted in order",
+                self.sequence_no, max_canon_sequence
+            )));
         }
 
         // Validate causality
@@ -386,5 +402,65 @@ mod tests {
         let json = serde_json::to_string(&evt).unwrap();
         let deserialized: TimelineEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(evt, deserialized);
+    }
+
+    /// C-2: promote_to_canon() must enforce sequence monotonicity.
+    /// When event's sequence_no conflicts with existing canon events, promotion should fail.
+    #[test]
+    fn test_promote_with_sequence_conflict_fails() {
+        let mut evt =
+            TimelineEvent::new("wld_test", "fbk_root", TimelineEventType::StoryAdvance, 5);
+        evt.status = "provisional".to_string();
+
+        // Existing canon event with higher sequence_no
+        let existing_canon = TimelineEvent {
+            status: "canon".to_string(),
+            sequence_no: 10,
+            ..TimelineEvent::new("wld_test", "fbk_root", TimelineEventType::StoryAdvance, 10)
+        };
+
+        let branch_events = vec![existing_canon];
+        let result = evt.promote_to_canon(
+            &MembershipPermissionCheck {
+                can_confirm_canon: true,
+                can_sync_kb: true,
+            },
+            "evt_head",
+            &branch_events,
+        );
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DomainError::TimelineConflict(_)
+        ));
+    }
+
+    /// C-2: promote_to_canon() succeeds when sequence_no is valid.
+    #[test]
+    fn test_promote_with_valid_sequence_succeeds() {
+        let mut evt =
+            TimelineEvent::new("wld_test", "fbk_root", TimelineEventType::StoryAdvance, 15);
+        evt.status = "provisional".to_string();
+
+        // Existing canon event with lower sequence_no
+        let existing_canon = TimelineEvent {
+            status: "canon".to_string(),
+            sequence_no: 10,
+            ..TimelineEvent::new("wld_test", "fbk_root", TimelineEventType::StoryAdvance, 10)
+        };
+
+        let branch_events = vec![existing_canon];
+        let result = evt.promote_to_canon(
+            &MembershipPermissionCheck {
+                can_confirm_canon: true,
+                can_sync_kb: true,
+            },
+            "evt_head",
+            &branch_events,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(evt.status, "canon");
     }
 }
