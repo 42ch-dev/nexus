@@ -59,11 +59,7 @@ fn scan_references(path: &str) -> Result<()> {
     if let Ok(entries) = std::fs::read_dir(scan_path) {
         for entry in entries.flatten() {
             let file_name = entry.file_name().to_string_lossy().to_string();
-            let ext = file_name
-                .rsplit('.')
-                .next()
-                .unwrap_or("")
-                .to_lowercase();
+            let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
 
             if extensions.contains(&ext.as_str()) {
                 found.push(file_name);
@@ -139,13 +135,16 @@ fn cache_scan_results(files: &[String]) -> Result<()> {
             scan_status TEXT NOT NULL DEFAULT 'scanned',
             created_at TEXT NOT NULL,
             updated_at TEXT
-        );"
+        );",
     )?;
 
     let now = chrono::Utc::now().to_rfc3339();
 
     for file in files {
-        let id = format!("ref_{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string());
+        let id = format!(
+            "ref_{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        );
         let ext = file.rsplit('.').next().unwrap_or("unknown");
         let source_type = match ext {
             "pdf" => "pdf",

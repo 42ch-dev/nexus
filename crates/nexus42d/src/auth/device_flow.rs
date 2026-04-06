@@ -20,10 +20,7 @@ pub struct DeviceCodeSession {
 }
 
 /// Verify a device code (proxy to platform)
-pub async fn verify_device_code(
-    _platform_url: &str,
-    _device_code: &str,
-) -> anyhow::Result<bool> {
+pub async fn verify_device_code(_platform_url: &str, _device_code: &str) -> anyhow::Result<bool> {
     // V1.0 skeleton — in production, polls the platform token endpoint
     Ok(false)
 }

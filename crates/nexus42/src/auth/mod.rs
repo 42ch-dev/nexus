@@ -2,12 +2,13 @@
 //!
 //! Supports both User authentication (device flow OAuth) and Creator API key management.
 
-pub mod user_auth;
 pub mod creator_auth;
+pub mod user_auth;
 
 use crate::config::auth_store_path;
 use crate::errors::{CliError, Result};
 use serde::{Deserialize, Serialize};
+use std::os::unix::fs::PermissionsExt;
 
 /// Auth store — persisted to `$HOME/.nexus42/auth.json`
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -49,20 +50,23 @@ impl AuthStore {
         Ok(serde_json::from_str(&content)?)
     }
 
-    /// Save auth store to disk
+    /// Save auth store to disk (owner-only: 0600)
     pub fn save(&self) -> Result<()> {
         let path = auth_store_path()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, content)?;
+        std::fs::write(&path, &content)?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         Ok(())
     }
 
     /// Check if user is authenticated
     pub fn is_user_authenticated(&self) -> bool {
-        self.user.as_ref().map_or(false, |u| !u.access_token.is_empty())
+        self.user
+            .as_ref()
+            .map_or(false, |u| !u.access_token.is_empty())
     }
 
     /// Check if a specific creator is authenticated

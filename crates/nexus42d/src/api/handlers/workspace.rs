@@ -1,8 +1,8 @@
 //! Workspace handlers
 
+use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
-use crate::workspace::WorkspaceState;
 
 #[derive(Serialize)]
 pub struct WorkspaceInfo {
