@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/nexus-contracts",
+    "crates/nexus-domain",
     # Future members (commented out for now):
     # "crates/nexus42",
     # "crates/nexus42d",
