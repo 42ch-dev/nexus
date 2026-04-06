@@ -46,6 +46,15 @@ docs/                   # User docs (installation, sync, troubleshooting)
 .github/workflows/      # CI: schema validation, Rust fmt/clippy/test, npm publish
 ```
 
+## Documentation & plans (mandatory reachability)
+
+**Mandatory** for any in-repo documentation (for example `docs/`, `README`, design notes) and agent plans (for example `.agents/plans/`):
+
+- **Do not** reference paths to files that are excluded by `.gitignore` or otherwise not present in a fresh clone. Readers who only `git clone` this repository must be able to open every cited path.
+- **Do not** reference files **outside** this repository root (for example `~/.config/...`, absolute home paths, or arbitrary sibling directories). If external context is required, inline the essential content in the repo or link to a **stable, public** URL.
+
+Violations break onboarding and agent handoff for anyone without your local machine layout.
+
 ## Development Workflow
 
 **Schema/codegen flow:**
