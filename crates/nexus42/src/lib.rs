@@ -9,6 +9,7 @@ pub mod auth;
 pub mod commands;
 pub mod config;
 pub mod context;
+pub mod db;
 pub mod errors;
 
 // Re-export commonly used types for convenience

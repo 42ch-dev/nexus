@@ -1,7 +1,9 @@
 //! Manuscript handler
 
+use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
-use axum::{extract::State, Json};
+use axum::extract::State;
+use axum::Json;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -11,16 +13,13 @@ pub struct ManuscriptStatusResponse {
 }
 
 /// GET /v1/local/manuscript
-pub async fn status(State(state): State<WorkspaceState>) -> Json<ManuscriptStatusResponse> {
-    let conn = match state.db().await {
-        Some(conn) => conn,
-        None => {
-            return Json(ManuscriptStatusResponse {
-                phase: None,
-                active_manifest_id: None,
-            })
-        }
-    };
+pub async fn status(
+    State(state): State<WorkspaceState>,
+) -> Result<Json<ManuscriptStatusResponse>, NexusApiError> {
+    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_UNAVAILABLE".into(),
+        message: format!("Database connection error: {}", e),
+    })?;
 
     let phase: Option<String> = conn
         .query_row(
@@ -28,7 +27,11 @@ pub async fn status(State(state): State<WorkspaceState>) -> Json<ManuscriptStatu
             [],
             |row| row.get(0),
         )
-        .ok();
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
     let active_manifest_id: Option<String> = conn
         .query_row(
@@ -36,10 +39,14 @@ pub async fn status(State(state): State<WorkspaceState>) -> Json<ManuscriptStatu
             [],
             |row| row.get(0),
         )
-        .ok();
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
-    Json(ManuscriptStatusResponse {
+    Ok(Json(ManuscriptStatusResponse {
         phase,
         active_manifest_id,
-    })
+    }))
 }

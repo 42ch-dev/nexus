@@ -45,6 +45,10 @@ fn default_memory_kinds() -> Vec<String> {
 
 impl ContextAssembleRequest {
     /// Create a minimal request with required fields and default options.
+    ///
+    /// NOTE: Not yet wired into CLI commands; will be used by the context
+    /// assembly workflow once the daemon context endpoint is integrated.
+    #[allow(dead_code)]
     pub fn new(
         request_id: String,
         workspace_id: String,
