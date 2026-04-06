@@ -414,14 +414,16 @@ impl RegistryClient {
     }
 
     /// Fetch from CDN and save to the given directory (static helper for background refresh).
+    ///
+    /// The HTTP request is wrapped with a 60-second timeout to prevent resource
+    /// leaks if the CDN hangs indefinitely.
     async fn fetch_and_save(
         http: reqwest::Client,
         cache_dir: &Path,
     ) -> anyhow::Result<(String, usize)> {
-        let response = http
-            .get(REGISTRY_URL)
-            .send()
+        let response = tokio::time::timeout(Duration::from_secs(60), http.get(REGISTRY_URL).send())
             .await
+            .context("Background fetch timed out after 60s")?
             .context("Background fetch failed")?;
 
         if !response.status().is_success() {
