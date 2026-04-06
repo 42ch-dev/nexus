@@ -1,5 +1,6 @@
 //! Integration Tests — Daemon HTTP API
 
+use axum::http::StatusCode;
 use axum::Router;
 use axum_test::TestServer;
 use nexus42d::{api::handlers, workspace::WorkspaceState};
@@ -196,13 +197,10 @@ async fn context_assemble_endpoint() {
         .json(&payload)
         .await;
 
-    response.assert_status_ok();
+    response.assert_status(StatusCode::NOT_IMPLEMENTED);
     let body: serde_json::Value = response.json();
-    assert_eq!(body["status"], "ok");
-    assert_eq!(
-        body["message"],
-        "context assembly not yet implemented on daemon side"
-    );
+    assert!(!body["success"].as_bool().unwrap());
+    assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
 }
 
 /// Integration test: concurrent handler requests all succeed

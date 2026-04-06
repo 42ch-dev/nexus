@@ -330,7 +330,14 @@ impl AcpSession {
             use nix::sys::signal::{kill, Signal};
             use nix::unistd::Pid;
 
-            let pid = Pid::from_raw(self.child.id().unwrap() as i32);
+            let pid = self.child.id().ok_or_else(|| {
+                AcpError::agent_crashed(
+                    None,
+                    self.agent_path.clone(),
+                    Some("Cannot get PID: process has already exited".into()),
+                )
+            })?;
+            let pid = Pid::from_raw(pid as i32);
             if let Err(e) = kill(pid, Signal::SIGTERM) {
                 tracing::warn!(
                     agent_id = %self.agent_id,
@@ -361,7 +368,14 @@ impl AcpSession {
                     );
 
                     // SIGKILL
-                    let pid = Pid::from_raw(self.child.id().unwrap() as i32);
+                    let pid = self.child.id().ok_or_else(|| {
+                        AcpError::agent_crashed(
+                            None,
+                            self.agent_path.clone(),
+                            Some("Cannot get PID: process has already exited".into()),
+                        )
+                    })?;
+                    let pid = Pid::from_raw(pid as i32);
                     if let Err(e) = kill(pid, Signal::SIGKILL) {
                         tracing::error!(
                             agent_id = %self.agent_id,
