@@ -246,15 +246,28 @@ fn sync_requires_daemon() {
         .stderr(predicate::str::contains("not running"));
 }
 
-/// Test context placeholder command
+/// Test context assemble command validates --world-id requirement
 #[test]
-fn context_assemble_placeholder() {
+fn context_assemble_requires_world_id() {
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("context")
         .arg("assemble")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--world-id"));
+}
+
+/// Test context assemble command with --world-id attempts daemon connection
+#[test]
+fn context_assemble_with_world_id_connects_daemon() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("context")
+        .arg("assemble")
+        .arg("--world-id")
         .arg("wld_test_123")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("V1.1"));
+        .failure()
+        .stderr(predicate::str::contains("Error"));
 }

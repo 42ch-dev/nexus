@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/context-assembly-v1.schema.json",
+  "schema_version": 1,
+  "title": "ContextAssemblyV1",
+  "description": "Context Assembly request/response schemas for POST /v1/local/context/assemble. CLI sends request to request a stable read-only context snapshot from the platform.",
+  "type": "object",
+  "definitions": {
+    "ContextAssembleRequestV1": {
+      "description": "Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform.",
+      "type": "object",
+      "required": ["request_id", "workspace_id", "creator_id", "world_id"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Caller-generated traceable ID (Local API envelope)"
+        },
+        "workspace_id": {
+          "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorkspaceId"
+        },
+        "creator_id": {
+          "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+        },
+        "world_id": {
+          "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+        },
+        "include_memory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include memory items in assembled context"
+        },
+        "include_timeline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include timeline events in assembled context"
+        },
+        "include_story_summaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include story summaries in assembled context"
+        },
+        "memory_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["story_summary", "research_material", "review_note"]
+          },
+          "default": ["story_summary", "research_material", "review_note"],
+          "description": "Filter memory items by kind"
+        },
+        "max_timeline_events": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of recent timeline events (null = platform default)"
+        },
+        "max_story_summaries": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum number of story summaries (null = platform default)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContextAssembleResponseV1": {
+      "description": "Response shape for POST /v1/local/context/assemble. Platform returns a stable read-only context snapshot.",
+      "type": "object",
+      "required": ["request_id", "success", "world_id", "assembled_at"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "description": "Echo of request_id for correlation"
+        },
+        "success": {
+          "type": "boolean",
+          "description": "Whether the assembly succeeded"
+        },
+        "error_code": {
+          "type": ["string", "null"],
+          "description": "Error code if success=false (e.g., 'auth_expired', 'world_not_found', 'platform_unavailable')"
+        },
+        "error_message": {
+          "type": ["string", "null"],
+          "description": "Human-readable error message if success=false"
+        },
+        "world_id": {
+          "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+        },
+        "assembled_at": {
+          "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+        },
+        "data_freshness_hint": {
+          "type": ["string", "null"],
+          "description": "Freshness indicator (e.g., 'last_indexed_bundle_id') to detect stale data"
+        },
+        "key_blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key_block_id", "block_type", "name", "summary"],
+            "properties": {
+              "key_block_id": { "type": "string" },
+              "block_type": { "type": "string" },
+              "name": { "type": "string" },
+              "summary": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "description": "Confirmed KeyBlocks relevant to the world"
+        },
+        "timeline_events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["event_id", "event_type", "description", "occurred_at"],
+            "properties": {
+              "event_id": { "type": "string" },
+              "event_type": { "type": "string" },
+              "description": { "type": "string" },
+              "occurred_at": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "description": "Recent canon timeline events"
+        },
+        "story_summaries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["story_manifest_id", "title", "summary_text", "manifest_type"],
+            "properties": {
+              "story_manifest_id": { "type": "string" },
+              "title": { "type": "string" },
+              "summary_text": { "type": "string" },
+              "manifest_type": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "description": "Story summaries from StoryManifest.summary_text"
+        },
+        "memory_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["memory_id", "memory_kind", "content"],
+            "properties": {
+              "memory_id": { "type": "string" },
+              "memory_kind": { "type": "string" },
+              "content": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "description": "Memory slices (story_summary, research_material, review_note)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
