@@ -55,6 +55,105 @@ docs/                   # User docs (installation, sync, troubleshooting)
 
 Violations break onboarding and agent handoff for anyone without your local machine layout.
 
+## Plans & Reports Structure
+
+### Directory Organization
+
+```
+.agents/plans/
+├── <plan-id>-<plan-name>.md     # Main plan files
+├── status.json                   # SSOT: plan rows + file-level metadata (residual_findings, program notes)
+├── reports/                      # Supplementary reports
+│   ├── README.md
+│   └── <plan-id>/               # Reports for each plan
+│       ├── <plan-id>-review.md           # Architecture review
+│       ├── <plan-id>-qc<#>.md            # QC reports (parallel review)
+│       └── <plan-id>-qc-consolidated.md  # Consolidated QC decision
+├── archived/                     # Archived plans
+└── knowledge/                    # Plan-related knowledge
+```
+
+### File Naming Conventions
+
+**Main Plan Files**:
+
+- Format: `<plan-id>-<plan-name>.md`
+- Example: `2025-04-05-domain-models.md`
+
+**Report Files**:
+
+- Architecture review: `<plan-id>-review.md`
+- QC individual reports: `<plan-id>-qc1.md`, `<plan-id>-qc2.md`, `<plan-id>-qc3.md`
+- QC consolidated decision: `<plan-id>-qc-consolidated.md`
+
+### Residual Findings Tracking
+
+**Authoritative residual rows** live in `status.json` under **`metadata.residual_findings[<plan-id>]`** (same key as `plans[].id`). Optional **`plans[].metadata.residual_summary`** is a one-line human hint only; it does not replace the structured list below.
+
+```json
+{
+  "metadata": {
+    "residual_findings": {
+      "<plan-id>": [
+        {
+          "id": "R1",
+          "title": "Finding title",
+          "severity": "critical|high|medium|low|warning",
+          "source": "QC-#1, QC-#3",
+          "scope": "Affected file or component",
+          "decision": "defer|accept|risk-accepted",
+          "owner": "@fullstack-dev",
+          "target": "When to address (e.g., 'Before next plan')",
+          "tracking": "Issue URL or null"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Root `metadata.notes`** (optional): program-level timeline, usually an array of `{ "updated_at", "message" }`. **Per-plan `plans[].notes`**: short status string for that plan only.
+
+### Severity Levels
+
+- **Critical**: Must fix before merge (blocking)
+- **High**: Should fix before merge or immediately after
+- **Medium**: Should address in near-term (next 1-2 plans)
+- **Low**: Accept as-is or optional improvement
+- **Warning**: Non-blocking, informational
+
+### Plan Lifecycle
+
+1. **Todo**: Plan created, not started
+2. **InProgress**: Implementation underway
+3. **InReview**: QC review in progress (reports in `reports/<plan-id>/`)
+4. **Done**: Completed, merged to main
+
+### Plan items in `status.json`
+
+Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally **`metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; **`plans[].id`** is the only key into `metadata.residual_findings`.
+
+**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`. Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
+
+### Accessing Plan Information
+
+```bash
+# View plan status (plans is an array; filter by id)
+jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/status.json
+
+# View plan-local metadata
+jq '.plans[] | select(.id == "2025-04-05-domain-models") | .metadata' .agents/plans/status.json
+
+# View residual findings (when present)
+jq '.metadata.residual_findings["2025-04-05-domain-models"]' .agents/plans/status.json
+
+# Program-level timeline (if present)
+jq '.metadata.notes' .agents/plans/status.json
+
+# View detailed QC report
+cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-consolidated.md
+```
+
 ## Development Workflow
 
 **Schema/codegen flow:**
