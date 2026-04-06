@@ -128,85 +128,16 @@ Violations break onboarding and agent handoff for anyone without your local mach
 
 ### Residual Findings Tracking
 
-**Authoritative residual rows** live in `status.json` under **`metadata.residual_findings[<plan-id>]`** (same key as `plans[].id`). Optional **`plans[].metadata.residual_summary`** is a one-line human hint only; it does not replace the structured list below.
+Full conventions for residual findings (i.e. tech debt) are defined in the global `plan-convention.md`: entry structure, lifecycle states (open/resolved/waived/superseded/duplicate), archival to `archived/residuals/<plan-id>.json`, `tech_debt_summary` rollup view, etc.
 
-```json
-{
-  "metadata": {
-    "residual_findings": {
-      "<plan-id>": [
-        {
-          "id": "R1",
-          "title": "Finding title",
-          "severity": "critical|high|medium|low|warning",
-          "source": "QC-#1, QC-#3",
-          "scope": "Affected file or component",
-          "decision": "defer|accept|risk-accepted|resolve",
-          "owner": "@fullstack-dev",
-          "target": "When to address (e.g., 'Before next plan')",
-          "tracking": "Issue URL or null"
-        }
-      ]
-    }
-  }
-}
-```
+Project-level notes:
 
-#### Decision Values
-
-- **`resolve`**: Issue was addressed in the plan implementation. After the plan merges to `main`, archive the entry (see lifecycle below) and remove from `residual_findings`.
-- **`accept`**: Known limitation, intentionally accepted for current milestone. Remains open in `residual_findings` with a `target` milestone.
-- **`defer`**: Deliberately postponed. Remains open in `residual_findings` with a `target` milestone or precondition.
-- **`risk-accepted`**: Accepted risk with documented rationale. Remains open.
-
-#### Residual Lifecycle
-
-1. **Open**: Entry lives in `metadata.residual_findings[<plan-id>]`.
-2. **Resolved**: When `decision: "resolve"` and the plan is merged to `main`:
-   - Append the entry (with `closed_reason`, `closed_at`, `archived_at` fields) to `.agents/plans/archived/residuals/<plan-id>.json`.
-   - **Delete** the entry from `metadata.residual_findings[<plan-id>]` in `status.json`.
-   - `status.json` must only contain **open** residuals.
-3. **Archived format**: Each archive file is `{ "schema_version": 1, "plan_id": "...", "archived_at": "...", "entries": [...] }`.
-
-#### Tech Debt Summary (optional)
-
-`metadata.tech_debt_summary` provides a quick-reference view of all open residuals across plans:
-
-```json
-{
-  "metadata": {
-    "tech_debt_summary": {
-      "updated_at": "2026-04-06",
-      "total_open": 29,
-      "by_severity": { "high": 10, "medium": 10, "low": 5, "warning": 1 },
-      "by_target": { "V1.0 GA": 5, "V1.1": 18, "V1.1+": 4 },
-      "by_plan": { "domain-models": 4, "cli-daemon-foundation": 11, "sync-contract": 10 },
-      "cross_cutting": [
-        {
-          "id": "DEBT-X1",
-          "title": "Short description of cross-plan theme",
-          "severity": "high",
-          "scope": "crates affected",
-          "target": "When to address",
-          "relates_to": ["CLI-R9", "SYNC-R4"]
-        }
-      ]
-    }
-  }
-}
-```
-
-`cross_cutting` entries are **views only** — they group related residuals by theme via `relates_to` and do not replace the authoritative entries in `residual_findings`.
+- **Entry location**: `status.json` → `metadata.residual_findings[<plan-id>]` (open items only).
+- **Close & archive**: set `lifecycle` to `resolved`/`waived`/`superseded`/`duplicate` → add `closed_at` + `closure_note` → move to `archived/residuals/<plan-id>.json` → remove from `residual_findings`.
+- **Severity**: `critical`/`high` must be addressed before merge; `medium`/`low`/`warning` can be tracked as residuals.
+- **`residual_summary`** (optional, in `plans[].metadata`): one-line human-readable summary of open items only.
 
 **Root `metadata.notes`** (optional): program-level timeline, usually an array of `{ "updated_at", "message" }`. **Per-plan `plans[].notes`**: short status string for that plan only.
-
-### Severity Levels
-
-- **Critical**: Must fix before merge (blocking)
-- **High**: Should fix before merge or immediately after
-- **Medium**: Should address in near-term (next 1-2 plans)
-- **Low**: Accept as-is or optional improvement
-- **Warning**: Non-blocking, informational
 
 ### Plan Lifecycle
 
@@ -229,9 +160,6 @@ jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/status.j
 
 # View plan-local metadata
 jq '.plans[] | select(.id == "2025-04-05-domain-models") | .metadata' .agents/plans/status.json
-
-# View residual findings (when present)
-jq '.metadata.residual_findings["2025-04-05-domain-models"]' .agents/plans/status.json
 
 # Program-level timeline (if present)
 jq '.metadata.notes' .agents/plans/status.json
