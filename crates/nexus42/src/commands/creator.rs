@@ -277,15 +277,7 @@ fn cache_creator_locally(creator: &Creator) -> Result<()> {
     }
 
     let conn = rusqlite::Connection::open(&db_path)?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS creators (
-            creator_id TEXT PRIMARY KEY,
-            display_name TEXT NOT NULL,
-            status TEXT NOT NULL,
-            cached_at TEXT NOT NULL,
-            data TEXT NOT NULL
-        );",
-    )?;
+    crate::db::Schema::init(&conn)?;
 
     conn.execute(
         "INSERT OR REPLACE INTO creators (creator_id, display_name, status, cached_at, data)

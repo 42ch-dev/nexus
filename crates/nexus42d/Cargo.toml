@@ -25,6 +25,7 @@ axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 rusqlite = { workspace = true }
+deadpool-sqlite = { workspace = true }
 dirs = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
