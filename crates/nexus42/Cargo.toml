@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 description = "Nexus CLI — creative world-building command-line interface"
 
+[lib]
+name = "nexus42"
+path = "src/lib.rs"
+
 [[bin]]
 name = "nexus42"
 path = "src/main.rs"
@@ -28,8 +32,17 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
+# ACP SDK — pinned to exact version per tech spec §1.2
+agent-client-protocol = "=0.10.4"
+tokio-util = { version = "0.7", features = ["compat"] }
+async-trait = "0.1"
+async-broadcast = "0.7" # re-exported by agent-client-protocol; used for empty StreamReceiver in subscribe()
+# Unix signal handling for graceful shutdown (only on Unix platforms)
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["signal", "process"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3"
+wiremock = "0.5"
