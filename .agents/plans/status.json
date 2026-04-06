@@ -499,21 +499,21 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-07",
-      "total_open": 49,
+      "total_open": 42,
       "by_severity": {
-        "high": 11,
+        "high": 4,
         "medium": 17,
         "low": 20,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 33,
+        "V1.1": 27,
         "V1.1+": 4
       },
       "by_plan": {
         "domain-models": 1,
-        "cli-daemon-foundation": 11,
+        "cli-daemon-foundation": 5,
         "sync-contract": 10,
         "acp-client": 9,
         "context-assembly": 6
@@ -521,10 +521,10 @@
       "cross_cutting": [
         {
           "id": "DEBT-X1",
-          "title": "SQLite connection pooling \u2014 nexus-sync uses direct connections, nexus42d opens per-request",
+          "title": "SQLite connection pooling \u2014 nexus-sync still uses direct connections (daemon now uses deadpool-sqlite via Plan A)",
           "severity": "high",
-          "scope": "crates/nexus42d, crates/nexus-sync",
-          "target": "V1.1 \u2014 unified connection pool strategy (r2d2/deadpool-sqlite)",
+          "scope": "crates/nexus-sync (daemon resolved by Plan A Task 2)",
+          "target": "V1.1 \u2014 add pooling to nexus-sync or centralize through daemon API",
           "relates_to": [
             "CLI-R9",
             "CLI-R14",
@@ -533,9 +533,9 @@
         },
         {
           "id": "DEBT-X2",
-          "title": "SQLite schema duplication \u2014 3+ places define creators/reference_sources tables",
+          "title": "SQLite schema duplication \u2014 nexus-sync has intentionally different outbox_entries schema (CLI/daemon resolved by Plan A Task 3)",
           "severity": "high",
-          "scope": "crates/nexus42, crates/nexus42d, crates/nexus-sync",
+          "scope": "crates/nexus-sync (CLI/daemon resolved)",
           "target": "V1.1 \u2014 extract shared schema module or centralize through daemon API",
           "relates_to": [
             "CLI-R10"
@@ -543,9 +543,9 @@
         },
         {
           "id": "DEBT-X3",
-          "title": "Error propagation inconsistency \u2014 nexus42d uses anyhow, nexus-sync uses thiserror",
+          "title": "Error propagation inconsistency \u2014 nexus-sync uses thiserror, nexus42d now uses NexusApiError (Plan A Task 1)",
           "severity": "medium",
-          "scope": "crates/nexus42d, crates/nexus-sync",
+          "scope": "crates/nexus-sync (daemon resolved by Plan A Task 1)",
           "target": "V1.1 \u2014 standardize error strategy across crates",
           "relates_to": [
             "CLI-R11",
@@ -554,13 +554,16 @@
         },
         {
           "id": "DEBT-X4",
-          "title": "Daemon workspace validation missing \u2014 command handlers skip state checks",
+          "title": "Daemon workspace validation \u2014 RESOLVED by Plan A Task 4 (require_workspace middleware)",
           "severity": "high",
           "scope": "crates/nexus42d",
           "target": "V1.1 \u2014 add workspace validation middleware in daemon",
           "relates_to": [
             "CLI-R12"
-          ]
+          ],
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-06T16:29:44Z",
+          "closure_note": "require_workspace middleware applied to 4 guarded route groups"
         }
       ]
     },
@@ -600,6 +603,10 @@
       {
         "updated_at": "2026-04-06",
         "message": "Phase 1 complete (8/8 plans Done). Phase 1 architecture + product reviews completed. 36 arch findings, 37 feature analysis. P0 bug fixes in progress on fix/v1.0-p0-bugs. Pre-Phase 2 consolidated plan created (2026-04-06-pre-phase2.md) with 5 implementation plans (A-E). 5 Phase 2 plan entries added to status.json."
+      },
+      {
+        "updated_at": "2026-04-07",
+        "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 \u2192 42."
       }
     ],
     "residual_findings": {
@@ -673,72 +680,6 @@
           "tracking": null
         },
         {
-          "id": "CLI-R9",
-          "title": "SQLite connection per request (performance impact)",
-          "severity": "high",
-          "source": "QC Consolidated (CONS-H3)",
-          "scope": "crates/nexus42d/src/workspace/mod.rs:62-72 \u2014 WorkspaceState::db() opens new SQLite connection per request instead of using connection pool",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add r2d2 or deadpool-sqlite connection pooling for production load handling",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R10",
-          "title": "SQLite schema duplication across CLI and daemon",
-          "severity": "high",
-          "source": "QC Consolidated (CONS-H4)",
-          "scope": "crates/nexus42/src/commands/creator.rs:273, research.rs:132, crates/nexus42d/src/workspace/mod.rs:122 \u2014 creators and reference_sources tables defined in 3 places",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 extract schema definitions to shared module or centralize SQLite operations through daemon API",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R11",
-          "title": "Inconsistent error propagation across command handlers",
-          "severity": "high",
-          "source": "QC Consolidated (CONS-H5)",
-          "scope": "Multiple command handlers use `.unwrap_or_default()` on HTTP responses, silently swallowing errors",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 standardize error propagation with logging before fallback, extract helper methods in errors.rs",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R12",
-          "title": "Missing workspace validation before operations",
-          "severity": "high",
-          "source": "QC Consolidated (CONS-H6)",
-          "scope": "Command handlers (init, creator, manuscript) don't validate workspace state before performing operations",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add workspace state validation checks to prevent operations on uninitialized or corrupted workspaces",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R13",
-          "title": "Unsafe unwrap in error paths",
-          "severity": "high",
-          "source": "QC Consolidated (CONS-H7)",
-          "scope": "Multiple instances of `.unwrap()` in production code paths that could panic on unexpected errors",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 replace unwrap with proper error handling using Result types and error_chain/thiserror",
-          "tracking": null
-        },
-        {
-          "id": "CLI-R14",
-          "title": "Concurrent workspace access race condition",
-          "severity": "high",
-          "source": "QC Consolidated (CONS-H8)",
-          "scope": "Mutex<Option<Connection>> pattern in workspace state may cause race conditions under concurrent access",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 use async-aware RwLock or switch to connection pool pattern to handle concurrent access safely",
-          "tracking": null
-        },
-        {
           "id": "CLI-R15",
           "title": "No tracing in daemon API handlers",
           "severity": "medium",
@@ -747,7 +688,8 @@
           "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "V1.1 \u2014 add tracing::info/debug statements to handlers for request lifecycle observability",
-          "tracking": null
+          "tracking": null,
+          "notes": "Partially resolved by Plan A Task 4 (middleware has tracing::debug). Individual handlers still lack tracing."
         }
       ],
       "2025-04-05-sync-contract": [
