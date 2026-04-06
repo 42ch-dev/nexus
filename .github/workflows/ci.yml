@@ -33,6 +33,18 @@ jobs:
         run: cd tooling/codegen && npm install
       - name: Run codegen
         run: pnpm run codegen
+      - name: Check generated code is up-to-date
+        run: |
+          # After running codegen, check if generated files match committed versions
+          if ! git diff --exit-code packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/generated/; then
+            echo "❌ Generated code is outdated or not committed!"
+            echo "Please run 'pnpm run codegen' locally and commit the changes."
+            echo ""
+            echo "Changed files:"
+            git diff --name-only packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/generated/
+            exit 1
+          fi
+          echo "✅ Generated code is up-to-date"
       - name: Verify TypeScript generated
         run: test -d packages/nexus-contracts/src/generated && test -f packages/nexus-contracts/src/generated/index.ts
       - name: Verify Rust generated
