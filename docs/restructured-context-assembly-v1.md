@@ -14,11 +14,11 @@ The original Context Assembly implementation plan (`.agents/plans/2025-04-05-con
 
 | # | Conflict | Severity | Resolution |
 |---|----------|----------|------------|
-| 1 | **Tech Stack Conflict**: Plan proposed Rust crate `crates/nexus-context/` with Neo4j/Postgres/pgvector clients. Spec `context-assembly-v1.md` §3.1 explicitly freezes "全 TypeScript 实现" (all TypeScript implementation). | P1 Critical | Remove Rust crate entirely. CLI calls platform API; Context Assembly is a platform-side TypeScript service. |
-| 2 | **Storage Ownership Conflict**: Plan proposed CLI-side direct access to Neo4j/Postgres/pgvector. Spec `cli-spec-v1.md` §5.2 defines these as platform-authoritative stores. | P1 Critical | Prohibit CLI-side direct database access. Local API endpoint is the only integration point. |
-| 3 | **Responsibility Split Violation**: Plan put assembly logic in CLI/Rust. Spec `context-assembly-v1.md` §5 specifies: CLI generates summaries → platform receives/validates/indexes → agent consumes assembled context. | P1 Critical | Align with spec's responsibility split (see §2 below). |
-| 4 | **Over-Scoped Embedding/Reranking**: Plan included OpenAI/local model embeddings and reranking. Spec §3.4 excludes LLM-as-judge and ColBERT/cross-encoder rerank for V1.0. | P2 | Remove embedding/reranking from CLI-side scope. Defer to platform-side future enhancements. |
-| 5 | **Docker Compose Misalignment**: Plan's docker-compose included Neo4j + Postgres + pgvector + Redis for CLI dev. CLI only uses SQLite locally (`cli-spec-v1.md` §14). | P3 | Remove docker-compose from CLI-side plan. Move to separate platform-dev infrastructure file (not in this repo). |
+| 1 | **Tech Stack Conflict**: Plan proposed Rust crate `crates/nexus-context/` with Neo4j/Postgres/pgvector clients. Context Assembly is frozen as TypeScript-only implementation. | P1 Critical | Remove Rust crate entirely. CLI calls platform API; Context Assembly is a platform-side TypeScript service. |
+| 2 | **Storage Ownership Conflict**: Plan proposed CLI-side direct access to Neo4j/Postgres/pgvector. World/Creator metadata, Key Block structured state, Timeline/Fork graph, Explore indexes, and subscription/permission info are all platform-authoritative stores. | P1 Critical | Prohibit CLI-side direct database access. Local API endpoint is the only integration point. |
+| 3 | **Responsibility Split Violation**: Plan put assembly logic in CLI/Rust. CLI generates summaries → platform receives/validates/indexes → agent consumes assembled context. | P1 Critical | Align with responsibility split (see §2 below). |
+| 4 | **Over-Scoped Embedding/Reranking**: Plan included OpenAI/local model embeddings and reranking. LLM-as-judge and ColBERT/cross-encoder reranking are explicitly excluded from V1.0. | P2 | Remove embedding/reranking from CLI-side scope. Defer to platform-side future enhancements. |
+| 5 | **Docker Compose Misalignment**: Plan's docker-compose included Neo4j + Postgres + pgvector + Redis for CLI dev. CLI uses SQLite for local structured state. | P3 | Remove docker-compose from CLI-side plan. Move to separate platform-dev infrastructure file (not in this repo). |
 
 ### 1.2 Revision Goals
 
@@ -28,16 +28,16 @@ The original Context Assembly implementation plan (`.agents/plans/2025-04-05-con
 4. **Provide clear integration contracts**: `POST /v1/local/context/assemble` request/response shapes.
 5. **Define actionable CLI-side tasks** with file paths and verification commands.
 
-### 1.3 Spec Anchor Quotes
+### 1.3 Design Decisions (Inlined)
 
-All restructured decisions trace back to these frozen spec anchors:
+All restructured decisions are based on these frozen design constraints:
 
-- `context-assembly-v1.md` §3.1: "全 TypeScript 实现" (all TypeScript implementation)
-- `context-assembly-v1.md` §5: "CLI / 执行侧: 生成 Story 概要; 平台: 接收、校验、一致性检查、存储、向量化、检索"
-- `cli-spec-v1.md` §5.2: Platform-authoritative stores include "World / Creator 元数据, Key Block 结构化状态, Timeline / Fork 图, Explore 所需索引, 订阅和权限信息"
-- `cli-spec-v1.md` §6.6A: "`nexus42 context assemble` — 读取 confirmed KB、recent canon timeline、memory slices; 输出供本地 agent / 模板系统消费的只读快照"
-- `local-runtime-boundary-v1.md` §3.2.1: `POST /v1/local/context/assemble` is a frozen Local API endpoint
-- `service-boundaries-v1.md` §5A: "CLI / 执行侧：生成 Story 概要并随结构化提交上送; 平台：接收概要、校验、一致性检查、入库、向量化、提供 Context Assembly 检索"
+- **TypeScript-only implementation**: Context Assembly service must be implemented entirely in TypeScript
+- **CLI generates summaries; platform does everything else**: CLI generates `StoryManifest.summary_text`; platform receives, validates, indexes into graph/vector stores, and serves assembled context
+- **Platform-authoritative stores**: World/Creator metadata, Key Block structured state, Timeline/Fork graph, Explore indexes, and subscription/permission info are all managed by the platform — CLI never accesses them directly
+- **Local API is the only integration point**: `POST /v1/local/context/assemble` is the frozen Local API contract between CLI and Context Assembly
+- **`nexus42 context assemble`**: reads confirmed KBs, recent canon timeline, and memory slices; outputs a read-only snapshot for local agent/template consumption
+- **Responsibility split**: CLI generates story summaries and includes them in structured sync submissions; platform receives summaries, validates, checks consistency, persists to database, vectorizes, and provides Context Assembly retrieval
 
 ---
 
@@ -91,17 +91,17 @@ All restructured decisions trace back to these frozen spec anchors:
 
 ### 2.2 Responsibility Matrix
 
-| Responsibility | Owner | Repo | Tech | Spec Anchor |
+| Responsibility | Owner | Repo | Tech | Design Constraint |
 |---|---|---|---|---|
-| **Summary generation** from local manuscript files | CLI | `nexus` (this repo) | Rust | `context-assembly-v1.md` §5 |
-| **Local API call** to request assembled context | CLI / daemon | `nexus` (this repo) | Rust (HTTP client) | `local-runtime-boundary-v1.md` §3.2.1 |
+| **Summary generation** from local manuscript files | CLI | `nexus` (this repo) | Rust | CLI generates summaries; platform does everything else |
+| **Local API call** to request assembled context | CLI / daemon | `nexus` (this repo) | Rust (HTTP client) | Local API contract (frozen) |
 | **Bundle metadata** (attach summary to sync bundle) | CLI | `nexus` (this repo) | Rust | `bundle.schema.json`, `story-manifest.schema.json` |
-| **Context Assembly service** (HybridRAG + query façade) | Platform | `nexus-platform` (private) | TypeScript / Next.js | `context-assembly-v1.md` §3.1, §3.2 |
-| **Neo4j graph storage** (KB, Timeline, Fork) | Platform | `nexus-platform` (private) | TypeScript + Neo4j driver | `service-boundaries-v1.md` §3.2 |
-| **Postgres/pgvector** (Story summary, Memory embeddings) | Platform | `nexus-platform` (private) | TypeScript + pgvector | `service-boundaries-v1.md` §3.1, §3.3 |
-| **Vector retrieval + similarity search** | Platform | `nexus-platform` (private) | TypeScript | `context-assembly-v1.md` §3.4 |
+| **Context Assembly service** (HybridRAG + query façade) | Platform | `nexus-platform` (private) | TypeScript / Next.js | TypeScript-only implementation; frozen design |
+| **Neo4j graph storage** (KB, Timeline, Fork) | Platform | `nexus-platform` (private) | TypeScript + Neo4j driver | Platform-authoritative graph store |
+| **Postgres/pgvector** (Story summary, Memory embeddings) | Platform | `nexus-platform` (private) | TypeScript + pgvector | Platform-authoritative relational store |
+| **Vector retrieval + similarity search** | Platform | `nexus-platform` (private) | TypeScript | V1.0 baseline; LLM-as-judge and cross-encoder reranking deferred to V1.1+ |
 | **Embedding generation** (future: OpenAI or local model) | Platform | `nexus-platform` (private) | TypeScript | Deferred to V1.1+ |
-| **Reranking** (future: LLM-as-judge, cross-encoder) | Platform | `nexus-platform` (private) | TypeScript | `context-assembly-v1.md` §3.4 (explicitly excluded from V1.0) |
+| **Reranking** (future: LLM-as-judge, cross-encoder) | Platform | `nexus-platform` (private) | TypeScript | Explicitly excluded from V1.0 |
 
 ### 2.3 Strict Boundaries
 
@@ -116,7 +116,7 @@ All restructured decisions trace back to these frozen spec anchors:
 - Generate `StoryManifest.summary_text` from local manuscript files
 - Call `POST /v1/local/context/assemble` (proxied to platform) to request assembled context
 - Include summary in sync bundle metadata alongside KB/Timeline deltas
-- Use only SQLite for local structured state (`cli-spec-v1.md` §14)
+- Use only SQLite for local structured state
 
 ---
 
@@ -134,7 +134,7 @@ All restructured decisions trace back to these frozen spec anchors:
    - Future V1.1+: LLM-assisted summary generation (using user's local agent via ACP, not a hardcoded model SDK).
 4. **Attach to StoryManifest**: Set `StoryManifest.summary_text` on the local working copy.
 
-**File scope** (aligned with `cli-spec-v1.md` §13):
+**File scope**:
 - Source: `Stories/<world_ref>/chapter-*.md` (and subdirectories)
 - Output: `StoryManifest.summary_text` (stored in local SQLite + included in sync bundle)
 
@@ -144,13 +144,13 @@ All restructured decisions trace back to these frozen spec anchors:
 - Summary is a plain text field, max TBD bytes (recommend 4096 chars for V1.0).
 - Full manuscript text is never included in sync — only the summary.
 
-**Future path (V1.1+)**: Agent-assisted summary via ACP capability `nexus.manuscript.summarize` — CLI sends manuscript content to local agent, receives generated summary. This keeps CLI model-agnostic per `cli-spec-v1.md` §1 #2.
+**Future path (V1.1+)**: Agent-assisted summary via ACP capability `nexus.manuscript.summarize` — CLI sends manuscript content to local agent, receives generated summary. This keeps CLI model-agnostic.
 
 ### 3.2 Local API Endpoint
 
 **Endpoint**: `POST /v1/local/context/assemble`
 
-**Source**: `local-runtime-boundary-v1.md` §3.2.1 (frozen v1 Local API contract)
+**Source**: Local API contract (frozen)
 
 **Behavior**:
 - CLI/daemon sends request to the Local API.
@@ -166,7 +166,7 @@ The following shapes define the wire contract between CLI and the platform's Con
 
 #### 3.3.1 Request: `ContextAssembleRequestV1`
 
-Aligned with `context-assembly-v1.md` §4.1 minimal request shape, wrapped in the Local API envelope from `local-runtime-boundary-v1.md` §3.2.1.
+Aligned with the minimal request shape for `POST /v1/local/context/assemble`, wrapped in the Local API envelope.
 
 ```json
 {
@@ -235,7 +235,7 @@ Aligned with `context-assembly-v1.md` §4.1 minimal request shape, wrapped in th
 
 #### 3.3.2 Response: `ContextAssembleResponseV1`
 
-Aligned with `context-assembly-v1.md` §4.2 minimal output shape, wrapped in the Local API response envelope.
+Aligned with the minimal output shape for `POST /v1/local/context/assemble`, wrapped in the Local API response envelope.
 
 ```json
 {
@@ -268,7 +268,7 @@ Aligned with `context-assembly-v1.md` §4.2 minimal output shape, wrapped in the
     },
     "data_freshness_hint": {
       "type": ["string", "null"],
-      "description": "Freshness indicator (e.g., 'last_indexed_bundle_id') to detect stale data per service-boundaries-v1.md §8 P1"
+      "description": "Freshness indicator (e.g., 'last_indexed_bundle_id') to detect stale data"
     },
     "key_blocks": {
       "type": "array",
@@ -326,7 +326,7 @@ Aligned with `context-assembly-v1.md` §4.2 minimal output shape, wrapped in the
 }
 ```
 
-**Output requirements** (from `context-assembly-v1.md` §4.2):
+**Output requirements**:
 - Same request under same authoritative state MUST return **stable order**.
 - Returns a **snapshot**, not a mutable working set.
 
@@ -343,21 +343,21 @@ Summary generation integrates with the sync contract as follows:
 4. DeltaBundle carries optional metadata: manuscript_phase, output_manuscript
 5. CLI pushes bundle via sync API
 6. Platform Phase A: validates and persists to Postgres (authoritative)
-7. Platform Phase B: indexes summary into pgvector (async, per service-boundaries-v1.md §4.5)
+7. Platform Phase B: indexes summary into pgvector (async)
 ```
 
 **Key bundle metadata fields** (from `bundle.schema.json`):
 
 | Field | Purpose | Spec Anchor |
 |---|---|---|
-| `manuscript_phase` | Current manuscript lifecycle phase (`brainstorm`/`draft`/`review`/`finalize`/`published`). Used for downstream gate validation. | `roadmap.md` §3.1.3, `bundle.schema.json`, `common.schema.json` `ManuscriptPhase` |
-| `output_manuscript` | Whether this execution requires manuscript output. Defaults `true` for local, `false` for platform-hosted creators. | `story-manifest.schema.json`, `cli-spec-v1.md` §6.6 |
+| `manuscript_phase` | Current manuscript lifecycle phase (`brainstorm`/`draft`/`review`/`finalize`/`published`). Used for downstream gate validation. | `bundle.schema.json`, `common.schema.json` `ManuscriptPhase` |
+| `output_manuscript` | Whether this execution requires manuscript output. Defaults `true` for local, `false` for platform-hosted creators. | `story-manifest.schema.json` |
 | `deltas[].payload.summary_text` | The generated summary text, embedded in the story_manifest delta payload. | `story-manifest.schema.json` `summary_text` |
 
 **Dependency on sync-contract**:
 - Context Assembly (restructured) depends on `sync-contract` for bundle envelope fields: `manuscript_phase`, `output_manuscript`, `submitting_creator_id`, `last_confirmed_delta_sequence`.
 - The story_manifest delta type in `bundle.schema.json` carries the summary payload.
-- Platform's Phase A/B pipeline (`service-boundaries-v1.md` §4.5) handles persistence and async indexing.
+- Platform's Phase A/B pipeline handles persistence and async indexing (Phase A: persist to Postgres; Phase B: index into Neo4j/pgvector asynchronously).
 
 ---
 
@@ -370,8 +370,8 @@ Summary generation integrates with the sync contract as follows:
 The full Context Assembly service — including Neo4j graph queries, pgvector similarity search, HybridRAG orchestration, query façade, and embedding generation — **belongs in the private `nexus-platform` repository**.
 
 This is not a future decision; it is already frozen by:
-- `context-assembly-v1.md` §3.1: "全 TypeScript 实现"
-- `service-boundaries-v1.md` §5A: Platform is responsible for receiving, validating, indexing, and providing Context Assembly retrieval
+- Context Assembly is implemented entirely in TypeScript
+- Platform is responsible for receiving, validating, indexing, and providing Context Assembly retrieval
 
 ### 4.2 Integration Point
 
@@ -388,13 +388,13 @@ The following are explicitly **NOT** implemented in this (`nexus`) repository:
 
 | Component | Reason |
 |---|---|
-| Neo4j client/driver | Platform-authoritative graph store (`cli-spec-v1.md` §5.2) |
+| Neo4j client/driver | Platform-authoritative graph store |
 | Postgres client (for platform stores) | Platform-authoritative relational store |
 | pgvector client | Platform-authoritative vector store |
-| HybridRAG query logic | Platform TypeScript service (`context-assembly-v1.md` §3.1) |
-| Query façade (GraphQL / aggregation layer) | Platform read model (`service-boundaries-v1.md` §3.5) |
+| HybridRAG query logic | Platform TypeScript service |
+| Query façade (GraphQL / aggregation layer) | Platform read model |
 | Embedding generation (OpenAI / local model) | Deferred to V1.1+ platform-side |
-| Reranking (LLM-as-judge, cross-encoder) | Explicitly excluded from V1.0 (`context-assembly-v1.md` §3.4) |
+| Reranking (LLM-as-judge, cross-encoder) | Explicitly excluded from V1.0 |
 | Docker Compose (Neo4j/Postgres/pgvector/Redis) | Platform infrastructure, not CLI dev dependency |
 
 ---
@@ -490,7 +490,7 @@ cargo test -p nexus42 sync::bundle_builder
 - `crates/nexus42/src/cli/context_test.rs` — Tests
 
 **Implementation**:
-- [ ] Implement `nexus42 context assemble` subcommand (aligned with `cli-spec-v1.md` §6.6A)
+- [ ] Implement `nexus42 context assemble` subcommand (aligned with §1.3 design decisions)
 - [ ] Command reads `workspace_id`, `world_id`, `creator_id` from current workspace config
 - [ ] Sends `ContextAssembleRequest` via Local API client (Task 2)
 - [ ] Outputs assembled context as formatted JSON to stdout (or `--output <file>`)
@@ -570,7 +570,7 @@ The following items from the original plan (`.agents/plans/2025-04-05-context-as
 
 ## 8. Implementation Effort (Agent-Oriented)
 
-- **Complexity**: **M** — see `~/.config/opencode/docs/agents/effort-estimation.md`
+- **Complexity**: **M** (medium)
 - **Agent session band**: ~1–2 focused agent sessions for the restructured spec output. Actual implementation (Tasks 1–5) is **S** per task individually but **M** collectively.
 - **Prerequisites**: `sync-contract` plan must deliver bundle envelope + story_manifest delta support before Task 3.
 
@@ -582,7 +582,7 @@ The following items from the original plan (`.agents/plans/2025-04-05-context-as
 |---|---|---|
 | CLI-side scope vs Platform-side scope clearly separated | ✅ | §2 Responsibility Matrix + Architecture Diagram |
 | CLI-side scope has NO Neo4j/Postgres/pgvector direct access | ✅ | §2.3 Strict Boundaries + §7 Removed Items |
-| `POST /v1/local/context/assemble` request/response shapes defined | ✅ | §3.3.1 + §3.3.2 (aligned with `context-assembly-v1.md` §4.1/§4.2) |
+| `POST /v1/local/context/assemble` request/response shapes defined | ✅ | §3.3.1 + §3.3.2 |
 | Summary generation logic integrates with sync-contract bundle metadata | ✅ | §3.4 Bundle Metadata Integration + §6 Dependency on Sync Contract |
 | Task breakdown is actionable (file paths, test commands, expected results) | ✅ | §5 Tasks 1–5 with verification commands |
 | Aligns with tech stack freeze (TypeScript platform-side, no Rust Context Assembly crate) | ✅ | §7 Removed Items + §1.1 Conflict Resolution table |
