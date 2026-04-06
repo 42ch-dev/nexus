@@ -218,28 +218,26 @@
       "id": "2025-04-05-context-assembly",
       "title": "Context Assembly Basic",
       "file": ".agents/plans/2025-04-05-context-assembly.md",
-      "status": "Blocked",
+      "status": "Todo",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
+      "agents": ["@architect", "@fullstack-dev"],
       "progress": 0,
-      "tags": ["phase-1", "context-assembly", "rag"],
+      "tags": ["phase-1", "context-assembly"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "ACP Client dependency resolved (Done). Plan file must be rewritten from restructured spec. Ready for implementation planning.",
+      "notes": "Plan rewritten from restructured spec (1469 lines, 5 tasks). CTX-R1 resolved. All dependencies Done. Ready for implementation on feature/v1.0-context-assembly.",
       "metadata": {
         "phase": "Phase 1",
-        "branch_policy": "feature branch from main",
+        "branch_policy": "feature/v1.0-context-assembly from main",
         "priority": "high",
         "description": "Implement Context Assembly basic version — CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
-        "blocked_since": "2026-04-06",
-        "blocked_reason": "All dependencies resolved (cli-daemon-foundation Done, sync-contract Done, acp-client Done). Plan file must be rewritten from .agents/plans/knowledge/restructured-context-assembly-v1.md.",
-        "review_outcome": "critical-gaps",
-        "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
-        "review_verdict": "Blocked",
-        "next_action": "Rewrite plan file from .agents/plans/knowledge/restructured-context-assembly-v1.md after Phase 1a+1b+2 complete",
+        "working_branch": "feature/v1.0-context-assembly",
         "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
-        "dependency": "Blocked by cli-daemon-foundation, sync-contract, acp-client"
+        "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
+        "next_action": "Create feature branch and implement Tasks 1-5",
+        "tasks": ["Task 1: JSON Schema registration", "Task 2: Rust types for request/response", "Task 3: Summary generation module", "Task 4: Context Assembly Local API client", "Task 5: CLI command nexus42 context assemble"],
+        "effort": "M — ~1-2 focused agent sessions"
       }
     }
   ],
@@ -249,9 +247,9 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
-      "total_open": 35,
+      "total_open": 34,
       "by_severity": {
-        "high": 10,
+        "high": 9,
         "medium": 11,
         "low": 13,
         "warning": 1
@@ -259,15 +257,13 @@
       "by_target": {
         "V1.0 GA": 3,
         "V1.1": 27,
-        "V1.1+": 4,
-        "implementation-start": 1
+        "V1.1+": 4
       },
       "by_plan": {
         "domain-models": 4,
         "cli-daemon-foundation": 11,
         "sync-contract": 10,
-        "acp-client": 9,
-        "context-assembly": 1
+        "acp-client": 9
       },
       "cross_cutting": [
         {
@@ -721,19 +717,7 @@
           "tracking": null
         }
       ],
-      "2025-04-05-context-assembly": [
-        {
-          "id": "CTX-R1",
-          "title": "Original plan file still contains incorrect scope (Neo4j/pgvector in Rust)",
-          "severity": "high",
-          "source": "Architecture Review",
-          "scope": ".agents/plans/2025-04-05-context-assembly.md — entire plan needs replacement",
-          "decision": "defer",
-          "owner": "@project-manager",
-          "target": "Rewrite plan file from .agents/plans/knowledge/restructured-context-assembly-v1.md after cli-daemon, sync-contract, acp-client complete",
-          "tracking": null
-        }
-      ]
+      "2025-04-05-context-assembly": []
     }
   }
 }
