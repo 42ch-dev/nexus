@@ -174,15 +174,15 @@
       "id": "2025-04-05-acp-client",
       "title": "ACP Client Integration",
       "file": ".agents/plans/2025-04-05-acp-client.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
-      "agents": ["@architect", "@fullstack-dev"],
-      "progress": 42,
+      "agents": ["@architect", "@fullstack-dev", "@fullstack-dev-2", "@qc-specialist", "@qc-specialist-2", "@qc-specialist-3", "@qa-engineer"],
+      "progress": 95,
       "tags": ["phase-1", "acp"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Task 1 of 6 complete: ACP SDK dependency + Adapter Trait. Task 2 of 6 complete: Registry Manifest Fetcher + Cache. Task 5 (Skills) also complete. Tasks 3+4 can now proceed.",
+      "notes": "All 6 tasks implemented. QC三审 APPROVE (3 blocking fixed). QA CONDITIONAL PASS. 10 QC residuals for V1.1. Ready for merge.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-acp-client from main",
@@ -192,20 +192,26 @@
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
         "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)",
         "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
-        "qc_status": "spec refined — ACP-R1, ACP-R2 resolved",
-        "residual_summary": "ACP-R1/R2 resolved in tech spec. 9 new V1.1+ residuals (ACP-R3..R11) identified.",
+        "qc_status": "APPROVE — ACP-C1, ACP-C2, ACP-H1 fixed and verified",
+        "qc_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qc-consolidated.md",
+        "qa_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qa.md",
+        "qa_status": "CONDITIONAL PASS — CI clean, 312+ tests pass, CLI commands work",
+        "residual_summary": "ACP-R1/R2 resolved. 9 V1.1+ residuals (ACP-R3..R11). 10 QC residuals (QC-ACP-1..10).",
         "tests": {
-          "unit": "38 passed, 0 failed (acp::error 10, acp::registry 28)",
-          "integration": "16 passed, 0 failed (existing CLI tests)"
+          "unit": "63 passed, 0 failed (acp modules)",
+          "integration": "36 passed, 0 failed (acp_registry 12, cli_agent 12, existing CLI 12)",
+          "workspace": "312+ passed, 0 failed"
         },
         "task_status": {
           "task_1": "done",
           "task_2": "done",
-          "task_3": "todo",
-          "task_4": "todo",
+          "task_3": "done",
+          "task_4": "done",
           "task_5": "done",
-          "task_6": "todo"
-        }
+          "task_6": "done"
+        },
+        "files_changed": "24 files (5,700+ insertions, 76 deletions)",
+        "commits": "5 commits (3cee742..e78d364)"
       }
     },
     {
