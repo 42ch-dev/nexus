@@ -8,6 +8,8 @@ mod api;
 mod auth;
 mod commands;
 mod config;
+#[allow(dead_code)]
+mod context;
 mod errors;
 
 use clap::{Parser, Subcommand};
