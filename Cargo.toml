@@ -4,8 +4,7 @@ members = [
     "crates/nexus-domain",
     "crates/nexus42",
     "crates/nexus42d",
-    # Future members (commented out for now):
-    # "crates/nexus-sync",
+    "crates/nexus-sync",
 ]
 resolver = "2"
 
