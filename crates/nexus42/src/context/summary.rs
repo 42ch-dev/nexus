@@ -3,6 +3,13 @@
 //! V1.0 uses basic extraction: title (from front-matter or first heading),
 //! chapter list (from heading structure), word count, and opening excerpt.
 //! No LLM call required.
+//!
+//! NOTE: The types and functions in this module are not yet wired into the
+//! CLI command pipeline. They will be used by the context assembly workflow
+//! once the daemon context endpoint is integrated. Suppressing dead-code
+//! warnings to keep the implementation ready for that integration.
+
+#![allow(dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -181,7 +188,7 @@ fn extract_title(content: &str) -> Option<String> {
         }
         // Check first Markdown heading (but not inside front-matter)
         if trimmed.starts_with("# ") && !trimmed.starts_with("# #") {
-            let value = trimmed.strip_prefix("# ").unwrap().trim().to_string();
+            let value = trimmed["# ".len()..].trim().to_string();
             if !value.is_empty() {
                 return Some(value);
             }

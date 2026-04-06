@@ -8,6 +8,14 @@
 //! - Tracking delivery state (staged → ready → sent → acked/conflicted/failed)
 //! - Retry with exponential backoff
 //! - Replay of pending entries
+//!
+//! ## Note: `outbox_entries` vs daemon `outbox`
+//!
+//! The `outbox_entries` table defined here is **intentionally different** from the
+//! daemon's `outbox` table (in `nexus42d/src/db/schema.rs`). The daemon's `outbox`
+//! is a simple command queue, while `outbox_entries` is a full bundle-level sync
+//! outbox with idempotency keys, retry tracking, and delivery state management.
+//! They serve different purposes and should NOT be merged.
 
 use std::path::Path;
 

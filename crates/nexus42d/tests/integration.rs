@@ -1,5 +1,6 @@
 //! Integration Tests — Daemon HTTP API
 
+use axum::http::StatusCode;
 use axum::Router;
 use axum_test::TestServer;
 use nexus42d::{api::handlers, workspace::WorkspaceState};
@@ -13,11 +14,7 @@ fn create_test_state() -> (WorkspaceState, TempDir) {
 
     let db_path = nexus_home.join("state.db");
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         CREATE TABLE IF NOT EXISTS creators (creator_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', cached_at TEXT NOT NULL, data TEXT NOT NULL);
-         CREATE TABLE IF NOT EXISTS reference_sources (reference_source_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'local', source_type TEXT NOT NULL, uri TEXT NOT NULL, title TEXT NOT NULL, scan_status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL);"
-    ).unwrap();
+    nexus42d::db::schema::Schema::init(&conn).unwrap();
 
     // Insert test data
     conn.execute(
@@ -200,11 +197,43 @@ async fn context_assemble_endpoint() {
         .json(&payload)
         .await;
 
-    response.assert_status_ok();
+    response.assert_status(StatusCode::NOT_IMPLEMENTED);
     let body: serde_json::Value = response.json();
-    assert_eq!(body["status"], "ok");
+    assert!(!body["success"].as_bool().unwrap());
+    assert_eq!(body["error"]["code"], "NOT_IMPLEMENTED");
+}
+
+/// Integration test: concurrent handler requests all succeed
+///
+/// Verifies that the connection pool allows multiple concurrent requests
+/// to different endpoints without deadlock or pool exhaustion.
+#[tokio::test]
+async fn concurrent_handler_requests_succeed() {
+    let (state, _tmp) = create_test_state();
+    let app = build_test_app(state);
+
+    let server = TestServer::new(app).unwrap();
+
+    // Fire 5 concurrent requests to different endpoints
+    let (health, workspace, creators, manuscript, references) = tokio::join!(
+        async { server.get("/v1/local/runtime/health").await.status_code() },
+        async { server.get("/v1/local/workspace").await.status_code() },
+        async { server.get("/v1/local/creators").await.status_code() },
+        async { server.get("/v1/local/manuscript").await.status_code() },
+        async { server.get("/v1/local/references").await.status_code() },
+    );
+
+    assert_eq!(health, 200, "health endpoint returned {}", health);
+    assert_eq!(workspace, 200, "workspace endpoint returned {}", workspace);
+    assert_eq!(creators, 200, "creators endpoint returned {}", creators);
     assert_eq!(
-        body["message"],
-        "context assembly not yet implemented on daemon side"
+        manuscript, 200,
+        "manuscript endpoint returned {}",
+        manuscript
+    );
+    assert_eq!(
+        references, 200,
+        "references endpoint returned {}",
+        references
     );
 }

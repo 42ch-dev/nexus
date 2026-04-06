@@ -1,7 +1,9 @@
 //! Context assembly handlers
 
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use crate::api::errors::NexusApiError;
 
 #[derive(Deserialize)]
 #[allow(dead_code)]
@@ -12,19 +14,11 @@ pub struct ContextAssembleRequest {
     pub world_id: String,
 }
 
-#[derive(Serialize)]
-pub struct ContextAssembleResponse {
-    pub status: String,
-    pub message: String,
-}
-
 /// POST /v1/local/context/assemble
 ///
-/// Placeholder handler — context assembly is not yet implemented on the daemon side.
-/// Returns a valid JSON response so the CLI client does not receive a 404.
-pub async fn assemble(Json(_req): Json<ContextAssembleRequest>) -> Json<ContextAssembleResponse> {
-    Json(ContextAssembleResponse {
-        status: "ok".to_string(),
-        message: "context assembly not yet implemented on daemon side".to_string(),
-    })
+/// Returns 501 Not Implemented — context assembly is not yet implemented on the daemon side.
+pub async fn assemble(Json(_req): Json<ContextAssembleRequest>) -> Result<Json<()>, NexusApiError> {
+    Err(NexusApiError::NotImplemented(
+        "Context assembly not yet implemented".into(),
+    ))
 }

@@ -6,6 +6,21 @@ use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use serde::{de::DeserializeOwned, Serialize};
 
+/// Structured error response from the daemon API
+#[derive(Debug, serde::Deserialize)]
+struct DaemonErrorResponse {
+    #[allow(dead_code)]
+    success: bool,
+    #[serde(default)]
+    error: Option<DaemonErrorDetail>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DaemonErrorDetail {
+    code: String,
+    message: String,
+}
+
 /// Client for the nexus42d Local API
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
@@ -43,11 +58,7 @@ impl DaemonClient {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(CliError::Api {
-                status,
-                message: body,
-            });
+            return Err(Self::parse_error_response(status, resp).await);
         }
 
         let data: T = resp.json().await?;
@@ -62,11 +73,7 @@ impl DaemonClient {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(CliError::Api {
-                status,
-                message: body,
-            });
+            return Err(Self::parse_error_response(status, resp).await);
         }
 
         let data: T = resp.json().await?;
@@ -81,14 +88,32 @@ impl DaemonClient {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(CliError::Api {
-                status,
-                message: body,
-            });
+            return Err(Self::parse_error_response(status, resp).await);
         }
 
         let data: serde_json::Value = resp.json().await?;
         Ok(data)
+    }
+
+    /// Parse an error response from the daemon, attempting structured parsing first
+    /// and falling back to raw body text for backward compatibility.
+    async fn parse_error_response(status: u16, resp: reqwest::Response) -> CliError {
+        let body = resp.text().await.unwrap_or_default();
+
+        // Try structured error parsing first
+        if let Ok(parsed) = serde_json::from_str::<DaemonErrorResponse>(&body) {
+            if let Some(detail) = parsed.error {
+                return CliError::Api {
+                    status,
+                    message: format!("[{}] {}", detail.code, detail.message),
+                };
+            }
+        }
+
+        // Fallback to raw body (backward compatible with old daemon versions)
+        CliError::Api {
+            status,
+            message: body,
+        }
     }
 }
