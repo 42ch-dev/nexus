@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::{ManuscriptPhase};
+use crate::generated::common_types::ManuscriptPhase;
 
 /// Nexus ManuscriptState
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
