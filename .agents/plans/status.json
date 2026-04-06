@@ -99,12 +99,21 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Not started. Plan needs expansion to cover gaps found in architecture review (see residual_findings).",
+      "notes": "Ready for implementation. Plan expanded with 4 new tasks (Creator/Manuscript/Research commands + dual-subject auth). Architecture review complete: Request Changes → Resolved.",
       "metadata": {
         "phase": "Phase 1",
-        "branch_policy": "feature branch from main",
-        "priority": "medium",
-        "description": "Implement nexus42 CLI and nexus42d daemon skeleton with auth and workspace basics"
+        "branch_policy": "feature/v1.0-cli-daemon from main",
+        "priority": "high",
+        "description": "Implement nexus42 CLI and nexus42d daemon with dual-subject auth, Creator/Manuscript/Research command surfaces, HTTP Local API, and SQLite workspace state",
+        "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+        "review_verdict": "Request Changes → Resolved (CLI-R1..R4)",
+        "tasks_added": [
+          "Task 6: Creator Command Module",
+          "Task 7: Manuscript Command Module",
+          "Task 8: Research Command Module (V1.0 minimal)",
+          "Task 9: Integration Tests"
+        ],
+        "task_modified": "Task 3: Dual-subject auth (User + Creator)"
       }
     },
     {
@@ -119,12 +128,20 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Not started. Plan needs expansion to cover gaps found in architecture review (see residual_findings).",
+      "notes": "Ready for implementation. Plan expanded with bundle metadata fields, partial apply, and local precheck. Architecture review complete: Request Changes → Resolved.",
       "metadata": {
         "phase": "Phase 1",
-        "branch_policy": "feature branch from main",
-        "priority": "medium",
-        "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with conflict handling"
+        "branch_policy": "feature/v1.0-sync-contract from main",
+        "priority": "high",
+        "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with bundle metadata fields, partial apply semantics, local precheck, and conflict resolution",
+        "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+        "review_verdict": "Request Changes → Resolved (SYNC-R1..R3)",
+        "tasks_added": [
+          "Task 6: Partial Apply Semantics",
+          "Task 7: Local Precheck Stage"
+        ],
+        "task_modified": "Task 1: Schema-anchored (use generated types)",
+        "task_modified_2": "Task 3: Add bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript)"
       }
     },
     {
@@ -139,12 +156,14 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Not started. Plan needs expansion to cover gaps found in architecture review (see residual_findings).",
+      "notes": "Ready for implementation. Plan approved with residuals (ACP-R1, ACP-R2 deferred to implementation start).",
       "metadata": {
         "phase": "Phase 1",
-        "branch_policy": "feature branch from main",
+        "branch_policy": "feature/v1.0-acp-client from main",
         "priority": "medium",
-        "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract"
+        "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract",
+        "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+        "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)"
       }
     },
     {
@@ -159,18 +178,20 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Unblock when sync-contract exposes required bundle metadata fields.",
+      "notes": "Blocked until cli-daemon-foundation, sync-contract, and acp-client complete. Plan file must be rewritten from restructured spec after dependencies resolve.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature branch from main",
         "priority": "high",
         "description": "Implement Context Assembly basic version — CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
         "blocked_since": "2026-04-06",
-        "blocked_reason": "Architecture review found fundamental tech stack conflict. Wave 0 restructure complete. Blocked on sync-contract for bundle metadata.",
+        "blocked_reason": "Depends on: (1) cli-daemon for nexus42 context assemble command, (2) sync-contract for bundle metadata fields + story_manifest delta, (3) acp-client for Local API proxy",
         "review_outcome": "critical-gaps",
-        "next_action": "Wave 2+: implement CLI-side scope after sync-contract completion",
+        "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+        "review_verdict": "Blocked",
+        "next_action": "Rewrite plan file from .agents/plans/knowledge/restructured-context-assembly-v1.md after Phase 1a+1b+2 complete",
         "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
-        "dependency": "Blocked by sync-contract plan for bundle metadata fields"
+        "dependency": "Blocked by cli-daemon-foundation, sync-contract, acp-client"
       }
     }
   ],
@@ -194,6 +215,14 @@
       {
         "updated_at": "2026-04-06",
         "message": "domain-models merged to main. Residual findings recorded for cli-daemon-foundation, sync-contract, acp-client, context-assembly, and domain-models (non-blocking QC items)."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Phase 1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon → sync-contract → acp-client → context-assembly."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Clarify phase complete. 4 future iteration points recorded as residual findings (CLI-R5..R8): Unix socket support, manuscript promote strict mode, manuscript verify content checks, research scan content extraction. Ready for implementation."
       }
     ],
     "residual_findings": {
@@ -250,9 +279,9 @@
           "severity": "high",
           "source": "Architecture Review",
           "scope": "nexus42 creator subcommand — register, status, use, list, pair, unpair, logout, credentials rotate",
-          "decision": "defer",
+          "decision": "resolve",
           "owner": "@fullstack-dev",
-          "target": "Must include in plan before implementation start",
+          "target": "Added Task 6: Creator Command Module to plan",
           "tracking": null
         },
         {
@@ -261,9 +290,9 @@
           "severity": "high",
           "source": "Architecture Review",
           "scope": "nexus42 manuscript subcommand — status, phase, output, promote, verify",
-          "decision": "defer",
+          "decision": "resolve",
           "owner": "@fullstack-dev",
-          "target": "Must include in plan before implementation start",
+          "target": "Added Task 7: Manuscript Command Module to plan",
           "tracking": null
         },
         {
@@ -272,9 +301,9 @@
           "severity": "medium",
           "source": "Architecture Review",
           "scope": "nexus42 research subcommand — scan, list, extract",
-          "decision": "defer",
+          "decision": "resolve",
           "owner": "@fullstack-dev",
-          "target": "Include in plan before implementation start",
+          "target": "Added Task 8: Research Command Module (V1.0 minimal) to plan",
           "tracking": null
         },
         {
@@ -283,9 +312,53 @@
           "severity": "high",
           "source": "Architecture Review",
           "scope": "Auth module — needs User tokens + Creator API keys as separate subjects",
+          "decision": "resolve",
+          "owner": "@fullstack-dev",
+          "target": "Task 3 redesigned: split into user_auth.rs and creator_auth.rs for dual-subject auth",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R5",
+          "title": "Local API Unix socket support for better IPC performance",
+          "severity": "low",
+          "source": "Clarify Phase",
+          "scope": "nexus42d Local API — currently HTTP over TCP loopback (port 8420); Unix socket provides better security and performance for local IPC",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Must redesign auth module before implementation start; Creator API keys stored in platform secure storage",
+          "target": "V1.1+ — add Unix socket support as optional transport; keep HTTP as default for V1.0",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R6",
+          "title": "Manuscript promote precondition checks (strict mode)",
+          "severity": "low",
+          "source": "Clarify Phase",
+          "scope": "nexus42 manuscript promote — V1.0 uses loose constraints (user-initiated, no hard pre-checks); strict mode could enforce phase transitions (review→finalize), StoryManifest status, sync state",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — add optional strict mode with `--strict` flag or workspace config",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R7",
+          "title": "Manuscript verify content integrity checks",
+          "severity": "low",
+          "source": "Clarify Phase",
+          "scope": "nexus42 manuscript verify — V1.0 verifies metadata only; content integrity (comparing content_hash with actual file SHA256) deferred",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — add `--check-content` flag to verify manuscript file integrity against StoryManifest.content_hash",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R8",
+          "title": "Research scan content extraction for PDF and URL sources",
+          "severity": "low",
+          "source": "Clarify Phase",
+          "scope": "nexus42 research scan — V1.0 records metadata only (path, size, hash, title); PDF text extraction and URL content fetching deferred",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — add `--extract-text` flag to enable content extraction for PDF and URL sources; may require external tools (pdftotext, http client)",
           "tracking": null
         }
       ],
@@ -296,9 +369,9 @@
           "severity": "high",
           "source": "Architecture Review",
           "scope": "bundle.schema.json — submitting_creator_id, manuscript_phase, output_manuscript",
-          "decision": "defer",
+          "decision": "resolve",
           "owner": "@fullstack-dev",
-          "target": "Must include in schema and implementation before context-assembly can unblock",
+          "target": "Added to Task 3: Bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript, story_manifest delta)",
           "tracking": null
         },
         {
@@ -307,9 +380,9 @@
           "severity": "medium",
           "source": "Architecture Review",
           "scope": "DeltaBundle apply pipeline — platform must support partial success (some deltas applied, some rejected)",
-          "decision": "defer",
+          "decision": "resolve",
           "owner": "@fullstack-dev",
-          "target": "Include in plan design before implementation start",
+          "target": "Added Task 6: Partial Apply Semantics to plan",
           "tracking": null
         },
         {
@@ -318,9 +391,9 @@
           "severity": "medium",
           "source": "Architecture Review",
           "scope": "Sync client — CLI should validate bundle locally before pushing to platform",
-          "decision": "defer",
+          "decision": "resolve",
           "owner": "@fullstack-dev",
-          "target": "Include in plan design before implementation start",
+          "target": "Added Task 7: Local Precheck Stage to plan",
           "tracking": null
         }
       ],
@@ -333,7 +406,7 @@
           "scope": "ACP skill/capability registration — must reference frozen capability ID list from ACP Registry",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Include in plan before implementation start",
+          "target": "Wire frozen capability IDs during implementation start (implementation-start gate)",
           "tracking": null
         },
         {
@@ -344,7 +417,7 @@
           "scope": "CLI command — probe ACP Registry or local agent to verify connectivity and capability set",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Include in plan before implementation start",
+          "target": "Add probe command during implementation start (implementation-start gate)",
           "tracking": null
         }
       ],
@@ -357,7 +430,7 @@
           "scope": ".agents/plans/2025-04-05-context-assembly.md — entire plan needs replacement",
           "decision": "defer",
           "owner": "@project-manager",
-          "target": "Rewrite plan file from restructured spec (.agents/plans/knowledge/restructured-context-assembly-v1.md) before implementation start",
+          "target": "Rewrite plan file from .agents/plans/knowledge/restructured-context-assembly-v1.md after cli-daemon, sync-contract, acp-client complete",
           "tracking": null
         }
       ]
