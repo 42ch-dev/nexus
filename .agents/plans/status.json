@@ -1,89 +1,179 @@
 {
   "version": 1,
   "updated_at": "2026-04-06",
-  "plans": {
-"2025-04-05-monorepo-structure": {
-      "status": "done",
-      "phase": "Phase 0",
-      "branch_policy": "direct on main — initialization",
-      "priority": "high",
-      "created": "2025-04-05",
-      "updated": "2026-04-06",
+  "plans": [
+    {
+      "id": "2025-04-05-monorepo-structure",
       "title": "Monorepo Structure Implementation",
-      "description": "Create foundational monorepo directory structure, Rust workspace, TypeScript workspace",
+      "file": ".agents/plans/2025-04-05-monorepo-structure.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
       "progress": 100,
-      "completed_at": "2026-04-06"
+      "tags": ["phase-0", "foundation", "monorepo"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": "2026-04-06",
+      "notes": "Phase 0 complete on main.",
+      "metadata": {
+        "phase": "Phase 0",
+        "branch_policy": "direct on main — initialization",
+        "priority": "high",
+        "description": "Create foundational monorepo directory structure, Rust workspace, TypeScript workspace"
+      }
     },
-    "2025-04-05-json-schema-foundation": {
-      "status": "done",
-      "phase": "Phase 0",
-      "branch_policy": "direct on main — initialization",
-      "priority": "high",
-      "created": "2025-04-05",
-      "updated": "2026-04-06",
+    {
+      "id": "2025-04-05-json-schema-foundation",
       "title": "JSON Schema Foundation",
-      "description": "Create foundational JSON Schema files for Nexus wire contracts, validation tooling, and CI integration",
+      "file": ".agents/plans/2025-04-05-json-schema-foundation.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
       "progress": 100,
-      "completed_at": "2026-04-06"
+      "tags": ["phase-0", "schemas", "contracts"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": "2026-04-06",
+      "notes": "Phase 0 complete on main.",
+      "metadata": {
+        "phase": "Phase 0",
+        "branch_policy": "direct on main — initialization",
+        "priority": "high",
+        "description": "Create foundational JSON Schema files for Nexus wire contracts, validation tooling, and CI integration"
+      }
     },
-    "2025-04-05-codegen-pipeline": {
-      "status": "done",
-      "phase": "Phase 0",
-      "branch_policy": "direct on main — initialization",
-      "priority": "high",
-      "created": "2025-04-05",
-      "updated": "2026-04-06",
+    {
+      "id": "2025-04-05-codegen-pipeline",
       "title": "Codegen Pipeline",
-      "description": "Implement schema-to-code generation pipeline (JSON Schema → TypeScript + Rust)",
+      "file": ".agents/plans/2025-04-05-codegen-pipeline.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
       "progress": 100,
-      "completed_at": "2026-04-06"
+      "tags": ["phase-0", "codegen"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": "2026-04-06",
+      "notes": "Phase 0 complete on main.",
+      "metadata": {
+        "phase": "Phase 0",
+        "branch_policy": "direct on main — initialization",
+        "priority": "high",
+        "description": "Implement schema-to-code generation pipeline (JSON Schema → TypeScript + Rust)"
+      }
     },
-    "2025-04-05-domain-models": {
-      "status": "pending",
-      "phase": "Phase 1",
-      "branch_policy": "feature branch from main",
-      "priority": "medium",
-      "created": "2025-04-05",
+    {
+      "id": "2025-04-05-domain-models",
       "title": "Domain Models Implementation",
-      "description": "Implement domain models (Key Block, Timeline, Memory, SourceAnchor) with consistency rules"
+      "file": ".agents/plans/2025-04-05-domain-models.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev", "@qc-specialist", "@qc-specialist-2", "@qc-specialist-3"],
+      "progress": 100,
+      "tags": ["phase-1", "domain", "aggregates"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": "2026-04-06",
+      "notes": "Merged to main. 15 aggregates, 133 tests, QC三审 passed.",
+      "metadata": {
+        "phase": "Phase 1",
+        "branch_policy": "feature/v1.0-domain-models from main",
+        "priority": "high",
+        "description": "Implement domain models (15 aggregates) with consistency rules and gates",
+        "wave_0_spec": ".agents/plans/knowledge/revised-domain-models-spec-v1.md",
+        "qc_status": "APPROVE — C-1 and C-2 fixed and verified",
+        "tests": "133 passed, 0 failed",
+        "commits": "8 commits (a22a2cd..e0b9e8c)",
+        "residual_summary": "1 Warning (schema required constraint), 4 Suggestions (test coverage)"
+      }
     },
-    "2025-04-05-cli-daemon-foundation": {
-      "status": "pending",
-      "phase": "Phase 1",
-      "branch_policy": "feature branch from main",
-      "priority": "medium",
-      "created": "2025-04-05",
+    {
+      "id": "2025-04-05-cli-daemon-foundation",
       "title": "CLI + Daemon Foundation",
-      "description": "Implement nexus42 CLI and nexus42d daemon skeleton with auth and workspace basics"
+      "file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-1", "cli", "daemon"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": null,
+      "notes": "Not started. Plan needs expansion to cover gaps found in architecture review (see residual_findings).",
+      "metadata": {
+        "phase": "Phase 1",
+        "branch_policy": "feature branch from main",
+        "priority": "medium",
+        "description": "Implement nexus42 CLI and nexus42d daemon skeleton with auth and workspace basics"
+      }
     },
-    "2025-04-05-sync-contract": {
-      "status": "pending",
-      "phase": "Phase 1",
-      "branch_policy": "feature branch from main",
-      "priority": "medium",
-      "created": "2025-04-05",
+    {
+      "id": "2025-04-05-sync-contract",
       "title": "Sync Contract Implementation",
-      "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with conflict handling"
+      "file": ".agents/plans/2025-04-05-sync-contract.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-1", "sync", "bundle"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": null,
+      "notes": "Not started. Plan needs expansion to cover gaps found in architecture review (see residual_findings).",
+      "metadata": {
+        "phase": "Phase 1",
+        "branch_policy": "feature branch from main",
+        "priority": "medium",
+        "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with conflict handling"
+      }
     },
-    "2025-04-05-acp-client": {
-      "status": "pending",
-      "phase": "Phase 1",
-      "branch_policy": "feature branch from main",
-      "priority": "medium",
-      "created": "2025-04-05",
+    {
+      "id": "2025-04-05-acp-client",
       "title": "ACP Client Integration",
-      "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract"
+      "file": ".agents/plans/2025-04-05-acp-client.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-1", "acp"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": null,
+      "notes": "Not started. Plan needs expansion to cover gaps found in architecture review (see residual_findings).",
+      "metadata": {
+        "phase": "Phase 1",
+        "branch_policy": "feature branch from main",
+        "priority": "medium",
+        "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract"
+      }
     },
-    "2025-04-05-context-assembly": {
-      "status": "pending",
-      "phase": "Phase 1",
-      "branch_policy": "feature branch from main",
-      "priority": "medium",
-      "created": "2025-04-05",
+    {
+      "id": "2025-04-05-context-assembly",
       "title": "Context Assembly Basic",
-      "description": "Implement Context Assembly basic version (Neo4j + Postgres/pgvector + HybridRAG baseline)"
+      "file": ".agents/plans/2025-04-05-context-assembly.md",
+      "status": "Blocked",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-1", "context-assembly", "rag"],
+      "created_at": "2025-04-05",
+      "updated_at": "2026-04-06",
+      "done_at": null,
+      "notes": "Unblock when sync-contract exposes required bundle metadata fields.",
+      "metadata": {
+        "phase": "Phase 1",
+        "branch_policy": "feature branch from main",
+        "priority": "high",
+        "description": "Implement Context Assembly basic version — CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
+        "blocked_since": "2026-04-06",
+        "blocked_reason": "Architecture review found fundamental tech stack conflict. Wave 0 restructure complete. Blocked on sync-contract for bundle metadata.",
+        "review_outcome": "critical-gaps",
+        "next_action": "Wave 2+: implement CLI-side scope after sync-contract completion",
+        "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
+        "dependency": "Blocked by sync-contract plan for bundle metadata fields"
+      }
     }
-  },
+  ],
   "metadata": {
     "versioning": {
       "phase_1_branch_prefix": "feature/v1.0-"
@@ -96,7 +186,181 @@
       {
         "updated_at": "2026-04-06",
         "message": "Phase 0 complete: monorepo-structure, json-schema-foundation, codegen-pipeline all done. 15 commits on main. Ready for Phase 1."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Phase 1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC三审, Critical fixes (C-1, C-2) verified."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "domain-models merged to main. Residual findings recorded for cli-daemon-foundation, sync-contract, acp-client, context-assembly, and domain-models (non-blocking QC items)."
       }
-    ]
+    ],
+    "residual_findings": {
+      "2025-04-05-domain-models": [
+        {
+          "id": "DM-R1",
+          "title": "SourceAnchor.unit_kind not marked required in schema",
+          "severity": "warning",
+          "source": "QC-#1",
+          "scope": "schemas/common/source-anchor.schema.json — SourceSummaryRef.unit_kind field",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Before V1.0 GA — add \"required\": [\"unit_kind\"] when platform confirms all sources provide unit_kind",
+          "tracking": null
+        },
+        {
+          "id": "DM-R2",
+          "title": "Integration test coverage for World and WorldMembership contract roundtrip",
+          "severity": "low",
+          "source": "QC-#2",
+          "scope": "crates/nexus-domain/src/contract_assertions.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Before Wave 2 — add domain↔contract roundtrip tests for World and WorldMembership",
+          "tracking": null
+        },
+        {
+          "id": "DM-R3",
+          "title": "Edge-case test coverage for Pairing and ForkBranch lifecycle",
+          "severity": "low",
+          "source": "QC-#2",
+          "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Before V1.0 GA — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
+          "tracking": null
+        },
+        {
+          "id": "DM-R4",
+          "title": "Error message ergonomics and domain error variant coverage",
+          "severity": "low",
+          "source": "QC-#2",
+          "scope": "crates/nexus-domain/src/errors.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Before V1.0 GA — review error messages for user-facing clarity, add Display impl tests",
+          "tracking": null
+        }
+      ],
+      "2025-04-05-cli-daemon-foundation": [
+        {
+          "id": "CLI-R1",
+          "title": "Missing Creator command surface",
+          "severity": "high",
+          "source": "Architecture Review",
+          "scope": "nexus42 creator subcommand — register, status, use, list, pair, unpair, logout, credentials rotate",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Must include in plan before implementation start",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R2",
+          "title": "Missing Manuscript command surface",
+          "severity": "high",
+          "source": "Architecture Review",
+          "scope": "nexus42 manuscript subcommand — status, phase, output, promote, verify",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Must include in plan before implementation start",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R3",
+          "title": "Missing Research command surface",
+          "severity": "medium",
+          "source": "Architecture Review",
+          "scope": "nexus42 research subcommand — scan, list, extract",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Include in plan before implementation start",
+          "tracking": null
+        },
+        {
+          "id": "CLI-R4",
+          "title": "Auth model covers only single-user tokens, missing dual-subject auth",
+          "severity": "high",
+          "source": "Architecture Review",
+          "scope": "Auth module — needs User tokens + Creator API keys as separate subjects",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Must redesign auth module before implementation start; Creator API keys stored in platform secure storage",
+          "tracking": null
+        }
+      ],
+      "2025-04-05-sync-contract": [
+        {
+          "id": "SYNC-R1",
+          "title": "Missing bundle metadata fields",
+          "severity": "high",
+          "source": "Architecture Review",
+          "scope": "bundle.schema.json — submitting_creator_id, manuscript_phase, output_manuscript",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Must include in schema and implementation before context-assembly can unblock",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R2",
+          "title": "Missing partial apply semantics",
+          "severity": "medium",
+          "source": "Architecture Review",
+          "scope": "DeltaBundle apply pipeline — platform must support partial success (some deltas applied, some rejected)",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Include in plan design before implementation start",
+          "tracking": null
+        },
+        {
+          "id": "SYNC-R3",
+          "title": "Missing local precheck (Stage 0)",
+          "severity": "medium",
+          "source": "Architecture Review",
+          "scope": "Sync client — CLI should validate bundle locally before pushing to platform",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Include in plan design before implementation start",
+          "tracking": null
+        }
+      ],
+      "2025-04-05-acp-client": [
+        {
+          "id": "ACP-R1",
+          "title": "Missing frozen capability ID contract reference",
+          "severity": "medium",
+          "source": "Architecture Review",
+          "scope": "ACP skill/capability registration — must reference frozen capability ID list from ACP Registry",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Include in plan before implementation start",
+          "tracking": null
+        },
+        {
+          "id": "ACP-R2",
+          "title": "Missing nexus42 acp probe command",
+          "severity": "low",
+          "source": "Architecture Review",
+          "scope": "CLI command — probe ACP Registry or local agent to verify connectivity and capability set",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "Include in plan before implementation start",
+          "tracking": null
+        }
+      ],
+      "2025-04-05-context-assembly": [
+        {
+          "id": "CTX-R1",
+          "title": "Original plan file still contains incorrect scope (Neo4j/pgvector in Rust)",
+          "severity": "high",
+          "source": "Architecture Review",
+          "scope": ".agents/plans/2025-04-05-context-assembly.md — entire plan needs replacement",
+          "decision": "defer",
+          "owner": "@project-manager",
+          "target": "Rewrite plan file from restructured spec (.agents/plans/knowledge/restructured-context-assembly-v1.md) before implementation start",
+          "tracking": null
+        }
+      ]
+    }
   }
 }

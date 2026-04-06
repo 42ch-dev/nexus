@@ -42,8 +42,155 @@ packages/
   nexus-contracts/      # Generated TypeScript wire types (npm package)
 tooling/
   codegen/              # Schema → TS + Rust pipeline
-docs/                   # User docs (installation, sync, troubleshooting)
+docs/                   # User & contributor docs (installation, architecture, codegen, contributing)
+.agents/plans/
+  knowledge/            # Dev-process knowledge (architecture reviews, spec revisions, design decisions)
+  reports/              # QC/QA review reports
 .github/workflows/      # CI: schema validation, Rust fmt/clippy/test, npm publish
+```
+
+## Content Boundary: `docs/` vs `.agents/plans/knowledge/`
+
+### `docs/` — User & Contributor Documentation
+
+End-user and contributor-facing content that anyone cloning the repo should read:
+
+- Installation, quickstart, usage guides
+- Architecture overview (high-level, stable)
+- Code generation workflow
+- Contributing guidelines
+
+**Do NOT place** the following in `docs/`:
+- Architecture review reports, spec revision outputs, gap analyses
+- Per-plan design decisions or implementation notes
+- Any document that is an **input to** or **output from** a specific plan
+
+### `.agents/plans/knowledge/` — Dev-Process Knowledge
+
+Development process artifacts generated during planning and review:
+
+- Architecture review reports and spec revision outputs
+- Design decision records and rationale
+- Gap analyses, constraint inventories, compliance checklists
+- Any document that serves as **context for implementing a plan**
+
+These documents are valuable for agent handoff and cross-session continuity, but are not intended for external consumers.
+
+**Index**: All knowledge documents are catalogued in [`.agents/plans/knowledge/README.md`](.agents/plans/knowledge/README.md) with source plan, description, and status.
+
+**Maintenance rules**:
+
+1. **Adding**: Name new documents `<topic>-<qualifier>-v<N>.md`. Add an entry to the README index table. Record the path in `status.json` under the plan's `metadata` (e.g. `wave_0_spec`).
+2. **Reading**: Before implementing a plan, agents MUST read any knowledge documents referenced in that plan's `status.json` metadata (e.g. `wave_0_spec`, `spec_refs`). These are authoritative design input — do not silently diverge.
+3. **Updating**: If an architecture review or spec revision modifies a knowledge document, update the README index status. If the document is fully consumed by implementation, mark it `Superseded` but do not delete — design rationale should be preserved.
+4. **Reachability**: All knowledge documents MUST follow the reachability rules in §"Documentation & plans" below — no references to files outside this repository.
+
+## Documentation & plans (mandatory reachability)
+
+**Mandatory** for any in-repo documentation (for example `docs/`, `README`, design notes) and agent plans (for example `.agents/plans/`):
+
+- **Do not** reference paths to files that are excluded by `.gitignore` or otherwise not present in a fresh clone. Readers who only `git clone` this repository must be able to open every cited path.
+- **Do not** reference files **outside** this repository root (for example `~/.config/...`, absolute home paths, or arbitrary sibling directories). If external context is required, inline the essential content in the repo or link to a **stable, public** URL.
+
+Violations break onboarding and agent handoff for anyone without your local machine layout.
+
+## Plans & Reports Structure
+
+### Directory Organization
+
+```
+.agents/plans/
+├── <plan-id>-<plan-name>.md     # Main plan files
+├── status.json                   # SSOT: plan rows + file-level metadata (residual_findings, program notes)
+├── reports/                      # Supplementary reports
+│   ├── README.md
+│   └── <plan-id>/               # Reports for each plan
+│       ├── <plan-id>-review.md           # Architecture review
+│       ├── <plan-id>-qc<#>.md            # QC reports (parallel review)
+│       └── <plan-id>-qc-consolidated.md  # Consolidated QC decision
+├── archived/                     # Archived plans
+└── knowledge/                    # Dev-process knowledge (indexed in knowledge/README.md)
+```
+
+### File Naming Conventions
+
+**Main Plan Files**:
+
+- Format: `<plan-id>-<plan-name>.md`
+- Example: `2025-04-05-domain-models.md`
+
+**Report Files**:
+
+- Architecture review: `<plan-id>-review.md`
+- QC individual reports: `<plan-id>-qc1.md`, `<plan-id>-qc2.md`, `<plan-id>-qc3.md`
+- QC consolidated decision: `<plan-id>-qc-consolidated.md`
+
+### Residual Findings Tracking
+
+**Authoritative residual rows** live in `status.json` under **`metadata.residual_findings[<plan-id>]`** (same key as `plans[].id`). Optional **`plans[].metadata.residual_summary`** is a one-line human hint only; it does not replace the structured list below.
+
+```json
+{
+  "metadata": {
+    "residual_findings": {
+      "<plan-id>": [
+        {
+          "id": "R1",
+          "title": "Finding title",
+          "severity": "critical|high|medium|low|warning",
+          "source": "QC-#1, QC-#3",
+          "scope": "Affected file or component",
+          "decision": "defer|accept|risk-accepted",
+          "owner": "@fullstack-dev",
+          "target": "When to address (e.g., 'Before next plan')",
+          "tracking": "Issue URL or null"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Root `metadata.notes`** (optional): program-level timeline, usually an array of `{ "updated_at", "message" }`. **Per-plan `plans[].notes`**: short status string for that plan only.
+
+### Severity Levels
+
+- **Critical**: Must fix before merge (blocking)
+- **High**: Should fix before merge or immediately after
+- **Medium**: Should address in near-term (next 1-2 plans)
+- **Low**: Accept as-is or optional improvement
+- **Warning**: Non-blocking, informational
+
+### Plan Lifecycle
+
+1. **Todo**: Plan created, not started
+2. **InProgress**: Implementation underway
+3. **InReview**: QC review in progress (reports in `reports/<plan-id>/`)
+4. **Done**: Completed, merged to main
+
+### Plan items in `status.json`
+
+Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally **`metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; **`plans[].id`** is the only key into `metadata.residual_findings`.
+
+**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`. Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
+
+### Accessing Plan Information
+
+```bash
+# View plan status (plans is an array; filter by id)
+jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/status.json
+
+# View plan-local metadata
+jq '.plans[] | select(.id == "2025-04-05-domain-models") | .metadata' .agents/plans/status.json
+
+# View residual findings (when present)
+jq '.metadata.residual_findings["2025-04-05-domain-models"]' .agents/plans/status.json
+
+# Program-level timeline (if present)
+jq '.metadata.notes' .agents/plans/status.json
+
+# View detailed QC report
+cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-consolidated.md
 ```
 
 ## Development Workflow

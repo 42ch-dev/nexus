@@ -8,7 +8,7 @@
 
 **Tech Stack:** JSON Schema Draft-07, ajv (validator), json-schema-to-typescript (future codegen)
 
-**Reference alignment:** All enums and field names follow `data-model-v1.md` §7 enum table and §5 aggregate definitions. Bundle envelope follows `bundle-envelope-schema-v1.md` §5.
+**Reference alignment:** All enums and field names follow V1.0 spec enum and aggregate definitions. Bundle envelope follows `bundle.schema.json`.
 
 ---
 
@@ -145,7 +145,7 @@ Create file: `schemas/common/common.schema.json`
   "$id": "https://nexus.42ch.io/schemas/common/common.schema.json",
   "schema_version": 1,
   "title": "Nexus Common Types",
-  "description": "Common type definitions shared across all Nexus domain schemas. All enums aligned with data-model-v1.md §7.",
+  "description": "Common type definitions shared across all Nexus domain schemas.",
   "definitions": {
     "Timestamp": {
       "type": "string",
@@ -200,32 +200,32 @@ Create file: `schemas/common/common.schema.json`
     "ManuscriptPhase": {
       "type": "string",
       "enum": ["brainstorm", "draft", "review", "finalize", "published"],
-      "description": "Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)"
+      "description": "Manuscript lifecycle phase"
     },
     "TimePolicy": {
       "type": "string",
       "enum": ["manual", "owner_driven", "event_driven"],
-      "description": "World timeline evolution policy (data-model-v1.md §5.3)"
+      "description": "World timeline evolution policy"
     },
     "Visibility": {
       "type": "string",
       "enum": ["private", "unlisted", "public"],
-      "description": "Visibility/access level (data-model-v1.md §5.3)"
+      "description": "Visibility/access level"
     },
     "BlockType": {
       "type": "string",
       "enum": ["character", "ability", "scene", "organization", "item", "conflict", "info_point", "event"],
-      "description": "KeyBlock content type (data-model-v1.md §5.5)"
+      "description": "KeyBlock content type"
     },
     "MemoryType": {
       "type": "string",
       "enum": ["canon", "working", "experience"],
-      "description": "MemoryItem type (data-model-v1.md §5.8)"
+      "description": "MemoryItem type"
     },
     "BundleType": {
       "type": "string",
       "enum": ["world_sync", "memory_sync", "publish_metadata"],
-      "description": "DeltaBundle type (data-model-v1.md §5.11)"
+      "description": "DeltaBundle type"
     },
     "SchemaVersion": {
       "type": "integer",
@@ -245,7 +245,7 @@ Create file: `schemas/common/README.md`
 ```markdown
 # Common Types
 
-Reusable type definitions imported by domain schemas. All enums aligned with data-model-v1.md §7.
+Reusable type definitions imported by domain schemas.
 
 ## Definitions
 
@@ -260,7 +260,7 @@ Reusable type definitions imported by domain schemas. All enums aligned with dat
 - `WorkspaceId`: Workspace ID (`wrk_xxx`)
 - `DeltaSequence`: Integer sequence number
 
-### Enums (data-model-v1.md §7)
+### Enums
 - `ManuscriptPhase`: brainstorm / draft / review / finalize / published
 - `TimePolicy`: manual / owner_driven / event_driven
 - `Visibility`: private / unlisted / public
@@ -291,7 +291,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/bundle.schema.json`
 
-Aligned with: `bundle-envelope-schema-v1.md` §5, `data-model-v1.md` §5.11
+Aligned with: `bundle.schema.json`
 
 ```json
 {
@@ -299,7 +299,7 @@ Aligned with: `bundle-envelope-schema-v1.md` §5, `data-model-v1.md` §5.11
   "$id": "https://nexus.42ch.io/schemas/domain/bundle.schema.json",
   "schema_version": 1,
   "title": "Nexus DeltaBundle Envelope",
-  "description": "DeltaBundle envelope containing delta operations for world synchronization. Aligned with bundle-envelope-schema-v1.md §5.",
+  "description": "DeltaBundle envelope containing delta operations for world synchronization.",
   "type": "object",
   "required": [
     "schema_version",
@@ -475,11 +475,11 @@ Aligned with: `bundle-envelope-schema-v1.md` §5, `data-model-v1.md` §5.11
 }
 ```
 
-Expected: DeltaBundle envelope schema created with 13+ required fields aligned with bundle-envelope-schema-v1.md §5
+Expected: DeltaBundle envelope schema created with 13+ required fields
 
 - [x] **Step 2: Commit bundle schema**
 
-Run: `git add schemas/domain/bundle.schema.json && git commit -m "feat(schema): add DeltaBundle envelope schema aligned with bundle-envelope-schema-v1.md §5"`
+Run: `git add schemas/domain/bundle.schema.json && git commit -m "feat(schema): add DeltaBundle envelope schema"`
 
 Expected: Commit successful
 
@@ -494,7 +494,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/creator.schema.json`
 
-Aligned with: `data-model-v1.md` §5.2
+Aligned with: `schemas/domain/creator.schema.json`
 
 ```json
 {
@@ -502,7 +502,7 @@ Aligned with: `data-model-v1.md` §5.2
   "$id": "https://nexus.42ch.io/schemas/domain/creator.schema.json",
   "schema_version": 1,
   "title": "Nexus Creator Entity",
-  "description": "Creator entity - a first-class creative agent that can be user-owned or agent-registered. Aligned with data-model-v1.md §5.2.",
+  "description": "Creator entity - a first-class creative agent that can be user-owned or agent-registered.",
   "type": "object",
   "required": ["schema_version", "creator_id", "display_name", "status", "registration_source", "created_at"],
   "properties": {
@@ -587,11 +587,11 @@ Aligned with: `data-model-v1.md` §5.2
 }
 ```
 
-Expected: Creator schema created aligned with data-model-v1.md §5.2
+Expected: Creator schema created
 
 - [x] **Step 2: Commit creator schema**
 
-Run: `git add schemas/domain/creator.schema.json && git commit -m "feat(schema): add creator entity schema aligned with data-model-v1.md §5.2"`
+Run: `git add schemas/domain/creator.schema.json && git commit -m "feat(schema): add creator entity schema"`
 
 Expected: Commit successful
 
@@ -606,7 +606,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/world.schema.json`
 
-Aligned with: `data-model-v1.md` §5.3
+Aligned with: `schemas/domain/world.schema.json`
 
 ```json
 {
@@ -614,7 +614,7 @@ Aligned with: `data-model-v1.md` §5.3
   "$id": "https://nexus.42ch.io/schemas/domain/world.schema.json",
   "schema_version": 1,
   "title": "Nexus World Entity",
-  "description": "World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3.",
+  "description": "World entity - a narrative universe maintained by creators with timeline evolution.",
   "type": "object",
   "required": ["schema_version", "world_id", "owner_creator_id", "title", "slug", "status", "visibility", "time_policy", "created_at"],
   "properties": {
@@ -699,11 +699,11 @@ Aligned with: `data-model-v1.md` §5.3
 }
 ```
 
-Expected: World schema created aligned with data-model-v1.md §5.3
+Expected: World schema created
 
 - [x] **Step 2: Commit world schema**
 
-Run: `git add schemas/domain/world.schema.json && git commit -m "feat(schema): add world entity schema aligned with data-model-v1.md §5.3"`
+Run: `git add schemas/domain/world.schema.json && git commit -m "feat(schema): add world entity schema"`
 
 Expected: Commit successful
 
@@ -718,7 +718,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/key-block.schema.json`
 
-Aligned with: `data-model-v1.md` §5.5
+Aligned with: `schemas/domain/key-block.schema.json`
 
 ```json
 {
@@ -726,7 +726,7 @@ Aligned with: `data-model-v1.md` §5.5
   "$id": "https://nexus.42ch.io/schemas/domain/key-block.schema.json",
   "schema_version": 1,
   "title": "Nexus KeyBlock",
-  "description": "KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5.",
+  "description": "KeyBlock - a structured knowledge unit in a world timeline.",
   "type": "object",
   "required": ["schema_version", "key_block_id", "world_id", "block_type", "canonical_name", "status", "created_at"],
   "properties": {
@@ -801,11 +801,11 @@ Aligned with: `data-model-v1.md` §5.5
 }
 ```
 
-Expected: KeyBlock schema created aligned with data-model-v1.md §5.5
+Expected: KeyBlock schema created
 
 - [x] **Step 2: Commit key block schema**
 
-Run: `git add schemas/domain/key-block.schema.json && git commit -m "feat(schema): add KeyBlock schema aligned with data-model-v1.md §5.5"`
+Run: `git add schemas/domain/key-block.schema.json && git commit -m "feat(schema): add KeyBlock schema"`
 
 Expected: Commit successful
 
@@ -821,7 +821,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/timeline-event.schema.json`
 
-Aligned with: `data-model-v1.md` §5.6
+Aligned with: `schemas/domain/timeline-event.schema.json`
 
 ```json
 {
@@ -829,7 +829,7 @@ Aligned with: `data-model-v1.md` §5.6
   "$id": "https://nexus.42ch.io/schemas/domain/timeline-event.schema.json",
   "schema_version": 1,
   "title": "Nexus TimelineEvent",
-  "description": "TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.",
+  "description": "TimelineEvent - a canonical event on the world timeline with causality and sequence.",
   "type": "object",
   "required": ["schema_version", "timeline_event_id", "world_id", "branch_id", "event_type", "status", "sequence_no", "created_at"],
   "properties": {
@@ -900,13 +900,13 @@ Aligned with: `data-model-v1.md` §5.6
 }
 ```
 
-Expected: TimelineEvent schema created aligned with data-model-v1.md §5.6
+Expected: TimelineEvent schema created
 
 - [x] **Step 2: Create memory item schema**
 
 Create file: `schemas/domain/memory.schema.json`
 
-Aligned with: `data-model-v1.md` §5.8
+Aligned with: `schemas/domain/memory.schema.json`
 
 ```json
 {
@@ -914,7 +914,7 @@ Aligned with: `data-model-v1.md` §5.8
   "$id": "https://nexus.42ch.io/schemas/domain/memory.schema.json",
   "schema_version": 1,
   "title": "Nexus MemoryItem",
-  "description": "MemoryItem - structured memory for creator experience and world context. Aligned with data-model-v1.md §5.8.",
+  "description": "MemoryItem - structured memory for creator experience and world context.",
   "type": "object",
   "required": ["schema_version", "memory_item_id", "creator_id", "world_id", "memory_type", "status", "created_at"],
   "properties": {
@@ -995,7 +995,7 @@ Aligned with: `data-model-v1.md` §5.8
 }
 ```
 
-Expected: MemoryItem schema created aligned with data-model-v1.md §5.8
+Expected: MemoryItem schema created
 
 - [x] **Step 3: Commit timeline event and memory item schemas**
 
@@ -1015,7 +1015,7 @@ Expected: Commit successful
 
 Create file: `schemas/common/source-anchor.schema.json`
 
-Aligned with: `data-model-v1.md` §6.1
+Aligned with: `schemas/common/source-anchor.schema.json`
 
 ```json
 {
@@ -1023,7 +1023,7 @@ Aligned with: `data-model-v1.md` §6.1
   "$id": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
   "schema_version": 1,
   "title": "Nexus SourceAnchor",
-  "description": "Value object for referencing platform Story summary entities without uploading full text. Aligned with data-model-v1.md §6.1.",
+  "description": "Value object for referencing platform Story summary entities without uploading full text.",
   "type": "object",
   "properties": {
     "story_summary_refs": {
@@ -1067,7 +1067,7 @@ Aligned with: `data-model-v1.md` §6.1
 
 Create file: `schemas/common/version-ref.schema.json`
 
-Aligned with: `data-model-v1.md` §6.2
+Aligned with: `schemas/common/version-ref.schema.json`
 
 ```json
 {
@@ -1075,7 +1075,7 @@ Aligned with: `data-model-v1.md` §6.2
   "$id": "https://nexus.42ch.io/schemas/common/version-ref.schema.json",
   "schema_version": 1,
   "title": "Nexus VersionRef",
-  "description": "Value object describing the baseline version of a bundle/entity/world. Aligned with data-model-v1.md §6.2.",
+  "description": "Value object describing the baseline version of a bundle/entity/world.",
   "type": "object",
   "required": ["entity_type", "entity_id", "revision"],
   "properties": {
@@ -1114,7 +1114,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/pairing.schema.json`
 
-Aligned with: `data-model-v1.md` §5.2A
+Aligned with: `schemas/domain/pairing.schema.json`
 
 ```json
 {
@@ -1122,7 +1122,7 @@ Aligned with: `data-model-v1.md` §5.2A
   "$id": "https://nexus.42ch.io/schemas/domain/pairing.schema.json",
   "schema_version": 1,
   "title": "Nexus Pairing",
-  "description": "Pairing entity describing Creator <-> User association. Aligned with data-model-v1.md §5.2A.",
+  "description": "Pairing entity describing Creator <-> User association.",
   "type": "object",
   "required": ["schema_version", "pairing_id", "creator_id", "user_id", "pairing_source", "status", "created_at"],
   "properties": {
@@ -1164,7 +1164,7 @@ Aligned with: `data-model-v1.md` §5.2A
 
 - [x] **Step 2: Commit pairing schema**
 
-Run: `git add schemas/domain/pairing.schema.json && git commit -m "feat(schema): add Pairing schema aligned with data-model-v1.md §5.2A"`
+Run: `git add schemas/domain/pairing.schema.json && git commit -m "feat(schema): add Pairing schema"`
 
 Expected: Commit successful
 
@@ -1179,7 +1179,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/world-membership.schema.json`
 
-Aligned with: `data-model-v1.md` §5.4
+Aligned with: `schemas/domain/world-membership.schema.json`
 
 ```json
 {
@@ -1187,7 +1187,7 @@ Aligned with: `data-model-v1.md` §5.4
   "$id": "https://nexus.42ch.io/schemas/domain/world-membership.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldMembership",
-  "description": "WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4.",
+  "description": "WorldMembership entity describing Creator-World relationship with roles and permissions.",
   "type": "object",
   "required": ["schema_version", "membership_id", "world_id", "creator_id", "role", "membership_status", "joined_at"],
   "properties": {
@@ -1251,7 +1251,7 @@ Aligned with: `data-model-v1.md` §5.4
 
 - [x] **Step 2: Commit world membership schema**
 
-Run: `git add schemas/domain/world-membership.schema.json && git commit -m "feat(schema): add WorldMembership schema aligned with data-model-v1.md §5.4"`
+Run: `git add schemas/domain/world-membership.schema.json && git commit -m "feat(schema): add WorldMembership schema"`
 
 Expected: Commit successful
 
@@ -1266,7 +1266,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/story-manifest.schema.json`
 
-Aligned with: `data-model-v1.md` §5.9
+Aligned with: `schemas/domain/story-manifest.schema.json`
 
 ```json
 {
@@ -1274,7 +1274,7 @@ Aligned with: `data-model-v1.md` §5.9
   "$id": "https://nexus.42ch.io/schemas/domain/story-manifest.schema.json",
   "schema_version": 1,
   "title": "Nexus StoryManifest",
-  "description": "StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9.",
+  "description": "StoryManifest entity for platform-side chapter/arc manifest and summary.",
   "type": "object",
   "required": ["schema_version", "story_manifest_id", "world_id", "creator_id", "manifest_type", "status", "title", "summary_unit_id", "created_at"],
   "properties": {
@@ -1355,7 +1355,7 @@ Aligned with: `data-model-v1.md` §5.9
 
 - [x] **Step 2: Commit story manifest schema**
 
-Run: `git add schemas/domain/story-manifest.schema.json && git commit -m "feat(schema): add StoryManifest schema aligned with data-model-v1.md §5.9"`
+Run: `git add schemas/domain/story-manifest.schema.json && git commit -m "feat(schema): add StoryManifest schema"`
 
 Expected: Commit successful
 
@@ -1370,7 +1370,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/sync-command.schema.json`
 
-Aligned with: `data-model-v1.md` §5.10
+Aligned with: `schemas/domain/sync-command.schema.json`
 
 ```json
 {
@@ -1378,7 +1378,7 @@ Aligned with: `data-model-v1.md` §5.10
   "$id": "https://nexus.42ch.io/schemas/domain/sync-command.schema.json",
   "schema_version": 1,
   "title": "Nexus SyncCommand",
-  "description": "SyncCommand entity representing a business action with audit attribution. Aligned with data-model-v1.md §5.10.",
+  "description": "SyncCommand entity representing a business action with audit attribution.",
   "type": "object",
   "required": ["schema_version", "command_id", "workspace_id", "world_id", "creator_id", "command_type", "origin", "status", "created_at"],
   "properties": {
@@ -1437,7 +1437,7 @@ Aligned with: `data-model-v1.md` §5.10
 
 - [x] **Step 2: Commit sync command schema**
 
-Run: `git add schemas/domain/sync-command.schema.json && git commit -m "feat(schema): add SyncCommand schema aligned with data-model-v1.md §5.10"`
+Run: `git add schemas/domain/sync-command.schema.json && git commit -m "feat(schema): add SyncCommand schema"`
 
 Expected: Commit successful
 
@@ -1452,7 +1452,7 @@ Expected: Commit successful
 
 Create file: `schemas/domain/outbox-entry.schema.json`
 
-Aligned with: `data-model-v1.md` §5.13
+Aligned with: `schemas/domain/outbox-entry.schema.json`
 
 ```json
 {
@@ -1460,7 +1460,7 @@ Aligned with: `data-model-v1.md` §5.13
   "$id": "https://nexus.42ch.io/schemas/domain/outbox-entry.schema.json",
   "schema_version": 1,
   "title": "Nexus OutboxEntry",
-  "description": "OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13.",
+  "description": "OutboxEntry entity representing a local send queue item.",
   "type": "object",
   "required": ["schema_version", "outbox_entry_id", "bundle_id", "idempotency_key", "delivery_state", "created_at"],
   "properties": {
@@ -1512,7 +1512,7 @@ Aligned with: `data-model-v1.md` §5.13
 
 - [x] **Step 2: Commit outbox entry schema**
 
-Run: `git add schemas/domain/outbox-entry.schema.json && git commit -m "feat(schema): add OutboxEntry schema aligned with data-model-v1.md §5.13"`
+Run: `git add schemas/domain/outbox-entry.schema.json && git commit -m "feat(schema): add OutboxEntry schema"`
 
 Expected: Commit successful
 
@@ -1734,12 +1734,12 @@ Create file: `schemas/domain/README.md`
 ```markdown
 # Domain Schemas
 
-Core domain entity schemas for Nexus. All aligned with `data-model-v1.md`.
+Core domain entity schemas for Nexus.
 
 ## Schemas
 
 ### DeltaBundle (`bundle.schema.json`)
-Envelope for delta operations (world_sync, memory_sync, publish_metadata). 13+ required fields per bundle-envelope-schema-v1.md §5.
+Envelope for delta operations (world_sync, memory_sync, publish_metadata). 13+ required fields.
 
 ### Creator (`creator.schema.json`)
 First-class creative agent (user-owned or agent-registered) with style profile and experience tracking. §5.2
@@ -1775,7 +1775,7 @@ Local outbox queue item with delivery state and retry logic. §5.13
 
 All domain schemas import reusable types from `schemas/common/common.schema.json`:
 - Identifiers (WorldId, CreatorId, UserId, KeyBlockId, TimelineEventId, BundleId, CommandId, WorkspaceId)
-- Enums (ManuscriptPhase, TimePolicy, Visibility, BlockType, MemoryType, BundleType) — all aligned with data-model-v1.md §7
+- Enums (ManuscriptPhase, TimePolicy, Visibility, BlockType, MemoryType, BundleType)
 - Timestamps (ISO 8601 / RFC 3339 UTC)
 
 ## Value Objects
