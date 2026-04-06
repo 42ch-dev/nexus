@@ -258,20 +258,20 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
-      "total_open": 40,
+      "total_open": 37,
       "by_severity": {
         "high": 11,
         "medium": 13,
-        "low": 15,
+        "low": 12,
         "warning": 1
       },
       "by_target": {
-        "V1.0 GA": 3,
+        "V1.0 GA": 0,
         "V1.1": 33,
         "V1.1+": 4
       },
       "by_plan": {
-        "domain-models": 4,
+        "domain-models": 1,
         "cli-daemon-foundation": 11,
         "sync-contract": 10,
         "acp-client": 9,
@@ -356,6 +356,9 @@
           "scope": "schemas/common/source-anchor.schema.json — SourceSummaryRef.unit_kind field",
           "decision": "accept",
           "owner": "@fullstack-dev",
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-06",
+          "closure_note": "Removed unit_kind from required array — codegen already treats it as optional due to nested allOf/items limitation. Schema now matches generated output.",
           "target": "Before V1.0 GA — add \"required\": [\"unit_kind\"] when platform confirms all sources provide unit_kind",
           "tracking": null
         },
@@ -367,6 +370,9 @@
           "scope": "crates/nexus-domain/src/contract_assertions.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-06",
+          "closure_note": "Added test_world_domain_contract_roundtrip and test_world_membership_domain_contract_roundtrip. MembershipRole schema/domain drift documented in test comment.",
           "target": "Before Wave 2 — add domain↔contract roundtrip tests for World and WorldMembership",
           "tracking": null
         },
@@ -389,6 +395,9 @@
           "scope": "crates/nexus-domain/src/errors.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-06",
+          "closure_note": "Added Display/ToString tests for all 18 error variants. Added #[allow(dead_code)] to unused CreatorQuotaExceeded and InvalidIdFormat with V1.1 TODO comment.",
           "target": "Before V1.0 GA — review error messages for user-facing clarity, add Display impl tests",
           "tracking": null
         }
