@@ -71,6 +71,10 @@ fn build_test_app(state: WorkspaceState) -> Router {
             "/v1/local/references",
             axum::routing::get(handlers::references::list),
         )
+        .route(
+            "/v1/local/context/assemble",
+            axum::routing::post(handlers::context::assemble),
+        )
         .with_state(state)
 }
 
@@ -177,4 +181,30 @@ async fn references_list_endpoint() {
     assert_eq!(refs[0]["reference_source_id"], "ref_test_001");
     assert_eq!(refs[0]["source_type"], "pdf");
     assert_eq!(refs[0]["title"], "Test Reference");
+}
+
+#[tokio::test]
+async fn context_assemble_endpoint() {
+    let (state, _tmp) = create_test_state();
+    let app = build_test_app(state);
+
+    let server = TestServer::new(app).unwrap();
+    let payload = serde_json::json!({
+        "request_id": "req_test_001",
+        "workspace_id": "wrk_001",
+        "creator_id": "ctr_001",
+        "world_id": "wld_001"
+    });
+    let response = server
+        .post("/v1/local/context/assemble")
+        .json(&payload)
+        .await;
+
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "ok");
+    assert_eq!(
+        body["message"],
+        "context assembly not yet implemented on daemon side"
+    );
 }

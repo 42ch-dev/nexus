@@ -250,11 +250,127 @@
         "clippy": "clean — 0 warnings with -D warnings",
         "effort": "M — ~1-2 focused agent sessions"
       }
+    },
+    {
+      "id": "2026-04-06-foundation-hardening",
+      "title": "Foundation Hardening",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-2", "foundation", "error-strategy", "sqlite"],
+      "created_at": "2026-04-06",
+      "updated_at": "2026-04-06",
+      "notes": "Pre-Phase 2: error strategy, SQLite pooling, schema dedup, workspace validation, unwrap cleanup. 15 residuals.",
+      "metadata": {
+        "phase": "Phase 2",
+        "branch_policy": "feature/v2.0-foundation-hardening from main",
+        "priority": "high",
+        "description": "Resolve DEBT-X1..X4, standardize error propagation, SQLite schema dedup, workspace validation middleware, unsafe unwrap cleanup",
+        "dependency": "P0 bug fixes (fix/v1.0-p0-bugs)",
+        "spec_refs": [".agents/plans/knowledge/phase1-architecture-review-v1.md", ".agents/plans/knowledge/phase2-architecture-plan-v1.md"],
+        "effort": "M — ~2-4 agent sessions",
+        "residual_summary": "15 addressed (7 HIGH, 4 MEDIUM resolved; 1 HIGH, 3 MEDIUM partially)"
+      }
+    },
+    {
+      "id": "2026-04-06-acp-sdk-bridge",
+      "title": "ACP SDK Bridge Implementation",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-2", "acp", "sdk", "agent-interaction"],
+      "created_at": "2026-04-06",
+      "updated_at": "2026-04-06",
+      "notes": "Pre-Phase 2: implement actual ACP SDK calls via LocalSet bridge. 10 residuals.",
+      "metadata": {
+        "phase": "Phase 2",
+        "branch_policy": "feature/v2.0-acp-sdk-bridge from main",
+        "priority": "high",
+        "description": "Implement AcpSdkAdapter with LocalSet bridge, complete prompt loop, event handling, and error integration",
+        "dependency": "2026-04-06-foundation-hardening",
+        "spec_refs": [".agents/plans/knowledge/acp-client-tech-spec-v1.md", ".agents/plans/knowledge/phase2-architecture-plan-v1.md"],
+        "effort": "M-L — ~3-6 agent sessions",
+        "residual_summary": "10 addressed (1 CRITICAL, 2 HIGH resolved; 4 MEDIUM, 3 LOW partially)"
+      }
+    },
+    {
+      "id": "2026-04-06-daemon-manuscript-ops",
+      "title": "Daemon + Manuscript Operations",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-2", "daemon", "manuscript", "sync-status"],
+      "created_at": "2026-04-06",
+      "updated_at": "2026-04-06",
+      "notes": "Pre-Phase 2: daemon stop, manuscript lifecycle, sync status with real data. 9 residuals. 2 milestones.",
+      "metadata": {
+        "phase": "Phase 2",
+        "branch_policy": "feature/v2.0-daemon-manuscript-ops from main",
+        "priority": "high",
+        "description": "Daemon lifecycle (stop, timeout), manuscript file operations, sync status with real data, research list/extract",
+        "dependency": "2026-04-06-foundation-hardening",
+        "spec_refs": [".agents/plans/knowledge/phase2-architecture-plan-v1.md", ".agents/plans/knowledge/phase2-product-plan-v1.md"],
+        "effort": "L — ~4-8 agent sessions (2 milestones)",
+        "residual_summary": "9 addressed (2 CRITICAL, 2 HIGH resolved; 1 HIGH, 1 MEDIUM partially; 3 LOW deferred)"
+      }
+    },
+    {
+      "id": "2026-04-06-auth-flow",
+      "title": "Auth Flow Completion",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-2", "auth", "oauth", "daemon"],
+      "created_at": "2026-04-06",
+      "updated_at": "2026-04-06",
+      "notes": "Pre-Phase 2: device code OAuth, token lifecycle, daemon auth middleware. 3 residuals.",
+      "metadata": {
+        "phase": "Phase 2",
+        "branch_policy": "feature/v2.0-auth-flow from main",
+        "priority": "medium",
+        "description": "Complete device code OAuth flow, token refresh, daemon auth middleware, CLI auth client update",
+        "dependency": "2026-04-06-foundation-hardening, 2026-04-06-daemon-manuscript-ops (soft)",
+        "spec_refs": [".agents/plans/knowledge/phase2-architecture-plan-v1.md"],
+        "effort": "M — ~2-3 agent sessions",
+        "residual_summary": "3 addressed (1 HIGH, 2 MEDIUM resolved)"
+      }
+    },
+    {
+      "id": "2026-04-06-codegen-alignment",
+      "title": "Codegen & Contract Alignment",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["phase-2", "codegen", "contracts", "schema-first"],
+      "created_at": "2026-04-06",
+      "updated_at": "2026-04-06",
+      "notes": "Pre-Phase 2: fix codegen pipeline, generate context assembly types, registry types. 5 residuals. No dependencies.",
+      "metadata": {
+        "phase": "Phase 2",
+        "branch_policy": "feature/v2.0-codegen-alignment from main",
+        "priority": "medium",
+        "description": "Fix CommonTypes codegen to read from schema, generate context assembly types, generate registry manifest types",
+        "dependency": "none (can run in parallel with all plans)",
+        "spec_refs": [".agents/plans/knowledge/phase2-architecture-plan-v1.md"],
+        "effort": "S — ~1-2 agent sessions",
+        "residual_summary": "5 addressed (2 HIGH, 3 MEDIUM resolved)"
+      }
     }
   ],
   "metadata": {
     "versioning": {
-      "phase_1_branch_prefix": "feature/v1.0-"
+      "phase_1_branch_prefix": "feature/v1.0-",
+      "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-06",
@@ -356,6 +472,10 @@
       {
         "updated_at": "2026-04-06",
         "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC三审 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
+      },
+      {
+        "updated_at": "2026-04-06",
+        "message": "Phase 1 complete (8/8 plans Done). Phase 1 architecture + product reviews completed. 36 arch findings, 37 feature analysis. P0 bug fixes in progress on fix/v1.0-p0-bugs. Pre-Phase 2 consolidated plan created (2026-04-06-pre-phase2.md) with 5 implementation plans (A-E). 5 Phase 2 plan entries added to status.json."
       }
     ],
     "residual_findings": {
