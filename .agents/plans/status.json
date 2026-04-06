@@ -218,15 +218,15 @@
       "id": "2025-04-05-context-assembly",
       "title": "Context Assembly Basic",
       "file": ".agents/plans/2025-04-05-context-assembly.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
-      "agents": ["@architect", "@fullstack-dev"],
-      "progress": 80,
+      "agents": ["@architect", "@fullstack-dev", "@fullstack-dev-2"],
+      "progress": 100,
       "tags": ["phase-1", "context-assembly"],
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": null,
-      "notes": "Tasks 1-4 done. Task 5 (CLI command) remaining.",
+      "notes": "All 5 tasks implemented. 416 workspace tests pass. QC三审 in progress.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-context-assembly from main",
@@ -235,16 +235,22 @@
         "working_branch": "feature/v1.0-context-assembly",
         "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
         "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
-        "next_action": "Implement Task 5: CLI command nexus42 context assemble",
+        "next_action": "QC三审 → QA verification → merge to main",
         "task_status": {
           "task_1": "done",
           "task_2": "done",
           "task_3": "done",
           "task_4": "done",
-          "task_5": "pending"
+          "task_5": "done"
         },
-        "tasks": ["Task 1: JSON Schema registration", "Task 2: Rust types for request/response", "Task 3: Summary generation module", "Task 4: Context Assembly Local API client", "Task 5: CLI command nexus42 context assemble"],
-        "tests": "25 context module tests (6 types + 14 summary + 5 client) — all passing",
+        "tests": {
+          "context_unit": "25 passed, 0 failed",
+          "context_integration": "2 passed, 0 failed",
+          "workspace": "416 passed, 0 failed, 2 ignored"
+        },
+        "commits": "6 commits (bfdeca2..924d388)",
+        "files_changed": "schema + 6 Rust files (context module + commands + lib + tests)",
+        "qc_status": "pending",
         "clippy": "clean — 0 warnings with -D warnings",
         "effort": "M — ~1-2 focused agent sessions"
       }
