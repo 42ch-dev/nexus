@@ -10,6 +10,7 @@
 //! - GET  /v1/local/creators         — List creators
 //! - GET  /v1/local/manuscript       — Manuscript status
 //! - GET  /v1/local/references       — List reference sources
+//! - GET  /v1/local/sync/status      — Sync status
 
 pub mod errors;
 pub mod handlers;
@@ -78,6 +79,9 @@ pub fn create_router(state: WorkspaceState) -> Router {
             middleware::require_workspace,
         ));
 
+    // Sync routes (unguarded — can check status without workspace)
+    let sync_routes = Router::new().route("/v1/local/sync/status", get(handlers::sync::status));
+
     Router::new()
         .merge(runtime_routes)
         .merge(workspace_routes)
@@ -86,6 +90,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(manuscript_routes)
         .merge(reference_routes)
         .merge(context_routes)
+        .merge(sync_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
