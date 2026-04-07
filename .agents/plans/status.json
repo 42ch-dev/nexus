@@ -365,12 +365,17 @@
       "id": "2026-04-06-acp-sdk-bridge",
       "title": "ACP SDK Bridge Implementation",
       "file": ".agents/plans/2026-04-06-pre-phase2.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@fullstack-dev-2",
+        "@qc-specialist",
+        "@qc-specialist-2",
+        "@qc-specialist-3",
+        "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "phase-2",
         "acp",
@@ -378,8 +383,9 @@
         "agent-interaction"
       ],
       "created_at": "2026-04-06",
-      "updated_at": "2026-04-06",
-      "notes": "Pre-Phase 2: implement actual ACP SDK calls via LocalSet bridge. 10 residuals.",
+      "updated_at": "2026-04-07",
+      "done_at": "2026-04-07",
+      "notes": "Merged to main. QC三审 3 rounds (Request Changes → fix → Approve). QA APPROVED. LocalSetBridge, real SDK calls, AcpError integration. 15 files changed, 887 insertions.",
       "metadata": {
         "phase": "Phase 2",
         "branch_policy": "feature/v2.0-acp-sdk-bridge from main",
@@ -435,12 +441,16 @@
       "id": "2026-04-06-auth-flow",
       "title": "Auth Flow Completion",
       "file": ".agents/plans/2026-04-06-pre-phase2.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qc-specialist-2",
+        "@qc-specialist-3",
+        "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "phase-2",
         "auth",
@@ -448,8 +458,9 @@
         "daemon"
       ],
       "created_at": "2026-04-06",
-      "updated_at": "2026-04-06",
-      "notes": "Pre-Phase 2: device code OAuth, token lifecycle, daemon auth middleware. 3 residuals.",
+      "updated_at": "2026-04-07",
+      "done_at": "2026-04-07",
+      "notes": "Merged to main. QC三审 Approve. QA PASS. Device code OAuth, token lifecycle, auth middleware, CLI auth client. 15 files changed, 1362 insertions.",
       "metadata": {
         "phase": "Phase 2",
         "branch_policy": "feature/v2.0-auth-flow from main",
@@ -467,10 +478,12 @@
       "id": "2026-04-06-codegen-alignment",
       "title": "Codegen & Contract Alignment",
       "file": ".agents/plans/2026-04-06-pre-phase2.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
       ],
       "progress": 100,
       "tags": [
@@ -481,7 +494,8 @@
       ],
       "created_at": "2026-04-06",
       "updated_at": "2026-04-07",
-      "notes": "Implementation complete on feature/v2.0-codegen-alignment. All tests pass (480+), clippy clean, TS typecheck clean. 51 files changed.",
+      "done_at": "2026-04-07",
+      "notes": "Merged to main. QC Approve (single reviewer, S effort). QA PASS. Codegen pipeline fixed, context assembly types generated, registry types generated. 58 files changed, 1215 insertions.",
       "metadata": {
         "phase": "Phase 2",
         "branch_policy": "feature/v2.0-codegen-alignment from main",
