@@ -373,24 +373,30 @@ impl acp::Client for PolicyAwareClientHandler {
     }
 }
 
-/// Simple client handler for V1.0 — auto-grants all permissions.
+/// Simple client handler for V1.0 — routes tools through daemon (ACP-R8).
 ///
-/// This implements the ACP `Client` trait with a permissive policy:
+/// This implements the ACP `Client` trait with daemon-mediated tool access:
 /// - `request_permission`: Auto-grant with warning log
 /// - `session_notification`: Log updates for debugging
-/// - File/terminal operations: Return errors (not implemented in V1.0)
+/// - File operations: Route through daemon Local API
+/// - Terminal operations: Return errors (not implemented in V1.0)
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct SimpleClientHandler {
     /// Agent ID for logging context.
     agent_id: String,
+    /// Daemon client for tool execution.
+    daemon_client: crate::api::daemon_client::DaemonClient,
 }
 
 #[allow(dead_code)]
 impl SimpleClientHandler {
-    /// Create a new simple client handler.
-    pub fn new(agent_id: String) -> Self {
-        Self { agent_id }
+    /// Create a new simple client handler with daemon client.
+    pub fn new(agent_id: String, daemon_client: crate::api::daemon_client::DaemonClient) -> Self {
+        Self {
+            agent_id,
+            daemon_client,
+        }
     }
 }
 
@@ -539,8 +545,12 @@ impl AcpSdkAdapter {
     ///
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[allow(dead_code)]
-    pub fn new(agent_id: String, agent_path: PathBuf) -> Self {
-        let handler = SimpleClientHandler::new(agent_id.clone());
+    pub fn new(
+        agent_id: String,
+        agent_path: PathBuf,
+        daemon_client: crate::api::daemon_client::DaemonClient,
+    ) -> Self {
+        let handler = SimpleClientHandler::new(agent_id.clone(), daemon_client);
         Self {
             agent_path,
             agent_id: agent_id.clone(),
@@ -562,8 +572,9 @@ impl AcpSdkAdapter {
         agent_path: PathBuf,
         stdin: tokio::process::ChildStdin,
         stdout: tokio::process::ChildStdout,
+        daemon_client: crate::api::daemon_client::DaemonClient,
     ) -> Self {
-        let handler = SimpleClientHandler::new(agent_id.clone());
+        let handler = SimpleClientHandler::new(agent_id.clone(), daemon_client);
         let bridge = LocalSetBridge::new();
         let connection = Arc::new(RwLock::new(None));
 
@@ -874,9 +885,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_new_creates_bridge() {
+        let daemon_client = crate::api::daemon_client::DaemonClient::new("http://localhost:8420");
         let adapter = AcpSdkAdapter::new(
             "test-agent".to_string(),
             PathBuf::from("/usr/bin/test-agent"),
+            daemon_client,
         );
 
         assert_eq!(adapter.agent_id(), "test-agent");
@@ -889,9 +902,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_initialize_without_connection_fails() {
+        let daemon_client = crate::api::daemon_client::DaemonClient::new("http://localhost:8420");
         let adapter = AcpSdkAdapter::new(
             "test-agent".to_string(),
             PathBuf::from("/usr/bin/test-agent"),
+            daemon_client,
         );
 
         let request = InitializeRequest::new(ProtocolVersion::LATEST);
