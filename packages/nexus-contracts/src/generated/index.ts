@@ -9,28 +9,49 @@
 // Common types (type aliases, enums, SourceAnchor)
 export * from './CommonTypes';
 
+// Per-schema modules (stable order: sorted schema paths at load time)
+export * from './RegistryManifest';
+export * from './ConflictResponse';
+export * from './VersionRef';
+export * from './Bundle';
+export * from './Creator';
+export * from './ForkBranch';
+export * from './KeyBlock';
+export * from './ManuscriptState';
+export * from './Memory';
+export * from './OutboxEntry';
+export * from './Pairing';
+export * from './ReferenceSource';
+export * from './StoryManifest';
+export * from './SyncCommand';
+export * from './TimelineEvent';
+export * from './WorldMembership';
+export * from './World';
+export * from './Meta';
+export * from './ContextAssemblyV1';
+
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
-  ContextAssemblyV1: 1,
-  Meta: 1,
-  World: 1,
-  WorldMembership: 1,
-  TimelineEvent: 1,
-  SyncCommand: 1,
-  StoryManifest: 1,
-  ReferenceSource: 1,
-  Pairing: 1,
-  OutboxEntry: 1,
-  Memory: 1,
-  ManuscriptState: 1,
-  KeyBlock: 1,
-  ForkBranch: 1,
-  Creator: 1,
-  Bundle: 1,
-  VersionRef: 1,
-  ConflictResponse: 1,
   RegistryManifest: 1,
+  ConflictResponse: 1,
+  VersionRef: 1,
+  Bundle: 1,
+  Creator: 1,
+  ForkBranch: 1,
+  KeyBlock: 1,
+  ManuscriptState: 1,
+  Memory: 1,
+  OutboxEntry: 1,
+  Pairing: 1,
+  ReferenceSource: 1,
+  StoryManifest: 1,
+  SyncCommand: 1,
+  TimelineEvent: 1,
+  WorldMembership: 1,
+  World: 1,
+  Meta: 1,
+  ContextAssemblyV1: 1,
 };
 
-// Latest schema version
+// Highest schema_version among emitted contract schemas
 export const LATEST_SCHEMA_VERSION = 1;

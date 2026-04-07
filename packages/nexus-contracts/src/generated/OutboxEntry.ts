@@ -10,7 +10,7 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type DeliveryState = 'staged' | 'ready' | 'sent' | 'acked' | 'conflicted' | 'failed';
+export type OutboxEntryDeliveryState = 'staged' | 'ready' | 'sent' | 'acked' | 'conflicted' | 'failed';
 
 /** OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13. */
 export interface OutboxEntry {
@@ -18,7 +18,7 @@ export interface OutboxEntry {
   outbox_entry_id: string;
   bundle_id: string;
   idempotency_key: string;
-  delivery_state: DeliveryState;
+  delivery_state: OutboxEntryDeliveryState;
   retry_count?: number;
   last_error?: string | null;
   next_retry_at?: string;

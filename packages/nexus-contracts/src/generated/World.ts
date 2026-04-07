@@ -10,7 +10,7 @@ import type { SchemaVersion, TimePolicy, Visibility } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type Status = 'active' | 'paused' | 'archived';
+export type WorldStatus = 'active' | 'paused' | 'archived';
 
 /** World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3. */
 export interface World {
@@ -19,7 +19,7 @@ export interface World {
   owner_creator_id: string;
   title: string;
   slug: string;
-  status: Status;
+  status: WorldStatus;
   visibility: Visibility;
   time_policy: TimePolicy;
   canon_revision?: number;

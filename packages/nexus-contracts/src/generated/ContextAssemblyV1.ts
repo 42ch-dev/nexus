@@ -10,7 +10,7 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type MemoryKinds = 'story_summary' | 'research_material' | 'review_note';
+export type ContextAssembleRequestV1MemoryKinds = 'story_summary' | 'research_material' | 'review_note';
 
 /** Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform. */
 export interface ContextAssembleRequestV1 {
@@ -21,7 +21,7 @@ export interface ContextAssembleRequestV1 {
   include_memory?: boolean;
   include_timeline?: boolean;
   include_story_summaries?: boolean;
-  memory_kinds?: MemoryKinds[];
+  memory_kinds?: ContextAssembleRequestV1MemoryKinds[];
   max_timeline_events?: number | null;
   max_story_summaries?: number | null;
 }

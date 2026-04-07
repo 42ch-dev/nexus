@@ -10,13 +10,13 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type ManifestType = 'chapter' | 'arc' | 'story' | 'excerpt';
+export type StoryManifestManifestType = 'chapter' | 'arc' | 'story' | 'excerpt';
 
 /** Inline enum type */
-export type Status = 'summary_ready' | 'staged_for_publish' | 'published' | 'archived';
+export type StoryManifestStatus = 'summary_ready' | 'staged_for_publish' | 'published' | 'archived';
 
 /** Inline enum type */
-export type ManuscriptStorage = 'none' | 'local_workspace' | 'platform_sandbox';
+export type StoryManifestManuscriptStorage = 'none' | 'local_workspace' | 'platform_sandbox';
 
 /** StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9. */
 export interface StoryManifest {
@@ -24,13 +24,13 @@ export interface StoryManifest {
   story_manifest_id: string;
   world_id: string;
   creator_id: string;
-  manifest_type: ManifestType;
-  status: Status;
+  manifest_type: StoryManifestManifestType;
+  status: StoryManifestStatus;
   title: string;
   summary_unit_id: string;
   summary_text?: string;
   output_manuscript?: boolean;
-  manuscript_storage?: ManuscriptStorage;
+  manuscript_storage?: StoryManifestManuscriptStorage;
   local_path?: string;
   sandbox_path?: string | null;
   content_hash?: string | null;
