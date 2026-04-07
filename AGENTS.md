@@ -192,8 +192,8 @@ If you modify schemas without regenerating, the commit will be rejected by CI. D
 **Before opening a PR or merging to `main`:** run the same checks as the `CI` workflow (`.github/workflows/ci.yml`) so local results match GitHub Actions.
 
 ```bash
-# 1) JSON Schemas (install once: cd tooling/validation && npm install)
-node tooling/validation/schema-validator.js
+# 1) JSON Schemas (pnpm install at repo root, then:)
+pnpm run validate-schemas
 
 # 2) Codegen matches committed output (must produce no diff on generated dirs)
 pnpm run codegen
