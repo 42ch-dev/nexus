@@ -449,9 +449,13 @@ impl Drop for AcpSdkAdapter {
         if let Some(setup_task) = self._setup_task.take() {
             // Use tokio::spawn to join in an async context
             // We can't block in Drop, so we spawn a cleanup task
-            tokio::spawn(async move {
-                let _ = setup_task.await;
-            });
+            // Check if a tokio runtime is available to avoid panic during shutdown
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = setup_task.await;
+                });
+            }
+            // If no runtime is available, skip — the process is shutting down anyway
         }
     }
 }
