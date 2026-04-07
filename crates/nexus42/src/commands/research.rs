@@ -618,7 +618,7 @@ mod tests {
     fn test_pdf_extraction_without_tool() {
         // This test verifies error handling when pdftotext is missing
         // The actual extraction depends on the tool being installed
-        let result = extract_pdf_content(Path::new("/nonexistent.pdf"));
+        let result = extract_pdf_content(std::path::Path::new("/nonexistent.pdf"));
         // Either the tool is not found, or the file doesn't exist
         assert!(result.is_err());
     }
