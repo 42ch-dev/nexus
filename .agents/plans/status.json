@@ -608,7 +608,9 @@
         "commits": "7 commits (d2e86c0..0222e46)",
         "files_changed": "54 files (2331 insertions, 205 deletions)",
         "tests": "~662 tests passing",
-        "schemas": "25 schemas valid"
+        "schemas": "25 schemas valid",
+        "wave_1_merged": true,
+        "wave_1_merged_at": "2026-04-08"
       }
     }
   ],
@@ -739,6 +741,10 @@
       {
         "updated_at": "2026-04-08",
         "message": "V1.1 Wave 1 complete: DM-R5 resolved (MembershipRole aligned), 3 schemas created (delta/workspace-binding/agent-profile), W1-C1 fixed (AgentProfile enums), QC三审 APPROVE. 7 commits, 662 tests passing, 25 schemas valid. Ready for merge."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "Wave 1 merged to main: DM-R5 resolved, 3 schemas created, W1-C1 fixed, QC APPROVE. 59 files, 4102 insertions. Ready for Wave 2."
       }
     ],
     "residual_findings": {
