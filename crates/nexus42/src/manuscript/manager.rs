@@ -11,6 +11,52 @@ use nexus_domain::manuscript_state::ManuscriptState;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
+/// Maximum allowed length for a manuscript title (filesystem limit)
+const MAX_TITLE_LENGTH: usize = 255;
+
+/// Sanitize a manuscript title to prevent path traversal attacks.
+///
+/// Returns an error if the title:
+/// - Is empty after stripping whitespace
+/// - Contains `..`, `/`, `\`, or null bytes
+/// - Exceeds 255 characters
+pub fn sanitize_title(title: &str) -> Result<String> {
+    let trimmed = title.trim();
+
+    if trimmed.is_empty() {
+        return Err(CliError::Config(
+            "Manuscript title cannot be empty".to_string(),
+        ));
+    }
+
+    if trimmed.len() > MAX_TITLE_LENGTH {
+        return Err(CliError::Config(format!(
+            "Manuscript title exceeds maximum length of {} characters",
+            MAX_TITLE_LENGTH
+        )));
+    }
+
+    if trimmed.contains("..") {
+        return Err(CliError::Config(
+            "Manuscript title cannot contain '..' (path traversal blocked)".to_string(),
+        ));
+    }
+
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(CliError::Config(
+            "Manuscript title cannot contain '/' or '\\'".to_string(),
+        ));
+    }
+
+    if trimmed.contains('\0') {
+        return Err(CliError::Config(
+            "Manuscript title cannot contain null bytes".to_string(),
+        ));
+    }
+
+    Ok(trimmed.to_string())
+}
+
 /// Validate that a world ID has the `wld_` prefix
 pub fn validate_world_id(world_id: &str) -> Result<()> {
     if !world_id.starts_with("wld_") {
@@ -56,25 +102,34 @@ impl ManuscriptManager {
     }
 
     /// Get the path to a specific manuscript's directory
-    pub fn manuscript_dir(&self, title: &str) -> PathBuf {
-        self.stories_dir().join(title)
+    ///
+    /// Title is sanitized to prevent path traversal attacks.
+    pub fn manuscript_dir(&self, title: &str) -> Result<PathBuf> {
+        let safe = sanitize_title(title)?;
+        Ok(self.stories_dir().join(safe))
     }
 
     /// Get the path to a manuscript's main file
-    pub fn manuscript_file(&self, title: &str) -> PathBuf {
-        self.manuscript_dir(title).join("manuscript.md")
+    ///
+    /// Title is sanitized to prevent path traversal attacks.
+    pub fn manuscript_file(&self, title: &str) -> Result<PathBuf> {
+        let safe = sanitize_title(title)?;
+        Ok(self.manuscript_dir(&safe)?.join("manuscript.md"))
     }
 
     /// Get the path to a manuscript's metadata file
-    pub fn metadata_file(&self, title: &str) -> PathBuf {
-        self.manuscript_dir(title).join("metadata.json")
+    ///
+    /// Title is sanitized to prevent path traversal attacks.
+    pub fn metadata_file(&self, title: &str) -> Result<PathBuf> {
+        let safe = sanitize_title(title)?;
+        Ok(self.manuscript_dir(&safe)?.join("metadata.json"))
     }
 
     /// Create a new manuscript with the given title
     pub fn create(&self, title: &str, world_id: Option<&str>) -> Result<PathBuf> {
         validate_world_id(world_id.unwrap_or("wld_default"))?;
 
-        let dir = self.manuscript_dir(title);
+        let dir = self.manuscript_dir(title)?;
 
         if dir.exists() {
             return Err(CliError::Config(format!(
@@ -89,12 +144,12 @@ impl ManuscriptManager {
 
         // Create manuscript.md from template
         let content = MANUSCRIPT_TEMPLATE.replace("{{title}}", title);
-        let manuscript_path = self.manuscript_file(title);
+        let manuscript_path = self.manuscript_file(title)?;
         std::fs::write(&manuscript_path, content)?;
 
         // Create metadata
         let metadata = ManuscriptMetadata::new(title, world_id);
-        let metadata_path = self.metadata_file(title);
+        let metadata_path = self.metadata_file(title)?;
         let metadata_json = serde_json::to_string_pretty(&metadata)?;
         std::fs::write(&metadata_path, metadata_json)?;
 
@@ -103,7 +158,7 @@ impl ManuscriptManager {
 
     /// Read the content of a manuscript
     pub fn read_content(&self, title: &str) -> Result<String> {
-        let path = self.manuscript_file(title);
+        let path = self.manuscript_file(title)?;
         if !path.exists() {
             return Err(CliError::Config(format!(
                 "Manuscript '{}' not found. Create it with: nexus42 manuscript create \"{}\"",
@@ -116,7 +171,7 @@ impl ManuscriptManager {
 
     /// Read metadata for a manuscript
     pub fn read_metadata(&self, title: &str) -> Result<ManuscriptMetadata> {
-        let path = self.metadata_file(title);
+        let path = self.metadata_file(title)?;
         if !path.exists() {
             return Err(CliError::Config(format!(
                 "Manuscript '{}' metadata not found.",
@@ -130,7 +185,7 @@ impl ManuscriptManager {
 
     /// Write content to a manuscript
     pub fn write_content(&self, title: &str, content: &str) -> Result<()> {
-        let path = self.manuscript_file(title);
+        let path = self.manuscript_file(title)?;
         if !path.exists() {
             return Err(CliError::Config(format!(
                 "Manuscript '{}' not found.",
@@ -264,7 +319,7 @@ impl ManuscriptManager {
             metadata.phase = phase.to_string();
             metadata.updated_at = now.clone();
             if let Ok(json) = serde_json::to_string_pretty(&metadata) {
-                let _ = std::fs::write(self.metadata_file(title), json);
+                let _ = std::fs::write(self.metadata_file(title)?, json);
             }
         }
 
@@ -332,7 +387,7 @@ impl ManuscriptManager {
             metadata.phase = phase_str.to_string();
             metadata.updated_at = now.clone();
             if let Ok(json) = serde_json::to_string_pretty(&metadata) {
-                let _ = std::fs::write(self.metadata_file(title), json);
+                let _ = std::fs::write(self.metadata_file(title)?, json);
             }
         }
 
@@ -344,7 +399,7 @@ impl ManuscriptManager {
         let mut checks = Vec::new();
 
         // 1. File integrity
-        let manuscript_path = self.manuscript_file(title);
+        let manuscript_path = self.manuscript_file(title)?;
         if manuscript_path.exists() {
             let content = self.read_content(title)?;
             // UTF-8 safety check (CTX-R5)
@@ -849,22 +904,69 @@ mod tests {
 
         assert_eq!(manager.stories_dir(), tmp.path().join("Stories"));
         assert_eq!(
-            manager.manuscript_dir("My Novel"),
+            manager.manuscript_dir("My Novel").unwrap(),
             tmp.path().join("Stories").join("My Novel")
         );
         assert_eq!(
-            manager.manuscript_file("My Novel"),
+            manager.manuscript_file("My Novel").unwrap(),
             tmp.path()
                 .join("Stories")
                 .join("My Novel")
                 .join("manuscript.md")
         );
         assert_eq!(
-            manager.metadata_file("My Novel"),
+            manager.metadata_file("My Novel").unwrap(),
             tmp.path()
                 .join("Stories")
                 .join("My Novel")
                 .join("metadata.json")
         );
+    }
+
+    // ── Title sanitization (QC3-C1) ──
+
+    #[test]
+    fn test_sanitize_title_normal() {
+        assert_eq!(sanitize_title("My Novel").unwrap(), "My Novel");
+        assert_eq!(sanitize_title("  Hello World  ").unwrap(), "Hello World");
+        assert_eq!(sanitize_title("日本語タイトル").unwrap(), "日本語タイトル");
+    }
+
+    #[test]
+    fn test_sanitize_title_rejects_empty() {
+        assert!(sanitize_title("").is_err());
+        assert!(sanitize_title("   ").is_err());
+        assert!(sanitize_title("\t\n").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_title_rejects_path_traversal() {
+        assert!(sanitize_title("../../../etc").is_err());
+        assert!(sanitize_title("foo/../bar").is_err());
+        assert!(sanitize_title("..hidden").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_title_rejects_slashes() {
+        assert!(sanitize_title("my/novel").is_err());
+        assert!(sanitize_title("my\\novel").is_err());
+        assert!(sanitize_title("foo/bar/baz").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_title_rejects_null_bytes() {
+        assert!(sanitize_title("title\0evil").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_title_rejects_too_long() {
+        let long_title = "a".repeat(256);
+        assert!(sanitize_title(&long_title).is_err());
+    }
+
+    #[test]
+    fn test_sanitize_title_accepts_max_length() {
+        let max_title = "a".repeat(255);
+        assert!(sanitize_title(&max_title).is_ok());
     }
 }
