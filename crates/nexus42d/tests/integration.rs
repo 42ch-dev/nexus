@@ -129,8 +129,7 @@ async fn auth_status_endpoint() {
 
     response.assert_status_ok();
     let body: serde_json::Value = response.json();
-    assert_eq!(body["user_authenticated"], false);
-    assert_eq!(body["creator_tokens"], 0);
+    assert_eq!(body["authenticated"], false);
 }
 
 #[tokio::test]

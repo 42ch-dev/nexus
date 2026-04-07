@@ -40,9 +40,9 @@ pub async fn run(cmd: AuthCommand, config: &CliConfig) -> Result<()> {
         } => {
             let refresh = refresh_token.unwrap_or_default();
             let uid = user_id.unwrap_or_else(|| format!("usr_dev_{}", uuid::Uuid::new_v4()));
-            auth::user_auth::login_with_token(access_token, refresh, uid)
+            auth::user_auth::login_with_token(config, access_token, refresh, uid).await
         }
-        AuthCommand::Logout => auth::user_auth::logout(),
-        AuthCommand::Status => auth::user_auth::status(),
+        AuthCommand::Logout => auth::user_auth::logout(config).await,
+        AuthCommand::Status => auth::user_auth::status(config).await,
     }
 }

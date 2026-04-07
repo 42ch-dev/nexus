@@ -97,6 +97,11 @@ impl WorkspaceState {
         &self.nexus_home
     }
 
+    /// Get a clone of the database pool (for TokenManager, etc.)
+    pub fn db_pool(&self) -> DbPool {
+        self.db.clone()
+    }
+
     /// Get uptime in seconds
     pub async fn uptime_seconds(&self) -> u64 {
         self.started_at.elapsed().as_secs()
