@@ -46,6 +46,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::acp::error::AcpResult;
 use crate::acp::localset_bridge::LocalSetBridge;
+use crate::acp::policy::{PermissionDecision, PermissionPolicy};
 
 // Re-export commonly used SDK types for convenience.
 #[allow(unused_imports)]
@@ -154,6 +155,222 @@ pub trait NexusAcpClient: Send + Sync {
 
     /// Subscribe to stream messages from the agent.
     fn subscribe(&self) -> StreamReceiver;
+}
+
+/// Policy-aware client handler for V1.1+ — uses configurable permission policy.
+///
+/// This implements the ACP `Client` trait with policy-based permission handling:
+/// - `request_permission`: Consults PermissionPolicy, prompts if needed
+/// - `session_notification`: Log updates for debugging
+/// - File/terminal operations: Return errors (not implemented in V1.0)
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct PolicyAwareClientHandler {
+    /// Agent ID for logging context.
+    agent_id: String,
+    /// Permission policy for evaluating requests.
+    policy: Arc<RwLock<PermissionPolicy>>,
+    /// Workspace root for saving policy changes.
+    workspace_root: PathBuf,
+}
+
+#[allow(dead_code)]
+impl PolicyAwareClientHandler {
+    /// Create a new policy-aware client handler.
+    pub fn new(agent_id: String, workspace_root: PathBuf) -> Self {
+        let policy = PermissionPolicy::load(&workspace_root).unwrap_or_default();
+        Self {
+            agent_id,
+            policy: Arc::new(RwLock::new(policy)),
+            workspace_root,
+        }
+    }
+
+    /// Prompt user for permission decision.
+    async fn prompt_user(
+        &self,
+        tool_call: &str,
+        options: &[acp::PermissionOption],
+    ) -> PermissionDecision {
+        println!("\n⚠️  Agent '{}' requests permission:", self.agent_id);
+        println!("   Tool: {}", tool_call);
+
+        if !options.is_empty() {
+            println!("\nOptions:");
+            for (i, opt) in options.iter().enumerate() {
+                println!("  {}. {}", i + 1, opt.name);
+            }
+        }
+
+        println!("\nChoose action:");
+        println!("  [g] Grant this time");
+        println!("  [G] Grant always (save to policy)");
+        println!("  [d] Deny this time");
+        println!("  [D] Deny always (save to policy)");
+        println!("  [c] Cancel");
+
+        // Read user input (simplified for V1.1 - in production, use a proper prompt library)
+        // For now, we default to asking, but save policy if user chooses
+        // TODO: Add proper interactive prompting with dialoguer or similar
+
+        // Default to deny for safety in automated environments
+        tracing::warn!(
+            agent_id = %self.agent_id,
+            tool_call = %tool_call,
+            "Interactive prompt not available - defaulting to deny"
+        );
+
+        PermissionDecision::Deny
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl acp::Client for PolicyAwareClientHandler {
+    /// Evaluate permission request against policy (V1.1 policy engine).
+    async fn request_permission(
+        &self,
+        args: acp::RequestPermissionRequest,
+    ) -> acp::Result<acp::RequestPermissionResponse> {
+        let tool_call_name = format!("{:?}", args.tool_call);
+
+        tracing::info!(
+            agent_id = %self.agent_id,
+            tool_call = %tool_call_name,
+            "Permission request received"
+        );
+
+        // Load current policy
+        let policy = self.policy.read().await;
+        let decision = policy.evaluate(&tool_call_name);
+        drop(policy);
+
+        // If decision is Ask, prompt user
+        let final_decision = if decision == PermissionDecision::Ask {
+            self.prompt_user(&tool_call_name, &args.options).await
+        } else {
+            decision
+        };
+
+        match final_decision {
+            PermissionDecision::Grant => {
+                tracing::info!(
+                    agent_id = %self.agent_id,
+                    tool_call = %tool_call_name,
+                    "Permission granted"
+                );
+
+                if args.options.is_empty() {
+                    tracing::error!(
+                        agent_id = %self.agent_id,
+                        "Permission request has no options - cancelling"
+                    );
+                    return Ok(acp::RequestPermissionResponse::new(
+                        acp::RequestPermissionOutcome::Cancelled,
+                    ));
+                }
+
+                let selected_option =
+                    acp::SelectedPermissionOutcome::new(args.options[0].option_id.clone());
+                Ok(acp::RequestPermissionResponse::new(
+                    acp::RequestPermissionOutcome::Selected(selected_option),
+                ))
+            }
+            PermissionDecision::Deny => {
+                tracing::warn!(
+                    agent_id = %self.agent_id,
+                    tool_call = %tool_call_name,
+                    "Permission denied"
+                );
+                Ok(acp::RequestPermissionResponse::new(
+                    acp::RequestPermissionOutcome::Cancelled,
+                ))
+            }
+            PermissionDecision::Ask => {
+                // Should not reach here (Ask is handled above), but deny for safety
+                tracing::warn!(
+                    agent_id = %self.agent_id,
+                    tool_call = %tool_call_name,
+                    "Permission denied (ask fallback)"
+                );
+                Ok(acp::RequestPermissionResponse::new(
+                    acp::RequestPermissionOutcome::Cancelled,
+                ))
+            }
+        }
+    }
+
+    /// Log session notifications for debugging.
+    async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
+        tracing::debug!(
+            agent_id = %self.agent_id,
+            session_id = ?args.session_id,
+            "Received session notification from agent"
+        );
+        Ok(())
+    }
+
+    /// File system operations — not implemented in V1.0.
+    async fn write_text_file(
+        &self,
+        _args: acp::WriteTextFileRequest,
+    ) -> acp::Result<acp::WriteTextFileResponse> {
+        tracing::warn!(
+            agent_id = %self.agent_id,
+            "Agent requested fs/write_text_file — not supported in V1.0"
+        );
+        Err(Error::method_not_found())
+    }
+
+    async fn read_text_file(
+        &self,
+        _args: acp::ReadTextFileRequest,
+    ) -> acp::Result<acp::ReadTextFileResponse> {
+        tracing::warn!(
+            agent_id = %self.agent_id,
+            "Agent requested fs/read_text_file — not supported in V1.0"
+        );
+        Err(Error::method_not_found())
+    }
+
+    /// Terminal operations — not implemented in V1.0.
+    async fn create_terminal(
+        &self,
+        _args: acp::CreateTerminalRequest,
+    ) -> acp::Result<acp::CreateTerminalResponse> {
+        tracing::warn!(
+            agent_id = %self.agent_id,
+            "Agent requested terminal/create — not supported in V1.0"
+        );
+        Err(Error::method_not_found())
+    }
+
+    async fn terminal_output(
+        &self,
+        _args: acp::TerminalOutputRequest,
+    ) -> acp::Result<acp::TerminalOutputResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn release_terminal(
+        &self,
+        _args: acp::ReleaseTerminalRequest,
+    ) -> acp::Result<acp::ReleaseTerminalResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn wait_for_terminal_exit(
+        &self,
+        _args: acp::WaitForTerminalExitRequest,
+    ) -> acp::Result<acp::WaitForTerminalExitResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn kill_terminal(
+        &self,
+        _args: acp::KillTerminalRequest,
+    ) -> acp::Result<acp::KillTerminalResponse> {
+        Err(Error::method_not_found())
+    }
 }
 
 /// Simple client handler for V1.0 — auto-grants all permissions.

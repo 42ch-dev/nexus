@@ -21,6 +21,8 @@ pub mod init;
 #[deny(clippy::unwrap_used)]
 pub mod manuscript;
 #[deny(clippy::unwrap_used)]
+pub mod policy;
+#[deny(clippy::unwrap_used)]
 pub mod research;
 #[deny(clippy::unwrap_used)]
 pub mod sync;
