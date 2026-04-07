@@ -1,3 +1,5 @@
+import type { SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus SyncCommand
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source sync-command.schema.json
  */
-import type { SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type CommandType = 'advance_world' | 'inject_future_event' | 'extract_kb' | 'sync_push' | 'sync_pull' | 'fork_world' | 'publish_story';
@@ -17,6 +18,7 @@ export type Origin = 'local_user' | 'local_agent' | 'official_creator' | 'system
 /** Inline enum type */
 export type Status = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
+/** SyncCommand entity representing a business action with audit attribution. Aligned with data-model-v1.md §5.10. */
 export interface SyncCommand {
   schema_version: number;
   command_id: string;

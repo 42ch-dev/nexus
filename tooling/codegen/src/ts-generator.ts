@@ -1,7 +1,26 @@
-import { LoadedSchema } from './schema-loader';
+import { LoadedSchema, COMMON_DEFINITIONS } from './schema-loader';
 import { resolveRef, isCommonEnum, getCommonBaseType } from './schema-loader';
 import { resolveFromRoot, writeFile, logger } from './utils';
 import path from 'path';
+
+/**
+ * Check if a schema has object definitions with properties.
+ */
+function schemaHasObjectDefinitions(schema: LoadedSchema): boolean {
+  const definitions = getDefinitions(schema);
+  if (!definitions) return false;
+  return Object.values(definitions).some(
+    (def: any) => def.type === 'object' && def.properties && Object.keys(def.properties).length > 0,
+  );
+}
+
+/**
+ * Get definitions from a schema (supports both `definitions` and `$defs`).
+ */
+function getDefinitions(schema: LoadedSchema): Record<string, Record<string, unknown>> | undefined {
+  const d = schema.schemaContent.definitions || schema.schemaContent.$defs;
+  return d as Record<string, Record<string, unknown>> | undefined;
+}
 
 /**
  * Generate TypeScript types from schemas.
@@ -10,21 +29,30 @@ export function generateTSTypes(schemas: LoadedSchema[]): void {
   const outputDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outputDir}`);
 
-  // Filter schemas that need struct generation (have properties)
-  const structSchemas = schemas.filter(s => !s.isDefinitionsOnly);
-
   // Generate common types file first
   generateCommonTypesFile(outputDir);
 
-  // Generate individual type files
-  for (const schema of structSchemas) {
-    generateTSTypeFile(schema, outputDir);
+  // Collect schemas that produce type files
+  const schemasWithTypes: LoadedSchema[] = [];
+
+  for (const schema of schemas) {
+    if (schema.isExplicitlySkipped) continue;
+
+    const hasTopLevel = !schema.isDefinitionsOnly;
+    const hasDefs = schemaHasObjectDefinitions(schema);
+
+    if (!hasTopLevel && !hasDefs) continue;
+
+    schemasWithTypes.push(schema);
+
+    // Generate individual type files
+    generateTSTypeFile(schema, outputDir, hasTopLevel, hasDefs);
   }
 
   // Generate index.ts with re-exports
-  generateTSIndex(structSchemas, outputDir);
+  generateTSIndex(schemasWithTypes, outputDir);
 
-  logger.success(`Generated TypeScript types for ${structSchemas.length} schema(s) (+ common types)`);
+  logger.success(`Generated TypeScript types for ${schemasWithTypes.length} schema(s) (+ common types)`);
 }
 
 /**
@@ -61,68 +89,128 @@ export const LATEST_SCHEMA_VERSION = ${schemas[0]?.schemaVersion ?? 1};
 }
 
 /**
- * Generate individual TypeScript type file for a schema.
+ * Generate TypeScript type file(s) for a schema.
  *
- * Strategy:
- * - Common ref types (from $ref to common.schema.json#/definitions/*) → import from CommonTypes
- * - SourceAnchor ref → import from CommonTypes
- * - Inline enums (enum values on non-$ref properties) → define as type alias in this file
- * - All other types → resolve inline
+ * Handles three cases:
+ * 1. Top-level properties only → single interface
+ * 2. Definitions only → one interface per definition
+ * 3. Both → main interface + definition interfaces (all in same file)
  */
-function generateTSTypeFile(schema: LoadedSchema, outputDir: string): void {
-  const typeName = schema.typeName;
-  const schemaContent = schema.schemaContent;
-  const properties = (schemaContent.properties || {}) as Record<string, unknown>;
-  const requiredFields = (schemaContent.required || []) as string[];
-
-  // Collect information during property traversal
-  const commonTypeImports: Set<string> = new Set(['SchemaVersion']);
-  const inlineEnums: Map<string, string[]> = new Map(); // name → values
-  const fields: string[] = [];
-
-  // Check if SourceAnchor is referenced anywhere in this schema
-  const schemaJSON = JSON.stringify(schemaContent);
-  if (schemaJSON.includes('source-anchor.schema.json')) {
-    commonTypeImports.add('SourceAnchor');
-  }
-
-  for (const [propName, propDef] of Object.entries(properties)) {
-    const def = propDef as Record<string, unknown>;
-    const isRequired = requiredFields.includes(propName);
-    const { tsType, commonRef } = resolveTSType(def, propName, inlineEnums);
-    if (commonRef) {
-      commonTypeImports.add(commonRef);
-    }
-    const optionalMark = isRequired ? '' : '?';
-    fields.push(`  ${propName}${optionalMark}: ${tsType};`);
-  }
-
-  // Build file content
+function generateTSTypeFile(
+  schema: LoadedSchema,
+  outputDir: string,
+  hasTopLevel: boolean,
+  hasDefs: boolean,
+): void {
   let content = `/**
- * ${schemaContent.title || typeName}
+ * ${schema.schemaContent.title || schema.typeName}
  *
- * ${schemaContent.description || 'Generated from JSON Schema'}
+ * ${schema.schemaContent.description || 'Generated from JSON Schema'}
  *
  * @schema_version ${schema.schemaVersion}
  * @source ${schema.fileName}
  */
 `;
 
-  // Import from CommonTypes
+  const localDefinitions = hasDefs ? getDefinitions(schema) : undefined;
+  const commonTypeImports: Set<string> = new Set(['SchemaVersion']);
+  const allInlineEnums: Map<string, string[]> = new Map();
+  const definitionNames: string[] = [];
+
+  // Check if SourceAnchor is referenced anywhere in this schema
+  const schemaJSON = JSON.stringify(schema.schemaContent);
+  if (schemaJSON.includes('source-anchor.schema.json')) {
+    commonTypeImports.add('SourceAnchor');
+  }
+
+  // Generate main interface from top-level properties
+  if (hasTopLevel) {
+    const { fieldsText, imports } = generateTSTypeFields(
+      schema.schemaContent,
+      schema.typeName,
+      commonTypeImports,
+      allInlineEnums,
+      localDefinitions,
+    );
+    for (const imp of imports) commonTypeImports.add(imp);
+    content += fieldsText + '\n';
+  }
+
+  // Generate interfaces from definitions
+  if (hasDefs && localDefinitions) {
+    for (const [defName, defContent] of Object.entries(localDefinitions)) {
+      const def = defContent as Record<string, unknown>;
+      if (def.type !== 'object' || !def.properties) continue;
+
+      definitionNames.push(defName);
+      const { fieldsText, imports } = generateTSTypeFields(
+        def,
+        defName,
+        commonTypeImports,
+        allInlineEnums,
+        localDefinitions,
+      );
+      for (const imp of imports) commonTypeImports.add(imp);
+      content += fieldsText + '\n';
+    }
+  }
+
+  // Build imports
   const imports = [...commonTypeImports].sort();
   if (imports.length > 0) {
-    content += `import type { ${imports.join(', ')} } from './CommonTypes';\n`;
+    content = `import type { ${imports.join(', ')} } from './CommonTypes';\n\n` + content;
   }
 
   // Define inline enums as type aliases
-  for (const [enumName, values] of inlineEnums) {
-    content += `\n/** Inline enum type */\nexport type ${enumName} = ${values.map(v => `'${v}'`).join(' | ')};\n`;
+  let enumBlock = '';
+  for (const [enumName, values] of allInlineEnums) {
+    enumBlock += `\n/** Inline enum type */\nexport type ${enumName} = ${values.map(v => `'${v}'`).join(' | ')};\n`;
   }
 
-  // Main interface
-  content += `\nexport interface ${typeName} {\n${fields.join('\n')}\n}\n`;
+  // Insert enum block after imports
+  if (enumBlock) {
+    const importEnd = content.indexOf('*/', content.indexOf('import type'));
+    if (importEnd !== -1) {
+      const afterImport = content.indexOf('\n', importEnd) + 1;
+      content = content.slice(0, afterImport) + enumBlock + '\n' + content.slice(afterImport);
+    }
+  }
 
-  writeFile(path.join(outputDir, `${typeName}.ts`), content);
+  writeFile(path.join(outputDir, `${schema.typeName}.ts`), content);
+}
+
+/**
+ * Generate TypeScript interface fields from a schema or definition object.
+ * Returns the interface text and any common type imports needed.
+ */
+function generateTSTypeFields(
+  schemaContent: Record<string, unknown>,
+  typeName: string,
+  existingImports: Set<string>,
+  inlineEnums: Map<string, string[]>,
+  localDefinitions?: Record<string, Record<string, unknown>>,
+): { fieldsText: string; imports: Set<string> } {
+  const properties = (schemaContent.properties || {}) as Record<string, unknown>;
+  const requiredFields = (schemaContent.required || []) as string[];
+  const newImports: Set<string> = new Set();
+  const fields: string[] = [];
+
+  for (const [propName, propDef] of Object.entries(properties)) {
+    const def = propDef as Record<string, unknown>;
+    const isRequired = requiredFields.includes(propName);
+    const { tsType, commonRef } = resolveTSType(def, propName, inlineEnums, localDefinitions);
+    if (commonRef) {
+      newImports.add(commonRef);
+    }
+    const optionalMark = isRequired ? '' : '?';
+    // Quote property names that contain hyphens (invalid in unquoted TS identifiers)
+    const tsPropName = /-/.test(propName) ? `'${propName}'` : propName;
+    fields.push(`  ${tsPropName}${optionalMark}: ${tsType};`);
+  }
+
+  const desc = (schemaContent.description || typeName) as string;
+  const fieldsText = `/** ${desc} */\nexport interface ${typeName} {\n${fields.join('\n')}\n}`;
+  return { fieldsText, imports: newImports };
 }
 
 /**
@@ -133,6 +221,7 @@ function resolveTSType(
   propDef: Record<string, unknown>,
   propName: string,
   inlineEnums: Map<string, string[]>,
+  localDefinitions?: Record<string, Record<string, unknown>>,
 ): { tsType: string; commonRef?: string } {
   const ref = propDef.$ref as string | undefined;
   const type = propDef.type;
@@ -146,6 +235,10 @@ function resolveTSType(
     if (defName && isCommonEnum(defName)) {
       return { tsType: defName, commonRef: defName };
     }
+    // Check local definitions (e.g., #/definitions/AgentEntry within same schema)
+    if (defName && localDefinitions && defName in localDefinitions) {
+      return { tsType: defName };
+    }
     if (defName) {
       return { tsType: getCommonBaseType(defName), commonRef: undefined };
     }
@@ -157,13 +250,13 @@ function resolveTSType(
     const nonNullTypes = type.filter(t => t !== 'null');
     const hasNull = type.includes('null');
     if (nonNullTypes.length === 1) {
-      const base = resolveSingleTSType(nonNullTypes[0], propDef, propName, inlineEnums);
+      const base = resolveSingleTSType(nonNullTypes[0], propDef, propName, inlineEnums, localDefinitions);
       return { tsType: hasNull ? `${base} | null` : base };
     }
     return { tsType: 'unknown' };
   }
 
-  return { tsType: resolveSingleTSType(type as string, propDef, propName, inlineEnums) };
+  return { tsType: resolveSingleTSType(type as string, propDef, propName, inlineEnums, localDefinitions) };
 }
 
 /**
@@ -174,6 +267,7 @@ function resolveSingleTSType(
   propDef: Record<string, unknown>,
   propName: string,
   inlineEnums: Map<string, string[]>,
+  localDefinitions?: Record<string, Record<string, unknown>>,
 ): string {
   switch (type) {
     case 'string':
@@ -195,16 +289,16 @@ function resolveSingleTSType(
         // Check if items is an object with its own properties
         if (items.type === 'object' && items.properties) {
           // Inline object inside array — build an inline type
-          return buildInlineObjectType(items, inlineEnums) + '[]';
+          return buildInlineObjectType(items, inlineEnums, localDefinitions) + '[]';
         }
-        const { tsType } = resolveTSType(items, propName, inlineEnums);
+        const { tsType } = resolveTSType(items, propName, inlineEnums, localDefinitions);
         return `${tsType}[]`;
       }
       return 'unknown[]';
     }
     case 'object': {
       if (propDef.properties) {
-        return buildInlineObjectType(propDef, inlineEnums);
+        return buildInlineObjectType(propDef, inlineEnums, localDefinitions);
       }
       return 'Record<string, unknown>';
     }
@@ -219,6 +313,7 @@ function resolveSingleTSType(
 function buildInlineObjectType(
   objDef: Record<string, unknown>,
   inlineEnums: Map<string, string[]>,
+  localDefinitions?: Record<string, Record<string, unknown>>,
 ): string {
   const props = (objDef.properties || {}) as Record<string, unknown>;
   const required = (objDef.required || []) as string[];
@@ -226,7 +321,7 @@ function buildInlineObjectType(
 
   for (const [k, v] of Object.entries(props)) {
     const isReq = required.includes(k);
-    const { tsType } = resolveTSType(v as Record<string, unknown>, k, inlineEnums);
+    const { tsType } = resolveTSType(v as Record<string, unknown>, k, inlineEnums, localDefinitions);
     parts.push(`${k}${isReq ? '' : '?'}: ${tsType}`);
   }
 
@@ -246,55 +341,28 @@ function toPascalCase(snakeStr: string): string {
 
 /**
  * Generate CommonTypes.ts with shared type definitions.
- * Contains: type aliases, common enums, and SourceAnchor interface.
+ * Driven from COMMON_DEFINITIONS map (populated from common.schema.json).
  */
 function generateCommonTypesFile(outputDir: string): void {
-  const aliases = [
-    { name: 'SchemaVersion', type: 'number', desc: 'Schema version as integer (e.g., 1)' },
-    { name: 'Timestamp', type: 'string', desc: 'ISO 8601 / RFC 3339 UTC datetime string' },
-    { name: 'WorldId', type: 'string', desc: "World ID (prefix: 'wld_')" },
-    { name: 'CreatorId', type: 'string', desc: "Creator ID (prefix: 'ctr_')" },
-    { name: 'UserId', type: 'string', desc: "User ID (prefix: 'usr_')" },
-    { name: 'KeyBlockId', type: 'string', desc: "KeyBlock ID (prefix: 'kb_')" },
-    { name: 'TimelineEventId', type: 'string', desc: "TimelineEvent ID (prefix: 'evt_')" },
-    { name: 'BundleId', type: 'string', desc: "DeltaBundle ID (prefix: 'bdl_')" },
-    { name: 'CommandId', type: 'string', desc: "SyncCommand ID (prefix: 'cmd_')" },
-    { name: 'WorkspaceId', type: 'string', desc: "Workspace ID (prefix: 'wrk_')" },
-    { name: 'DeltaSequence', type: 'number', desc: 'Monotonically increasing sequence number for deltas' },
-  ];
+  const typeAliases: Array<{ name: string; type: string; desc: string }> = [];
+  const enums: Array<{ name: string; values: string[]; desc: string }> = [];
 
-  const enums = [
-    {
-      name: 'ManuscriptPhase',
-      values: ['brainstorm', 'draft', 'review', 'finalize', 'published'],
-      desc: 'Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)',
-    },
-    {
-      name: 'TimePolicy',
-      values: ['manual', 'owner_driven', 'event_driven'],
-      desc: 'World timeline evolution policy (data-model-v1.md §5.3)',
-    },
-    {
-      name: 'Visibility',
-      values: ['private', 'unlisted', 'public'],
-      desc: 'Visibility/access level (data-model-v1.md §5.3)',
-    },
-    {
-      name: 'BlockType',
-      values: ['character', 'ability', 'scene', 'organization', 'item', 'conflict', 'info_point', 'event'],
-      desc: 'KeyBlock content type (data-model-v1.md §5.5)',
-    },
-    {
-      name: 'MemoryType',
-      values: ['canon', 'working', 'experience'],
-      desc: 'MemoryItem type (data-model-v1.md §5.8)',
-    },
-    {
-      name: 'BundleType',
-      values: ['world_sync', 'memory_sync', 'publish_metadata'],
-      desc: 'DeltaBundle type (data-model-v1.md §5.11)',
-    },
-  ];
+  for (const [name, def] of COMMON_DEFINITIONS.entries()) {
+    if (def.enum) {
+      enums.push({
+        name,
+        values: def.enum,
+        desc: def.description || `Enum type ${name}`,
+      });
+    } else {
+      const tsType = def.type === 'integer' ? 'number' : 'string';
+      typeAliases.push({
+        name,
+        type: tsType,
+        desc: def.description || `Type alias ${name}`,
+      });
+    }
+  }
 
   let content = `/**
  * Nexus Common Types
@@ -307,7 +375,7 @@ function generateCommonTypesFile(outputDir: string): void {
 
 `;
 
-  for (const alias of aliases) {
+  for (const alias of typeAliases) {
     content += `/** ${alias.desc} */\nexport type ${alias.name} = ${alias.type};\n\n`;
   }
 

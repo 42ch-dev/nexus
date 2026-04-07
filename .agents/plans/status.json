@@ -467,12 +467,12 @@
       "id": "2026-04-06-codegen-alignment",
       "title": "Codegen & Contract Alignment",
       "file": ".agents/plans/2026-04-06-pre-phase2.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "phase-2",
         "codegen",
@@ -480,11 +480,12 @@
         "schema-first"
       ],
       "created_at": "2026-04-06",
-      "updated_at": "2026-04-06",
-      "notes": "Pre-Phase 2: fix codegen pipeline, generate context assembly types, registry types. 5 residuals. No dependencies.",
+      "updated_at": "2026-04-07",
+      "notes": "Implementation complete on feature/v2.0-codegen-alignment. All tests pass (480+), clippy clean, TS typecheck clean. 51 files changed.",
       "metadata": {
         "phase": "Phase 2",
         "branch_policy": "feature/v2.0-codegen-alignment from main",
+        "working_branch": "feature/v2.0-codegen-alignment",
         "priority": "medium",
         "description": "Fix CommonTypes codegen to read from schema, generate context assembly types, generate registry manifest types",
         "dependency": "none (can run in parallel with all plans)",
@@ -492,7 +493,14 @@
           ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
         ],
         "effort": "S \u2014 ~1-2 agent sessions",
-        "residual_summary": "5 addressed (2 HIGH, 3 MEDIUM resolved)"
+        "residual_summary": "5 addressed (2 HIGH, 3 MEDIUM resolved)",
+        "tests": "480+ passed, 0 failed",
+        "clippy": "clean \u2014 0 warnings with -D warnings",
+        "task_status": {
+          "task_1": "done",
+          "task_2": "done",
+          "task_3": "done"
+        }
       }
     }
   ],

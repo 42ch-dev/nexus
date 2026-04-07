@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus Meta Schema
+/// Meta schema defining schema versioning and structure rules for all Nexus schemas
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Meta {

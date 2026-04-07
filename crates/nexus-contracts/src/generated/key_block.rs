@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::generated::common_types::{BlockType, SourceAnchor};
 
-/// Nexus KeyBlock
+/// KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct KeyBlock {

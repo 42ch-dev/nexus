@@ -1,3 +1,5 @@
+import type { SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus WorldMembership
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source world-membership.schema.json
  */
-import type { SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type Role = 'owner' | 'maintainer' | 'collaborator' | 'official_creator';
@@ -14,6 +15,7 @@ export type Role = 'owner' | 'maintainer' | 'collaborator' | 'official_creator';
 /** Inline enum type */
 export type MembershipStatus = 'active' | 'invited' | 'suspended' | 'removed';
 
+/** WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4. */
 export interface WorldMembership {
   schema_version: number;
   membership_id: string;
