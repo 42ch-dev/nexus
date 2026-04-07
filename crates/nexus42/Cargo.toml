@@ -22,6 +22,7 @@ clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = "0.8"
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 dirs = { workspace = true }
