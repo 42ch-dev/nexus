@@ -167,6 +167,47 @@ Project-level notes:
 3. **InReview**: QC review in progress (reports in `reports/<plan-id>/`)
 4. **Done**: Completed, merged to main
 
+### Pre-merge checklist (mandatory)
+
+**Before merging any feature branch or opening a PR that closes plan work**, update `.agents/plans/status.json` so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
+
+#### Required updates
+
+1. **`plans[].status`**, **`plans[].notes`**, **`plans[].updated_at`** / **`done_at`** (when applicable): reflect the real branch and merge outcome.
+2. **`plans[].metadata.gates`** (or equivalent): QC / QA / CI parity — e.g. `qc_status`, `qa_status`, `tests`, `clippy`, `validation` — so reviewers see gate state without opening reports.
+3. **`plans[].metadata.residual_summary`**: one-line summary of **open** residuals for that plan only (formal rows stay under `metadata.residual_findings`).
+4. **`metadata.residual_findings[<plan-id>]`**: add or update structured findings from QC; **close and archive** per `plan-convention.md` (`archived/residuals/<plan-id>.json`) when resolved. Keys use the full plan id (e.g. `2025-04-05-domain-models`), same as `plans[].id`.
+5. **`metadata.tech_debt_summary`**: refresh `updated_at`, `total_open`, `by_severity`, `by_plan`, and **`by_target`** when the open residual set changes; keep **`cross_cutting`** in sync if you add or resolve program-level debt items (e.g. `DEBT-X*`).
+6. **`metadata.notes`**: append a program-level timeline entry for significant merges or residual cleanups (see existing entries in `status.json`).
+7. **Wire contracts / schemas (when `schemas/` or publish version changes)** — nexus-specific, not `contracts_schema`:
+   - Run **`pnpm run codegen`** and commit **`packages/nexus-contracts/src/generated/`** and **`crates/nexus-contracts/src/generated/`** (CI `verify-codegen` enforces this).
+   - Bump **`schema_version`** and package versions (`packages/nexus-contracts`, `crates/nexus-contracts`) per release policy; note downstream impact (`nexus-platform` consumes `@42ch/nexus-contracts`).
+
+#### Verification commands
+
+```bash
+# Open residuals by plan (keys are full plan ids)
+jq '.metadata.residual_findings | to_entries[] | {plan: .key, count: (.value | length)}' .agents/plans/status.json
+
+# Tech-debt rollup and branch-prefix conventions
+jq '.metadata.tech_debt_summary, .metadata.versioning' .agents/plans/status.json
+
+# Program timeline
+jq '.metadata.notes' .agents/plans/status.json
+
+# Optional: sum of residual_findings entries (compare mentally with tech_debt_summary.total_open when both track the same scope)
+jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agents/plans/status.json
+```
+
+#### Common mistakes
+
+- Leaving **`tech_debt_summary`** stale after QC triage (counts and `updated_at` disagree with `residual_findings`).
+- **Schema edits without regenerated** `*/generated/` trees — CI fails on drift.
+- **Missing `metadata.notes`** for a merge or bulk residual archival that future agents need for context.
+- Duplicating finding detail only in **`plans[].notes`** instead of **`metadata.residual_findings`** (SSOT for open items).
+
+**Rule:** If `status.json` does not reflect reality, treat the branch as **not merge-ready** until it is corrected.
+
 ### Plan items in `status.json`
 
 Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally **`metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; **`plans[].id`** is the only key into `metadata.residual_findings`.
@@ -182,8 +223,14 @@ jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/status.j
 # View plan-local metadata
 jq '.plans[] | select(.id == "2025-04-05-domain-models") | .metadata' .agents/plans/status.json
 
+# Residual findings for one plan (SSOT key matches plans[].id)
+jq '.metadata.residual_findings["2025-04-05-domain-models"]' .agents/plans/status.json
+
 # Program-level timeline (if present)
 jq '.metadata.notes' .agents/plans/status.json
+
+# Open tech-debt rollup (if present)
+jq '.metadata.tech_debt_summary' .agents/plans/status.json
 
 # View detailed QC report
 cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-consolidated.md
