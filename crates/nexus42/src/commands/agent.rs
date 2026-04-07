@@ -19,7 +19,7 @@
 
 use std::path::PathBuf;
 
-use crate::acp::registry::{AgentEntry, RegistryClient, REGISTRY_URL};
+use crate::acp::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
 use crate::acp::transport::AgentSpawner;
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -167,11 +167,17 @@ fn print_list_table(registry: &crate::acp::registry::Registry) {
     for agent in &registry.agents {
         let source = agent.distribution.source_kind();
         // Truncate description for table display
-        let desc = if agent.description.len() > 60 {
-            format!("{}...", &agent.description[..57])
-        } else {
-            agent.description.clone()
-        };
+        let desc = agent
+            .description
+            .as_deref()
+            .map(|d| {
+                if d.len() > 60 {
+                    format!("{}...", &d[..57])
+                } else {
+                    d.to_string()
+                }
+            })
+            .unwrap_or_default();
         println!(
             "{:<id_width$}  {:<version_width$}  {:<9}  {}",
             agent.id,
@@ -259,7 +265,10 @@ fn print_show_details(agent: &AgentEntry) {
     if let Some(ref repo) = agent.repository {
         println!("Repository: {}", repo);
     }
-    println!("Description: {}", agent.description);
+    println!(
+        "Description: {}",
+        agent.description.as_deref().unwrap_or("No description")
+    );
     println!("Source: {}", source_detail);
 }
 
@@ -353,7 +362,9 @@ async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>)
 fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
     if let Some(ref npx) = agent.distribution.npx {
         let mut args = vec![npx.package.clone()];
-        args.extend(npx.args.iter().cloned());
+        if let Some(ref npx_args) = npx.args {
+            args.extend(npx_args.iter().cloned());
+        }
         Ok(("npx".to_string(), args))
     } else if let Some(ref binary) = agent.distribution.binary {
         // For binary agents, we need to determine the platform-specific binary
@@ -379,7 +390,7 @@ fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
             ))
         })?;
 
-        let args = pb.args.clone();
+        let args = pb.args.clone().unwrap_or_default();
         Ok((pb.cmd.clone(), args))
     } else {
         Err(crate::errors::CliError::Other(format!(
@@ -728,21 +739,21 @@ mod tests {
                 id: "test-agent".to_string(),
                 name: "Test Agent".to_string(),
                 version: "1.0.0".to_string(),
-                description: "A test agent for unit testing".to_string(),
+                description: Some("A test agent for unit testing".to_string()),
                 repository: None,
-                authors: vec![],
+                authors: None,
                 license: None,
                 icon: None,
                 distribution: crate::acp::registry::Distribution {
                     npx: Some(crate::acp::registry::NpxDistribution {
                         package: "@scope/test@1.0.0".to_string(),
-                        args: vec![],
+                        args: None,
                         env: None,
                     }),
                     binary: None,
                 },
             }],
-            extensions: vec![],
+            extensions: None,
         };
         // Should not panic
         print_list_table(&registry);
@@ -753,7 +764,7 @@ mod tests {
         let registry = crate::acp::registry::Registry {
             version: "1.0.0".to_string(),
             agents: vec![],
-            extensions: vec![],
+            extensions: None,
         };
         print_list_table(&registry);
     }
@@ -764,15 +775,15 @@ mod tests {
             id: "claude-acp".to_string(),
             name: "Claude Agent".to_string(),
             version: "0.18.0".to_string(),
-            description: "ACP wrapper for Claude".to_string(),
+            description: Some("ACP wrapper for Claude".to_string()),
             repository: Some("https://github.com/example/claude".to_string()),
-            authors: vec!["Anthropic".to_string()],
+            authors: Some(vec!["Anthropic".to_string()]),
             license: Some("proprietary".to_string()),
             icon: None,
             distribution: crate::acp::registry::Distribution {
                 npx: Some(crate::acp::registry::NpxDistribution {
                     package: "@scope/claude@0.18.0".to_string(),
-                    args: vec![],
+                    args: None,
                     env: None,
                 }),
                 binary: None,
@@ -787,9 +798,9 @@ mod tests {
             id: "codex-acp".to_string(),
             name: "Codex Agent".to_string(),
             version: "0.9.4".to_string(),
-            description: "Codex ACP adapter".to_string(),
+            description: Some("Codex ACP adapter".to_string()),
             repository: None,
-            authors: vec![],
+            authors: None,
             license: None,
             icon: None,
             distribution: crate::acp::registry::Distribution {
@@ -813,15 +824,15 @@ mod tests {
             id: "test".to_string(),
             name: "Test".to_string(),
             version: "1.0.0".to_string(),
-            description: String::new(),
+            description: None,
             repository: None,
-            authors: vec![],
+            authors: None,
             license: None,
             icon: None,
             distribution: crate::acp::registry::Distribution {
                 npx: Some(crate::acp::registry::NpxDistribution {
                     package: "@scope/pkg@1.0.0".to_string(),
-                    args: vec![],
+                    args: None,
                     env: None,
                 }),
                 binary: None,
@@ -838,9 +849,9 @@ mod tests {
             id: "test".to_string(),
             name: "Test".to_string(),
             version: "1.0.0".to_string(),
-            description: String::new(),
+            description: None,
             repository: None,
-            authors: vec![],
+            authors: None,
             license: None,
             icon: None,
             distribution: crate::acp::registry::Distribution {
