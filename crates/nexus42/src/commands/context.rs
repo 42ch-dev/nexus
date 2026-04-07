@@ -4,7 +4,7 @@ use crate::api::DaemonClient;
 use crate::config::CliConfig;
 use crate::context::client::ContextClient;
 use crate::context::types::ContextAssembleRequestV1;
-use crate::context::types::{error_code, error_message, is_error};
+use crate::context::types::{error_code, error_message, is_error, MemoryKind};
 use crate::errors::Result;
 use clap::Subcommand;
 
@@ -90,9 +90,9 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 include_timeline: Some(include_timeline),
                 include_story_summaries: Some(include_story_summaries),
                 memory_kinds: Some(vec![
-                    "story_summary".to_string(),
-                    "research_material".to_string(),
-                    "review_note".to_string(),
+                    MemoryKind::StorySummary.to_string(),
+                    MemoryKind::ResearchMaterial.to_string(),
+                    MemoryKind::ReviewNote.to_string(),
                 ]),
                 max_timeline_events: max_timeline_events.map(|v| v as i64),
                 max_story_summaries: max_story_summaries.map(|v| v as i64),
