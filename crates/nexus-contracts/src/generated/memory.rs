@@ -6,6 +6,7 @@
 //! @source memory.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{MemoryType};
 
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -14,8 +15,6 @@ pub struct MemorySourceRef {
     pub kind: String,
     pub id: String,
 }
-use crate::generated::common_types::{MemoryType};
-
 /// MemoryItem - structured memory for creator experience and world context. Aligned with data-model-v1.md §5.8.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

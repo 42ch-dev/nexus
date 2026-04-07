@@ -120,6 +120,7 @@ function generateTSTypeFile(
 
   const localDefinitions = hasDefs ? getDefinitions(schema) : undefined;
   const commonTypeImports: Set<string> = new Set(['SchemaVersion']);
+  const crossFileImports: Set<string> = new Set(); // For types like Delta that are in separate files
   const allInlineEnums: Map<string, string[]> = new Map();
   const definitionNames: string[] = [];
 
@@ -127,6 +128,11 @@ function generateTSTypeFile(
   const schemaJSON = JSON.stringify(schema.schemaContent);
   if (schemaJSON.includes('source-anchor.schema.json')) {
     commonTypeImports.add('SourceAnchor');
+  }
+
+  // Check if Delta is referenced anywhere in this schema (but not in delta.schema.json itself)
+  if (schemaJSON.includes('delta.schema.json') && schema.fileName !== 'delta.schema.json') {
+    crossFileImports.add('Delta');
   }
 
   // Generate main interface from top-level properties
@@ -138,7 +144,13 @@ function generateTSTypeFile(
       allInlineEnums,
       localDefinitions,
     );
-    for (const imp of imports) commonTypeImports.add(imp);
+    for (const imp of imports) {
+      if (imp === 'Delta') {
+        crossFileImports.add('Delta');
+      } else {
+        commonTypeImports.add(imp);
+      }
+    }
     content += fieldsText + '\n';
   }
 
@@ -156,15 +168,26 @@ function generateTSTypeFile(
         allInlineEnums,
         localDefinitions,
       );
-      for (const imp of imports) commonTypeImports.add(imp);
+      for (const imp of imports) {
+        if (imp === 'Delta') {
+          crossFileImports.add('Delta');
+        } else {
+          commonTypeImports.add(imp);
+        }
+      }
       content += fieldsText + '\n';
     }
   }
 
   // Build imports
-  const imports = [...commonTypeImports].sort();
-  if (imports.length > 0) {
-    content = `import type { ${imports.join(', ')} } from './CommonTypes';\n\n` + content;
+  const commonImports = [...commonTypeImports].sort();
+  const crossImports = [...crossFileImports].sort();
+  
+  if (commonImports.length > 0) {
+    content = `import type { ${commonImports.join(', ')} } from './CommonTypes';\n` + content;
+  }
+  if (crossImports.length > 0) {
+    content = `import type { ${crossImports.join(', ')} } from './Delta';\n` + content;
   }
 
   // Define inline enums as type aliases
@@ -204,9 +227,13 @@ function generateTSTypeFields(
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { tsType, commonRef } = resolveTSType(def, propName, inlineEnums, localDefinitions, typeName);
+    const { tsType, commonRef, deltaRef } = resolveTSType(def, propName, inlineEnums, localDefinitions, typeName);
     if (commonRef) {
       newImports.add(commonRef);
+    }
+    if (deltaRef) {
+      // Delta is a cross-file import, will be handled separately
+      newImports.add(deltaRef);
     }
     const optionalMark = isRequired ? '' : '?';
     // Quote property names that contain hyphens (invalid in unquoted TS identifiers)
@@ -221,7 +248,8 @@ function generateTSTypeFields(
 
 /**
  * Resolve a property definition to a TypeScript type string.
- * Returns { tsType, commonRef? } where commonRef is set if this maps to a CommonTypes export.
+ * Returns { tsType, commonRef?, deltaRef? } where commonRef is set if this maps to a CommonTypes export,
+ * and deltaRef is set if this maps to a Delta type (cross-file import).
  *
  * @param inlineEnumPathPrefix PascalCase path prefix for inline string enums (e.g. Creator, CreatorMetadata)
  *        so barrel `export *` does not collide on names like `Status` across modules.
@@ -232,7 +260,7 @@ function resolveTSType(
   inlineEnums: Map<string, string[]>,
   localDefinitions: Record<string, Record<string, unknown>> | undefined,
   inlineEnumPathPrefix: string,
-): { tsType: string; commonRef?: string } {
+): { tsType: string; commonRef?: string; deltaRef?: string } {
   const ref = propDef.$ref as string | undefined;
   const type = propDef.type;
 
@@ -243,7 +271,7 @@ function resolveTSType(
       return { tsType: 'SourceAnchor', commonRef: 'SourceAnchor' };
     }
     if (defName === 'Delta') {
-      return { tsType: 'Delta' };
+      return { tsType: 'Delta', deltaRef: 'Delta' };
     }
     if (defName && isCommonEnum(defName)) {
       return { tsType: defName, commonRef: defName };

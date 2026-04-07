@@ -1,5 +1,4 @@
 import type { SchemaVersion, TimePolicy, Visibility } from './CommonTypes';
-
 /**
  * Nexus World Entity
  *

@@ -6,7 +6,6 @@
 //! @source key-block.schema.json
 
 use serde::{Deserialize, Serialize};
-
 use crate::generated::common_types::{BlockType, SourceAnchor};
 
 /// KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5.

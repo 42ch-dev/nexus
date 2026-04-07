@@ -1,5 +1,4 @@
 import type { BlockType, SchemaVersion, SourceAnchor } from './CommonTypes';
-
 /**
  * Nexus KeyBlock
  *

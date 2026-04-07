@@ -1,5 +1,4 @@
 import type { SchemaVersion, SourceAnchor } from './CommonTypes';
-
 /**
  * Nexus Delta
  *

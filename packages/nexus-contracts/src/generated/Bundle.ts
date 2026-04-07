@@ -1,5 +1,5 @@
+import type { Delta } from './Delta';
 import type { BundleType, ManuscriptPhase, SchemaVersion } from './CommonTypes';
-
 /**
  * Nexus DeltaBundle Envelope
  *
