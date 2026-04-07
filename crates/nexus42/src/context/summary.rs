@@ -13,6 +13,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 /// Maximum summary text length (characters).
 const MAX_SUMMARY_CHARS: usize = 4096;
@@ -52,6 +53,8 @@ pub struct SummaryGenerator {
     max_summary_chars: usize,
     /// Maximum excerpt length in characters.
     max_excerpt_chars: usize,
+    /// Maximum file size in bytes (optional limit).
+    max_file_size: Option<u64>,
 }
 
 impl SummaryGenerator {
@@ -61,6 +64,15 @@ impl SummaryGenerator {
             manuscript_root,
             max_summary_chars: MAX_SUMMARY_CHARS,
             max_excerpt_chars: MAX_EXCERPT_CHARS,
+            max_file_size: None,
+        }
+    }
+
+    /// Set maximum file size limit (in bytes).
+    pub fn with_max_file_size(self, max_file_size: Option<u64>) -> Self {
+        Self {
+            max_file_size,
+            ..self
         }
     }
 
@@ -92,6 +104,24 @@ impl SummaryGenerator {
             } else {
                 let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 if matches!(extension, "md" | "txt") {
+                    // Check file size if limit is set
+                    if let Some(max_size) = self.max_file_size {
+                        let metadata = fs::metadata(&path)?;
+                        let file_size = metadata.len();
+                        if file_size > max_size {
+                            // Skip file exceeding size limit
+                            let relative =
+                                path.strip_prefix(&self.manuscript_root).unwrap_or(&path);
+                            warn!(
+                                "Skipping file {} ({} bytes) exceeding limit {} bytes",
+                                relative.display(),
+                                file_size,
+                                max_size
+                            );
+                            continue;
+                        }
+                    }
+
                     let relative = path
                         .strip_prefix(&self.manuscript_root)
                         .unwrap_or(&path)
@@ -153,9 +183,21 @@ impl SummaryGenerator {
         }
 
         let mut summary_text = summary_parts.join("\n");
-        // Truncate to max length
+        // Truncate to max length with UTF-8 safety
         if summary_text.len() > self.max_summary_chars {
-            summary_text.truncate(self.max_summary_chars.saturating_sub(3));
+            let truncate_len = self.max_summary_chars.saturating_sub(3);
+            // Ensure truncate_len is at a valid UTF-8 char boundary
+            let safe_len = if summary_text.is_char_boundary(truncate_len) {
+                truncate_len
+            } else {
+                // Find nearest valid char boundary (move backwards)
+                let mut pos = truncate_len;
+                while !summary_text.is_char_boundary(pos) && pos > 0 {
+                    pos -= 1;
+                }
+                pos
+            };
+            summary_text.truncate(safe_len);
             summary_text.push_str("...");
         }
 
@@ -270,6 +312,8 @@ fn extract_opening_excerpt(content: &str, max_chars: usize) -> Option<String> {
 mod tests {
     use super::*;
     use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     /// Helper: create a temp manuscript directory with files.
@@ -434,5 +478,518 @@ mod tests {
             summary.summary_text.len(),
             4096
         );
+    }
+
+    #[test]
+    fn summary_truncation_with_emoji() {
+        // Use emoji (4-byte UTF-8 characters) to force truncation at non-char boundary
+        // Emoji like 😊 are 4 bytes each
+        let emoji_content = format!(
+            "# Title\n\n{}\n",
+            "这是一段中文文字 mixed with emoji 😊🎉🎊 and more text here to exceed limit. "
+                .repeat(100)
+        );
+        let tmp = create_test_manuscript(&[("emoji.md", &emoji_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // This should NOT panic even if truncation hits emoji mid-byte
+        let summary = gen.generate().expect("generate should succeed");
+        assert!(summary.summary_text.len() <= 4096);
+        // Verify the string is valid UTF-8
+        assert!(summary
+            .summary_text
+            .is_char_boundary(summary.summary_text.len()));
+    }
+
+    #[test]
+    fn summary_truncation_with_cjk() {
+        // Use CJK characters (3-byte UTF-8)
+        // Chinese characters like 中 are 3 bytes each
+        let cjk_content = format!(
+            "# 标题\n\n{}\n",
+            "中文字符测试内容，这段文字会被截断。每一行都包含足够的内容来超过限制。".repeat(200)
+        );
+        let tmp = create_test_manuscript(&[("cjk.md", &cjk_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // This should NOT panic even if truncation hits CJK mid-byte
+        let summary = gen.generate().expect("generate should succeed");
+        assert!(summary.summary_text.len() <= 4096);
+        // Verify the string is valid UTF-8
+        assert!(summary
+            .summary_text
+            .is_char_boundary(summary.summary_text.len()));
+    }
+
+    #[test]
+    fn summary_truncation_with_mixed_multibyte() {
+        // Mixed: ASCII (1 byte), CJK (3 bytes), emoji (4 bytes)
+        let mixed_content = format!(
+            "# Mixed Title\n\n{}\n",
+            "English 日本語 한국어 emoji 😊🎉 text with mixed encoding types.".repeat(150)
+        );
+        let tmp = create_test_manuscript(&[("mixed.md", &mixed_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // This should NOT panic
+        let summary = gen.generate().expect("generate should succeed");
+        assert!(summary.summary_text.len() <= 4096);
+        assert!(summary
+            .summary_text
+            .is_char_boundary(summary.summary_text.len()));
+    }
+
+    #[test]
+    fn summary_truncation_at_non_char_boundary() {
+        // Construct a string that will have truncation at non-char boundary
+        // MAX_SUMMARY_CHARS is 4096, so truncation happens at 4096 - 3 = 4093 bytes
+        // We need to ensure 4093 is NOT a valid char boundary
+        // Strategy: Create a prefix that makes 4093 land inside a multi-byte character
+
+        // Create content that, after summary construction, has emoji at position 4093
+        // Let's craft the summary text structure: "Title: X\nChapters: ...\nWord count: N\nOpening: Y..."
+        // We need to carefully position multi-byte chars
+
+        // Create a story with many emoji in the title and opening to hit boundary
+        let emoji_title = "🎉".repeat(100); // 400 bytes (100 * 4)
+        let emoji_body = "😊".repeat(900); // 3600 bytes (900 * 4)
+                                           // Total in summary will be around: Title line (400+) + Opening (3600+) > 4096
+
+        let emoji_content = format!(
+            "---\ntitle: \"{}\"\n---\n\n# Story\n\n{}",
+            emoji_title, emoji_body
+        );
+
+        let tmp = create_test_manuscript(&[("story.md", &emoji_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // This will panic if truncation is not UTF-8 safe
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gen.generate().expect("generate should succeed")
+        }));
+
+        match result {
+            Ok(summary) => {
+                assert!(summary.summary_text.len() <= 4096);
+                assert!(summary
+                    .summary_text
+                    .is_char_boundary(summary.summary_text.len()));
+            }
+            Err(panic_info) => {
+                // If we panicked, it's because truncation hit non-char boundary
+                panic!(
+                    "Summary generation panicked on UTF-8 truncation: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn summary_truncation_with_exact_boundary_hit() {
+        // More controlled test: create summary that is exactly 4097 bytes
+        // so truncation happens at 4093, which we ensure is in multi-byte char
+
+        // Create a summary that will be slightly over 4096
+        // Format: "Title: ...\nChapters:\n  1. ...\nWord count: N\nOpening: ..."
+
+        let title = "T".repeat(50); // ASCII title
+        let chapters: Vec<String> = (1..100).map(|i| format!("Chapter {}", i)).collect();
+        let chapter_content = chapters
+            .iter()
+            .map(|ch| format!("## {}", ch))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        // Opening will be long emoji string
+        let opening = "🔥".repeat(800); // 3200 bytes
+
+        let content = format!(
+            "---\ntitle: \"{}\"\n---\n\n{}\n\n{}",
+            title, chapter_content, opening
+        );
+
+        let tmp = create_test_manuscript(&[("story.md", &content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gen.generate().expect("generate should succeed")
+        }));
+
+        match result {
+            Ok(summary) => {
+                assert!(summary.summary_text.len() <= 4096);
+                assert!(summary
+                    .summary_text
+                    .is_char_boundary(summary.summary_text.len()));
+            }
+            Err(panic_info) => {
+                panic!(
+                    "Summary generation panicked on UTF-8 truncation: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opening_excerpt_truncation_with_emoji() {
+        // Test extract_opening_excerpt with emoji near truncation boundary
+        let emoji_body = "😊🎉🎊".repeat(200); // Many emoji characters
+        let content = format!("# Title\n\n{}", emoji_body);
+        // max_chars should force truncation that might hit emoji mid-byte
+        let excerpt = super::extract_opening_excerpt(&content, 100).expect("should have excerpt");
+        assert!(excerpt.len() <= 103); // 100 + "..."
+                                       // Verify valid UTF-8
+        assert!(excerpt.is_char_boundary(excerpt.len()));
+    }
+
+    #[test]
+    fn opening_excerpt_truncation_with_cjk() {
+        // Test extract_opening_excerpt with CJK characters
+        let cjk_body = "中文测试".repeat(100);
+        let content = format!("# 标题\n\n{}", cjk_body);
+        let excerpt = super::extract_opening_excerpt(&content, 50).expect("should have excerpt");
+        assert!(excerpt.len() <= 53);
+        assert!(excerpt.is_char_boundary(excerpt.len()));
+    }
+
+    #[test]
+    fn scan_skips_large_files_when_limit_set() {
+        // Test that files exceeding max_file_size are skipped
+        let small_content = "Small file content";
+        let large_content = "a".repeat(10_000); // 10KB file
+
+        let tmp =
+            create_test_manuscript(&[("small.md", small_content), ("large.md", &large_content)]);
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf()).with_max_file_size(Some(5000)); // 5KB limit
+
+        let files = gen.scan_manuscript_dir().expect("scan should succeed");
+
+        // Should only include small.md (17 bytes), not large.md (10001 bytes)
+        assert_eq!(files.len(), 1);
+        assert!(files[0].relative_path.ends_with("small.md"));
+    }
+
+    #[test]
+    fn scan_includes_all_files_when_no_limit() {
+        // Test that all files are included when max_file_size is None (default)
+        let small_content = "Small file content";
+        let large_content = "a".repeat(10_000); // 10KB file
+
+        let tmp =
+            create_test_manuscript(&[("small.md", small_content), ("large.md", &large_content)]);
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // No max_file_size set (default: None)
+
+        let files = gen.scan_manuscript_dir().expect("scan should succeed");
+
+        // Should include both files
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f.relative_path.ends_with("small.md")));
+        assert!(files.iter().any(|f| f.relative_path.ends_with("large.md")));
+    }
+
+    #[test]
+    fn max_file_size_limit_boundary() {
+        // Test file exactly at the limit boundary is included
+        let content = "a".repeat(1000); // Exactly 1000 bytes
+
+        let tmp = create_test_manuscript(&[
+            ("exact.md", &content),
+            ("over.md", &"a".repeat(1001)), // 1001 bytes, just over limit
+        ]);
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf()).with_max_file_size(Some(1000));
+
+        let files = gen.scan_manuscript_dir().expect("scan should succeed");
+
+        // Should include exact.md (1000 bytes) but skip over.md (1001 bytes)
+        assert_eq!(files.len(), 1);
+        assert!(files[0].relative_path.ends_with("exact.md"));
+    }
+
+    #[test]
+    fn scan_permission_denied_file_no_panic() {
+        // Create a file and make it unreadable
+        let tmp = create_test_manuscript(&[("readable.md", "# Readable\n\nContent.")]);
+        let unreadable_path = tmp.path().join("unreadable.md");
+
+        // Create the file
+        let mut f = fs::File::create(&unreadable_path).expect("create file");
+        f.write_all(b"# Unreadable\n\nSecret content.")
+            .expect("write file");
+
+        // Make file unreadable (Unix-specific, skip on other platforms)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&unreadable_path, fs::Permissions::from_mode(0o000))
+                .expect("set permissions");
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Test should not panic - it may return an error, but should not crash
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        #[cfg(unix)]
+        {
+            // On Unix, permission denied should propagate error, not panic
+            match result {
+                Ok(scan_result) => {
+                    // Current implementation returns error on permission denied
+                    assert!(
+                        scan_result.is_err(),
+                        "Expected error for permission-denied file, got {:?}",
+                        scan_result
+                    );
+                }
+                Err(panic_info) => {
+                    panic!(
+                        "scan_manuscript_dir panicked on permission-denied file: {:?}",
+                        panic_info
+                    );
+                }
+            }
+
+            // Restore permissions for cleanup
+            fs::set_permissions(&unreadable_path, fs::Permissions::from_mode(0o644))
+                .expect("restore permissions");
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix platforms, just verify no panic
+            assert!(result.is_ok(), "scan_manuscript_dir should not panic");
+        }
+    }
+
+    #[test]
+    fn scan_symlink_to_file_no_panic() {
+        // Create a real file and a symlink to it
+        let tmp =
+            create_test_manuscript(&[("real.md", "# Real File\n\nThis is the real content.")]);
+        let real_path = tmp.path().join("real.md");
+        let symlink_path = tmp.path().join("symlink.md");
+
+        // Create symlink (platform-specific)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&real_path, &symlink_path).expect("create symlink");
+        }
+
+        #[cfg(windows)]
+        {
+            // Windows symlinks require admin privileges, skip if unavailable
+            if std::os::windows::fs::symlink_file(&real_path, &symlink_path).is_err() {
+                // Skip test on Windows if symlink creation fails
+                return;
+            }
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Test should not panic - symlink should be followed or skipped gracefully
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        match result {
+            Ok(scan_result) => {
+                // Symlink to file is followed by default (fs::read_to_string resolves symlinks)
+                match scan_result {
+                    Ok(files) => {
+                        // Should have found both real.md and symlink.md (symlink is followed)
+                        // On some platforms, symlink might be filtered or cause error
+                        assert!(
+                            files.len() >= 1 && files.len() <= 2,
+                            "Expected 1-2 files (real.md and possibly symlink.md), got {}",
+                            files.len()
+                        );
+                    }
+                    Err(e) => {
+                        // Some platforms may error on symlinks - acceptable, but no panic
+                        eprintln!("scan returned error for symlink (acceptable): {}", e);
+                    }
+                }
+            }
+            Err(panic_info) => {
+                panic!("scan_manuscript_dir panicked on symlink: {:?}", panic_info);
+            }
+        }
+    }
+
+    #[test]
+    fn scan_symlink_to_directory_no_panic() {
+        // Create a directory with files and a symlink to it
+        let tmp = TempDir::new().expect("temp dir");
+        let real_dir = tmp.path().join("real_dir");
+        fs::create_dir_all(&real_dir).expect("create real dir");
+
+        let real_file = real_dir.join("file.md");
+        let mut f = fs::File::create(&real_file).expect("create real file");
+        f.write_all(b"# Real Dir File\n\nContent in symlinked dir.")
+            .expect("write file");
+
+        let symlink_dir = tmp.path().join("symlink_dir");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&real_dir, &symlink_dir).expect("create symlink to dir");
+        }
+
+        #[cfg(windows)]
+        {
+            // Windows directory symlinks require admin privileges, skip if unavailable
+            if std::os::windows::fs::symlink_dir(&real_dir, &symlink_dir).is_err() {
+                return;
+            }
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Test should not panic when scanning symlinked directory
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        match result {
+            Ok(scan_result) => {
+                match scan_result {
+                    Ok(files) => {
+                        // Symlink to dir is followed - files inside are scanned
+                        // May find files from both real_dir and symlink_dir (same content)
+                        assert!(
+                            files.len() >= 1,
+                            "Expected at least 1 file from symlinked directory, got {}",
+                            files.len()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "scan returned error for symlinked directory (acceptable): {}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(panic_info) => {
+                panic!(
+                    "scan_manuscript_dir panicked on symlinked directory: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scan_broken_symlink_no_panic() {
+        // Create a symlink pointing to a non-existent target
+        let tmp = TempDir::new().expect("temp dir");
+        let broken_symlink = tmp.path().join("broken.md");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let fake_target = tmp.path().join("nonexistent.md");
+            symlink(&fake_target, &broken_symlink).expect("create broken symlink");
+        }
+
+        #[cfg(windows)]
+        {
+            // Windows symlinks may not work without admin, skip if fails
+            if std::os::windows::fs::symlink_file(
+                &tmp.path().join("nonexistent.md"),
+                &broken_symlink,
+            )
+            .is_err()
+            {
+                return;
+            }
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Broken symlink should not cause panic
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        match result {
+            Ok(scan_result) => {
+                match scan_result {
+                    Ok(files) => {
+                        // Broken symlink is skipped or filtered - no files found
+                        assert_eq!(
+                            files.len(),
+                            0,
+                            "Broken symlink should not produce files, got {}",
+                            files.len()
+                        );
+                    }
+                    Err(e) => {
+                        // Error on broken symlink is acceptable
+                        eprintln!("scan returned error for broken symlink (acceptable): {}", e);
+                    }
+                }
+            }
+            Err(panic_info) => {
+                panic!(
+                    "scan_manuscript_dir panicked on broken symlink: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generate_with_permission_denied_file_no_panic() {
+        // Test full generate() workflow with permission-denied file
+        let tmp = create_test_manuscript(&[("good.md", "# Good File\n\nReadable content.")]);
+        let bad_file = tmp.path().join("bad.md");
+
+        let mut f = fs::File::create(&bad_file).expect("create bad file");
+        f.write_all(b"# Bad File\n\nUnreadable content.")
+            .expect("write bad file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&bad_file, fs::Permissions::from_mode(0o000))
+                .expect("set permissions");
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.generate()));
+
+        #[cfg(unix)]
+        {
+            match result {
+                Ok(gen_result) => {
+                    // generate() propagates error from scan, does not panic
+                    assert!(
+                        gen_result.is_err(),
+                        "Expected error for permission-denied file in generate(), got {:?}",
+                        gen_result
+                    );
+                }
+                Err(panic_info) => {
+                    panic!(
+                        "generate() panicked on permission-denied file: {:?}",
+                        panic_info
+                    );
+                }
+            }
+
+            // Restore permissions
+            fs::set_permissions(&bad_file, fs::Permissions::from_mode(0o644))
+                .expect("restore permissions");
+        }
+
+        #[cfg(not(unix))]
+        {
+            assert!(result.is_ok(), "generate() should not panic");
+        }
     }
 }

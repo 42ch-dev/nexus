@@ -574,7 +574,7 @@
         "@qc-specialist-3",
         "@qa-engineer"
       ],
-      "progress": 33,
+      "progress": 50,
       "tags": [
         "v1.1",
         "tech-debt",
@@ -583,7 +583,7 @@
       ],
       "created_at": "2026-04-08",
       "updated_at": "2026-04-08",
-      "notes": "Wave 1 (P0) complete: DM-R5 resolved, 3 schemas created, QC APPROVE. Wave 2 (P1) planned.",
+      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) complete. Batch 2 (Task 8-10, 16-18) pending.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
@@ -610,7 +610,10 @@
         "tests": "~662 tests passing",
         "schemas": "25 schemas valid",
         "wave_1_merged": true,
-        "wave_1_merged_at": "2026-04-08"
+        "wave_1_merged_at": "2026-04-08",
+        "wave_2_batch1_status": "Complete",
+        "wave_2_batch1_tasks": "8 tasks: ACP-R6/R7/R8 + CTX-R2/R4/R5/R6/R7",
+        "wave_2_batch1_commits": "9 commits (568c71d..35e89eb)"
       }
     }
   ],
@@ -620,17 +623,17 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08",
-      "total_open": 41,
+      "updated_at": "2026-04-08T12:00:00Z",
+      "total_open": 40,
       "by_severity": {
         "high": 4,
-        "medium": 16,
+        "medium": 15,
         "low": 20,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 26,
+        "V1.1": 25,
         "V1.1+": 4
       },
       "by_plan": {
@@ -638,7 +641,7 @@
         "cli-daemon-foundation": 5,
         "sync-contract": 10,
         "acp-client": 9,
-        "context-assembly": 6
+        "context-assembly": 5
       },
       "cross_cutting": [
         {
@@ -745,6 +748,14 @@
       {
         "updated_at": "2026-04-08",
         "message": "Wave 1 merged to main: DM-R5 resolved, 3 schemas created, W1-C1 fixed, QC APPROVE. 59 files, 4102 insertions. Ready for Wave 2."
+      },
+      {
+        "updated_at": "2026-04-08T12:00:00Z",
+        "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 → 40."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "Wave 2 Batch 1 complete: 8 tasks (ACP session/policy/daemon-mediated + Context Assembly 5 residuals). All tests passing. Batch 2 pending."
       }
     ],
     "residual_findings": {
@@ -947,50 +958,6 @@
       ],
       "2025-04-05-acp-client": [
         {
-          "id": "ACP-R3",
-          "title": "Terminal kill/wait_for_exit capability",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "V1.1 — add terminal kill and wait_for_exit to capability set",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R4",
-          "title": "Slash commands UI integration",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "Agent-provided slash commands not surfaced in CLI UX",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R5",
-          "title": "Agent plan display support",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "ACP Plan protocol not rendered in CLI output",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R6",
-          "title": "Session persistence across CLI invocations",
-          "severity": "medium",
-          "source": "Tech Spec §Appendix B",
-          "scope": "ACP sessions lost when nexus42 exits; no session/load support",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
           "id": "ACP-R7",
           "title": "Permission policy engine (grant/deny UI)",
           "severity": "medium",
@@ -999,51 +966,10 @@
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R8",
-          "title": "Daemon-mediated agent tool access",
-          "severity": "medium",
-          "source": "Tech Spec §Appendix B",
-          "scope": "V1.0 agents access fs directly; daemon could mediate tool calls",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R9",
-          "title": "Skills manifest file for multi-agent hosts",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "No persistent skills manifest file for host discovery",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R10",
-          "title": "Binary agent auto-update mechanism",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "Downloaded binary agents not auto-updated",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R11",
-          "title": "Session modes (ask/act) switching",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "ACP session modes not exposed in CLI",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T20:00:00Z",
+          "closure_note": "Implemented permission policy engine with configurable grant/deny rules, interactive prompts, CLI commands (policy grant/deny/list), and PolicyAwareClientHandler. Tests: 12 new policy tests, all 195 nexus42 tests pass."
         }
       ],
       "2025-04-05-context-assembly": [
@@ -1097,10 +1023,13 @@
           "severity": "medium",
           "source": "QC-#3",
           "scope": "crates/nexus42/src/context/types.rs",
-          "decision": "defer",
+          "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "V1.1 — extract MemoryKind enum matching schema",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T12:00:00Z",
+          "closure_note": "MemoryKind enum updated with 8 variants matching schema (story_summary, research_material, review_note, character_note, world_building, plot_outline, theme_analysis, custom). Added strum::Display for serialization, FromStr for parsing. CLI commands updated to use enum. 6 new tests for enum behavior."
         },
         {
           "id": "CTX-R7",
@@ -1108,10 +1037,9 @@
           "severity": "medium",
           "source": "QC-#3",
           "scope": "crates/nexus42/src/context/summary.rs",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 — add permission-denied and symlink test cases",
-          "tracking": null
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T19:55:00Z",
+          "closure_note": "Added 5 edge case tests: permission-denied file (scan and generate), symlink to file, symlink to directory, broken symlink. All tests use catch_unwind to verify no panics. Tests bundled into CTX-R2 commit (file size limit)."
         }
       ],
       "2026-04-06-foundation-hardening": [

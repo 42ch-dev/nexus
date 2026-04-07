@@ -22,7 +22,9 @@
 //! - [`client`] — `NexusAcpClient` trait + `AcpSDKAdapter` implementation
 //! - [`error`] — `AcpError` enum covering all ACP failure modes
 //! - [`localset_bridge`] — Bridge between async tokio and `!Send` LocalSet futures
+//! - [`policy`] — Permission policy engine (V1.1, ACP-R7)
 //! - [`registry`] — ACP registry manifest fetcher + local cache
+//! - [`session_manager`] — ACP session persistence (ACP-R6)
 //! - [`skills`] — Frozen capability IDs + capability set construction
 //! - [`transport`] — Subprocess spawn + stdio pipe management + lifecycle
 
@@ -31,7 +33,9 @@
 pub mod client;
 pub mod error;
 pub mod localset_bridge;
+pub mod policy;
 pub mod registry;
+pub mod session_manager;
 pub mod skills;
 pub mod transport;
 
@@ -43,6 +47,10 @@ pub use client::{
 };
 #[allow(unused_imports)]
 pub use error::{AcpError, AcpResult};
+
+// Re-export policy types for permission management.
+#[allow(unused_imports)]
+pub use policy::{DefaultPolicy, PermissionDecision, PermissionPolicy};
 
 // Re-export registry types for commands and other consumers.
 // These are used by Task 3 (CLI commands) and Task 4 (transport).
@@ -59,3 +67,7 @@ pub use skills::{build_v1_0_capabilities, capabilities};
 // Re-export transport types for subprocess management.
 #[allow(unused_imports)]
 pub use transport::{AcpSession, AgentSpawner, Platform};
+
+// Re-export session management types.
+#[allow(unused_imports)]
+pub use session_manager::{SessionEntry, SessionManager};

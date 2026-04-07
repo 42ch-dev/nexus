@@ -26,6 +26,7 @@ impl Schema {
         conn.execute_batch(OUTBOX_TABLE)?;
         conn.execute_batch(AUTH_TOKENS_TABLE)?;
         conn.execute_batch(DEVICE_CODE_SESSIONS_TABLE)?;
+        conn.execute_batch(ACP_TOOL_AUDIT_LOG_TABLE)?;
 
         // Seed schema version row (idempotent)
         conn.execute(
@@ -111,6 +112,19 @@ CREATE TABLE IF NOT EXISTS device_code_sessions (
     verification_uri TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending'
+);
+"#;
+
+/// ACP tool audit log — records all agent tool executions through daemon.
+pub const ACP_TOOL_AUDIT_LOG_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS acp_tool_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    agent_id TEXT,
+    session_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 "#;
 

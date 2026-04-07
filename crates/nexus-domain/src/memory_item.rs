@@ -6,6 +6,7 @@
 use crate::errors::DomainError;
 use crate::MemoryType;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Memory status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,23 +27,79 @@ impl MemoryStatus {
     }
 }
 
-/// Memory kind enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Memory kind enum - matches v1-spec §5.8 and ADR-001.
+/// Schema defines: story_summary, research_material, review_note, character_note,
+/// world_building, plot_outline, theme_analysis, custom.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, strum::Display)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum MemoryKind {
-    Generic,
     StorySummary,
     ResearchMaterial,
     ReviewNote,
+    CharacterNote,
+    WorldBuilding,
+    PlotOutline,
+    ThemeAnalysis,
+    Custom,
 }
 
 impl MemoryKind {
+    /// Get the string representation (same as Display via strum).
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Generic => "generic",
             Self::StorySummary => "story_summary",
             Self::ResearchMaterial => "research_material",
             Self::ReviewNote => "review_note",
+            Self::CharacterNote => "character_note",
+            Self::WorldBuilding => "world_building",
+            Self::PlotOutline => "plot_outline",
+            Self::ThemeAnalysis => "theme_analysis",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// Get all valid memory kinds as strings.
+    pub fn all_as_strings() -> Vec<String> {
+        vec![
+            "story_summary".to_string(),
+            "research_material".to_string(),
+            "review_note".to_string(),
+            "character_note".to_string(),
+            "world_building".to_string(),
+            "plot_outline".to_string(),
+            "theme_analysis".to_string(),
+            "custom".to_string(),
+        ]
+    }
+}
+
+/// Error type for MemoryKind parsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseMemoryKindError(String);
+
+impl std::fmt::Display for ParseMemoryKindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Invalid memory kind: {}", self.0)
+    }
+}
+
+impl std::error::Error for ParseMemoryKindError {}
+
+impl FromStr for MemoryKind {
+    type Err = ParseMemoryKindError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "story_summary" => Ok(Self::StorySummary),
+            "research_material" => Ok(Self::ResearchMaterial),
+            "review_note" => Ok(Self::ReviewNote),
+            "character_note" => Ok(Self::CharacterNote),
+            "world_building" => Ok(Self::WorldBuilding),
+            "plot_outline" => Ok(Self::PlotOutline),
+            "theme_analysis" => Ok(Self::ThemeAnalysis),
+            "custom" => Ok(Self::Custom),
+            _ => Err(ParseMemoryKindError(s.to_string())),
         }
     }
 }
@@ -267,11 +324,17 @@ mod tests {
 
     #[test]
     fn test_create_canon_memory() {
-        let mi = MemoryItem::new("ctr_test", "wld_test", MemoryType::Canon, Some("generic"));
+        let mi = MemoryItem::new(
+            "ctr_test",
+            "wld_test",
+            MemoryType::Canon,
+            Some("story_summary"),
+        );
         assert_eq!(mi.memory_type, MemoryType::Canon);
         assert_eq!(mi.status, "active");
         assert!(mi.memory_item_id.starts_with("mem_"));
         assert_eq!(mi.schema_version, 1);
+        assert_eq!(mi.memory_kind, Some("story_summary".to_string()));
     }
 
     #[test]
@@ -357,5 +420,87 @@ mod tests {
         let json = serde_json::to_string(&mi).unwrap();
         let deserialized: MemoryItem = serde_json::from_str(&json).unwrap();
         assert_eq!(mi, deserialized);
+    }
+
+    // ── MemoryKind Enum Tests ──────────────────────────────────────
+
+    #[test]
+    fn test_memory_kind_all_variants() {
+        let kinds = vec![
+            MemoryKind::StorySummary,
+            MemoryKind::ResearchMaterial,
+            MemoryKind::ReviewNote,
+            MemoryKind::CharacterNote,
+            MemoryKind::WorldBuilding,
+            MemoryKind::PlotOutline,
+            MemoryKind::ThemeAnalysis,
+            MemoryKind::Custom,
+        ];
+        assert_eq!(kinds.len(), 8);
+    }
+
+    #[test]
+    fn test_memory_kind_serialize_snake_case() {
+        assert_eq!(MemoryKind::StorySummary.to_string(), "story_summary");
+        assert_eq!(
+            MemoryKind::ResearchMaterial.to_string(),
+            "research_material"
+        );
+        assert_eq!(MemoryKind::ReviewNote.to_string(), "review_note");
+        assert_eq!(MemoryKind::CharacterNote.to_string(), "character_note");
+        assert_eq!(MemoryKind::WorldBuilding.to_string(), "world_building");
+        assert_eq!(MemoryKind::PlotOutline.to_string(), "plot_outline");
+        assert_eq!(MemoryKind::ThemeAnalysis.to_string(), "theme_analysis");
+        assert_eq!(MemoryKind::Custom.to_string(), "custom");
+    }
+
+    #[test]
+    fn test_memory_kind_deserialize_snake_case() {
+        let json = r#""story_summary""#;
+        let kind: MemoryKind = serde_json::from_str(json).unwrap();
+        assert_eq!(kind, MemoryKind::StorySummary);
+
+        let json = r#""character_note""#;
+        let kind: MemoryKind = serde_json::from_str(json).unwrap();
+        assert_eq!(kind, MemoryKind::CharacterNote);
+
+        let json = r#""custom""#;
+        let kind: MemoryKind = serde_json::from_str(json).unwrap();
+        assert_eq!(kind, MemoryKind::Custom);
+    }
+
+    #[test]
+    fn test_memory_kind_roundtrip_json() {
+        for kind_str in &[
+            "story_summary",
+            "research_material",
+            "review_note",
+            "character_note",
+            "world_building",
+            "plot_outline",
+            "theme_analysis",
+            "custom",
+        ] {
+            let json = format!(r#""{}""#, kind_str);
+            let parsed: MemoryKind = serde_json::from_str(&json).unwrap();
+            let serialized = serde_json::to_string(&parsed).unwrap();
+            assert_eq!(serialized, json);
+        }
+    }
+
+    #[test]
+    fn test_memory_kind_from_str() {
+        use std::str::FromStr;
+        assert!(MemoryKind::from_str("story_summary").is_ok());
+        assert!(MemoryKind::from_str("invalid_kind").is_err());
+        assert_eq!(MemoryKind::from_str("custom").unwrap(), MemoryKind::Custom);
+    }
+
+    #[test]
+    fn test_memory_kind_all_as_strings() {
+        let strings = MemoryKind::all_as_strings();
+        assert_eq!(strings.len(), 8);
+        assert!(strings.contains(&"story_summary".to_string()));
+        assert!(strings.contains(&"custom".to_string()));
     }
 }

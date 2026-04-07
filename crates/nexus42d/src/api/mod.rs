@@ -14,6 +14,7 @@
 //! - GET  /v1/local/references       — List reference sources (auth required)
 //! - POST /v1/local/context/assemble — Context assembly (auth required)
 //! - GET  /v1/local/sync/status      — Sync status
+//! - POST /v1/local/acp/tool/execute — ACP tool execution (daemon-mediated)
 
 pub mod auth_middleware;
 pub mod errors;
@@ -93,6 +94,12 @@ pub fn create_router(state: WorkspaceState) -> Router {
     // Sync routes (unguarded — can check status without auth)
     let sync_routes = Router::new().route("/v1/local/sync/status", get(handlers::sync::status));
 
+    // ACP tool execution routes (unguarded — workspace validation in handler)
+    let acp_routes = Router::new().route(
+        "/v1/local/acp/tool/execute",
+        post(handlers::acp::tool_execute),
+    );
+
     Router::new()
         .merge(runtime_routes)
         .merge(workspace_routes)
@@ -102,6 +109,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(reference_routes)
         .merge(context_routes)
         .merge(sync_routes)
+        .merge(acp_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

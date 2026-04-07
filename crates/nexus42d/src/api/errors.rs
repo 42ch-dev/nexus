@@ -46,6 +46,10 @@ pub enum NexusApiError {
     /// Feature not yet implemented
     #[error("Not implemented: {0}")]
     NotImplemented(String),
+
+    /// Access forbidden (e.g., path outside workspace)
+    #[error("Forbidden: {reason}")]
+    Forbidden { resource: String, reason: String },
 }
 
 impl NexusApiError {
@@ -58,6 +62,7 @@ impl NexusApiError {
             NexusApiError::AuthRequired => StatusCode::UNAUTHORIZED,
             NexusApiError::NotFound(_) => StatusCode::NOT_FOUND,
             NexusApiError::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
+            NexusApiError::Forbidden { .. } => StatusCode::FORBIDDEN,
         }
     }
 
@@ -70,6 +75,7 @@ impl NexusApiError {
             NexusApiError::AuthRequired => "AUTH_REQUIRED",
             NexusApiError::NotFound(_) => "NOT_FOUND",
             NexusApiError::NotImplemented(_) => "NOT_IMPLEMENTED",
+            NexusApiError::Forbidden { .. } => "FORBIDDEN",
         }
     }
 
