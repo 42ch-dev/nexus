@@ -87,18 +87,18 @@ These documents are valuable for agent handoff and cross-session continuity, but
 
 ## External Design Specs
 
-Nexus is an **open-source repo**, but its design specs are in the **private `nexus-platform` repo**.
+Nexus 是**开源仓库**，但设计规格位于**私有 `nexus-platform` 仓库**中。
 
-### Setup (One-time)
+### 设置（一次性）
 
 ```bash
 cp .agents/local-paths.json.example .agents/local-paths.json
 # 编辑 local-paths.json，填入 nexus_platform 实际路径
 ```
 
-`local-paths.json` 已加入 `.gitignore`，不会提交到git。
+`local-paths.json` 已加入 `.gitignore`，不会提交到 git。
 
-### Reading Specs
+### 读取规格
 
 直接使用 `specs_root` 作为根路径：
 
