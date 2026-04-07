@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/domain/delta.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Delta",
+  "description": "Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.",
+  "type": "object",
+  "required": ["delta_type", "operation", "payload", "local_timestamp"],
+  "properties": {
+    "delta_type": {
+      "type": "string",
+      "enum": ["world", "key_block", "timeline_event", "fork_branch", "memory_item", "story_manifest"],
+      "description": "Target aggregate type for this delta"
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["create", "update", "upsert", "delete", "append"],
+      "description": "Operation to apply"
+    },
+    "target_entity_type": {
+      "type": "string",
+      "description": "Sub-type (e.g., 'character' when delta_type='key_block')"
+    },
+    "target_entity_id": {
+      "type": "string",
+      "description": "Target entity ID (null for create)"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Delta payload (validated by per-type sub-schema)"
+    },
+    "source_anchor": {
+      "$ref": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
+      "description": "Optional source anchor for provenance"
+    },
+    "local_timestamp": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Local timestamp of this delta (RFC 3339 UTC)"
+    }
+  },
+  "additionalProperties": false
+}

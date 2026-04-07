@@ -99,40 +99,7 @@
     "deltas": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": ["delta_type", "operation", "payload", "local_timestamp"],
-        "properties": {
-          "delta_type": {
-            "type": "string",
-            "enum": ["world", "key_block", "timeline_event", "fork_branch", "memory_item", "story_manifest"],
-            "description": "Target aggregate type for this delta"
-          },
-          "operation": {
-            "type": "string",
-            "enum": ["create", "update", "upsert", "delete", "append"],
-            "description": "Operation to apply"
-          },
-          "target_entity_type": {
-            "type": "string",
-            "description": "Sub-type (e.g., 'character' when delta_type='key_block')"
-          },
-          "target_entity_id": {
-            "type": "string",
-            "description": "Target entity ID (null for create)"
-          },
-          "payload": {
-            "type": "object",
-            "description": "Delta payload (validated by per-type sub-schema)"
-          },
-          "source_anchor": {
-            "$ref": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
-            "description": "Optional source anchor for provenance"
-          },
-          "local_timestamp": {
-            "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
-            "description": "Local timestamp of this delta"
-          }
-        }
+        "$ref": "delta.schema.json"
       },
       "minItems": 1,
       "description": "Ordered list of delta operations"

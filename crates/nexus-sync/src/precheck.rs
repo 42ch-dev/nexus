@@ -452,7 +452,7 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_contracts::generated::BundleDelta;
+    use nexus_contracts::generated::Delta;
     use nexus_contracts::{BundleType, ManuscriptPhase};
 
     fn valid_bundle() -> Bundle {
@@ -471,7 +471,7 @@ mod tests {
             canonical_hash: String::new(),
             base_versions: serde_json::json!({"world_revision": 5}),
             last_confirmed_delta_sequence: Some(10),
-            deltas: vec![BundleDelta {
+            deltas: vec![Delta {
                 delta_type: "key_block".to_string(),
                 operation: "create".to_string(),
                 target_entity_type: None,
@@ -596,7 +596,7 @@ mod tests {
     #[test]
     fn precheck_delta_missing_type() {
         let mut bundle = valid_bundle();
-        bundle.deltas = vec![BundleDelta {
+        bundle.deltas = vec![Delta {
             delta_type: String::new(),
             operation: "create".to_string(),
             target_entity_type: None,
@@ -614,7 +614,7 @@ mod tests {
     #[test]
     fn precheck_create_with_target_id_warning() {
         let mut bundle = valid_bundle();
-        bundle.deltas = vec![BundleDelta {
+        bundle.deltas = vec![Delta {
             delta_type: "key_block".to_string(),
             operation: "create".to_string(),
             target_entity_type: None,

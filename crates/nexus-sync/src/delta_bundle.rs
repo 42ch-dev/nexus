@@ -14,7 +14,7 @@
 //! V1.0 supports `story_manifest` delta type in the deltas array,
 //! required for context-assembly summary payloads.
 
-use nexus_contracts::generated::{Bundle, BundleDelta};
+use nexus_contracts::generated::{Bundle, Delta, SourceAnchor};
 use nexus_contracts::{BundleType, ManuscriptPhase};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -25,7 +25,7 @@ use crate::errors::{SyncError, SyncResult};
 
 /// Delta operation within a bundle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Delta {
+pub struct LocalDelta {
     /// Target aggregate type for this delta.
     pub delta_type: DeltaType,
     /// Operation to apply.
@@ -117,7 +117,7 @@ pub struct BundleBuilder {
     bundle_type: BundleType,
     command_id: Option<String>,
     idempotency_key: Option<String>,
-    deltas: Vec<Delta>,
+    deltas: Vec<LocalDelta>,
     base_world_revision: Option<u64>,
     base_timeline_head_id: Option<String>,
     base_canon_revision: Option<u64>,
@@ -188,13 +188,13 @@ impl BundleBuilder {
     }
 
     /// Add a delta to the bundle.
-    pub fn add_delta(mut self, delta: Delta) -> Self {
+    pub fn add_delta(mut self, delta: LocalDelta) -> Self {
         self.deltas.push(delta);
         self
     }
 
     /// Add multiple deltas to the bundle.
-    pub fn add_deltas(mut self, deltas: Vec<Delta>) -> Self {
+    pub fn add_deltas(mut self, deltas: Vec<LocalDelta>) -> Self {
         self.deltas.extend(deltas);
         self
     }
@@ -259,18 +259,23 @@ impl BundleBuilder {
             base_versions["canon_revision"] = json!(rev);
         }
 
-        // Convert deltas to BundleDelta (generated contract type)
-        let delta_values: Vec<BundleDelta> = self
+        // Convert deltas to Delta (generated contract type)
+        let delta_values: Vec<Delta> = self
             .deltas
             .into_iter()
-            .map(|d| BundleDelta {
-                delta_type: d.delta_type.as_str().to_string(),
-                operation: d.operation.as_str().to_string(),
-                target_entity_type: d.target_entity_type.map(|s| s.to_string()),
-                target_entity_id: d.target_entity_id.map(|s| s.to_string()),
-                payload: d.payload,
-                source_anchor: d.source_anchor.and_then(|v| serde_json::from_value(v).ok()),
-                local_timestamp: d.local_timestamp.to_string(),
+            .map(|d| {
+                let source_anchor = d
+                    .source_anchor
+                    .and_then(|v| serde_json::from_value::<SourceAnchor>(v).ok());
+                Delta {
+                    delta_type: d.delta_type.as_str().to_string(),
+                    operation: d.operation.as_str().to_string(),
+                    target_entity_type: d.target_entity_type.map(|s| s.to_string()),
+                    target_entity_id: d.target_entity_id.map(|s| s.to_string()),
+                    payload: d.payload,
+                    source_anchor,
+                    local_timestamp: d.local_timestamp.to_string(),
+                }
             })
             .collect();
 
@@ -314,8 +319,8 @@ pub fn story_manifest_delta(
     summary_text: &str,
     story_manifest_id: &str,
     manifest_type: &str,
-) -> Delta {
-    Delta {
+) -> LocalDelta {
+    LocalDelta {
         delta_type: DeltaType::StoryManifest,
         operation: DeltaOperation::Upsert,
         target_entity_type: Some("story_manifest".to_string()),
@@ -334,8 +339,8 @@ mod tests {
     use super::*;
     use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
 
-    fn make_test_delta() -> Delta {
-        Delta {
+    fn make_test_delta() -> LocalDelta {
+        LocalDelta {
             delta_type: DeltaType::KeyBlock,
             operation: DeltaOperation::Create,
             target_entity_type: Some("character".to_string()),
@@ -398,9 +403,9 @@ mod tests {
             .expect("should build");
 
         assert_eq!(bundle.deltas.len(), 1);
-        let delta_val = &bundle.deltas[0];
-        assert_eq!(delta_val.delta_type, "story_manifest");
-        assert_eq!(delta_val.operation, "upsert");
+        let delta = &bundle.deltas[0];
+        assert_eq!(delta.delta_type, "story_manifest");
+        assert_eq!(delta.operation, "upsert");
     }
 
     #[test]

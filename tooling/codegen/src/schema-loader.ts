@@ -166,9 +166,12 @@ export function resolveRef(ref: string): string | null {
   if (localMatch) {
     return localMatch[1];
   }
-  // Whole-schema ref (e.g., source-anchor.schema.json)
+  // Whole-schema ref (e.g., source-anchor.schema.json, delta.schema.json)
   if (ref.includes('source-anchor.schema.json')) {
     return 'SourceAnchor';
+  }
+  if (ref.includes('delta.schema.json')) {
+    return 'Delta';
   }
   return null;
 }

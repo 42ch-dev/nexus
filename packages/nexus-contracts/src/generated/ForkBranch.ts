@@ -1,5 +1,4 @@
 import type { SchemaVersion } from './CommonTypes';
-
 /**
  * Nexus ForkBranch
  *
