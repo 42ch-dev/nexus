@@ -30,6 +30,44 @@ export function writeFile(filePath: string, content: string): void {
 }
 
 /**
+ * Delete files in a generated directory that are no longer part of the allowlist.
+ * Keeps codegen output in sync when schemas are removed or renamed.
+ */
+export function removeStaleGeneratedFiles(
+  dirPath: string,
+  allowedBasenames: Set<string>,
+  extensionWithDot: string,
+): void {
+  if (!fs.existsSync(dirPath)) {
+    return;
+  }
+  const root = path.resolve(__dirname, '..', '..', '..');
+  for (const ent of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    if (!ent.isFile()) {
+      continue;
+    }
+    const { name } = ent;
+    if (!name.endsWith(extensionWithDot)) {
+      continue;
+    }
+    if (allowedBasenames.has(name)) {
+      continue;
+    }
+    const full = path.join(dirPath, name);
+    fs.unlinkSync(full);
+    logger.warn(`Removed stale generated file: ${path.relative(root, full)}`);
+  }
+}
+
+/** Latest wire schema_version across emitted schemas (minimum 1). */
+export function maxSchemaVersion(schemaVersions: number[]): number {
+  if (schemaVersions.length === 0) {
+    return 1;
+  }
+  return Math.max(1, ...schemaVersions);
+}
+
+/**
  * Read JSON file
  */
 export function readJSON<T>(filePath: string): T {

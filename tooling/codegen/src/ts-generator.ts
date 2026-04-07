@@ -1,6 +1,6 @@
 import { LoadedSchema, COMMON_DEFINITIONS } from './schema-loader';
 import { resolveRef, isCommonEnum, getCommonBaseType } from './schema-loader';
-import { resolveFromRoot, writeFile, logger } from './utils';
+import { resolveFromRoot, writeFile, logger, removeStaleGeneratedFiles, maxSchemaVersion } from './utils';
 import path from 'path';
 
 /**
@@ -52,6 +52,12 @@ export function generateTSTypes(schemas: LoadedSchema[]): void {
   // Generate index.ts with re-exports
   generateTSIndex(schemasWithTypes, outputDir);
 
+  const keepTs = new Set(['index.ts', 'CommonTypes.ts']);
+  for (const s of schemasWithTypes) {
+    keepTs.add(`${s.typeName}.ts`);
+  }
+  removeStaleGeneratedFiles(outputDir, keepTs, '.ts');
+
   logger.success(`Generated TypeScript types for ${schemasWithTypes.length} schema(s) (+ common types)`);
 }
 
@@ -59,11 +65,8 @@ export function generateTSTypes(schemas: LoadedSchema[]): void {
  * Generate index.ts with re-exports
  */
 function generateTSIndex(schemas: LoadedSchema[], outputDir: string): void {
-  const exports: string[] = [];
-
-  for (const schema of schemas) {
-    exports.push(schema.typeName);
-  }
+  const perSchemaExports = schemas.map(s => `export * from './${s.typeName}';`).join('\n');
+  const latest = maxSchemaVersion(schemas.map(s => s.schemaVersion));
 
   const content = `/**
  * Nexus Wire Contracts - Generated TypeScript Types
@@ -76,13 +79,16 @@ function generateTSIndex(schemas: LoadedSchema[], outputDir: string): void {
 // Common types (type aliases, enums, SourceAnchor)
 export * from './CommonTypes';
 
+// Per-schema modules (stable order: sorted schema paths at load time)
+${perSchemaExports}
+
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
 ${schemas.map(s => `  ${s.typeName}: ${s.schemaVersion},`).join('\n')}
 };
 
-// Latest schema version
-export const LATEST_SCHEMA_VERSION = ${schemas[0]?.schemaVersion ?? 1};
+// Highest schema_version among emitted contract schemas
+export const LATEST_SCHEMA_VERSION = ${latest};
 `;
 
   writeFile(path.join(outputDir, 'index.ts'), content);
@@ -198,7 +204,7 @@ function generateTSTypeFields(
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { tsType, commonRef } = resolveTSType(def, propName, inlineEnums, localDefinitions);
+    const { tsType, commonRef } = resolveTSType(def, propName, inlineEnums, localDefinitions, typeName);
     if (commonRef) {
       newImports.add(commonRef);
     }
@@ -216,12 +222,16 @@ function generateTSTypeFields(
 /**
  * Resolve a property definition to a TypeScript type string.
  * Returns { tsType, commonRef? } where commonRef is set if this maps to a CommonTypes export.
+ *
+ * @param inlineEnumPathPrefix PascalCase path prefix for inline string enums (e.g. Creator, CreatorMetadata)
+ *        so barrel `export *` does not collide on names like `Status` across modules.
  */
 function resolveTSType(
   propDef: Record<string, unknown>,
   propName: string,
   inlineEnums: Map<string, string[]>,
-  localDefinitions?: Record<string, Record<string, unknown>>,
+  localDefinitions: Record<string, Record<string, unknown>> | undefined,
+  inlineEnumPathPrefix: string,
 ): { tsType: string; commonRef?: string } {
   const ref = propDef.$ref as string | undefined;
   const type = propDef.type;
@@ -250,13 +260,29 @@ function resolveTSType(
     const nonNullTypes = type.filter(t => t !== 'null');
     const hasNull = type.includes('null');
     if (nonNullTypes.length === 1) {
-      const base = resolveSingleTSType(nonNullTypes[0], propDef, propName, inlineEnums, localDefinitions);
+      const base = resolveSingleTSType(
+        nonNullTypes[0],
+        propDef,
+        propName,
+        inlineEnums,
+        localDefinitions,
+        inlineEnumPathPrefix,
+      );
       return { tsType: hasNull ? `${base} | null` : base };
     }
     return { tsType: 'unknown' };
   }
 
-  return { tsType: resolveSingleTSType(type as string, propDef, propName, inlineEnums, localDefinitions) };
+  return {
+    tsType: resolveSingleTSType(
+      type as string,
+      propDef,
+      propName,
+      inlineEnums,
+      localDefinitions,
+      inlineEnumPathPrefix,
+    ),
+  };
 }
 
 /**
@@ -267,13 +293,16 @@ function resolveSingleTSType(
   propDef: Record<string, unknown>,
   propName: string,
   inlineEnums: Map<string, string[]>,
-  localDefinitions?: Record<string, Record<string, unknown>>,
+  localDefinitions: Record<string, Record<string, unknown>> | undefined,
+  inlineEnumPathPrefix: string,
 ): string {
   switch (type) {
     case 'string':
       if (propDef.enum) {
         const values = propDef.enum as string[];
-        const enumName = toPascalCase(propName);
+        // Empty propName: caller already folded the segment (e.g. array item type for `memory_kinds`).
+        const enumName =
+          propName === '' ? inlineEnumPathPrefix : `${inlineEnumPathPrefix}${toPascalCase(propName)}`;
         inlineEnums.set(enumName, values);
         return enumName;
       }
@@ -288,17 +317,24 @@ function resolveSingleTSType(
         const items = propDef.items as Record<string, unknown>;
         // Check if items is an object with its own properties
         if (items.type === 'object' && items.properties) {
-          // Inline object inside array — build an inline type
-          return buildInlineObjectType(items, inlineEnums, localDefinitions) + '[]';
+          const path = `${inlineEnumPathPrefix}${toPascalCase(propName)}`;
+          return buildInlineObjectType(items, inlineEnums, localDefinitions, path) + '[]';
         }
-        const { tsType } = resolveTSType(items, propName, inlineEnums, localDefinitions);
+        const { tsType } = resolveTSType(
+          items,
+          '',
+          inlineEnums,
+          localDefinitions,
+          `${inlineEnumPathPrefix}${toPascalCase(propName)}`,
+        );
         return `${tsType}[]`;
       }
       return 'unknown[]';
     }
     case 'object': {
       if (propDef.properties) {
-        return buildInlineObjectType(propDef, inlineEnums, localDefinitions);
+        const path = `${inlineEnumPathPrefix}${toPascalCase(propName)}`;
+        return buildInlineObjectType(propDef, inlineEnums, localDefinitions, path);
       }
       return 'Record<string, unknown>';
     }
@@ -313,7 +349,9 @@ function resolveSingleTSType(
 function buildInlineObjectType(
   objDef: Record<string, unknown>,
   inlineEnums: Map<string, string[]>,
-  localDefinitions?: Record<string, Record<string, unknown>>,
+  localDefinitions: Record<string, Record<string, unknown>> | undefined,
+  /** PascalCase path to this anonymous object (parent prefix + property segment). */
+  objectPathPrefix: string,
 ): string {
   const props = (objDef.properties || {}) as Record<string, unknown>;
   const required = (objDef.required || []) as string[];
@@ -321,7 +359,7 @@ function buildInlineObjectType(
 
   for (const [k, v] of Object.entries(props)) {
     const isReq = required.includes(k);
-    const { tsType } = resolveTSType(v as Record<string, unknown>, k, inlineEnums, localDefinitions);
+    const { tsType } = resolveTSType(v as Record<string, unknown>, k, inlineEnums, localDefinitions, objectPathPrefix);
     parts.push(`${k}${isReq ? '' : '?'}: ${tsType}`);
   }
 

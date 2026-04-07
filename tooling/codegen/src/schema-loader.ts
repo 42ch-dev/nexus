@@ -1,6 +1,7 @@
+import fs from 'fs';
 import { globSync } from 'glob';
-import { readJSON, resolveFromRoot, extractSchemaVersion, schemaToTypeName, logger } from './utils';
 import path from 'path';
+import { readJSON, resolveFromRoot, extractSchemaVersion, schemaToTypeName, logger } from './utils';
 
 export interface LoadedSchema {
   filePath: string;
@@ -57,7 +58,7 @@ export function loadAllSchemas(): LoadedSchema[] {
 
   // First pass: load common schema to populate COMMON_DEFINITIONS
   const commonSchemaPath = path.join(schemasDir, 'common', 'common.schema.json');
-  if (fs_existsSync(commonSchemaPath)) {
+  if (fs.existsSync(commonSchemaPath)) {
     const commonContent = readJSON<Record<string, unknown>>(commonSchemaPath);
     const definitions = commonContent.definitions as Record<string, unknown> | undefined;
     if (definitions) {
@@ -73,7 +74,13 @@ export function loadAllSchemas(): LoadedSchema[] {
     }
   }
 
-  for (const filePath of files) {
+  const sortedFiles = [...files].sort((a, b) => {
+    const ra = path.relative(schemasDir, a).replace(/\\/g, '/');
+    const rb = path.relative(schemasDir, b).replace(/\\/g, '/');
+    return ra.localeCompare(rb);
+  });
+
+  for (const filePath of sortedFiles) {
     const fileName = path.basename(filePath);
     const relPath = path.relative(schemasDir, filePath).replace(/\\/g, '/');
     const typeName = schemaToTypeName(fileName);
@@ -100,7 +107,30 @@ export function loadAllSchemas(): LoadedSchema[] {
     logger.info(`  Loaded: ${fileName} -> ${typeName} (v${schemaVersion})${isDefinitionsOnly ? ' [definitions-only]' : ''}`);
   }
 
+  assertUniqueTypeNames(loadedSchemas);
+
   return loadedSchemas;
+}
+
+/**
+ * Fail fast if two emitting schema files map to the same PascalCase type name (basename collision).
+ * Skipped schemas (e.g. cli-sync refinements of a domain envelope) may share a basename with the canonical file.
+ */
+function assertUniqueTypeNames(schemas: LoadedSchema[]): void {
+  const byType = new Map<string, string>();
+  for (const s of schemas) {
+    if (s.isExplicitlySkipped) {
+      continue;
+    }
+    const prev = byType.get(s.typeName);
+    if (prev) {
+      logger.error(
+        `Duplicate generated type name "${s.typeName}": ${prev} and ${s.filePath} — rename one of the schema files.`,
+      );
+      process.exit(1);
+    }
+    byType.set(s.typeName, s.filePath);
+  }
 }
 
 /**
@@ -175,8 +205,3 @@ export function getCommonBaseType(defName: string): string {
   }
 }
 
-// Polyfill for fs.existsSync (avoid needing to import fs in this module)
-function fs_existsSync(filePath: string): boolean {
-  const { existsSync } = require('fs');
-  return existsSync(filePath);
-}
