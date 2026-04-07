@@ -100,6 +100,7 @@ pub fn build_v1_0_capabilities() -> ClientCapabilities {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::capabilities::*;
 
