@@ -516,6 +516,40 @@
           "task_3": "done"
         }
       }
+    },
+    {
+      "id": "2026-04-07-json-schema-update-phase2",
+      "title": "JSON Schema Update for Phase 2 Alignment",
+      "file": ".agents/plans/2026-04-07-json-schema-update-phase2.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "phase-2",
+        "json-schema",
+        "contracts",
+        "adr-002"
+      ],
+      "created_at": "2026-04-07",
+      "updated_at": "2026-04-07",
+      "notes": "Coordinate with nexus-platform Phase 2. Update KeyBlock, SourceAnchor, MemoryItem schemas per ADR-002. Regenerate types. Package version bump to 1.1.0.",
+      "metadata": {
+        "phase": "Phase 2",
+        "branch_policy": "feature/v2.0-json-schema-update from main",
+        "priority": "high",
+        "description": "Update JSON Schemas to align with nexus-platform Phase 2 domain model changes (ADR-002)",
+        "dependency": "nexus-platform Phase 2 Tasks 1-7 can run in parallel; Task 8 (contract consumption) blocked on this plan",
+        "spec_refs": [
+          "nexus-platform/.agents/designs/v1-spec/adr/adr-002-domain-models-g1-g6-fixes.md"
+        ],
+        "effort": "S — ~2 agent sessions",
+        "blocking": [
+          "nexus-platform Phase 2 Task 8 (contract consumption)"
+        ]
+      }
     }
   ],
   "metadata": {
