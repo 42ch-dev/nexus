@@ -21,12 +21,14 @@
 //!
 //! - [`client`] — `NexusAcpClient` trait + `AcpSdkAdapter` implementation
 //! - [`error`] — `AcpError` enum covering all ACP failure modes
+//! - [`localset_bridge`] — Bridge between async tokio and `!Send` LocalSet futures
 //! - [`registry`] — ACP registry manifest fetcher + local cache
 //! - [`skills`] — Frozen capability IDs + capability set construction
 //! - [`transport`] — Subprocess spawn + stdio pipe management + lifecycle
 
 pub mod client;
 pub mod error;
+pub mod localset_bridge;
 pub mod registry;
 pub mod skills;
 pub mod transport;

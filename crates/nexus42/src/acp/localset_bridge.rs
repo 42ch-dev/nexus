@@ -1,0 +1,377 @@
+//! LocalSet Bridge for `!Send` ACP SDK futures.
+//!
+//! The `agent-client-protocol` SDK produces `!Send` futures because they require
+//! `tokio::task::LocalSet` + `spawn_local`. This module provides a bridge between:
+//!
+//! - The **async tokio world** (where CLI commands run with `#[tokio::main]`)
+//! - The **LocalSet world** (where ACP SDK futures must run on a single thread)
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────────────────┐
+//! │                     Tokio Runtime (multi-threaded)                │
+//! │                                                                   │
+//! │  ┌─────────────────────────────────────────────────────────────┐ │
+//! │  │ CLI Command (async fn)                                       │ │
+//! │  │                                                              │ │
+//! │  │   let bridge = LocalSetBridge::new();                       │ │
+//! │  │   let response = bridge.execute(request).await;             │ │
+//! │  │                           │                                  │ │
+//! │  └───────────────────────────┼──────────────────────────────────┘ │
+//! │                              │                                    │
+//! │                              │ tokio::sync::mpsc::Sender          │
+//! │                              ▼                                    │
+//! │  ┌─────────────────────────────────────────────────────────────┐ │
+//! │  │ LocalSetBridge                                              │ │
+//! │  │  - Sends request via tokio::sync::mpsc                      │ │
+//! │  │  - Receives response via oneshot channel                    │ │
+//! │  └───────────────────────────┬──────────────────────────────────┘ │
+//! └──────────────────────────────┼────────────────────────────────────┘
+//!                                │
+//!                                │ tokio::sync::mpsc::Receiver
+//!                                ▼
+//! ┌──────────────────────────────────────────────────────────────────┐
+//! │            Dedicated OS Thread (std::thread::spawn)              │
+//! │                                                                   │
+//! │  ┌─────────────────────────────────────────────────────────────┐ │
+//! │  │ tokio::runtime::Runtime (current_thread)                    │ │
+//! │  │   .block_on(LocalSet::new().run_until(async {                │ │
+//! │  │     loop {                                                   │ │
+//! │  │         match request_rx.recv().await {                     │ │
+//! │  │             Some(req) => process on LocalSet,               │ │
+//! │  │             None => break,                                   │ │
+//! │  │         }                                                    │ │
+//! │  │     }                                                        │ │
+//! │  │   }))                                                        │ │
+//! │  └─────────────────────────────────────────────────────────────┘ │
+//! └──────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Graceful Shutdown
+//!
+//! When `LocalSetBridge` is dropped:
+//! 1. Send `None` (shutdown signal) via request channel
+//! 2. Wait for LocalSet thread to exit (join)
+
+use std::any::Any;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, error, info, warn};
+
+/// Internal request message for the bridge (type-erased).
+#[allow(clippy::type_complexity)]
+struct BridgeRequest {
+    /// The future-producing closure (boxed for `!Send`).
+    future_factory: Box<
+        dyn FnOnce() -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Box<dyn Any + Send>> + 'static>,
+            > + Send
+            + 'static,
+    >,
+}
+
+/// Bridge between async tokio world and `!Send` LocalSet world.
+///
+/// This struct spawns a dedicated OS thread running a `LocalSet`, enabling
+/// execution of `!Send` futures (like those from `agent-client-protocol` SDK)
+/// from async code that runs on a multi-threaded tokio runtime.
+///
+/// # Thread Safety
+///
+/// The bridge is `Send + Sync + Clone` because all channels used are thread-safe.
+/// Cloning shares the sender channel and thread handle.
+#[derive(Clone)]
+pub struct LocalSetBridge {
+    /// Sender for requests to the LocalSet thread.
+    request_tx: mpsc::Sender<Option<BridgeRequest>>,
+    /// Handle to the LocalSet thread for graceful shutdown (shared).
+    thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl LocalSetBridge {
+    /// Create a new LocalSet bridge.
+    ///
+    /// This spawns a dedicated OS thread running a `LocalSet` that can execute
+    /// `!Send` futures. The thread runs until the bridge is dropped.
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        let (request_tx, mut request_rx) = mpsc::channel::<Option<BridgeRequest>>(16);
+
+        // Spawn dedicated OS thread for LocalSet
+        let thread_handle = thread::spawn(move || {
+            // Create a single-threaded tokio runtime for this thread
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    error!("Failed to create tokio runtime for LocalSet thread: {}", e);
+                    return;
+                }
+            };
+
+            rt.block_on(async {
+                let localset = tokio::task::LocalSet::new();
+
+                localset
+                    .run_until(async {
+                        info!("LocalSet bridge thread started");
+
+                        while let Some(Some(request)) = request_rx.recv().await {
+                            // Execute the !Send future on the LocalSet
+                            let future = (request.future_factory)();
+                            future.await;
+                        }
+
+                        info!("LocalSet bridge thread shutting down");
+                    })
+                    .await;
+            });
+        });
+
+        Self {
+            request_tx,
+            thread_handle: Arc::new(Mutex::new(Some(thread_handle))),
+        }
+    }
+
+    /// Execute a `!Send` future on the LocalSet thread.
+    ///
+    /// This method sends a request to the LocalSet thread and waits for the
+    /// result using a oneshot channel.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` — A closure that returns a `!Send` future
+    ///
+    /// # Returns
+    ///
+    /// The result of the future.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bridge has been shut down or the receiver was dropped.
+    #[allow(dead_code)]
+    pub async fn execute<F, T>(&self, f: F) -> crate::acp::AcpResult<T>
+    where
+        F: FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'static>>
+            + Send
+            + 'static,
+        T: Send + 'static,
+    {
+        let (response_tx, response_rx) = oneshot::channel::<T>();
+
+        // Wrap the future to return Box<dyn Any + Send> for type erasure
+        let wrapper = BridgeRequest {
+            future_factory: Box::new(move || {
+                let future = f();
+                Box::pin(async move {
+                    let result = future.await;
+                    // Send result, ignore errors (receiver may have timed out)
+                    let _ = response_tx.send(result);
+                    Box::new(()) as Box<dyn Any + Send>
+                })
+            }),
+        };
+
+        self.request_tx.send(Some(wrapper)).await.map_err(|_| {
+            crate::acp::AcpError::connection_failed("LocalSet bridge channel closed")
+        })?;
+
+        response_rx.await.map_err(|_| {
+            crate::acp::AcpError::connection_failed("LocalSet bridge response channel closed")
+        })
+    }
+
+    /// Execute a `!Send` future with a timeout.
+    ///
+    /// Same as [`execute`], but wraps the operation with a timeout.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` — A closure that returns a `!Send` future
+    /// * `timeout_duration` — Maximum time to wait for the operation
+    /// * `operation_name` — Name of the operation (for error messages)
+    ///
+    /// # Errors
+    ///
+    /// Returns a timeout error if the operation doesn't complete in time.
+    #[allow(dead_code)]
+    pub async fn execute_with_timeout<F, T>(
+        &self,
+        f: F,
+        timeout_duration: Duration,
+        operation_name: &str,
+    ) -> crate::acp::AcpResult<T>
+    where
+        F: FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'static>>
+            + Send
+            + 'static,
+        T: Send + 'static,
+    {
+        tokio::time::timeout(timeout_duration, self.execute(f))
+            .await
+            .map_err(|_| crate::acp::AcpError::timeout(operation_name, timeout_duration))?
+    }
+}
+
+impl Default for LocalSetBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for LocalSetBridge {
+    fn drop(&mut self) {
+        // Check if we're the last instance holding the thread handle
+        // Arc::strong_count returns 1 if we're the last one
+        if Arc::strong_count(&self.thread_handle) == 1 {
+            debug!("Initiating LocalSet bridge shutdown");
+
+            // Send shutdown signal (None) to the LocalSet thread
+            // Use try_send to avoid blocking in Drop
+            let _ = self.request_tx.try_send(None);
+
+            // Wait for thread to exit
+            if let Some(handle) = self.thread_handle.lock().unwrap().take() {
+                match handle.join() {
+                    Ok(()) => debug!("LocalSet bridge thread exited cleanly"),
+                    Err(e) => warn!("LocalSet bridge thread panicked: {:?}", e),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Test: Bridge starts and processes a simple request.
+    #[tokio::test]
+    async fn bridge_starts_and_processes_request() {
+        let bridge = LocalSetBridge::new();
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+
+        let result: usize = bridge
+            .execute(move || {
+                let counter = counter_clone;
+                Box::pin(async move {
+                    // Simulate async work
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    42
+                })
+            })
+            .await
+            .expect("Bridge execute failed");
+
+        assert_eq!(result, 42);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    /// Test: Bridge handles multiple sequential requests.
+    #[tokio::test]
+    async fn bridge_handles_multiple_requests() {
+        let bridge = LocalSetBridge::new();
+
+        for i in 0..5 {
+            let value = i;
+            let result: i32 = bridge
+                .execute(move || Box::pin(async move { value * 2 }))
+                .await
+                .expect("Bridge execute failed");
+
+            assert_eq!(result, value * 2);
+        }
+    }
+
+    /// Test: Bridge shuts down cleanly when dropped.
+    #[tokio::test]
+    async fn bridge_shuts_down_cleanly() {
+        let bridge = LocalSetBridge::new();
+
+        // Execute one request to verify bridge is working
+        let result: i32 = bridge
+            .execute(|| Box::pin(async move { 1 }))
+            .await
+            .expect("Bridge execute failed");
+        assert_eq!(result, 1);
+
+        // Drop the bridge — this should trigger graceful shutdown
+        drop(bridge);
+
+        // Wait a bit for thread cleanup
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // No assertion needed — we're testing that drop doesn't panic
+    }
+
+    /// Test: Bridge timeout works correctly.
+    #[tokio::test]
+    async fn bridge_timeout_expires() {
+        let bridge = LocalSetBridge::new();
+
+        let result: crate::acp::AcpResult<i32> = bridge
+            .execute_with_timeout(
+                || {
+                    Box::pin(async move {
+                        // This future will sleep longer than the timeout
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        42
+                    })
+                },
+                Duration::from_millis(50),
+                "test-operation",
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, crate::acp::AcpError::Timeout { .. }));
+
+        // Give the bridge time to clean up the pending task
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    /// Test: Bridge can execute concurrent requests.
+    #[tokio::test]
+    async fn bridge_handles_concurrent_requests() {
+        let bridge = Arc::new(LocalSetBridge::new());
+        let mut handles = vec![];
+
+        for i in 0..3 {
+            let bridge = bridge.clone();
+            let handle = tokio::spawn(async move {
+                let value = i;
+                bridge
+                    .execute(move || Box::pin(async move { value * 2 }))
+                    .await
+                    .expect("Bridge execute failed")
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks to complete
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.await.expect("Task join failed"));
+        }
+
+        // All results should be present (order may vary)
+        assert_eq!(results.len(), 3);
+        for result in results {
+            assert!((0..6).contains(&result) && result % 2 == 0);
+        }
+    }
+}
