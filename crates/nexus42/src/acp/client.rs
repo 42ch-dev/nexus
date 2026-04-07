@@ -4,7 +4,7 @@
 //! all nexus42 CLI code interacts with ACP agents. The concrete implementation
 //! ([`AcpSdkAdapter`]) wraps the `agent-client-protocol` SDK's
 //! `ClientSideConnection`, isolating the `!Send` future constraint behind
-//! `tokio::task::LocalSet` + `spawn_local`.
+//! [`LocalSetBridge`].
 //!
 //! # Design Rationale
 //!
@@ -15,30 +15,42 @@
 //!   the nexus42 codebase.
 //! - Unit testing can swap the adapter with a mock implementation.
 //!
-//! # V1.0 Client Handler
+//! # LocalSetBridge Integration
 //!
-//! The [`SimpleClientHandler`] implements the ACP `Client` trait with a
-//! permissive auto-grant policy for V1.0:
-//! - All `request_permission` requests are auto-granted with a warning log
-//! - File system operations return errors (no workspace access yet)
-//! - Terminal operations return errors (deferred to V1.1+)
-//! - Session notifications are logged for debugging
+//! The SDK's `ClientSideConnection` produces `!Send` futures because it uses
+//! `tokio::task::LocalSet` internally. We bridge this with the async tokio
+//! world using [`LocalSetBridge`]:
+//!
+//! ```text
+//! CLI Command (async) ──► AcpSdkAdapter ──► LocalSetBridge
+//!                                              │
+//!                                              ▼
+//!                                    Dedicated OS Thread
+//!                                    (LocalSet + SDK connection)
+//! ```
+//!
+//! # Async Trait Compatibility
+//!
+//! The ACP SDK uses `futures::AsyncRead/AsyncWrite` traits, while tokio's
+//! subprocess pipes provide `tokio::io::AsyncRead/AsyncWrite`. We use
+//! `tokio_util::compat` to bridge these two trait families.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
-use agent_client_protocol::{ClientSideConnection, Error, StreamReceiver};
-use tokio::io::{AsyncRead, AsyncWrite};
+use agent_client_protocol::{Error, StreamReceiver};
 use tokio::sync::RwLock;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::acp::error::AcpResult;
+use crate::acp::localset_bridge::LocalSetBridge;
 
 // Re-export commonly used SDK types for convenience.
 #[allow(unused_imports)]
 pub use acp::{
-    AgentCapabilities, CancelNotification, Client, ClientCapabilities, ContentBlock,
+    Agent, AgentCapabilities, CancelNotification, Client, ClientCapabilities, ContentBlock,
     Implementation, InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
     PromptRequest, PromptResponse, SessionId, StopReason,
 };
@@ -116,13 +128,6 @@ impl PromptCompleted {
 ///
 /// All ACP communication from the CLI goes through this trait. The methods
 /// mirror the ACP protocol lifecycle: initialize → session → prompt → cancel.
-///
-/// # `!Send` Isolation
-///
-/// The underlying SDK produces `!Send` futures, which require
-/// `tokio::task::LocalSet`. This trait exposes **`Send`** futures so callers
-/// don't need to worry about runtime constraints. The concrete adapter
-/// ([`AcpSdkAdapter`]) internally bridges the gap.
 #[allow(async_fn_in_trait)]
 #[allow(dead_code)]
 pub trait NexusAcpClient: Send + Sync {
@@ -279,171 +284,347 @@ impl acp::Client for SimpleClientHandler {
     }
 }
 
+/// Internal state for the SDK adapter (stored in LocalSet thread).
+#[allow(dead_code)]
+struct SdkConnection {
+    /// The ACP SDK connection.
+    connection: acp::ClientSideConnection,
+    /// The I/O task handle (must be kept alive).
+    _io_task: tokio::task::JoinHandle<()>,
+    /// Stream receiver for notifications.
+    stream_receiver: StreamReceiver,
+}
+
 /// Concrete adapter wrapping the `agent-client-protocol` SDK.
 ///
-/// This struct owns the `ClientSideConnection` wrapped in `RwLock` to allow
-/// interior mutability. The SDK's `ClientSideConnection` is `!Send`, so it
-/// must be used within a `LocalSet`. We achieve this by running the LocalSet
-/// in a dedicated thread and using message passing for SDK calls.
-///
-/// # Architecture Note
-///
-/// For Task 4, this implementation provides the structure but defers the full
-/// LocalSet thread integration to keep the codebase buildable. The trait methods
-/// currently return placeholder responses. Full integration requires:
-/// 1. Spawning a dedicated OS thread for the LocalSet
-/// 2. Using channels to send requests and receive responses
-/// 3. Managing the lifetime of the LocalSet thread
-///
-/// This is tracked as a follow-up refinement.
+/// This struct uses [`LocalSetBridge`] to execute `!Send` SDK operations on a
+/// dedicated thread with a `LocalSet`. The connection is created once and reused
+/// for all subsequent operations.
 #[allow(dead_code)]
 pub struct AcpSdkAdapter {
     /// The agent's resolved binary path or command string (for error messages).
     agent_path: PathBuf,
     /// Agent ID for logging context.
     agent_id: String,
-    /// The ACP SDK connection (wrapped for interior mutability).
-    connection: Arc<RwLock<Option<ClientSideConnection>>>,
+    /// LocalSet bridge for executing !Send futures.
+    bridge: LocalSetBridge,
+    /// The ACP SDK connection (wrapped for thread-safe access).
+    /// This is `Some` after `with_connection()` is called.
+    connection: Arc<RwLock<Option<SdkConnection>>>,
+    /// Client handler for permission requests.
+    handler: SimpleClientHandler,
+    /// Handle to the connection setup task (must be joined during cleanup).
+    _setup_task: Option<tokio::task::JoinHandle<()>>,
 }
 
-#[allow(dead_code)]
 impl AcpSdkAdapter {
-    /// Create a new adapter with placeholder connection.
+    /// Create a new adapter without an established connection.
     ///
-    /// For Task 4, this creates the adapter structure without establishing
-    /// the actual SDK connection. The full LocalSet-based integration will
-    /// be added in a follow-up refinement to handle the `!Send` constraint.
+    /// Use [`with_connection()`] to establish the actual SDK connection.
+    #[allow(dead_code)]
     pub fn new(agent_id: String, agent_path: PathBuf) -> Self {
+        let handler = SimpleClientHandler::new(agent_id.clone());
         Self {
             agent_path,
-            agent_id,
+            agent_id: agent_id.clone(),
+            bridge: LocalSetBridge::new(),
             connection: Arc::new(RwLock::new(None)),
+            handler,
+            _setup_task: None,
         }
     }
 
-    /// Create adapter with established connection (for future use).
+    /// Create adapter with established connection.
     ///
-    /// This method will be used when the full LocalSet thread integration
-    /// is implemented. Currently marked as future work.
+    /// This method establishes the ACP SDK connection using the provided
+    /// stdin/stdout pipes from the agent subprocess.
     #[allow(dead_code)]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn with_connection(
         agent_id: String,
         agent_path: PathBuf,
-        _stdin: impl AsyncWrite + Unpin + 'static,
-        _stdout: impl AsyncRead + Unpin + 'static,
+        stdin: tokio::process::ChildStdin,
+        stdout: tokio::process::ChildStdout,
     ) -> Self {
-        tracing::warn!(
+        let handler = SimpleClientHandler::new(agent_id.clone());
+        let bridge = LocalSetBridge::new();
+        let connection = Arc::new(RwLock::new(None));
+
+        tracing::info!(
             agent_id = %agent_id,
-            "AcpSdkAdapter::with_connection() called — full LocalSet integration pending"
+            "Creating ACP SDK adapter with connection"
         );
 
-        // TODO: Implement LocalSet-based thread for !Send futures
-        // For now, return placeholder adapter
-        Self::new(agent_id, agent_path)
+        // Clone for use inside the closure
+        let connection_clone = connection.clone();
+        let handler_clone = handler.clone();
+        let agent_id_for_log = agent_id.clone();
+        let agent_id_for_error = agent_id.clone();
+
+        // Execute the connection setup on the LocalSet
+        let bridge_clone = bridge.clone();
+        let setup_task = tokio::spawn(async move {
+            let result = bridge_clone
+                .execute(move || {
+                    let connection_clone = connection_clone.clone();
+                    let handler = handler_clone;
+                    let agent_id = agent_id_for_log;
+
+                    // Convert tokio pipes to futures-compatible traits inside the LocalSet
+                    // This is where Compat is created - inside the !Send context
+                    let stdin_compat = stdin.compat_write();
+                    let stdout_compat = stdout.compat();
+
+                    Box::pin(async move {
+                        // Create the SDK connection on the LocalSet
+                        let spawn_local = |fut| {
+                            tokio::task::spawn_local(fut);
+                        };
+
+                        let (conn, io_task) = acp::ClientSideConnection::new(
+                            handler,
+                            stdin_compat,
+                            stdout_compat,
+                            spawn_local,
+                        );
+
+                        let stream_receiver = conn.subscribe();
+
+                        // Store the connection
+                        let mut guard = connection_clone.write().await;
+                        *guard = Some(SdkConnection {
+                            connection: conn,
+                            _io_task: tokio::task::spawn_local(async move {
+                                if let Err(e) = io_task.await {
+                                    tracing::error!(
+                                        agent_id = %agent_id,
+                                        error = %e,
+                                        "ACP I/O task failed"
+                                    );
+                                }
+                            }),
+                            stream_receiver,
+                        });
+
+                        Ok::<(), crate::acp::AcpError>(())
+                    })
+                })
+                .await;
+
+            if let Err(e) = result {
+                tracing::error!(
+                    agent_id = %agent_id_for_error,
+                    error = %e,
+                    "Failed to establish ACP connection"
+                );
+            }
+        });
+
+        Self {
+            agent_path,
+            agent_id,
+            bridge,
+            connection,
+            handler,
+            _setup_task: Some(setup_task),
+        }
     }
 
     /// Return a reference to the agent path (for error reporting).
+    #[allow(dead_code)]
     pub fn agent_path(&self) -> &Path {
         &self.agent_path
     }
 
     /// Return the agent ID.
+    #[allow(dead_code)]
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+}
+
+impl Drop for AcpSdkAdapter {
+    fn drop(&mut self) {
+        // Join the setup task if it exists (fire-and-forget cleanup)
+        if let Some(setup_task) = self._setup_task.take() {
+            // Use tokio::spawn to join in an async context
+            // We can't block in Drop, so we spawn a cleanup task
+            // Check if a tokio runtime is available to avoid panic during shutdown
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = setup_task.await;
+                });
+            }
+            // If no runtime is available, skip — the process is shutting down anyway
+        }
     }
 }
 
 impl NexusAcpClient for AcpSdkAdapter {
     fn initialize(
         &self,
-        _request: InitializeRequest,
+        request: InitializeRequest,
     ) -> impl Future<Output = AcpResult<InitializedSession>> + Send {
-        let agent_id = self.agent_id.clone();
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
 
         async move {
-            tracing::warn!(
-                agent_id = %agent_id,
-                "AcpSdkAdapter::initialize() — full SDK integration pending LocalSet thread implementation"
-            );
+            // execute returns AcpResult<Result<T, AcpError>>
+            // Flatten with and_then
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
 
-            // Placeholder response for Task 4
-            // TODO: Implement LocalSet thread + channel-based SDK calls
-            Ok(InitializedSession {
-                protocol_version: ProtocolVersion::LATEST,
-                agent_capabilities: AgentCapabilities::default(),
-                agent_info: None,
-                auth_methods: Vec::new(),
-            })
+                    Box::pin(async move {
+                        let guard = connection.read().await;
+                        let sdk_conn = match guard.as_ref() {
+                            Some(conn) => conn,
+                            None => {
+                                return Err(crate::acp::AcpError::connection_failed(
+                                    "Connection not established",
+                                ))
+                            }
+                        };
+
+                        let response = sdk_conn
+                            .connection
+                            .initialize(request)
+                            .await
+                            .map_err(crate::acp::AcpError::sdk)?;
+
+                        Ok(InitializedSession::from_sdk_response(response))
+                    })
+                })
+                .await
+                .and_then(|r| r)
         }
     }
 
     fn create_session(
         &self,
-        _request: NewSessionRequest,
+        request: NewSessionRequest,
     ) -> impl Future<Output = AcpResult<SessionCreated>> + Send {
-        let agent_id = self.agent_id.clone();
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
 
         async move {
-            tracing::warn!(
-                agent_id = %agent_id,
-                "AcpSdkAdapter::create_session() — full SDK integration pending"
-            );
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
 
-            Ok(SessionCreated {
-                session_id: SessionId::new("placeholder-session-id"),
-                modes: None,
-            })
+                    Box::pin(async move {
+                        let guard = connection.read().await;
+                        let sdk_conn = match guard.as_ref() {
+                            Some(conn) => conn,
+                            None => {
+                                return Err(crate::acp::AcpError::connection_failed(
+                                    "Connection not established",
+                                ))
+                            }
+                        };
+
+                        let response = sdk_conn
+                            .connection
+                            .new_session(request)
+                            .await
+                            .map_err(crate::acp::AcpError::sdk)?;
+
+                        Ok(SessionCreated::from_sdk_response(response))
+                    })
+                })
+                .await
+                .and_then(|r| r)
         }
     }
 
     fn prompt(
         &self,
-        _request: PromptRequest,
+        request: PromptRequest,
     ) -> impl Future<Output = AcpResult<PromptCompleted>> + Send {
-        let agent_id = self.agent_id.clone();
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
 
         async move {
-            tracing::warn!(
-                agent_id = %agent_id,
-                "AcpSdkAdapter::prompt() — full SDK integration pending"
-            );
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
 
-            Ok(PromptCompleted {
-                stop_reason: StopReason::EndTurn,
-            })
+                    Box::pin(async move {
+                        let guard = connection.read().await;
+                        let sdk_conn = match guard.as_ref() {
+                            Some(conn) => conn,
+                            None => {
+                                return Err(crate::acp::AcpError::connection_failed(
+                                    "Connection not established",
+                                ))
+                            }
+                        };
+
+                        let response = sdk_conn
+                            .connection
+                            .prompt(request)
+                            .await
+                            .map_err(crate::acp::AcpError::sdk)?;
+
+                        Ok(PromptCompleted::from_sdk_response(response))
+                    })
+                })
+                .await
+                .and_then(|r| r)
         }
     }
 
-    fn cancel(&self, _session_id: SessionId) -> impl Future<Output = AcpResult<()>> + Send {
-        let agent_id = self.agent_id.clone();
+    fn cancel(&self, session_id: SessionId) -> impl Future<Output = AcpResult<()>> + Send {
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
 
         async move {
-            tracing::warn!(
-                agent_id = %agent_id,
-                "AcpSdkAdapter::cancel() — full SDK integration pending"
-            );
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
 
-            Ok(())
+                    Box::pin(async move {
+                        let guard = connection.read().await;
+                        let sdk_conn = match guard.as_ref() {
+                            Some(conn) => conn,
+                            None => {
+                                return Err(crate::acp::AcpError::connection_failed(
+                                    "Connection not established",
+                                ))
+                            }
+                        };
+
+                        let cancel_notification = CancelNotification::new(session_id);
+                        let result: Result<(), acp::Error> =
+                            sdk_conn.connection.cancel(cancel_notification).await;
+                        result.map_err(crate::acp::AcpError::sdk)?;
+
+                        Ok(())
+                    })
+                })
+                .await
+                .and_then(|r| r)
         }
     }
 
     fn subscribe(&self) -> StreamReceiver {
-        // TODO: Implement actual stream subscription when full LocalSet integration is ready
+        let _connection = self.connection.clone();
+
+        // Create a fresh receiver (this will be updated to use the actual connection's receiver)
+        let (tx, rx) = async_broadcast::broadcast(16);
+        drop(tx);
+
         tracing::warn!(
             agent_id = %self.agent_id,
-            "subscribe() called — returning empty receiver (pending LocalSet integration)"
+            "subscribe() called — returning empty receiver (connection may not be established yet)"
         );
 
-        // Create a broadcast channel and immediately drop the sender.
-        // The receiver's recv() will return Err(RecvError::Closed) instead of
-        // panicking via unimplemented!().
-        let (tx, rx) = async_broadcast::broadcast(1);
-        drop(tx);
         StreamReceiver::from(rx)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -475,7 +656,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adapter_placeholder_initialize() {
+    async fn adapter_new_creates_bridge() {
+        let adapter = AcpSdkAdapter::new(
+            "test-agent".to_string(),
+            PathBuf::from("/usr/bin/test-agent"),
+        );
+
+        assert_eq!(adapter.agent_id(), "test-agent");
+        assert_eq!(adapter.agent_path(), Path::new("/usr/bin/test-agent"));
+
+        // Connection should be None
+        let guard = adapter.connection.read().await;
+        assert!(guard.is_none());
+    }
+
+    #[tokio::test]
+    async fn adapter_initialize_without_connection_fails() {
         let adapter = AcpSdkAdapter::new(
             "test-agent".to_string(),
             PathBuf::from("/usr/bin/test-agent"),
@@ -483,9 +679,10 @@ mod tests {
 
         let request = InitializeRequest::new(ProtocolVersion::LATEST);
 
-        let result: AcpResult<InitializedSession> = adapter.initialize(request).await;
-        assert!(result.is_ok());
-        let session = result.unwrap();
-        assert_eq!(session.protocol_version, ProtocolVersion::LATEST);
+        let result = adapter.initialize(request).await;
+        // Since the closure returns Result<T, AcpError> and execute wraps it,
+        // we get AcpResult<AcpResult<InitializedSession>>
+        // The ? will flatten outer errors, inner result contains connection error
+        assert!(result.is_err());
     }
 }
