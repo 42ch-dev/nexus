@@ -120,6 +120,12 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
                 message: format!("Failed to spawn daemon process '{}': {}", program, e),
             })?;
 
+        // Write the PID file so stop_daemon() can find the process
+        let child_pid = child.id();
+        if child_pid > 0 {
+            write_pid_file(child_pid)?;
+        }
+
         if foreground {
             // In foreground mode, wait for the child process to exit
             let _ = child.wait();
@@ -150,7 +156,7 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
             tokio::time::sleep(retry_delay).await;
             if client.health_check().await? {
                 println!("✓ Daemon started successfully on port {}", port);
-                println!("  PID: child process");
+                println!("  PID: {}", child_pid);
                 return Ok(());
             }
             if i == max_retries {
@@ -194,14 +200,22 @@ fn read_pid_file() -> Result<Option<u32>> {
     Ok(Some(pid))
 }
 
-/// Write PID to the daemon PID file
-#[allow(dead_code)]
+/// Write PID to the daemon PID file with owner-only permissions (0600)
 fn write_pid_file(pid: u32) -> Result<()> {
     let path = pid_file_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, pid.to_string())?;
+
+    // Set file permissions to 0600 (owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&path, perms)?;
+    }
+
     Ok(())
 }
 

@@ -5,7 +5,7 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use crate::manuscript::manager::{validate_world_id, ManuscriptManager};
+use crate::manuscript::manager::{sanitize_title, validate_world_id, ManuscriptManager};
 use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
@@ -88,8 +88,9 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             let content = manager.read_content(&title)?;
             let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
-            // Write to a temp file for editing
-            let tmp_path = std::env::temp_dir().join(format!(".nexus42-edit-{}", title));
+            // Write to a temp file for editing (title sanitized to prevent path traversal)
+            let safe_title = sanitize_title(&title)?;
+            let tmp_path = std::env::temp_dir().join(format!(".nexus42-edit-{}", safe_title));
             std::fs::write(&tmp_path, &content)?;
 
             // Open editor
@@ -197,6 +198,8 @@ fn open_workspace_db(workspace_root: &std::path::Path) -> Result<rusqlite::Conne
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_get_phase_from_empty_db() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -230,5 +233,23 @@ mod tests {
             )
             .ok();
         assert_eq!(result, Some("draft".to_string()));
+    }
+
+    #[test]
+    fn test_temp_path_sanitization() {
+        // Titles with path traversal should be rejected before reaching temp path
+        let result = sanitize_title("../../../etc/passwd");
+        assert!(
+            result.is_err(),
+            "Path traversal in title should be rejected"
+        );
+
+        let result = sanitize_title("my/novel");
+        assert!(result.is_err(), "Slash in title should be rejected");
+
+        // Normal titles should pass
+        let result = sanitize_title("My Great Novel");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "My Great Novel");
     }
 }
