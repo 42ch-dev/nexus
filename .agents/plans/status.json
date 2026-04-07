@@ -743,7 +743,7 @@
           "target": "V1.1 \u2014 add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
         },
-{
+        {
           "id": "DM-R5",
           "title": "MembershipRole enum drift between schema and domain",
           "severity": "medium",
