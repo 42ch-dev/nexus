@@ -10,10 +10,10 @@ import type { MemoryType, SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type MemoryKind = 'generic' | 'story_summary' | 'research_material' | 'review_note';
+export type MemoryMemoryKind = 'generic' | 'story_summary' | 'research_material' | 'review_note';
 
 /** Inline enum type */
-export type Status = 'active' | 'superseded' | 'archived';
+export type MemoryStatus = 'active' | 'superseded' | 'archived';
 
 /** MemoryItem - structured memory for creator experience and world context. Aligned with data-model-v1.md §5.8. */
 export interface Memory {
@@ -22,8 +22,8 @@ export interface Memory {
   creator_id: string;
   world_id: string;
   memory_type: MemoryType;
-  memory_kind?: MemoryKind;
-  status: Status;
+  memory_kind?: MemoryMemoryKind;
+  status: MemoryStatus;
   summary?: string;
   embedding_ref?: string;
   source_refs?: { kind: string; id: string }[];

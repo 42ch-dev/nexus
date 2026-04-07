@@ -10,10 +10,10 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type EventType = 'story_advance' | 'state_update' | 'fork_marker' | 'official_progression' | 'publish_marker';
+export type TimelineEventEventType = 'story_advance' | 'state_update' | 'fork_marker' | 'official_progression' | 'publish_marker';
 
 /** Inline enum type */
-export type Status = 'canon' | 'provisional' | 'rejected';
+export type TimelineEventStatus = 'canon' | 'provisional' | 'rejected';
 
 /** TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6. */
 export interface TimelineEvent {
@@ -21,8 +21,8 @@ export interface TimelineEvent {
   timeline_event_id: string;
   world_id: string;
   branch_id: string;
-  event_type: EventType;
-  status: Status;
+  event_type: TimelineEventEventType;
+  status: TimelineEventStatus;
   sequence_no: number;
   title?: string;
   summary?: string;

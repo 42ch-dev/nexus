@@ -10,7 +10,7 @@ import type { BlockType, SchemaVersion, SourceAnchor } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type Status = 'provisional' | 'confirmed' | 'deprecated' | 'merged' | 'deleted';
+export type KeyBlockStatus = 'provisional' | 'confirmed' | 'deprecated' | 'merged' | 'deleted';
 
 /** KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5. */
 export interface KeyBlock {
@@ -19,7 +19,7 @@ export interface KeyBlock {
   world_id: string;
   block_type: BlockType;
   canonical_name: string;
-  status: Status;
+  status: KeyBlockStatus;
   revision?: number;
   body?: { summary?: string; attributes?: Record<string, unknown>; tags?: string[] };
   source_anchor?: SourceAnchor;

@@ -10,7 +10,7 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type Type = 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
+export type MetaType = 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
 
 /** Meta schema defining schema versioning and structure rules for all Nexus schemas */
 export interface Meta {
@@ -19,5 +19,5 @@ export interface Meta {
   schema_version: number;
   title: string;
   description?: string;
-  type: Type;
+  type: MetaType;
 }
