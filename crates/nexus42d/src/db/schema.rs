@@ -24,6 +24,8 @@ impl Schema {
         conn.execute_batch(CREATORS_TABLE)?;
         conn.execute_batch(REFERENCE_SOURCES_TABLE)?;
         conn.execute_batch(OUTBOX_TABLE)?;
+        conn.execute_batch(AUTH_TOKENS_TABLE)?;
+        conn.execute_batch(DEVICE_CODE_SESSIONS_TABLE)?;
 
         // Seed schema version row (idempotent)
         conn.execute(
@@ -90,6 +92,28 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 "#;
 
+/// Auth tokens — stores OAuth tokens for user authentication.
+pub const AUTH_TOKENS_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    user_id TEXT PRIMARY KEY,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"#;
+
+/// Device code sessions — tracks OAuth device authorization grants.
+pub const DEVICE_CODE_SESSIONS_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS device_code_sessions (
+    device_code TEXT PRIMARY KEY,
+    user_code TEXT NOT NULL,
+    verification_uri TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +136,7 @@ mod tests {
         assert!(tables.contains(&"creators".to_string()));
         assert!(tables.contains(&"reference_sources".to_string()));
         assert!(tables.contains(&"outbox".to_string()));
+        assert!(tables.contains(&"auth_tokens".to_string()));
     }
 
     #[test]
