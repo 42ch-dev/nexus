@@ -72,6 +72,10 @@ pub enum ContextCommand {
         #[arg(long)]
         max_story_summaries: Option<u64>,
 
+        /// Maximum file size in bytes for summary generation (null = no limit)
+        #[arg(long)]
+        max_file_size: Option<u64>,
+
         /// Output file path (default: stdout as JSON)
         #[arg(long)]
         output_file: Option<String>,
@@ -90,6 +94,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             include_story_summaries,
             max_timeline_events,
             max_story_summaries,
+            max_file_size,
             output_file,
         } => {
             // Resolve workspace_id and creator_id from config if not provided
@@ -125,6 +130,11 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 max_timeline_events: max_timeline_events.map(|v| v as i64),
                 max_story_summaries: max_story_summaries.map(|v| v as i64),
             };
+
+            // Note: max_file_size is not yet passed to the daemon API
+            // It will be used when SummaryGenerator is integrated into the context assembly workflow
+            // For now, suppress unused warning
+            let _ = max_file_size;
 
             // Create daemon client and context client
             let daemon = DaemonClient::from_config(config);

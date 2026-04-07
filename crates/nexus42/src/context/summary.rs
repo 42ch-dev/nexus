@@ -13,6 +13,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 /// Maximum summary text length (characters).
 const MAX_SUMMARY_CHARS: usize = 4096;
@@ -52,6 +53,8 @@ pub struct SummaryGenerator {
     max_summary_chars: usize,
     /// Maximum excerpt length in characters.
     max_excerpt_chars: usize,
+    /// Maximum file size in bytes (optional limit).
+    max_file_size: Option<u64>,
 }
 
 impl SummaryGenerator {
@@ -61,6 +64,15 @@ impl SummaryGenerator {
             manuscript_root,
             max_summary_chars: MAX_SUMMARY_CHARS,
             max_excerpt_chars: MAX_EXCERPT_CHARS,
+            max_file_size: None,
+        }
+    }
+
+    /// Set maximum file size limit (in bytes).
+    pub fn with_max_file_size(self, max_file_size: Option<u64>) -> Self {
+        Self {
+            max_file_size,
+            ..self
         }
     }
 
@@ -92,6 +104,24 @@ impl SummaryGenerator {
             } else {
                 let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 if matches!(extension, "md" | "txt") {
+                    // Check file size if limit is set
+                    if let Some(max_size) = self.max_file_size {
+                        let metadata = fs::metadata(&path)?;
+                        let file_size = metadata.len();
+                        if file_size > max_size {
+                            // Skip file exceeding size limit
+                            let relative =
+                                path.strip_prefix(&self.manuscript_root).unwrap_or(&path);
+                            warn!(
+                                "Skipping file {} ({} bytes) exceeding limit {} bytes",
+                                relative.display(),
+                                file_size,
+                                max_size
+                            );
+                            continue;
+                        }
+                    }
+
                     let relative = path
                         .strip_prefix(&self.manuscript_root)
                         .unwrap_or(&path)
@@ -282,6 +312,8 @@ fn extract_opening_excerpt(content: &str, max_chars: usize) -> Option<String> {
 mod tests {
     use super::*;
     use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     /// Helper: create a temp manuscript directory with files.
@@ -617,5 +649,347 @@ mod tests {
         let excerpt = super::extract_opening_excerpt(&content, 50).expect("should have excerpt");
         assert!(excerpt.len() <= 53);
         assert!(excerpt.is_char_boundary(excerpt.len()));
+    }
+
+    #[test]
+    fn scan_skips_large_files_when_limit_set() {
+        // Test that files exceeding max_file_size are skipped
+        let small_content = "Small file content";
+        let large_content = "a".repeat(10_000); // 10KB file
+
+        let tmp =
+            create_test_manuscript(&[("small.md", small_content), ("large.md", &large_content)]);
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf()).with_max_file_size(Some(5000)); // 5KB limit
+
+        let files = gen.scan_manuscript_dir().expect("scan should succeed");
+
+        // Should only include small.md (17 bytes), not large.md (10001 bytes)
+        assert_eq!(files.len(), 1);
+        assert!(files[0].relative_path.ends_with("small.md"));
+    }
+
+    #[test]
+    fn scan_includes_all_files_when_no_limit() {
+        // Test that all files are included when max_file_size is None (default)
+        let small_content = "Small file content";
+        let large_content = "a".repeat(10_000); // 10KB file
+
+        let tmp =
+            create_test_manuscript(&[("small.md", small_content), ("large.md", &large_content)]);
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // No max_file_size set (default: None)
+
+        let files = gen.scan_manuscript_dir().expect("scan should succeed");
+
+        // Should include both files
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f.relative_path.ends_with("small.md")));
+        assert!(files.iter().any(|f| f.relative_path.ends_with("large.md")));
+    }
+
+    #[test]
+    fn max_file_size_limit_boundary() {
+        // Test file exactly at the limit boundary is included
+        let content = "a".repeat(1000); // Exactly 1000 bytes
+
+        let tmp = create_test_manuscript(&[
+            ("exact.md", &content),
+            ("over.md", &"a".repeat(1001)), // 1001 bytes, just over limit
+        ]);
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf()).with_max_file_size(Some(1000));
+
+        let files = gen.scan_manuscript_dir().expect("scan should succeed");
+
+        // Should include exact.md (1000 bytes) but skip over.md (1001 bytes)
+        assert_eq!(files.len(), 1);
+        assert!(files[0].relative_path.ends_with("exact.md"));
+    }
+
+    #[test]
+    fn scan_permission_denied_file_no_panic() {
+        // Create a file and make it unreadable
+        let tmp = create_test_manuscript(&[("readable.md", "# Readable\n\nContent.")]);
+        let unreadable_path = tmp.path().join("unreadable.md");
+
+        // Create the file
+        let mut f = fs::File::create(&unreadable_path).expect("create file");
+        f.write_all(b"# Unreadable\n\nSecret content.")
+            .expect("write file");
+
+        // Make file unreadable (Unix-specific, skip on other platforms)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&unreadable_path, fs::Permissions::from_mode(0o000))
+                .expect("set permissions");
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Test should not panic - it may return an error, but should not crash
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        #[cfg(unix)]
+        {
+            // On Unix, permission denied should propagate error, not panic
+            match result {
+                Ok(scan_result) => {
+                    // Current implementation returns error on permission denied
+                    assert!(
+                        scan_result.is_err(),
+                        "Expected error for permission-denied file, got {:?}",
+                        scan_result
+                    );
+                }
+                Err(panic_info) => {
+                    panic!(
+                        "scan_manuscript_dir panicked on permission-denied file: {:?}",
+                        panic_info
+                    );
+                }
+            }
+
+            // Restore permissions for cleanup
+            fs::set_permissions(&unreadable_path, fs::Permissions::from_mode(0o644))
+                .expect("restore permissions");
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix platforms, just verify no panic
+            assert!(result.is_ok(), "scan_manuscript_dir should not panic");
+        }
+    }
+
+    #[test]
+    fn scan_symlink_to_file_no_panic() {
+        // Create a real file and a symlink to it
+        let tmp =
+            create_test_manuscript(&[("real.md", "# Real File\n\nThis is the real content.")]);
+        let real_path = tmp.path().join("real.md");
+        let symlink_path = tmp.path().join("symlink.md");
+
+        // Create symlink (platform-specific)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&real_path, &symlink_path).expect("create symlink");
+        }
+
+        #[cfg(windows)]
+        {
+            // Windows symlinks require admin privileges, skip if unavailable
+            if std::os::windows::fs::symlink_file(&real_path, &symlink_path).is_err() {
+                // Skip test on Windows if symlink creation fails
+                return;
+            }
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Test should not panic - symlink should be followed or skipped gracefully
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        match result {
+            Ok(scan_result) => {
+                // Symlink to file is followed by default (fs::read_to_string resolves symlinks)
+                match scan_result {
+                    Ok(files) => {
+                        // Should have found both real.md and symlink.md (symlink is followed)
+                        // On some platforms, symlink might be filtered or cause error
+                        assert!(
+                            files.len() >= 1 && files.len() <= 2,
+                            "Expected 1-2 files (real.md and possibly symlink.md), got {}",
+                            files.len()
+                        );
+                    }
+                    Err(e) => {
+                        // Some platforms may error on symlinks - acceptable, but no panic
+                        eprintln!("scan returned error for symlink (acceptable): {}", e);
+                    }
+                }
+            }
+            Err(panic_info) => {
+                panic!("scan_manuscript_dir panicked on symlink: {:?}", panic_info);
+            }
+        }
+    }
+
+    #[test]
+    fn scan_symlink_to_directory_no_panic() {
+        // Create a directory with files and a symlink to it
+        let tmp = TempDir::new().expect("temp dir");
+        let real_dir = tmp.path().join("real_dir");
+        fs::create_dir_all(&real_dir).expect("create real dir");
+
+        let real_file = real_dir.join("file.md");
+        let mut f = fs::File::create(&real_file).expect("create real file");
+        f.write_all(b"# Real Dir File\n\nContent in symlinked dir.")
+            .expect("write file");
+
+        let symlink_dir = tmp.path().join("symlink_dir");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&real_dir, &symlink_dir).expect("create symlink to dir");
+        }
+
+        #[cfg(windows)]
+        {
+            // Windows directory symlinks require admin privileges, skip if unavailable
+            if std::os::windows::fs::symlink_dir(&real_dir, &symlink_dir).is_err() {
+                return;
+            }
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Test should not panic when scanning symlinked directory
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        match result {
+            Ok(scan_result) => {
+                match scan_result {
+                    Ok(files) => {
+                        // Symlink to dir is followed - files inside are scanned
+                        // May find files from both real_dir and symlink_dir (same content)
+                        assert!(
+                            files.len() >= 1,
+                            "Expected at least 1 file from symlinked directory, got {}",
+                            files.len()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "scan returned error for symlinked directory (acceptable): {}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(panic_info) => {
+                panic!(
+                    "scan_manuscript_dir panicked on symlinked directory: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scan_broken_symlink_no_panic() {
+        // Create a symlink pointing to a non-existent target
+        let tmp = TempDir::new().expect("temp dir");
+        let broken_symlink = tmp.path().join("broken.md");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let fake_target = tmp.path().join("nonexistent.md");
+            symlink(&fake_target, &broken_symlink).expect("create broken symlink");
+        }
+
+        #[cfg(windows)]
+        {
+            // Windows symlinks may not work without admin, skip if fails
+            if std::os::windows::fs::symlink_file(
+                &tmp.path().join("nonexistent.md"),
+                &broken_symlink,
+            )
+            .is_err()
+            {
+                return;
+            }
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // Broken symlink should not cause panic
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.scan_manuscript_dir()));
+
+        match result {
+            Ok(scan_result) => {
+                match scan_result {
+                    Ok(files) => {
+                        // Broken symlink is skipped or filtered - no files found
+                        assert_eq!(
+                            files.len(),
+                            0,
+                            "Broken symlink should not produce files, got {}",
+                            files.len()
+                        );
+                    }
+                    Err(e) => {
+                        // Error on broken symlink is acceptable
+                        eprintln!("scan returned error for broken symlink (acceptable): {}", e);
+                    }
+                }
+            }
+            Err(panic_info) => {
+                panic!(
+                    "scan_manuscript_dir panicked on broken symlink: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generate_with_permission_denied_file_no_panic() {
+        // Test full generate() workflow with permission-denied file
+        let tmp = create_test_manuscript(&[("good.md", "# Good File\n\nReadable content.")]);
+        let bad_file = tmp.path().join("bad.md");
+
+        let mut f = fs::File::create(&bad_file).expect("create bad file");
+        f.write_all(b"# Bad File\n\nUnreadable content.")
+            .expect("write bad file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&bad_file, fs::Permissions::from_mode(0o000))
+                .expect("set permissions");
+        }
+
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.generate()));
+
+        #[cfg(unix)]
+        {
+            match result {
+                Ok(gen_result) => {
+                    // generate() propagates error from scan, does not panic
+                    assert!(
+                        gen_result.is_err(),
+                        "Expected error for permission-denied file in generate(), got {:?}",
+                        gen_result
+                    );
+                }
+                Err(panic_info) => {
+                    panic!(
+                        "generate() panicked on permission-denied file: {:?}",
+                        panic_info
+                    );
+                }
+            }
+
+            // Restore permissions
+            fs::set_permissions(&bad_file, fs::Permissions::from_mode(0o644))
+                .expect("restore permissions");
+        }
+
+        #[cfg(not(unix))]
+        {
+            assert!(result.is_ok(), "generate() should not panic");
+        }
     }
 }
