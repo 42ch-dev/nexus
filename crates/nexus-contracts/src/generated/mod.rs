@@ -8,8 +8,10 @@ pub mod common_types;
 pub mod registry_manifest;
 pub mod conflict_response;
 pub mod version_ref;
+pub mod agent_profile;
 pub mod bundle;
 pub mod creator;
+pub mod delta;
 pub mod fork_branch;
 pub mod key_block;
 pub mod manuscript_state;
@@ -20,6 +22,7 @@ pub mod reference_source;
 pub mod story_manifest;
 pub mod sync_command;
 pub mod timeline_event;
+pub mod workspace_binding;
 pub mod world_membership;
 pub mod world;
 pub mod meta;
@@ -31,8 +34,10 @@ pub use common_types::*;
 pub use registry_manifest::*;
 pub use conflict_response::*;
 pub use version_ref::*;
+pub use agent_profile::*;
 pub use bundle::*;
 pub use creator::*;
+pub use delta::*;
 pub use fork_branch::*;
 pub use key_block::*;
 pub use manuscript_state::*;
@@ -43,6 +48,7 @@ pub use reference_source::*;
 pub use story_manifest::*;
 pub use sync_command::*;
 pub use timeline_event::*;
+pub use workspace_binding::*;
 pub use world_membership::*;
 pub use world::*;
 pub use meta::*;
@@ -53,8 +59,10 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("RegistryManifest", 1),
     ("ConflictResponse", 1),
     ("VersionRef", 1),
+    ("AgentProfile", 1),
     ("Bundle", 1),
     ("Creator", 1),
+    ("Delta", 1),
     ("ForkBranch", 1),
     ("KeyBlock", 1),
     ("ManuscriptState", 1),
@@ -65,6 +73,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("StoryManifest", 1),
     ("SyncCommand", 1),
     ("TimelineEvent", 1),
+    ("WorkspaceBinding", 1),
     ("WorldMembership", 1),
     ("World", 1),
     ("Meta", 1),

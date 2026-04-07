@@ -13,8 +13,10 @@ export * from './CommonTypes';
 export * from './RegistryManifest';
 export * from './ConflictResponse';
 export * from './VersionRef';
+export * from './AgentProfile';
 export * from './Bundle';
 export * from './Creator';
+export * from './Delta';
 export * from './ForkBranch';
 export * from './KeyBlock';
 export * from './ManuscriptState';
@@ -25,6 +27,7 @@ export * from './ReferenceSource';
 export * from './StoryManifest';
 export * from './SyncCommand';
 export * from './TimelineEvent';
+export * from './WorkspaceBinding';
 export * from './WorldMembership';
 export * from './World';
 export * from './Meta';
@@ -35,8 +38,10 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   RegistryManifest: 1,
   ConflictResponse: 1,
   VersionRef: 1,
+  AgentProfile: 1,
   Bundle: 1,
   Creator: 1,
+  Delta: 1,
   ForkBranch: 1,
   KeyBlock: 1,
   ManuscriptState: 1,
@@ -47,6 +52,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   StoryManifest: 1,
   SyncCommand: 1,
   TimelineEvent: 1,
+  WorkspaceBinding: 1,
   WorldMembership: 1,
   World: 1,
   Meta: 1,

@@ -1,4 +1,4 @@
-import type { BundleType, ManuscriptPhase, SchemaVersion, SourceAnchor } from './CommonTypes';
+import type { BundleType, ManuscriptPhase, SchemaVersion } from './CommonTypes';
 
 /**
  * Nexus DeltaBundle Envelope
@@ -8,12 +8,6 @@ import type { BundleType, ManuscriptPhase, SchemaVersion, SourceAnchor } from '.
  * @schema_version 1
  * @source bundle.schema.json
  */
-
-/** Inline enum type */
-export type BundleDeltasDeltaType = 'world' | 'key_block' | 'timeline_event' | 'fork_branch' | 'memory_item' | 'story_manifest';
-
-/** Inline enum type */
-export type BundleDeltasOperation = 'create' | 'update' | 'upsert' | 'delete' | 'append';
 
 /** Inline enum type */
 export type BundleBundleApplyStatus = 'all_success' | 'partial' | 'failed';
@@ -37,7 +31,7 @@ export interface Bundle {
   canonical_hash: string;
   base_versions: { world_revision?: number | null; timeline_head_id?: string; canon_revision?: number | null };
   last_confirmed_delta_sequence?: number;
-  deltas: { delta_type: BundleDeltasDeltaType; operation: BundleDeltasOperation; target_entity_type?: string; target_entity_id?: string; payload: Record<string, unknown>; source_anchor?: SourceAnchor; local_timestamp: string }[];
+  deltas: Delta[];
   bundle_apply_status?: BundleBundleApplyStatus;
   delta_results?: { delta_index: number; delta_apply_status: BundleDeltaResultsDeltaApplyStatus; error_code?: string; applied_entity_revision?: number | null }[];
   created_at: string;
