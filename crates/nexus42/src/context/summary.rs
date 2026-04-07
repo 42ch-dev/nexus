@@ -153,9 +153,21 @@ impl SummaryGenerator {
         }
 
         let mut summary_text = summary_parts.join("\n");
-        // Truncate to max length
+        // Truncate to max length with UTF-8 safety
         if summary_text.len() > self.max_summary_chars {
-            summary_text.truncate(self.max_summary_chars.saturating_sub(3));
+            let truncate_len = self.max_summary_chars.saturating_sub(3);
+            // Ensure truncate_len is at a valid UTF-8 char boundary
+            let safe_len = if summary_text.is_char_boundary(truncate_len) {
+                truncate_len
+            } else {
+                // Find nearest valid char boundary (move backwards)
+                let mut pos = truncate_len;
+                while !summary_text.is_char_boundary(pos) && pos > 0 {
+                    pos -= 1;
+                }
+                pos
+            };
+            summary_text.truncate(safe_len);
             summary_text.push_str("...");
         }
 
@@ -434,5 +446,176 @@ mod tests {
             summary.summary_text.len(),
             4096
         );
+    }
+
+    #[test]
+    fn summary_truncation_with_emoji() {
+        // Use emoji (4-byte UTF-8 characters) to force truncation at non-char boundary
+        // Emoji like 😊 are 4 bytes each
+        let emoji_content = format!(
+            "# Title\n\n{}\n",
+            "这是一段中文文字 mixed with emoji 😊🎉🎊 and more text here to exceed limit. "
+                .repeat(100)
+        );
+        let tmp = create_test_manuscript(&[("emoji.md", &emoji_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // This should NOT panic even if truncation hits emoji mid-byte
+        let summary = gen.generate().expect("generate should succeed");
+        assert!(summary.summary_text.len() <= 4096);
+        // Verify the string is valid UTF-8
+        assert!(summary
+            .summary_text
+            .is_char_boundary(summary.summary_text.len()));
+    }
+
+    #[test]
+    fn summary_truncation_with_cjk() {
+        // Use CJK characters (3-byte UTF-8)
+        // Chinese characters like 中 are 3 bytes each
+        let cjk_content = format!(
+            "# 标题\n\n{}\n",
+            "中文字符测试内容，这段文字会被截断。每一行都包含足够的内容来超过限制。".repeat(200)
+        );
+        let tmp = create_test_manuscript(&[("cjk.md", &cjk_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // This should NOT panic even if truncation hits CJK mid-byte
+        let summary = gen.generate().expect("generate should succeed");
+        assert!(summary.summary_text.len() <= 4096);
+        // Verify the string is valid UTF-8
+        assert!(summary
+            .summary_text
+            .is_char_boundary(summary.summary_text.len()));
+    }
+
+    #[test]
+    fn summary_truncation_with_mixed_multibyte() {
+        // Mixed: ASCII (1 byte), CJK (3 bytes), emoji (4 bytes)
+        let mixed_content = format!(
+            "# Mixed Title\n\n{}\n",
+            "English 日本語 한국어 emoji 😊🎉 text with mixed encoding types.".repeat(150)
+        );
+        let tmp = create_test_manuscript(&[("mixed.md", &mixed_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+        // This should NOT panic
+        let summary = gen.generate().expect("generate should succeed");
+        assert!(summary.summary_text.len() <= 4096);
+        assert!(summary
+            .summary_text
+            .is_char_boundary(summary.summary_text.len()));
+    }
+
+    #[test]
+    fn summary_truncation_at_non_char_boundary() {
+        // Construct a string that will have truncation at non-char boundary
+        // MAX_SUMMARY_CHARS is 4096, so truncation happens at 4096 - 3 = 4093 bytes
+        // We need to ensure 4093 is NOT a valid char boundary
+        // Strategy: Create a prefix that makes 4093 land inside a multi-byte character
+
+        // Create content that, after summary construction, has emoji at position 4093
+        // Let's craft the summary text structure: "Title: X\nChapters: ...\nWord count: N\nOpening: Y..."
+        // We need to carefully position multi-byte chars
+
+        // Create a story with many emoji in the title and opening to hit boundary
+        let emoji_title = "🎉".repeat(100); // 400 bytes (100 * 4)
+        let emoji_body = "😊".repeat(900); // 3600 bytes (900 * 4)
+                                           // Total in summary will be around: Title line (400+) + Opening (3600+) > 4096
+
+        let emoji_content = format!(
+            "---\ntitle: \"{}\"\n---\n\n# Story\n\n{}",
+            emoji_title, emoji_body
+        );
+
+        let tmp = create_test_manuscript(&[("story.md", &emoji_content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        // This will panic if truncation is not UTF-8 safe
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gen.generate().expect("generate should succeed")
+        }));
+
+        match result {
+            Ok(summary) => {
+                assert!(summary.summary_text.len() <= 4096);
+                assert!(summary
+                    .summary_text
+                    .is_char_boundary(summary.summary_text.len()));
+            }
+            Err(panic_info) => {
+                // If we panicked, it's because truncation hit non-char boundary
+                panic!(
+                    "Summary generation panicked on UTF-8 truncation: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn summary_truncation_with_exact_boundary_hit() {
+        // More controlled test: create summary that is exactly 4097 bytes
+        // so truncation happens at 4093, which we ensure is in multi-byte char
+
+        // Create a summary that will be slightly over 4096
+        // Format: "Title: ...\nChapters:\n  1. ...\nWord count: N\nOpening: ..."
+
+        let title = "T".repeat(50); // ASCII title
+        let chapters: Vec<String> = (1..100).map(|i| format!("Chapter {}", i)).collect();
+        let chapter_content = chapters
+            .iter()
+            .map(|ch| format!("## {}", ch))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        // Opening will be long emoji string
+        let opening = "🔥".repeat(800); // 3200 bytes
+
+        let content = format!(
+            "---\ntitle: \"{}\"\n---\n\n{}\n\n{}",
+            title, chapter_content, opening
+        );
+
+        let tmp = create_test_manuscript(&[("story.md", &content)]);
+        let gen = SummaryGenerator::new(tmp.path().to_path_buf());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gen.generate().expect("generate should succeed")
+        }));
+
+        match result {
+            Ok(summary) => {
+                assert!(summary.summary_text.len() <= 4096);
+                assert!(summary
+                    .summary_text
+                    .is_char_boundary(summary.summary_text.len()));
+            }
+            Err(panic_info) => {
+                panic!(
+                    "Summary generation panicked on UTF-8 truncation: {:?}",
+                    panic_info
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opening_excerpt_truncation_with_emoji() {
+        // Test extract_opening_excerpt with emoji near truncation boundary
+        let emoji_body = "😊🎉🎊".repeat(200); // Many emoji characters
+        let content = format!("# Title\n\n{}", emoji_body);
+        // max_chars should force truncation that might hit emoji mid-byte
+        let excerpt = super::extract_opening_excerpt(&content, 100).expect("should have excerpt");
+        assert!(excerpt.len() <= 103); // 100 + "..."
+                                       // Verify valid UTF-8
+        assert!(excerpt.is_char_boundary(excerpt.len()));
+    }
+
+    #[test]
+    fn opening_excerpt_truncation_with_cjk() {
+        // Test extract_opening_excerpt with CJK characters
+        let cjk_body = "中文测试".repeat(100);
+        let content = format!("# 标题\n\n{}", cjk_body);
+        let excerpt = super::extract_opening_excerpt(&content, 50).expect("should have excerpt");
+        assert!(excerpt.len() <= 53);
+        assert!(excerpt.is_char_boundary(excerpt.len()));
     }
 }
