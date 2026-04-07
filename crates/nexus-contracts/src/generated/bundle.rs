@@ -6,6 +6,8 @@
 //! @source bundle.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{BundleType, ManuscriptPhase};
+use crate::generated::delta::Delta;
 
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -18,8 +20,6 @@ pub struct BundleDeltaResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied_entity_revision: Option<i64>,
 }
-use crate::generated::common_types::{BundleType, ManuscriptPhase};
-
 /// DeltaBundle envelope containing delta operations for world synchronization. Aligned with bundle-envelope-schema-v1.md §5.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

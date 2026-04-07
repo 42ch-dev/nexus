@@ -6,7 +6,6 @@
 //! @source delta.schema.json
 
 use serde::{Deserialize, Serialize};
-
 use crate::generated::common_types::{SourceAnchor};
 
 /// Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.

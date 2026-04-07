@@ -1,5 +1,4 @@
 import type { ManuscriptPhase, SchemaVersion } from './CommonTypes';
-
 /**
  * Nexus ManuscriptState
  *
