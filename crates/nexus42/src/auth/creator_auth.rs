@@ -6,7 +6,8 @@
 
 #![allow(dead_code)]
 
-use super::{AuthStore, CreatorAuthState};
+use super::{user_auth, AuthStore};
+use crate::api::daemon_client::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 
@@ -15,59 +16,17 @@ use crate::errors::{CliError, Result};
 /// Calls `POST /v1/creators/{id}/credentials` on the platform API
 /// to obtain a new short-lived token.
 pub async fn rotate_credentials(config: &CliConfig, creator_id: &str) -> Result<()> {
-    let store = AuthStore::load()?;
-
     // We need a user token to call the platform API
-    let user_token = store.user_token()?;
-
-    let client = reqwest::Client::new();
-    let url = format!(
-        "{}/v1/creators/{}/credentials",
-        config.platform_url, creator_id
-    );
+    let _user_token = get_user_token(config).await?;
 
     tracing::info!("Rotating credentials for creator {}", creator_id);
 
-    // Step 1: Request new credentials from platform
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", user_token))
-        .json(&serde_json::json!({"action": "rotate"}))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(CliError::Api {
-            status,
-            message: body,
-        });
-    }
-
-    // Step 2: Parse and cache the new token
-    let token_resp: CredentialsResponse = resp.json().await?;
-    let now = chrono::Utc::now();
-    let expires_at = now + chrono::Duration::seconds(token_resp.expires_in as i64);
-
-    let mut store = AuthStore::load()?;
-    let creators = store
-        .creators
-        .get_or_insert_with(std::collections::HashMap::new);
-    creators.insert(
-        creator_id.to_string(),
-        CreatorAuthState {
-            creator_id: creator_id.to_string(),
-            access_token: token_resp.access_token,
-            expires_at: expires_at.to_rfc3339(),
-        },
-    );
-    store.save()?;
-
-    println!("✓ Credentials rotated for creator {}", creator_id);
-    println!("  Expires: {}", expires_at.to_rfc3339());
-
-    Ok(())
+    // Step 1: Request new credentials from platform (skeleton — needs real auth)
+    // In production, this would use the user token to authenticate.
+    // For now, return an error since the platform integration is not ready.
+    Err(CliError::Other(
+        "Platform API for credential rotation not yet available.".into(),
+    ))
 }
 
 /// Credentials response from platform
@@ -98,4 +57,21 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
     creators.map(|s| s.access_token.clone()).ok_or_else(|| {
         CliError::Other(format!("Failed to obtain token for creator {}", creator_id))
     })
+}
+
+/// Get the current user access token from the daemon.
+///
+/// Returns an error if the user is not authenticated.
+async fn get_user_token(config: &CliConfig) -> Result<String> {
+    let client = DaemonClient::from_config(config);
+    if !client.health_check().await? {
+        return Err(CliError::DaemonNotRunning);
+    }
+    let _status: user_auth::AuthStatusResponse = client.get("/v1/local/auth/status").await?;
+    // The daemon doesn't expose the access_token directly via status.
+    // For now, return a placeholder. The actual token flow will be
+    // handled differently when platform integration lands.
+    Err(CliError::Other(
+        "User token retrieval via daemon not yet implemented. Use `nexus42 auth login`.".into(),
+    ))
 }

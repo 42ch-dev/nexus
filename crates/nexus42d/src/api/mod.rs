@@ -5,13 +5,17 @@
 //! - GET  /v1/local/runtime/status   — Runtime status
 //! - GET  /v1/local/workspace        — Workspace info
 //! - POST /v1/local/workspace/init   — Initialize workspace
-//! - POST /v1/local/context/assemble — Context assembly (placeholder)
 //! - GET  /v1/local/auth/status      — Auth status
-//! - GET  /v1/local/creators         — List creators
-//! - GET  /v1/local/manuscript       — Manuscript status
-//! - GET  /v1/local/references       — List reference sources
+//! - POST /v1/local/auth/device      — Start device authorization
+//! - POST /v1/local/auth/token       — Exchange device code for tokens
+//! - POST /v1/local/auth/logout      — Clear tokens (logout)
+//! - GET  /v1/local/creators         — List creators (auth required)
+//! - GET  /v1/local/manuscript       — Manuscript status (auth required)
+//! - GET  /v1/local/references       — List reference sources (auth required)
+//! - POST /v1/local/context/assemble — Context assembly (auth required)
 //! - GET  /v1/local/sync/status      — Sync status
 
+pub mod auth_middleware;
 pub mod errors;
 pub mod handlers;
 pub mod middleware;
@@ -26,12 +30,12 @@ use tower_http::cors::CorsLayer;
 
 /// Create the Local API router
 ///
-/// Unguarded routes (no workspace initialization required):
+/// **Unguarded routes** (no auth, no workspace init):
 /// - runtime health & status
 /// - workspace info & init
-/// - auth status
+/// - auth status, device authorization, token exchange, logout
 ///
-/// Guarded routes (require workspace initialization):
+/// **Auth-guarded routes** (require valid Bearer token):
 /// - creators, manuscript, references, context/assemble
 pub fn create_router(state: WorkspaceState) -> Router {
     let runtime_routes = Router::new()
@@ -45,28 +49,35 @@ pub fn create_router(state: WorkspaceState) -> Router {
             post(handlers::workspace::init_workspace),
         );
 
-    let auth_routes = Router::new().route("/v1/local/auth/status", get(handlers::auth::status));
+    let auth_routes = Router::new()
+        .route("/v1/local/auth/status", get(handlers::auth::status))
+        .route(
+            "/v1/local/auth/device",
+            post(handlers::auth::device_authorization),
+        )
+        .route("/v1/local/auth/token", post(handlers::auth::exchange_token))
+        .route("/v1/local/auth/logout", post(handlers::auth::logout));
 
-    // Guarded: require workspace initialization
+    // Auth-guarded routes (require valid Bearer token)
     let creator_routes = Router::new()
         .route("/v1/local/creators", get(handlers::creators::list))
         .route_layer(axum_mw::from_fn_with_state(
             state.clone(),
-            middleware::require_workspace,
+            auth_middleware::require_auth,
         ));
 
     let manuscript_routes = Router::new()
         .route("/v1/local/manuscript", get(handlers::manuscript::status))
         .route_layer(axum_mw::from_fn_with_state(
             state.clone(),
-            middleware::require_workspace,
+            auth_middleware::require_auth,
         ));
 
     let reference_routes = Router::new()
         .route("/v1/local/references", get(handlers::references::list))
         .route_layer(axum_mw::from_fn_with_state(
             state.clone(),
-            middleware::require_workspace,
+            auth_middleware::require_auth,
         ));
 
     let context_routes = Router::new()
@@ -76,10 +87,10 @@ pub fn create_router(state: WorkspaceState) -> Router {
         )
         .route_layer(axum_mw::from_fn_with_state(
             state.clone(),
-            middleware::require_workspace,
+            auth_middleware::require_auth,
         ));
 
-    // Sync routes (unguarded — can check status without workspace)
+    // Sync routes (unguarded — can check status without auth)
     let sync_routes = Router::new().route("/v1/local/sync/status", get(handlers::sync::status));
 
     Router::new()

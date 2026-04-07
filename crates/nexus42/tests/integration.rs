@@ -78,24 +78,25 @@ fn init_workspace_idempotent() {
         .stdout(predicate::str::contains("already initialized"));
 }
 
-/// Test auth status (no auth configured)
+/// Test auth status (no daemon running)
 #[test]
 fn auth_status_not_logged_in() {
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("auth")
         .arg("status")
+        .env("HOME", TempDir::new().unwrap().path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Not logged in"));
+        .stdout(predicate::str::contains("Daemon not running"));
 }
 
-/// Test auth login with token
+/// Test auth login with token (daemon not running)
 #[test]
 fn auth_token_login() {
     let tmp = TempDir::new().unwrap();
 
-    // Set HOME to temp dir to isolate auth state
+    // Set HOME to temp dir to isolate auth state — daemon won't be running
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("auth")
@@ -105,37 +106,24 @@ fn auth_token_login() {
         .arg("usr_test_123")
         .env("HOME", tmp.path())
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Authenticated successfully"))
-        .stdout(predicate::str::contains("usr_test_123"));
+        .failure() // Daemon not running
+        .stderr(predicate::str::contains("Daemon not running"));
 }
 
-/// Test auth logout
+/// Test auth logout (daemon not running)
 #[test]
 fn auth_logout() {
     let tmp = TempDir::new().unwrap();
 
-    // Login first
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("auth")
-        .arg("token")
-        .arg("test-token")
-        .arg("--user-id")
-        .arg("usr_test_456")
-        .env("HOME", tmp.path())
-        .assert()
-        .success();
-
-    // Logout
+    // Logout requires daemon running
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("auth")
         .arg("logout")
         .env("HOME", tmp.path())
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Logged out"));
+        .failure() // Daemon not running
+        .stderr(predicate::str::contains("Daemon not running"));
 }
 
 /// Test creator command group

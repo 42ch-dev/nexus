@@ -21,6 +21,7 @@ pub enum CliError {
     Daemon { message: String },
 
     #[error("Authentication required. Run `nexus42 auth login` first.")]
+    #[allow(dead_code)]
     AuthenticationRequired,
 
     #[error("Creator not selected. Run `nexus42 creator use <creator-ref>` first.")]

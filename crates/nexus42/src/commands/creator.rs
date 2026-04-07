@@ -3,7 +3,7 @@
 //! Creator is a V1.0 first-class citizen (roadmap §3.1.1, §3.1.2).
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate.
 
-use crate::auth::{self, AuthStore};
+use crate::auth;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
@@ -82,51 +82,15 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
 }
 
 /// Register a new Creator entity
-async fn register_creator(config: &CliConfig, name: String, summary: Option<String>) -> Result<()> {
-    let store = AuthStore::load()?;
-    let user_token = store.user_token()?;
-
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/creators", config.platform_url);
-
-    tracing::info!("Registering Creator: {}", name);
-
-    let body = serde_json::json!({
-        "display_name": name,
-        "persona_summary": summary,
-        "registration_source": "cli",
-    });
-
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", user_token))
-        .json(&body)
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(crate::errors::CliError::Api {
-            status,
-            message: body,
-        });
-    }
-
-    let creator: Creator = resp.json().await?;
-
-    // Cache locally in workspace SQLite
-    cache_creator_locally(&creator)?;
-
-    // Set as active
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(creator.creator_id.clone());
-    cli_config.save()?;
-
-    println!("✓ Creator registered: {}", creator.display_name);
-    println!("  ID: {}", creator.creator_id);
-    println!("  Status: {}", creator.status);
-
+async fn register_creator(
+    _config: &CliConfig,
+    name: String,
+    _summary: Option<String>,
+) -> Result<()> {
+    // Platform API integration not yet available
+    println!("⚠ V1.0 skeleton: Creator registration requires platform API.");
+    println!("  Name: {}", name);
+    println!("  Run `nexus42 auth login` to authenticate first when platform integration lands.");
     Ok(())
 }
 
@@ -145,7 +109,7 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
         return Ok(());
     }
 
-    let store = AuthStore::load()?;
+    let store = crate::auth::AuthStore::load()?;
 
     // Try to get from local cache first
     println!("Creator: {}", id);
@@ -192,64 +156,18 @@ async fn list_creators(_config: &CliConfig) -> Result<()> {
 }
 
 /// Initiate pairing flow
-async fn pair_creator(config: &CliConfig, creator_id: String) -> Result<()> {
-    let store = AuthStore::load()?;
-    let user_token = store.user_token()?;
-
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/creators/{}/pair", config.platform_url, creator_id);
-
-    tracing::info!("Pairing creator {}", creator_id);
-
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", user_token))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(crate::errors::CliError::Api {
-            status,
-            message: body,
-        });
-    }
-
-    let result: serde_json::Value = resp.json().await?;
-
-    println!("✓ Creator paired: {}", creator_id);
-    if let Some(pairing_code) = result.get("pairing_code").and_then(|v| v.as_str()) {
-        println!("  Pairing code: {}", pairing_code);
-    }
-
+async fn pair_creator(_config: &CliConfig, creator_id: String) -> Result<()> {
+    // Platform API integration not yet available
+    println!("⚠ V1.0 skeleton: Creator pairing requires platform API.");
+    println!("  Creator: {}", creator_id);
     Ok(())
 }
 
 /// Remove pairing
-async fn unpair_creator(config: &CliConfig, creator_id: String) -> Result<()> {
-    let store = AuthStore::load()?;
-    let user_token = store.user_token()?;
-
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/creators/{}/pair", config.platform_url, creator_id);
-
-    let resp = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", user_token))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(crate::errors::CliError::Api {
-            status,
-            message: body,
-        });
-    }
-
-    println!("✓ Creator unpaired: {}", creator_id);
+async fn unpair_creator(_config: &CliConfig, creator_id: String) -> Result<()> {
+    // Platform API integration not yet available
+    println!("⚠ V1.0 skeleton: Creator unpairing requires platform API.");
+    println!("  Creator: {}", creator_id);
     Ok(())
 }
 
@@ -267,6 +185,7 @@ async fn rotate_credentials(config: &CliConfig, creator_id: Option<String>) -> R
 }
 
 /// Cache a Creator locally in SQLite
+#[allow(dead_code)]
 fn cache_creator_locally(creator: &Creator) -> Result<()> {
     use crate::config::state_db_path;
     let db_path = state_db_path()?;

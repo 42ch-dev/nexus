@@ -1,34 +1,26 @@
 //! Dual-Subject Authentication Module
 //!
 //! Supports both User authentication (device flow OAuth) and Creator API key management.
+//! User auth state is owned by the daemon (SQLite), accessed via HTTP API.
+//! Creator auth state remains file-based for V1.x (will migrate to daemon in V1.2).
 
 pub mod creator_auth;
 pub mod user_auth;
 
 use crate::config::auth_store_path;
-use crate::errors::{CliError, Result};
+use crate::errors::Result;
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt;
 
 /// Auth store — persisted to `$HOME/.nexus42/auth.json`
+///
+/// NOTE: User auth (OAuth tokens) is now managed by the daemon.
+/// This store is retained for creator API key caching.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthStore {
-    /// User authentication state
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<UserAuthState>,
-
     /// Creator authentication states (keyed by creator_id)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creators: Option<std::collections::HashMap<String, CreatorAuthState>>,
-}
-
-/// User authentication state (from device flow OAuth)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserAuthState {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub user_id: String,
-    pub expires_at: String, // ISO 8601
 }
 
 /// Creator authentication state (short-lived token cached from platform)
@@ -51,6 +43,7 @@ impl AuthStore {
     }
 
     /// Save auth store to disk (owner-only: 0600)
+    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let path = auth_store_path()?;
         if let Some(parent) = path.parent() {
@@ -62,27 +55,11 @@ impl AuthStore {
         Ok(())
     }
 
-    /// Check if user is authenticated
-    #[allow(dead_code)] // Public helper for auth-aware commands
-    pub fn is_user_authenticated(&self) -> bool {
-        self.user
-            .as_ref()
-            .is_some_and(|u| !u.access_token.is_empty())
-    }
-
     /// Check if a specific creator is authenticated
     pub fn is_creator_authenticated(&self, creator_id: &str) -> bool {
         self.creators
             .as_ref()
             .and_then(|m| m.get(creator_id))
             .is_some_and(|c| !c.access_token.is_empty())
-    }
-
-    /// Get user access token
-    pub fn user_token(&self) -> Result<&str> {
-        self.user
-            .as_ref()
-            .map(|u| u.access_token.as_str())
-            .ok_or(CliError::AuthenticationRequired)
     }
 }
