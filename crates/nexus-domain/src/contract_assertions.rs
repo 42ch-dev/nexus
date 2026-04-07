@@ -352,10 +352,7 @@ fn test_world_membership_domain_contract_roundtrip() {
         domain_membership.schema_version
     );
 
-    // NOTE: Schema/domain drift on MembershipRole enum values.
-    // Schema defines: ["owner", "maintainer", "collaborator", "official_creator"]
-    // Domain defines: [Owner, Admin, Curator, Collaborator, Viewer]
-    // The roundtrip itself (serialize → deserialize → serialize) works because
-    // role is stored as String, not an enum variant. A future plan should
-    // reconcile these enum values.
+    // NOTE: MembershipRole enum values are now aligned with v1-spec §5.4, §7.
+    // Both schema and domain use: Owner, Maintainer, Collaborator, OfficialCreator.
+    // This alignment was completed in DM-R5 resolution.
 }
