@@ -167,3 +167,6 @@ target
 # ---- Local files ----
 .agents/designs
 .agents/plans/design_docs_mapping.md
+
+# Git worktrees (isolation for parallel branch development)
+.worktrees/
