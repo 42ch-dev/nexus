@@ -10,7 +10,7 @@ import type { MemoryType, SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type MemoryMemoryKind = 'generic' | 'story_summary' | 'research_material' | 'review_note';
+export type MemoryMemoryKind = 'story_summary' | 'research_material' | 'review_note' | 'character_note' | 'world_building' | 'plot_outline' | 'theme_analysis' | 'custom';
 
 /** Inline enum type */
 export type MemoryStatus = 'active' | 'superseded' | 'archived';
