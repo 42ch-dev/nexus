@@ -620,17 +620,17 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08",
-      "total_open": 41,
+      "updated_at": "2026-04-08T12:00:00Z",
+      "total_open": 40,
       "by_severity": {
         "high": 4,
-        "medium": 16,
+        "medium": 15,
         "low": 20,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 26,
+        "V1.1": 25,
         "V1.1+": 4
       },
       "by_plan": {
@@ -638,7 +638,7 @@
         "cli-daemon-foundation": 5,
         "sync-contract": 10,
         "acp-client": 9,
-        "context-assembly": 6
+        "context-assembly": 5
       },
       "cross_cutting": [
         {
@@ -745,6 +745,10 @@
       {
         "updated_at": "2026-04-08",
         "message": "Wave 1 merged to main: DM-R5 resolved, 3 schemas created, W1-C1 fixed, QC APPROVE. 59 files, 4102 insertions. Ready for Wave 2."
+      },
+      {
+        "updated_at": "2026-04-08T12:00:00Z",
+        "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 → 40."
       }
     ],
     "residual_findings": {
@@ -1097,10 +1101,13 @@
           "severity": "medium",
           "source": "QC-#3",
           "scope": "crates/nexus42/src/context/types.rs",
-          "decision": "defer",
+          "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "V1.1 — extract MemoryKind enum matching schema",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T12:00:00Z",
+          "closure_note": "MemoryKind enum updated with 8 variants matching schema (story_summary, research_material, review_note, character_note, world_building, plot_outline, theme_analysis, custom). Added strum::Display for serialization, FromStr for parsing. CLI commands updated to use enum. 6 new tests for enum behavior."
         },
         {
           "id": "CTX-R7",
