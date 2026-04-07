@@ -951,50 +951,6 @@
       ],
       "2025-04-05-acp-client": [
         {
-          "id": "ACP-R3",
-          "title": "Terminal kill/wait_for_exit capability",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "V1.1 — add terminal kill and wait_for_exit to capability set",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R4",
-          "title": "Slash commands UI integration",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "Agent-provided slash commands not surfaced in CLI UX",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R5",
-          "title": "Agent plan display support",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "ACP Plan protocol not rendered in CLI output",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R6",
-          "title": "Session persistence across CLI invocations",
-          "severity": "medium",
-          "source": "Tech Spec §Appendix B",
-          "scope": "ACP sessions lost when nexus42 exits; no session/load support",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
           "id": "ACP-R7",
           "title": "Permission policy engine (grant/deny UI)",
           "severity": "medium",
@@ -1003,51 +959,10 @@
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R8",
-          "title": "Daemon-mediated agent tool access",
-          "severity": "medium",
-          "source": "Tech Spec §Appendix B",
-          "scope": "V1.0 agents access fs directly; daemon could mediate tool calls",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R9",
-          "title": "Skills manifest file for multi-agent hosts",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "No persistent skills manifest file for host discovery",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R10",
-          "title": "Binary agent auto-update mechanism",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "Downloaded binary agents not auto-updated",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
-        },
-        {
-          "id": "ACP-R11",
-          "title": "Session modes (ask/act) switching",
-          "severity": "low",
-          "source": "Tech Spec §Appendix B",
-          "scope": "ACP session modes not exposed in CLI",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T20:00:00Z",
+          "closure_note": "Implemented permission policy engine with configurable grant/deny rules, interactive prompts, CLI commands (policy grant/deny/list), and PolicyAwareClientHandler. Tests: 12 new policy tests, all 195 nexus42 tests pass."
         }
       ],
       "2025-04-05-context-assembly": [
