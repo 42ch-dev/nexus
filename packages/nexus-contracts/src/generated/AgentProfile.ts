@@ -9,16 +9,16 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type AgentProfileProfileKind = 'primary' | 'specialist' | 'fallback';
+export type AgentProfileProfileKind = 'local_agent' | 'platform_hosted';
 
 /** Inline enum type */
-export type AgentProfileSelectionMode = 'explicit' | 'registry' | 'auto';
+export type AgentProfileSelectionMode = 'registry' | 'manual_command' | 'manual_remote';
 
 /** Inline enum type */
-export type AgentProfileTransport = 'local' | 'http' | 'stdio';
+export type AgentProfileTransport = 'stdio' | 'http' | 'websocket';
 
 /** Inline enum type */
-export type AgentProfileStatus = 'active' | 'inactive' | 'error';
+export type AgentProfileStatus = 'active' | 'unavailable' | 'deprecated';
 
 /** Configuration for an ACP agent in a workspace. Aligned with data-model-v1.md §5.15. */
 export interface AgentProfile {
@@ -28,9 +28,10 @@ export interface AgentProfile {
   profile_kind: AgentProfileProfileKind;
   selection_mode: AgentProfileSelectionMode;
   registry_agent_id?: string;
+  launch_command?: string | null;
   transport?: AgentProfileTransport;
-  default_output_manuscript?: string;
-  protocol_version?: string;
+  default_output_manuscript?: boolean;
+  protocol_version?: number;
   status: AgentProfileStatus;
   created_at?: string;
   updated_at?: string;
