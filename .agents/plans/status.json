@@ -611,21 +611,21 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-07",
-      "total_open": 42,
+      "updated_at": "2026-04-08",
+      "total_open": 41,
       "by_severity": {
         "high": 4,
-        "medium": 17,
+        "medium": 16,
         "low": 20,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 27,
+        "V1.1": 26,
         "V1.1+": 4
       },
       "by_plan": {
-        "domain-models": 1,
+        "domain-models": 0,
         "cli-daemon-foundation": 5,
         "sync-contract": 10,
         "acp-client": 9,
@@ -724,6 +724,10 @@
       {
         "updated_at": "2026-04-08",
         "message": "V1.1 tech debt mitigation plan created (2026-04-08-v1.1-tech-debt-mitigation.md) based on architecture gap analysis. 3-wave approach: Wave 1 (P0 — DM-R5 + 3 schemas), Wave 2 (P1 — ACP/Research/Manuscript/Context), Wave 3 (P2 — DEBT-X/SYNC-R/FH-R). Total: 27 residuals + 3 missing features. nexus-platform Phase 2 confirmed complete."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "DM-R5 resolved: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. Total open residuals: 42 → 41."
       }
     ],
     "residual_findings": {
@@ -739,16 +743,19 @@
           "target": "V1.1 \u2014 add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
         },
-        {
+{
           "id": "DM-R5",
           "title": "MembershipRole enum drift between schema and domain",
           "severity": "medium",
           "source": "GA Residual QC-#1",
-          "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs \u2014 schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
+          "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs — schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 align schema enum with domain MembershipRole or vice versa",
-          "tracking": null
+          "target": "V1.1 — align schema enum with domain MembershipRole or vice versa",
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-07T18:16:41Z",
+          "closure_note": "Fixed in feature/v1.1-tech-debt-mitigation: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. All tests pass."
         }
       ],
       "2025-04-05-cli-daemon-foundation": [
