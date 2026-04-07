@@ -41,12 +41,21 @@ pub enum ManuscriptCommand {
     Promote {
         /// Manuscript title
         title: String,
+
+        /// Enable strict mode validation (V1.1)
+        /// Checks: phase transition validity, manifest status, sync state
+        #[arg(long)]
+        strict: bool,
     },
 
     /// Verify manuscript consistency
     Verify {
         /// Manuscript title
         title: String,
+
+        /// Check content integrity using SHA256 (V1.1)
+        #[arg(long)]
+        check_content: bool,
     },
 
     /// Export manuscript content
@@ -136,15 +145,18 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             println!("Manuscript '{}' phase set to: {:?}", title, target);
             Ok(())
         }
-        ManuscriptCommand::Promote { title } => {
+        ManuscriptCommand::Promote { title, strict } => {
             let conn = open_workspace_db(&workspace_root)?;
-            let new_phase = manager.promote(&title, &conn)?;
+            let new_phase = manager.promote(&title, strict, &conn)?;
             println!("Manuscript '{}' promoted to: {:?}", title, new_phase);
+            if strict {
+                println!("  Strict mode: all validation checks passed");
+            }
             Ok(())
         }
-        ManuscriptCommand::Verify { title } => {
+        ManuscriptCommand::Verify { title, check_content } => {
             let conn = open_workspace_db(&workspace_root)?;
-            let checks = manager.verify(&title, &conn)?;
+            let checks = manager.verify(&title, check_content, &conn)?;
             println!("Verifying manuscript '{}'...", title);
             for check in &checks {
                 println!("  {}", check);
