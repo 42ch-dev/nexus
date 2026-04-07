@@ -282,7 +282,7 @@ fn context_assemble_with_world_id_connects_daemon() {
         .arg("context")
         .arg("assemble")
         .arg("--world-id")
-        .arg("wld_test_123")
+        .arg("wld_test123")
         .assert()
         .failure()
         .stderr(predicate::str::contains("Error"));
