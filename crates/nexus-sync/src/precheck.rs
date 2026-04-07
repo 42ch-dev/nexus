@@ -367,9 +367,17 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
     let mut seen_creates: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (i, delta) in bundle.deltas.iter().enumerate() {
-        let delta_type = delta.get("delta_type").and_then(|v| v.as_str());
-        let operation = delta.get("operation").and_then(|v| v.as_str());
-        let target_id = delta.get("target_entity_id").and_then(|v| v.as_str());
+        let delta_type = if delta.delta_type.is_empty() {
+            None
+        } else {
+            Some(delta.delta_type.as_str())
+        };
+        let operation = if delta.operation.is_empty() {
+            None
+        } else {
+            Some(delta.operation.as_str())
+        };
+        let target_id = delta.target_entity_id.as_deref();
 
         // Check that delta_type and operation are present
         if delta_type.is_none() {
@@ -404,7 +412,8 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
         }
 
         // Warn about missing payload
-        if delta.get("payload").is_none() {
+        let has_payload = delta.payload.is_object();
+        if !has_payload {
             report.add_issue(PrecheckIssue::warning(&format!(
                 "delta[{i}] missing payload"
             )));
@@ -443,6 +452,7 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_contracts::generated::BundleDelta;
     use nexus_contracts::{BundleType, ManuscriptPhase};
 
     fn valid_bundle() -> Bundle {
@@ -461,12 +471,15 @@ mod tests {
             canonical_hash: String::new(),
             base_versions: serde_json::json!({"world_revision": 5}),
             last_confirmed_delta_sequence: Some(10),
-            deltas: vec![serde_json::json!({
-                "delta_type": "key_block",
-                "operation": "create",
-                "payload": {"display_name": "Test"},
-                "local_timestamp": "2025-01-01T00:00:00Z",
-            })],
+            deltas: vec![BundleDelta {
+                delta_type: "key_block".to_string(),
+                operation: "create".to_string(),
+                target_entity_type: None,
+                target_entity_id: None,
+                payload: serde_json::json!({"display_name": "Test"}),
+                source_anchor: None,
+                local_timestamp: "2025-01-01T00:00:00Z".to_string(),
+            }],
             bundle_apply_status: None,
             delta_results: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -583,11 +596,15 @@ mod tests {
     #[test]
     fn precheck_delta_missing_type() {
         let mut bundle = valid_bundle();
-        bundle.deltas = vec![serde_json::json!({
-            "operation": "create",
-            "payload": {},
-            "local_timestamp": "2025-01-01T00:00:00Z",
-        })];
+        bundle.deltas = vec![BundleDelta {
+            delta_type: String::new(),
+            operation: "create".to_string(),
+            target_entity_type: None,
+            target_entity_id: None,
+            payload: serde_json::json!({}),
+            source_anchor: None,
+            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
+        }];
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
@@ -597,13 +614,15 @@ mod tests {
     #[test]
     fn precheck_create_with_target_id_warning() {
         let mut bundle = valid_bundle();
-        bundle.deltas = vec![serde_json::json!({
-            "delta_type": "key_block",
-            "operation": "create",
-            "target_entity_id": "kb_existing",
-            "payload": {},
-            "local_timestamp": "2025-01-01T00:00:00Z",
-        })];
+        bundle.deltas = vec![BundleDelta {
+            delta_type: "key_block".to_string(),
+            operation: "create".to_string(),
+            target_entity_type: None,
+            target_entity_id: Some("kb_existing".to_string()),
+            payload: serde_json::json!({}),
+            source_anchor: None,
+            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
+        }];
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);

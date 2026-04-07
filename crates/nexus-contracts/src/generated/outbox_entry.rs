@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus OutboxEntry
+/// OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct OutboxEntry {

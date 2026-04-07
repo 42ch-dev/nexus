@@ -1,3 +1,5 @@
+import type { BundleType, ManuscriptPhase, SchemaVersion, SourceAnchor } from './CommonTypes';
+
 /**
  * Nexus DeltaBundle Envelope
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source bundle.schema.json
  */
-import type { BundleType, ManuscriptPhase, SchemaVersion, SourceAnchor } from './CommonTypes';
 
 /** Inline enum type */
 export type DeltaType = 'world' | 'key_block' | 'timeline_event' | 'fork_branch' | 'memory_item' | 'story_manifest';
@@ -20,6 +21,7 @@ export type BundleApplyStatus = 'all_success' | 'partial' | 'failed';
 /** Inline enum type */
 export type DeltaApplyStatus = 'applied' | 'rejected' | 'skipped_dependency';
 
+/** DeltaBundle envelope containing delta operations for world synchronization. Aligned with bundle-envelope-schema-v1.md §5. */
 export interface Bundle {
   schema_version: number;
   bundle_id: string;

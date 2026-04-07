@@ -1,3 +1,5 @@
+import type { SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus Sync Conflict Response
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source conflict-response.schema.json
  */
-import type { SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type ConflictType = 'version_mismatch' | 'sequence_conflict' | 'hard_validation_failure' | 'soft_validation_warning';
@@ -14,6 +15,7 @@ export type ConflictType = 'version_mismatch' | 'sequence_conflict' | 'hard_vali
 /** Inline enum type */
 export type ResolutionHint = 'auto_accept' | 'auto_reject' | 'manual_review';
 
+/** Platform conflict response for bundle push operations. HTTP 200 with success:false indicates a conflict requiring resolution. See hard-vs-soft-validation-v1.md §7. */
 export interface ConflictResponse {
   success: boolean;
   conflict_type: ConflictType;

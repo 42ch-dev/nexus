@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::generated::common_types::{ManuscriptPhase};
 
-/// Nexus ManuscriptState
+/// ManuscriptState - local-only manuscript phase machine tracking creation progression. Platform may receive manuscript_phase as bundle metadata but does not own this aggregate in V1.0. Aligned with data-model-v1.md §5.9B.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ManuscriptState {

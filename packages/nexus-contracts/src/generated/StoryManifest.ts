@@ -1,3 +1,5 @@
+import type { SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus StoryManifest
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source story-manifest.schema.json
  */
-import type { SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type ManifestType = 'chapter' | 'arc' | 'story' | 'excerpt';
@@ -17,6 +18,7 @@ export type Status = 'summary_ready' | 'staged_for_publish' | 'published' | 'arc
 /** Inline enum type */
 export type ManuscriptStorage = 'none' | 'local_workspace' | 'platform_sandbox';
 
+/** StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9. */
 export interface StoryManifest {
   schema_version: number;
   story_manifest_id: string;
