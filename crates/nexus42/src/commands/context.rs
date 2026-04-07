@@ -8,12 +8,40 @@ use crate::context::types::{error_code, error_message, is_error};
 use crate::errors::Result;
 use clap::Subcommand;
 
+/// Validate WorldId format: must start with 'wld_' followed by alphanumeric characters
+pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
+    // Check prefix
+    if !s.starts_with("wld_") {
+        return Err(format!(
+            "WorldId must start with 'wld_' prefix (got '{}')",
+            s
+        ));
+    }
+
+    // Check that there's content after prefix
+    let suffix = &s[4..]; // Skip "wld_" prefix (4 chars)
+    if suffix.is_empty() {
+        return Err("WorldId must have alphanumeric characters after 'wld_' prefix".to_string());
+    }
+
+    // Check that suffix contains only alphanumeric characters
+    if !suffix.chars().all(|c| c.is_alphanumeric()) {
+        return Err(format!(
+            "WorldId must contain only alphanumeric characters after 'wld_' prefix (got '{}')",
+            suffix
+        ));
+    }
+
+    // Return the validated string
+    Ok(s.to_string())
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ContextCommand {
     /// Assemble context for a world via the Local API
     Assemble {
-        /// World ID (required for context assembly)
-        #[arg(long)]
+        /// World ID (required for context assembly, format: wld_[a-zA-Z0-9]+)
+        #[arg(long, value_parser = validate_world_id)]
         world_id: String,
 
         /// Workspace ID (defaults to current workspace)
@@ -135,5 +163,64 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test valid WorldId formats
+    #[test]
+    fn validate_world_id_accepts_valid_formats() {
+        // Valid: starts with wld_ followed by alphanumeric
+        assert!(validate_world_id("wld_abc123").is_ok());
+        assert!(validate_world_id("wld_test").is_ok());
+        assert!(validate_world_id("wld_ABCDEF123456").is_ok());
+        assert!(validate_world_id("wld_1").is_ok());
+    }
+
+    /// Test invalid WorldId formats - missing prefix
+    #[test]
+    fn validate_world_id_rejects_missing_prefix() {
+        let result = validate_world_id("abc123");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must start with 'wld_'"));
+    }
+
+    /// Test invalid WorldId formats - wrong prefix
+    #[test]
+    fn validate_world_id_rejects_wrong_prefix() {
+        let result = validate_world_id("world_123");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must start with 'wld_'"));
+    }
+
+    /// Test invalid WorldId formats - empty
+    #[test]
+    fn validate_world_id_rejects_empty() {
+        let result = validate_world_id("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must start with 'wld_'"));
+    }
+
+    /// Test invalid WorldId formats - special characters
+    #[test]
+    fn validate_world_id_rejects_special_characters() {
+        let result = validate_world_id("wld_test-123");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("alphanumeric characters"));
+
+        let result = validate_world_id("wld_test@123");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("alphanumeric characters"));
+    }
+
+    /// Test invalid WorldId formats - only prefix
+    #[test]
+    fn validate_world_id_rejects_only_prefix() {
+        let result = validate_world_id("wld_");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("alphanumeric characters"));
     }
 }
