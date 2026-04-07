@@ -1,6 +1,6 @@
 import { LoadedSchema, COMMON_DEFINITIONS } from './schema-loader';
 import { resolveRef, isCommonEnum } from './schema-loader';
-import { resolveFromRoot, writeFile, logger, toSnakeCase } from './utils';
+import { resolveFromRoot, writeFile, logger, toSnakeCase, removeStaleGeneratedFiles, maxSchemaVersion } from './utils';
 import path from 'path';
 
 /** Rust reserved words that cannot be used as field names without r# prefix */
@@ -115,6 +115,12 @@ export function generateRustTypes(schemas: LoadedSchema[]): void {
   // Generate mod.rs with module declarations
   generateRustMod(schemasWithTypes, outputDir);
 
+  const keepRs = new Set(['mod.rs', 'common_types.rs']);
+  for (const s of schemasWithTypes) {
+    keepRs.add(`${toSnakeCase(s.typeName)}.rs`);
+  }
+  removeStaleGeneratedFiles(outputDir, keepRs, '.rs');
+
   logger.success(`Generated Rust types for ${schemasWithTypes.length} schema(s) (+ common types)`);
 }
 
@@ -147,8 +153,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
 ${schemas.map(s => `    ("${s.typeName}", ${s.schemaVersion}),`).join('\n')}
 ];
 
-/// Latest schema version
-pub const LATEST_SCHEMA_VERSION: u32 = ${schemas[0]?.schemaVersion ?? 1};
+/// Highest schema_version among emitted contract schemas
+pub const LATEST_SCHEMA_VERSION: u32 = ${maxSchemaVersion(schemas.map(s => s.schemaVersion))};
 `;
 
   writeFile(path.join(outputDir, 'mod.rs'), content);
