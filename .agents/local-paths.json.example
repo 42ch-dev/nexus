@@ -1,0 +1,8 @@
+{
+  "_comment": "本地路径配置 - 不提交到git",
+  "nexus_platform": "/Users/bibi/workspace/organizations/42ch/nexus-platform",
+  "specs_root": {
+    "v1-spec": "${nexus_platform}/.agents/designs/v1-spec",
+    "roadmap": "${nexus_platform}/.agents/designs/roadmap.md"
+  }
+}

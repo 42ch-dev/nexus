@@ -85,6 +85,27 @@ These documents are valuable for agent handoff and cross-session continuity, but
 3. **Updating**: If an architecture review or spec revision modifies a knowledge document, update the README index status. If the document is fully consumed by implementation, mark it `Superseded` but do not delete — design rationale should be preserved.
 4. **Reachability**: All knowledge documents MUST follow the reachability rules in §"Documentation & plans" below — no references to files outside this repository.
 
+## External Design Specs
+
+Nexus is an **open-source repo**, but its design specs are in the **private `nexus-platform` repo**.
+
+### Setup (One-time)
+
+```bash
+cp .agents/local-paths.json.example .agents/local-paths.json
+# 编辑 local-paths.json，填入 nexus_platform 实际路径
+```
+
+`local-paths.json` 已加入 `.gitignore`，不会提交到git。
+
+### Reading Specs
+
+直接使用 `specs_root` 作为根路径：
+
+- Roadmap: `{specs_root.roadmap}`
+- Architecture: `{specs_root.v1-spec}/architecture/v1.md`
+- Domain Model: `{specs_root.v1-spec}/domain/data-model-v1.md`
+
 ## Documentation & plans (mandatory reachability)
 
 **Mandatory** for any in-repo documentation (for example `docs/`, `README`, design notes) and agent plans (for example `.agents/plans/`):
