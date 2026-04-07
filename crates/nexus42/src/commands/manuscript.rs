@@ -1,123 +1,234 @@
 //! Manuscript Command Module
 //!
-//! Implements `manuscript_phase` and promote workflow (roadmap §3.1.1).
-//! Subcommands: status, phase, output, promote, verify.
+//! Implements manuscript lifecycle management (roadmap §3.1.1).
+//! Subcommands: create, edit, phase, status, promote, verify, export, list.
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
+use crate::manuscript::manager::{validate_world_id, ManuscriptManager};
 use clap::Subcommand;
-use nexus_contracts::ManuscriptPhase;
 
 #[derive(Debug, Subcommand)]
 pub enum ManuscriptCommand {
+    /// Create a new manuscript
+    Create {
+        /// Manuscript title
+        title: String,
+
+        /// World ID (must start with wld_)
+        #[arg(long)]
+        world_id: Option<String>,
+    },
+
+    /// Edit manuscript content (opens in $EDITOR or prints content)
+    Edit {
+        /// Manuscript title
+        title: String,
+    },
+
     /// Show current manuscript phase
     Status,
 
     /// Set manuscript phase
     Phase {
+        /// Manuscript title
+        title: String,
         /// Target phase: brainstorm, draft, review, finalize, published
         phase: String,
     },
 
-    /// Show output manuscript status
-    Output,
-
-    /// Promote provisional manuscript to canon
-    Promote,
+    /// Promote manuscript to the next phase
+    Promote {
+        /// Manuscript title
+        title: String,
+    },
 
     /// Verify manuscript consistency
     Verify {
-        /// Enable content check (V1.1+ feature — metadata-only in V1.0)
-        #[arg(long)]
-        check_content: bool,
+        /// Manuscript title
+        title: String,
     },
+
+    /// Export manuscript content
+    Export {
+        /// Manuscript title
+        title: String,
+        /// Export format: markdown, plain
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+
+    /// List all manuscripts
+    #[command(alias = "ls")]
+    List,
 }
 
 /// Run manuscript command
 pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
+    // Find workspace root
+    let workspace_root =
+        crate::config::find_workspace_root().ok_or(CliError::WorkspaceNotInitialized)?;
+
+    let manager = ManuscriptManager::new(workspace_root.clone());
+
     match cmd {
-        ManuscriptCommand::Status => manuscript_status(),
-        ManuscriptCommand::Phase { phase } => set_phase(&phase),
-        ManuscriptCommand::Output => manuscript_output(),
-        ManuscriptCommand::Promote => promote_manuscript(),
-        ManuscriptCommand::Verify { check_content } => verify_manuscript(check_content),
+        ManuscriptCommand::Create { title, world_id } => {
+            // Validate world_id format if provided
+            if let Some(ref wid) = world_id {
+                validate_world_id(wid)?;
+            }
+            let dir = manager.create(&title, world_id.as_deref())?;
+            println!("Created manuscript: {}", title);
+            println!("  Directory: {}", dir.display());
+            println!("  Files: manuscript.md, metadata.json");
+            println!("  Phase: brainstorm");
+            Ok(())
+        }
+        ManuscriptCommand::Edit { title } => {
+            let content = manager.read_content(&title)?;
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+
+            // Write to a temp file for editing
+            let tmp_path = std::env::temp_dir().join(format!(".nexus42-edit-{}", title));
+            std::fs::write(&tmp_path, &content)?;
+
+            // Open editor
+            let status = std::process::Command::new(&editor)
+                .arg(&tmp_path)
+                .status()
+                .map_err(|e| {
+                    CliError::Other(format!("Failed to open editor '{}': {}", editor, e))
+                })?;
+
+            if status.success() {
+                let edited = std::fs::read_to_string(&tmp_path)?;
+                manager.write_content(&title, &edited)?;
+                println!("Manuscript '{}' updated.", title);
+                // Clean up temp file
+                let _ = std::fs::remove_file(&tmp_path);
+            } else {
+                println!("Editor exited with non-zero status. Changes not saved.");
+                let _ = std::fs::remove_file(&tmp_path);
+            }
+
+            Ok(())
+        }
+        ManuscriptCommand::Status => {
+            let phase = ManuscriptManager::get_from_db(&workspace_root)?;
+            match phase {
+                Some(p) => {
+                    println!("Manuscript Status:");
+                    println!("  Phase: {}", p);
+                    println!("  Workspace: {}", workspace_root.display());
+                }
+                None => {
+                    println!("Manuscript Status:");
+                    println!("  Phase: not set");
+                    println!("  Set with: nexus42 manuscript phase <title> <phase>");
+                }
+            }
+            Ok(())
+        }
+        ManuscriptCommand::Phase { title, phase } => {
+            let conn = open_workspace_db(&workspace_root)?;
+            let target = manager.set_phase(&title, &phase, &conn)?;
+            println!("Manuscript '{}' phase set to: {:?}", title, target);
+            Ok(())
+        }
+        ManuscriptCommand::Promote { title } => {
+            let conn = open_workspace_db(&workspace_root)?;
+            let new_phase = manager.promote(&title, &conn)?;
+            println!("Manuscript '{}' promoted to: {:?}", title, new_phase);
+            Ok(())
+        }
+        ManuscriptCommand::Verify { title } => {
+            let conn = open_workspace_db(&workspace_root)?;
+            let checks = manager.verify(&title, &conn)?;
+            println!("Verifying manuscript '{}'...", title);
+            for check in &checks {
+                println!("  {}", check);
+            }
+            let failures = checks
+                .iter()
+                .filter(|c: &&String| c.starts_with('✗'))
+                .count();
+            if failures == 0 {
+                println!("✓ Verification passed.");
+            } else {
+                println!("✗ Verification failed: {} issue(s).", failures);
+            }
+            Ok(())
+        }
+        ManuscriptCommand::Export { title, format } => {
+            let content = manager.export(&title, &format)?;
+            println!("{}", content);
+            Ok(())
+        }
+        ManuscriptCommand::List => {
+            let manuscripts = manager.list()?;
+            if manuscripts.is_empty() {
+                println!("No manuscripts found.");
+                println!("Create one with: nexus42 manuscript create \"<title>\"");
+            } else {
+                println!("Manuscripts ({}):", manuscripts.len());
+                for m in &manuscripts {
+                    println!("  • {}", m);
+                }
+            }
+            Ok(())
+        }
     }
 }
 
-/// Parse a phase string into ManuscriptPhase
-fn parse_phase(phase: &str) -> Result<ManuscriptPhase> {
-    match phase.to_lowercase().as_str() {
-        "brainstorm" => Ok(ManuscriptPhase::Brainstorm),
-        "draft" => Ok(ManuscriptPhase::Draft),
-        "review" => Ok(ManuscriptPhase::Review),
-        "finalize" => Ok(ManuscriptPhase::Finalize),
-        "published" => Ok(ManuscriptPhase::Published),
-        _ => Err(CliError::Config(format!(
-            "Unknown phase '{}'. Valid: brainstorm, draft, review, finalize, published",
-            phase
-        ))),
-    }
-}
+/// Open the workspace SQLite database
+fn open_workspace_db(workspace_root: &std::path::Path) -> Result<rusqlite::Connection> {
+    let nexus_dir = crate::config::workspace_nexus_dir(workspace_root);
+    let db_path = nexus_dir.join("state.db");
 
-/// Show current manuscript status
-fn manuscript_status() -> Result<()> {
-    println!("Manuscript Status:");
-    println!("  Phase: — (no workspace initialized)");
-    println!("  Active manifest: —");
-    println!();
-    println!("⚠ V1.0 skeleton: status requires workspace initialization + daemon.");
-
-    Ok(())
-}
-
-/// Set manuscript phase
-fn set_phase(phase_str: &str) -> Result<()> {
-    let phase = parse_phase(phase_str)?;
-
-    println!("Setting manuscript phase to: {:?}", phase);
-    println!("✓ Phase updated.");
-    println!();
-    println!("⚠ V1.0 skeleton: phase stored locally; sync to platform pending.");
-
-    Ok(())
-}
-
-/// Show output manuscript status
-fn manuscript_output() -> Result<()> {
-    println!("Output Manuscript:");
-    println!("  Status: —");
-    println!("  Last generated: —");
-    println!();
-    println!("⚠ V1.0 skeleton: output requires workspace initialization + daemon.");
-
-    Ok(())
-}
-
-/// Promote provisional manuscript to canon
-fn promote_manuscript() -> Result<()> {
-    println!("Promoting manuscript to canon...");
-    println!();
-    println!("⚠ V1.0 skeleton: promote is a user-triggered operation with no");
-    println!("  hard pre-checks in V1.0. Full validation in V1.1+.");
-    println!("  Success criteria: metadata integrity + no conflicting world revisions.");
-
-    Ok(())
-}
-
-/// Verify manuscript consistency
-fn verify_manuscript(check_content: bool) -> Result<()> {
-    println!("Verifying manuscript consistency...");
-
-    if check_content {
-        println!("  ⚠ --check-content is a V1.1+ feature.");
-        println!("    V1.0 verify performs metadata-only validation.");
+    // Ensure the nexus dir exists (init should have created it, but be safe)
+    if !nexus_dir.exists() {
+        return Err(CliError::WorkspaceNotInitialized);
     }
 
-    println!("  Metadata integrity: ✓ (placeholder)");
-    println!("  Schema compliance: ✓ (placeholder)");
-    println!("  Phase consistency: ✓ (placeholder)");
-    println!();
-    println!("✓ Verification passed (metadata-only).");
+    let conn = rusqlite::Connection::open(&db_path)?;
+    crate::db::Schema::init(&conn)?;
+    Ok(conn)
+}
 
-    Ok(())
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_get_phase_from_empty_db() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::Schema::init(&conn).unwrap();
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_phase_after_set() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::Schema::init(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspace_meta (key, value) VALUES ('manuscript_phase', 'draft')",
+            [],
+        )
+        .unwrap();
+
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        assert_eq!(result, Some("draft".to_string()));
+    }
 }

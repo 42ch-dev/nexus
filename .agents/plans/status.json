@@ -398,7 +398,7 @@
       "id": "2026-04-06-daemon-manuscript-ops",
       "title": "Daemon + Manuscript Operations",
       "file": ".agents/plans/2026-04-06-pre-phase2.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
@@ -411,7 +411,7 @@
         "sync-status"
       ],
       "created_at": "2026-04-06",
-      "updated_at": "2026-04-06",
+      "updated_at": "2026-04-07",
       "notes": "Pre-Phase 2: daemon stop, manuscript lifecycle, sync status with real data. 9 residuals. 2 milestones.",
       "metadata": {
         "phase": "Phase 2",

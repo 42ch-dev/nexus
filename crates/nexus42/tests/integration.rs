@@ -184,10 +184,38 @@ fn manuscript_help() {
 /// Test manuscript verify
 #[test]
 fn manuscript_verify() {
+    let tmp = TempDir::new().unwrap();
+
+    // Init workspace (creates .nexus42, Stories, References in current dir)
+    // Use env HOME to isolate from any existing workspace in parent dirs
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("init")
+        .arg("workspace")
+        .env("HOME", tmp.path())
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Create a manuscript (must run in workspace dir)
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("manuscript")
+        .arg("create")
+        .arg("Test Manuscript")
+        .env("HOME", tmp.path())
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Verify the manuscript
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("manuscript")
         .arg("verify")
+        .arg("Test Manuscript")
+        .env("HOME", tmp.path())
+        .current_dir(tmp.path())
         .assert()
         .success()
         .stdout(predicate::str::contains("Verification passed"));
@@ -234,16 +262,16 @@ fn daemon_status_not_running() {
         .stdout(predicate::str::contains("Not running"));
 }
 
-/// Test sync requires daemon
+/// Test sync status shows daemon not running message
 #[test]
-fn sync_requires_daemon() {
+fn sync_status_without_daemon() {
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("sync")
         .arg("status")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("not running"));
+        .success()
+        .stdout(predicate::str::contains("not running"));
 }
 
 /// Test context assemble command validates --world-id requirement

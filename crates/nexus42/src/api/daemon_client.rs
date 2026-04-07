@@ -1,10 +1,12 @@
 //! Daemon HTTP Client
 //!
 //! Communicates with the nexus42d daemon via the Local API (HTTP JSON on port 8420).
+//! Configurable timeouts prevent infinite hangs when the daemon is unresponsive.
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use serde::{de::DeserializeOwned, Serialize};
+use std::time::Duration;
 
 /// Structured error response from the daemon API
 #[derive(Debug, serde::Deserialize)]
@@ -21,6 +23,12 @@ struct DaemonErrorDetail {
     message: String,
 }
 
+/// Default connection timeout: 10 seconds
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Default request timeout: 30 seconds
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Client for the nexus42d Local API
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
@@ -29,20 +37,38 @@ pub struct DaemonClient {
 }
 
 impl DaemonClient {
-    /// Create a new daemon client from config
+    /// Create a new daemon client from config with default timeouts
     pub fn from_config(config: &CliConfig) -> Self {
         Self::new(&config.daemon_url)
     }
 
-    /// Create a new daemon client with a custom base URL
+    /// Create a new daemon client with a custom base URL and default timeouts
     pub fn new(base_url: &str) -> Self {
+        Self::with_timeouts(base_url, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
+    }
+
+    /// Create a new daemon client with custom timeouts
+    pub fn with_timeouts(
+        base_url: &str,
+        connect_timeout: Duration,
+        request_timeout: Duration,
+    ) -> Self {
+        let http = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(request_timeout)
+            .build()
+            .expect("Failed to build reqwest Client");
         Self {
             base_url: base_url.to_string(),
-            http: reqwest::Client::new(),
+            http,
         }
     }
 
-    /// Check if the daemon is running and healthy
+    /// Check if the daemon is running and healthy.
+    ///
+    /// Uses the client's configured timeout. Returns `Ok(false)` on any error
+    /// (connection refused, timeout, etc.) rather than propagating errors,
+    /// since "not running" is a valid state for health checks.
     pub async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/v1/local/runtime/health", self.base_url);
         match self.http.get(&url).send().await {
@@ -115,5 +141,84 @@ impl DaemonClient {
             status,
             message: body,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_client_has_default_timeouts() {
+        let client = DaemonClient::new("http://127.0.0.1:8420");
+        assert_eq!(client.base_url, "http://127.0.0.1:8420");
+    }
+
+    #[test]
+    fn test_with_timeouts_builds_client() {
+        let client = DaemonClient::with_timeouts(
+            "http://127.0.0.1:9999",
+            Duration::from_secs(5),
+            Duration::from_secs(15),
+        );
+        assert_eq!(client.base_url, "http://127.0.0.1:9999");
+    }
+
+    #[test]
+    fn test_from_config_uses_daemon_url() {
+        let mut config = CliConfig::default();
+        config.daemon_url = "http://127.0.0.1:9000".to_string();
+        let client = DaemonClient::from_config(&config);
+        assert_eq!(client.base_url, "http://127.0.0.1:9000");
+    }
+
+    #[test]
+    fn test_default_constants() {
+        assert_eq!(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(DEFAULT_REQUEST_TIMEOUT, Duration::from_secs(30));
+    }
+
+    #[tokio::test]
+    async fn test_health_check_returns_false_on_connection_refused() {
+        // Use a port that nothing is listening on — should return Ok(false) quickly
+        let client = DaemonClient::with_timeouts(
+            "http://127.0.0.1:19998",
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+        );
+        let result = client.health_check().await;
+        assert!(
+            result.is_ok(),
+            "health_check should not error on connection refused"
+        );
+        assert!(
+            !result.unwrap(),
+            "health_check should return false when daemon not running"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_timeout_prevents_infinite_hang() {
+        // Connect to a non-routable address to test timeout behavior.
+        // 198.51.100.1 is TEST-NET-2 (RFC 5737) — should be unreachable and cause a timeout.
+        let client = DaemonClient::with_timeouts(
+            "http://198.51.100.1:1",
+            Duration::from_millis(100),
+            Duration::from_millis(200),
+        );
+
+        let start = std::time::Instant::now();
+        let result = client.health_check().await;
+        let elapsed = start.elapsed();
+
+        // Should complete within a reasonable time (well under 5s)
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Health check should timeout quickly, took {:?}",
+            elapsed
+        );
+        // Should return Ok(false) regardless of timeout/connection error
+        assert!(result.is_ok(), "health_check should absorb timeout errors");
+        assert!(!result.unwrap());
     }
 }

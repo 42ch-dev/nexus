@@ -57,3 +57,9 @@ impl From<chrono::ParseError> for CliError {
         CliError::Other(format!("Date parse error: {}", err))
     }
 }
+
+impl From<nexus_domain::errors::DomainError> for CliError {
+    fn from(err: nexus_domain::errors::DomainError) -> Self {
+        CliError::Other(format!("Domain error: {}", err))
+    }
+}
