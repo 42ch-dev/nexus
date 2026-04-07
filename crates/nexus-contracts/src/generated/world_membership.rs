@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus WorldMembership
+/// WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldMembership {

@@ -1,3 +1,5 @@
+import type { MemoryType, SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus MemoryItem
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source memory.schema.json
  */
-import type { MemoryType, SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type MemoryKind = 'generic' | 'story_summary' | 'research_material' | 'review_note';
@@ -14,6 +15,7 @@ export type MemoryKind = 'generic' | 'story_summary' | 'research_material' | 're
 /** Inline enum type */
 export type Status = 'active' | 'superseded' | 'archived';
 
+/** MemoryItem - structured memory for creator experience and world context. Aligned with data-model-v1.md §5.8. */
 export interface Memory {
   schema_version: number;
   memory_item_id: string;

@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus TimelineEvent
+/// TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct TimelineEvent {

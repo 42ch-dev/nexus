@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus ForkBranch
+/// ForkBranch - describes a world branch forked from a parent world at a specific event. Aligned with data-model-v1.md §5.7.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkBranch {

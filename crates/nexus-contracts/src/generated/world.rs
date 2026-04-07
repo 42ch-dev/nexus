@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::generated::common_types::{TimePolicy, Visibility};
 
-/// Nexus World Entity
+/// World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct World {

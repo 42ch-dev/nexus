@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus Pairing
+/// Pairing entity describing Creator <-> User association. Aligned with data-model-v1.md §5.2A.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Pairing {

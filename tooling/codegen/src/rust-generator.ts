@@ -1,5 +1,5 @@
-import { LoadedSchema } from './schema-loader';
-import { resolveRef, isCommonEnum, getCommonBaseType } from './schema-loader';
+import { LoadedSchema, COMMON_DEFINITIONS } from './schema-loader';
+import { resolveRef, isCommonEnum } from './schema-loader';
 import { resolveFromRoot, writeFile, logger, toSnakeCase } from './utils';
 import path from 'path';
 
@@ -13,27 +13,109 @@ const RUST_RESERVED_WORDS = new Set([
 ]);
 
 /**
+ * Check if a schema has object definitions with properties.
+ */
+function schemaHasObjectDefinitions(schema: LoadedSchema): boolean {
+  const definitions = getDefinitions(schema);
+  if (!definitions) return false;
+  return Object.values(definitions).some(
+    (def: any) => def.type === 'object' && def.properties && Object.keys(def.properties).length > 0,
+  );
+}
+
+/**
+ * Get definitions from a schema (supports both `definitions` and `$defs`).
+ */
+function getDefinitions(schema: LoadedSchema): Record<string, Record<string, unknown>> | undefined {
+  const d = schema.schemaContent.definitions || schema.schemaContent.$defs;
+  return d as Record<string, Record<string, unknown>> | undefined;
+}
+
+/**
+ * Singularize a snake_case name for use as a struct name for inline array items.
+ * e.g., "key_blocks" -> "key_block", "story_summaries" -> "story_summary"
+ */
+function singularize(snakeName: string): string {
+  if (snakeName.endsWith('ies')) return snakeName.slice(0, -3) + 'y';
+  if (snakeName.endsWith('ses') && snakeName.length > 4) return snakeName;
+  if (snakeName.endsWith('s') && !snakeName.endsWith('ss')) return snakeName.slice(0, -1);
+  return snakeName;
+}
+
+/**
+ * Derive a unique name for an inline array item struct.
+ * Uses `{ParentTypeName}{SingularPropertyName}` to avoid name collisions
+ * with top-level schema types.
+ */
+function inlineItemTypeName(parentTypeName: string, propName: string): string {
+  const singular = singularize(propName);
+  const pascal = toPascalCase(singular);
+  return `${parentTypeName}${pascal}`;
+}
+
+/**
+ * Convert a snake_case name to PascalCase.
+ * e.g., "key_block" -> "KeyBlock"
+ */
+function toPascalCase(snakeStr: string): string {
+  return snakeStr
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
+}
+
+/**
+ * Check if a property name contains characters that need serde renaming.
+ */
+function needsSerdeRename(propName: string): boolean {
+  return propName.startsWith('$') || propName.includes('-') || RUST_RESERVED_WORDS.has(propName);
+}
+
+/**
+ * Get the Rust-safe field name for a JSON property.
+ */
+function rustFieldName(propName: string): string {
+  if (propName.startsWith('$')) {
+    return `dollar_${propName.slice(1)}`;
+  }
+  if (RUST_RESERVED_WORDS.has(propName)) {
+    return `r#${propName}`;
+  }
+  // Hyphenated names: replace hyphens with underscores for Rust identifier
+  return propName.replace(/-/g, '_');
+}
+
+/**
  * Generate Rust types from schemas.
  */
 export function generateRustTypes(schemas: LoadedSchema[]): void {
   const outputDir = resolveFromRoot('crates', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating Rust types to: ${outputDir}`);
 
-  // Filter schemas that need struct generation
-  const structSchemas = schemas.filter(s => !s.isDefinitionsOnly);
-
   // Generate common types module first
   generateRustCommonTypes(outputDir);
 
-  // Generate individual type files
-  for (const schema of structSchemas) {
-    generateRustTypeFile(schema, outputDir);
+  // Collect schemas that produce type files
+  const schemasWithTypes: LoadedSchema[] = [];
+
+  for (const schema of schemas) {
+    if (schema.isExplicitlySkipped) continue;
+
+    const hasTopLevel = !schema.isDefinitionsOnly;
+    const hasDefs = schemaHasObjectDefinitions(schema);
+
+    if (!hasTopLevel && !hasDefs) continue;
+
+    schemasWithTypes.push(schema);
+
+    // Generate individual type files
+    generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs);
   }
 
   // Generate mod.rs with module declarations
-  generateRustMod(structSchemas, outputDir);
+  generateRustMod(schemasWithTypes, outputDir);
 
-  logger.success(`Generated Rust types for ${structSchemas.length} schema(s) (+ common types)`);
+  logger.success(`Generated Rust types for ${schemasWithTypes.length} schema(s) (+ common types)`);
 }
 
 /**
@@ -74,39 +156,91 @@ pub const LATEST_SCHEMA_VERSION: u32 = ${schemas[0]?.schemaVersion ?? 1};
 
 /**
  * Generate individual Rust type file for a schema.
+ *
+ * Handles three cases:
+ * 1. Top-level properties only → single struct
+ * 2. Definitions only → one struct per definition
+ * 3. Both → main struct + definition structs (all in same file)
  */
-function generateRustTypeFile(schema: LoadedSchema, outputDir: string): void {
-  const typeName = schema.typeName;
-  const moduleName = toSnakeCase(typeName);
-  const content = generateRustStruct(typeName, schema);
+function generateRustTypeFile(
+  schema: LoadedSchema,
+  outputDir: string,
+  hasTopLevel: boolean,
+  hasDefs: boolean,
+): void {
+  const moduleName = toSnakeCase(schema.typeName);
+  const localDefinitions = hasDefs ? getDefinitions(schema) : undefined;
+
+  // Collect all structs to generate
+  const structs: Array<{
+    typeName: string;
+    content: string;
+  }> = [];
+
+  // Generate main struct from top-level properties
+  if (hasTopLevel) {
+    const structContent = generateRustStructContent(schema.typeName, schema.schemaContent, localDefinitions);
+    structs.push({ typeName: schema.typeName, content: structContent });
+  }
+
+  // Generate structs from definitions
+  if (hasDefs && localDefinitions) {
+    for (const [defName, defContent] of Object.entries(localDefinitions)) {
+      const def = defContent as Record<string, unknown>;
+      if (def.type !== 'object' || !def.properties) continue;
+
+      const structContent = generateRustStructContent(defName, def, localDefinitions);
+      structs.push({ typeName: defName, content: structContent });
+    }
+  }
+
+  // Build file content
+  let content = `//! ${schema.schemaContent.title || schema.typeName}
+//!
+//! ${schema.schemaContent.description || 'Generated from JSON Schema'}
+//!
+//! @schema_version ${schema.schemaVersion}
+//! @source ${schema.fileName}
+
+use serde::{Deserialize, Serialize};
+
+`;
+
+  for (const s of structs) {
+    content += s.content + '\n';
+  }
 
   writeFile(path.join(outputDir, `${moduleName}.rs`), content);
 }
 
 /**
- * Generate Rust struct from JSON Schema properties.
+ * Generate a Rust struct from a schema object (top-level or definition).
  *
- * Strategy:
- * - Common ref enums (ManuscriptPhase, etc.) → import from common_types
- * - SourceAnchor ref → import from common_types
- * - Inline enums → use String (future: generate per-file enums)
- * - $-prefixed fields → #[serde(rename = "$xxx")] + pub dollar_xxx: ...
+ * Returns the struct definition as a string (without use statements — those
+ * are handled at the file level).
  */
-function generateRustStruct(typeName: string, schema: LoadedSchema): string {
-  const schemaContent = schema.schemaContent;
+function generateRustStructContent(
+  typeName: string,
+  schemaContent: Record<string, unknown>,
+  localDefinitions?: Record<string, Record<string, unknown>>,
+): string {
   const properties = (schemaContent.properties || {}) as Record<string, unknown>;
   const requiredFields = (schemaContent.required || []) as string[];
 
   const fields: string[] = [];
   const commonImports: Set<string> = new Set();
+  const inlineStructs: string[] = [];
 
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { rustType, commonImport } = resolveRustType(def, propName);
+    const { rustType, commonImport, inlineStruct } = resolveRustTypeFull(def, propName, typeName, localDefinitions);
 
     if (commonImport) {
       commonImports.add(commonImport);
+    }
+    if (inlineStruct) {
+      inlineStructs.push(inlineStruct);
     }
 
     // Handle nullable types (type: ["string", "null"])
@@ -117,67 +251,63 @@ function generateRustStruct(typeName: string, schema: LoadedSchema): string {
     // serde attributes
     const serdeSkip = !isRequired ? '#[serde(skip_serializing_if = "Option::is_none")]' : '';
 
-    const needsRename = propName.startsWith('$') || RUST_RESERVED_WORDS.has(propName);
-    const rustFieldName = propName.startsWith('$')
-      ? `dollar_${propName.slice(1)}`
-      : RUST_RESERVED_WORDS.has(propName)
-        ? `r#${propName}`
-        : propName;
-
-    if (needsRename) {
+    if (needsSerdeRename(propName)) {
       fields.push(`    #[serde(rename = "${propName}")]`);
     }
     if (serdeSkip) {
       fields.push(`    ${serdeSkip}`);
     }
-    fields.push(`    pub ${rustFieldName}: ${optionalWrap},`);
+    fields.push(`    pub ${rustFieldName(propName)}: ${optionalWrap},`);
   }
 
   // Build use statements
   const importsArr = [...commonImports].sort();
-  const useCommon = importsArr.length > 0
-    ? `use crate::generated::common_types::{${importsArr.join(', ')}};`
-    : '';
+  let useCommon = '';
+  if (importsArr.length > 0) {
+    useCommon = `use crate::generated::common_types::{${importsArr.join(', ')}};\n\n`;
+  }
 
-  return `//! ${schemaContent.title || typeName}
-//!
-//! ${schemaContent.description || 'Generated from JSON Schema'}
-//!
-//! @schema_version ${schema.schemaVersion}
-//! @source ${schema.fileName}
-
-use serde::{Deserialize, Serialize};
-
-${useCommon}
-
-/// ${schemaContent.title || typeName}
+  const desc = (schemaContent.description || typeName) as string;
+  let result = `${useCommon}/// ${desc}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ${typeName} {
 ${fields.join('\n')}
-}
-`;
+}`;
+
+  // Prepend inline structs (for array items that are inline objects)
+  if (inlineStructs.length > 0) {
+    result = inlineStructs.join('\n') + '\n' + result;
+  }
+
+  return result;
 }
 
 /**
- * Resolve a property definition to a Rust type.
- * Returns { rustType, commonImport? } where commonImport is a common_types export name.
+ * Fully resolve a property definition, returning the Rust type and any
+ * associated metadata (common imports, inline struct definitions).
  */
-function resolveRustType(
+function resolveRustTypeFull(
   propDef: Record<string, unknown>,
   propName: string,
-): { rustType: string; commonImport?: string } {
-  const ref = propDef.$ref as string | undefined;
+  parentTypeName: string,
+  localDefinitions?: Record<string, Record<string, unknown>>,
+): { rustType: string; commonImport?: string; inlineStruct?: string } {
+  const ref_ = propDef.$ref as string | undefined;
   const type = propDef.type;
 
   // Handle $ref
-  if (ref) {
-    const defName = resolveRef(ref);
+  if (ref_) {
+    const defName = resolveRef(ref_);
     if (defName === 'SourceAnchor') {
       return { rustType: 'SourceAnchor', commonImport: 'SourceAnchor' };
     }
     if (defName && isCommonEnum(defName)) {
       return { rustType: defName, commonImport: defName };
+    }
+    // Check local definitions (e.g., #/definitions/AgentEntry within same schema)
+    if (defName && localDefinitions && defName in localDefinitions) {
+      return { rustType: defName };
     }
     if (defName) {
       return { rustType: getCommonRustType(defName) };
@@ -190,14 +320,13 @@ function resolveRustType(
     const nonNullTypes = type.filter(t => t !== 'null');
     const hasNull = type.includes('null');
     if (nonNullTypes.length === 1) {
-      const base = resolveSingleRustType(nonNullTypes[0], propDef, propName);
-      // Caller handles Option wrapping; avoid double-wrap
-      return { rustType: hasNull ? stripOuterOption(base) : base };
+      const base = resolveSingleRustType(nonNullTypes[0], propDef, propName, parentTypeName, localDefinitions);
+      return { rustType: hasNull ? stripOuterOption(base.rustType) : base.rustType, inlineStruct: base.inlineStruct };
     }
     return { rustType: 'serde_json::Value' };
   }
 
-  return { rustType: resolveSingleRustType(type as string, propDef, propName) };
+  return resolveSingleRustType(type as string, propDef, propName, parentTypeName, localDefinitions);
 }
 
 /**
@@ -217,43 +346,57 @@ function resolveSingleRustType(
   type: string,
   propDef: Record<string, unknown>,
   propName: string,
-): string {
+  parentTypeName: string,
+  localDefinitions?: Record<string, Record<string, unknown>>,
+): { rustType: string; commonImport?: string; inlineStruct?: string } {
   switch (type) {
     case 'string':
-      // Inline enum — use String for now (future: generate per-file enums)
+      // Inline enum — use String for now (schema-first generates enums via COMMON_DEFINITIONS)
       if (propDef.enum) {
-        return 'String';
+        return { rustType: 'String' };
       }
-      return 'String';
+      return { rustType: 'String' };
     case 'number':
-      return 'f64';
+      return { rustType: 'f64' };
     case 'integer':
-      if (propName === 'schema_version') return 'u32';
-      if (propDef.minimum === 0) return 'u64';
-      return 'i64';
+      if (propName === 'schema_version') return { rustType: 'u32' };
+      if (propDef.minimum === 0) return { rustType: 'u64' };
+      return { rustType: 'i64' };
     case 'boolean':
-      return 'bool';
+      return { rustType: 'bool' };
     case 'array': {
       if (propDef.items) {
         const items = propDef.items as Record<string, unknown>;
         if (items.type === 'object' && items.properties) {
-          // Complex inline object in array → use serde_json::Value
-          return "Vec<serde_json::Value>";
+          // Complex inline object in array → generate a named struct
+          const itemTypeName = inlineItemTypeName(parentTypeName, propName);
+          const inlineStruct = generateInlineArrayItemStruct(
+            itemTypeName,
+            items,
+            localDefinitions,
+          );
+          return { rustType: `Vec<${itemTypeName}>`, inlineStruct };
         }
-        const { rustType } = resolveRustType(items, propName);
-        return `Vec<${rustType}>`;
+        const { rustType } = resolveRustTypeFull(items, propName, parentTypeName, localDefinitions);
+        return { rustType: `Vec<${rustType}>` };
       }
-      return 'Vec<serde_json::Value>';
+      return { rustType: 'Vec<serde_json::Value>' };
     }
     case 'object': {
       if (propDef.properties) {
-        // Inline object → serde_json::Value (future: generate inline struct)
-        return 'serde_json::Value';
+        // Inline object → serde_json::Value (top-level inline objects are rare in Nexus schemas)
+        return { rustType: 'serde_json::Value' };
       }
-      return 'serde_json::Value';
+      if (propDef.additionalProperties) {
+        const ap = propDef.additionalProperties as Record<string, unknown>;
+        if (ap.type === 'string') {
+          return { rustType: 'std::collections::HashMap<String, String>' };
+        }
+      }
+      return { rustType: 'serde_json::Value' };
     }
     default:
-      return 'serde_json::Value';
+      return { rustType: 'serde_json::Value' };
   }
 }
 
@@ -282,10 +425,84 @@ function getCommonRustType(defName: string): string {
 }
 
 /**
+ * Generate a named struct for an inline array item object.
+ */
+function generateInlineArrayItemStruct(
+  itemTypeName: string,
+  objDef: Record<string, unknown>,
+  localDefinitions?: Record<string, Record<string, unknown>>,
+): string {
+  const properties = (objDef.properties || {}) as Record<string, unknown>;
+  const requiredFields = (objDef.required || []) as string[];
+  const fields: string[] = [];
+  const commonImports: Set<string> = new Set();
+
+  for (const [propName, propDef] of Object.entries(properties)) {
+    const def = propDef as Record<string, unknown>;
+    const isRequired = requiredFields.includes(propName);
+    const { rustType, commonImport } = resolveRustTypeFull(def, propName, itemTypeName, localDefinitions);
+
+    if (commonImport) {
+      commonImports.add(commonImport);
+    }
+
+    const isNullable = Array.isArray(def.type) && def.type.includes('null');
+    const finalType = isNullable ? stripOuterOption(rustType) : rustType;
+    const optionalWrap = isRequired ? finalType : `Option<${finalType}>`;
+    const serdeSkip = !isRequired ? '#[serde(skip_serializing_if = "Option::is_none")]' : '';
+
+    if (needsSerdeRename(propName)) {
+      fields.push(`    #[serde(rename = "${propName}")]`);
+    }
+    if (serdeSkip) {
+      fields.push(`    ${serdeSkip}`);
+    }
+    fields.push(`    pub ${rustFieldName(propName)}: ${optionalWrap},`);
+  }
+
+  const importsArr = [...commonImports].sort();
+  let useLine = '';
+  if (importsArr.length > 0) {
+    useLine = `use crate::generated::common_types::{${importsArr.join(', ')}};\n`;
+  }
+
+  return `${useLine}/// Inline array item type (auto-generated from schema)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ${itemTypeName} {
+${fields.join('\n')}
+}`;
+}
+
+/**
  * Generate common_types.rs with shared Rust types and enums.
+ * Driven from COMMON_DEFINITIONS map (populated from common.schema.json).
  */
 function generateRustCommonTypes(outputDir: string): void {
-  const content = `//! Nexus Common Types
+  const typeAliases: Array<{ name: string; rustType: string; desc: string }> = [];
+  const enums: Array<{ name: string; values: string[]; desc: string }> = [];
+
+  for (const [name, def] of COMMON_DEFINITIONS.entries()) {
+    if (def.enum) {
+      enums.push({
+        name,
+        values: def.enum,
+        desc: def.description || `Enum type ${name}`,
+      });
+    } else {
+      let rustType = 'String';
+      if (def.type === 'integer') {
+        rustType = name === 'SchemaVersion' ? 'u32' : 'u64';
+      }
+      typeAliases.push({
+        name,
+        rustType,
+        desc: def.description || `Type alias ${name}`,
+      });
+    }
+  }
+
+  let content = `//! Nexus Common Types
 //!
 //! Shared type definitions extracted from schemas/common/common.schema.json
 //!
@@ -296,103 +513,26 @@ use serde::{Deserialize, Serialize};
 
 // ── Type aliases ──────────────────────────────────────────────────────
 
-/// Schema version as integer (e.g., 1)
-pub type SchemaVersion = u32;
+`;
 
-/// ISO 8601 / RFC 3339 UTC datetime string
-pub type Timestamp = String;
+  for (const alias of typeAliases) {
+    content += `/// ${alias.desc}\npub type ${alias.name} = ${alias.rustType};\n\n`;
+  }
 
-/// World ID (prefix: 'wld_')
-pub type WorldId = String;
+  content += '// ── Enums ─────────────────────────────────────────────────────────────\n\n';
 
-/// Creator ID (prefix: 'ctr_')
-pub type CreatorId = String;
+  for (const en of enums) {
+    const variants = en.values.map(v => {
+      // Convert snake_case enum values to PascalCase
+      return v
+        .split('_')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join('');
+    });
+    content += `/// ${en.desc}\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${en.name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n\n`;
+  }
 
-/// User ID (prefix: 'usr_')
-pub type UserId = String;
-
-/// KeyBlock ID (prefix: 'kb_')
-pub type KeyBlockId = String;
-
-/// TimelineEvent ID (prefix: 'evt_')
-pub type TimelineEventId = String;
-
-/// DeltaBundle ID (prefix: 'bdl_')
-pub type BundleId = String;
-
-/// SyncCommand ID (prefix: 'cmd_')
-pub type CommandId = String;
-
-/// Workspace ID (prefix: 'wrk_')
-pub type WorkspaceId = String;
-
-/// Monotonically increasing sequence number for deltas
-pub type DeltaSequence = u64;
-
-// ── Enums ─────────────────────────────────────────────────────────────
-
-/// Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ManuscriptPhase {
-    Brainstorm,
-    Draft,
-    Review,
-    Finalize,
-    Published,
-}
-
-/// World timeline evolution policy (data-model-v1.md §5.3)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TimePolicy {
-    Manual,
-    OwnerDriven,
-    EventDriven,
-}
-
-/// Visibility/access level (data-model-v1.md §5.3)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Visibility {
-    Private,
-    Unlisted,
-    Public,
-}
-
-/// KeyBlock content type (data-model-v1.md §5.5)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum BlockType {
-    Character,
-    Ability,
-    Scene,
-    Organization,
-    Item,
-    Conflict,
-    InfoPoint,
-    Event,
-}
-
-/// MemoryItem type (data-model-v1.md §5.8)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum MemoryType {
-    Canon,
-    Working,
-    Experience,
-}
-
-/// DeltaBundle type (data-model-v1.md §5.11)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum BundleType {
-    WorldSync,
-    MemorySync,
-    PublishMetadata,
-}
-
-// ── SourceAnchor (from source-anchor.schema.json) ─────────────────────
+  content += `// ── SourceAnchor (from source-anchor.schema.json) ─────────────────────
 
 /// Source anchor for provenance — references platform Story summary entities.
 /// Source: schemas/common/source-anchor.schema.json

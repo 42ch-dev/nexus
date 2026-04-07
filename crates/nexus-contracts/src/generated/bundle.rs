@@ -7,9 +7,36 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::generated::common_types::{SourceAnchor};
+/// Inline array item type (auto-generated from schema)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct BundleDelta {
+    pub delta_type: String,
+    pub operation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_entity_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_entity_id: Option<String>,
+    pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_anchor: Option<SourceAnchor>,
+    pub local_timestamp: String,
+}
+/// Inline array item type (auto-generated from schema)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct BundleDeltaResult {
+    pub delta_index: u64,
+    pub delta_apply_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applied_entity_revision: Option<i64>,
+}
 use crate::generated::common_types::{BundleType, ManuscriptPhase};
 
-/// Nexus DeltaBundle Envelope
+/// DeltaBundle envelope containing delta operations for world synchronization. Aligned with bundle-envelope-schema-v1.md §5.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Bundle {
@@ -30,10 +57,10 @@ pub struct Bundle {
     pub base_versions: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_confirmed_delta_sequence: Option<u64>,
-    pub deltas: Vec<serde_json::Value>,
+    pub deltas: Vec<BundleDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_apply_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delta_results: Option<Vec<serde_json::Value>>,
+    pub delta_results: Option<Vec<BundleDeltaResult>>,
     pub created_at: String,
 }

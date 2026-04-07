@@ -1,3 +1,5 @@
+import type { SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus Meta Schema
  *
@@ -6,11 +8,11 @@
  * @schema_version 1
  * @source meta.schema.json
  */
-import type { SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type Type = 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
 
+/** Meta schema defining schema versioning and structure rules for all Nexus schemas */
 export interface Meta {
   $schema: string;
   $id: string;

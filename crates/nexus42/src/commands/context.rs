@@ -3,7 +3,8 @@
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
 use crate::context::client::ContextClient;
-use crate::context::types::ContextAssembleRequest;
+use crate::context::types::ContextAssembleRequestV1;
+use crate::context::types::{error_code, error_message, is_error};
 use crate::errors::Result;
 use clap::Subcommand;
 
@@ -80,21 +81,21 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             });
 
             // Build the request
-            let request = ContextAssembleRequest {
+            let request = ContextAssembleRequestV1 {
                 request_id: format!("req_{}", uuid::Uuid::new_v4().simple()),
                 workspace_id,
                 creator_id,
                 world_id,
-                include_memory,
-                include_timeline,
-                include_story_summaries,
-                memory_kinds: vec![
+                include_memory: Some(include_memory),
+                include_timeline: Some(include_timeline),
+                include_story_summaries: Some(include_story_summaries),
+                memory_kinds: Some(vec![
                     "story_summary".to_string(),
                     "research_material".to_string(),
                     "review_note".to_string(),
-                ],
-                max_timeline_events,
-                max_story_summaries,
+                ]),
+                max_timeline_events: max_timeline_events.map(|v| v as i64),
+                max_story_summaries: max_story_summaries.map(|v| v as i64),
             };
 
             // Create daemon client and context client
@@ -105,19 +106,16 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             let response = client.assemble(&request).await?;
 
             // Handle error responses
-            if response.is_error() {
-                let error_code = response.error_code().unwrap_or("unknown");
-                let error_message = response
-                    .error_message
-                    .as_deref()
-                    .unwrap_or("No details available");
-                eprintln!("Error: Context assembly failed ({})", error_code);
-                eprintln!("  {}", error_message);
-                if error_code == "auth_expired" {
+            if is_error(&response) {
+                let ec = error_code(&response).unwrap_or("unknown");
+                let em = error_message(&response).unwrap_or("No details available");
+                eprintln!("Error: Context assembly failed ({})", ec);
+                eprintln!("  {}", em);
+                if ec == "auth_expired" {
                     eprintln!("  Run `nexus42 auth login` to re-authenticate.");
-                } else if error_code == "world_not_found" {
+                } else if ec == "world_not_found" {
                     eprintln!("  Check the world ID and ensure the world exists on the platform.");
-                } else if error_code == "platform_unavailable" {
+                } else if ec == "platform_unavailable" {
                     eprintln!("  The platform may be temporarily unavailable. Try again later.");
                 }
                 std::process::exit(1);

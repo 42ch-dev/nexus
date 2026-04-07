@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-
-
-/// Nexus SyncCommand
+/// SyncCommand entity representing a business action with audit attribution. Aligned with data-model-v1.md §5.10.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SyncCommand {

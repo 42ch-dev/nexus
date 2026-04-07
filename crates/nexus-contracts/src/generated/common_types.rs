@@ -9,9 +9,6 @@ use serde::{Deserialize, Serialize};
 
 // ── Type aliases ──────────────────────────────────────────────────────
 
-/// Schema version as integer (e.g., 1)
-pub type SchemaVersion = u32;
-
 /// ISO 8601 / RFC 3339 UTC datetime string
 pub type Timestamp = String;
 
@@ -41,6 +38,9 @@ pub type WorkspaceId = String;
 
 /// Monotonically increasing sequence number for deltas
 pub type DeltaSequence = u64;
+
+/// Schema version as integer (e.g., 1)
+pub type SchemaVersion = u32;
 
 // ── Enums ─────────────────────────────────────────────────────────────
 

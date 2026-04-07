@@ -219,7 +219,10 @@ impl From<nexus_contracts::Memory> for MemoryItem {
             embedding_ref: c.embedding_ref,
             source_refs: c.source_refs.map(|refs| {
                 refs.into_iter()
-                    .filter_map(|v| serde_json::from_value::<SourceRef>(v).ok())
+                    .map(|r| SourceRef {
+                        kind: r.kind,
+                        id: r.id,
+                    })
                     .collect()
             }),
             last_accessed_at: c.last_accessed_at,
@@ -244,7 +247,10 @@ impl From<MemoryItem> for nexus_contracts::Memory {
             embedding_ref: d.embedding_ref,
             source_refs: d.source_refs.map(|refs| {
                 refs.into_iter()
-                    .map(|r| serde_json::to_value(r).unwrap_or_default())
+                    .map(|r| nexus_contracts::MemorySourceRef {
+                        kind: r.kind,
+                        id: r.id,
+                    })
                     .collect()
             }),
             last_accessed_at: d.last_accessed_at,

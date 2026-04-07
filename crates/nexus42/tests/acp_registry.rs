@@ -84,14 +84,17 @@ async fn registry_fetch_from_mock_cdn() {
     // Verify parsed data
     assert_eq!(registry.version, "1.0.0");
     assert_eq!(registry.agents.len(), 2);
-    assert_eq!(registry.extensions.len(), 0);
+    assert!(registry.extensions.as_ref().map_or(true, |v| v.is_empty()));
 
     // Verify first agent (Claude)
     let claude = &registry.agents[0];
     assert_eq!(claude.id, "claude-acp");
     assert_eq!(claude.name, "Claude Agent");
     assert_eq!(claude.version, "0.18.0");
-    assert_eq!(claude.description, "ACP wrapper for Anthropic's Claude");
+    assert_eq!(
+        claude.description.as_deref(),
+        Some("ACP wrapper for Anthropic's Claude")
+    );
     assert!(claude.distribution.npx.is_some());
     assert!(claude.distribution.binary.is_none());
 
@@ -230,9 +233,9 @@ fn registry_minimal_agent_entry() {
     assert_eq!(registry.agents.len(), 1);
     let agent = &registry.agents[0];
     assert_eq!(agent.id, "test-agent");
-    assert_eq!(agent.description, ""); // default
+    assert!(agent.description.is_none()); // optional, not provided
     assert!(agent.repository.is_none()); // optional
-    assert!(agent.authors.is_empty()); // default
+    assert!(agent.authors.is_none()); // optional, not provided
 }
 
 /// Test registry rejects missing required fields.
