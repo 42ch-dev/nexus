@@ -22,14 +22,12 @@
 //!
 //! # Design Notes
 //!
-//! The Rust types for registry data are defined here (not via codegen from
-//! `registry-manifest.schema.json`) because:
-//! - The registry JSON comes from an external CDN, not our wire protocol
-//! - The codegen pipeline only produces flat structs, not nested types
-//! - We need proper typed fields for agent distribution, platform binaries, etc.
+//! The registry types are now imported from the generated `registry_manifest.rs`
+//! (codegenned from `schemas/acp-runtime/registry-manifest.schema.json`).
+//! This ensures consistency between the schema and the implementation.
 //!
-//! The JSON Schema file (`schemas/acp-runtime/registry-manifest.schema.json`)
-//! serves as the authoritative structural reference and validation document.
+//! The `RegistryManifest` type is aliased as `Registry` for convenience.
+//! Additional helper methods are added via an extension trait.
 
 // This module defines the public API for ACP registry fetching and caching.
 // Items are consumed by Task 3 (CLI commands) and Task 4 (transport/run).
@@ -42,6 +40,13 @@ use std::time::{Duration, SystemTime};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+
+// Import generated registry manifest types
+use nexus_contracts::generated::registry_manifest::{
+    AgentEntry as GeneratedAgentEntry, BinaryDistribution as GeneratedBinaryDistribution,
+    Distribution as GeneratedDistribution, NpxDistribution as GeneratedNpxDistribution,
+    PlatformBinary as GeneratedPlatformBinary, RegistryManifest,
+};
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -64,62 +69,36 @@ const NEXUS_DIR: &str = ".nexus42";
 /// Subdirectory under nexus42 dir for registry cache.
 const REGISTRY_DIR: &str = "registry";
 
-// ── Registry Data Types ──────────────────────────────────────────────
+// ── Type Aliases for Generated Types ────────────────────────────────
 
-/// Top-level ACP Registry response.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Registry {
-    /// Registry format version (e.g. "1.0.0").
-    pub version: String,
-    /// List of available ACP agents.
-    pub agents: Vec<AgentEntry>,
-    /// Registry extensions (reserved).
-    #[serde(default)]
-    pub extensions: Vec<serde_json::Value>,
-}
+/// Top-level ACP Registry response (alias for generated `RegistryManifest`).
+pub type Registry = RegistryManifest;
 
-/// A single agent entry in the ACP Registry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentEntry {
-    /// Unique agent identifier (e.g. "claude-acp").
-    pub id: String,
-    /// Human-readable agent name (e.g. "Claude Agent").
-    pub name: String,
-    /// Agent version (e.g. "0.18.0").
-    pub version: String,
-    /// Agent description.
-    #[serde(default)]
-    pub description: String,
-    /// Agent source repository URL.
-    #[serde(default)]
-    pub repository: Option<String>,
-    /// Agent authors.
-    #[serde(default)]
-    pub authors: Vec<String>,
-    /// Agent license identifier.
-    #[serde(default)]
-    pub license: Option<String>,
-    /// Agent icon URL.
-    #[serde(default)]
-    pub icon: Option<String>,
-    /// Distribution configuration (npx or binary).
-    pub distribution: Distribution,
-}
+/// A single agent entry in the ACP Registry (alias for generated type).
+pub type AgentEntry = GeneratedAgentEntry;
 
-/// Agent distribution configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Distribution {
-    /// NPX-based distribution (e.g. `npx @scope/pkg@1.0.0`).
-    #[serde(default)]
-    pub npx: Option<NpxDistribution>,
-    /// Binary distribution (per-platform downloads).
-    #[serde(default)]
-    pub binary: Option<BinaryDistribution>,
-}
+/// Agent distribution configuration (alias for generated type).
+pub type Distribution = GeneratedDistribution;
 
-impl Distribution {
+/// NPX-based distribution configuration (alias for generated type).
+pub type NpxDistribution = GeneratedNpxDistribution;
+
+/// Binary distribution configuration with per-platform entries (alias for generated type).
+pub type BinaryDistribution = GeneratedBinaryDistribution;
+
+/// Platform-specific binary distribution (alias for generated type).
+pub type PlatformBinary = GeneratedPlatformBinary;
+
+// ── Extension Trait for Distribution ────────────────────────────────
+
+/// Extension trait to add helper methods to generated `Distribution` type.
+pub trait DistributionExt {
     /// Returns the distribution source kind: "npx" or "binary".
-    pub fn source_kind(&self) -> &str {
+    fn source_kind(&self) -> &str;
+}
+
+impl DistributionExt for Distribution {
+    fn source_kind(&self) -> &str {
         if self.npx.is_some() {
             "npx"
         } else if self.binary.is_some() {
@@ -128,54 +107,6 @@ impl Distribution {
             "unknown"
         }
     }
-}
-
-/// NPX-based distribution configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct NpxDistribution {
-    /// npm package name with optional version (e.g. "@scope/pkg@1.0.0").
-    pub package: String,
-    /// Additional CLI arguments.
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Environment variables to set.
-    #[serde(default)]
-    pub env: Option<std::collections::HashMap<String, String>>,
-}
-
-/// Binary distribution configuration with per-platform entries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct BinaryDistribution {
-    /// macOS ARM64 (Apple Silicon).
-    #[serde(rename = "darwin-aarch64", default)]
-    pub darwin_aarch64: Option<PlatformBinary>,
-    /// macOS x86_64 (Intel).
-    #[serde(rename = "darwin-x86_64", default)]
-    pub darwin_x86_64: Option<PlatformBinary>,
-    /// Linux ARM64.
-    #[serde(rename = "linux-aarch64", default)]
-    pub linux_aarch64: Option<PlatformBinary>,
-    /// Linux x86_64.
-    #[serde(rename = "linux-x86_64", default)]
-    pub linux_x86_64: Option<PlatformBinary>,
-    /// Windows ARM64.
-    #[serde(rename = "windows-aarch64", default)]
-    pub windows_aarch64: Option<PlatformBinary>,
-    /// Windows x86_64.
-    #[serde(rename = "windows-x86_64", default)]
-    pub windows_x86_64: Option<PlatformBinary>,
-}
-
-/// Platform-specific binary distribution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PlatformBinary {
-    /// Download URL for the platform-specific archive.
-    pub archive: String,
-    /// Command to execute within the archive.
-    pub cmd: String,
-    /// Additional CLI arguments.
-    #[serde(default)]
-    pub args: Vec<String>,
 }
 
 // ── Cache Metadata ───────────────────────────────────────────────────
@@ -590,7 +521,10 @@ mod tests {
 
         assert_eq!(registry.version, "1.0.0");
         assert_eq!(registry.agents.len(), 3);
-        assert_eq!(registry.extensions.len(), 0);
+        assert_eq!(
+            registry.extensions.as_ref().map(|v| v.len()).unwrap_or(0),
+            0
+        );
     }
 
     #[test]
@@ -602,17 +536,23 @@ mod tests {
         assert_eq!(claude.id, "claude-acp");
         assert_eq!(claude.name, "Claude Agent");
         assert_eq!(claude.version, "0.18.0");
-        assert_eq!(claude.description, "ACP wrapper for Anthropic's Claude");
+        assert_eq!(
+            claude.description.as_deref(),
+            Some("ACP wrapper for Anthropic's Claude")
+        );
         assert_eq!(
             claude.repository.as_deref(),
             Some("https://github.com/zed-industries/claude-agent-acp")
         );
-        assert_eq!(claude.authors, vec!["Anthropic"]);
+        assert_eq!(
+            claude.authors.as_deref(),
+            Some(&["Anthropic".to_string()][..])
+        );
         assert_eq!(claude.license.as_deref(), Some("proprietary"));
 
         let npx = claude.distribution.npx.as_ref().unwrap();
         assert_eq!(npx.package, "@zed-industries/claude-agent-acp@0.18.0");
-        assert_eq!(claude.distribution.source_kind(), "npx");
+        assert_eq!(DistributionExt::source_kind(&claude.distribution), "npx");
     }
 
     #[test]
@@ -622,7 +562,7 @@ mod tests {
 
         let codex = &registry.agents[1];
         assert_eq!(codex.id, "codex-acp");
-        assert_eq!(codex.distribution.source_kind(), "binary");
+        assert_eq!(DistributionExt::source_kind(&codex.distribution), "binary");
 
         let binary = codex.distribution.binary.as_ref().unwrap();
         let darwin = binary.darwin_aarch64.as_ref().unwrap();
@@ -641,7 +581,7 @@ mod tests {
         let gemini = &registry.agents[2];
         assert_eq!(gemini.id, "gemini");
         let npx = gemini.distribution.npx.as_ref().unwrap();
-        assert_eq!(npx.args, vec!["--verbose"]);
+        assert_eq!(npx.args.as_deref(), Some(&["--verbose".to_string()][..]));
     }
 
     #[test]
@@ -665,9 +605,9 @@ mod tests {
         assert_eq!(registry.agents.len(), 1);
         let agent = &registry.agents[0];
         assert_eq!(agent.id, "minimal-agent");
-        assert_eq!(agent.description, ""); // default
+        assert!(agent.description.is_none()); // optional, not provided
         assert!(agent.repository.is_none()); // optional
-        assert!(agent.authors.is_empty()); // default
+        assert!(agent.authors.is_none()); // optional, not provided
         assert!(agent.license.is_none()); // optional
     }
 
@@ -865,12 +805,12 @@ mod tests {
         let dist = Distribution {
             npx: Some(NpxDistribution {
                 package: "pkg".to_string(),
-                args: vec![],
+                args: None,
                 env: None,
             }),
             binary: None,
         };
-        assert_eq!(dist.source_kind(), "npx");
+        assert_eq!(DistributionExt::source_kind(&dist), "npx");
     }
 
     #[test]
@@ -886,7 +826,7 @@ mod tests {
                 windows_x86_64: None,
             }),
         };
-        assert_eq!(dist.source_kind(), "binary");
+        assert_eq!(DistributionExt::source_kind(&dist), "binary");
     }
 
     #[test]
@@ -895,7 +835,7 @@ mod tests {
             npx: None,
             binary: None,
         };
-        assert_eq!(dist.source_kind(), "unknown");
+        assert_eq!(DistributionExt::source_kind(&dist), "unknown");
     }
 
     // ── Integration: Cache Roundtrip with get_registry ────────────
