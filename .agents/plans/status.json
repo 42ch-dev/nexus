@@ -574,7 +574,7 @@
         "@qc-specialist-3",
         "@qa-engineer"
       ],
-      "progress": 33,
+      "progress": 50,
       "tags": [
         "v1.1",
         "tech-debt",
@@ -583,7 +583,7 @@
       ],
       "created_at": "2026-04-08",
       "updated_at": "2026-04-08",
-      "notes": "Wave 1 (P0) complete: DM-R5 resolved, 3 schemas created, QC APPROVE. Wave 2 (P1) planned.",
+      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) complete. Batch 2 (Task 8-10, 16-18) pending.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
@@ -610,7 +610,10 @@
         "tests": "~662 tests passing",
         "schemas": "25 schemas valid",
         "wave_1_merged": true,
-        "wave_1_merged_at": "2026-04-08"
+        "wave_1_merged_at": "2026-04-08",
+        "wave_2_batch1_status": "Complete",
+        "wave_2_batch1_tasks": "8 tasks: ACP-R6/R7/R8 + CTX-R2/R4/R5/R6/R7",
+        "wave_2_batch1_commits": "9 commits (568c71d..35e89eb)"
       }
     }
   ],
@@ -749,6 +752,10 @@
       {
         "updated_at": "2026-04-08T12:00:00Z",
         "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 → 40."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "Wave 2 Batch 1 complete: 8 tasks (ACP session/policy/daemon-mediated + Context Assembly 5 residuals). All tests passing. Batch 2 pending."
       }
     ],
     "residual_findings": {
