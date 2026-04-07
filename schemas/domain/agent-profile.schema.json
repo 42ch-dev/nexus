@@ -22,34 +22,38 @@
     },
     "profile_kind": {
       "type": "string",
-      "enum": ["primary", "specialist", "fallback"],
-      "description": "Kind of agent profile"
+      "enum": ["local_agent", "platform_hosted"],
+      "description": "Kind of agent profile (local or platform-hosted)"
     },
     "selection_mode": {
       "type": "string",
-      "enum": ["explicit", "registry", "auto"],
+      "enum": ["registry", "manual_command", "manual_remote"],
       "description": "How agent is selected"
     },
     "registry_agent_id": {
       "type": "string",
       "description": "Agent ID from ACP Registry (if selection_mode=registry)"
     },
+    "launch_command": {
+      "type": ["string", "null"],
+      "description": "Command to launch agent (if selection_mode=manual_command or manual_remote)"
+    },
     "transport": {
       "type": "string",
-      "enum": ["local", "http", "stdio"],
+      "enum": ["stdio", "http", "websocket"],
       "description": "Transport method for agent communication"
     },
     "default_output_manuscript": {
-      "type": "string",
-      "description": "Default manuscript for agent output"
+      "type": "boolean",
+      "description": "Default manuscript output for this profile"
     },
     "protocol_version": {
-      "type": "string",
-      "description": "ACP protocol version (e.g., '0.10.4')"
+      "type": "integer",
+      "description": "ACP protocol version (e.g., 1)"
     },
     "status": {
       "type": "string",
-      "enum": ["active", "inactive", "error"],
+      "enum": ["active", "unavailable", "deprecated"],
       "description": "Profile status"
     },
     "created_at": {

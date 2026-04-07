@@ -19,11 +19,13 @@ pub struct AgentProfile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transport: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_output_manuscript: Option<String>,
+    pub default_output_manuscript: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub protocol_version: Option<String>,
+    pub protocol_version: Option<i64>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
