@@ -1,0 +1,356 @@
+//! Token Lifecycle Manager
+//!
+//! Manages OAuth token storage, retrieval, and refresh lifecycle.
+//! Tokens are stored in the daemon's SQLite database (`auth_tokens` table)
+//! to provide centralized auth state for both CLI and daemon.
+
+use crate::api::errors::NexusApiError;
+use crate::db::pool::DbPool;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+/// Minimum remaining time before expiry that triggers proactive refresh.
+pub const REFRESH_THRESHOLD: Duration = Duration::from_secs(300); // 5 minutes
+
+/// Stored auth token record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredToken {
+    pub user_id: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl StoredToken {
+    /// Check if the token is expired or within the refresh threshold.
+    pub fn needs_refresh(&self) -> bool {
+        let now = Utc::now();
+        let threshold = self.expires_at
+            - chrono::Duration::from_std(REFRESH_THRESHOLD).unwrap_or(chrono::Duration::zero());
+        now >= threshold
+    }
+
+    /// Check if the token is fully expired (past expires_at).
+    pub fn is_expired(&self) -> bool {
+        Utc::now() >= self.expires_at
+    }
+}
+
+/// Token manager — handles storage, retrieval, and lifecycle of auth tokens.
+pub struct TokenManager {
+    db: DbPool,
+}
+
+fn db_error(e: impl std::fmt::Display) -> NexusApiError {
+    NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: e.to_string(),
+    }
+}
+
+impl TokenManager {
+    /// Create a new TokenManager backed by the given connection pool.
+    pub fn new(db: DbPool) -> Self {
+        Self { db }
+    }
+
+    /// Store a new set of tokens, replacing any existing tokens for the user.
+    pub async fn store_tokens(
+        &self,
+        user_id: &str,
+        access_token: &str,
+        refresh_token: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), NexusApiError> {
+        let conn = self.db.get().await.map_err(db_error)?;
+
+        // Use interact() for multi-param INSERT since rusqlite::params! isn't Send
+        let user_id = user_id.to_string();
+        let access_token = access_token.to_string();
+        let refresh_token = refresh_token.to_string();
+        let expires_at_str = expires_at.to_rfc3339();
+        let created_at = Utc::now().to_rfc3339();
+
+        conn.interact(move |conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                [&user_id, &access_token, &refresh_token, &expires_at_str, &created_at],
+            )
+        })
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("Token storage failed: {}", e),
+        })?
+        .map_err(db_error)?;
+
+        Ok(())
+    }
+
+    /// Get the current stored token for the user.
+    ///
+    /// Returns `Ok(None)` if no token is stored.
+    pub async fn get_token(&self) -> Result<Option<StoredToken>, NexusApiError> {
+        let conn = self.db.get().await.map_err(db_error)?;
+
+        let row = conn
+            .query_row(
+                "SELECT user_id, access_token, refresh_token, expires_at, created_at FROM auth_tokens ORDER BY created_at DESC LIMIT 1",
+                [],
+                |row| {
+                    let user_id: String = row.get(0)?;
+                    let access_token: String = row.get(1)?;
+                    let refresh_token: String = row.get(2)?;
+                    let expires_at_str: String = row.get(3)?;
+                    let created_at_str: String = row.get(4)?;
+
+                    let expires_at = DateTime::parse_from_rfc3339(&expires_at_str)
+                        .map_err(|e| {
+                            rusqlite::Error::InvalidParameterName(format!(
+                                "Invalid expires_at: {}",
+                                e
+                            ))
+                        })?
+                        .with_timezone(&Utc);
+                    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                        .map_err(|e| {
+                            rusqlite::Error::InvalidParameterName(format!(
+                                "Invalid created_at: {}",
+                                e
+                            ))
+                        })?
+                        .with_timezone(&Utc);
+
+                    Ok(StoredToken {
+                        user_id,
+                        access_token,
+                        refresh_token,
+                        expires_at,
+                        created_at,
+                    })
+                },
+            )
+            .await
+            .map_err(db_error)?;
+
+        Ok(row)
+    }
+
+    /// Get a valid (non-expired) access token.
+    ///
+    /// If no token is stored or the token is expired, returns `Ok(None)`.
+    pub async fn get_valid_token(&self) -> Result<Option<StoredToken>, NexusApiError> {
+        let token = self.get_token().await?;
+        match token {
+            Some(t) if !t.is_expired() => Ok(Some(t)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Clear all stored tokens (logout).
+    pub async fn clear_tokens(&self) -> Result<(), NexusApiError> {
+        let conn = self.db.get().await.map_err(db_error)?;
+        conn.execute("DELETE FROM auth_tokens", [])
+            .await
+            .map_err(db_error)?;
+        Ok(())
+    }
+
+    /// Validate an access token against stored tokens.
+    ///
+    /// Returns `Ok(true)` if the token matches a stored, non-expired token.
+    pub async fn validate_token(&self, token: &str) -> Result<bool, NexusApiError> {
+        let token = token.to_string();
+        let stored = self.get_valid_token().await?;
+        Ok(stored.is_some_and(|t| t.access_token == token))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::pool::DbPool;
+    use crate::db::schema::Schema;
+
+    /// Create a test database with schema initialized
+    fn create_test_db() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        Schema::init(&conn).unwrap();
+        drop(conn);
+
+        (tmp, db_path)
+    }
+
+    #[tokio::test]
+    async fn store_and_retrieve_token() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+
+        mgr.store_tokens("usr_test123", "at_abc", "rt_def", expires_at)
+            .await
+            .unwrap();
+
+        let token = mgr.get_token().await.unwrap().unwrap();
+        assert_eq!(token.user_id, "usr_test123");
+        assert_eq!(token.access_token, "at_abc");
+        assert_eq!(token.refresh_token, "rt_def");
+    }
+
+    #[tokio::test]
+    async fn get_token_returns_none_when_empty() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let token = mgr.get_token().await.unwrap();
+        assert!(token.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_valid_token_returns_none_for_expired_token() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        // Store a token that expired in the past
+        let expires_at = Utc::now() - chrono::Duration::hours(1);
+        mgr.store_tokens("usr_test", "at_old", "rt_old", expires_at)
+            .await
+            .unwrap();
+
+        let valid = mgr.get_valid_token().await.unwrap();
+        assert!(valid.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_valid_token_returns_token_when_not_expired() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        mgr.store_tokens("usr_test", "at_valid", "rt_valid", expires_at)
+            .await
+            .unwrap();
+
+        let valid = mgr.get_valid_token().await.unwrap();
+        assert!(valid.is_some());
+        assert_eq!(valid.unwrap().access_token, "at_valid");
+    }
+
+    #[tokio::test]
+    async fn clear_tokens_removes_all_tokens() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        mgr.store_tokens("usr_test", "at_abc", "rt_def", expires_at)
+            .await
+            .unwrap();
+
+        assert!(mgr.get_token().await.unwrap().is_some());
+
+        mgr.clear_tokens().await.unwrap();
+
+        assert!(mgr.get_token().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn validate_token_returns_true_for_matching_valid_token() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        mgr.store_tokens("usr_test", "at_abc", "rt_def", expires_at)
+            .await
+            .unwrap();
+
+        assert!(mgr.validate_token("at_abc").await.unwrap());
+        assert!(!mgr.validate_token("at_wrong").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn validate_token_returns_false_for_expired_token() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let expires_at = Utc::now() - chrono::Duration::hours(1);
+        mgr.store_tokens("usr_test", "at_expired", "rt_old", expires_at)
+            .await
+            .unwrap();
+
+        assert!(!mgr.validate_token("at_expired").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn store_tokens_replaces_existing() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::new(&db_path, 2).unwrap();
+        let mgr = TokenManager::new(pool);
+
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        mgr.store_tokens("usr_test", "at_old", "rt_old", expires_at)
+            .await
+            .unwrap();
+
+        let expires_at2 = Utc::now() + chrono::Duration::hours(2);
+        mgr.store_tokens("usr_test", "at_new", "rt_new", expires_at2)
+            .await
+            .unwrap();
+
+        let token = mgr.get_token().await.unwrap().unwrap();
+        assert_eq!(token.access_token, "at_new");
+        assert_eq!(token.refresh_token, "rt_new");
+    }
+
+    #[test]
+    fn stored_token_needs_refresh_when_within_threshold() {
+        let expires_at = Utc::now() + chrono::Duration::minutes(3); // < 5min
+        let token = StoredToken {
+            user_id: "usr_test".into(),
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at,
+            created_at: Utc::now(),
+        };
+        assert!(token.needs_refresh());
+    }
+
+    #[test]
+    fn stored_token_does_not_need_refresh_when_far_from_expiry() {
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        let token = StoredToken {
+            user_id: "usr_test".into(),
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at,
+            created_at: Utc::now(),
+        };
+        assert!(!token.needs_refresh());
+    }
+
+    #[test]
+    fn stored_token_is_expired_when_past_expires_at() {
+        let expires_at = Utc::now() - chrono::Duration::seconds(1);
+        let token = StoredToken {
+            user_id: "usr_test".into(),
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at,
+            created_at: Utc::now(),
+        };
+        assert!(token.is_expired());
+    }
+}
