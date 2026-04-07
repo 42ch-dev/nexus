@@ -8,6 +8,9 @@
 pub use nexus_contracts::generated::ContextAssembleRequestV1;
 pub use nexus_contracts::generated::ContextAssembleResponseV1;
 
+// Re-export MemoryKind from domain for CLI use
+pub use nexus_domain::memory_item::MemoryKind;
+
 /// Backward-compatible type alias.
 #[allow(dead_code)]
 pub type ContextAssembleRequest = ContextAssembleRequestV1;
@@ -176,7 +179,7 @@ mod tests {
             memory_items: Some(vec![
                 nexus_contracts::generated::ContextAssembleResponseV1MemoryItem {
                     memory_id: "mem_001".to_string(),
-                    memory_kind: "story_summary".to_string(),
+                    memory_kind: MemoryKind::StorySummary.to_string(),
                     content: "Important detail".to_string(),
                 },
             ]),
