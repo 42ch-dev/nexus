@@ -1,3 +1,5 @@
+import type { SchemaVersion } from './CommonTypes';
+
 /**
  * Nexus ForkBranch
  *
@@ -6,7 +8,6 @@
  * @schema_version 1
  * @source fork-branch.schema.json
  */
-import type { SchemaVersion } from './CommonTypes';
 
 /** Inline enum type */
 export type Status = 'active' | 'archived';
@@ -14,6 +15,7 @@ export type Status = 'active' | 'archived';
 /** Inline enum type */
 export type VerificationStatus = 'unverified' | 'requested' | 'verified' | 'rejected';
 
+/** ForkBranch - describes a world branch forked from a parent world at a specific event. Aligned with data-model-v1.md §5.7. */
 export interface ForkBranch {
   schema_version: number;
   fork_branch_id: string;

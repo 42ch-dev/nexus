@@ -10,8 +10,10 @@ export interface LoadedSchema {
   /** Integer schema version */
   schemaVersion: number;
   schemaContent: Record<string, unknown>;
-  /** Whether this schema is definitions-only (no own properties to generate) */
+  /** Whether this schema is definitions-only (no own top-level properties) */
   isDefinitionsOnly: boolean;
+  /** Whether this schema is in an explicit skip list and should not generate any types */
+  isExplicitlySkipped: boolean;
 }
 
 // Schema files that are definitions-only or already embedded in common_types
@@ -31,7 +33,7 @@ const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['cli-sync/bundle.schema.json']
  * Map of definition names from common.schema.json to their base types.
  * Updated when common schema is loaded.
  */
-export const COMMON_DEFINITIONS: Map<string, { type: string; enum?: string[] }> = new Map();
+export const COMMON_DEFINITIONS: Map<string, { type: string; enum?: string[]; description?: string }> = new Map();
 
 /**
  * Load all schema files from schemas/ directory.
@@ -64,6 +66,7 @@ export function loadAllSchemas(): LoadedSchema[] {
         COMMON_DEFINITIONS.set(name, {
           type: (d.type as string) || 'string',
           enum: d.enum as string[] | undefined,
+          description: d.description as string | undefined,
         });
       }
       logger.info(`Loaded ${COMMON_DEFINITIONS.size} common type definitions`);
@@ -79,9 +82,10 @@ export function loadAllSchemas(): LoadedSchema[] {
 
     // Determine if this schema should be skipped for struct generation
     const properties = schemaContent.properties as Record<string, unknown> | undefined;
-    const isDefinitionsOnly = SKIP_STRUCT_GENERATION.has(fileName)
-      || SKIP_STRUCT_GENERATION_REL_PATHS.has(relPath)
-      || !properties || Object.keys(properties).length === 0;
+    const isExplicitlySkipped = SKIP_STRUCT_GENERATION.has(fileName)
+      || SKIP_STRUCT_GENERATION_REL_PATHS.has(relPath);
+    const isDefinitionsOnly = !isExplicitlySkipped
+      && (!properties || Object.keys(properties).length === 0);
 
     loadedSchemas.push({
       filePath,
@@ -90,6 +94,7 @@ export function loadAllSchemas(): LoadedSchema[] {
       schemaVersion,
       schemaContent,
       isDefinitionsOnly,
+      isExplicitlySkipped,
     });
 
     logger.info(`  Loaded: ${fileName} -> ${typeName} (v${schemaVersion})${isDefinitionsOnly ? ' [definitions-only]' : ''}`);

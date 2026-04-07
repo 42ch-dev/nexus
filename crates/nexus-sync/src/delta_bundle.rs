@@ -14,7 +14,7 @@
 //! V1.0 supports `story_manifest` delta type in the deltas array,
 //! required for context-assembly summary payloads.
 
-use nexus_contracts::generated::Bundle;
+use nexus_contracts::generated::{Bundle, BundleDelta};
 use nexus_contracts::{BundleType, ManuscriptPhase};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -259,20 +259,18 @@ impl BundleBuilder {
             base_versions["canon_revision"] = json!(rev);
         }
 
-        // Convert deltas to serde_json::Value
-        let delta_values: Vec<Value> = self
+        // Convert deltas to BundleDelta (generated contract type)
+        let delta_values: Vec<BundleDelta> = self
             .deltas
             .into_iter()
-            .map(|d| {
-                json!({
-                    "delta_type": d.delta_type.as_str(),
-                    "operation": d.operation.as_str(),
-                    "target_entity_type": d.target_entity_type,
-                    "target_entity_id": d.target_entity_id,
-                    "payload": d.payload,
-                    "source_anchor": d.source_anchor,
-                    "local_timestamp": d.local_timestamp,
-                })
+            .map(|d| BundleDelta {
+                delta_type: d.delta_type.as_str().to_string(),
+                operation: d.operation.as_str().to_string(),
+                target_entity_type: d.target_entity_type.map(|s| s.to_string()),
+                target_entity_id: d.target_entity_id.map(|s| s.to_string()),
+                payload: d.payload,
+                source_anchor: d.source_anchor.and_then(|v| serde_json::from_value(v).ok()),
+                local_timestamp: d.local_timestamp.to_string(),
             })
             .collect();
 
@@ -401,8 +399,8 @@ mod tests {
 
         assert_eq!(bundle.deltas.len(), 1);
         let delta_val = &bundle.deltas[0];
-        assert_eq!(delta_val["delta_type"], "story_manifest");
-        assert_eq!(delta_val["operation"], "upsert");
+        assert_eq!(delta_val.delta_type, "story_manifest");
+        assert_eq!(delta_val.operation, "upsert");
     }
 
     #[test]

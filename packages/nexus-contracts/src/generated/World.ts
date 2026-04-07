@@ -1,3 +1,5 @@
+import type { SchemaVersion, TimePolicy, Visibility } from './CommonTypes';
+
 /**
  * Nexus World Entity
  *
@@ -6,11 +8,11 @@
  * @schema_version 1
  * @source world.schema.json
  */
-import type { SchemaVersion, TimePolicy, Visibility } from './CommonTypes';
 
 /** Inline enum type */
 export type Status = 'active' | 'paused' | 'archived';
 
+/** World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3. */
 export interface World {
   schema_version: number;
   world_id: string;

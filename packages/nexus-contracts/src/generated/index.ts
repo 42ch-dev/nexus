@@ -11,6 +11,7 @@ export * from './CommonTypes';
 
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
+  ContextAssemblyV1: 1,
   Meta: 1,
   World: 1,
   WorldMembership: 1,

@@ -3,7 +3,8 @@
 //! Calls POST /v1/local/context/assemble through the DaemonClient (nexus42d loopback).
 
 use crate::api::DaemonClient;
-use crate::context::types::{ContextAssembleRequest, ContextAssembleResponse};
+use crate::context::types::ContextAssembleRequestV1;
+use crate::context::types::ContextAssembleResponseV1;
 use crate::errors::Result;
 
 /// Client for the Context Assembly Local API.
@@ -23,9 +24,9 @@ impl ContextClient {
     /// The daemon proxies this request to the platform's Context Assembly service.
     pub async fn assemble(
         &self,
-        request: &ContextAssembleRequest,
-    ) -> Result<ContextAssembleResponse> {
-        let response: ContextAssembleResponse = self
+        request: &ContextAssembleRequestV1,
+    ) -> Result<ContextAssembleResponseV1> {
+        let response: ContextAssembleResponseV1 = self
             .daemon
             .post("/v1/local/context/assemble", request)
             .await?;
@@ -39,13 +40,19 @@ mod tests {
     use serde_json::json;
 
     /// Helper: create a minimal request for testing.
-    fn make_request() -> ContextAssembleRequest {
-        ContextAssembleRequest::new(
-            "req_test_001".to_string(),
-            "wrk_001".to_string(),
-            "ctr_001".to_string(),
-            "wld_001".to_string(),
-        )
+    fn make_request() -> ContextAssembleRequestV1 {
+        ContextAssembleRequestV1 {
+            request_id: "req_test_001".to_string(),
+            workspace_id: "wrk_001".to_string(),
+            creator_id: "ctr_001".to_string(),
+            world_id: "wld_001".to_string(),
+            include_memory: Some(true),
+            include_timeline: Some(true),
+            include_story_summaries: Some(true),
+            memory_kinds: None,
+            max_timeline_events: None,
+            max_story_summaries: None,
+        }
     }
 
     #[test]
@@ -222,10 +229,11 @@ mod tests {
             .await
             .expect("assemble should succeed");
 
-        assert_eq!(response.key_blocks.len(), 1);
-        assert_eq!(response.key_blocks[0].name, "Hero");
-        assert_eq!(response.timeline_events.len(), 1);
-        assert_eq!(response.story_summaries.len(), 1);
-        assert_eq!(response.memory_items.len(), 1);
+        let key_blocks = response.key_blocks.as_ref().unwrap();
+        assert_eq!(key_blocks.len(), 1);
+        assert_eq!(key_blocks[0].name, "Hero");
+        assert_eq!(response.timeline_events.as_ref().unwrap().len(), 1);
+        assert_eq!(response.story_summaries.as_ref().unwrap().len(), 1);
+        assert_eq!(response.memory_items.as_ref().unwrap().len(), 1);
     }
 }
