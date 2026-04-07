@@ -564,30 +564,14 @@
       "id": "2026-04-08-v1.1-tech-debt-mitigation",
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
-        "@fullstack-dev-2",
-        "@qc-specialist",
-        "@qc-specialist-2",
-        "@qc-specialist-3",
-        "@qa-engineer"
-      ],
-      "progress": 50,
-      "tags": [
-        "v1.1",
-        "tech-debt",
-        "contract-drift",
-        "feature-gap"
-      ],
-      "created_at": "2026-04-08",
+"status": "InProgress",
+      "progress": 60,
       "updated_at": "2026-04-08",
-      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) complete. Batch 2 (Task 8-10, 16-18) pending.",
+      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) merged to main. Batch 2 (Task 8-10, 16-18) pending.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
-        "working_branch": "feature/v1.1-tech-debt-mitigation",
+        "working_branch": "feature/v1.1-wave2-batch1 (merged)",
         "priority": "high",
         "description": "Resolve CRITICAL contract drift (DM-R5), complete missing schemas (delta/workspace-binding/agent-profile), address 27 V1.1 residuals across ACP session/policy, Research extraction, Context Assembly, Multi-Creator governance, and reliability hardening",
         "dependency": "nexus-platform Phase 2 complete (confirmed)",
@@ -602,8 +586,8 @@
         },
         "residual_target": "Resolve 27 HIGH/MEDIUM residuals + 3 missing features",
         "effort": "XL — ~15-20 agent sessions (3 waves)",
-        "qc_status": "APPROVE — unanimous, W1-C1 resolved",
-        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-wave1.md",
+        "qc_status": "APPROVE — QC三审 consolidated (0 Critical, 5 Warnings)",
+        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-batch1.md",
         "wave_1_status": "Complete",
         "commits": "7 commits (d2e86c0..0222e46)",
         "files_changed": "54 files (2331 insertions, 205 deletions)",
@@ -613,7 +597,11 @@
         "wave_1_merged_at": "2026-04-08",
         "wave_2_batch1_status": "Complete",
         "wave_2_batch1_tasks": "8 tasks: ACP-R6/R7/R8 + CTX-R2/R4/R5/R6/R7",
-        "wave_2_batch1_commits": "9 commits (568c71d..35e89eb)"
+        "wave_2_batch1_commits": "10 commits (32b8081..cf3afde)",
+        "wave_2_batch1_merged": true,
+        "wave_2_batch1_merged_at": "2026-04-08",
+        "wave_2_batch1_files": "23 files (3086 insertions, 130 deletions)",
+        "residual_summary": "5 Warnings (max_file_size wiring, policy race condition, interactive prompt), 10 Suggestions (daemon_client field, schema version, etc.)"
       }
     }
   ],
@@ -756,6 +744,10 @@
       {
         "updated_at": "2026-04-08",
         "message": "Wave 2 Batch 1 complete: 8 tasks (ACP session/policy/daemon-mediated + Context Assembly 5 residuals). All tests passing. Batch 2 pending."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "Wave 2 Batch 1 merged to main: QC三审 APPROVE (consolidated: 0 Critical, 5 Warnings, 10 Suggestions). 10 commits, 23 files (3086 insertions). Residuals: ACP-R7 resolved, CTX-R2/R4/R5/R6/R7 resolved. Ready for Batch 2 in new session."
       }
     ],
     "residual_findings": {
