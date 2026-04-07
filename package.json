@@ -10,7 +10,8 @@
     "url": "https://github.com/42ch/nexus"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "tooling/*"
   ],
   "engines": {
     "node": ">=20.0.0",
@@ -24,8 +25,8 @@
     "typecheck": "pnpm -r run typecheck",
     "clean": "pnpm -r run clean",
     "validate-schemas": "node tooling/validation/schema-validator.js",
-    "codegen": "cd tooling/codegen && npm run build && npm run codegen",
-    "codegen:watch": "cd tooling/codegen && npm run build && npm run dev",
+    "codegen": "pnpm --filter nexus-codegen run build && pnpm --filter nexus-codegen run codegen && pnpm --filter @42ch/nexus-contracts run build",
+    "codegen:watch": "pnpm --filter nexus-codegen run build && pnpm --filter nexus-codegen run dev",
     "publish:contracts": "cd packages/nexus-contracts && pnpm run publish:public"
   }
 }

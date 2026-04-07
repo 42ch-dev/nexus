@@ -12,13 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install validation dependencies
-        run: cd tooling/validation && npm install
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Validate schemas
-        run: node tooling/validation/schema-validator.js
+        run: pnpm run validate-schemas
 
   verify-codegen:
     name: Verify Codegen Output
@@ -32,8 +36,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install codegen dependencies
-        run: cd tooling/codegen && npm install
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Run codegen
         run: pnpm run codegen
       - name: Check generated code is up-to-date
@@ -106,7 +111,9 @@ jobs:
           name: generated-types
           path: .
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+      - name: Build contracts package
+        run: pnpm --filter @42ch/nexus-contracts run build
       - name: Typecheck
         run: pnpm run typecheck
 
