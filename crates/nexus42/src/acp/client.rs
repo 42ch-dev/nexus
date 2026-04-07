@@ -313,6 +313,8 @@ pub struct AcpSdkAdapter {
     connection: Arc<RwLock<Option<SdkConnection>>>,
     /// Client handler for permission requests.
     handler: SimpleClientHandler,
+    /// Handle to the connection setup task (must be joined during cleanup).
+    _setup_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl AcpSdkAdapter {
@@ -328,6 +330,7 @@ impl AcpSdkAdapter {
             bridge: LocalSetBridge::new(),
             connection: Arc::new(RwLock::new(None)),
             handler,
+            _setup_task: None,
         }
     }
 
@@ -360,7 +363,7 @@ impl AcpSdkAdapter {
 
         // Execute the connection setup on the LocalSet
         let bridge_clone = bridge.clone();
-        tokio::spawn(async move {
+        let setup_task = tokio::spawn(async move {
             let result = bridge_clone
                 .execute(move || {
                     let connection_clone = connection_clone.clone();
@@ -423,6 +426,7 @@ impl AcpSdkAdapter {
             bridge,
             connection,
             handler,
+            _setup_task: Some(setup_task),
         }
     }
 
@@ -436,6 +440,19 @@ impl AcpSdkAdapter {
     #[allow(dead_code)]
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+}
+
+impl Drop for AcpSdkAdapter {
+    fn drop(&mut self) {
+        // Join the setup task if it exists (fire-and-forget cleanup)
+        if let Some(setup_task) = self._setup_task.take() {
+            // Use tokio::spawn to join in an async context
+            // We can't block in Drop, so we spawn a cleanup task
+            tokio::spawn(async move {
+                let _ = setup_task.await;
+            });
+        }
     }
 }
 
@@ -603,6 +620,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

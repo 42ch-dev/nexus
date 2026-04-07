@@ -55,7 +55,8 @@
 //! 2. Wait for LocalSet thread to exit (join)
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -90,6 +91,8 @@ pub struct LocalSetBridge {
     request_tx: mpsc::Sender<Option<BridgeRequest>>,
     /// Handle to the LocalSet thread for graceful shutdown (shared).
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Shutdown flag to ensure only one caller sends shutdown signal.
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl LocalSetBridge {
@@ -101,42 +104,46 @@ impl LocalSetBridge {
     pub fn new() -> Self {
         let (request_tx, mut request_rx) = mpsc::channel::<Option<BridgeRequest>>(16);
 
-        // Spawn dedicated OS thread for LocalSet
-        let thread_handle = thread::spawn(move || {
-            // Create a single-threaded tokio runtime for this thread
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    error!("Failed to create tokio runtime for LocalSet thread: {}", e);
-                    return;
-                }
-            };
+        // Spawn dedicated OS thread for LocalSet using Builder (returns Result)
+        let thread_handle = thread::Builder::new()
+            .name("nexus-localset-bridge".to_string())
+            .spawn(move || {
+                // Create a single-threaded tokio runtime for this thread
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        error!("Failed to create tokio runtime for LocalSet thread: {}", e);
+                        return;
+                    }
+                };
 
-            rt.block_on(async {
-                let localset = tokio::task::LocalSet::new();
+                rt.block_on(async {
+                    let localset = tokio::task::LocalSet::new();
 
-                localset
-                    .run_until(async {
-                        info!("LocalSet bridge thread started");
+                    localset
+                        .run_until(async {
+                            info!("LocalSet bridge thread started");
 
-                        while let Some(Some(request)) = request_rx.recv().await {
-                            // Execute the !Send future on the LocalSet
-                            let future = (request.future_factory)();
-                            future.await;
-                        }
+                            while let Some(Some(request)) = request_rx.recv().await {
+                                // Execute the !Send future on the LocalSet
+                                let future = (request.future_factory)();
+                                future.await;
+                            }
 
-                        info!("LocalSet bridge thread shutting down");
-                    })
-                    .await;
-            });
-        });
+                            info!("LocalSet bridge thread shutting down");
+                        })
+                        .await;
+                });
+            })
+            .expect("Failed to spawn LocalSet bridge thread — system resources exhausted");
 
         Self {
             request_tx,
             thread_handle: Arc::new(Mutex::new(Some(thread_handle))),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -228,27 +235,64 @@ impl Default for LocalSetBridge {
 
 impl Drop for LocalSetBridge {
     fn drop(&mut self) {
-        // Check if we're the last instance holding the thread handle
-        // Arc::strong_count returns 1 if we're the last one
-        if Arc::strong_count(&self.thread_handle) == 1 {
-            debug!("Initiating LocalSet bridge shutdown");
+        // Check if we're potentially the last instance (strong_count == 1 means only us)
+        // Use atomic flag to prevent race: even if count changes after we check,
+        // only ONE drop will actually perform shutdown
+        let is_last_instance = Arc::strong_count(&self.thread_handle) == 1;
 
-            // Send shutdown signal (None) to the LocalSet thread
-            // Use try_send to avoid blocking in Drop
-            let _ = self.request_tx.try_send(None);
+        if is_last_instance {
+            // Try to claim shutdown leadership via atomic flag
+            // compare_exchange ensures only ONE caller succeeds, even if
+            // another clone is created during the race window
+            if self
+                .shutdown_flag
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                debug!("Initiating LocalSet bridge shutdown (last instance)");
 
-            // Wait for thread to exit
-            if let Some(handle) = self.thread_handle.lock().unwrap().take() {
-                match handle.join() {
-                    Ok(()) => debug!("LocalSet bridge thread exited cleanly"),
-                    Err(e) => warn!("LocalSet bridge thread panicked: {:?}", e),
+                // Send shutdown signal (None) to the LocalSet thread
+                // Use try_send to avoid blocking in Drop
+                let _ = self.request_tx.try_send(None);
+
+                // Wait for thread to exit with timeout
+                if let Some(handle) = self
+                    .thread_handle
+                    .lock()
+                    .expect("bridge shutdown: mutex poisoned — unrecoverable")
+                    .take()
+                {
+                    // Use channel to implement timeout on join
+                    let (done_tx, done_rx) = std_mpsc::channel();
+
+                    // Spawn helper thread to perform join
+                    thread::spawn(move || {
+                        let result = handle.join();
+                        let _ = done_tx.send(result);
+                    });
+
+                    // Wait with timeout
+                    match done_rx.recv_timeout(Duration::from_secs(5)) {
+                        Ok(Ok(())) => debug!("LocalSet bridge thread exited cleanly"),
+                        Ok(Err(e)) => warn!("LocalSet bridge thread panicked: {:?}", e),
+                        Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                            warn!("LocalSet bridge thread did not shut down within 5s — detaching");
+                        }
+                        Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                            warn!("Join helper thread disconnected unexpectedly");
+                        }
+                    }
                 }
+            } else {
+                // Another drop already claimed shutdown, we just decrement strong_count
+                debug!("LocalSet bridge drop: shutdown already claimed by another instance");
             }
         }
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
