@@ -7,22 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::{SourceAnchor};
-/// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub struct BundleDelta {
-    pub delta_type: String,
-    pub operation: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_entity_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_entity_id: Option<String>,
-    pub payload: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_anchor: Option<SourceAnchor>,
-    pub local_timestamp: String,
-}
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -57,7 +41,7 @@ pub struct Bundle {
     pub base_versions: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_confirmed_delta_sequence: Option<u64>,
-    pub deltas: Vec<BundleDelta>,
+    pub deltas: Vec<Delta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_apply_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

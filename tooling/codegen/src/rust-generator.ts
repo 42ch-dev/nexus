@@ -308,6 +308,9 @@ function resolveRustTypeFull(
     if (defName === 'SourceAnchor') {
       return { rustType: 'SourceAnchor', commonImport: 'SourceAnchor' };
     }
+    if (defName === 'Delta') {
+      return { rustType: 'Delta' };
+    }
     if (defName && isCommonEnum(defName)) {
       return { rustType: defName, commonImport: defName };
     }

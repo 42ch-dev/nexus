@@ -242,6 +242,9 @@ function resolveTSType(
     if (defName === 'SourceAnchor') {
       return { tsType: 'SourceAnchor', commonRef: 'SourceAnchor' };
     }
+    if (defName === 'Delta') {
+      return { tsType: 'Delta' };
+    }
     if (defName && isCommonEnum(defName)) {
       return { tsType: defName, commonRef: defName };
     }
