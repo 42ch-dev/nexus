@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/domain/workspace-binding.schema.json",
+  "schema_version": 1,
+  "title": "WorkspaceBinding",
+  "description": "Binding between a local workspace and a remote world. Aligned with data-model-v1.md §5.14.",
+  "type": "object",
+  "required": ["schema_version", "workspace_id", "local_root", "world_id", "creator_id", "binding_status", "created_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "workspace_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorkspaceId",
+      "description": "Unique workspace identifier"
+    },
+    "local_root": {
+      "type": "string",
+      "description": "Local filesystem path to workspace root"
+    },
+    "profile_name": {
+      "type": "string",
+      "description": "Optional profile name for this binding"
+    },
+    "world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "Remote world ID this workspace is bound to"
+    },
+    "creator_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Creator ID associated with this binding"
+    },
+    "binding_status": {
+      "type": "string",
+      "enum": ["active", "unlinked", "stale"],
+      "description": "Current binding status"
+    },
+    "created_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Binding creation timestamp"
+    },
+    "updated_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Last update timestamp"
+    }
+  },
+  "additionalProperties": false
+}

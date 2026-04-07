@@ -4,28 +4,18 @@
 //! See data-model-v1.md §5.4.
 
 use serde::{Deserialize, Serialize};
+use strum::Display;
 
-/// Membership role enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Membership role enum - matches v1-spec §5.4, §7
+/// Values: owner, maintainer, collaborator, official_creator
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum MembershipRole {
     Owner,
-    Admin,
-    Curator,
+    Maintainer,
     Collaborator,
-    Viewer,
-}
-
-impl MembershipRole {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Owner => "owner",
-            Self::Admin => "admin",
-            Self::Curator => "curator",
-            Self::Collaborator => "collaborator",
-            Self::Viewer => "viewer",
-        }
-    }
+    OfficialCreator,
 }
 
 /// Membership status enum.
@@ -68,7 +58,7 @@ impl MembershipPermissions {
         }
     }
 
-    pub fn admin_permissions() -> Self {
+    pub fn maintainer_permissions() -> Self {
         Self {
             can_sync_kb: true,
             can_publish: true,
@@ -88,13 +78,13 @@ impl MembershipPermissions {
         }
     }
 
-    pub fn viewer_permissions() -> Self {
+    pub fn official_creator_permissions() -> Self {
         Self {
             can_sync_kb: false,
             can_publish: false,
             can_fork: true,
             can_invite_official_creator: false,
-            can_confirm_canon: false,
+            can_confirm_canon: true,
         }
     }
 }
@@ -119,17 +109,18 @@ impl WorldMembership {
         let membership_id = format!("wmb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         let permissions = match role {
             MembershipRole::Owner => Some(MembershipPermissions::owner_permissions()),
-            MembershipRole::Admin => Some(MembershipPermissions::admin_permissions()),
-            MembershipRole::Curator => Some(MembershipPermissions::collaborator_permissions()),
+            MembershipRole::Maintainer => Some(MembershipPermissions::maintainer_permissions()),
             MembershipRole::Collaborator => Some(MembershipPermissions::collaborator_permissions()),
-            MembershipRole::Viewer => Some(MembershipPermissions::viewer_permissions()),
+            MembershipRole::OfficialCreator => {
+                Some(MembershipPermissions::official_creator_permissions())
+            }
         };
         Self {
             schema_version: 1,
             membership_id,
             world_id: world_id.to_string(),
             creator_id: creator_id.to_string(),
-            role: role.as_str().to_string(),
+            role: role.to_string(),
             membership_status: MembershipStatus::Active.as_str().to_string(),
             joined_at: chrono::Utc::now().to_rfc3339(),
             permissions,
@@ -208,6 +199,15 @@ mod tests {
     }
 
     #[test]
+    fn test_create_maintainer_membership() {
+        let m = WorldMembership::new("wld_test", "ctr_maintainer", MembershipRole::Maintainer);
+        assert_eq!(m.role, "maintainer");
+        assert!(m.is_active());
+        assert!(m.can_confirm_canon());
+        assert!(m.can_sync_kb());
+    }
+
+    #[test]
     fn test_create_collaborator_membership() {
         let m = WorldMembership::new("wld_test", "ctr_collab", MembershipRole::Collaborator);
         assert!(!m.can_confirm_canon());
@@ -215,9 +215,11 @@ mod tests {
     }
 
     #[test]
-    fn test_create_viewer_membership() {
-        let m = WorldMembership::new("wld_test", "ctr_viewer", MembershipRole::Viewer);
-        assert!(!m.can_confirm_canon());
+    fn test_create_official_creator_membership() {
+        let m = WorldMembership::new("wld_test", "ctr_official", MembershipRole::OfficialCreator);
+        assert_eq!(m.role, "official_creator");
+        assert!(m.is_active());
+        assert!(m.can_confirm_canon());
         assert!(!m.can_sync_kb());
     }
 
@@ -227,5 +229,62 @@ mod tests {
         let json = serde_json::to_string(&m).unwrap();
         let deserialized: WorldMembership = serde_json::from_str(&json).unwrap();
         assert_eq!(m, deserialized);
+    }
+}
+
+#[cfg(test)]
+mod enum_alignment_tests {
+    use super::*;
+
+    #[test]
+    fn membership_role_matches_spec() {
+        let roles = vec![
+            MembershipRole::Owner,
+            MembershipRole::Maintainer,
+            MembershipRole::Collaborator,
+            MembershipRole::OfficialCreator,
+        ];
+        assert_eq!(roles.len(), 4);
+    }
+
+    #[test]
+    fn official_creator_role_exists() {
+        let role = MembershipRole::OfficialCreator;
+        assert_eq!(role.to_string(), "official_creator");
+    }
+
+    #[test]
+    fn maintainer_role_exists() {
+        let role = MembershipRole::Maintainer;
+        assert_eq!(role.to_string(), "maintainer");
+    }
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+
+    #[test]
+    fn maintainer_can_confirm_and_sync() {
+        let role = MembershipRole::Maintainer;
+        let m = WorldMembership::new("wld_test", "ctr_maintainer", role);
+        assert!(m.can_confirm_canon());
+        assert!(m.can_sync_kb());
+    }
+
+    #[test]
+    fn official_creator_can_confirm_but_not_sync() {
+        let role = MembershipRole::OfficialCreator;
+        let m = WorldMembership::new("wld_test", "ctr_official", role);
+        assert!(m.can_confirm_canon());
+        assert!(!m.can_sync_kb());
+    }
+
+    #[test]
+    fn collaborator_can_sync_but_not_confirm() {
+        let role = MembershipRole::Collaborator;
+        let m = WorldMembership::new("wld_test", "ctr_collab", role);
+        assert!(!m.can_confirm_canon());
+        assert!(m.can_sync_kb());
     }
 }

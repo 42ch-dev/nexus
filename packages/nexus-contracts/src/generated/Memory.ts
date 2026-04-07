@@ -1,5 +1,4 @@
 import type { MemoryType, SchemaVersion } from './CommonTypes';
-
 /**
  * Nexus MemoryItem
  *

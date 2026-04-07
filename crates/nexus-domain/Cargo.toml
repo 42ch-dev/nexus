@@ -13,6 +13,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+strum.workspace = true
 
 [dev-dependencies]
 jsonschema = "0.17"

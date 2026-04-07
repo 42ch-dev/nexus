@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-06",
+  "updated_at": "2026-04-08",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -23,7 +23,7 @@
       "notes": "Phase 0 complete on main.",
       "metadata": {
         "phase": "Phase 0",
-        "branch_policy": "direct on main \u2014 initialization",
+        "branch_policy": "direct on main — initialization",
         "priority": "high",
         "description": "Create foundational monorepo directory structure, Rust workspace, TypeScript workspace"
       }
@@ -49,7 +49,7 @@
       "notes": "Phase 0 complete on main.",
       "metadata": {
         "phase": "Phase 0",
-        "branch_policy": "direct on main \u2014 initialization",
+        "branch_policy": "direct on main — initialization",
         "priority": "high",
         "description": "Create foundational JSON Schema files for Nexus wire contracts, validation tooling, and CI integration"
       }
@@ -74,9 +74,9 @@
       "notes": "Phase 0 complete on main.",
       "metadata": {
         "phase": "Phase 0",
-        "branch_policy": "direct on main \u2014 initialization",
+        "branch_policy": "direct on main — initialization",
         "priority": "high",
-        "description": "Implement schema-to-code generation pipeline (JSON Schema \u2192 TypeScript + Rust)"
+        "description": "Implement schema-to-code generation pipeline (JSON Schema → TypeScript + Rust)"
       }
     },
     {
@@ -100,14 +100,14 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": "2026-04-06",
-      "notes": "Merged to main. 15 aggregates, 133 tests, QC\u4e09\u5ba1 passed.",
+      "notes": "Merged to main. 15 aggregates, 133 tests, QC三审 passed.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-domain-models from main",
         "priority": "high",
         "description": "Implement domain models (15 aggregates) with consistency rules and gates",
         "wave_0_spec": ".agents/plans/knowledge/revised-domain-models-spec-v1.md",
-        "qc_status": "APPROVE \u2014 C-1 and C-2 fixed and verified",
+        "qc_status": "APPROVE — C-1 and C-2 fixed and verified",
         "tests": "133 passed, 0 failed",
         "commits": "8 commits (a22a2cd..e0b9e8c)",
         "residual_summary": "1 Warning (schema required constraint), 4 Suggestions (test coverage)"
@@ -131,15 +131,15 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": "2026-04-06",
-      "notes": "Merged to main. QC\u4e09\u5ba1 passed (2 blocking issues fixed). 156/156 tests passing. 61 files changed. 4 commits merged.",
+      "notes": "Merged to main. QC三审 passed (2 blocking issues fixed). 156/156 tests passing. 61 files changed. 4 commits merged.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-cli-daemon from main",
         "priority": "high",
         "description": "Implement nexus42 CLI and nexus42d daemon with dual-subject auth, Creator/Manuscript/Research command surfaces, HTTP Local API, and SQLite workspace state",
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
-        "review_verdict": "Request Changes \u2192 Resolved (CLI-R1..R4)",
-        "qc_status": "APPROVE \u2014 CONS-H1 and CONS-H2 fixed",
+        "review_verdict": "Request Changes → Resolved (CLI-R1..R4)",
+        "qc_status": "APPROVE — CONS-H1 and CONS-H2 fixed",
         "qc_report": ".agents/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc-consolidated.md",
         "qc_resolved": [
           "CONS-H1: Formatting violations",
@@ -174,23 +174,23 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": "2026-04-06",
-      "notes": "Merged to main. QC\u4e09\u5ba1 APPROVE (10 blocking issues fixed). QA PASS (226/226 tests). 22 files changed, 4479 insertions. 2 commits + merge.",
+      "notes": "Merged to main. QC三审 APPROVE (10 blocking issues fixed). QA PASS (226/226 tests). 22 files changed, 4479 insertions. 2 commits + merge.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-sync-contract from main",
         "priority": "high",
         "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with bundle metadata fields, partial apply semantics, local precheck, and conflict resolution",
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
-        "review_verdict": "Request Changes \u2192 Resolved (SYNC-R1..R3)",
+        "review_verdict": "Request Changes → Resolved (SYNC-R1..R3)",
         "tasks_added": [
           "Task 6: Partial Apply Semantics",
           "Task 7: Local Precheck Stage"
         ],
         "task_modified": "Task 1: Schema-anchored (use generated types)",
         "task_modified_2": "Task 3: Add bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript)",
-        "tests": "70 nexus-sync tests, 226 workspace total \u2014 all passing",
-        "clippy": "clean \u2014 0 warnings with -D warnings",
-        "qc_status": "APPROVE \u2014 10 blocking issues fixed (SYNC-C1..C5, SYNC-H1..H5)",
+        "tests": "70 nexus-sync tests, 226 workspace total — all passing",
+        "clippy": "clean — 0 warnings with -D warnings",
+        "qc_status": "APPROVE — 10 blocking issues fixed (SYNC-C1..C5, SYNC-H1..H5)",
         "qc_report": ".agents/plans/reports/2025-04-05-sync-contract/2025-04-05-sync-contract-qc-consolidated.md",
         "qc_fixed": [
           "SYNC-C1: Formatting violations fixed",
@@ -201,7 +201,7 @@
           "SYNC-H1: Unsafe unwrap replaced with expect()",
           "SYNC-H2: ConflictResponse::from_json returns error on missing success field",
           "SYNC-H3: Duplicate create detection only checks creates WITH target_id",
-          "SYNC-H4: mark_sent no longer allows failed\u2192sent transition",
+          "SYNC-H4: mark_sent no longer allows failed→sent transition",
           "SYNC-H5: Exponential backoff uses saturating arithmetic"
         ]
       }
@@ -229,7 +229,7 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": "2026-04-06",
-      "notes": "Merged to main. 29 files changed, 6,638 insertions. QC\u4e09\u5ba1 APPROVE (3 blocking fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals for V1.1.",
+      "notes": "Merged to main. 29 files changed, 6,638 insertions. QC三审 APPROVE (3 blocking fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals for V1.1.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-acp-client from main",
@@ -239,10 +239,10 @@
         "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
         "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)",
         "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
-        "qc_status": "APPROVE \u2014 ACP-C1, ACP-C2, ACP-H1 fixed and verified",
+        "qc_status": "APPROVE — ACP-C1, ACP-C2, ACP-H1 fixed and verified",
         "qc_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qc-consolidated.md",
         "qa_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qa.md",
-        "qa_status": "CONDITIONAL PASS \u2014 CI clean, 312+ tests pass, CLI commands work",
+        "qa_status": "CONDITIONAL PASS — CI clean, 312+ tests pass, CLI commands work",
         "residual_summary": "ACP-R1/R2 resolved. 9 V1.1+ residuals (ACP-R3..R11). 10 QC residuals (QC-ACP-1..10).",
         "tests": {
           "unit": "63 passed, 0 failed (acp modules)",
@@ -284,19 +284,19 @@
       "created_at": "2025-04-05",
       "updated_at": "2026-04-06",
       "done_at": "2026-04-06",
-      "notes": "Merged to main. QC\u4e09\u5ba1 APPROVE (3 blocking fixed: status.json key, fmt, import path). QA PASS. 425 tests passing. 13 files changed, 1925 insertions. 7 commits + merge.",
+      "notes": "Merged to main. QC三审 APPROVE (3 blocking fixed: status.json key, fmt, import path). QA PASS. 425 tests passing. 13 files changed, 1925 insertions. 7 commits + merge.",
       "metadata": {
         "phase": "Phase 1",
         "branch_policy": "feature/v1.0-context-assembly from main",
         "priority": "high",
-        "description": "Implement Context Assembly basic version \u2014 CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
+        "description": "Implement Context Assembly basic version — CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
         "working_branch": "feature/v1.0-context-assembly",
         "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
         "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
-        "qc_status": "APPROVE \u2014 status.json key, fmt, import path fixed",
+        "qc_status": "APPROVE — status.json key, fmt, import path fixed",
         "qc_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc-consolidated.md",
         "qa_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qa.md",
-        "qa_status": "PASS \u2014 all 12 acceptance criteria met, 425 workspace tests pass",
+        "qa_status": "PASS — all 12 acceptance criteria met, 425 workspace tests pass",
         "residual_summary": "11 V1.1+ residuals (QC-#1 L1-L7, QC-#2 H2-H3, QC-#3 M3-M4)",
         "tests": {
           "context_unit": "25 passed, 0 failed",
@@ -305,8 +305,8 @@
         },
         "commits": "7 commits (bfdeca2..6b3b7c2) + merge",
         "files_changed": "13 files (1925 insertions, 21 deletions)",
-        "clippy": "clean \u2014 0 warnings with -D warnings",
-        "effort": "M \u2014 ~1-2 focused agent sessions"
+        "clippy": "clean — 0 warnings with -D warnings",
+        "effort": "M — ~1-2 focused agent sessions"
       }
     },
     {
@@ -332,7 +332,7 @@
       "created_at": "2026-04-06",
       "updated_at": "2026-04-07",
       "done_at": "2026-04-07",
-      "notes": "Merged to main. QC\u4e09\u5ba1 APPROVE (4 blocking fixed). QA CONDITIONAL PASS. 480 tests, 0 clippy warnings. 30 files changed, 1822 insertions, 336 deletions.",
+      "notes": "Merged to main. QC三审 APPROVE (4 blocking fixed). QA CONDITIONAL PASS. 480 tests, 0 clippy warnings. 30 files changed, 1822 insertions, 336 deletions.",
       "metadata": {
         "phase": "Phase 2",
         "branch_policy": "feature/v2.0-foundation-hardening from main",
@@ -343,7 +343,7 @@
           ".agents/plans/knowledge/phase1-architecture-review-v1.md",
           ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
         ],
-        "effort": "M \u2014 ~2-4 agent sessions",
+        "effort": "M — ~2-4 agent sessions",
         "residual_summary": "15 addressed (7 HIGH, 4 MEDIUM resolved; 1 HIGH, 3 MEDIUM partially)",
         "tests": "480 passed, 0 failed",
         "task_status": {
@@ -353,10 +353,10 @@
           "task_4": "done",
           "task_5": "done"
         },
-        "qc_status": "APPROVE \u2014 4 blocking items fixed (ffaaba8)",
+        "qc_status": "APPROVE — 4 blocking items fixed (ffaaba8)",
         "qc_report": ".agents/plans/reports/2026-04-06-foundation-hardening/2026-04-06-foundation-hardening-qc-consolidated.md",
         "qa_report": ".agents/plans/reports/2026-04-06-foundation-hardening/2026-04-06-foundation-hardening-qa.md",
-        "qa_status": "CONDITIONAL PASS \u2014 all acceptance criteria met",
+        "qa_status": "CONDITIONAL PASS — all acceptance criteria met",
         "files_changed": "30 files (1,822 insertions, 336 deletions)",
         "commits": "2 commits (1b8e849..ffaaba8) + merge"
       }
@@ -396,7 +396,7 @@
           ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
           ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
         ],
-        "effort": "M-L \u2014 ~3-6 agent sessions",
+        "effort": "M-L — ~3-6 agent sessions",
         "residual_summary": "10 addressed (1 CRITICAL, 2 HIGH resolved; 4 MEDIUM, 3 LOW partially)"
       }
     },
@@ -470,7 +470,7 @@
         "spec_refs": [
           ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
         ],
-        "effort": "M \u2014 ~2-3 agent sessions",
+        "effort": "M — ~2-3 agent sessions",
         "residual_summary": "3 addressed (1 HIGH, 2 MEDIUM resolved)"
       }
     },
@@ -506,10 +506,10 @@
         "spec_refs": [
           ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
         ],
-        "effort": "S \u2014 ~1-2 agent sessions",
+        "effort": "S — ~1-2 agent sessions",
         "residual_summary": "5 addressed (2 HIGH, 3 MEDIUM resolved)",
         "tests": "480+ passed, 0 failed",
-        "clippy": "clean \u2014 0 warnings with -D warnings",
+        "clippy": "clean — 0 warnings with -D warnings",
         "task_status": {
           "task_1": "done",
           "task_2": "done",
@@ -559,6 +559,57 @@
         "tests": "N/A (schema-only change)",
         "validation": "22 schemas valid, codegen success, typecheck pass"
       }
+    },
+    {
+      "id": "2026-04-08-v1.1-tech-debt-mitigation",
+      "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
+      "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
+      "status": "InReview",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev",
+        "@fullstack-dev-2",
+        "@qc-specialist",
+        "@qc-specialist-2",
+        "@qc-specialist-3",
+        "@qa-engineer"
+      ],
+      "progress": 33,
+      "tags": [
+        "v1.1",
+        "tech-debt",
+        "contract-drift",
+        "feature-gap"
+      ],
+      "created_at": "2026-04-08",
+      "updated_at": "2026-04-08",
+      "notes": "Wave 1 (P0) complete: DM-R5 resolved, 3 schemas created, QC APPROVE. Wave 2 (P1) planned.",
+      "metadata": {
+        "phase": "V1.1",
+        "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
+        "working_branch": "feature/v1.1-tech-debt-mitigation",
+        "priority": "high",
+        "description": "Resolve CRITICAL contract drift (DM-R5), complete missing schemas (delta/workspace-binding/agent-profile), address 27 V1.1 residuals across ACP session/policy, Research extraction, Context Assembly, Multi-Creator governance, and reliability hardening",
+        "dependency": "nexus-platform Phase 2 complete (confirmed)",
+        "spec_refs": [
+          "nexus-platform/.agents/designs/v1-spec/domain/data-model-v1.md",
+          "nexus-platform/.agents/designs/roadmap.md"
+        ],
+        "wave_structure": {
+          "wave_1": "P0 — 4 tasks (DM-R5 fix + 3 schemas) ~2 sessions",
+          "wave_2": "P1 — 4 task groups (ACP/Research/Manuscript/Context) ~6-10 sessions",
+          "wave_3": "P2 — 3 task groups (DEBT-X/SYNC-R/FH-R) ~5-7 sessions"
+        },
+        "residual_target": "Resolve 27 HIGH/MEDIUM residuals + 3 missing features",
+        "effort": "XL — ~15-20 agent sessions (3 waves)",
+        "qc_status": "APPROVE — unanimous, W1-C1 resolved",
+        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-wave1.md",
+        "wave_1_status": "Complete",
+        "commits": "7 commits (d2e86c0..0222e46)",
+        "files_changed": "54 files (2331 insertions, 205 deletions)",
+        "tests": "~662 tests passing",
+        "schemas": "25 schemas valid"
+      }
     }
   ],
   "metadata": {
@@ -567,21 +618,21 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-07",
-      "total_open": 42,
+      "updated_at": "2026-04-08",
+      "total_open": 41,
       "by_severity": {
         "high": 4,
-        "medium": 17,
+        "medium": 16,
         "low": 20,
         "warning": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 27,
+        "V1.1": 26,
         "V1.1+": 4
       },
       "by_plan": {
-        "domain-models": 1,
+        "domain-models": 0,
         "cli-daemon-foundation": 5,
         "sync-contract": 10,
         "acp-client": 9,
@@ -590,10 +641,10 @@
       "cross_cutting": [
         {
           "id": "DEBT-X1",
-          "title": "SQLite connection pooling \u2014 nexus-sync still uses direct connections (daemon now uses deadpool-sqlite via Plan A)",
+          "title": "SQLite connection pooling — nexus-sync still uses direct connections (daemon now uses deadpool-sqlite via Plan A)",
           "severity": "high",
           "scope": "crates/nexus-sync (daemon resolved by Plan A Task 2)",
-          "target": "V1.1 \u2014 add pooling to nexus-sync or centralize through daemon API",
+          "target": "V1.1 — add pooling to nexus-sync or centralize through daemon API",
           "relates_to": [
             "CLI-R9",
             "CLI-R14",
@@ -602,20 +653,20 @@
         },
         {
           "id": "DEBT-X2",
-          "title": "SQLite schema duplication \u2014 nexus-sync has intentionally different outbox_entries schema (CLI/daemon resolved by Plan A Task 3)",
+          "title": "SQLite schema duplication — nexus-sync has intentionally different outbox_entries schema (CLI/daemon resolved by Plan A Task 3)",
           "severity": "high",
           "scope": "crates/nexus-sync (CLI/daemon resolved)",
-          "target": "V1.1 \u2014 extract shared schema module or centralize through daemon API",
+          "target": "V1.1 — extract shared schema module or centralize through daemon API",
           "relates_to": [
             "CLI-R10"
           ]
         },
         {
           "id": "DEBT-X3",
-          "title": "Error propagation inconsistency \u2014 nexus-sync uses thiserror, nexus42d now uses NexusApiError (Plan A Task 1)",
+          "title": "Error propagation inconsistency — nexus-sync uses thiserror, nexus42d now uses NexusApiError (Plan A Task 1)",
           "severity": "medium",
           "scope": "crates/nexus-sync (daemon resolved by Plan A Task 1)",
-          "target": "V1.1 \u2014 standardize error strategy across crates",
+          "target": "V1.1 — standardize error strategy across crates",
           "relates_to": [
             "CLI-R11",
             "CLI-R13"
@@ -623,10 +674,10 @@
         },
         {
           "id": "DEBT-X4",
-          "title": "Daemon workspace validation \u2014 RESOLVED by Plan A Task 4 (require_workspace middleware)",
+          "title": "Daemon workspace validation — RESOLVED by Plan A Task 4 (require_workspace middleware)",
           "severity": "high",
           "scope": "crates/nexus42d",
-          "target": "V1.1 \u2014 add workspace validation middleware in daemon",
+          "target": "V1.1 — add workspace validation middleware in daemon",
           "relates_to": [
             "CLI-R12"
           ],
@@ -647,7 +698,7 @@
       },
       {
         "updated_at": "2026-04-06",
-        "message": "Phase 1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC\u4e09\u5ba1, Critical fixes (C-1, C-2) verified."
+        "message": "Phase 1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC三审, Critical fixes (C-1, C-2) verified."
       },
       {
         "updated_at": "2026-04-06",
@@ -655,7 +706,7 @@
       },
       {
         "updated_at": "2026-04-06",
-        "message": "Phase 1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon \u2192 sync-contract \u2192 acp-client \u2192 context-assembly."
+        "message": "Phase 1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon → sync-contract → acp-client → context-assembly."
       },
       {
         "updated_at": "2026-04-06",
@@ -667,7 +718,7 @@
       },
       {
         "updated_at": "2026-04-06",
-        "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC\u4e09\u5ba1 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
+        "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC三审 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
       },
       {
         "updated_at": "2026-04-06",
@@ -675,7 +726,19 @@
       },
       {
         "updated_at": "2026-04-07",
-        "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 \u2192 42."
+        "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 → 42."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "V1.1 tech debt mitigation plan created (2026-04-08-v1.1-tech-debt-mitigation.md) based on architecture gap analysis. 3-wave approach: Wave 1 (P0 — DM-R5 + 3 schemas), Wave 2 (P1 — ACP/Research/Manuscript/Context), Wave 3 (P2 — DEBT-X/SYNC-R/FH-R). Total: 27 residuals + 3 missing features. nexus-platform Phase 2 confirmed complete."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "DM-R5 resolved: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. Total open residuals: 42 → 41."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "V1.1 Wave 1 complete: DM-R5 resolved (MembershipRole aligned), 3 schemas created (delta/workspace-binding/agent-profile), W1-C1 fixed (AgentProfile enums), QC三审 APPROVE. 7 commits, 662 tests passing, 25 schemas valid. Ready for merge."
       }
     ],
     "residual_findings": {
@@ -688,7 +751,7 @@
           "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
+          "target": "V1.1 — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
         },
         {
@@ -696,11 +759,14 @@
           "title": "MembershipRole enum drift between schema and domain",
           "severity": "medium",
           "source": "GA Residual QC-#1",
-          "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs \u2014 schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
+          "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs — schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 align schema enum with domain MembershipRole or vice versa",
-          "tracking": null
+          "target": "V1.1 — align schema enum with domain MembershipRole or vice versa",
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-07T18:16:41Z",
+          "closure_note": "Fixed in feature/v1.1-tech-debt-mitigation: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. All tests pass."
         }
       ],
       "2025-04-05-cli-daemon-foundation": [
@@ -709,10 +775,10 @@
           "title": "Local API Unix socket support for better IPC performance",
           "severity": "low",
           "source": "Clarify Phase",
-          "scope": "nexus42d Local API \u2014 currently HTTP over TCP loopback (port 8420); Unix socket provides better security and performance for local IPC",
+          "scope": "nexus42d Local API — currently HTTP over TCP loopback (port 8420); Unix socket provides better security and performance for local IPC",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add Unix socket support as optional transport; keep HTTP as default for V1.0",
+          "target": "V1.1+ — add Unix socket support as optional transport; keep HTTP as default for V1.0",
           "tracking": null
         },
         {
@@ -720,10 +786,10 @@
           "title": "Manuscript promote precondition checks (strict mode)",
           "severity": "low",
           "source": "Clarify Phase",
-          "scope": "nexus42 manuscript promote \u2014 V1.0 uses loose constraints (user-initiated, no hard pre-checks); strict mode could enforce phase transitions (review\u2192finalize), StoryManifest status, sync state",
+          "scope": "nexus42 manuscript promote — V1.0 uses loose constraints (user-initiated, no hard pre-checks); strict mode could enforce phase transitions (review→finalize), StoryManifest status, sync state",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add optional strict mode with `--strict` flag or workspace config",
+          "target": "V1.1+ — add optional strict mode with `--strict` flag or workspace config",
           "tracking": null
         },
         {
@@ -731,10 +797,10 @@
           "title": "Manuscript verify content integrity checks",
           "severity": "low",
           "source": "Clarify Phase",
-          "scope": "nexus42 manuscript verify \u2014 V1.0 verifies metadata only; content integrity (comparing content_hash with actual file SHA256) deferred",
+          "scope": "nexus42 manuscript verify — V1.0 verifies metadata only; content integrity (comparing content_hash with actual file SHA256) deferred",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add `--check-content` flag to verify manuscript file integrity against StoryManifest.content_hash",
+          "target": "V1.1+ — add `--check-content` flag to verify manuscript file integrity against StoryManifest.content_hash",
           "tracking": null
         },
         {
@@ -742,10 +808,10 @@
           "title": "Research scan content extraction for PDF and URL sources",
           "severity": "low",
           "source": "Clarify Phase",
-          "scope": "nexus42 research scan \u2014 V1.0 records metadata only (path, size, hash, title); PDF text extraction and URL content fetching deferred",
+          "scope": "nexus42 research scan — V1.0 records metadata only (path, size, hash, title); PDF text extraction and URL content fetching deferred",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add `--extract-text` flag to enable content extraction for PDF and URL sources; may require external tools (pdftotext, http client)",
+          "target": "V1.1+ — add `--extract-text` flag to enable content extraction for PDF and URL sources; may require external tools (pdftotext, http client)",
           "tracking": null
         },
         {
@@ -753,10 +819,10 @@
           "title": "No tracing in daemon API handlers",
           "severity": "medium",
           "source": "QC Consolidated (CONS-H9)",
-          "scope": "crates/nexus42d/src/api/handlers/*.rs \u2014 HTTP handlers lack tracing/logging statements for request tracking and debugging",
+          "scope": "crates/nexus42d/src/api/handlers/*.rs — HTTP handlers lack tracing/logging statements for request tracking and debugging",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add tracing::info/debug statements to handlers for request lifecycle observability",
+          "target": "V1.1 — add tracing::info/debug statements to handlers for request lifecycle observability",
           "tracking": null,
           "notes": "Partially resolved by Plan A Task 4 (middleware has tracing::debug). Individual handlers still lack tracing."
         }
@@ -767,10 +833,10 @@
           "title": "Missing outbox transaction atomicity tests",
           "severity": "high",
           "source": "QC Consolidated (QC#1)",
-          "scope": "crates/nexus-sync/src/outbox.rs \u2014 no tests for concurrent writes, rollback, crash recovery",
+          "scope": "crates/nexus-sync/src/outbox.rs — no tests for concurrent writes, rollback, crash recovery",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add concurrent append tests, transaction rollback tests",
+          "target": "V1.1 — add concurrent append tests, transaction rollback tests",
           "tracking": null
         },
         {
@@ -778,10 +844,10 @@
           "title": "No HTTP request body size limit on SyncClient",
           "severity": "high",
           "source": "QC Consolidated (QC#3)",
-          "scope": "crates/nexus-sync/src/sync_client.rs \u2014 Client::builder() has no max body size",
+          "scope": "crates/nexus-sync/src/sync_client.rs — Client::builder() has no max body size",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add body_max_size to client builder",
+          "target": "V1.1 — add body_max_size to client builder",
           "tracking": null
         },
         {
@@ -789,10 +855,10 @@
           "title": "No auth match validation in precheck",
           "severity": "high",
           "source": "QC Consolidated (QC#3)",
-          "scope": "crates/nexus-sync/src/precheck.rs \u2014 submitting_creator_id not validated against authenticated identity",
+          "scope": "crates/nexus-sync/src/precheck.rs — submitting_creator_id not validated against authenticated identity",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "Requires daemon context \u2014 add when daemon exposes authenticated creator info",
+          "target": "Requires daemon context — add when daemon exposes authenticated creator info",
           "tracking": null
         },
         {
@@ -803,7 +869,7 @@
           "scope": "crates/nexus-sync/src/delta_bundle.rs:226-231",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 precheck already handles; add optional validate() to builder",
+          "target": "V1.1 — precheck already handles; add optional validate() to builder",
           "tracking": null
         },
         {
@@ -814,7 +880,7 @@
           "scope": "schemas/cli-sync/bundle.schema.json:8-11",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 verify codegen output; inline constraints if needed",
+          "target": "V1.1 — verify codegen output; inline constraints if needed",
           "tracking": null
         },
         {
@@ -825,7 +891,7 @@
           "scope": "crates/nexus-sync/src/sync_client.rs:81-85",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add basic format validation",
+          "target": "V1.1 — add basic format validation",
           "tracking": null
         },
         {
@@ -836,7 +902,7 @@
           "scope": "crates/nexus-sync/src/outbox.rs:81-104",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add schema_version column and migration strategy",
+          "target": "V1.1 — add schema_version column and migration strategy",
           "tracking": null
         },
         {
@@ -847,7 +913,7 @@
           "scope": "crates/nexus-sync/src/conflict.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 honor retry_after from conflict response",
+          "target": "V1.1 — honor retry_after from conflict response",
           "tracking": null
         },
         {
@@ -858,7 +924,7 @@
           "scope": "crates/nexus-sync/src/partial_apply.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 persist partial apply state to outbox for retry",
+          "target": "V1.1 — persist partial apply state to outbox for retry",
           "tracking": null
         },
         {
@@ -869,7 +935,7 @@
           "scope": "crates/nexus-sync/src/conflict.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add confirmation prompt for auto-reject in CLI",
+          "target": "V1.1 — add confirmation prompt for auto-reject in CLI",
           "tracking": null
         }
       ],
@@ -878,8 +944,8 @@
           "id": "ACP-R3",
           "title": "Terminal kill/wait_for_exit capability",
           "severity": "low",
-          "source": "Tech Spec \u00a7Appendix B",
-          "scope": "V1.1 \u2014 add terminal kill and wait_for_exit to capability set",
+          "source": "Tech Spec §Appendix B",
+          "scope": "V1.1 — add terminal kill and wait_for_exit to capability set",
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "V1.1",
@@ -889,7 +955,7 @@
           "id": "ACP-R4",
           "title": "Slash commands UI integration",
           "severity": "low",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "Agent-provided slash commands not surfaced in CLI UX",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -900,7 +966,7 @@
           "id": "ACP-R5",
           "title": "Agent plan display support",
           "severity": "low",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "ACP Plan protocol not rendered in CLI output",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -911,7 +977,7 @@
           "id": "ACP-R6",
           "title": "Session persistence across CLI invocations",
           "severity": "medium",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "ACP sessions lost when nexus42 exits; no session/load support",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -922,7 +988,7 @@
           "id": "ACP-R7",
           "title": "Permission policy engine (grant/deny UI)",
           "severity": "medium",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "V1.0 auto-grants all permissions; need configurable policy",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -933,7 +999,7 @@
           "id": "ACP-R8",
           "title": "Daemon-mediated agent tool access",
           "severity": "medium",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "V1.0 agents access fs directly; daemon could mediate tool calls",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -944,7 +1010,7 @@
           "id": "ACP-R9",
           "title": "Skills manifest file for multi-agent hosts",
           "severity": "low",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "No persistent skills manifest file for host discovery",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -955,7 +1021,7 @@
           "id": "ACP-R10",
           "title": "Binary agent auto-update mechanism",
           "severity": "low",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "Downloaded binary agents not auto-updated",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -966,7 +1032,7 @@
           "id": "ACP-R11",
           "title": "Session modes (ask/act) switching",
           "severity": "low",
-          "source": "Tech Spec \u00a7Appendix B",
+          "source": "Tech Spec §Appendix B",
           "scope": "ACP session modes not exposed in CLI",
           "decision": "defer",
           "owner": "@fullstack-dev",
@@ -983,7 +1049,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add max_file_size parameter",
+          "target": "V1.1 — add max_file_size parameter",
           "tracking": null
         },
         {
@@ -994,7 +1060,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 scope is local manuscript dirs under user control",
+          "target": "V1.1 — scope is local manuscript dirs under user control",
           "tracking": null
         },
         {
@@ -1005,7 +1071,7 @@
           "scope": "crates/nexus42/src/commands/context.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add clap validator for wld_ prefix pattern",
+          "target": "V1.1 — add clap validator for wld_ prefix pattern",
           "tracking": null
         },
         {
@@ -1016,7 +1082,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 is_char_boundary already checked; add multi-byte safety tests",
+          "target": "V1.1 — is_char_boundary already checked; add multi-byte safety tests",
           "tracking": null
         },
         {
@@ -1027,7 +1093,7 @@
           "scope": "crates/nexus42/src/context/types.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 extract MemoryKind enum matching schema",
+          "target": "V1.1 — extract MemoryKind enum matching schema",
           "tracking": null
         },
         {
@@ -1038,7 +1104,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add permission-denied and symlink test cases",
+          "target": "V1.1 — add permission-denied and symlink test cases",
           "tracking": null
         }
       ],
@@ -1051,7 +1117,7 @@
           "scope": "crates/nexus42/src/db/, crates/nexus42d/src/db/",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add CI drift-detection job comparing schema constants",
+          "target": "V1.1 — add CI drift-detection job comparing schema constants",
           "tracking": null
         },
         {
@@ -1062,7 +1128,7 @@
           "scope": "crates/nexus42d/src/db/pool.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add configurable timeout to DbPool::new()",
+          "target": "V1.1 — add configurable timeout to DbPool::new()",
           "tracking": null
         },
         {
@@ -1073,7 +1139,7 @@
           "scope": "crates/nexus42d/src/api/errors.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 document and standardize error code convention",
+          "target": "V1.1 — document and standardize error code convention",
           "tracking": null
         },
         {
@@ -1095,7 +1161,7 @@
           "scope": "crates/nexus42d/src/db/pool.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 useful for future monitoring endpoint",
+          "target": "V1.1 — useful for future monitoring endpoint",
           "tracking": null
         },
         {
@@ -1106,7 +1172,7 @@
           "scope": "crates/nexus42d/src/api/",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 extract to shared test_utils module",
+          "target": "V1.1 — extract to shared test_utils module",
           "tracking": null
         },
         {
@@ -1117,7 +1183,7 @@
           "scope": "crates/nexus42d/src/db/pool.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 WAL mode mitigates; complex to test",
+          "target": "V1.1 — WAL mode mitigates; complex to test",
           "tracking": null
         },
         {
@@ -1128,7 +1194,7 @@
           "scope": "crates/nexus42d/src/api/middleware.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 window is negligible (in-memory mutex)",
+          "target": "V1.1+ — window is negligible (in-memory mutex)",
           "tracking": null
         },
         {
@@ -1139,18 +1205,18 @@
           "scope": "crates/nexus42d/src/db/pool.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add comment with tuning guidance",
+          "target": "V1.1 — add comment with tuning guidance",
           "tracking": null
         },
         {
           "id": "FH-R10",
-          "title": "Mutex poisoning uses .expect() \u2014 could crash daemon",
+          "title": "Mutex poisoning uses .expect() — could crash daemon",
           "severity": "low",
           "source": "QC1-M1",
           "scope": "crates/nexus42d/src/workspace/mod.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 documented as crash-on-poison policy",
+          "target": "V1.1 — documented as crash-on-poison policy",
           "tracking": null
         },
         {
@@ -1161,7 +1227,7 @@
           "scope": "crates/nexus42d/src/api/errors.rs, middleware.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 split tests into separate files",
+          "target": "V1.1 — split tests into separate files",
           "tracking": null
         }
       ]

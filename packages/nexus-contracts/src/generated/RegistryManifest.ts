@@ -1,5 +1,4 @@
 import type { SchemaVersion } from './CommonTypes';
-
 /**
  * ACP Registry Manifest
  *

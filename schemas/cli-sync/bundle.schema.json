@@ -26,26 +26,8 @@
     },
     "deltas": {
       "items": {
-        "required": ["delta_type", "operation", "payload", "local_timestamp"],
-        "properties": {
-          "delta_type": {
-            "description": "V1.0 supports all aggregate delta types including story_manifest.",
-            "enum": ["world", "key_block", "timeline_event", "fork_branch", "memory_item", "story_manifest"]
-          },
-          "operation": {
-            "description": "Operation to apply on the delta target.",
-            "type": "string",
-            "enum": ["create", "update", "upsert", "delete", "append"]
-          },
-          "payload": {
-            "description": "Delta payload (validated by per-type sub-schema).",
-            "type": "object"
-          },
-          "local_timestamp": {
-            "description": "Local timestamp of this delta (RFC 3339 UTC).",
-            "type": "string"
-          }
-        }
+        "$ref": "https://nexus.42ch.io/schemas/domain/delta.schema.json",
+        "description": "V1.0 supports all aggregate delta types including story_manifest."
       }
     }
   }

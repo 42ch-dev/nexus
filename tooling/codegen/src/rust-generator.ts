@@ -181,12 +181,14 @@ function generateRustTypeFile(
   const structs: Array<{
     typeName: string;
     content: string;
+    commonImports: Set<string>;
+    crossModuleImports: Set<string>;
   }> = [];
 
   // Generate main struct from top-level properties
   if (hasTopLevel) {
-    const structContent = generateRustStructContent(schema.typeName, schema.schemaContent, localDefinitions);
-    structs.push({ typeName: schema.typeName, content: structContent });
+    const { structContent, commonImports, crossModuleImports } = generateRustStructContent(schema.typeName, schema.schemaContent, localDefinitions);
+    structs.push({ typeName: schema.typeName, content: structContent, commonImports, crossModuleImports });
   }
 
   // Generate structs from definitions
@@ -195,9 +197,17 @@ function generateRustTypeFile(
       const def = defContent as Record<string, unknown>;
       if (def.type !== 'object' || !def.properties) continue;
 
-      const structContent = generateRustStructContent(defName, def, localDefinitions);
-      structs.push({ typeName: defName, content: structContent });
+      const { structContent, commonImports, crossModuleImports } = generateRustStructContent(defName, def, localDefinitions);
+      structs.push({ typeName: defName, content: structContent, commonImports, crossModuleImports });
     }
+  }
+
+  // Collect all imports from all structs
+  const allCommonImports: Set<string> = new Set();
+  const allCrossModuleImports: Set<string> = new Set();
+  for (const s of structs) {
+    for (const imp of s.commonImports) allCommonImports.add(imp);
+    for (const imp of s.crossModuleImports) allCrossModuleImports.add(imp);
   }
 
   // Build file content
@@ -209,8 +219,22 @@ function generateRustTypeFile(
 //! @source ${schema.fileName}
 
 use serde::{Deserialize, Serialize};
-
 `;
+
+  // Add use statements for common types
+  if (allCommonImports.size > 0) {
+    const importsArr = [...allCommonImports].sort();
+    content += `use crate::generated::common_types::{${importsArr.join(', ')}};\n`;
+  }
+
+  // Add use statements for cross-module types (e.g., Delta)
+  if (allCrossModuleImports.size > 0) {
+    for (const imp of [...allCrossModuleImports].sort()) {
+      content += `use crate::generated::${toSnakeCase(imp)}::${imp};\n`;
+    }
+  }
+
+  content += '\n';
 
   for (const s of structs) {
     content += s.content + '\n';
@@ -222,28 +246,35 @@ use serde::{Deserialize, Serialize};
 /**
  * Generate a Rust struct from a schema object (top-level or definition).
  *
- * Returns the struct definition as a string (without use statements — those
- * are handled at the file level).
+ * Returns the struct definition as a string plus any imports needed.
  */
 function generateRustStructContent(
   typeName: string,
   schemaContent: Record<string, unknown>,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): string {
+): {
+  structContent: string;
+  commonImports: Set<string>;
+  crossModuleImports: Set<string>;
+} {
   const properties = (schemaContent.properties || {}) as Record<string, unknown>;
   const requiredFields = (schemaContent.required || []) as string[];
 
   const fields: string[] = [];
   const commonImports: Set<string> = new Set();
+  const crossModuleImports: Set<string> = new Set(); // For types like Delta that are in separate modules
   const inlineStructs: string[] = [];
 
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { rustType, commonImport, inlineStruct } = resolveRustTypeFull(def, propName, typeName, localDefinitions);
+    const { rustType, commonImport, inlineStruct, crossModuleImport } = resolveRustTypeFull(def, propName, typeName, localDefinitions);
 
     if (commonImport) {
       commonImports.add(commonImport);
+    }
+    if (crossModuleImport) {
+      crossModuleImports.add(crossModuleImport);
     }
     if (inlineStruct) {
       inlineStructs.push(inlineStruct);
@@ -268,13 +299,19 @@ function generateRustStructContent(
 
   // Build use statements
   const importsArr = [...commonImports].sort();
+  const crossImportsArr = [...crossModuleImports].sort();
   let useCommon = '';
   if (importsArr.length > 0) {
-    useCommon = `use crate::generated::common_types::{${importsArr.join(', ')}};\n\n`;
+    useCommon = `use crate::generated::common_types::{${importsArr.join(', ')}};\n`;
   }
+  let useCross = '';
+  if (crossImportsArr.length > 0) {
+    useCross = crossImportsArr.map(t => `use crate::generated::${toSnakeCase(t)}::${t};\n`).join('');
+  }
+  const useStatements = useCommon + useCross;
 
   const desc = (schemaContent.description || typeName) as string;
-  let result = `${useCommon}/// ${desc}
+  const result = `/// ${desc}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ${typeName} {
@@ -282,23 +319,24 @@ ${fields.join('\n')}
 }`;
 
   // Prepend inline structs (for array items that are inline objects)
+  let structContent = result;
   if (inlineStructs.length > 0) {
-    result = inlineStructs.join('\n') + '\n' + result;
+    structContent = inlineStructs.join('\n') + '\n' + result;
   }
 
-  return result;
+  return { structContent, commonImports, crossModuleImports };
 }
 
 /**
  * Fully resolve a property definition, returning the Rust type and any
- * associated metadata (common imports, inline struct definitions).
+ * associated metadata (common imports, inline struct definitions, cross-module imports).
  */
 function resolveRustTypeFull(
   propDef: Record<string, unknown>,
   propName: string,
   parentTypeName: string,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): { rustType: string; commonImport?: string; inlineStruct?: string } {
+): { rustType: string; commonImport?: string; inlineStruct?: string; crossModuleImport?: string } {
   const ref_ = propDef.$ref as string | undefined;
   const type = propDef.type;
 
@@ -307,6 +345,9 @@ function resolveRustTypeFull(
     const defName = resolveRef(ref_);
     if (defName === 'SourceAnchor') {
       return { rustType: 'SourceAnchor', commonImport: 'SourceAnchor' };
+    }
+    if (defName === 'Delta') {
+      return { rustType: 'Delta', crossModuleImport: 'Delta' };
     }
     if (defName && isCommonEnum(defName)) {
       return { rustType: defName, commonImport: defName };
@@ -354,7 +395,7 @@ function resolveSingleRustType(
   propName: string,
   parentTypeName: string,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): { rustType: string; commonImport?: string; inlineStruct?: string } {
+): { rustType: string; commonImport?: string; inlineStruct?: string; crossModuleImport?: string } {
   switch (type) {
     case 'string':
       // Inline enum — use String for now (schema-first generates enums via COMMON_DEFINITIONS)
@@ -383,8 +424,8 @@ function resolveSingleRustType(
           );
           return { rustType: `Vec<${itemTypeName}>`, inlineStruct };
         }
-        const { rustType } = resolveRustTypeFull(items, propName, parentTypeName, localDefinitions);
-        return { rustType: `Vec<${rustType}>` };
+        const { rustType, commonImport, crossModuleImport } = resolveRustTypeFull(items, propName, parentTypeName, localDefinitions);
+        return { rustType: `Vec<${rustType}>`, commonImport, crossModuleImport };
       }
       return { rustType: 'Vec<serde_json::Value>' };
     }

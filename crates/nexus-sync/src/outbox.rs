@@ -425,7 +425,7 @@ impl Outbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_contracts::generated::{BundleDelta, SyncCommand};
+    use nexus_contracts::generated::{Delta, SyncCommand};
 
     fn make_test_command() -> SyncCommand {
         SyncCommand {
@@ -573,7 +573,7 @@ mod tests {
             canonical_hash: String::new(),
             base_versions: serde_json::json!({"world_revision": 1}),
             last_confirmed_delta_sequence: None,
-            deltas: vec![BundleDelta {
+            deltas: vec![Delta {
                 delta_type: "world".to_string(),
                 operation: "create".to_string(),
                 target_entity_type: None,
