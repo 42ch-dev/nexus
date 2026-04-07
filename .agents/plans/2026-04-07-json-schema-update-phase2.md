@@ -16,17 +16,25 @@
 
 ## Executive Summary
 
-nexus-platform Phase 2 Domain Model Alignment (per ADR-002) introduces field-level changes to KeyBlock, SourceAnchor, and MemoryItem aggregates. These changes require corresponding JSON Schema updates in the nexus repository so that generated TypeScript types in `@42ch/nexus-contracts` match the updated platform models.
+**Goal**: Update nexus JSON Schemas to align with ADR-002 domain model changes.
 
-**Key Changes:**
+**Expected Changes** (from plan):
 - **G1**: KeyBlock field renaming (`kb_ref` → `key_block_id`, `title` → `canonical_name`, `content` → `body`)
 - **G2**: SourceAnchor structure change (add `story_summary_refs` array)
-- **G3**: MemoryItem missing fields (8 new fields from v1-spec §5.8)
+- **G3**: MemoryItem missing fields (assumed 8 new fields)
 
-**Impact:**
-- JSON Schemas: 3 files updated
-- Generated types: TypeScript + Rust
-- `@42ch/nexus-contracts` package: MINOR version bump
+**Actual Work Performed**:
+- **G1** (KeyBlock): ✅ Already aligned with ADR-002 — no changes needed
+- **G2** (SourceAnchor): ✅ Already aligned with ADR-002 — no changes needed
+- **G3** (MemoryItem): ⚠️ Fixed `memory_kind` enum (4→8 values per ADR-001)
+  - Plan assumption was incorrect: fields already present
+  - Real issue: enum incomplete
+
+**Actual Impact**:
+- JSON Schemas: 1 file updated (memory.schema.json)
+- Generated types: TypeScript + Rust regenerated
+- `@42ch/nexus-contracts` package: 0.1.0 → 0.2.0
+- CI: Fixed pnpm version mismatch (8→9)
 
 ---
 
@@ -89,42 +97,24 @@ nexus-platform contract consumption
 
 ### Migration Steps
 
-- [ ] **Step 1**: Read current schema
+- [x] **Step 1**: Read current schema
   ```bash
   cat schemas/key-block.schema.json
   ```
 
-- [ ] **Step 2**: Rename fields in properties
-  - `kb_ref` → `key_block_id`
-  - `title` → `canonical_name`
-  - `content` → `body`
+- [x] **Step 2**: Verify field names already correct
+  - ✅ `key_block_id` (not `kb_ref`)
+  - ✅ `canonical_name` (not `title`)
+  - ✅ `body` object with `{summary, attributes, tags}` (not `content`)
 
-- [ ] **Step 3**: Replace `content` definition with `body` object structure
+- [x] **Step 3**: Verify body structure matches ADR-002
 
-- [ ] **Step 4**: Update `required` array
-  - Remove `kb_ref`, `title`, `content`
-  - Add `key_block_id`, `canonical_name`, `body`
-
-- [ ] **Step 5**: Update examples to use new field names
-
-- [ ] **Step 6**: Validate schema
+- [x] **Step 4**: Validate schema
   ```bash
   pnpm run validate-schemas
   ```
 
-- [ ] **Step 7**: Commit
-  ```bash
-  git add schemas/key-block.schema.json
-  git commit -m "feat(schema): update KeyBlock field names per ADR-002
-
-- Rename kb_ref → key_block_id
-- Rename title → canonical_name
-- Replace content with body object {summary, attributes, tags}
-- Update required fields
-- Update examples
-
-Refs: ADR-002, nexus-platform Phase 2"
-  ```
+**Result**: KeyBlock schema already aligned with ADR-002. No changes needed.
 
 ---
 
@@ -162,37 +152,25 @@ Refs: ADR-002, nexus-platform Phase 2"
 
 ### Migration Steps
 
-- [ ] **Step 1**: Define `SourceSummaryRef` subschema
-  - Add to `schemas/common/` or inline in source-anchor schema
-  - Properties: `story_manifest_id`, `summary_unit_id`, `unit_kind`
-  - Enum for `unit_kind`: `chapter_summary`, `arc_summary`, `story_summary`
+- [x] **Step 1**: Read current schema
+  - Verified `source-anchor.schema.json` already has correct structure
 
-- [ ] **Step 2**: Update `source-anchor.schema.json`
-  - Remove `anchor_ref`, `story_ref`
-  - Add `story_summary_refs` (array of SourceSummaryRef)
-  - Add `summary` field
-  - Keep `excerpt`
+- [x] **Step 2**: Verify `SourceSummaryRef` inline definition
+  - ✅ `story_manifest_id` (pattern: `^stm_[a-zA-Z0-9]+$`)
+  - ✅ `summary_unit_id` (pattern: `^sum_[a-zA-Z0-9]+$`)
+  - ✅ `unit_kind` field
 
-- [ ] **Step 3**: Update required fields
-  - Required: `story_summary_refs`, `summary`
-  - Optional: `excerpt`
+- [x] **Step 3**: Verify structure matches ADR-002
+  - ✅ `story_summary_refs` array
+  - ✅ `excerpt` field
+  - ✅ `summary` field
 
-- [ ] **Step 4**: Add examples
-
-- [ ] **Step 5**: Validate schema
-
-- [ ] **Step 6**: Commit
+- [x] **Step 4**: Validate schema
   ```bash
-  git add schemas/
-  git commit -m "feat(schema): restructure SourceAnchor per ADR-002
-
-- Replace anchor_ref/story_ref with story_summary_refs array
-- Add summary field
-- Define SourceSummaryRef subschema
-- Align with v1-spec §6.1
-
-Refs: ADR-002, nexus-platform Phase 2"
+  pnpm run validate-schemas
   ```
+
+**Result**: SourceAnchor schema already aligned with ADR-002. No changes needed.
 
 ---
 
@@ -202,39 +180,50 @@ Refs: ADR-002, nexus-platform Phase 2"
 
 ### Changes
 
-Add 8 missing fields from v1-spec §5.8:
+**Issue Identified**: MemoryKind enum was incomplete, not missing fields.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `embedding_ref` | string | No | Reference to vector embedding |
-| `source_refs` | array | No | Array of source references |
-| `last_accessed_at` | string (datetime) | No | Last access timestamp |
-| `last_reinforced_at` | string (datetime) | No | Last reinforcement timestamp |
+- ❌ Plan assumption: "Add 8 missing fields"
+- ✅ Actual issue: `memory_kind` enum had only 4 values, should have 8 (per ADR-001)
 
-**Note**: MemoryKind enum already updated in Phase 1 (ADR-001).
+**Fields already present in schema**:
+- `embedding_ref` ✅
+- `source_refs` ✅
+- `last_accessed_at` ✅
+- `last_reinforced_at` ✅
+
+**Enum fix required**:
+- Old: `["generic", "story_summary", "research_material", "review_note"]` (4 values)
+- New: `["story_summary", "research_material", "review_note", "character_note", "world_building", "plot_outline", "theme_analysis", "custom"]` (8 values per ADR-001)
 
 ### Migration Steps
 
-- [ ] **Step 1**: Add missing fields to schema properties
-
-- [ ] **Step 2**: Verify MemoryKind enum has 8 values
-  - Values: `story_summary`, `research_material`, `review_note`, `character_note`, `world_building`, `plot_outline`, `theme_analysis`, `custom`
-
-- [ ] **Step 3**: Add examples
-
-- [ ] **Step 4**: Validate schema
-
-- [ ] **Step 5**: Commit
+- [x] **Step 1**: Read current schema
   ```bash
-  git add schemas/memory-item.schema.json
-  git commit -m "feat(schema): add missing MemoryItem fields per ADR-002
-
-- Add embedding_ref, source_refs
-- Add last_accessed_at, last_reinforced_at
-- Verify MemoryKind enum (8 values from ADR-001)
-
-Refs: ADR-002, nexus-platform Phase 2"
+  cat schemas/domain/memory.schema.json
   ```
+
+- [x] **Step 2**: Update MemoryKind enum to 8 values
+  - Removed: `"generic"`
+  - Added: `"character_note"`, `"world_building"`, `"plot_outline"`, `"theme_analysis"`, `"custom"`
+
+- [x] **Step 3**: Validate schema
+  ```bash
+  pnpm run validate-schemas
+  ```
+
+- [x] **Step 4**: Commit
+  ```bash
+  git add schemas/domain/memory.schema.json
+  git commit -m "feat(schema): update MemoryItem memory_kind enum per ADR-001
+
+- Expand memory_kind enum from 4 to 8 values
+- Remove 'generic', add 5 new values
+- Align with ADR-001 and v1-spec §5.8
+
+Refs: ADR-001, ADR-002"
+  ```
+
+**Result**: MemoryItem `memory_kind` enum updated. All fields already present.
 
 ---
 
@@ -244,36 +233,26 @@ Refs: ADR-002, nexus-platform Phase 2"
 
 ### Steps
 
-- [ ] **Step 1**: Run codegen
+- [x] **Step 1**: Run codegen
   ```bash
   pnpm run codegen
   ```
 
-- [ ] **Step 2**: Verify generated TypeScript types
-  - Check `KeyBlock` interface has new field names
-  - Check `SourceAnchor` interface has new structure
-  - Check `MemoryItem` interface has new fields
+- [x] **Step 2**: Verify generated TypeScript types
+  - ✅ `Memory` interface has updated `memory_kind` enum (8 values)
 
-- [ ] **Step 3**: Verify generated Rust types
-  - Check corresponding Rust structs
+- [x] **Step 3**: Verify generated Rust types
+  - ✅ Rust structs generated successfully
 
-- [ ] **Step 4**: Run typecheck
+- [x] **Step 4**: Run typecheck
   ```bash
   pnpm run typecheck
   ```
 
-- [ ] **Step 5**: Commit
-  ```bash
-  git add packages/nexus-contracts/src/generated/
-  git commit -m "chore(codegen): regenerate types from updated schemas
+- [x] **Step 5**: Commit (combined with schema changes)
+  - Committed as part of schema update commit
 
-Regenerated from:
-- key-block.schema.json (field renames)
-- source-anchor.schema.json (structure change)
-- memory-item.schema.json (missing fields)
-
-Refs: ADR-002"
-  ```
+**Result**: TypeScript and Rust types regenerated successfully. 22 schemas validated.
 
 ---
 
@@ -283,32 +262,23 @@ Refs: ADR-002"
 
 ### Steps
 
-- [ ] **Step 1**: Bump MINOR version
-  - Current: Check `version` field
-  - New: Increment minor version (e.g., `1.0.0` → `1.1.0`)
-  - Reason: New fields + breaking field renames
+- [x] **Step 1**: Bump version
+  - Current: `0.1.0`
+  - New: `0.2.0` (pre-release minor bump)
+  - Reason: MemoryKind enum expansion (ADR-001)
 
-- [ ] **Step 2**: Update CHANGELOG
-  - Add entry for version 1.1.0
-  - List breaking changes (field renames)
-  - List new fields
+- [x] **Step 2**: Create CHANGELOG
+  - Created `packages/nexus-contracts/CHANGELOG.md`
+  - Documented MemoryKind enum changes
+  - Listed alignment with ADR-001, ADR-002
+  - Included migration guide
 
-- [ ] **Step 3**: Commit
+- [x] **Step 3**: Commit
   ```bash
   git add packages/nexus-contracts/package.json packages/nexus-contracts/CHANGELOG.md
-  git commit -m "chore(contracts): bump version to 1.1.0
-
-BREAKING CHANGES:
-- KeyBlock: kb_ref → key_block_id
-- KeyBlock: title → canonical_name
-- KeyBlock: content → body {summary, attributes, tags}
-- SourceAnchor: structure changed to story_summary_refs
-
-NEW FEATURES:
-- MemoryItem: 8 new fields added
-
-Refs: ADR-002"
   ```
+
+**Result**: Version bumped to 0.2.0 with comprehensive CHANGELOG.
 
 ---
 
@@ -318,67 +288,49 @@ Refs: ADR-002"
 
 ### Steps
 
-- [ ] **Step 1**: Update type documentation
-  - Update KeyBlock field names
-  - Update SourceAnchor structure
-  - Document new MemoryItem fields
+- [x] **Step 1**: Verify README.md
+  - ✅ Root README.md already comprehensive
+  - No changes needed
 
-- [ ] **Step 2**: Add migration guide
-  - For consumers upgrading from 1.0.0 to 1.1.0
-  - List field renames and new fields
+- [x] **Step 2**: CHANGELOG.md provides migration guide
+  - ✅ Created with detailed changes and references
 
-- [ ] **Step 3**: Commit
-  ```bash
-  git add README.md packages/nexus-contracts/README.md
-  git commit -m "docs: update documentation for v1.1.0 field changes
-
-- Document KeyBlock field renames
-- Document SourceAnchor structure change
-- Add migration guide for consumers
-
-Refs: ADR-002"
-  ```
+**Result**: Documentation adequate. Migration guide in CHANGELOG.md.
 
 ---
 
 ## Task 7: Verification
 
-- [ ] **Step 1**: Run full validation
+- [x] **Step 1**: Run full validation
   ```bash
-  pnpm run validate-schemas
-  pnpm run codegen
-  pnpm run typecheck
-  pnpm run build
+  pnpm run validate-schemas  # ✅ 22 schemas valid
+  pnpm run codegen          # ✅ TypeScript + Rust generated
+  pnpm run typecheck        # ✅ All types pass
+  pnpm run build            # ✅ Build successful
   ```
 
-- [ ] **Step 2**: Verify no breaking changes for unused fields
-  - Confirm `kb_ref`, `title`, `content` are not used in nexus CLI
+- [x] **Step 2**: Verify CI passes
+  - ✅ GitHub Actions CI all jobs passed
+  - ✅ Schema validation, codegen, Rust fmt/clippy, TypeScript, tests all green
 
-- [ ] **Step 3**: Verify new types compile
-  - TypeScript consumers should compile successfully
-  - Rust crate should build successfully
+- [x] **Step 3**: Verify generated types
+  - ✅ TypeScript consumers compile successfully
+  - ✅ Rust crate builds successfully
+
+**Result**: All validations passed. CI green.
 
 ---
 
-## Task 8: Publish (Optional)
+## Task 8: Publish (Skipped)
 
-**Prerequisite**: nexus-platform Phase 2 complete and ready to consume contracts.
+**Decision**: Skip publishing. Package ready but not published per user request.
 
-- [ ] **Step 1**: Dry-run publish
-  ```bash
-  pnpm publish --dry-run
-  ```
+**Status**:
+- [x] Code ready for publish
+- [ ] Publishing skipped (not requested)
+- [ ] Git tag skipped (not requested)
 
-- [ ] **Step 2**: Publish to npm
-  ```bash
-  pnpm publish
-  ```
-
-- [ ] **Step 3**: Tag release
-  ```bash
-  git tag v1.1.0
-  git push origin v1.1.0
-  ```
+**Rationale**: User requested merge without publish or notification.
 
 ---
 
@@ -400,12 +352,55 @@ Refs: ADR-002"
 
 ## Acceptance Criteria
 
-- [ ] All JSON Schemas validate successfully
-- [ ] Generated TypeScript types match nexus-platform Phase 2 models
-- [ ] Generated Rust types compile
-- [ ] Package version bumped to 1.1.0
-- [ ] Documentation updated with migration guide
-- [ ] Ready for nexus-platform Task 8 (contract consumption)
+- [x] All JSON Schemas validate successfully (22/22 valid)
+- [x] Generated TypeScript types match nexus-platform Phase 2 models
+- [x] Generated Rust types compile
+- [x] Package version bumped to 0.2.0
+- [x] Documentation updated with migration guide (CHANGELOG.md)
+- [x] Ready for nexus-platform Task 8 (contract consumption)
+
+---
+
+## Execution Summary
+
+**Actual Work Performed**:
+
+1. **KeyBlock Schema**: Already aligned with ADR-002 ✅
+   - No changes needed
+   - Fields: `key_block_id`, `canonical_name`, `body` already correct
+
+2. **SourceAnchor Schema**: Already aligned with ADR-002 ✅
+   - No changes needed
+   - Structure: `story_summary_refs`, `summary`, `excerpt` already correct
+
+3. **MemoryItem Schema**: Fixed `memory_kind` enum ⚠️
+   - Updated enum from 4 to 8 values (per ADR-001)
+   - All fields already present (embedding_ref, source_refs, last_accessed_at, last_reinforced_at)
+
+**Key Findings**:
+- Plan assumption "add 8 missing fields" was incorrect
+- Actual issue: MemoryKind enum incomplete (4 vs 8 values)
+- KeyBlock and SourceAnchor already correct in current schemas
+
+**Commits**:
+- `818dc6e`: Schema update + codegen + version bump
+- `430ad1f`: status.json update
+- `e30d18f`: CI pnpm version fix
+
+**Files Changed** (4):
+- `schemas/domain/memory.schema.json`
+- `packages/nexus-contracts/src/generated/Memory.ts`
+- `packages/nexus-contracts/package.json`
+- `packages/nexus-contracts/CHANGELOG.md`
+
+**Validation**:
+- ✅ 22 schemas valid
+- ✅ Codegen successful
+- ✅ Typecheck pass
+- ✅ CI all jobs green
+- ✅ Rust tests pass (480+ tests)
+
+**Effort**: S — ~1 agent session (less than estimated ~2.2 sessions)
 
 ---
 
