@@ -17,7 +17,7 @@ use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
     daemon::DaemonCommand, init::InitCommand, manuscript::ManuscriptCommand, policy::PolicyCommand,
-    research::ResearchCommand, sync::SyncCommand,
+    research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -98,6 +98,12 @@ enum Commands {
         command: AgentCommand,
     },
 
+    /// ACP session persistence management
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+
     /// Permission policy management (ACP-R7)
     Policy {
         #[command(subcommand)]
@@ -126,6 +132,7 @@ async fn main() {
         Some(Commands::Research { command }) => commands::research::run(command, &config).await,
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
+        Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);

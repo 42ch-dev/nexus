@@ -86,6 +86,7 @@ pub struct PermissionPolicy {
 
 impl PermissionPolicy {
     /// Create a new permission policy with default settings.
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }

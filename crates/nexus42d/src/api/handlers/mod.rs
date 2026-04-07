@@ -1,5 +1,6 @@
 //! API handler modules
 
+pub mod acp;
 pub mod auth;
 pub mod context;
 pub mod creators;
