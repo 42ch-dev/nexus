@@ -29,6 +29,9 @@ impl Schema {
         conn.execute_batch(CREATORS_TABLE)?;
         conn.execute_batch(REFERENCE_SOURCES_TABLE)?;
 
+        // V1.1 migration: Add content column if it doesn't exist
+        let _ = conn.execute("ALTER TABLE reference_sources ADD COLUMN content TEXT", []);
+
         // Seed schema version row (idempotent)
         conn.execute(
             "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('schema_version', ?1)",
@@ -63,6 +66,8 @@ CREATE TABLE IF NOT EXISTS creators (
 
 /// Reference source registry — tracks scanned research references.
 /// Keep in sync with daemon schema.
+///
+/// V1.1 (CLI-R8): Added `content` column for extracted text.
 const REFERENCE_SOURCES_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS reference_sources (
     reference_source_id TEXT PRIMARY KEY,
@@ -72,6 +77,7 @@ CREATE TABLE IF NOT EXISTS reference_sources (
     title TEXT NOT NULL,
     tags TEXT,
     content_hash TEXT,
+    content TEXT,
     scan_status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL,
     updated_at TEXT

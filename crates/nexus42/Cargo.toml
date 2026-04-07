@@ -33,6 +33,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
 # ACP SDK — pinned to exact version per tech spec §1.2
 agent-client-protocol = "=0.10.4"
 tokio-util = { version = "0.7", features = ["compat"] }
