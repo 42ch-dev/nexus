@@ -29,8 +29,8 @@
     },
     "memory_kind": {
       "type": "string",
-      "enum": ["generic", "story_summary", "research_material", "review_note"],
-      "description": "Content morphology sub-type"
+      "enum": ["story_summary", "research_material", "review_note", "character_note", "world_building", "plot_outline", "theme_analysis", "custom"],
+      "description": "Content morphology sub-type (per ADR-001)"
     },
     "status": {
       "type": "string",
