@@ -180,7 +180,7 @@
         "priority": "medium",
         "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (31 total). Batch A (3 critical) completed on 2026-04-09. Batch B (3 medium) and Batch C (25 low) deferred to V1.1+ milestone.",
         "residual_target": "31 residuals (3 completed in Batch A, 28 remaining)",
-        "effort": "L — ongoing across multiple milestones (Batch A: S, Batch B: M, Batch C: M)",
+        "effort": "L \u2014 ongoing across multiple milestones (Batch A: S, Batch B: M, Batch C: M)",
         "batch_status": {
           "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
           "batch_b": "pending (3 medium: CLI-R15, FH-R2, FH-R4)",
@@ -212,7 +212,7 @@
       "created_at": "2026-04-09",
       "updated_at": "2026-04-08",
       "done_at": "2026-04-08",
-      "notes": "Completed: 7 tasks implemented — tracing (29 statements), pool config builder, auth error variants, bundle validation, schema allOf verification, auth token validation, low-priority polish (dead_code, WAL, race, tuning, mutex, test org). All 12 residuals resolved.",
+      "notes": "Completed: 7 tasks implemented \u2014 tracing (29 statements), pool config builder, auth error variants, bundle validation, schema allOf verification, auth token validation, low-priority polish (dead_code, WAL, race, tuning, mutex, test org). All 12 residuals resolved.",
       "metadata": {
         "priority": "P0",
         "phase": "Done",
@@ -250,7 +250,7 @@
       "id": "2026-04-09-v1.1-context-assembly-enhancement",
       "title": "Context Assembly Enhancement (V1.1 Safety & Validation)",
       "file": ".agents/plans/2026-04-09-v1.1-context-assembly-enhancement.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
@@ -263,11 +263,11 @@
         "validation"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-09",
-      "notes": "V1.1 safety and validation constraints for CLI-side summary generator. Implements knowledge SSOT §9.1 constraints. Foundation hardening tasks moved to Plan 09.",
+      "updated_at": "2026-04-08",
+      "notes": "Plan 09 dependency resolved. Starting implementation.",
       "metadata": {
         "priority": "P2",
-        "phase": "Todo",
+        "phase": "InProgress",
         "description": "Implement V1.1 safety and validation constraints for summary generator: file size limit, path traversal validation, UTF-8 truncation safety. 3 tasks. Resolves CTX-R2, CTX-R3, CTX-R5.",
         "working_branch": "feature/v1.1-context-assembly",
         "dependency": "2026-04-09-v1.1-cli-daemon-hardening",
@@ -290,7 +290,7 @@
       "id": "2026-04-09-v1.1-acp-ux-permissions",
       "title": "ACP UX & Permission Policy",
       "file": ".agents/plans/2026-04-09-v1.1-acp-ux-permissions.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
@@ -303,11 +303,11 @@
         "permissions"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-09",
-      "notes": "ACP user experience improvements and permission policy. CLI-only plan with no direct platform dependency. 6 tasks across 3 groups: session management, permission policy, skills & UX polish.",
+      "updated_at": "2026-04-08",
+      "notes": "Plan 09 dependency resolved. Starting implementation in worktree.",
       "metadata": {
         "priority": "P2",
-        "phase": "Todo",
+        "phase": "InProgress",
         "description": "Improve ACP UX: session persistence, permission policy, skills listing, agent status, user-friendly errors. 6 tasks. Depends on Plan 09.",
         "working_branch": "feature/v1.1-acp-ux",
         "dependency": "2026-04-09-v1.1-cli-daemon-hardening",
@@ -357,8 +357,8 @@
         "2026-04-08-v1.1-tech-debt-mitigation": 11,
         "2026-04-09-v1.1-tech-debt-cleanup-2": 0
       },
-      "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md §209-211 (historical compatibility rule)",
-      "archival_note": "15 closed residuals archived to .agents/plans/archived/residuals/ on 2026-04-09 per plan-convention.md §248-286. metadata.notes migrated to notes.json per §105."
+      "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md \u00a7209-211 (historical compatibility rule)",
+      "archival_note": "15 closed residuals archived to .agents/plans/archived/residuals/ on 2026-04-09 per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
     },
     "residual_findings": {
       "2025-04-05-domain-models": [
@@ -370,7 +370,7 @@
           "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
+          "target": "V1.1 \u2014 add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
         }
       ],
@@ -380,10 +380,10 @@
           "title": "Local API Unix socket support for better IPC performance",
           "severity": "low",
           "source": "Clarify Phase",
-          "scope": "nexus42d Local API — currently HTTP over TCP loopback (port 8420); Unix socket provides better security and performance for local IPC",
+          "scope": "nexus42d Local API \u2014 currently HTTP over TCP loopback (port 8420); Unix socket provides better security and performance for local IPC",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ — add Unix socket support as optional transport; keep HTTP as default for V1.0",
+          "target": "V1.1+ \u2014 add Unix socket support as optional transport; keep HTTP as default for V1.0",
           "tracking": null
         }
       ],
@@ -396,7 +396,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — add max_file_size parameter",
+          "target": "V1.1 \u2014 add max_file_size parameter",
           "tracking": null
         },
         {
@@ -407,7 +407,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — scope is local manuscript dirs under user control",
+          "target": "V1.1 \u2014 scope is local manuscript dirs under user control",
           "tracking": null
         },
         {
@@ -418,7 +418,7 @@
           "scope": "crates/nexus42/src/context/summary.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — is_char_boundary already checked; add multi-byte safety tests",
+          "target": "V1.1 \u2014 is_char_boundary already checked; add multi-byte safety tests",
           "tracking": null
         }
       ],
@@ -505,23 +505,23 @@
         },
         {
           "id": "QC-W9",
-          "title": "CI shell script readability — extract to standalone script",
+          "title": "CI shell script readability \u2014 extract to standalone script",
           "severity": "warning",
           "source": "QC#1 (Wave 3 Batch B)",
           "scope": ".github/workflows/ci.yml:119-177",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ — Extract to tooling/check-schema-drift.sh"
+          "target": "V1.1+ \u2014 Extract to tooling/check-schema-drift.sh"
         },
         {
           "id": "QC-W10",
-          "title": "TempDir ownership semantics — reinforce with type hint",
+          "title": "TempDir ownership semantics \u2014 reinforce with type hint",
           "severity": "warning",
           "source": "QC#1 (Wave 3 Batch B)",
           "scope": "test_utils.rs:11-23, 40-43",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ — Add newtype wrapper or compile-time hint"
+          "target": "V1.1+ \u2014 Add newtype wrapper or compile-time hint"
         },
         {
           "id": "QC-W11",
@@ -531,7 +531,7 @@
           "scope": "CI check at ci.yml:171-177 vs crates/nexus-contracts/src/generated/mod.rs:84",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ — Standardize schema version type across CLI/daemon/contracts"
+          "target": "V1.1+ \u2014 Standardize schema version type across CLI/daemon/contracts"
         }
       ]
     }
