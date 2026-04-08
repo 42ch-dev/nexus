@@ -587,7 +587,7 @@
         "residual_target": "Resolve 27 HIGH/MEDIUM residuals + 3 missing features",
         "effort": "XL — ~15-20 agent sessions (3 waves)",
         "qc_status": "APPROVE — QC三审 consolidated (0 Critical, 6 Warnings)",
-        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-batch2.md",
+        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated.md",
         "wave_1_status": "Complete",
         "commits": "7 commits (d2e86c0..0222e46)",
         "files_changed": "54 files (2331 insertions, 205 deletions)",
