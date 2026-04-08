@@ -378,10 +378,10 @@ impl SyncClient {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
                     if length > self.body_max_size {
-                        return Err(SyncError::Serialization(format!(
-                            "Response body too large: {} bytes (limit: {} bytes)",
-                            length, self.body_max_size
-                        )));
+                        return Err(SyncError::HttpBodySizeExceeded {
+                            actual: length,
+                            limit: self.body_max_size,
+                        });
                     }
                 }
             }
@@ -394,11 +394,10 @@ impl SyncClient {
 
         // Check actual body size (SYNC-R5)
         if body.len() > self.body_max_size {
-            return Err(SyncError::Serialization(format!(
-                "Response body too large: {} bytes (limit: {} bytes)",
-                body.len(),
-                self.body_max_size
-            )));
+            return Err(SyncError::HttpBodySizeExceeded {
+                actual: body.len(),
+                limit: self.body_max_size,
+            });
         }
 
         if status >= 400 {
