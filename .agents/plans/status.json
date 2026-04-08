@@ -199,7 +199,7 @@
       "id": "2026-04-09-v1.1-cli-daemon-hardening",
       "title": "CLI/Daemon Reliability Hardening",
       "file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
@@ -212,12 +212,12 @@
         "p0"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-09",
-      "notes": "Foundation hardening for V1.1 GA: observability, sync/validation, db/pool hardening, error handling. Prerequisite for all platform V1.1 plans.",
+      "updated_at": "2026-04-08",
+      "notes": "Foundation hardening for V1.1 GA: observability, sync/validation, db/pool hardening, error handling. Prerequisite for all platform V1.1 plans. Task 7 refined with 6 specific sub-tasks (FH-R5/R7/R8/R9/R10/R11).",
       "metadata": {
         "priority": "P0",
-        "phase": "Todo",
-        "description": "Improve CLI/daemon reliability, observability, and error handling. 7 tasks across 4 groups: tracing, sync/validation, auth variants, low-priority polish. Resolves 14 residuals.",
+        "phase": "InProgress",
+        "description": "Improve CLI/daemon reliability, observability, and error handling. 7 tasks across 4 groups: tracing, sync/validation, auth variants, low-priority polish. Resolves 12 residuals (6 medium + 6 low).",
         "working_branch": "feature/v1.1-cli-daemon-hardening",
         "dependency": null,
         "spec_refs": [
