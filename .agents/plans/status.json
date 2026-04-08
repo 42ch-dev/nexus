@@ -253,7 +253,7 @@
       ],
       "created_at": "2026-04-09",
       "updated_at": "2026-04-08",
-      "notes": "C-01/H-01 closed in tree: harness status.json + daemon push BundleBuilder/precheck/stage. QC re-review: pass (approve with residuals). QA: pass — see metadata.qa_report. 7 ALIGN-* residuals resolved (see archived/residuals/2026-04-09-v1.1-arch-alignment-blockers.json); 2 remain (ALIGN-HASH-01 open; ARCH-SYNC-D1 defer).",
+      "notes": "C-01/H-01 closed in tree: harness status.json + daemon push BundleBuilder/precheck/stage. Residuals batch on v1.1-alignment-residuals: triple QC + consolidated Approve; QA pass — see metadata.qc_residuals_batch_* / metadata.qa_residuals_batch_report. 7 ALIGN-* archived; 2 remain (ALIGN-HASH-01; ARCH-SYNC-D1 defer).",
       "metadata": {
         "phase": "V1.1 GA — architecture alignment blockers",
         "priority": "high",
@@ -273,14 +273,21 @@
           "fmt": "pass",
           "codegen": "no_drift",
           "typecheck": "pass",
-          "qc_status": "pass_rereview_approve_with_residuals",
-          "qa_status": "pass",
+          "qc_status": "pass_triple_residuals_batch_approve_2026-04-08",
+          "qa_status": "pass_residuals_batch_2026-04-08",
           "merge_to_main": "pending"
         },
         "residual_summary": "2 open: ALIGN-HASH-01 (cross-stack golden vectors); ARCH-SYNC-D1 deferred optional daemon SyncClient push",
         "implementation_tip": "refresh at commit after landing A1+A2 sync push + status envelope fixes",
         "qc_rereview_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qc-rereview.md",
-        "qa_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qa.md"
+        "qa_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qa.md",
+        "qc_residuals_batch_consolidated": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc-consolidated.md",
+        "qc_residuals_batch": [
+          ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc1.md",
+          ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc2.md",
+          ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc3.md"
+        ],
+        "qa_residuals_batch_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qa.md"
       }
     }
   ],
