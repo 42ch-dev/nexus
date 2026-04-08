@@ -637,12 +637,12 @@
       ],
       "created_at": "2026-04-09",
       "updated_at": "2026-04-09",
-      "notes": "Consolidated 21 warning-level residuals from V1.1 and previous plans.",
+      "notes": "Consolidated 31 open residuals from all V1.1 plans: 2 HIGH + 8 MEDIUM + 21 LOW (including 11 QC-Warnings treated as LOW per plan-convention.md).",
       "metadata": {
         "phase": "V1.1",
         "priority": "medium",
-        "description": "Address 21 warning-level and above residuals: 2 HIGH + 8 MEDIUM + 11 WARNING",
-        "residual_target": "21 residuals from all plans",
+        "description": "Address all 31 open residuals across V1.1 plans: 2 HIGH (context assembly), 8 MEDIUM (sync/daemon), 21 LOW (including 11 QC-Warnings from v1.1-tech-debt-mitigation treated as LOW per plan-convention.md \u00a7209-211).",
+        "residual_target": "31 open residuals from all V1.1 plans (2025-04-05-*, 2026-04-06-*, 2026-04-08-v1.1-tech-debt-mitigation)",
         "effort": "M \u2014 ~6-8 agent sessions (3 task groups)"
       }
     }
@@ -653,13 +653,14 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-09T12:00:00Z",
+      "updated_at": "2026-04-09T00:00:00Z",
       "total_open": 31,
       "by_severity": {
+        "critical": 0,
         "high": 2,
         "medium": 8,
-        "low": 10,
-        "warning": 11
+        "low": 21,
+        "nit": 0
       },
       "by_target": {
         "V1.0 GA": 0,
@@ -667,118 +668,17 @@
         "V1.2": 0
       },
       "by_plan": {
-        "domain-models": 0,
-        "cli-daemon-foundation": 1,
-        "sync-contract": 5,
-        "acp-client": 0,
-        "context-assembly": 2,
-        "foundation-hardening": 2,
-        "v1.1-tech-debt-mitigation": 11,
-        "v1.1-tech-debt-cleanup-2": 0
-      }
+        "2025-04-05-domain-models": 1,
+        "2025-04-05-cli-daemon-foundation": 2,
+        "2025-04-05-sync-contract": 5,
+        "2025-04-05-context-assembly": 4,
+        "2026-04-06-foundation-hardening": 8,
+        "2026-04-08-v1.1-tech-debt-mitigation": 11,
+        "2026-04-09-v1.1-tech-debt-cleanup-2": 0
+      },
+      "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md \u00a7209-211 (historical compatibility rule)",
+      "archival_note": "15 closed residuals archived to .agents/plans/archived/residuals/ on 2026-04-09 per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
     },
-    "notes": [
-      {
-        "updated_at": "2026-04-05",
-        "message": "Phase 0 plans execute on main branch for initialization. Phase 1+ plans require feature branches."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "Phase 0 complete: monorepo-structure, json-schema-foundation, codegen-pipeline all done. 15 commits on main. Ready for Phase 1."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "Phase 1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC\u4e09\u5ba1, Critical fixes (C-1, C-2) verified."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "domain-models merged to main. Residual findings recorded for cli-daemon-foundation, sync-contract, acp-client, context-assembly, and domain-models (non-blocking QC items)."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "Phase 1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon \u2192 sync-contract \u2192 acp-client \u2192 context-assembly."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "Clarify phase complete. 4 future iteration points recorded as residual findings (CLI-R5..R8): Unix socket support, manuscript promote strict mode, manuscript verify content checks, research scan content extraction. Ready for implementation."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "ACP Client tech spec refined by @architect. SDK choice: agent-client-protocol v0.10.4. 6 tasks defined with parallel execution plan. ACP-R1/R2 resolved, 9 new V1.1+ residuals (ACP-R3..R11) added. Plan status: InProgress."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC\u4e09\u5ba1 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
-      },
-      {
-        "updated_at": "2026-04-06",
-        "message": "Phase 1 complete (8/8 plans Done). Phase 1 architecture + product reviews completed. 36 arch findings, 37 feature analysis. P0 bug fixes in progress on fix/v1.0-p0-bugs. Pre-Phase 2 consolidated plan created (2026-04-06-pre-phase2.md) with 5 implementation plans (A-E). 5 Phase 2 plan entries added to status.json."
-      },
-      {
-        "updated_at": "2026-04-07",
-        "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 \u2192 42."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "V1.1 tech debt mitigation plan created (2026-04-08-v1.1-tech-debt-mitigation.md) based on architecture gap analysis. 3-wave approach: Wave 1 (P0 \u2014 DM-R5 + 3 schemas), Wave 2 (P1 \u2014 ACP/Research/Manuscript/Context), Wave 3 (P2 \u2014 DEBT-X/SYNC-R/FH-R). Total: 27 residuals + 3 missing features. nexus-platform Phase 2 confirmed complete."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "DM-R5 resolved: MembershipRole enum aligned with v1-spec \u00a75.4, \u00a77 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. Total open residuals: 42 \u2192 41."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "V1.1 Wave 1 complete: DM-R5 resolved (MembershipRole aligned), 3 schemas created (delta/workspace-binding/agent-profile), W1-C1 fixed (AgentProfile enums), QC\u4e09\u5ba1 APPROVE. 7 commits, 662 tests passing, 25 schemas valid. Ready for merge."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "Wave 1 merged to main: DM-R5 resolved, 3 schemas created, W1-C1 fixed, QC APPROVE. 59 files, 4102 insertions. Ready for Wave 2."
-      },
-      {
-        "updated_at": "2026-04-08T12:00:00Z",
-        "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 \u2192 40."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "Wave 2 Batch 1 complete: 8 tasks (ACP session/policy/daemon-mediated + Context Assembly 5 residuals). All tests passing. Batch 2 pending."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "Wave 2 Batch 1 merged to main: QC\u4e09\u5ba1 APPROVE (consolidated: 0 Critical, 5 Warnings, 10 Suggestions). 10 commits, 23 files (3086 insertions). Residuals: ACP-R7 resolved, CTX-R2/R4/R5/R6/R7 resolved. Ready for Batch 2 in new session."
-      },
-      {
-        "updated_at": "2026-04-08T21:00:00Z",
-        "message": "Wave 2 Batch 2 (Tasks 8-10) complete: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction) resolved. 1 commit, 7 files (819 insertions), 232 tests passing. Total open residuals: 40 \u2192 37."
-      },
-      {
-        "updated_at": "2026-04-08T22:30:00Z",
-        "message": "Wave 2 Batch 2 extended (Tasks 16-18): SYNC-R6 (precheck auth match validation), SYNC-R11 (honor retry_after from conflict), SYNC-R12 (persist partial apply retry state) resolved. 1 commit, 6 files (837 insertions), 94 nexus-sync tests passing. Total open residuals: 37 \u2192 34."
-      },
-      {
-        "updated_at": "2026-04-08",
-        "message": "Wave 2 Batch 2 merged to main: QC\u4e09\u5ba1 APPROVE (unanimous: 0 Critical, 6 Warnings). 4 commits, 14 files (1710 insertions). Residuals: CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. Wave 2 complete (14/14 tasks). Ready for Wave 3."
-      },
-      {
-        "updated_at": "2026-04-09",
-        "message": "Wave 3 Batch A merged to main: QC\u4e09\u5ba1 APPROVE (0 Critical, 8 Warnings). 8 QC Warnings (W-1 through W-8) tracked as residuals for V1.1+. Total open residuals: 29 \u2192 37. Progress: 90% (23/26 tasks complete). Ready for Batch B."
-      },
-      {
-        "updated_at": "2026-04-09",
-        "message": "Wave 3 Batch B complete: FH-R1 (schema drift detection CI), FH-R3 (error code inconsistency docs), FH-R6 (test helper duplication). Added schema-drift-check CI job, documented Internal.code vs error_code() design, created test_utils.rs module. 62 nexus42d tests, all workspace tests passing. InReview for QC."
-      },
-      {
-        "updated_at": "2026-04-09",
-        "message": "Wave 3 Batch B QC\u4e09\u5ba1 APPROVE (unanimous: 0 Critical, 3 Warnings, 6 Suggestions). All 26 tasks complete. FH-R1/R3/R6 resolved. 11 QC Warnings (W1-W11) tracked for V1.1+. Ready for merge to main. V1.1 GA ready."
-      },
-      {
-        "updated_at": "2026-04-09",
-        "message": "V1.1 Tech Debt Mitigation complete. Created V1.2 Tech Debt Cleanup plan for 21 warning-level residuals. Archived 15 Done plans to archived/plans/."
-      },
-      {
-        "updated_at": "2026-04-09",
-        "message": "V1.1 Tech Debt Mitigation complete. Created V1.1 Tech Debt Cleanup 2 plan for 21 warning-level residuals. Archived 15 Done plans."
-      }
-    ],
     "residual_findings": {
       "2025-04-05-domain-models": [
         {
@@ -791,20 +691,6 @@
           "owner": "@fullstack-dev",
           "target": "V1.1 \u2014 add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
-        },
-        {
-          "id": "DM-R5",
-          "title": "MembershipRole enum drift between schema and domain",
-          "severity": "medium",
-          "source": "GA Residual QC-#1",
-          "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs \u2014 schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 align schema enum with domain MembershipRole or vice versa",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-07T18:16:41Z",
-          "closure_note": "Fixed in feature/v1.1-tech-debt-mitigation: MembershipRole enum aligned with v1-spec \u00a75.4, \u00a77 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. All tests pass."
         }
       ],
       "2025-04-05-cli-daemon-foundation": [
@@ -820,48 +706,6 @@
           "tracking": null
         },
         {
-          "id": "CLI-R6",
-          "title": "Manuscript promote precondition checks (strict mode)",
-          "severity": "low",
-          "source": "Clarify Phase",
-          "scope": "nexus42 manuscript promote \u2014 V1.0 uses loose constraints (user-initiated, no hard pre-checks); strict mode could enforce phase transitions (review\u2192finalize), StoryManifest status, sync state",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add optional strict mode with `--strict` flag or workspace config",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T21:00:00Z",
-          "closure_note": "Implemented in feature/v1.1-wave2-batch2: Added --strict flag to manuscript promote command with phase transition validation, StoryManifest status checks, and sync conflict detection."
-        },
-        {
-          "id": "CLI-R7",
-          "title": "Manuscript verify content integrity checks",
-          "severity": "low",
-          "source": "Clarify Phase",
-          "scope": "nexus42 manuscript verify \u2014 V1.0 verifies metadata only; content integrity (comparing content_hash with actual file SHA256) deferred",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add `--check-content` flag to verify manuscript file integrity against StoryManifest.content_hash",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T21:00:00Z",
-          "closure_note": "Implemented in feature/v1.1-wave2-batch2: Added --check-content flag to manuscript verify command with SHA256 hash computation and comparison against stored content_hash."
-        },
-        {
-          "id": "CLI-R8",
-          "title": "Research scan content extraction for PDF and URL sources",
-          "severity": "low",
-          "source": "Clarify Phase",
-          "scope": "nexus42 research scan \u2014 V1.0 records metadata only (path, size, hash, title); PDF text extraction and URL content fetching deferred",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 add `--extract-text` flag to enable content extraction for PDF and URL sources; may require external tools (pdftotext, http client)",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T21:00:00Z",
-          "closure_note": "Implemented in feature/v1.1-wave2-batch2: Added --extract-text flag to research scan command with PDF extraction (pdftotext), URL fetching (curl), and content storage in database."
-        },
-        {
           "id": "CLI-R15",
           "title": "No tracing in daemon API handlers",
           "severity": "medium",
@@ -875,48 +719,6 @@
         }
       ],
       "2025-04-05-sync-contract": [
-        {
-          "id": "SYNC-R4",
-          "title": "Outbox transaction atomicity tests \u2014 RESOLVED: 8 comprehensive tests added",
-          "severity": "high",
-          "source": "QC Consolidated (QC#1)",
-          "scope": "crates/nexus-sync/src/outbox.rs \u2014 tests for concurrent writes, rollback, state transitions, retry_after atomicity",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 RESOLVED: Added 8 transaction atomicity tests covering concurrent append, rollback, state transitions, retry_after persistence, exponential backoff, bundle payload integrity, and partial apply state atomicity. All tests passing.",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T23:30:00Z",
-          "closure_note": "Implemented 8 comprehensive atomicity tests: concurrent append (10 connections), transaction rollback, state transition atomicity, retry_after persistence atomicity, exponential backoff atomicity, bundle payload integrity, partial apply state persistence atomicity. All 109 nexus-sync tests passing."
-        },
-        {
-          "id": "SYNC-R5",
-          "title": "HTTP body size limit on SyncClient \u2014 RESOLVED: 10MB default with builder pattern",
-          "severity": "high",
-          "source": "QC Consolidated (QC#3)",
-          "scope": "crates/nexus-sync/src/sync_client.rs \u2014 SyncClient::builder() with body_max_size configuration",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 RESOLVED: Added body_max_size parameter to SyncClient::builder() with 10MB default. Checks Content-Length header and actual body size. Configurable via builder pattern.",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T23:30:00Z",
-          "closure_note": "Added SyncClientBuilder with body_max_size() method. Default 10MB limit. Checks Content-Length header before reading body, and verifies actual body size. Returns Serialization error if limit exceeded. Documented in sync_client.rs module header."
-        },
-        {
-          "id": "SYNC-R6",
-          "title": "No auth match validation in precheck",
-          "severity": "high",
-          "source": "QC Consolidated (QC#3)",
-          "scope": "crates/nexus-sync/src/precheck.rs \u2014 submitting_creator_id not validated against authenticated identity",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "Requires daemon context \u2014 add when daemon exposes authenticated creator info",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T22:30:00Z",
-          "closure_note": "Implemented AuthContext struct and precheck_bundle_with_auth() in feature/v1.1-wave2-batch2. Validates submitting_creator_id against authenticated_creator_id in multi-creator worlds. Single-creator worlds skip validation. 7 new tests."
-        },
         {
           "id": "SYNC-R7",
           "title": "BundleBuilder missing monotonicity validation",
@@ -962,34 +764,6 @@
           "tracking": null
         },
         {
-          "id": "SYNC-R11",
-          "title": "No retry logic based on retry_after field",
-          "severity": "medium",
-          "source": "QC Consolidated (QC#3)",
-          "scope": "crates/nexus-sync/src/conflict.rs",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 honor retry_after from conflict response",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T22:30:00Z",
-          "closure_note": "Implemented RetryAfterPolicy enum, mark_conflicted_with_retry() in outbox, updated replay() to include conflicted entries with elapsed retry_after, added retry_after_policy() convenience method to ConflictResponse. SyncConflict error now carries full ConflictResponse. 7 new tests."
-        },
-        {
-          "id": "SYNC-R12",
-          "title": "Partial apply doesn't persist retry state",
-          "severity": "medium",
-          "source": "QC Consolidated (QC#3)",
-          "scope": "crates/nexus-sync/src/partial_apply.rs",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 persist partial apply state to outbox for retry",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T22:30:00Z",
-          "closure_note": "Added partial_apply_states table to outbox schema. Implemented persist/load/remove/list methods with upsert semantics. Daemon can resume partial apply from persisted state after restart. 5 new outbox persistence tests + 2 new partial_apply tests."
-        },
-        {
           "id": "SYNC-R13",
           "title": "AutoReject resolution safety mechanism",
           "severity": "medium",
@@ -999,22 +773,6 @@
           "owner": "@fullstack-dev",
           "target": "V1.1 \u2014 add confirmation prompt for auto-reject in CLI",
           "tracking": null
-        }
-      ],
-      "2025-04-05-acp-client": [
-        {
-          "id": "ACP-R7",
-          "title": "Permission policy engine (grant/deny UI)",
-          "severity": "medium",
-          "source": "Tech Spec \u00a7Appendix B",
-          "scope": "V1.0 auto-grants all permissions; need configurable policy",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T20:00:00Z",
-          "closure_note": "Implemented permission policy engine with configurable grant/deny rules, interactive prompts, CLI commands (policy grant/deny/list), and PolicyAwareClientHandler. Tests: 12 new policy tests, all 195 nexus42 tests pass."
         }
       ],
       "2025-04-05-context-assembly": [
@@ -1061,47 +819,9 @@
           "owner": "@fullstack-dev",
           "target": "V1.1 \u2014 is_char_boundary already checked; add multi-byte safety tests",
           "tracking": null
-        },
-        {
-          "id": "CTX-R6",
-          "title": "MemoryKind as String not enum",
-          "severity": "medium",
-          "source": "QC-#3",
-          "scope": "crates/nexus42/src/context/types.rs",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 extract MemoryKind enum matching schema",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T12:00:00Z",
-          "closure_note": "MemoryKind enum updated with 8 variants matching schema (story_summary, research_material, review_note, character_note, world_building, plot_outline, theme_analysis, custom). Added strum::Display for serialization, FromStr for parsing. CLI commands updated to use enum. 6 new tests for enum behavior."
-        },
-        {
-          "id": "CTX-R7",
-          "title": "Missing file I/O edge case tests (permissions, symlinks)",
-          "severity": "medium",
-          "source": "QC-#3",
-          "scope": "crates/nexus42/src/context/summary.rs",
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-08T19:55:00Z",
-          "closure_note": "Added 5 edge case tests: permission-denied file (scan and generate), symlink to file, symlink to directory, broken symlink. All tests use catch_unwind to verify no panics. Tests bundled into CTX-R2 commit (file size limit)."
         }
       ],
       "2026-04-06-foundation-hardening": [
-        {
-          "id": "FH-R1",
-          "title": "Schema drift between CLI/daemon has no automated detection",
-          "severity": "medium",
-          "source": "QC2-H1",
-          "scope": "crates/nexus42/src/db/, crates/nexus42d/src/db/",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 RESOLVED: Added schema-drift-check CI job comparing SCHEMA_VERSION, reference_sources table columns, and LATEST_SCHEMA_VERSION across CLI, daemon, and contracts",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-09T00:00:00Z",
-          "closure_note": "Added schema-drift-check job to ci.yml with 3 checks: SCHEMA_VERSION consistency (CLI vs daemon), reference_sources key columns (both directions), LATEST_SCHEMA_VERSION match (contracts vs CLI). Fast-failing CI detection."
-        },
         {
           "id": "FH-R2",
           "title": "Pool timeout not explicitly configured (deadpool default 30s)",
@@ -1112,20 +832,6 @@
           "owner": "@fullstack-dev",
           "target": "V1.1 \u2014 add configurable timeout to DbPool::new()",
           "tracking": null
-        },
-        {
-          "id": "FH-R3",
-          "title": "Error code inconsistency between error_code() and Internal code field",
-          "severity": "low",
-          "source": "QC1-M3",
-          "scope": "crates/nexus42d/src/api/errors.rs",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 RESOLVED: Documented two-tier error code strategy in module header and Internal variant doc comment. Internal.code is for internal classification (DATABASE_ERROR, INTERNAL_ERROR), error_code() returns stable public codes (INTERNAL). Documented future direction for finer-grained public codes.",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-09T00:00:00Z",
-          "closure_note": "Added module-level documentation explaining Internal.code vs error_code() design rationale. Added doc comment on Internal variant explaining code field purpose. Cross-referenced SyncError pattern."
         },
         {
           "id": "FH-R4",
@@ -1148,20 +854,6 @@
           "owner": "@fullstack-dev",
           "target": "V1.1 \u2014 useful for future monitoring endpoint",
           "tracking": null
-        },
-        {
-          "id": "FH-R6",
-          "title": "Test helper duplication across errors.rs and middleware.rs",
-          "severity": "low",
-          "source": "QC2-M3",
-          "scope": "crates/nexus42d/src/api/",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 RESOLVED: Created test_utils.rs module with create_test_workspace() and create_initialized_test_workspace() helpers. Migrated 6 tests (4 from errors.rs, 2 from sync.rs) to use shared helpers. lib.rs exports test_utils under #[cfg(test)].",
-          "tracking": null,
-          "lifecycle": "resolved",
-          "closed_at": "2026-04-09T00:00:00Z",
-          "closure_note": "Created crates/nexus42d/src/test_utils.rs with create_test_workspace() returning (TempDir, PathBuf, PathBuf) and create_initialized_test_workspace() returning (TempDir, PathBuf, PathBuf, PathBuf). Migrated errors.rs (4 integration tests) and sync.rs (2 integration tests). Other files can migrate incrementally."
         },
         {
           "id": "FH-R7",

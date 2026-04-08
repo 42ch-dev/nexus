@@ -118,12 +118,33 @@ Violations break onboarding and agent handoff for anyone without your local mach
 
 ## Plans & Reports Structure
 
+### Harness alignment (authoritative mirror)
+
+Plan directory discovery, `status.json` / residual lifecycle, optional `notes.json` and cold snapshots, and merge SSOT expectations follow **Harness Engineering** conventions. This repo aligns with the published OpenCode team config **[btspoony/harness-opencode-team](https://github.com/btspoony/harness-opencode-team)**; the normative document is [`docs/agents/plan-convention.md`](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/plan-convention.md) in that repository (same text as OpenCode global `docs/agents/plan-convention.md` when installed). The sections below are **this repo’s** binding summary; if anything conflicts, reconcile with that upstream document and update this file.
+
+### `{PLAN_DIR}` discovery
+
+Resolve the plan root in order (first match wins); call the result **`{PLAN_DIR}`**:
+
+1. `.agents/plans/`
+2. `.plans/`
+3. `plans/`
+
+If none exist, the project is treated as **not using** an on-disk plan tree; @project-manager may still run gates and track progress via conversation and completion reports. **This repository** ships with **`.agents/plans/`** as `{PLAN_DIR}`.
+
+**Git:** Prefer **tracking** `{PLAN_DIR}` so clone-based handoff stays reachable; only ignore the whole tree for purely local/private setups, and then do not cite ignored paths as the sole authority in committed docs (same as reachability rules above).
+
+**Superpowers `writing-plans`:** New plan files MUST land under the resolved **`{PLAN_DIR}`** (e.g. `.agents/plans/<plan-id>-<name>.md`), **not** `docs/superpowers/plans/` in this repo.
+
 ### Directory Organization
 
+Paths below are under **`{PLAN_DIR}`** (here, usually `.agents/plans/`):
+
 ```
-.agents/plans/
+{PLAN_DIR}/
 ├── <plan-id>-<plan-name>.md     # Main plan files
-├── status.json                   # SSOT: plan rows + file-level metadata (residual_findings, program notes)
+├── status.json                   # SSOT: plan rows + open residual_findings (+ optional root metadata)
+├── notes.json                    # Optional: program timeline (prefer over growing root metadata.notes)
 ├── reports/                      # Supplementary reports
 │   ├── README.md
 │   └── <plan-id>/               # Reports for each plan
@@ -135,6 +156,8 @@ Violations break onboarding and agent handoff for anyone without your local mach
 │   └── residuals/                # Closed residual findings (per-plan JSON archives)
 └── knowledge/                    # Dev-process knowledge (indexed in knowledge/README.md)
 ```
+
+Initialize or extend `{PLAN_DIR}` per upstream **Initialize Plan directory** (see Harness `plan-convention.md`): `status.json`, optional `notes.json`, `reports/README.md`, optional `knowledge/README.md`, optional `archived/residuals/`.
 
 ### File Naming Conventions
 
@@ -151,36 +174,38 @@ Violations break onboarding and agent handoff for anyone without your local mach
 
 ### Residual Findings Tracking
 
-Full conventions for residual findings (i.e. tech debt) are defined in the global `plan-convention.md`: entry structure, lifecycle states (open/resolved/waived/superseded/duplicate), archival to `archived/residuals/<plan-id>.json`, `tech_debt_summary` rollup view, etc.
+Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severity mapping) are defined in **[plan-convention.md](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/plan-convention.md)** (Harness mirror). Summary for this repo:
 
-Project-level notes:
+- **Entry location**: `status.json` → `metadata.residual_findings[<plan-id>]` (**open items only**; keys must match `plans[].id`).
+- **Empty keys**: When a plan has **no** open residuals, **remove** that `plan-id` key from `metadata.residual_findings` entirely (do not keep `"plan-id": []`).
+- **Close & archive**: set `lifecycle` to `resolved`/`waived`/`superseded`/`duplicate` → add `closed_at` + `closure_note` (and recommended `closure_evidence`) → append to `{PLAN_DIR}/archived/residuals/<plan-id>.json` → remove the row from the open list in `status.json`.
+- **`severity` (JSON SSOT)**: only `critical`, `high`, `medium`, `low`, **`nit`** (lowercase). **`nit`** is lighter than `low` (style/nits). **Do not** write `warning` on new rows; legacy `"warning"` reads as **`low`**. Merge gate: **`critical` / `high`** per team policy and QC baseline; other levels may be tracked as residuals.
+- **`residual_summary`** (optional, in `plans[].metadata`): one-line summary of **open** items only for that plan.
 
-- **Entry location**: `status.json` → `metadata.residual_findings[<plan-id>]` (open items only).
-- **Close & archive**: set `lifecycle` to `resolved`/`waived`/`superseded`/`duplicate` → add `closed_at` + `closure_note` → move to `archived/residuals/<plan-id>.json` → remove from `residual_findings`.
-- **Severity**: `critical`/`high` must be addressed before merge; `medium`/`low`/`warning` can be tracked as residuals.
-- **`residual_summary`** (optional, in `plans[].metadata`): one-line human-readable summary of open items only.
-
-**Root `metadata.notes`** (optional): program-level timeline, usually an array of `{ "updated_at", "message" }`. **Per-plan `plans[].notes`**: short status string for that plan only.
+**Program timeline:** Prefer **`{PLAN_DIR}/notes.json`** for cross-plan milestones (see upstream schema). Root **`metadata.notes`** is **legacy** if present; migrate out when practical. **Per-plan `plans[].notes`**: short status string for that plan only.
 
 ### Plan Lifecycle
 
 1. **Todo**: Plan created, not started
 2. **InProgress**: Implementation underway
 3. **InReview**: QC review in progress (reports in `reports/<plan-id>/`)
-4. **Done**: Completed, merged to main
+4. **Blocked**: Waiting on dependency, decision, or another plan (use `metadata.blocked_*` when applicable)
+5. **Done**: Completed, merged to main
+
+**Multi-batch plans:** Default QC triple-review **once** after the whole plan’s dev work completes (not necessarily per batch); see upstream `plan-convention.md` and `harness-loop.md` in the same Harness repo.
 
 ### Pre-merge checklist (mandatory)
 
-**Before merging any feature branch or opening a PR that closes plan work**, update `.agents/plans/status.json` so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
+**Before merging any feature branch or opening a PR that closes plan work**, update **`{PLAN_DIR}/status.json`** (this repo: `.agents/plans/status.json`) so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
 
 #### Required updates
 
 1. **`plans[].status`**, **`plans[].notes`**, **`plans[].updated_at`** / **`done_at`** (when applicable): reflect the real branch and merge outcome.
 2. **`plans[].metadata.gates`** (or equivalent): QC / QA / CI parity — e.g. `qc_status`, `qa_status`, `tests`, `clippy`, `validation` — so reviewers see gate state without opening reports.
 3. **`plans[].metadata.residual_summary`**: one-line summary of **open** residuals for that plan only (formal rows stay under `metadata.residual_findings`).
-4. **`metadata.residual_findings[<plan-id>]`**: add or update structured findings from QC; **close and archive** per `plan-convention.md` (`archived/residuals/<plan-id>.json`) when resolved. Keys use the full plan id (e.g. `2025-04-05-domain-models`), same as `plans[].id`.
+4. **`metadata.residual_findings[<plan-id>]`**: add or update structured findings from QC; **close and archive** per upstream convention (`{PLAN_DIR}/archived/residuals/<plan-id>.json`) when resolved. Keys use the full plan id (e.g. `2025-04-05-domain-models`), same as `plans[].id`. Remove **empty** `plan-id` keys from the map.
 5. **`metadata.tech_debt_summary`**: refresh `updated_at`, `total_open`, `by_severity`, `by_plan`, and **`by_target`** when the open residual set changes; keep **`cross_cutting`** in sync if you add or resolve program-level debt items (e.g. `DEBT-X*`).
-6. **`metadata.notes`**: append a program-level timeline entry for significant merges or residual cleanups (see existing entries in `status.json`).
+6. **Program timeline**: append a milestone to **`notes.json`** when the team uses it; otherwise **`metadata.notes`** in `status.json` for significant merges or residual cleanups (legacy; prefer `notes.json` for new program-level logs).
 7. **Wire contracts / schemas (when `schemas/` or publish version changes)** — nexus-specific, not `contracts_schema`:
    - Run **`pnpm run codegen`** and commit **`packages/nexus-contracts/src/generated/`** and **`crates/nexus-contracts/src/generated/`** (CI `verify-codegen` enforces this).
    - Bump **`schema_version`** and package versions (`packages/nexus-contracts`, `crates/nexus-contracts`) per release policy; note downstream impact (`nexus-platform` consumes `@42ch/nexus-contracts`).
@@ -194,8 +219,9 @@ jq '.metadata.residual_findings | to_entries[] | {plan: .key, count: (.value | l
 # Tech-debt rollup and branch-prefix conventions
 jq '.metadata.tech_debt_summary, .metadata.versioning' .agents/plans/status.json
 
-# Program timeline
+# Program timeline (legacy in status.json, or prefer notes.json when adopted)
 jq '.metadata.notes' .agents/plans/status.json
+# jq '.entries' .agents/plans/notes.json   # when notes.json exists
 
 # Optional: sum of residual_findings entries (compare mentally with tech_debt_summary.total_open when both track the same scope)
 jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agents/plans/status.json
@@ -205,7 +231,7 @@ jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agent
 
 - Leaving **`tech_debt_summary`** stale after QC triage (counts and `updated_at` disagree with `residual_findings`).
 - **Schema edits without regenerated** `*/generated/` trees — CI fails on drift.
-- **Missing `metadata.notes`** for a merge or bulk residual archival that future agents need for context.
+- **Missing timeline** (`notes.json` or, if legacy, `metadata.notes`) for a merge or bulk residual archival that future agents need for context.
 - Duplicating finding detail only in **`plans[].notes`** instead of **`metadata.residual_findings`** (SSOT for open items).
 
 **Rule:** If `status.json` does not reflect reality, treat the branch as **not merge-ready** until it is corrected.
@@ -214,31 +240,31 @@ jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agent
 
 Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally **`metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; **`plans[].id`** is the only key into `metadata.residual_findings`.
 
-**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`, and **`archived_record`** (relative path under `.agents/plans/` to a cold snapshot when using optional compaction below). Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
+**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`, and **`archived_record`** (relative path under `{PLAN_DIR}` to a cold snapshot when using optional compaction below). Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
 
 ### Plan row archival and `status.json` size (optional compaction)
 
-**Why:** Many `Done` rows carry large `metadata` (gates, QC strings, tests, commits, long scope text), so `.agents/plans/status.json` grows without bound. Open **`metadata.residual_findings`** should stay bounded if closed items move to `archived/residuals/` per the rules above.
+**Why:** Many `Done` rows carry large `metadata` (gates, QC strings, tests, commits, long scope text), so `{PLAN_DIR}/status.json` grows without bound. Open **`metadata.residual_findings`** should stay bounded if closed items move to `archived/residuals/` per the rules above.
 
 **SSOT:** Root `status.json` stays authoritative for **current execution** (non-terminal plans, root `metadata`, **open** residuals). The following is an **opt-in** way to keep the hot file small while preserving history in-repo (reachability: every path must exist in a fresh clone).
 
 **Cold storage (plan row snapshot at `Done`):**
 
-- **Path:** `.agents/plans/archived/plans/<plan-id>.json`
+- **Path:** `{PLAN_DIR}/archived/plans/<plan-id>.json` (here, `.agents/plans/archived/plans/<plan-id>.json`)
 - **Content:** Full `plans[]` element as it existed when the plan was marked `Done` (including rich `metadata`), for audit and agent handoff.
 - **Relationship to residuals:** `archived/residuals/<plan-id>.json` stores **closed finding rows**; `archived/plans/<plan-id>.json` stores the **plan row snapshot**. Do not treat the plan snapshot as a second copy of **open** `residual_findings`.
 
 **Slim `Done` row in `status.json` (after the team adopts this):**
 
 - Keep the same **canonical top-level keys**; on `Done` rows, **reduce** `metadata` to what is needed for navigation, typically:
-  - **`archived_record`**: relative path, e.g. `archived/plans/<plan-id>.json`
+  - **`archived_record`**: path relative to `{PLAN_DIR}`, e.g. `archived/plans/<plan-id>.json`
   - Optional one-line **`residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
 - Omit bulky fields from the hot row once the snapshot exists (`gates`, `qc_status`, `tests`, `commits`, long `description` / `scope`); they remain in the snapshot file.
 - Keep **`notes`** short (merge outcome, branch, pointer to `reports/<plan-id>/`); do not duplicate QC prose that already lives in reports.
 
 **When to write the snapshot:** Same change set as marking the plan `Done` and completing the pre-merge `status.json` updates (or immediately after merge), once compaction is adopted.
 
-**Optional index:** `.agents/plans/archived/plans/_index.json` — map plan id → relative path for tools that do not glob.
+**Optional index:** `{PLAN_DIR}/archived/plans/_index.json` — map plan id → relative path for tools that do not glob.
 
 **Optional rolling retention:** To shrink `status.json` further, retain only a **window** of `Done` slim rows in `plans[]` and list older ids only in `_index.json` / snapshot files. If you do this, document it here and update any scripts that assume every historical id appears in `plans[]`.
 
