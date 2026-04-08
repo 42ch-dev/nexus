@@ -4,7 +4,7 @@
 **QA Date**: 2026-04-07
 **QA Agent**: @fullstack-dev-2
 **Working Branch**: feature/v2.0-acp-sdk-bridge
-**Worktree**: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/acp-sdk-bridge/
+**Worktree**: <repository-root>/.worktrees/acp-sdk-bridge/
 
 ## Test Execution
 
