@@ -28,13 +28,11 @@
       "description": "canon | working | experience"
     },
     "memory_kind": {
-      "type": "string",
-      "enum": ["story_summary", "research_material", "review_note", "character_note", "world_building", "plot_outline", "theme_analysis", "custom"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MemoryKind",
       "description": "Content morphology sub-type (per ADR-001)"
     },
     "status": {
-      "type": "string",
-      "enum": ["active", "superseded", "archived"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MemoryStatus",
       "description": "MemoryItem status"
     },
     "summary": {

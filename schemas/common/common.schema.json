@@ -90,6 +90,156 @@
       "type": "integer",
       "minimum": 1,
       "description": "Schema version as integer (e.g., 1)"
+    },
+    "CreatorStatus": {
+      "type": "string",
+      "enum": ["active", "archived", "locked"],
+      "description": "Creator status (data-model-v1.md §5.2)"
+    },
+    "RegistrationSource": {
+      "type": "string",
+      "enum": ["cli", "web_agent", "platform"],
+      "description": "How creator was registered (data-model-v1.md §5.2)"
+    },
+    "WorldStatus": {
+      "type": "string",
+      "enum": ["active", "paused", "archived"],
+      "description": "World status (data-model-v1.md §5.3)"
+    },
+    "MembershipRole": {
+      "type": "string",
+      "enum": ["owner", "maintainer", "collaborator", "official_creator"],
+      "description": "Membership role (data-model-v1.md §5.4)"
+    },
+    "MembershipStatus": {
+      "type": "string",
+      "enum": ["active", "invited", "suspended", "removed"],
+      "description": "Membership status (data-model-v1.md §5.4)"
+    },
+    "PairingSource": {
+      "type": "string",
+      "enum": ["auto_cli", "manual_web", "platform_auto"],
+      "description": "How pairing was established (data-model-v1.md §5.2A)"
+    },
+    "PairingStatus": {
+      "type": "string",
+      "enum": ["active", "revoked"],
+      "description": "Pairing status (data-model-v1.md §5.2A)"
+    },
+    "KeyBlockStatus": {
+      "type": "string",
+      "enum": ["provisional", "confirmed", "deprecated", "merged", "deleted"],
+      "description": "KeyBlock status (data-model-v1.md §5.5)"
+    },
+    "TimelineEventType": {
+      "type": "string",
+      "enum": ["story_advance", "state_update", "fork_marker", "official_progression", "publish_marker"],
+      "description": "Timeline event type (data-model-v1.md §5.6)"
+    },
+    "TimelineEventStatus": {
+      "type": "string",
+      "enum": ["canon", "provisional", "rejected"],
+      "description": "Timeline event status (data-model-v1.md §5.6)"
+    },
+    "ForkBranchStatus": {
+      "type": "string",
+      "enum": ["active", "archived"],
+      "description": "Fork branch status (data-model-v1.md §5.7)"
+    },
+    "VerificationStatus": {
+      "type": "string",
+      "enum": ["unverified", "requested", "verified", "rejected"],
+      "description": "Fork branch verification status (data-model-v1.md §5.7)"
+    },
+    "MemoryKind": {
+      "type": "string",
+      "enum": ["story_summary", "research_material", "review_note", "character_note", "world_building", "plot_outline", "theme_analysis", "custom"],
+      "description": "Memory content kind (data-model-v1.md §5.8, ADR-001)"
+    },
+    "MemoryStatus": {
+      "type": "string",
+      "enum": ["active", "superseded", "archived"],
+      "description": "Memory status (data-model-v1.md §5.8)"
+    },
+    "ManifestType": {
+      "type": "string",
+      "enum": ["chapter", "arc", "story", "excerpt"],
+      "description": "Story manifest type (data-model-v1.md §5.9)"
+    },
+    "StoryManifestStatus": {
+      "type": "string",
+      "enum": ["summary_ready", "staged_for_publish", "published", "archived"],
+      "description": "Story manifest status (data-model-v1.md §5.9)"
+    },
+    "ManuscriptStorage": {
+      "type": "string",
+      "enum": ["none", "local_workspace", "platform_sandbox"],
+      "description": "Manuscript storage location (data-model-v1.md §5.9)"
+    },
+    "ReferenceSourceType": {
+      "type": "string",
+      "enum": ["file", "pdf", "url", "note"],
+      "description": "Reference source type (data-model-v1.md §5.9A)"
+    },
+    "ScanStatus": {
+      "type": "string",
+      "enum": ["pending", "scanned", "failed", "ignored"],
+      "description": "Reference scan status (data-model-v1.md §5.9A)"
+    },
+    "CommandType": {
+      "type": "string",
+      "enum": ["advance_world", "inject_future_event", "extract_kb", "sync_push", "sync_pull", "fork_world", "publish_story"],
+      "description": "Sync command type (data-model-v1.md §5.10)"
+    },
+    "CommandOrigin": {
+      "type": "string",
+      "enum": ["local_user", "local_agent", "official_creator", "system"],
+      "description": "Command origin (data-model-v1.md §5.10)"
+    },
+    "CommandStatus": {
+      "type": "string",
+      "enum": ["pending", "running", "completed", "failed", "cancelled"],
+      "description": "Command execution status (data-model-v1.md §5.10)"
+    },
+    "DeltaType": {
+      "type": "string",
+      "enum": ["world", "key_block", "timeline_event", "fork_branch", "memory_item", "story_manifest"],
+      "description": "Delta target aggregate type (data-model-v1.md §5.12)"
+    },
+    "DeltaOperation": {
+      "type": "string",
+      "enum": ["create", "update", "upsert", "delete", "append"],
+      "description": "Delta operation (data-model-v1.md §5.12)"
+    },
+    "DeliveryState": {
+      "type": "string",
+      "enum": ["staged", "ready", "sent", "acked", "conflicted", "failed"],
+      "description": "Outbox delivery state (data-model-v1.md §5.13)"
+    },
+    "BindingStatus": {
+      "type": "string",
+      "enum": ["active", "unlinked", "stale"],
+      "description": "Workspace binding status (data-model-v1.md §5.14)"
+    },
+    "ProfileKind": {
+      "type": "string",
+      "enum": ["local_agent", "platform_hosted"],
+      "description": "Agent profile kind (data-model-v1.md §5.15)"
+    },
+    "SelectionMode": {
+      "type": "string",
+      "enum": ["registry", "manual_command", "manual_remote"],
+      "description": "Agent selection mode (data-model-v1.md §5.15)"
+    },
+    "Transport": {
+      "type": "string",
+      "enum": ["stdio", "http", "websocket"],
+      "description": "Agent transport method (data-model-v1.md §5.15)"
+    },
+    "AgentProfileStatus": {
+      "type": "string",
+      "enum": ["active", "unavailable", "deprecated"],
+      "description": "Agent profile status (data-model-v1.md §5.15)"
     }
   }
 }

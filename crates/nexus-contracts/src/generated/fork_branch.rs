@@ -6,6 +6,7 @@
 //! @source fork-branch.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{ForkBranchStatus, VerificationStatus};
 
 /// ForkBranch - describes a world branch forked from a parent world at a specific event. Aligned with data-model-v1.md §5.7.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,8 +18,8 @@ pub struct ForkBranch {
     pub parent_world_id: String,
     pub parent_branch_id: String,
     pub forked_from_event_id: String,
-    pub status: String,
-    pub verification_status: String,
+    pub status: ForkBranchStatus,
+    pub verification_status: VerificationStatus,
     pub created_by_creator_id: String,
     pub created_at: String,
 }

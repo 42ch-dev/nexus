@@ -8,13 +8,11 @@
   "required": ["delta_type", "operation", "payload", "local_timestamp"],
   "properties": {
     "delta_type": {
-      "type": "string",
-      "enum": ["world", "key_block", "timeline_event", "fork_branch", "memory_item", "story_manifest"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeltaType",
       "description": "Target aggregate type for this delta"
     },
     "operation": {
-      "type": "string",
-      "enum": ["create", "update", "upsert", "delete", "append"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeltaOperation",
       "description": "Operation to apply"
     },
     "target_entity_type": {

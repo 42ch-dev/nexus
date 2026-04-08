@@ -25,8 +25,7 @@
       "description": "Creator display name"
     },
     "status": {
-      "type": "string",
-      "enum": ["active", "archived", "locked"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorStatus",
       "description": "Creator status"
     },
     "is_platform_owned": {
@@ -39,8 +38,7 @@
       "description": "Reference to platform-stored ACP/agent credential"
     },
     "registration_source": {
-      "type": "string",
-      "enum": ["cli", "web_agent", "platform"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/RegistrationSource",
       "description": "How this creator was registered"
     },
     "persona_summary": {

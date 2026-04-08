@@ -21,13 +21,11 @@
       "description": "Workspace this profile belongs to"
     },
     "profile_kind": {
-      "type": "string",
-      "enum": ["local_agent", "platform_hosted"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ProfileKind",
       "description": "Kind of agent profile (local or platform-hosted)"
     },
     "selection_mode": {
-      "type": "string",
-      "enum": ["registry", "manual_command", "manual_remote"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SelectionMode",
       "description": "How agent is selected"
     },
     "registry_agent_id": {
@@ -39,8 +37,7 @@
       "description": "Command to launch agent (if selection_mode=manual_command or manual_remote)"
     },
     "transport": {
-      "type": "string",
-      "enum": ["stdio", "http", "websocket"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Transport",
       "description": "Transport method for agent communication"
     },
     "default_output_manuscript": {
@@ -52,8 +49,7 @@
       "description": "ACP protocol version (e.g., 1)"
     },
     "status": {
-      "type": "string",
-      "enum": ["active", "unavailable", "deprecated"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/AgentProfileStatus",
       "description": "Profile status"
     },
     "created_at": {

@@ -6,7 +6,7 @@
 //! @source world.schema.json
 
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{TimePolicy, Visibility};
+use crate::generated::common_types::{TimePolicy, Visibility, WorldStatus};
 
 /// World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,7 +17,7 @@ pub struct World {
     pub owner_creator_id: String,
     pub title: String,
     pub slug: String,
-    pub status: String,
+    pub status: WorldStatus,
     pub visibility: Visibility,
     pub time_policy: TimePolicy,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -6,7 +6,7 @@
 //! @source key-block.schema.json
 
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{BlockType, SourceAnchor};
+use crate::generated::common_types::{BlockType, KeyBlockStatus, SourceAnchor};
 
 /// KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,7 +17,7 @@ pub struct KeyBlock {
     pub world_id: String,
     pub block_type: BlockType,
     pub canonical_name: String,
-    pub status: String,
+    pub status: KeyBlockStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
