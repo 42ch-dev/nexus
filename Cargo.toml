@@ -5,6 +5,7 @@ members = [
     "crates/nexus42",
     "crates/nexus42d",
     "crates/nexus-sync",
+    "crates/nexus-local-db",
 ]
 resolver = "2"
 

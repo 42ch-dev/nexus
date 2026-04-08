@@ -1,0 +1,15 @@
+[package]
+name = "nexus-local-db"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+nexus-contracts = { path = "../nexus-contracts" }
+thiserror.workspace = true
+
+[dev-dependencies]
+# Will add test dependencies later
