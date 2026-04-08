@@ -2,9 +2,13 @@
 //!
 //! Uses `nexus-sync` **Outbox**, **BundleBuilder**, and **precheck** on the push path:
 //! builds a minimal bundle (with `canonical_hash`), runs `precheck_bundle_with_auth`,
-//! then persists via **`Outbox::stage`** (`ready`). This is **offline-first**: the
-//! entry is queued locally; **`SyncClient::push_bundle`** to the platform is not
-//! invoked here yet (optional follow-up when URL + token are available).
+//! then persists via **`Outbox::stage`** (`ready`). This is **offline-first** by default.
+//!
+//! **Optional eager platform push (ARCH-SYNC-D1):** when `NEXUS_SYNC_EAGER_PUSH=1` and
+//! `NEXUS_SYNC_PLATFORM_URL` + `NEXUS_SYNC_PLATFORM_TOKEN` are set (token must satisfy
+//! `SyncClient` validation — min 64 chars), the daemon calls `SyncClient::push_bundle`
+//! after a successful stage. Failures are logged; the entry stays `ready` for retry.
+//! When the env gate is off or unset, behavior is unchanged.
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
@@ -19,6 +23,7 @@ use nexus_sync::precheck::{
     precheck_bundle_with_auth, AuthContext, LocalState, PrecheckReport, PrecheckResult,
     PrecheckSeverity,
 };
+use nexus_sync::sync_client::SyncClient;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -175,6 +180,21 @@ async fn optional_sync_push_binding(
             reason: "Set all workspace_meta keys sync_workspace_id, sync_world_id, and sync_creator_id, or none — partial binding is invalid".into(),
         }),
     }
+}
+
+/// When `NEXUS_SYNC_EAGER_PUSH=1` and URL + token env vars are set, returns config for
+/// an optional immediate `SyncClient::push_bundle` after local staging.
+fn try_eager_push_config_from_env() -> Option<(String, String)> {
+    if std::env::var("NEXUS_SYNC_EAGER_PUSH").ok().as_deref() != Some("1") {
+        return None;
+    }
+    let base = std::env::var("NEXUS_SYNC_PLATFORM_URL")
+        .ok()
+        .filter(|s| !s.is_empty())?;
+    let token = std::env::var("NEXUS_SYNC_PLATFORM_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())?;
+    Some((base, token))
 }
 
 fn precheck_summary_from_report(report: &PrecheckReport) -> PrecheckSummary {
@@ -418,6 +438,43 @@ pub async fn push(
         bundle_id = %bundle.bundle_id,
         "Bundle staged in outbox (ready)"
     );
+
+    if let Some((base_url, token)) = try_eager_push_config_from_env() {
+        match SyncClient::new(&base_url, &token) {
+            Ok(client) => match client.push_bundle(&bundle).await {
+                Ok(resp) => {
+                    if resp.success {
+                        match outbox.mark_sent(&entry_id).await {
+                            Ok(()) => info!(
+                                outbox_entry_id = %entry_id,
+                                "Eager platform push succeeded; marked sent"
+                            ),
+                            Err(e) => warn!(
+                                outbox_entry_id = %entry_id,
+                                error = %e,
+                                "Eager push OK but mark_sent failed"
+                            ),
+                        }
+                    } else {
+                        warn!(
+                            outbox_entry_id = %entry_id,
+                            ?resp,
+                            "Eager platform push returned success=false; entry remains ready"
+                        );
+                    }
+                }
+                Err(e) => warn!(
+                    outbox_entry_id = %entry_id,
+                    error = %e,
+                    "Eager platform push failed; entry remains ready"
+                ),
+            },
+            Err(e) => warn!(
+                error = %e,
+                "NEXUS_SYNC_EAGER_PUSH set but SyncClient config invalid; skipping eager push"
+            ),
+        }
+    }
 
     Ok(Json(SyncPushResponse {
         success: true,

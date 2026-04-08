@@ -1,31 +1,65 @@
 # Architecture Alignment Review — Nexus `crates/` vs v1-spec
 
 **Author**: @architect  
-**Date**: 2026-04-08  
-**Status**: Active  
+**Baseline review date**: 2026-04-08  
+**SSOT last reconciled**: 2026-04-09  
+**Status**: Active — **resolution SSOT** for architecture-alignment technical debt (TD-1…TD-13) and its mapping to program plans; **baseline analysis** for §2 dimension tables remains the 2026-04-08 snapshot unless a row is explicitly updated below.  
 **Scope**: `crates/nexus-contracts`, `nexus-domain`, `nexus-local-db`, `nexus-sync`, `nexus42` (CLI), `nexus42d` (daemon)  
 **Benchmark**: `v1-spec/` (architecture/v1.md, domain/data-model-v1.md, cli-sync/cli-spec-v1.md, acp-runtime/acp-client-tech-spec-v1.md, cli-sync/sync-contract-v1.md)
+
+**Authoritative execution SSOT**: Open **residual rows** and plan lifecycle live in [`.agents/plans/status.json`](../status.json) (`metadata.residual_findings`, `plans[]`). This document states **intent and narrative**; if a statement here disagrees with `status.json`, **fix this document** in the same change set that updates the SSOT file.
 
 **Related Documents**:
 
 - [v1.1-overview-v1.md](v1.1-overview-v1.md) — V1.1 development overview, consolidates product/architecture plans and residual handling
 - [README.md](README.md) — Knowledge base index and maintenance guidelines
+- [2026-04-09-v1.1-arch-alignment-closure.md](../2026-04-09-v1.1-arch-alignment-closure.md) — Plan to **fully close** remaining open alignment residuals (canonical_hash cross-stack parity; optional daemon eager push)
 
 ---
 
 ## 1. Executive Summary
 
-The Nexus `crates/` implementation shows **strong alignment (~75%)** with the v1-spec design across architectural boundaries, data models, and sync contracts. Core architectural decisions—Rust-first CLI/daemon, ACP Client-only topology, wire contracts single-source generation, and local-first data authority—are correctly implemented. The domain model layer is nearly complete with all 15 aggregates represented, and the enum table in §7 of data-model-v1.md is fully covered.
+### 1.1 Baseline assessment (2026-04-08)
 
-However, several **critical and high gaps** remain:
+The Nexus `crates/` implementation showed **strong alignment (~75%)** with the v1-spec design across architectural boundaries, data models, and sync contracts. Core architectural decisions—Rust-first CLI/daemon, ACP Client-only topology, wire contracts single-source generation, and local-first data authority—were correctly implemented. The domain model layer was nearly complete with all 15 aggregates represented, and the enum table in §7 of data-model-v1.md was fully covered **from a review perspective**.
 
-1. **Outbox/Sync dual implementation**: `nexus-sync` has a comprehensive outbox with SQLite, connection pooling, precheck, partial apply, and conflict resolution, but it is **not wired into the CLI or daemon commands** — `nexus42 sync push/pull` calls the daemon's HTTP API, which has only skeleton sync handlers (501 or stub for sync).
-2. **World status enum mismatch**: Domain `WorldStatus` uses `Frozen` where spec §7 defines `Paused`.
-3. **MembershipStatus enum mismatch**: Domain uses `Left` where spec §7 defines `Removed`.
-4. **Wire contracts (nexus-contracts) use String-typed enum fields**: 28+ fields that should be enum-typed per the design spec are plain `String` in generated code, creating validation gaps.
-5. **User aggregate and SyncCommand/Delta/OutboxEntry aggregates missing from domain**: Only wire contracts exist for these; no domain logic layer.
+At baseline, several **critical and high gaps** were recorded (verbatim historical list — **do not treat as current risk without reading §1.2**):
 
-These gaps require targeted fixes before V1.0 GA to prevent wire-format drift and to ensure the rich sync logic in `nexus-sync` is actually usable.
+1. **Outbox/Sync dual implementation**: `nexus-sync` had a comprehensive outbox with SQLite, connection pooling, precheck, partial apply, and conflict resolution, but was **not wired into the CLI or daemon commands** — `nexus42 sync push/pull` called the daemon's HTTP API, which had only skeleton sync handlers (501 or stub for sync).
+2. **World status enum mismatch**: Domain `WorldStatus` used `Frozen` where spec §7 defines `Paused`.
+3. **MembershipStatus enum mismatch**: Domain used `Left` where spec §7 defines `Removed`.
+4. **Wire contracts (nexus-contracts) use String-typed enum fields**: 28+ fields that should be enum-typed per the design spec were plain `String` in generated code, creating validation gaps.
+5. **User aggregate and SyncCommand/Delta/OutboxEntry aggregates missing from domain**: Only wire contracts existed for some of these; domain logic layer gaps were called out.
+
+### 1.2 Resolution SSOT (sync with `status.json`, 2026-04-09)
+
+**Plans (execution)**
+
+| Plan id | Title (short) | `plans[].status` in SSOT | Relationship to this review |
+| -------- | ---------------- | -------------------------- | ----------------------------- |
+| `2026-04-08-v1.1-tech-debt-mitigation` | V1.1 tech debt mitigation | Done | Declared scope includes **TD-7…TD-13** per `2026-04-09-v1.1-arch-alignment-blockers.md` cross-reference table |
+| `2026-04-09-v1.1-arch-alignment-blockers` | TD-1…TD-6 blockers | Done | Explicitly closes **TD-1…TD-6** scope; **two** follow-up rows remain open under this plan id in `residual_findings` |
+| `2026-04-09-v1.1-arch-alignment-closure` | Final alignment closure | See SSOT | **Authoritative plan** to eliminate the two open rows below and sign off cross-stack parity |
+
+**TD resolution matrix (authoritative for “is this done?”)**
+
+| ID | Baseline (§2.6) | Resolution statement (SSOT) | Open residual id (`metadata.residual_findings` key = owning plan id) |
+| --- | --- | --- | --- |
+| TD-1 | Critical — sync not wired | **Mitigated** — blocker plan Done; offline-first queue and integration delivered per plan. Optional **eager platform push** from daemon remains deferred. | `2026-04-09-v1.1-arch-alignment-blockers` → **ARCH-SYNC-D1** (low, defer) |
+| TD-2 | Critical — `Frozen` vs `Paused` | **Resolved** — closed under blocker plan (no open row). | — |
+| TD-3 | Critical — `Left` / `Removed` / `Invited` | **Resolved** — closed under blocker plan (no open row). | — |
+| TD-4 | High — String enums in contracts | **Resolved** — schema/codegen alignment delivered under blocker plan (no open row under this plan for TD-4). | — |
+| TD-5 | High — `canonical_hash` | **Partial** — in-repo computation exists; **cross-stack preimage**, golden vectors, and platform parity **not** closed. | `2026-04-09-v1.1-arch-alignment-blockers` → **ALIGN-HASH-01** (medium, open) |
+| TD-6 | High — User aggregate | **Resolved** — closed under blocker plan (no open row). | — |
+| TD-7…TD-13 | Medium / Low / N/A | **Treated as in-scope for** `2026-04-08-v1.1-tech-debt-mitigation` **per blocker plan text**; **TD-12** was “no issue” at baseline. Other program debt (e.g. QC warnings on that plan) may still appear under **different** `residual_findings` keys — see SSOT file. | See `status.json` keys `2026-04-08-v1.1-tech-debt-mitigation`, `2025-04-05-domain-models`, etc. |
+
+**Counting helper**
+
+- **No open residual under** `2026-04-09-v1.1-arch-alignment-blockers`: **4** TD rows (TD-2, TD-3, TD-4, TD-6) at last reconciliation.
+- **Still tracked** on that plan id: **2** (ALIGN-HASH-01, ARCH-SYNC-D1).
+- **Full program open residual count** is **not** duplicated here — use `metadata.tech_debt_summary` in `status.json`.
+
+**Maintenance rule**: When ALIGN-HASH-01 and ARCH-SYNC-D1 are closed and archived per plan-convention, update §1.2 and the “SSOT last reconciled” header date in the **same** merge as `status.json` and [archived residuals](../archived/residuals/).
 
 ---
 
@@ -260,12 +294,15 @@ Full enum-by-enum comparison:
 | TD-12 | **Low**      | **ForkBranch spec uses `parent_branch_id`**: Contracts have `parent_branch_id`. Domain model also has it. The naming is consistent between domain and contracts. However, the spec field `forked_from_event_id` maps to `parent_event_id` semantics.                                                          | No actual issue — naming is consistent                                        | Verified: all three sources agree                                                                                                         |
 | TD-13 | **Low**      | **Test coverage**: No `cargo test` results available for analysis. Domain logic has unit tests (verified in `#[cfg(test)]` modules), but integration tests for sync, CLI commands, and daemon handlers appear incomplete.                                                                                     | Risk of regression bugs                                                       | `nexus42/tests/` and `nexus42d/tests/` directories exist but coverage analysis not in scope                                               |
 
+**Note**: Row text above is the **2026-04-08 baseline**. For current done/partial/open, use **§1.2** and `status.json`.
 
 ---
 
 ## 3. Priority Roadmap
 
-### V1.0 GA (Critical + High)
+### V1.0 GA (Critical + High) — historical checklist
+
+**Status**: Executed under `2026-04-09-v1.1-arch-alignment-blockers` (Done). Remaining follow-ups: **ALIGN-HASH-01**, **ARCH-SYNC-D1** — see plan [`2026-04-09-v1.1-arch-alignment-closure.md`](../2026-04-09-v1.1-arch-alignment-closure.md).
 
 
 | Priority | ID   | Action                                                                                                                             | Effort |
@@ -304,13 +341,15 @@ Full enum-by-enum comparison:
 
 See §2.2 above for the complete 40-row enum alignment table covering all §7 enums with spec values vs implementation values vs contract types.
 
-**Summary statistics:**
+**Summary statistics (baseline 2026-04-08 — re-verify after TD-4 schema work):**
 
 - **Total enum fields in spec §7**: 40
 - **Fully aligned (correct values + proper enum type)**: 6 (15%) — `World.visibility`, `World.time_policy`, `KeyBlock.block_type`, `MemoryItem.memory_type`, `ManuscriptState.manuscript_phase`, `DeltaBundle.bundle_type`
 - **Value-aligned but String-typed in contracts**: 25 (63%) — correct values but no compile-time enforcement
 - **Value-mismatched**: 2 (5%) — `World.status`, `WorldMembership.membership_status`
 - **Not yet applicable (no domain/contract)**: 7 (17%) — User-subscription_tier, SyncCommand-status, WorkspaceBinding-binding_status, AgentProfile fields
+
+After TD-2/TD-3/TD-4 delivery, regenerate or spot-check codegen and update this appendix if the team needs an updated percentage rollup.
 
 ---
 
@@ -325,6 +364,7 @@ The technical debt items identified in this review are tracked and addressed in:
   - Residual-to-plan mapping matrix
   - Cross-repo dependency coordination with nexus-platform
   - Priority roadmap and GA criteria
+- **[2026-04-09-v1.1-arch-alignment-closure.md](../2026-04-09-v1.1-arch-alignment-closure.md)** — Closes remaining **ALIGN-HASH-01** and **ARCH-SYNC-D1**; after Done, update **§1.2** in this file
 
 ### Knowledge Base Index
 

@@ -69,7 +69,7 @@
     },
     "canonical_hash": {
       "type": "string",
-      "description": "Content hash (sha256:hexlower)"
+      "description": "SHA-256 over the JSON bytes of the bundle's `deltas` array only (serde_json in Rust); wire form `sha256:` + 64 lowercase hex. See .agents/plans/knowledge/canonical-hash-v1.md and golden vector in nexus-sync tests."
     },
     "base_versions": {
       "type": "object",

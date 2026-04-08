@@ -1,15 +1,15 @@
 //! Canonical content hash for delta bundles (TD-5).
 //!
-//! **Preimage (this crate):** `serde_json::to_vec` bytes of the bundle's `deltas`
-//! array (see [`canonical_hash_for_deltas`]). Cross-stack alignment (exact JSON
-//! shape, key order, number formatting) must match `nexus-platform` / bundle
-//! schema — see residual `ALIGN-HASH-01` / golden vectors before GA.
+//! **Preimage (this crate):** `serde_json::to_vec` bytes of the bundle's **`deltas` JSON array
+//! only** (not the full `Bundle` object). See repository `.agents/plans/knowledge/canonical-hash-v1.md` and unit
+//! test `golden_alignment_vector_matches_documented_digest` for the frozen golden vector.
+//! Platforms must use the **same** serialization rules when verifying or reproducing hashes.
 //!
 //! Wire format: `sha256:` + 64 lowercase hex digits (see [`is_well_formed_canonical_hash`]).
 //! Same delta sequence and contents produce the same hash for a fixed serialization.
 
 use crate::errors::{SyncError, SyncResult};
-use nexus_contracts::generated::Delta;
+use nexus_contracts::Delta;
 use sha2::{Digest, Sha256};
 
 /// Returns true if `s` is `sha256:` followed by 64 lowercase hex digits.
@@ -36,7 +36,7 @@ pub fn canonical_hash_for_deltas(deltas: &[Delta]) -> SyncResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_contracts::{DeltaOperation, DeltaType};
+    use nexus_contracts::{Delta, DeltaOperation, DeltaType};
     use serde_json::json;
 
     fn sample_delta() -> Delta {
@@ -76,11 +76,37 @@ mod tests {
 
     #[test]
     fn different_payload_different_hash() {
-        let mut a = sample_delta();
-        let mut b = sample_delta();
-        b.payload = json!({"display_name": "Other"});
+        let a = sample_delta();
+        let b = {
+            let mut b = sample_delta();
+            b.payload = json!({"display_name": "Other"});
+            b
+        };
         let ha = canonical_hash_for_deltas(&[a]).unwrap();
         let hb = canonical_hash_for_deltas(&[b]).unwrap();
         assert_ne!(ha, hb);
+    }
+
+    /// Frozen cross-stack fixture: changing field values requires updating
+    /// `.agents/plans/knowledge/canonical-hash-v1.md` and any platform golden vectors.
+    fn golden_alignment_fixture_delta() -> Delta {
+        Delta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Create,
+            target_entity_type: Some("key_block".to_string()),
+            target_entity_id: None,
+            payload: json!({"display_name": "Golden"}),
+            source_anchor: None,
+            local_timestamp: "2026-04-09T12:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn golden_alignment_vector_matches_documented_digest() {
+        // Frozen digest for `golden_alignment_fixture_delta` (serde_json::to_vec on `[delta]`).
+        const EXPECTED: &str =
+            "sha256:b9c07221605405f763956471055fed2ecdfdce7858f423a371aa387eec8befab";
+        let got = canonical_hash_for_deltas(&[golden_alignment_fixture_delta()]).unwrap();
+        assert_eq!(got, EXPECTED, "keep in sync with .agents/plans/knowledge/canonical-hash-v1.md");
     }
 }
