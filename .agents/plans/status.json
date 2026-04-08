@@ -157,6 +157,17 @@
       "done_at": "2026-04-09"
     },
     {
+      "id": "2026-04-09-v1.1-arch-alignment-blockers",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json",
+        "residual_summary": "2 open: ALIGN-HASH-01; ARCH-SYNC-D1 defer"
+      },
+      "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
+      "done_at": "2026-04-09"
+    },
+    {
       "id": "2026-04-09-v1.1-cli-daemon-hardening",
       "status": "Done",
       "file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
@@ -232,53 +243,6 @@
       },
       "title": "Local DB Refactor \u2014 Single Ownership Module",
       "done_at": "2026-04-08"
-    },
-    {
-      "id": "2026-04-09-v1.1-arch-alignment-blockers",
-      "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
-      "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": [
-        "v1.1",
-        "architecture-alignment",
-        "critical",
-        "enum-fix",
-        "sync-wiring",
-        "domain-models"
-      ],
-      "created_at": "2026-04-09",
-      "updated_at": "2026-04-09",
-      "notes": "PR-ready: v1.1-alignment-residuals @ 93013ef (ahead of main, QC triple Approve + QA pass). Fat plan row snapshot: archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json. After merge to main, mark Done + ultra-compress per AGENTS.",
-      "metadata": {
-        "phase": "V1.1 GA — architecture alignment blockers",
-        "priority": "high",
-        "working_branch": "v1.1-alignment-residuals",
-        "merge_target": "main",
-        "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json",
-        "residual_summary": "2 open: ALIGN-HASH-01 (cross-stack hash parity); ARCH-SYNC-D1 (defer optional daemon SyncClient push)",
-        "gates": {
-          "tests": "pass",
-          "clippy": "pass",
-          "fmt": "pass",
-          "codegen": "no_drift",
-          "typecheck": "pass",
-          "qc_status": "pass_triple_residuals_batch_approve_2026-04-08",
-          "qa_status": "pass_residuals_batch_2026-04-08",
-          "merge_to_main": "ready"
-        },
-        "qc_rereview_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qc-rereview.md",
-        "qa_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qa.md",
-        "qc_residuals_batch_consolidated": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc-consolidated.md",
-        "qc_residuals_batch": [
-          ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc1.md",
-          ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc2.md",
-          ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc3.md"
-        ],
-        "qa_residuals_batch_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qa.md"
-      }
     }
   ],
   "metadata": {
