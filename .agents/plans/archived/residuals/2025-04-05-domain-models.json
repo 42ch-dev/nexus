@@ -41,6 +41,21 @@
       "lifecycle": "resolved",
       "closed_at": "2026-04-06",
       "closure_note": "Added Display/ToString tests for all 18 error variants. Added #[allow(dead_code)] to unused CreatorQuotaExceeded and InvalidIdFormat with V1.1 TODO comment."
+    },
+    {
+      "id": "DM-R5",
+      "title": "MembershipRole enum drift between schema and domain",
+      "severity": "medium",
+      "source": "GA Residual QC-#1",
+      "scope": "schemas/domain/world-membership.schema.json vs crates/nexus-domain/src/world_membership.rs — schema has [owner,maintainer,collaborator,official_creator], domain has [Owner,Admin,Curator,Collaborator,Viewer]",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — align schema enum with domain MembershipRole or vice versa",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-07T18:16:41Z",
+      "closure_note": "Fixed in feature/v1.1-tech-debt-mitigation: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. All tests pass.",
+      "archived_at": "2026-04-09"
     }
   ]
 }

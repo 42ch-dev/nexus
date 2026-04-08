@@ -31,6 +31,21 @@
       "closed_reason": "resolved_in_spec",
       "closed_at": "2026-04-06",
       "archived_at": "2026-04-06"
+    },
+    {
+      "id": "ACP-R7",
+      "title": "Permission policy engine (grant/deny UI)",
+      "severity": "medium",
+      "source": "Tech Spec §Appendix B",
+      "scope": "V1.0 auto-grants all permissions; need configurable policy",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.1",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08T20:00:00Z",
+      "closure_note": "Implemented permission policy engine with configurable grant/deny rules, interactive prompts, CLI commands (policy grant/deny/list), and PolicyAwareClientHandler. Tests: 12 new policy tests, all 195 nexus42 tests pass.",
+      "archived_at": "2026-04-09"
     }
   ]
 }

@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-09",
+  "entries": [
+    {
+      "updated_at": "2026-04-05",
+      "message": "Phase 0 plans execute on main branch for initialization. Phase 1+ plans require feature branches."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "Phase 0 complete: monorepo-structure, json-schema-foundation, codegen-pipeline all done. 15 commits on main. Ready for Phase 1."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "Phase 1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC三审, Critical fixes (C-1, C-2) verified."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "domain-models merged to main. Residual findings recorded for cli-daemon-foundation, sync-contract, acp-client, context-assembly, and domain-models (non-blocking QC items)."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "Phase 1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon → sync-contract → acp-client → context-assembly."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "Clarify phase complete. 4 future iteration points recorded as residual findings (CLI-R5..R8): Unix socket support, manuscript promote strict mode, manuscript verify content checks, research scan content extraction. Ready for implementation."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "ACP Client tech spec refined by @architect. SDK choice: agent-client-protocol v0.10.4. 6 tasks defined with parallel execution plan. ACP-R1/R2 resolved, 9 new V1.1+ residuals (ACP-R3..R11) added. Plan status: InProgress."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC三审 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
+    },
+    {
+      "updated_at": "2026-04-06",
+      "message": "Phase 1 complete (8/8 plans Done). Phase 1 architecture + product reviews completed. 36 arch findings, 37 feature analysis. P0 bug fixes in progress on fix/v1.0-p0-bugs. Pre-Phase 2 consolidated plan created (2026-04-06-pre-phase2.md) with 5 implementation plans (A-E). 5 Phase 2 plan entries added to status.json."
+    },
+    {
+      "updated_at": "2026-04-07",
+      "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 → 42."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "V1.1 tech debt mitigation plan created (2026-04-08-v1.1-tech-debt-mitigation.md) based on architecture gap analysis. 3-wave approach: Wave 1 (P0 — DM-R5 + 3 schemas), Wave 2 (P1 — ACP/Research/Manuscript/Context), Wave 3 (P2 — DEBT-X/SYNC-R/FH-R). Total: 27 residuals + 3 missing features. nexus-platform Phase 2 confirmed complete."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "DM-R5 resolved: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. Total open residuals: 42 → 41."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "V1.1 Wave 1 complete: DM-R5 resolved (MembershipRole aligned), 3 schemas created (delta/workspace-binding/agent-profile), W1-C1 fixed (AgentProfile enums), QC三审 APPROVE. 7 commits, 662 tests passing, 25 schemas valid. Ready for merge."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "Wave 1 merged to main: DM-R5 resolved, 3 schemas created, W1-C1 fixed, QC APPROVE. 59 files, 4102 insertions. Ready for Wave 2."
+    },
+    {
+      "updated_at": "2026-04-08T12:00:00Z",
+      "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 → 40."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "Wave 2 Batch 1 complete: 8 tasks (ACP session/policy/daemon-mediated + Context Assembly 5 residuals). All tests passing. Batch 2 pending."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "Wave 2 Batch 1 merged to main: QC三审 APPROVE (consolidated: 0 Critical, 5 Warnings, 10 Suggestions). 10 commits, 23 files (3086 insertions). Residuals: ACP-R7 resolved, CTX-R2/R4/R5/R6/R7 resolved. Ready for Batch 2 in new session."
+    },
+    {
+      "updated_at": "2026-04-08T21:00:00Z",
+      "message": "Wave 2 Batch 2 (Tasks 8-10) complete: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction) resolved. 1 commit, 7 files (819 insertions), 232 tests passing. Total open residuals: 40 → 37."
+    },
+    {
+      "updated_at": "2026-04-08T22:30:00Z",
+      "message": "Wave 2 Batch 2 extended (Tasks 16-18): SYNC-R6 (precheck auth match validation), SYNC-R11 (honor retry_after from conflict), SYNC-R12 (persist partial apply retry state) resolved. 1 commit, 6 files (837 insertions), 94 nexus-sync tests passing. Total open residuals: 37 → 34."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "Wave 2 Batch 2 merged to main: QC三审 APPROVE (unanimous: 0 Critical, 6 Warnings). 4 commits, 14 files (1710 insertions). Residuals: CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. Wave 2 complete (14/14 tasks). Ready for Wave 3."
+    },
+    {
+      "updated_at": "2026-04-09",
+      "message": "Wave 3 Batch A merged to main: QC三审 APPROVE (0 Critical, 8 Warnings). 8 QC Warnings (W-1 through W-8) tracked as residuals for V1.1+. Total open residuals: 29 → 37. Progress: 90% (23/26 tasks complete). Ready for Batch B."
+    },
+    {
+      "updated_at": "2026-04-09",
+      "message": "Wave 3 Batch B complete: FH-R1 (schema drift detection CI), FH-R3 (error code inconsistency docs), FH-R6 (test helper duplication). Added schema-drift-check CI job, documented Internal.code vs error_code() design, created test_utils.rs module. 62 nexus42d tests, all workspace tests passing. InReview for QC."
+    },
+    {
+      "updated_at": "2026-04-09",
+      "message": "Wave 3 Batch B QC三审 APPROVE (unanimous: 0 Critical, 3 Warnings, 6 Suggestions). All 26 tasks complete. FH-R1/R3/R6 resolved. 11 QC Warnings (W1-W11) tracked for V1.1+. Ready for merge to main. V1.1 GA ready."
+    },
+    {
+      "updated_at": "2026-04-09",
+      "message": "V1.1 Tech Debt Mitigation complete. Created V1.2 Tech Debt Cleanup plan for 21 warning-level residuals. Archived 15 Done plans to archived/plans/."
+    },
+    {
+      "updated_at": "2026-04-08",
+      "message": "V1.1 Tech Debt Mitigation complete. Created V1.1 Tech Debt Cleanup 2 plan for 21 warning-level residuals. Archived 15 Done plans."
+    },
+    {
+      "updated_at": "2026-04-08T16:30:00Z",
+      "message": "Updated tech_debt_summary per plan-convention.md: severity stats now treat historical 'warning' as 'low' (11 QC-Warnings from v1.1-tech-debt-mitigation). by_plan keys aligned with residual_findings keys (full plan-id). Added severity_note for transparency."
+    },
+    {
+      "updated_at": "2026-04-09T00:00:00Z",
+      "message": "Major status.json cleanup per plan-convention.md: (1) Archived 15 closed residuals to archived/residuals/*.json (DM-R5, CLI-R6/R7/R8, SYNC-R4/R5/R6/R11/R12, ACP-R7, CTX-R6/R7, FH-R1/R3/R6). (2) Migrated metadata.notes to notes.json to reduce status.json size. (3) Updated tech_debt_summary to reflect 31 open residuals. All changes follow §248-286 (archival) and §105 (notes.json) of plan-convention.md."
+    }
+  ]
+}
