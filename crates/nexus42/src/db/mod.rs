@@ -8,10 +8,15 @@
 //! daemon must be mirrored here.
 
 use rusqlite::Connection;
+use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
 
-/// Current schema version, stored in `workspace_meta` as `schema_version`.
-/// Must match `nexus42d::db::schema::SCHEMA_VERSION`.
-pub const SCHEMA_VERSION: &str = "1";
+/// Database schema version for local SQLite migrations.
+/// Must match `nexus42d::db::schema::DB_SCHEMA_VERSION`.
+pub const DB_SCHEMA_VERSION: u32 = 1;
+
+/// Wire contract schema version for network payload compatibility.
+/// Sourced from generated contracts to avoid manual drift.
+pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;
 
 /// Schema initializer for CLI-side database access.
 ///
@@ -32,10 +37,14 @@ impl Schema {
         // V1.1 migration: Add content column if it doesn't exist
         let _ = conn.execute("ALTER TABLE reference_sources ADD COLUMN content TEXT", []);
 
-        // Seed schema version row (idempotent)
+        // Seed schema version rows (idempotent).
         conn.execute(
-            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('schema_version', ?1)",
-            rusqlite::params![SCHEMA_VERSION],
+            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('db_schema_version', ?1)",
+            rusqlite::params![DB_SCHEMA_VERSION.to_string()],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('wire_schema_version', ?1)",
+            rusqlite::params![WIRE_SCHEMA_VERSION.to_string()],
         )?;
 
         Ok(())

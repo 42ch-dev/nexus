@@ -122,18 +122,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check SCHEMA_VERSION consistency (CLI vs daemon)
+      - name: Check DB schema version consistency (CLI vs daemon)
         run: |
-          echo "Checking SCHEMA_VERSION consistency across CLI and daemon..."
-          CLI_VERSION=$(grep -oP 'pub const SCHEMA_VERSION: &str = "\K[^"]+' crates/nexus42/src/db/mod.rs)
-          DAEMON_VERSION=$(grep -oP 'pub const SCHEMA_VERSION: &str = "\K[^"]+' crates/nexus42d/src/db/schema.rs)
-          echo "CLI SCHEMA_VERSION:    $CLI_VERSION"
-          echo "Daemon SCHEMA_VERSION: $DAEMON_VERSION"
+          echo "Checking DB_SCHEMA_VERSION consistency across CLI and daemon..."
+          CLI_VERSION=$(grep -oP 'pub const DB_SCHEMA_VERSION: u32 = \K\d+' crates/nexus42/src/db/mod.rs)
+          DAEMON_VERSION=$(grep -oP 'pub const DB_SCHEMA_VERSION: u32 = \K\d+' crates/nexus42d/src/db/schema.rs)
+          echo "CLI DB_SCHEMA_VERSION:    $CLI_VERSION"
+          echo "Daemon DB_SCHEMA_VERSION: $DAEMON_VERSION"
           if [ "$CLI_VERSION" != "$DAEMON_VERSION" ]; then
-            echo "❌ SCHEMA_VERSION mismatch: CLI=$CLI_VERSION, Daemon=$DAEMON_VERSION"
+            echo "❌ DB_SCHEMA_VERSION mismatch: CLI=$CLI_VERSION, Daemon=$DAEMON_VERSION"
             exit 1
           fi
-          echo "✅ SCHEMA_VERSION values match"
+          echo "✅ DB_SCHEMA_VERSION values match"
       - name: Check reference_sources table schema consistency
         run: |
           echo "Checking reference_sources table definitions across CLI and daemon..."
@@ -164,19 +164,26 @@ jobs:
             fi
           done
           echo "✅ reference_sources key columns match (both have: reference_source_id, workspace_id, source_type, uri, title, content_hash, scan_status, created_at, updated_at)"
-      - name: Check LATEST_SCHEMA_VERSION in generated contracts
+      - name: Check wire schema source from generated contracts
         run: |
-          echo "Checking LATEST_SCHEMA_VERSION in generated contracts..."
+          echo "Checking wire schema source from generated contracts..."
           CONTRACTS_VERSION=$(grep -oP 'pub const LATEST_SCHEMA_VERSION: u32 = \K\d+' crates/nexus-contracts/src/generated/mod.rs)
           echo "Generated LATEST_SCHEMA_VERSION: $CONTRACTS_VERSION"
-          CLI_VERSION=$(grep -oP 'pub const SCHEMA_VERSION: &str = "\K[^"]+' crates/nexus42/src/db/mod.rs)
-          echo "CLI SCHEMA_VERSION: $CLI_VERSION"
-          # CLI/daemon use string "1", contracts use u32 1 — they should match numerically
-          if [ "$CONTRACTS_VERSION" != "$CLI_VERSION" ]; then
-            echo "❌ LATEST_SCHEMA_VERSION ($CONTRACTS_VERSION) does not match CLI SCHEMA_VERSION ($CLI_VERSION)"
+          if ! grep -q 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42/src/db/mod.rs; then
+            echo "❌ CLI WIRE_SCHEMA_VERSION is not sourced from LATEST_SCHEMA_VERSION"
             exit 1
           fi
-          echo "✅ Schema versions are consistent"
+          if ! grep -q 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42d/src/db/schema.rs; then
+            echo "❌ Daemon WIRE_SCHEMA_VERSION is not sourced from LATEST_SCHEMA_VERSION"
+            exit 1
+          fi
+          CLI_WIRE=$(grep -oP 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42/src/db/mod.rs | wc -l | tr -d ' ')
+          DAEMON_WIRE=$(grep -oP 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42d/src/db/schema.rs | wc -l | tr -d ' ')
+          if [ "$CLI_WIRE" != "1" ] || [ "$DAEMON_WIRE" != "1" ]; then
+            echo "❌ Unexpected wire schema source declarations"
+            exit 1
+          fi
+          echo "✅ Wire schema version is sourced from generated contracts"
 
   rust-tests:
     name: Rust tests
