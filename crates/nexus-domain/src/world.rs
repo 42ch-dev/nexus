@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 pub enum WorldStatus {
     Active,
     Archived,
-    Frozen,
+    Paused,
 }
 
 impl WorldStatus {
@@ -23,7 +23,7 @@ impl WorldStatus {
         match self {
             Self::Active => "active",
             Self::Archived => "archived",
-            Self::Frozen => "frozen",
+            Self::Paused => "paused",
         }
     }
 }
