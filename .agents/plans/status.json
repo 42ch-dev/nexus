@@ -565,9 +565,9 @@
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
 "status": "InProgress",
-      "progress": 75,
+      "progress": 85,
       "updated_at": "2026-04-08",
-      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) merged to main. Batch 2 (Task 8-10) complete on feature/v1.1-wave2-batch2. Tasks 16-18 (SYNC-R6/R11/R12) complete on feature/v1.1-wave2-batch2.",
+      "notes": "Wave 1 merged. Batch 1 & 2 merged to main. Wave 2 complete (14/14 tasks). Wave 3 (6 tasks) pending.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
@@ -586,8 +586,8 @@
         },
         "residual_target": "Resolve 27 HIGH/MEDIUM residuals + 3 missing features",
         "effort": "XL — ~15-20 agent sessions (3 waves)",
-        "qc_status": "APPROVE — QC三审 consolidated (0 Critical, 5 Warnings)",
-        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-batch1.md",
+        "qc_status": "APPROVE — QC三审 consolidated (0 Critical, 6 Warnings)",
+        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-batch2.md",
         "wave_1_status": "Complete",
         "commits": "7 commits (d2e86c0..0222e46)",
         "files_changed": "54 files (2331 insertions, 205 deletions)",
@@ -602,15 +602,14 @@
         "wave_2_batch1_merged_at": "2026-04-08",
         "wave_2_batch1_files": "23 files (3086 insertions, 130 deletions)",
         "wave_2_batch2_status": "Complete",
-        "wave_2_batch2_tasks": "3 tasks: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction)",
-        "wave_2_batch2_commits": "1 commit (401c0f8)",
-        "wave_2_batch2_files": "7 files (819 insertions, 43 deletions)",
-         "wave_2_batch2_tests": "232 tests passing",
-         "wave_2_batch2_extended_tasks": "3 tasks: SYNC-R6 (precheck auth), SYNC-R11 (retry_after), SYNC-R12 (partial apply persist)",
-         "wave_2_batch2_extended_commits": "1 commit (efedb0d)",
-         "wave_2_batch2_extended_files": "6 files (837 insertions, 15 deletions)",
-         "wave_2_batch2_extended_tests": "94 nexus-sync tests passing",
-         "residual_summary": "CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. All assigned tasks complete. Remaining open residuals: 34."
+        "wave_2_batch2_tasks": "6 tasks: CLI-R6/R7/R8 + SYNC-R6/R11/R12",
+        "wave_2_batch2_commits": "4 commits (401c0f8..b86921f)",
+        "wave_2_batch2_merged": true,
+        "wave_2_batch2_merged_at": "2026-04-08",
+        "wave_2_batch2_files": "14 files (1710 insertions, 77 deletions)",
+        "wave_2_status": "Complete",
+        "wave_2_total_tasks": "14 tasks (Batch 1: 8, Batch 2: 6)",
+        "residual_summary": "CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. All Wave 2 tasks complete. Remaining open residuals: 34."
        }
     }
   ],
@@ -765,6 +764,10 @@
       {
         "updated_at": "2026-04-08T22:30:00Z",
         "message": "Wave 2 Batch 2 extended (Tasks 16-18): SYNC-R6 (precheck auth match validation), SYNC-R11 (honor retry_after from conflict), SYNC-R12 (persist partial apply retry state) resolved. 1 commit, 6 files (837 insertions), 94 nexus-sync tests passing. Total open residuals: 37 → 34."
+      },
+      {
+        "updated_at": "2026-04-08",
+        "message": "Wave 2 Batch 2 merged to main: QC三审 APPROVE (unanimous: 0 Critical, 6 Warnings). 4 commits, 14 files (1710 insertions). Residuals: CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. Wave 2 complete (14/14 tasks). Ready for Wave 3."
       }
     ],
     "residual_findings": {
