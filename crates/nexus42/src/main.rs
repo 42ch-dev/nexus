@@ -16,8 +16,8 @@ mod manuscript;
 use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
-    daemon::DaemonCommand, init::InitCommand, manuscript::ManuscriptCommand, policy::PolicyCommand,
-    research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
+    daemon::DaemonCommand, db::DbCommand, init::InitCommand, manuscript::ManuscriptCommand,
+    policy::PolicyCommand, research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -60,6 +60,12 @@ enum Commands {
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
+    },
+
+    /// Database status and management
+    Db {
+        #[command(subcommand)]
+        command: DbCommand,
     },
 
     /// Synchronize workspace with platform
@@ -126,6 +132,7 @@ async fn main() {
         Some(Commands::Init { command }) => commands::init::run(command).await,
         Some(Commands::Auth { command }) => commands::auth::run(command, &config).await,
         Some(Commands::Daemon { command }) => commands::daemon::run(command, &config).await,
+        Some(Commands::Db { command }) => commands::db::run(command, &config).await,
         Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
         Some(Commands::Creator { command }) => commands::creator::run(command, &config).await,
         Some(Commands::Manuscript { command }) => commands::manuscript::run(command, &config).await,
