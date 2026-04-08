@@ -29,6 +29,15 @@ use std::time::Duration;
 ///   SQLite is file-level-locked, so very high values rarely improve
 ///   throughput; 8–16 is usually sufficient for the daemon.
 ///
+/// # Pool Tuning Guidance
+///
+/// The default pool configuration is suitable for single-user local development:
+/// - `max_connections: 8` — SQLite WAL mode supports 1 writer + N readers
+/// - `timeout: 30s` — connection timeout for pool checkout
+///
+/// For embedded daemon use, reduce `max_connections` to 2–4.
+/// Environment variables: `NEXUS_DB_POOL_TIMEOUT_SECS`, `NEXUS_DB_POOL_MAX_CONNECTIONS`
+///
 /// # Example
 ///
 /// ```no_run
@@ -114,6 +123,15 @@ impl DbPool {
     /// * `db_path` - Path to the SQLite database file
     /// * `config`  - Pool sizing and timeout configuration
     ///
+    /// # SQLite Locking Strategy
+    ///
+    /// This pool uses SQLite in WAL (Write-Ahead Logging) mode, which allows:
+    /// - Concurrent reads while a write is in progress
+    /// - Better performance for read-heavy workloads
+    ///
+    /// WAL mode mitigates "database is locked" errors common in journal mode.
+    /// Write contention is minimal since the daemon serves a single user locally.
+    ///
     /// # Errors
     /// Returns `BuildError` if the pool cannot be created (e.g. invalid path)
     pub fn new(db_path: &Path, config: PoolConfig) -> Result<Self, deadpool_sqlite::BuildError> {
@@ -152,7 +170,10 @@ impl DbPool {
         self.pool.get().await.map(PooledConn)
     }
 
-    /// Get the current pool status
+    /// Returns pool status information.
+    ///
+    /// Currently unused but retained for the planned `/health` monitoring endpoint (V1.2).
+    #[allow(dead_code)]
     pub fn status(&self) -> deadpool_sqlite::Status {
         self.pool.status()
     }

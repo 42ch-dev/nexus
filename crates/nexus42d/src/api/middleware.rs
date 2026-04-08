@@ -1,6 +1,16 @@
 //! API Middleware
 //!
 //! Tower/axum middleware layers for request validation and lifecycle observability.
+//!
+//! # Workspace Initialization Race Window
+//!
+//! There is a theoretical race between `init_workspace()` and the first middleware
+//! request. In practice, this window is negligible because:
+//! 1. Workspace initialization happens during daemon startup (single-threaded)
+//! 2. The HTTP listener is only bound AFTER initialization completes
+//! 3. The in-memory mutex provides additional protection
+//!
+//! If this ever becomes a concern, consider using an `Arc<OnceCell<Workspace>>` pattern.
 
 use axum::{body::Body, extract::State, http::Request, middleware::Next, response::Response};
 
@@ -45,6 +55,12 @@ pub async fn require_workspace(
     Ok(next.run(request).await)
 }
 
+// Note: These tests remain inline because they use `crate::test_utils` helpers and
+// `crate::db::schema::Schema`, which are private test-only/internal modules.
+// Integration tests in `tests/` cannot access `#[cfg(test)]` modules or internal
+// crate items directly. The tests also use `super::*` to import private middleware
+// helpers. Consider extracting to `tests/` once the tested items are pub or a public
+// test fixture helper is added.
 #[cfg(test)]
 mod tests {
     use crate::api::handlers;

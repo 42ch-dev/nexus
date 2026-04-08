@@ -119,6 +119,11 @@ pub async fn require_auth(
     Ok(next.run(request).await)
 }
 
+// Note: These tests remain inline because they use `crate::auth::token_manager::TokenManager`
+// and other internal crate items. Integration tests in `tests/` can only access the
+// crate's public API. The tests also rely on private test fixture helpers seeded in
+// the database. Consider extracting to `tests/` once TokenManager and related auth
+// internals are exposed publicly, or a public test fixture helper is added.
 #[cfg(test)]
 mod tests {
     use crate::api::handlers;

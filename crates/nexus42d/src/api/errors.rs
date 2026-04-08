@@ -178,6 +178,10 @@ impl From<rusqlite::Error> for NexusApiError {
     }
 }
 
+// Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
+// which is a private test-only helper. Integration tests in `tests/` cannot access
+// `#[cfg(test)]` modules. Consider extracting the pure unit tests (error mapping logic)
+// to `tests/` once a public test fixture helper is added.
 #[cfg(test)]
 mod tests {
     use super::*;
