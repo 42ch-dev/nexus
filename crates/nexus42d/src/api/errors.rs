@@ -78,6 +78,22 @@ pub enum NexusApiError {
     /// Access forbidden (e.g., path outside workspace)
     #[error("Forbidden: {reason}")]
     Forbidden { resource: String, reason: String },
+
+    /// Invalid API key format
+    #[error("Invalid API key format")]
+    InvalidApiKeyFormat,
+
+    /// API key expired or revoked
+    #[error("API key expired or revoked")]
+    ApiKeyExpired,
+
+    /// Insufficient permissions for the requested operation
+    #[error("Insufficient permissions: required {required:?}")]
+    InsufficientPermissions { required: Vec<String> },
+
+    /// Session expired
+    #[error("Session expired")]
+    SessionExpired,
 }
 
 impl NexusApiError {
@@ -91,6 +107,10 @@ impl NexusApiError {
             NexusApiError::NotFound(_) => StatusCode::NOT_FOUND,
             NexusApiError::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
             NexusApiError::Forbidden { .. } => StatusCode::FORBIDDEN,
+            NexusApiError::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
+            NexusApiError::ApiKeyExpired => StatusCode::UNAUTHORIZED,
+            NexusApiError::InsufficientPermissions { .. } => StatusCode::FORBIDDEN,
+            NexusApiError::SessionExpired => StatusCode::UNAUTHORIZED,
         }
     }
 
@@ -104,6 +124,10 @@ impl NexusApiError {
             NexusApiError::NotFound(_) => "NOT_FOUND",
             NexusApiError::NotImplemented(_) => "NOT_IMPLEMENTED",
             NexusApiError::Forbidden { .. } => "FORBIDDEN",
+            NexusApiError::InvalidApiKeyFormat => "INVALID_API_KEY",
+            NexusApiError::ApiKeyExpired => "API_KEY_EXPIRED",
+            NexusApiError::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
+            NexusApiError::SessionExpired => "SESSION_EXPIRED",
         }
     }
 
@@ -240,6 +264,74 @@ mod tests {
             }
             _ => panic!("Expected Internal variant"),
         }
+    }
+
+    #[test]
+    fn invalid_api_key_format_maps_to_400() {
+        let err = NexusApiError::InvalidApiKeyFormat;
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.error_code(), "INVALID_API_KEY");
+        assert_eq!(err.to_string(), "Invalid API key format");
+    }
+
+    #[test]
+    fn api_key_expired_maps_to_401() {
+        let err = NexusApiError::ApiKeyExpired;
+        assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(err.error_code(), "API_KEY_EXPIRED");
+        assert_eq!(err.to_string(), "API key expired or revoked");
+    }
+
+    #[test]
+    fn insufficient_permissions_maps_to_403() {
+        let err = NexusApiError::InsufficientPermissions {
+            required: vec!["admin".into(), "write".into()],
+        };
+        assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(err.error_code(), "INSUFFICIENT_PERMISSIONS");
+        let display = err.to_string();
+        assert!(
+            display.contains("admin") && display.contains("write"),
+            "Display should contain required permissions: {display}"
+        );
+    }
+
+    #[test]
+    fn insufficient_permissions_empty_vec() {
+        let err = NexusApiError::InsufficientPermissions {
+            required: vec![],
+        };
+        assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(err.error_code(), "INSUFFICIENT_PERMISSIONS");
+    }
+
+    #[test]
+    fn session_expired_maps_to_401() {
+        let err = NexusApiError::SessionExpired;
+        assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(err.error_code(), "SESSION_EXPIRED");
+        assert_eq!(err.to_string(), "Session expired");
+    }
+
+    #[test]
+    fn new_auth_variants_response_body_structure() {
+        let err = NexusApiError::InvalidApiKeyFormat;
+        let body = err.to_response_body();
+        assert!(!body.success);
+        assert_eq!(body.error.code, "INVALID_API_KEY");
+        assert_eq!(body.error.message, "Invalid API key format");
+
+        let err = NexusApiError::ApiKeyExpired;
+        let body = err.to_response_body();
+        assert!(!body.success);
+        assert_eq!(body.error.code, "API_KEY_EXPIRED");
+        assert_eq!(body.error.message, "API key expired or revoked");
+
+        let err = NexusApiError::SessionExpired;
+        let body = err.to_response_body();
+        assert!(!body.success);
+        assert_eq!(body.error.code, "SESSION_EXPIRED");
+        assert_eq!(body.error.message, "Session expired");
     }
 
     /// Integration test: POST /v1/local/workspace/init with empty path → 400
