@@ -254,13 +254,37 @@ Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, 
 - **Content:** Full `plans[]` element as it existed when the plan was marked `Done` (including rich `metadata`), for audit and agent handoff.
 - **Relationship to residuals:** `archived/residuals/<plan-id>.json` stores **closed finding rows**; `archived/plans/<plan-id>.json` stores the **plan row snapshot**. Do not treat the plan snapshot as a second copy of **open** `residual_findings`.
 
-**Slim `Done` row in `status.json` (after the team adopts this):**
+**Ultra-compressed `Done` row in `status.json` (after the team adopts this):**
 
-- Keep the same **canonical top-level keys**; on `Done` rows, **reduce** `metadata` to what is needed for navigation, typically:
-  - **`archived_record`**: path relative to `{PLAN_DIR}`, e.g. `archived/plans/<plan-id>.json`
-  - Optional one-line **`residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
-- Omit bulky fields from the hot row once the snapshot exists (`gates`, `qc_status`, `tests`, `commits`, long `description` / `scope`); they remain in the snapshot file.
-- Keep **`notes`** short (merge outcome, branch, pointer to `reports/<plan-id>/`); do not duplicate QC prose that already lives in reports.
+**Minimal field set** (per plan-convention.md §430-436):
+
+- **Required fields** (machine navigation): `id`, `status` (`"Done"`), `file`, `metadata`
+- **Optional fields** (human-friendly): `title`, `done_at`
+
+**Removed fields** (available in `archived/plans/<plan-id>.json`):
+- `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `notes`
+- Bulky metadata fields: `gates`, `qc_status`, `tests`, `commits`, `description`, `scope`, etc.
+
+**Metadata content**:
+- **`archived_record`**: path relative to `{PLAN_DIR}`, e.g. `archived/plans/<plan-id>.json`
+- Optional one-line **`residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
+
+**Example ultra-compressed Done plan**:
+```json
+{
+  "id": "2025-04-05-domain-models",
+  "status": "Done",
+  "file": ".agents/plans/2025-04-05-domain-models.md",
+  "metadata": {
+    "archived_record": "archived/plans/2025-04-05-domain-models.json",
+    "residual_summary": "1 open residuals"
+  },
+  "title": "Domain Models Implementation",
+  "done_at": "2026-04-06"
+}
+```
+
+**Important**: Once the snapshot is written, the hot row **MUST NOT** carry `gates`, `qc_status`, `tests`, `commits`, long `description`/`scope`, or any other bulky fields. All complete information is available via `metadata.archived_record` pointer.
 
 **When to write the snapshot:** Same change set as marking the plan `Done` and completing the pre-merge `status.json` updates (or immediately after merge), once compaction is adopted.
 
