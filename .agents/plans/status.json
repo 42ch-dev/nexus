@@ -567,7 +567,7 @@
 "status": "InProgress",
       "progress": 75,
       "updated_at": "2026-04-08",
-      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) merged to main. Batch 2 (Task 8-10) complete on feature/v1.1-wave2-batch2. Tasks 16-18 pending.",
+      "notes": "Wave 1 merged. Batch 1 (Task 5-7, 11-15) merged to main. Batch 2 (Task 8-10) complete on feature/v1.1-wave2-batch2. Tasks 16-18 (SYNC-R6/R11/R12) complete on feature/v1.1-wave2-batch2.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
@@ -605,9 +605,13 @@
         "wave_2_batch2_tasks": "3 tasks: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction)",
         "wave_2_batch2_commits": "1 commit (401c0f8)",
         "wave_2_batch2_files": "7 files (819 insertions, 43 deletions)",
-        "wave_2_batch2_tests": "232 tests passing",
-        "residual_summary": "CLI-R6/R7/R8 resolved. Remaining: Tasks 16-18 (SYNC-R6/R11/R12) for Multi-Creator governance."
-      }
+         "wave_2_batch2_tests": "232 tests passing",
+         "wave_2_batch2_extended_tasks": "3 tasks: SYNC-R6 (precheck auth), SYNC-R11 (retry_after), SYNC-R12 (partial apply persist)",
+         "wave_2_batch2_extended_commits": "1 commit (efedb0d)",
+         "wave_2_batch2_extended_files": "6 files (837 insertions, 15 deletions)",
+         "wave_2_batch2_extended_tests": "94 nexus-sync tests passing",
+         "residual_summary": "CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. All assigned tasks complete. Remaining open residuals: 34."
+       }
     }
   ],
   "metadata": {
@@ -616,11 +620,11 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08T21:00:00Z",
-      "total_open": 37,
+      "updated_at": "2026-04-08T22:30:00Z",
+      "total_open": 34,
       "by_severity": {
-        "high": 4,
-        "medium": 13,
+        "high": 3,
+        "medium": 12,
         "low": 19,
         "warning": 1
       },
@@ -632,7 +636,7 @@
       "by_plan": {
         "domain-models": 0,
         "cli-daemon-foundation": 2,
-        "sync-contract": 10,
+        "sync-contract": 7,
         "acp-client": 9,
         "context-assembly": 5
       },
@@ -757,6 +761,10 @@
       {
         "updated_at": "2026-04-08T21:00:00Z",
         "message": "Wave 2 Batch 2 (Tasks 8-10) complete: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction) resolved. 1 commit, 7 files (819 insertions), 232 tests passing. Total open residuals: 40 → 37."
+      },
+      {
+        "updated_at": "2026-04-08T22:30:00Z",
+        "message": "Wave 2 Batch 2 extended (Tasks 16-18): SYNC-R6 (precheck auth match validation), SYNC-R11 (honor retry_after from conflict), SYNC-R12 (persist partial apply retry state) resolved. 1 commit, 6 files (837 insertions), 94 nexus-sync tests passing. Total open residuals: 37 → 34."
       }
     ],
     "residual_findings": {
@@ -886,7 +894,10 @@
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "Requires daemon context — add when daemon exposes authenticated creator info",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T22:30:00Z",
+          "closure_note": "Implemented AuthContext struct and precheck_bundle_with_auth() in feature/v1.1-wave2-batch2. Validates submitting_creator_id against authenticated_creator_id in multi-creator worlds. Single-creator worlds skip validation. 7 new tests."
         },
         {
           "id": "SYNC-R7",
@@ -941,7 +952,10 @@
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "V1.1 — honor retry_after from conflict response",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T22:30:00Z",
+          "closure_note": "Implemented RetryAfterPolicy enum, mark_conflicted_with_retry() in outbox, updated replay() to include conflicted entries with elapsed retry_after, added retry_after_policy() convenience method to ConflictResponse. SyncConflict error now carries full ConflictResponse. 7 new tests."
         },
         {
           "id": "SYNC-R12",
@@ -952,7 +966,10 @@
           "decision": "defer",
           "owner": "@fullstack-dev",
           "target": "V1.1 — persist partial apply state to outbox for retry",
-          "tracking": null
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-08T22:30:00Z",
+          "closure_note": "Added partial_apply_states table to outbox schema. Implemented persist/load/remove/list methods with upsert semantics. Daemon can resume partial apply from persisted state after restart. 5 new outbox persistence tests + 2 new partial_apply tests."
         },
         {
           "id": "SYNC-R13",
