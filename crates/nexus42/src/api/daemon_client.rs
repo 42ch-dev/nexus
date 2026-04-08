@@ -77,6 +77,14 @@ impl DaemonClient {
         }
     }
 
+    /// Get runtime status from the daemon.
+    ///
+    /// Returns information about daemon health, uptime, workspace state,
+    /// and ACP session statistics.
+    pub async fn get_runtime_status(&self) -> Result<crate::api::models::RuntimeStatus> {
+        self.get("/v1/local/runtime/status").await
+    }
+
     /// Send a GET request
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);

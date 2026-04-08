@@ -39,9 +39,7 @@ impl Transport {
     pub fn from_args(args: &DaemonArgs) -> Self {
         // Unix socket takes priority
         if let Some(ref path) = args.socket_path {
-            return Transport::UnixSocket {
-                path: path.clone(),
-            };
+            return Transport::UnixSocket { path: path.clone() };
         }
 
         if let Ok(path) = std::env::var("NEXUS_DAEMON_SOCKET_PATH") {
@@ -151,10 +149,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let listener = UnixListener::bind(&path)?;
 
-                tracing::info!(
-                    ?path,
-                    "Local API listening on Unix socket"
-                );
+                tracing::info!(?path, "Local API listening on Unix socket");
                 tracing::info!("Press Ctrl+C to stop");
 
                 // axum 0.7's serve() only accepts TcpListener. For Unix sockets,
