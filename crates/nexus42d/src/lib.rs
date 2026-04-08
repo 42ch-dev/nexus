@@ -9,3 +9,6 @@ pub mod api;
 pub mod auth;
 pub mod db;
 pub mod workspace;
+
+#[cfg(test)]
+mod test_utils;
