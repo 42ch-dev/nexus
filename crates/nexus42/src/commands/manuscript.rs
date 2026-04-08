@@ -154,7 +154,10 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             }
             Ok(())
         }
-        ManuscriptCommand::Verify { title, check_content } => {
+        ManuscriptCommand::Verify {
+            title,
+            check_content,
+        } => {
             let conn = open_workspace_db(&workspace_root)?;
             let checks = manager.verify(&title, check_content, &conn)?;
             println!("Verifying manuscript '{}'...", title);

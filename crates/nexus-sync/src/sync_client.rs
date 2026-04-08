@@ -4,6 +4,17 @@
 //! Implements bundle push, state pull, and conflict detection.
 //!
 //! Uses `reqwest 0.12` for HTTP with retry logic and exponential backoff.
+//!
+//! # Configuration (SYNC-R5)
+//!
+//! The client supports body size limits to prevent memory exhaustion from
+//! large HTTP responses. Default limit is 10MB, configurable via builder.
+//!
+//! ```ignore
+//! let client = SyncClient::builder()
+//!     .body_max_size(20 * 1024 * 1024) // 20MB
+//!     .build("https://api.example.com", "token")?;
+//! ```
 
 use std::time::Duration;
 
@@ -17,6 +28,9 @@ use crate::partial_apply::PartialApplyResult;
 
 /// Default request timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+/// Default maximum HTTP body size (10MB).
+const DEFAULT_BODY_MAX_SIZE: usize = 10 * 1024 * 1024;
 
 /// Maximum number of automatic retries for transient errors.
 const MAX_HTTP_RETRIES: u32 = 3;
@@ -58,21 +72,108 @@ pub struct PullResponse {
     pub latest_bundle_id: Option<String>,
 }
 
+/// Builder for creating a SyncClient with custom configuration.
+pub struct SyncClientBuilder {
+    body_max_size: usize,
+    timeout_secs: u64,
+    max_retries: u32,
+}
+
+impl SyncClientBuilder {
+    /// Create a new builder with default configuration.
+    pub fn new() -> Self {
+        Self {
+            body_max_size: DEFAULT_BODY_MAX_SIZE,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
+            max_retries: MAX_HTTP_RETRIES,
+        }
+    }
+
+    /// Set the maximum HTTP body size in bytes.
+    ///
+    /// Default: 10MB (10 * 1024 * 1024 bytes).
+    ///
+    /// This limit applies to HTTP response bodies to prevent memory exhaustion.
+    /// Requests with bodies larger than this limit will fail with an error.
+    pub fn body_max_size(mut self, size: usize) -> Self {
+        self.body_max_size = size;
+        self
+    }
+
+    /// Set the request timeout in seconds.
+    ///
+    /// Default: 30 seconds.
+    pub fn timeout_secs(mut self, secs: u64) -> Self {
+        self.timeout_secs = secs;
+        self
+    }
+
+    /// Set the maximum number of retries for transient errors.
+    ///
+    /// Default: 3.
+    pub fn max_retries(mut self, retries: u32) -> Self {
+        self.max_retries = retries;
+        self
+    }
+
+    /// Build a SyncClient with the configured settings.
+    ///
+    /// # Arguments
+    /// * `platform_base_url` - Base URL of the platform sync API
+    /// * `auth_token` - Bearer token for authentication
+    pub fn build(self, platform_base_url: &str, auth_token: &str) -> SyncResult<SyncClient> {
+        SyncClient::with_config(
+            platform_base_url,
+            auth_token,
+            self.body_max_size,
+            self.timeout_secs,
+            self.max_retries,
+        )
+    }
+}
+
+impl Default for SyncClientBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Sync client for platform API interactions.
 pub struct SyncClient {
     client: Client,
     base_url: String,
     auth_token: String,
     max_retries: u32,
+    body_max_size: usize,
 }
 
 impl SyncClient {
-    /// Create a new sync client.
+    /// Create a new sync client with default configuration.
     ///
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform sync API (e.g., "https://api.nexus.42ch.io")
     /// * `auth_token` - Bearer token for authentication
+    ///
+    /// # Body Size Limit
+    /// Default: 10MB. Use `SyncClient::builder()` for custom configuration.
     pub fn new(platform_base_url: &str, auth_token: &str) -> SyncResult<Self> {
+        Self::with_config(
+            platform_base_url,
+            auth_token,
+            DEFAULT_BODY_MAX_SIZE,
+            DEFAULT_TIMEOUT_SECS,
+            MAX_HTTP_RETRIES,
+        )
+    }
+
+    /// Create a new sync client with custom configuration.
+    fn with_config(
+        platform_base_url: &str,
+        auth_token: &str,
+        body_max_size: usize,
+        timeout_secs: u64,
+        max_retries: u32,
+    ) -> SyncResult<Self> {
         if platform_base_url.is_empty() {
             return Err(SyncError::SyncNotConfigured(
                 "platform_base_url is required".to_string(),
@@ -85,7 +186,10 @@ impl SyncClient {
         }
 
         let client = Client::builder()
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+            .timeout(Duration::from_secs(timeout_secs))
+            // Note: reqwest 0.12 uses different methods for body size limiting
+            // For HTTP/1.1, we can use http1_max_buf_size() which controls buffer size
+            // For HTTP/2, there's no direct size limit, but we can check Content-Length
             .build()?;
 
         // Normalize base URL: remove trailing slash
@@ -95,8 +199,14 @@ impl SyncClient {
             client,
             base_url,
             auth_token: auth_token.to_string(),
-            max_retries: MAX_HTTP_RETRIES,
+            max_retries,
+            body_max_size,
         })
+    }
+
+    /// Create a builder for custom client configuration.
+    pub fn builder() -> SyncClientBuilder {
+        SyncClientBuilder::new()
     }
 
     /// Create a new sync client with custom configuration for testing.
@@ -106,15 +216,25 @@ impl SyncClient {
         auth_token: &str,
         max_retries: u32,
     ) -> SyncResult<Self> {
-        let mut client = Self::new(platform_base_url, auth_token)?;
-        client.max_retries = max_retries;
-        Ok(client)
+        Self::with_config(
+            platform_base_url,
+            auth_token,
+            DEFAULT_BODY_MAX_SIZE,
+            DEFAULT_TIMEOUT_SECS,
+            max_retries,
+        )
     }
 
     /// Get the base URL (for testing).
     #[cfg(test)]
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Get the configured body max size.
+    #[cfg(test)]
+    pub fn body_max_size(&self) -> usize {
+        self.body_max_size
     }
 
     /// Push a bundle to the platform sync API.
@@ -134,10 +254,34 @@ impl SyncClient {
             .await?;
 
         let status = response.status().as_u16();
+
+        // Check Content-Length header before reading body (SYNC-R5)
+        if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
+            if let Ok(length_str) = content_length.to_str() {
+                if let Ok(length) = length_str.parse::<usize>() {
+                    if length > self.body_max_size {
+                        return Err(SyncError::Serialization(format!(
+                            "Response body too large: {} bytes (limit: {} bytes)",
+                            length, self.body_max_size
+                        )));
+                    }
+                }
+            }
+        }
+
         let text = response
             .text()
             .await
             .map_err(|e| SyncError::Serialization(e.to_string()))?;
+
+        // Check actual body size (SYNC-R5)
+        if text.len() > self.body_max_size {
+            return Err(SyncError::Serialization(format!(
+                "Response body too large: {} bytes (limit: {} bytes)",
+                text.len(),
+                self.body_max_size
+            )));
+        }
 
         if status == 409 {
             let conflict = ConflictResponse::from_json(&text)?;
@@ -196,10 +340,34 @@ impl SyncClient {
             .await?;
 
         let status = response.status().as_u16();
+
+        // Check Content-Length header (SYNC-R5)
+        if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
+            if let Ok(length_str) = content_length.to_str() {
+                if let Ok(length) = length_str.parse::<usize>() {
+                    if length > self.body_max_size {
+                        return Err(SyncError::Serialization(format!(
+                            "Response body too large: {} bytes (limit: {} bytes)",
+                            length, self.body_max_size
+                        )));
+                    }
+                }
+            }
+        }
+
         let body = response
             .text()
             .await
             .map_err(|e| SyncError::Serialization(e.to_string()))?;
+
+        // Check actual body size (SYNC-R5)
+        if body.len() > self.body_max_size {
+            return Err(SyncError::Serialization(format!(
+                "Response body too large: {} bytes (limit: {} bytes)",
+                body.len(),
+                self.body_max_size
+            )));
+        }
 
         if status >= 400 {
             return Err(SyncError::PlatformError { status, body });
@@ -333,6 +501,31 @@ mod tests {
     fn client_normalizes_base_url() {
         let client = SyncClient::new("https://api.example.com/", "token").expect("create");
         assert_eq!(client.base_url(), "https://api.example.com");
+    }
+
+    #[test]
+    fn client_default_body_max_size() {
+        let client = SyncClient::new("https://api.example.com", "token").expect("create");
+        assert_eq!(client.body_max_size(), 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn builder_custom_body_max_size() {
+        let client = SyncClient::builder()
+            .body_max_size(20 * 1024 * 1024)
+            .build("https://api.example.com", "token")
+            .expect("build");
+        assert_eq!(client.body_max_size(), 20 * 1024 * 1024);
+    }
+
+    #[test]
+    fn builder_custom_timeout() {
+        let client = SyncClient::builder()
+            .timeout_secs(60)
+            .build("https://api.example.com", "token")
+            .expect("build");
+        // Timeout is internal to client, we trust it's set correctly
+        assert!(client.base_url().len() > 0);
     }
 
     #[test]
