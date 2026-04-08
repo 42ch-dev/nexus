@@ -207,14 +207,42 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
 
-            // Default IDs from config if not provided
-            let workspace_id = workspace_id.as_deref().unwrap_or("local").to_string();
-            let world_id = world_id.as_deref().unwrap_or("unknown").to_string();
-            let creator_id = creator_id
-                .as_deref()
-                .or(config.active_creator_id.as_deref())
-                .unwrap_or("unknown")
-                .to_string();
+            let mut default_id_fields: Vec<&'static str> = Vec::new();
+
+            let workspace_id = match workspace_id {
+                Some(s) => s,
+                None => {
+                    default_id_fields.push("workspace_id");
+                    "local".to_string()
+                }
+            };
+
+            let world_id = match world_id {
+                Some(s) => s,
+                None => {
+                    default_id_fields.push("world_id");
+                    "unknown".to_string()
+                }
+            };
+
+            let creator_id = match creator_id {
+                Some(s) => s,
+                None => match config.active_creator_id.as_deref() {
+                    Some(s) => s.to_string(),
+                    None => {
+                        default_id_fields.push("creator_id");
+                        "unknown".to_string()
+                    }
+                },
+            };
+
+            if !default_id_fields.is_empty() {
+                eprintln!(
+                    "Warning: sync push using placeholder IDs (missing {}). \
+Real platform sync requires --workspace-id, --world-id, and --creator-id (or active_creator_id in config).",
+                    default_id_fields.join(", ")
+                );
+            }
 
             let request = SyncPushRequest {
                 workspace_id,

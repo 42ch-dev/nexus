@@ -133,20 +133,35 @@ impl From<nexus_contracts::User> for User {
     }
 }
 
-impl From<User> for nexus_contracts::User {
-    fn from(d: User) -> Self {
-        Self {
+impl TryFrom<User> for nexus_contracts::User {
+    type Error = DomainError;
+
+    fn try_from(d: User) -> Result<Self, Self::Error> {
+        let account_status =
+            nexus_contracts::AccountStatus::from_str(&d.account_status).map_err(|_| {
+                DomainError::ValidationError(format!(
+                    "account_status {:?} is not a valid wire enum value",
+                    d.account_status
+                ))
+            })?;
+        let subscription_tier = nexus_contracts::SubscriptionTier::from_str(&d.subscription_tier)
+            .map_err(|_| {
+            DomainError::ValidationError(format!(
+                "subscription_tier {:?} is not a valid wire enum value",
+                d.subscription_tier
+            ))
+        })?;
+        Ok(Self {
             schema_version: d.schema_version,
             user_id: d.user_id,
             username: d.username,
             email: d.email,
             display_name: d.display_name,
-            account_status: nexus_contracts::AccountStatus::from_str(&d.account_status).unwrap(),
-            subscription_tier: nexus_contracts::SubscriptionTier::from_str(&d.subscription_tier)
-                .unwrap(),
+            account_status,
+            subscription_tier,
             created_at: d.created_at,
             updated_at: d.updated_at,
-        }
+        })
     }
 }
 
@@ -179,7 +194,7 @@ mod tests {
     #[test]
     fn contract_roundtrip() {
         let u = User::register("usr_rt", "bob", "b@example.com", "Bob");
-        let c = nexus_contracts::User::from(u.clone());
+        let c = nexus_contracts::User::try_from(u.clone()).unwrap();
         let back = User::from(c);
         assert_eq!(back.user_id, u.user_id);
         assert_eq!(back.username, u.username);
