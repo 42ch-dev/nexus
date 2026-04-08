@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-09-v1.1-cli-daemon-hardening",
+  "archived_at": "2026-04-08",
+  "closure_note": "All 12 residuals resolved by Plan 09 implementation (7 tasks)",
+  "entries": [
+    {"id": "CLI-R15", "title": "No tracing in daemon API handlers", "severity": "medium", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 1: 29 tracing statements added across 8 handler files, commit f0d2ec3"},
+    {"id": "FH-R2", "title": "Pool timeout not explicitly configured", "severity": "medium", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 2: PoolConfig struct with builder + env vars, commit 7793cd3"},
+    {"id": "FH-R4", "title": "NexusApiError auth variants underspecified", "severity": "medium", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 3: 4 new auth variants + 7 tests, commit 83e2d40"},
+    {"id": "FH-R5", "title": "DbPool::status() has no callers", "severity": "low", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 7b: #[allow(dead_code)] + doc comment, commit 23ff879"},
+    {"id": "FH-R7", "title": "SQLite file locking not tested", "severity": "low", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 7e: WAL mode mitigation doc, commit 23ff879"},
+    {"id": "FH-R8", "title": "Race condition window between init_workspace and middleware", "severity": "low", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 7d: Safety comment documenting negligible window, commit 23ff879"},
+    {"id": "FH-R9", "title": "Pool size tuning undocumented", "severity": "low", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 7a: Pool tuning guidance doc, commit 23ff879"},
+    {"id": "FH-R10", "title": "Mutex poisoning uses .expect()", "severity": "low", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 7c: Replaced .expect() with .unwrap_or_else() + warn, commit 23ff879"},
+    {"id": "FH-R11", "title": "Test file organization", "severity": "low", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 7f: Inline comments explaining why extraction infeasible, commit 23ff879"},
+    {"id": "SYNC-R7", "title": "BundleBuilder missing monotonicity validation", "severity": "medium", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 4: BundleValidationError + validate/build_validated + 9 tests, commit 61a6736"},
+    {"id": "SYNC-R8", "title": "Schema allOf may not enforce constraints correctly", "severity": "medium", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 5: Verified correct — allOf is validation-only, types from domain schema, commit f90531d"},
+    {"id": "SYNC-R9", "title": "SyncClient auth token format validation", "severity": "medium", "lifecycle": "resolved", "closed_at": "2026-04-08", "closure_evidence": "Task 6: validate_auth_token + 8 tests, commit e7a8256"}
+  ]
+}
