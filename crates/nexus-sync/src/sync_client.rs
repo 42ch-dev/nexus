@@ -38,6 +38,36 @@ const MAX_HTTP_RETRIES: u32 = 3;
 /// Base delay for HTTP retry backoff in milliseconds.
 const BASE_RETRY_DELAY_MS: u64 = 500;
 
+/// Minimum required auth token length.
+const MIN_AUTH_TOKEN_LENGTH: usize = 64;
+
+/// Validate auth token format.
+///
+/// Token must:
+/// - Not be empty (handled separately in with_config)
+/// - Be at least 64 characters long
+/// - Contain only alphanumeric characters, hyphens, underscores, or dots
+fn validate_auth_token(token: &str) -> SyncResult<()> {
+    if token.len() < MIN_AUTH_TOKEN_LENGTH {
+        return Err(SyncError::AuthTokenInvalid(format!(
+            "token must be at least {} characters long (got {})",
+            MIN_AUTH_TOKEN_LENGTH,
+            token.len()
+        )));
+    }
+
+    for c in token.chars() {
+        if !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
+            return Err(SyncError::AuthTokenInvalid(format!(
+                "token contains invalid character '{}'; allowed: alphanumeric, hyphens, underscores, dots",
+                c
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Successful push response from the platform.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PushResponse {
@@ -184,6 +214,9 @@ impl SyncClient {
                 "auth_token is required".to_string(),
             ));
         }
+
+        // Validate auth token format
+        validate_auth_token(auth_token)?;
 
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
@@ -485,9 +518,12 @@ impl SyncClient {
 mod tests {
     use super::*;
 
+    // Valid auth token for tests (64+ chars, alphanumeric + hyphens + underscores + dots)
+    const VALID_TOKEN: &str = "valid_token_1234567890123456789012345678901234567890123456789012345678901234567890";
+
     #[test]
     fn client_creation_requires_base_url() {
-        let result = SyncClient::new("", "token");
+        let result = SyncClient::new("", VALID_TOKEN);
         assert!(matches!(result, Err(SyncError::SyncNotConfigured { .. })));
     }
 
@@ -498,14 +534,67 @@ mod tests {
     }
 
     #[test]
+    fn client_creation_rejects_empty_token() {
+        let result = SyncClient::new("https://api.example.com", "");
+        assert!(matches!(result, Err(SyncError::SyncNotConfigured(_))));
+        if let Err(SyncError::SyncNotConfigured(msg)) = result {
+            assert!(msg.contains("auth_token is required"));
+        }
+    }
+
+    #[test]
+    fn client_creation_rejects_short_token() {
+        let short_token = "short_token_123"; // 15 chars
+        let result = SyncClient::new("https://api.example.com", short_token);
+        assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
+        if let Err(SyncError::AuthTokenInvalid(msg)) = result {
+            assert!(msg.contains("at least 64 characters"));
+            assert!(msg.contains("got 15"));
+        }
+    }
+
+    #[test]
+    fn client_creation_rejects_invalid_characters() {
+        let invalid_token = "invalid!token#1234567890123456789012345678901234567890123456789012345678901234";
+        let result = SyncClient::new("https://api.example.com", invalid_token);
+        assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
+        if let Err(SyncError::AuthTokenInvalid(msg)) = result {
+            assert!(msg.contains("invalid character"));
+            assert!(msg.contains('!') || msg.contains('#'));
+        }
+    }
+
+    #[test]
+    fn client_creation_accepts_valid_token() {
+        let result = SyncClient::new("https://api.example.com", VALID_TOKEN);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn client_creation_accepts_exactly_64_chars() {
+        let exactly_64 = "exact_64_chars_1234567890123456789012345678901234567890123456789";
+        assert_eq!(exactly_64.len(), 64);
+        let result = SyncClient::new("https://api.example.com", exactly_64);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn client_creation_accepts_very_long_token() {
+        let very_long_token = "very_long_token_12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890";
+        assert!(very_long_token.len() > 100);
+        let result = SyncClient::new("https://api.example.com", very_long_token);
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn client_normalizes_base_url() {
-        let client = SyncClient::new("https://api.example.com/", "token").expect("create");
+        let client = SyncClient::new("https://api.example.com/", VALID_TOKEN).expect("create");
         assert_eq!(client.base_url(), "https://api.example.com");
     }
 
     #[test]
     fn client_default_body_max_size() {
-        let client = SyncClient::new("https://api.example.com", "token").expect("create");
+        let client = SyncClient::new("https://api.example.com", VALID_TOKEN).expect("create");
         assert_eq!(client.body_max_size(), 10 * 1024 * 1024);
     }
 
@@ -513,7 +602,7 @@ mod tests {
     fn builder_custom_body_max_size() {
         let client = SyncClient::builder()
             .body_max_size(20 * 1024 * 1024)
-            .build("https://api.example.com", "token")
+            .build("https://api.example.com", VALID_TOKEN)
             .expect("build");
         assert_eq!(client.body_max_size(), 20 * 1024 * 1024);
     }
@@ -522,10 +611,24 @@ mod tests {
     fn builder_custom_timeout() {
         let client = SyncClient::builder()
             .timeout_secs(60)
-            .build("https://api.example.com", "token")
+            .build("https://api.example.com", VALID_TOKEN)
             .expect("build");
         // Timeout is internal to client, we trust it's set correctly
         assert!(client.base_url().len() > 0);
+    }
+
+    #[test]
+    fn builder_rejects_short_token() {
+        let result = SyncClient::builder()
+            .build("https://api.example.com", "short");
+        assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
+    }
+
+    #[test]
+    fn builder_accepts_valid_token() {
+        let result = SyncClient::builder()
+            .build("https://api.example.com", VALID_TOKEN);
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -75,6 +75,10 @@ pub enum SyncError {
     #[error("sync client not configured: {0}")]
     SyncNotConfigured(String),
 
+    /// Auth token format is invalid.
+    #[error("auth token invalid: {0}")]
+    AuthTokenInvalid(String),
+
     /// Sync request timed out.
     #[error("sync request timed out after {seconds}s")]
     SyncTimeout { seconds: u64 },
@@ -147,6 +151,7 @@ impl SyncError {
             SyncError::PlatformError { .. } => "PLATFORM_ERROR",
             SyncError::SyncConflict { .. } => "SYNC_CONFLICT",
             SyncError::SyncNotConfigured(_) => "SYNC_NOT_CONFIGURED",
+            SyncError::AuthTokenInvalid(_) => "AUTH_TOKEN_INVALID",
             SyncError::SyncTimeout { .. } => "SYNC_TIMEOUT",
 
             // Conflict resolution errors
