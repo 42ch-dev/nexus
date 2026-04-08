@@ -211,7 +211,17 @@ fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Result<()
         );
 
         match result {
-            Ok((ref_id, source_type, uri, title, status, created_at, tags, content_hash, content)) => {
+            Ok((
+                ref_id,
+                source_type,
+                uri,
+                title,
+                status,
+                created_at,
+                tags,
+                content_hash,
+                content,
+            )) => {
                 println!("Reference Source: {}", ref_id);
                 println!("  Title:       {}", title);
                 println!("  Type:        {}", source_type);
@@ -394,12 +404,8 @@ fn extract_pdf_content(path: &std::path::Path) -> Result<String> {
         )));
     }
 
-    let text = String::from_utf8(output.stdout).map_err(|e| {
-        CliError::Other(format!(
-            "pdftotext output is not valid UTF-8: {}",
-            e
-        ))
-    })?;
+    let text = String::from_utf8(output.stdout)
+        .map_err(|e| CliError::Other(format!("pdftotext output is not valid UTF-8: {}", e)))?;
 
     if text.trim().is_empty() {
         return Err(CliError::Other(
@@ -450,9 +456,8 @@ fn extract_url_content(path: &std::path::Path) -> Result<String> {
         )));
     }
 
-    let html = String::from_utf8(output.stdout).map_err(|e| {
-        CliError::Other(format!("Response is not valid UTF-8: {}", e))
-    })?;
+    let html = String::from_utf8(output.stdout)
+        .map_err(|e| CliError::Other(format!("Response is not valid UTF-8: {}", e)))?;
 
     // Strip HTML tags for a simple text extraction
     // Note: This is a basic implementation. For better results, consider using
@@ -472,17 +477,17 @@ fn extract_url_content(path: &std::path::Path) -> Result<String> {
 fn strip_html_tags(html: &str) -> String {
     // Use a simple regex-like approach to remove script and style blocks first
     let result = html.to_string();
-    
+
     // Remove script blocks (including content)
     let mut cleaned = String::new();
     let mut in_script = false;
     let chars: Vec<char> = result.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         // Check for script or style start
         if i + 7 <= chars.len() {
-            let tag_start: String = chars[i..i+7].iter().collect();
+            let tag_start: String = chars[i..i + 7].iter().collect();
             let tag_lower = tag_start.to_lowercase();
             if tag_lower == "<script" {
                 // Skip until </script>
@@ -491,9 +496,9 @@ fn strip_html_tags(html: &str) -> String {
                 continue;
             }
         }
-        
+
         if i + 6 <= chars.len() {
-            let tag_start: String = chars[i..i+6].iter().collect();
+            let tag_start: String = chars[i..i + 6].iter().collect();
             let tag_lower = tag_start.to_lowercase();
             if tag_lower == "<style" {
                 in_script = true;
@@ -501,10 +506,10 @@ fn strip_html_tags(html: &str) -> String {
                 continue;
             }
         }
-        
+
         // Check for script/style end
         if in_script && i + 9 <= chars.len() {
-            let tag_end: String = chars[i..i+9].iter().collect();
+            let tag_end: String = chars[i..i + 9].iter().collect();
             let tag_lower = tag_end.to_lowercase();
             if tag_lower == "</script>" {
                 in_script = false;
@@ -512,9 +517,9 @@ fn strip_html_tags(html: &str) -> String {
                 continue;
             }
         }
-        
+
         if in_script && i + 8 <= chars.len() {
-            let tag_end: String = chars[i..i+8].iter().collect();
+            let tag_end: String = chars[i..i + 8].iter().collect();
             let tag_lower = tag_end.to_lowercase();
             if tag_lower == "</style>" {
                 in_script = false;
@@ -522,13 +527,13 @@ fn strip_html_tags(html: &str) -> String {
                 continue;
             }
         }
-        
+
         // Skip content in script/style blocks
         if in_script {
             i += 1;
             continue;
         }
-        
+
         // Remove HTML tags
         if chars[i] == '<' {
             // Skip until >
@@ -540,11 +545,11 @@ fn strip_html_tags(html: &str) -> String {
             }
             continue;
         }
-        
+
         cleaned.push(chars[i]);
         i += 1;
     }
-    
+
     // Normalize whitespace
     cleaned
         .lines()
@@ -572,8 +577,8 @@ mod tests {
     fn test_compute_content_hash() {
         let content = "Hello, world!";
         let hash = compute_content_hash(content);
-        
-        // SHA256 of "Hello, world!" 
+
+        // SHA256 of "Hello, world!"
         assert!(hash.starts_with("sha256:"));
         assert_eq!(hash.len(), 71); // "sha256:" + 64 hex chars
     }
@@ -581,9 +586,10 @@ mod tests {
     /// Test HTML tag stripping
     #[test]
     fn test_strip_html_tags() {
-        let html = "<html><head><title>Test</title></head><body><p>Hello <b>world</b>!</p></body></html>";
+        let html =
+            "<html><head><title>Test</title></head><body><p>Hello <b>world</b>!</p></body></html>";
         let text = strip_html_tags(html);
-        
+
         assert!(!text.contains('<'));
         assert!(!text.contains('>'));
         assert!(text.contains("Hello"));
@@ -593,9 +599,10 @@ mod tests {
     /// Test HTML tag stripping removes script content
     #[test]
     fn test_strip_html_removes_scripts() {
-        let html = r#"<html><body><script>alert('evil');</script><p>Safe content</p></body></html>"#;
+        let html =
+            r#"<html><body><script>alert('evil');</script><p>Safe content</p></body></html>"#;
         let text = strip_html_tags(html);
-        
+
         assert!(!text.contains("script"));
         assert!(!text.contains("alert"));
         assert!(text.contains("Safe content"));
@@ -607,7 +614,7 @@ mod tests {
         // Valid URLs
         assert!("http://example.com".starts_with("http://"));
         assert!("https://example.com".starts_with("https://"));
-        
+
         // Invalid URLs
         assert!(!"ftp://example.com".starts_with("http"));
         assert!(!"example.com".starts_with("http"));
@@ -647,11 +654,7 @@ mod tests {
         let file_path = tmp.path().join("test.txt");
         std::fs::write(&file_path, "Test content").unwrap();
 
-        let files = vec![(
-            "test.txt".to_string(),
-            "txt".to_string(),
-            file_path.clone(),
-        )];
+        let files = vec![("test.txt".to_string(), "txt".to_string(), file_path.clone())];
 
         // Test without extraction
         let result = cache_scan_results(&files, false);

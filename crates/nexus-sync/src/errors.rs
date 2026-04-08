@@ -3,6 +3,16 @@
 //! Sync-layer error types for outbox, bundle building, sync client,
 //! conflict resolution, and precheck operations.
 //! Uses `thiserror` following the domain layer pattern.
+//!
+//! # Error Code Strategy (DEBT-X3)
+//!
+//! Each `SyncError` variant has a standardized error code (UPPER_SNAKE_CASE)
+//! matching the pattern used by `NexusApiError` in the daemon layer.
+//!
+//! Error codes are used for:
+//! - Structured logging and monitoring
+//! - Client-side error categorization
+//! - Mapping to HTTP status codes when crossing layer boundaries
 
 use thiserror::Error;
 
@@ -113,6 +123,52 @@ pub enum SyncError {
     Serialization(String),
 }
 
+impl SyncError {
+    /// Get the error code string (UPPER_SNAKE_CASE)
+    ///
+    /// Error codes are standardized across the nexus codebase for
+    /// consistent error tracking and monitoring.
+    pub fn error_code(&self) -> &str {
+        match self {
+            // Outbox errors
+            SyncError::OutboxDatabase(_) => "OUTBOX_DATABASE_ERROR",
+            SyncError::OutboxEntryNotFound { .. } => "OUTBOX_ENTRY_NOT_FOUND",
+            SyncError::OutboxInvalidState { .. } => "OUTBOX_INVALID_STATE",
+            SyncError::OutboxMaxRetriesExceeded { .. } => "OUTBOX_MAX_RETRIES_EXCEEDED",
+
+            // Bundle errors
+            SyncError::BundleValidation(_) => "BUNDLE_VALIDATION_ERROR",
+            SyncError::BundleMissingField { .. } => "BUNDLE_MISSING_FIELD",
+            SyncError::BundleSequenceNotMonotonic { .. } => "BUNDLE_SEQUENCE_NOT_MONOTONIC",
+            SyncError::BundleEmptyDeltas => "BUNDLE_EMPTY_DELTAS",
+
+            // Sync client errors
+            SyncError::HttpError(_) => "HTTP_ERROR",
+            SyncError::PlatformError { .. } => "PLATFORM_ERROR",
+            SyncError::SyncConflict { .. } => "SYNC_CONFLICT",
+            SyncError::SyncNotConfigured(_) => "SYNC_NOT_CONFIGURED",
+            SyncError::SyncTimeout { .. } => "SYNC_TIMEOUT",
+
+            // Conflict resolution errors
+            SyncError::UnresolvableConflict(_) => "UNRESOLVABLE_CONFLICT",
+            SyncError::ManualReviewRequired(_) => "MANUAL_REVIEW_REQUIRED",
+
+            // Partial apply errors
+            SyncError::PartialApplyStateError(_) => "PARTIAL_APPLY_STATE_ERROR",
+            SyncError::AllDeltasFailed { .. } => "ALL_DELTAS_FAILED",
+
+            // Precheck errors
+            SyncError::PrecheckFailed(_) => "PRECHECK_FAILED",
+            SyncError::PrecheckVersionMismatch { .. } => "PRECHECK_VERSION_MISMATCH",
+            SyncError::PrecheckCommandInconsistency(_) => "PRECHECK_COMMAND_INCONSISTENCY",
+            SyncError::PrecheckSchemaViolation(_) => "PRECHECK_SCHEMA_VIOLATION",
+
+            // Serialization errors
+            SyncError::Serialization(_) => "SERIALIZATION_ERROR",
+        }
+    }
+}
+
 impl From<serde_json::Error> for SyncError {
     fn from(err: serde_json::Error) -> Self {
         SyncError::Serialization(err.to_string())
@@ -121,6 +177,18 @@ impl From<serde_json::Error> for SyncError {
 
 impl From<rusqlite::Error> for SyncError {
     fn from(err: rusqlite::Error) -> Self {
+        SyncError::OutboxDatabase(err.to_string())
+    }
+}
+
+impl From<deadpool_sqlite::BuildError> for SyncError {
+    fn from(err: deadpool_sqlite::BuildError) -> Self {
+        SyncError::OutboxDatabase(err.to_string())
+    }
+}
+
+impl From<deadpool_sqlite::PoolError> for SyncError {
+    fn from(err: deadpool_sqlite::PoolError) -> Self {
         SyncError::OutboxDatabase(err.to_string())
     }
 }
