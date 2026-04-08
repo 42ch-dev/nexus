@@ -32,7 +32,7 @@
       "description": "Complete device code OAuth flow, token refresh, daemon auth middleware, CLI auth client update",
       "dependency": "2026-04-06-foundation-hardening, 2026-04-06-daemon-manuscript-ops (soft)",
       "spec_refs": [
-        ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
+        ".agents/plans/archived/knowledge/phase2-architecture-plan-v1.md"
       ],
       "effort": "M — ~2-3 agent sessions",
       "residual_summary": "3 addressed (1 HIGH, 2 MEDIUM resolved)"
