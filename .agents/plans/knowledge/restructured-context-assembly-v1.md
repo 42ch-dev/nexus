@@ -12,13 +12,15 @@
 
 The original Context Assembly implementation plan (`.agents/plans/2025-04-05-context-assembly.md`) contained five critical deviations from frozen specifications. This restructured spec resolves all five:
 
-| # | Conflict | Severity | Resolution |
-|---|----------|----------|------------|
-| 1 | **Tech Stack Conflict**: Plan proposed Rust crate `crates/nexus-context/` with Neo4j/Postgres/pgvector clients. Context Assembly is frozen as TypeScript-only implementation. | P1 Critical | Remove Rust crate entirely. CLI calls platform API; Context Assembly is a platform-side TypeScript service. |
-| 2 | **Storage Ownership Conflict**: Plan proposed CLI-side direct access to Neo4j/Postgres/pgvector. World/Creator metadata, Key Block structured state, Timeline/Fork graph, Explore indexes, and subscription/permission info are all platform-authoritative stores. | P1 Critical | Prohibit CLI-side direct database access. Local API endpoint is the only integration point. |
-| 3 | **Responsibility Split Violation**: Plan put assembly logic in CLI/Rust. CLI generates summaries → platform receives/validates/indexes → agent consumes assembled context. | P1 Critical | Align with responsibility split (see §7 below). |
-| 4 | **Over-Scoped Embedding/Reranking**: Plan included OpenAI/local model embeddings and reranking. LLM-as-judge and ColBERT/cross-encoder reranking are explicitly excluded from V1.0. | P2 | Remove embedding/reranking from CLI-side scope. Defer to platform-side future enhancements. |
-| 5 | **Docker Compose Misalignment**: Plan's docker-compose included Neo4j + Postgres + pgvector + Redis for CLI dev. CLI uses SQLite for local structured state. | P3 | Remove docker-compose from CLI-side plan. Move to separate platform-dev infrastructure file (not in this repo). |
+
+| #   | Conflict                                                                                                                                                                                                                                                           | Severity    | Resolution                                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| 1   | **Tech Stack Conflict**: Plan proposed Rust crate `crates/nexus-context/` with Neo4j/Postgres/pgvector clients. Context Assembly is frozen as TypeScript-only implementation.                                                                                      | P1 Critical | Remove Rust crate entirely. CLI calls platform API; Context Assembly is a platform-side TypeScript service.     |
+| 2   | **Storage Ownership Conflict**: Plan proposed CLI-side direct access to Neo4j/Postgres/pgvector. World/Creator metadata, Key Block structured state, Timeline/Fork graph, Explore indexes, and subscription/permission info are all platform-authoritative stores. | P1 Critical | Prohibit CLI-side direct database access. Local API endpoint is the only integration point.                     |
+| 3   | **Responsibility Split Violation**: Plan put assembly logic in CLI/Rust. CLI generates summaries → platform receives/validates/indexes → agent consumes assembled context.                                                                                         | P1 Critical | Align with responsibility split (see §7 below).                                                                 |
+| 4   | **Over-Scoped Embedding/Reranking**: Plan included OpenAI/local model embeddings and reranking. LLM-as-judge and ColBERT/cross-encoder reranking are explicitly excluded from V1.0.                                                                                | P2          | Remove embedding/reranking from CLI-side scope. Defer to platform-side future enhancements.                     |
+| 5   | **Docker Compose Misalignment**: Plan's docker-compose included Neo4j + Postgres + pgvector + Redis for CLI dev. CLI uses SQLite for local structured state.                                                                                                       | P3          | Remove docker-compose from CLI-side plan. Move to separate platform-dev infrastructure file (not in this repo). |
+
 
 ### 1.2 Revision Goals
 
@@ -36,7 +38,7 @@ All restructured decisions are based on these frozen design constraints:
 - **CLI generates summaries; platform does everything else**: CLI generates `StoryManifest.summary_text`; platform receives, validates, indexes into graph/vector stores, and serves assembled context
 - **Platform-authoritative stores**: World/Creator metadata, Key Block structured state, Timeline/Fork graph, Explore indexes, and subscription/permission info are all managed by the platform — CLI never accesses them directly
 - **Local API is the only integration point**: `POST /v1/local/context/assemble` is the frozen Local API contract between CLI and Context Assembly
-- **`nexus42 context assemble`**: reads confirmed KBs, recent canon timeline, and memory slices; outputs a read-only snapshot for local agent/template consumption
+- `**nexus42 context assemble`**: reads confirmed KBs, recent canon timeline, and memory slices; outputs a read-only snapshot for local agent/template consumption
 - **Responsibility split**: CLI generates story summaries and includes them in structured sync submissions; platform receives summaries, validates, checks consistency, persists to database, vectorizes, and provides Context Assembly retrieval
 
 ---
@@ -46,9 +48,7 @@ All restructured decisions are based on these frozen design constraints:
 The following goals are frozen as part of the V1.0 Context Assembly specification. All implementation work must satisfy these goals.
 
 1. **Stable read-only context snapshots**: Provide BWR (Block-World-Reasoning) and world advancement with consistent, reproducible context snapshots. Same authoritative state → same assembled output (stable sort order). Snapshots are read-only — they do not mutate world state.
-
 2. **Unified retrieval paths**: Consolidate retrieval of KeyBlocks, Timeline events, Story summaries, and MemoryItems through a single query façade. Consumers should not need to query each store separately.
-
 3. **V1.0 minimum viable freeze**: Advanced capabilities (V1.1+) must not leak into V1.0 scope. V1.0 is frozen with a minimal sorting strategy (metadata filter → vector top-k → graph expansion → rule merge → stable sort). No LLM-as-judge, no cross-encoder reranking, no declarative query DSL.
 
 ---
@@ -57,13 +57,15 @@ The following goals are frozen as part of the V1.0 Context Assembly specificatio
 
 Context Assembly consumes five input types. Each has an authoritative source defined below. The platform-side service aggregates these inputs into a unified read-only context snapshot.
 
-| # | Input Type | Authoritative Source | Description |
-|---|-----------|---------------------|-------------|
-| 1 | **Confirmed KeyBlocks** | Neo4j graph (platform-authoritative) | Structured state of confirmed world-building blocks (characters, locations, rules, etc.) that have passed validation and are part of the canon. |
-| 2 | **Recent canon timeline** | Neo4j graph (platform-authoritative) | Recent events on the canon timeline, ordered by `delta_sequence`. Provides temporal context for the current world state. |
-| 3 | **Story summaries** | Postgres (platform-authoritative), generated by CLI | CLI-generated `StoryManifest.summary_text` for stories in the workspace. Platform receives via sync pipeline (story_manifest delta), persists to Postgres, and indexes into pgvector for semantic retrieval. |
-| 4 | **Memory slices** | pgvector (platform-authoritative) | User-created memory items (research notes, review notes, story summaries as memory). Embeddings stored in pgvector for similarity search. |
-| 5 | **Query intent / caller info** | Request parameters | The `ContextAssembleRequestV1` includes workspace ID, creator ID, world ID, and optional filters (`memory_kinds`, `max_timeline_events`, `max_story_summaries`) to scope the assembled context. |
+
+| #   | Input Type                     | Authoritative Source                                | Description                                                                                                                                                                                                  |
+| --- | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **Confirmed KeyBlocks**        | Neo4j graph (platform-authoritative)                | Structured state of confirmed world-building blocks (characters, locations, rules, etc.) that have passed validation and are part of the canon.                                                              |
+| 2   | **Recent canon timeline**      | Neo4j graph (platform-authoritative)                | Recent events on the canon timeline, ordered by `delta_sequence`. Provides temporal context for the current world state.                                                                                     |
+| 3   | **Story summaries**            | Postgres (platform-authoritative), generated by CLI | CLI-generated `StoryManifest.summary_text` for stories in the workspace. Platform receives via sync pipeline (story_manifest delta), persists to Postgres, and indexes into pgvector for semantic retrieval. |
+| 4   | **Memory slices**              | pgvector (platform-authoritative)                   | User-created memory items (research notes, review notes, story summaries as memory). Embeddings stored in pgvector for similarity search.                                                                    |
+| 5   | **Query intent / caller info** | Request parameters                                  | The `ContextAssembleRequestV1` includes workspace ID, creator ID, world ID, and optional filters (`memory_kinds`, `max_timeline_events`, `max_story_summaries`) to scope the assembled context.              |
+
 
 **Note**: `ReferenceSource` entities (research material files, external references) do NOT enter the platform Context Assembly pipeline in V1.0. They are local-only research scope, not manuscript scope. This may change in V1.1+.
 
@@ -83,11 +85,13 @@ The V1.0 Context Assembly architecture uses:
 
 ### 4.2 Storage Split
 
-| Store | Data | Reason |
-|-------|------|--------|
-| **Neo4j** | KeyBlocks (KB structured state), Timeline/Fork graph | Graph-native relationships (parent-child, temporal ordering, fork history) |
-| **Postgres** | Story metadata, StoryManifest records (including `summary_text`) | Relational integrity, ACID compliance for metadata |
-| **pgvector** | Memory embeddings, Story summary embeddings | Vector similarity search (top-k retrieval) |
+
+| Store        | Data                                                             | Reason                                                                     |
+| ------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **Neo4j**    | KeyBlocks (KB structured state), Timeline/Fork graph             | Graph-native relationships (parent-child, temporal ordering, fork history) |
+| **Postgres** | Story metadata, StoryManifest records (including `summary_text`) | Relational integrity, ACID compliance for metadata                         |
+| **pgvector** | Memory embeddings, Story summary embeddings                      | Vector similarity search (top-k retrieval)                                 |
+
 
 ### 4.3 Query Aggregation
 
@@ -120,12 +124,14 @@ A **GraphQL or equivalent read-only façade** serves as the single aggregation l
 
 The following are explicitly out of scope for V1.0. They default to V1.1, V1.2, or backlog prioritization.
 
-| Non-Goal | Reason | Default Target |
-|----------|--------|---------------|
-| **Historical point-in-time snapshot reconstruction** (`as_of_delta_sequence`) | V1.0 only supports current-state snapshots. Reconstructing context as of a past `delta_sequence` requires additional indexing and is not needed for MVP. | V1.1+ |
-| **Long-task checkpoints and recovery** | Context Assembly is a stateless query. Long-running tasks (e.g., full re-indexing) are handled by the sync pipeline, not Context Assembly. | V1.1+ |
-| **Advanced narrative focus / generation hint DSL** | A declarative DSL to specify narrative focus areas (e.g., "focus on character X's emotional arc") would allow more targeted context assembly, but adds significant complexity. | Backlog |
-| **Explore recommendation algorithm** | Suggesting related entities or "what to explore next" is a separate feature from context assembly. It requires its own ranking and recommendation logic. | Backlog |
+
+| Non-Goal                                                                      | Reason                                                                                                                                                                         | Default Target |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------- |
+| **Historical point-in-time snapshot reconstruction** (`as_of_delta_sequence`) | V1.0 only supports current-state snapshots. Reconstructing context as of a past `delta_sequence` requires additional indexing and is not needed for MVP.                       | V1.1+          |
+| **Long-task checkpoints and recovery**                                        | Context Assembly is a stateless query. Long-running tasks (e.g., full re-indexing) are handled by the sync pipeline, not Context Assembly.                                     | V1.1+          |
+| **Advanced narrative focus / generation hint DSL**                            | A declarative DSL to specify narrative focus areas (e.g., "focus on character X's emotional arc") would allow more targeted context assembly, but adds significant complexity. | Backlog        |
+| **Explore recommendation algorithm**                                          | Suggesting related entities or "what to explore next" is a separate feature from context assembly. It requires its own ranking and recommendation logic.                       | Backlog        |
+
 
 ---
 
@@ -134,9 +140,7 @@ The following are explicitly out of scope for V1.0. They default to V1.1, V1.2, 
 The following decisions are unresolved and require further design work before V1.1 implementation.
 
 1. **GraphQL as sole façade vs multiple read-only query adapters**: Should the platform expose only a single GraphQL endpoint for context retrieval, or also support REST/other adapters? Trade-off: GraphQL offers flexible querying but adds complexity; REST is simpler but may require multiple endpoints.
-
 2. **Default top-k per input bucket**: What is the default number of results to retrieve from each input source (KeyBlocks, timeline events, story summaries, memory items)? Current schema allows null (platform default), but the default values need to be decided based on typical context window sizes and latency constraints.
-
 3. **Story summary independent schema / aggregate split**: Should story summaries have their own dedicated schema separate from the general `StoryManifest`? This would allow independent versioning and evolution of summary structure without impacting the manifest schema.
 
 ---
@@ -191,21 +195,24 @@ The following decisions are unresolved and require further design work before V1
 
 ### 7.2 Responsibility Matrix
 
-| Responsibility | Owner | Repo | Tech | Design Constraint |
-|---|---|---|---|---|
-| **Summary generation** from local manuscript files | CLI | `nexus` (this repo) | Rust | CLI generates summaries; platform does everything else |
-| **Local API call** to request assembled context | CLI / daemon | `nexus` (this repo) | Rust (HTTP client) | Local API contract (frozen) |
-| **Bundle metadata** (attach summary to sync bundle) | CLI | `nexus` (this repo) | Rust | `bundle.schema.json`, `story-manifest.schema.json` |
-| **Context Assembly service** (HybridRAG + query façade) | Platform | `nexus-platform` (private) | TypeScript / Next.js | TypeScript-only implementation; frozen design |
-| **Neo4j graph storage** (KB, Timeline, Fork) | Platform | `nexus-platform` (private) | TypeScript + Neo4j driver | Platform-authoritative graph store |
-| **Postgres/pgvector** (Story summary, Memory embeddings) | Platform | `nexus-platform` (private) | TypeScript + pgvector | Platform-authoritative relational store |
-| **Vector retrieval + similarity search** | Platform | `nexus-platform` (private) | TypeScript | V1.0 baseline; LLM-as-judge and cross-encoder reranking deferred to V1.1+ |
-| **Embedding generation** (future: OpenAI or local model) | Platform | `nexus-platform` (private) | TypeScript | Deferred to V1.1+ |
-| **Reranking** (future: LLM-as-judge, cross-encoder) | Platform | `nexus-platform` (private) | TypeScript | Explicitly excluded from V1.0 |
+
+| Responsibility                                           | Owner        | Repo                       | Tech                      | Design Constraint                                                         |
+| -------------------------------------------------------- | ------------ | -------------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| **Summary generation** from local manuscript files       | CLI          | `nexus` (this repo)        | Rust                      | CLI generates summaries; platform does everything else                    |
+| **Local API call** to request assembled context          | CLI / daemon | `nexus` (this repo)        | Rust (HTTP client)        | Local API contract (frozen)                                               |
+| **Bundle metadata** (attach summary to sync bundle)      | CLI          | `nexus` (this repo)        | Rust                      | `bundle.schema.json`, `story-manifest.schema.json`                        |
+| **Context Assembly service** (HybridRAG + query façade)  | Platform     | `nexus-platform` (private) | TypeScript / Next.js      | TypeScript-only implementation; frozen design                             |
+| **Neo4j graph storage** (KB, Timeline, Fork)             | Platform     | `nexus-platform` (private) | TypeScript + Neo4j driver | Platform-authoritative graph store                                        |
+| **Postgres/pgvector** (Story summary, Memory embeddings) | Platform     | `nexus-platform` (private) | TypeScript + pgvector     | Platform-authoritative relational store                                   |
+| **Vector retrieval + similarity search**                 | Platform     | `nexus-platform` (private) | TypeScript                | V1.0 baseline; LLM-as-judge and cross-encoder reranking deferred to V1.1+ |
+| **Embedding generation** (future: OpenAI or local model) | Platform     | `nexus-platform` (private) | TypeScript                | Deferred to V1.1+                                                         |
+| **Reranking** (future: LLM-as-judge, cross-encoder)      | Platform     | `nexus-platform` (private) | TypeScript                | Explicitly excluded from V1.0                                             |
+
 
 ### 7.3 Strict Boundaries
 
 **CLI MUST NOT:**
+
 - Connect to Neo4j, Postgres, or pgvector directly
 - Include any Neo4j/Postgres/pgvector client libraries in its dependency tree
 - Perform embedding generation or similarity search
@@ -213,6 +220,7 @@ The following decisions are unresolved and require further design work before V1
 - Include docker-compose for Neo4j/Postgres/pgvector/Redis
 
 **CLI MUST:**
+
 - Generate `StoryManifest.summary_text` from local manuscript files
 - Call `POST /v1/local/context/assemble` (proxied to platform) to request assembled context
 - Include summary in sync bundle metadata alongside KB/Timeline deltas
@@ -231,15 +239,17 @@ The following decisions are unresolved and require further design work before V1
 1. **Scan manuscript directory**: Walk `Stories/<world_ref>/` for recognized file types (`.md`, `.txt`, `.docx` export targets).
 2. **Extract structured metadata**: Parse front-matter or heading structure for title, chapter boundaries, word count.
 3. **Generate summary text**: V1.0 uses **basic extraction** (title + chapter list + word count + opening excerpt). No LLM call required.
-   - V1.1 adds safety constraints (file size limit, path traversal validation, UTF-8 truncation safety) — see §9.
-   - Future V1.1+: LLM-assisted summary generation (using user's local agent via ACP, not a hardcoded model SDK).
+  - V1.1 adds safety constraints (file size limit, path traversal validation, UTF-8 truncation safety) — see §9.
+  - Future V1.1+: LLM-assisted summary generation (using user's local agent via ACP, not a hardcoded model SDK).
 4. **Attach to StoryManifest**: Set `StoryManifest.summary_text` on the local working copy.
 
 **File scope**:
+
 - Source: `Stories/<world_ref>/chapter-*.md` (and subdirectories)
 - Output: `StoryManifest.summary_text` (stored in local SQLite + included in sync bundle)
 
 **Constraints**:
+
 - Only reads from whitelisted manuscript paths (`Stories/` tree).
 - Does NOT read `References/` tree (that's research scope, not manuscript).
 - Summary is a plain text field, max TBD bytes (recommend 4096 chars for V1.0).
@@ -255,6 +265,7 @@ The following decisions are unresolved and require further design work before V1
 **Source**: Local API contract (frozen)
 
 **Behavior**:
+
 - CLI/daemon sends request to the Local API.
 - `nexus42d` proxies this request to the platform's Context Assembly endpoint (HTTPS).
 - The platform performs the actual HybridRAG query (Neo4j + pgvector + Postgres).
@@ -429,6 +440,7 @@ Aligned with the minimal output shape for `POST /v1/local/context/assemble`, wra
 ```
 
 **Output requirements**:
+
 - Same request under same authoritative state MUST return **stable order**.
 - Returns a **snapshot**, not a mutable working set.
 
@@ -450,13 +462,16 @@ Summary generation integrates with the sync contract as follows:
 
 **Key bundle metadata fields** (from `bundle.schema.json`):
 
-| Field | Purpose | Spec Anchor |
-|---|---|---|
-| `manuscript_phase` | Current manuscript lifecycle phase (`brainstorm`/`draft`/`review`/`finalize`/`published`). Used for downstream gate validation. | `bundle.schema.json`, `common.schema.json` `ManuscriptPhase` |
-| `output_manuscript` | Whether this execution requires manuscript output. Defaults `true` for local, `false` for platform-hosted creators. | `story-manifest.schema.json` |
-| `deltas[].payload.summary_text` | The generated summary text, embedded in the story_manifest delta payload. | `story-manifest.schema.json` `summary_text` |
+
+| Field                           | Purpose                                                                                                                         | Spec Anchor                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `manuscript_phase`              | Current manuscript lifecycle phase (`brainstorm`/`draft`/`review`/`finalize`/`published`). Used for downstream gate validation. | `bundle.schema.json`, `common.schema.json` `ManuscriptPhase` |
+| `output_manuscript`             | Whether this execution requires manuscript output. Defaults `true` for local, `false` for platform-hosted creators.             | `story-manifest.schema.json`                                 |
+| `deltas[].payload.summary_text` | The generated summary text, embedded in the story_manifest delta payload.                                                       | `story-manifest.schema.json` `summary_text`                  |
+
 
 **Dependency on sync-contract**:
+
 - Context Assembly (restructured) depends on `sync-contract` for bundle envelope fields: `manuscript_phase`, `output_manuscript`, `submitting_creator_id`, `last_confirmed_delta_sequence`.
 - The story_manifest delta type in `bundle.schema.json` carries the summary payload.
 - Platform's Phase A/B pipeline handles persistence and async indexing (Phase A: persist to Postgres; Phase B: index into Neo4j/pgvector asynchronously).
@@ -509,11 +524,13 @@ The following safety constraints apply to the V1.1 summary generator (see §8.1 
 
 ### 9.2 Residual ID Mapping
 
-| Residual ID | Title | Severity | Constraint |
-|-------------|-------|----------|------------|
-| **CTX-R2** | Summary generator lacks file size limit | low | §9.1.1 |
-| **CTX-R3** | Path traversal not explicitly validated in scan_recursive | low | §9.1.2 |
-| **CTX-R5** | UTF-8 truncation safety in opening excerpt | high (accepted — needs tests) | §9.1.3 |
+
+| Residual ID | Title                                                     | Severity                      | Constraint |
+| ----------- | --------------------------------------------------------- | ----------------------------- | ---------- |
+| **CTX-R2**  | Summary generator lacks file size limit                   | low                           | §9.1.1     |
+| **CTX-R3**  | Path traversal not explicitly validated in scan_recursive | low                           | §9.1.2     |
+| **CTX-R5**  | UTF-8 truncation safety in opening excerpt                | high (accepted — needs tests) | §9.1.3     |
+
 
 ---
 
@@ -526,12 +543,14 @@ The following safety constraints apply to the V1.1 summary generator (see §8.1 
 The full Context Assembly service — including Neo4j graph queries, pgvector similarity search, HybridRAG orchestration, query façade, and embedding generation — **belongs in the private `nexus-platform` repository**.
 
 This is not a future decision; it is already frozen by:
+
 - Context Assembly is implemented entirely in TypeScript
 - Platform is responsible for receiving, validating, indexing, and providing Context Assembly retrieval
 
 ### 10.2 Integration Point
 
 Platform receives CLI-generated summaries through the standard sync pipeline:
+
 1. CLI pushes `story_manifest` delta with `summary_text` payload
 2. Platform `SyncService` validates the bundle
 3. Platform Phase A: persists to Postgres
@@ -542,16 +561,18 @@ Platform receives CLI-generated summaries through the standard sync pipeline:
 
 The following are explicitly **NOT** implemented in this (`nexus`) repository:
 
-| Component | Reason |
-|---|---|
-| Neo4j client/driver | Platform-authoritative graph store |
-| Postgres client (for platform stores) | Platform-authoritative relational store |
-| pgvector client | Platform-authoritative vector store |
-| HybridRAG query logic | Platform TypeScript service |
-| Query façade (GraphQL / aggregation layer) | Platform read model |
-| Embedding generation (OpenAI / local model) | Deferred to V1.1+ platform-side |
-| Reranking (LLM-as-judge, cross-encoder) | Explicitly excluded from V1.0 |
+
+| Component                                      | Reason                                          |
+| ---------------------------------------------- | ----------------------------------------------- |
+| Neo4j client/driver                            | Platform-authoritative graph store              |
+| Postgres client (for platform stores)          | Platform-authoritative relational store         |
+| pgvector client                                | Platform-authoritative vector store             |
+| HybridRAG query logic                          | Platform TypeScript service                     |
+| Query façade (GraphQL / aggregation layer)     | Platform read model                             |
+| Embedding generation (OpenAI / local model)    | Deferred to V1.1+ platform-side                 |
+| Reranking (LLM-as-judge, cross-encoder)        | Explicitly excluded from V1.0                   |
 | Docker Compose (Neo4j/Postgres/pgvector/Redis) | Platform infrastructure, not CLI dev dependency |
+
 
 ---
 
@@ -564,20 +585,23 @@ The following tasks are the **narrowed CLI-side scope** for this repo. Each task
 **Goal**: Implement basic summary extraction from local manuscript files.
 
 **Files to create**:
+
 - `crates/nexus42/src/context/summary.rs` — Summary generation logic
 - `crates/nexus42/src/context/summary_test.rs` — Unit tests
 - `crates/nexus42/src/context/mod.rs` — Module root
 
 **Implementation**:
-- [ ] Define `SummaryGenerator` struct with workspace path configuration
-- [ ] Implement `scan_manuscript_dir(world_ref: &str) -> Vec<ManuscriptFile>` that walks `Stories/<world_ref>/`
-- [ ] Implement `generate_basic_summary(files: Vec<ManuscriptFile>) -> String` (V1.0: title + chapter list + word count + opening excerpt, max 4096 chars)
-- [ ] Parse `.md` front-matter for title extraction
-- [ ] Parse heading structure for chapter boundary detection
-- [ ] Extract first N chars of first chapter as opening excerpt
-- [ ] Unit tests: valid manuscript dir, empty dir, single file, multi-chapter, non-markdown files ignored
+
+- Define `SummaryGenerator` struct with workspace path configuration
+- Implement `scan_manuscript_dir(world_ref: &str) -> Vec<ManuscriptFile>` that walks `Stories/<world_ref>/`
+- Implement `generate_basic_summary(files: Vec<ManuscriptFile>) -> String` (V1.0: title + chapter list + word count + opening excerpt, max 4096 chars)
+- Parse `.md` front-matter for title extraction
+- Parse heading structure for chapter boundary detection
+- Extract first N chars of first chapter as opening excerpt
+- Unit tests: valid manuscript dir, empty dir, single file, multi-chapter, non-markdown files ignored
 
 **Verification**:
+
 ```bash
 cargo test -p nexus42 context::summary
 ```
@@ -591,20 +615,23 @@ cargo test -p nexus42 context::summary
 **Goal**: Implement the HTTP client that calls `POST /v1/local/context/assemble` via `nexus42d`.
 
 **Files to create**:
+
 - `crates/nexus42/src/context/client.rs` — Platform Context Assembly HTTP client
 - `crates/nexus42/src/context/client_test.rs` — Unit/integration tests
 - `crates/nexus42/src/context/types.rs` — Request/response Rust types (generated or hand-written matching schema)
 
 **Implementation**:
-- [ ] Define `ContextAssembleRequest` and `ContextAssembleResponse` Rust structs matching `§8.3.1` and `§8.3.2` shapes
-- [ ] Implement `ContextClient::assemble(request: ContextAssembleRequest) -> Result<ContextAssembleResponse, ContextError>`
-- [ ] Client sends request to Local API endpoint (`POST /v1/local/context/assemble` on loopback)
-- [ ] Handle error responses: `auth_expired`, `world_not_found`, `platform_unavailable`
-- [ ] Parse `data_freshness_hint` for staleness detection
-- [ ] Integration test with mock Local API server (wiremock or similar)
-- [ ] Ensure request types are serializable/deserializable (serde)
+
+- Define `ContextAssembleRequest` and `ContextAssembleResponse` Rust structs matching `§8.3.1` and `§8.3.2` shapes
+- Implement `ContextClient::assemble(request: ContextAssembleRequest) -> Result<ContextAssembleResponse, ContextError>`
+- Client sends request to Local API endpoint (`POST /v1/local/context/assemble` on loopback)
+- Handle error responses: `auth_expired`, `world_not_found`, `platform_unavailable`
+- Parse `data_freshness_hint` for staleness detection
+- Integration test with mock Local API server (wiremock or similar)
+- Ensure request types are serializable/deserializable (serde)
 
 **Verification**:
+
 ```bash
 cargo test -p nexus42 context::client
 ```
@@ -618,19 +645,22 @@ cargo test -p nexus42 context::client
 **Goal**: Wire summary generation into the sync bundle pipeline so summaries are included in `story_manifest` deltas.
 
 **Files to modify**:
+
 - `crates/nexus42/src/sync/bundle_builder.rs` — (existing or new) Bundle construction logic
 - `crates/nexus42/src/sync/builder_test.rs` — Tests
 
 **Implementation**:
-- [ ] After summary generation (Task 1), create a `story_manifest` delta entry
-- [ ] Set `delta_type = "story_manifest"`, `operation = "upsert"`
-- [ ] Include `summary_text` in delta payload
-- [ ] Set bundle-level `manuscript_phase` from current workspace state
-- [ ] Set bundle-level `output_manuscript` from workspace config
-- [ ] Ensure `canonical_hash` covers the summary payload
-- [ ] Unit tests: bundle with story_manifest delta, bundle without summary, hash consistency
+
+- After summary generation (Task 1), create a `story_manifest` delta entry
+- Set `delta_type = "story_manifest"`, `operation = "upsert"`
+- Include `summary_text` in delta payload
+- Set bundle-level `manuscript_phase` from current workspace state
+- Set bundle-level `output_manuscript` from workspace config
+- Ensure `canonical_hash` covers the summary payload
+- Unit tests: bundle with story_manifest delta, bundle without summary, hash consistency
 
 **Verification**:
+
 ```bash
 cargo test -p nexus42 sync::bundle_builder
 ```
@@ -642,19 +672,22 @@ cargo test -p nexus42 sync::bundle_builder
 **Goal**: Wire the CLI command to the context assembly client.
 
 **Files to modify**:
+
 - `crates/nexus42/src/cli/context.rs` — CLI command handler
 - `crates/nexus42/src/cli/context_test.rs` — Tests
 
 **Implementation**:
-- [ ] Implement `nexus42 context assemble` subcommand (aligned with §1.3 design decisions)
-- [ ] Command reads `workspace_id`, `world_id`, `creator_id` from current workspace config
-- [ ] Sends `ContextAssembleRequest` via Local API client (Task 2)
-- [ ] Outputs assembled context as formatted JSON to stdout (or `--output <file>`)
-- [ ] Handles degraded mode: if platform unavailable, print clear error with action suggestion
-- [ ] Supports optional flags: `--include-memory`, `--include-timeline`, `--include-stories`
-- [ ] Unit tests: command parsing, error handling
+
+- Implement `nexus42 context assemble` subcommand (aligned with §1.3 design decisions)
+- Command reads `workspace_id`, `world_id`, `creator_id` from current workspace config
+- Sends `ContextAssembleRequest` via Local API client (Task 2)
+- Outputs assembled context as formatted JSON to stdout (or `--output <file>`)
+- Handles degraded mode: if platform unavailable, print clear error with action suggestion
+- Supports optional flags: `--include-memory`, `--include-timeline`, `--include-stories`
+- Unit tests: command parsing, error handling
 
 **Verification**:
+
 ```bash
 cargo test -p nexus42 cli::context
 cargo run -p nexus42 -- context assemble --help
@@ -667,16 +700,19 @@ cargo run -p nexus42 -- context assemble --help
 **Goal**: Create the JSON Schema file for context assembly request/response types.
 
 **Files to create**:
+
 - `schemas/platform/context-assembly-v1.schema.json` — Request/response schema definitions
 
 **Implementation**:
-- [ ] Define `ContextAssembleRequestV1` (per §8.3.1)
-- [ ] Define `ContextAssembleResponseV1` (per §8.3.2)
-- [ ] Use `$ref` to common types from `schemas/common/common.schema.json`
-- [ ] Validate schema compiles: `ajv validate -s meta.schema.json -d context-assembly-v1.schema.json` (or equivalent)
-- [ ] Ensure codegen pipeline can consume it (TypeScript + Rust types)
+
+- Define `ContextAssembleRequestV1` (per §8.3.1)
+- Define `ContextAssembleResponseV1` (per §8.3.2)
+- Use `$ref` to common types from `schemas/common/common.schema.json`
+- Validate schema compiles: `ajv validate -s meta.schema.json -d context-assembly-v1.schema.json` (or equivalent)
+- Ensure codegen pipeline can consume it (TypeScript + Rust types)
 
 **Verification**:
+
 ```bash
 # If ajv is available:
 npx ajv compile -s schemas/platform/context-assembly-v1.schema.json
@@ -694,13 +730,9 @@ python3 -m json.tool schemas/platform/context-assembly-v1.schema.json > /dev/nul
 The restructured Context Assembly (CLI-side) depends on the sync contract for the following:
 
 1. **Bundle envelope fields**: `manuscript_phase`, `output_manuscript`, `submitting_creator_id`, `last_confirmed_delta_sequence` — these are defined in `bundle.schema.json` and must be present in the sync pipeline before context assembly can attach summaries to bundles.
-
 2. **Delta type `story_manifest`**: Already defined in `bundle.schema.json` `deltas[].delta_type` enum. The context assembly summary is carried as a `story_manifest` delta payload.
-
 3. **StoryManifest entity**: Defined in `story-manifest.schema.json`. The `summary_text` field is where CLI-generated summaries are stored. The `summary_unit_id` field is platform-assigned after indexing.
-
 4. **Phase A/B pipeline**: Context Assembly depends on the platform's sync pipeline to persist summaries (Phase A) and index them (Phase B). CLI does not control this — it only pushes bundles and receives assembled context via Local API.
-
 5. **Prerequisite**: The `sync-contract` plan (`.agents/plans/2025-04-05-sync-contract`) must be at least partially complete (bundle envelope + story_manifest delta support) before Task 3 (Bundle Metadata Integration) can be implemented.
 
 ---
@@ -709,18 +741,20 @@ The restructured Context Assembly (CLI-side) depends on the sync contract for th
 
 The following items from the original plan (`.agents/plans/2025-04-05-context-assembly.md`) are explicitly **removed** from CLI-side scope:
 
-| Removed Item | Reason | New Owner |
-|---|---|---|
-| `crates/nexus-context/` Rust crate | Tech stack conflict (§4.1: all TypeScript) | N/A — restructured as thin CLI module |
-| Neo4j client wrapper (`neo4rs`) | Storage ownership conflict (§7.2: platform-authoritative) | `nexus-platform` |
-| Postgres/pgvector client wrapper (`sqlx`) | Storage ownership conflict | `nexus-platform` |
-| Graph storage (Timeline, KB in Neo4j) | Responsibility split violation | `nexus-platform` |
-| Vector storage (Memory embeddings in pgvector) | Responsibility split violation | `nexus-platform` |
-| Embedding generation (OpenAI / local model) | Over-scoped for V1.0 (§4.4 excludes) | `nexus-platform` (V1.1+) |
-| HybridRAG query logic | Responsibility split violation | `nexus-platform` |
-| Query façade / reranking | Over-scoped for V1.0 | `nexus-platform` (V1.1+) |
-| `docker-compose.yml` (Neo4j + Postgres + pgvector + Redis) | Docker misalignment (CLI uses SQLite only) | `nexus-platform` dev infra |
-| `.env.example` (database connection strings) | No direct database access from CLI | `nexus-platform` |
+
+| Removed Item                                               | Reason                                                    | New Owner                             |
+| ---------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------- |
+| `crates/nexus-context/` Rust crate                         | Tech stack conflict (§4.1: all TypeScript)                | N/A — restructured as thin CLI module |
+| Neo4j client wrapper (`neo4rs`)                            | Storage ownership conflict (§7.2: platform-authoritative) | `nexus-platform`                      |
+| Postgres/pgvector client wrapper (`sqlx`)                  | Storage ownership conflict                                | `nexus-platform`                      |
+| Graph storage (Timeline, KB in Neo4j)                      | Responsibility split violation                            | `nexus-platform`                      |
+| Vector storage (Memory embeddings in pgvector)             | Responsibility split violation                            | `nexus-platform`                      |
+| Embedding generation (OpenAI / local model)                | Over-scoped for V1.0 (§4.4 excludes)                      | `nexus-platform` (V1.1+)              |
+| HybridRAG query logic                                      | Responsibility split violation                            | `nexus-platform`                      |
+| Query façade / reranking                                   | Over-scoped for V1.0                                      | `nexus-platform` (V1.1+)              |
+| `docker-compose.yml` (Neo4j + Postgres + pgvector + Redis) | Docker misalignment (CLI uses SQLite only)                | `nexus-platform` dev infra            |
+| `.env.example` (database connection strings)               | No direct database access from CLI                        | `nexus-platform`                      |
+
 
 ---
 
@@ -734,14 +768,17 @@ The following items from the original plan (`.agents/plans/2025-04-05-context-as
 
 ## 15. Acceptance Criteria Verification
 
-| Criterion | Status | Evidence |
-|---|---|---|
-| CLI-side scope vs Platform-side scope clearly separated | ✅ | §7 Responsibility Matrix + Architecture Diagram |
-| CLI-side scope has NO Neo4j/Postgres/pgvector direct access | ✅ | §7.3 Strict Boundaries + §13 Removed Items |
-| `POST /v1/local/context/assemble` request/response shapes defined | ✅ | §8.3.1 + §8.3.2 |
-| Summary generation logic integrates with sync-contract bundle metadata | ✅ | §8.4 Bundle Metadata Integration + §12 Dependency on Sync Contract |
-| Task breakdown is actionable (file paths, test commands, expected results) | ✅ | §11 Tasks 1–5 with verification commands |
-| Aligns with tech stack freeze (TypeScript platform-side, no Rust Context Assembly crate) | ✅ | §13 Removed Items + §1.1 Conflict Resolution table |
-| V1.0 frozen goals and non-goals captured | ✅ | §2 Goals, §5 Non-Goals, §4 Technical Freeze |
-| V1.1 enhancement constraints defined as design-level specs | ✅ | §9 V1.1 Enhancement Constraints |
-| No external path references (all paths exist in fresh clone) | ✅ | All paths are within this repository |
+
+| Criterion                                                                                | Status | Evidence                                                           |
+| ---------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------ |
+| CLI-side scope vs Platform-side scope clearly separated                                  | ✅      | §7 Responsibility Matrix + Architecture Diagram                    |
+| CLI-side scope has NO Neo4j/Postgres/pgvector direct access                              | ✅      | §7.3 Strict Boundaries + §13 Removed Items                         |
+| `POST /v1/local/context/assemble` request/response shapes defined                        | ✅      | §8.3.1 + §8.3.2                                                    |
+| Summary generation logic integrates with sync-contract bundle metadata                   | ✅      | §8.4 Bundle Metadata Integration + §12 Dependency on Sync Contract |
+| Task breakdown is actionable (file paths, test commands, expected results)               | ✅      | §11 Tasks 1–5 with verification commands                           |
+| Aligns with tech stack freeze (TypeScript platform-side, no Rust Context Assembly crate) | ✅      | §13 Removed Items + §1.1 Conflict Resolution table                 |
+| V1.0 frozen goals and non-goals captured                                                 | ✅      | §2 Goals, §5 Non-Goals, §4 Technical Freeze                        |
+| V1.1 enhancement constraints defined as design-level specs                               | ✅      | §9 V1.1 Enhancement Constraints                                    |
+| No external path references (all paths exist in fresh clone)                             | ✅      | All paths are within this repository                               |
+
+
