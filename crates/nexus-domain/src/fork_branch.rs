@@ -6,6 +6,7 @@
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// ForkBranch status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -166,8 +167,8 @@ impl From<nexus_contracts::ForkBranch> for ForkBranch {
             parent_world_id: c.parent_world_id,
             parent_branch_id: c.parent_branch_id,
             forked_from_event_id: c.forked_from_event_id,
-            status: c.status,
-            verification_status: c.verification_status,
+            status: c.status.as_str().to_string(),
+            verification_status: c.verification_status.as_str().to_string(),
             created_by_creator_id: c.created_by_creator_id,
             created_at: c.created_at,
         }
@@ -183,8 +184,11 @@ impl From<ForkBranch> for nexus_contracts::ForkBranch {
             parent_world_id: d.parent_world_id,
             parent_branch_id: d.parent_branch_id,
             forked_from_event_id: d.forked_from_event_id,
-            status: d.status,
-            verification_status: d.verification_status,
+            status: nexus_contracts::ForkBranchStatus::from_str(&d.status).unwrap(),
+            verification_status: nexus_contracts::VerificationStatus::from_str(
+                &d.verification_status,
+            )
+            .unwrap(),
             created_by_creator_id: d.created_by_creator_id,
             created_at: d.created_at,
         }

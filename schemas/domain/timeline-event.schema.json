@@ -23,13 +23,11 @@
       "description": "Fork branch ID (root branch or specific fork)"
     },
     "event_type": {
-      "type": "string",
-      "enum": ["story_advance", "state_update", "fork_marker", "official_progression", "publish_marker"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventType",
       "description": "Type of timeline event"
     },
     "status": {
-      "type": "string",
-      "enum": ["canon", "provisional", "rejected"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventStatus",
       "description": "Event status"
     },
     "sequence_no": {

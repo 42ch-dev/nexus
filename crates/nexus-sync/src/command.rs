@@ -4,7 +4,9 @@
 //! These commands represent user-initiated operations that produce deltas for bundles.
 
 use nexus_contracts::generated::SyncCommand;
+use nexus_contracts::{CommandOrigin as ContractCommandOrigin, CommandStatus, CommandType};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 use crate::errors::{SyncError, SyncResult};
 
@@ -157,10 +159,10 @@ impl SyncCommandVariant {
             workspace_id: workspace_id.to_string(),
             world_id: self.world_id().to_string(),
             creator_id: self.creator_id().to_string(),
-            command_type: self.command_type_str().to_string(),
-            origin: origin.to_string(),
+            command_type: CommandType::from_str(self.command_type_str()).unwrap(),
+            origin: ContractCommandOrigin::from_str(origin).unwrap(),
             output_manuscript: matches!(self, Self::PublishStory { .. }).then_some(true),
-            status: "pending".to_string(),
+            status: CommandStatus::Pending,
             requested_by: match self {
                 Self::ForkWorld {
                     target_world_id, ..
@@ -198,6 +200,7 @@ impl CommandOrigin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_contracts::{CommandOrigin as WireCommandOrigin, CommandType};
 
     #[test]
     fn command_variant_roundtrip() {
@@ -219,10 +222,10 @@ mod tests {
         };
 
         let cmd = variant.to_sync_command("cmd_001", "wrk_001", "local_user");
-        assert_eq!(cmd.command_type, "advance_world");
+        assert_eq!(cmd.command_type, CommandType::AdvanceWorld);
         assert_eq!(cmd.world_id, "wld_test");
         assert_eq!(cmd.creator_id, "ctr_test");
-        assert_eq!(cmd.origin, "local_user");
+        assert_eq!(cmd.origin, WireCommandOrigin::LocalUser);
 
         let recovered = SyncCommandVariant::from_sync_command(&cmd).expect("should convert");
         assert_eq!(recovered, variant);
@@ -241,24 +244,22 @@ mod tests {
     }
 
     #[test]
-    fn unknown_command_type_returns_error() {
-        let cmd = SyncCommand {
-            schema_version: 1,
-            command_id: "cmd_001".to_string(),
-            workspace_id: "wrk_001".to_string(),
-            world_id: "wld_test".to_string(),
-            creator_id: "ctr_test".to_string(),
-            command_type: "unknown_type".to_string(),
-            origin: "local_user".to_string(),
-            output_manuscript: None,
-            status: "pending".to_string(),
-            requested_by: None,
-            started_at: None,
-            completed_at: None,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
-
-        let result = SyncCommandVariant::from_sync_command(&cmd);
-        assert!(result.is_err());
+    fn unknown_command_type_rejected_at_wire_deserialize() {
+        let json = r#"{
+            "schema_version": 1,
+            "command_id": "cmd_001",
+            "workspace_id": "wrk_001",
+            "world_id": "wld_test",
+            "creator_id": "ctr_test",
+            "command_type": "unknown_type",
+            "origin": "local_user",
+            "output_manuscript": null,
+            "status": "pending",
+            "requested_by": null,
+            "started_at": null,
+            "completed_at": null,
+            "created_at": "2025-01-01T00:00:00Z"
+        }"#;
+        assert!(serde_json::from_str::<SyncCommand>(json).is_err());
     }
 }

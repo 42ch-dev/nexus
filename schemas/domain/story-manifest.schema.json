@@ -22,13 +22,11 @@
       "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "manifest_type": {
-      "type": "string",
-      "enum": ["chapter", "arc", "story", "excerpt"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ManifestType",
       "description": "Manifest type"
     },
     "status": {
-      "type": "string",
-      "enum": ["summary_ready", "staged_for_publish", "published", "archived"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/StoryManifestStatus",
       "description": "Manifest status"
     },
     "title": {
@@ -51,8 +49,7 @@
       "description": "Whether manuscript output is enabled"
     },
     "manuscript_storage": {
-      "type": "string",
-      "enum": ["none", "local_workspace", "platform_sandbox"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ManuscriptStorage",
       "description": "Manuscript storage location"
     },
     "local_path": {

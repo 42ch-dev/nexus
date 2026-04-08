@@ -8,6 +8,7 @@ use crate::errors::DomainError;
 use crate::memory_item::MemoryItem;
 use crate::MemoryType;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Reference source type enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -179,12 +180,12 @@ impl From<nexus_contracts::ReferenceSource> for ReferenceSource {
             schema_version: c.schema_version,
             reference_source_id: c.reference_source_id,
             workspace_id: c.workspace_id,
-            source_type: c.source_type,
+            source_type: c.source_type.as_str().to_string(),
             uri: c.uri,
             title: c.title,
             tags: c.tags,
             content_hash: c.content_hash,
-            scan_status: c.scan_status,
+            scan_status: c.scan_status.as_str().to_string(),
             created_at: c.created_at,
             updated_at: c.updated_at,
         }
@@ -197,12 +198,12 @@ impl From<ReferenceSource> for nexus_contracts::ReferenceSource {
             schema_version: d.schema_version,
             reference_source_id: d.reference_source_id,
             workspace_id: d.workspace_id,
-            source_type: d.source_type,
+            source_type: nexus_contracts::ReferenceSourceType::from_str(&d.source_type).unwrap(),
             uri: d.uri,
             title: d.title,
             tags: d.tags,
             content_hash: d.content_hash,
-            scan_status: d.scan_status,
+            scan_status: nexus_contracts::ScanStatus::from_str(&d.scan_status).unwrap(),
             created_at: d.created_at,
             updated_at: d.updated_at,
         }

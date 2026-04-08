@@ -6,6 +6,7 @@
 //! @source agent-profile.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{AgentProfileStatus, ProfileKind, SelectionMode, Transport};
 
 /// Configuration for an ACP agent in a workspace. Aligned with data-model-v1.md §5.15.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -14,19 +15,19 @@ pub struct AgentProfile {
     pub schema_version: u32,
     pub agent_profile_id: String,
     pub workspace_id: String,
-    pub profile_kind: String,
-    pub selection_mode: String,
+    pub profile_kind: ProfileKind,
+    pub selection_mode: SelectionMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub launch_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub transport: Option<String>,
+    pub transport: Option<Transport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_output_manuscript: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_version: Option<i64>,
-    pub status: String,
+    pub status: AgentProfileStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

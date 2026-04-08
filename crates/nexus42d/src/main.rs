@@ -108,8 +108,8 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting nexus42d v{}", env!("CARGO_PKG_VERSION"));
 
-    // Initialize workspace state
-    let state = WorkspaceState::initialize()?;
+    // Initialize workspace state (async: initializes sync outbox)
+    let state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
     // Build the router

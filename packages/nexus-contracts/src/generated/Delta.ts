@@ -1,4 +1,4 @@
-import type { SchemaVersion, SourceAnchor } from './CommonTypes';
+import type { DeltaOperation, DeltaType, SchemaVersion, SourceAnchor } from './CommonTypes';
 /**
  * Nexus Delta
  *
@@ -7,16 +7,9 @@ import type { SchemaVersion, SourceAnchor } from './CommonTypes';
  * @schema_version 1
  * @source delta.schema.json
  */
-
-/** Inline enum type */
-export type DeltaDeltaType = 'world' | 'key_block' | 'timeline_event' | 'fork_branch' | 'memory_item' | 'story_manifest';
-
-/** Inline enum type */
-export type DeltaOperation = 'create' | 'update' | 'upsert' | 'delete' | 'append';
-
 /** Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12. */
 export interface Delta {
-  delta_type: DeltaDeltaType;
+  delta_type: DeltaType;
   operation: DeltaOperation;
   target_entity_type?: string;
   target_entity_id?: string;

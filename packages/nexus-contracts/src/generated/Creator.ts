@@ -1,4 +1,4 @@
-import type { SchemaVersion } from './CommonTypes';
+import type { CreatorStatus, RegistrationSource, SchemaVersion } from './CommonTypes';
 /**
  * Nexus Creator Entity
  *
@@ -7,13 +7,6 @@ import type { SchemaVersion } from './CommonTypes';
  * @schema_version 1
  * @source creator.schema.json
  */
-
-/** Inline enum type */
-export type CreatorStatus = 'active' | 'archived' | 'locked';
-
-/** Inline enum type */
-export type CreatorRegistrationSource = 'cli' | 'web_agent' | 'platform';
-
 /** Creator entity - a first-class creative agent that can be user-owned or agent-registered. Aligned with data-model-v1.md §5.2. */
 export interface Creator {
   schema_version: number;
@@ -23,7 +16,7 @@ export interface Creator {
   status: CreatorStatus;
   is_platform_owned?: boolean;
   api_key_ref?: string;
-  registration_source: CreatorRegistrationSource;
+  registration_source: RegistrationSource;
   persona_summary?: string;
   style_profile?: { tone?: string[]; narrative_preferences?: string[]; forbidden_patterns?: string[] };
   experience_revision?: number;

@@ -30,8 +30,7 @@
       "description": "URL-friendly world slug"
     },
     "status": {
-      "type": "string",
-      "enum": ["active", "paused", "archived"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldStatus",
       "description": "World status"
     },
     "visibility": {

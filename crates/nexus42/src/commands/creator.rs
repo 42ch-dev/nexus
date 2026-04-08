@@ -204,7 +204,7 @@ fn cache_creator_locally(creator: &Creator) -> Result<()> {
         rusqlite::params![
             creator.creator_id,
             creator.display_name,
-            creator.status,
+            creator.status.as_str(),
             chrono::Utc::now().to_rfc3339(),
             serde_json::to_string(creator)?,
         ],

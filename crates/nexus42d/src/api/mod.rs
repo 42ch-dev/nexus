@@ -99,8 +99,13 @@ pub fn create_router(state: WorkspaceState) -> Router {
             auth_middleware::require_auth,
         ));
 
-    // Sync routes (unguarded — can check status without auth)
-    let sync_routes = Router::new().route("/v1/local/sync/status", get(handlers::sync::status));
+    // Sync routes (unguarded — status and replay can checked without auth)
+    // Push and resolve are also available via daemon (auth is for platform communication)
+    let sync_routes = Router::new()
+        .route("/v1/local/sync/status", get(handlers::sync::status))
+        .route("/v1/local/sync/push", post(handlers::sync::push))
+        .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
+        .route("/v1/local/sync/replay", get(handlers::sync::replay));
 
     // ACP tool execution routes (unguarded — workspace validation in handler)
     let acp_routes = Router::new().route(
