@@ -25,6 +25,12 @@ use uuid::Uuid;
 
 use crate::errors::{SyncError, SyncResult};
 
+/// Maximum retry count before giving up.
+const MAX_RETRIES: u64 = 5;
+
+/// Base delay for exponential backoff in seconds.
+const BASE_RETRY_DELAY_SECS: u64 = 2;
+
 /// Delivery states for outbox entries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeliveryState {
@@ -64,11 +70,16 @@ impl DeliveryState {
     }
 }
 
-/// Maximum retry count before giving up.
-const MAX_RETRIES: u64 = 5;
-
-/// Base delay for exponential backoff in seconds.
-const BASE_RETRY_DELAY_SECS: u64 = 2;
+/// A parsed retry-after timestamp, either as an absolute time or relative seconds.
+#[derive(Debug, Clone)]
+pub enum RetryAfterPolicy {
+    /// Server requested retry after this specific timestamp (RFC 3339).
+    AtTime(chrono::DateTime<chrono::Utc>),
+    /// Server requested retry after this many seconds from now.
+    AfterSeconds(u64),
+    /// No retry-after specified; use default exponential backoff.
+    None,
+}
 
 /// SQLite-backed outbox for local sync operations.
 pub struct Outbox {
@@ -108,7 +119,14 @@ impl Outbox {
                 WHERE delivery_state IN ('staged', 'failed');
 
             CREATE INDEX IF NOT EXISTS idx_outbox_bundle_id
-                ON outbox_entries(bundle_id);",
+                ON outbox_entries(bundle_id);
+
+            CREATE TABLE IF NOT EXISTS partial_apply_states (
+                outbox_entry_id   TEXT PRIMARY KEY,
+                state_json        TEXT NOT NULL,
+                recorded_at       TEXT NOT NULL,
+                retry_count       INTEGER NOT NULL DEFAULT 0
+            );",
         )?;
 
         tracing::info!("Outbox database initialized");
@@ -140,7 +158,14 @@ impl Outbox {
 
             CREATE INDEX IF NOT EXISTS idx_outbox_next_retry
                 ON outbox_entries(next_retry_at)
-                WHERE delivery_state IN ('staged', 'failed');",
+                WHERE delivery_state IN ('staged', 'failed');
+
+            CREATE TABLE IF NOT EXISTS partial_apply_states (
+                outbox_entry_id   TEXT PRIMARY KEY,
+                state_json        TEXT NOT NULL,
+                recorded_at       TEXT NOT NULL,
+                retry_count       INTEGER NOT NULL DEFAULT 0
+            );",
         )?;
         Ok(Self { conn })
     }
@@ -254,13 +279,34 @@ impl Outbox {
     }
 
     /// Transition an outbox entry to `conflicted` state with error.
-    pub fn mark_conflicted(&self, outbox_entry_id: &str, error: &str) -> SyncResult<()> {
-        let now = chrono::Utc::now().to_rfc3339();
+    ///
+    /// If a `retry_after` policy is provided (SYNC-R11), it stores the
+    /// computed retry timestamp so that [`replay`] will skip this entry
+    /// until the server-specified time has elapsed.
+    pub fn mark_conflicted_with_retry(
+        &self,
+        outbox_entry_id: &str,
+        error: &str,
+        retry_after: &RetryAfterPolicy,
+    ) -> SyncResult<()> {
+        let now = chrono::Utc::now();
+        let next_retry_at = match retry_after {
+            RetryAfterPolicy::AtTime(t) => Some(t.to_rfc3339()),
+            RetryAfterPolicy::AfterSeconds(secs) => {
+                let target = now + chrono::Duration::seconds(*secs as i64);
+                Some(target.to_rfc3339())
+            }
+            RetryAfterPolicy::None => None,
+        };
+
         let rows = self.conn.execute(
             "UPDATE outbox_entries
-             SET delivery_state = 'conflicted', last_error = ?1, updated_at = ?2
-             WHERE outbox_entry_id = ?3 AND delivery_state = 'sent'",
-            params![error, now, outbox_entry_id],
+             SET delivery_state = 'conflicted',
+                 last_error = ?1,
+                 next_retry_at = ?2,
+                 updated_at = ?3
+             WHERE outbox_entry_id = ?4 AND delivery_state = 'sent'",
+            params![error, next_retry_at, now.to_rfc3339(), outbox_entry_id],
         )?;
 
         if rows == 0 {
@@ -272,9 +318,15 @@ impl Outbox {
         tracing::warn!(
             outbox_entry_id = %outbox_entry_id,
             error = %error,
-            "Marked as conflicted"
+            retry_after = ?next_retry_at,
+            "Marked as conflicted with retry policy"
         );
         Ok(())
+    }
+
+    /// Transition an outbox entry to `conflicted` state with error (no retry policy).
+    pub fn mark_conflicted(&self, outbox_entry_id: &str, error: &str) -> SyncResult<()> {
+        self.mark_conflicted_with_retry(outbox_entry_id, error, &RetryAfterPolicy::None)
     }
 
     /// Transition an outbox entry to `failed` state with retry scheduling.
@@ -340,6 +392,8 @@ impl Outbox {
     /// Replay all pending entries (staged, ready, failed-with-retry-due).
     ///
     /// Returns entries that are eligible for sync processing.
+    /// Also includes conflicted entries whose `retry_after` has elapsed (SYNC-R11),
+    /// allowing the caller to re-attempt delivery after a server-specified backoff.
     pub fn replay(&self) -> SyncResult<Vec<OutboxEntry>> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut stmt = self.conn.prepare(
@@ -348,6 +402,7 @@ impl Outbox {
              FROM outbox_entries
              WHERE delivery_state IN ('staged', 'ready')
                 OR (delivery_state = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= ?1)
+                OR (delivery_state = 'conflicted' AND next_retry_at IS NOT NULL AND next_retry_at <= ?1)
              ORDER BY created_at ASC",
         )?;
 
@@ -419,6 +474,105 @@ impl Outbox {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    // ── Partial apply state persistence (SYNC-R12) ──────────────
+
+    /// Persist partial apply state for an outbox entry (SYNC-R12).
+    ///
+    /// Stores the partial apply result so that on daemon restart, the
+    /// partial apply can be resumed without reconstructing state from scratch.
+    /// The state is stored in the `partial_apply_states` table.
+    pub fn persist_partial_apply_state(
+        &self,
+        outbox_entry_id: &str,
+        state: &crate::partial_apply::PartialApplyState,
+    ) -> SyncResult<()> {
+        let state_json = serde_json::to_string(state)?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO partial_apply_states
+                (outbox_entry_id, state_json, recorded_at, retry_count)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![outbox_entry_id, state_json, now, state.retry_count],
+        )?;
+
+        tracing::info!(
+            outbox_entry_id = %outbox_entry_id,
+            bundle_id = %state.bundle_id,
+            retry_count = state.retry_count,
+            "Partial apply state persisted"
+        );
+        Ok(())
+    }
+
+    /// Load persisted partial apply state for an outbox entry (SYNC-R12).
+    ///
+    /// Returns `None` if no persisted state exists for the given entry.
+    pub fn load_partial_apply_state(
+        &self,
+        outbox_entry_id: &str,
+    ) -> SyncResult<Option<crate::partial_apply::PartialApplyState>> {
+        let result = self.conn.query_row(
+            "SELECT state_json FROM partial_apply_states WHERE outbox_entry_id = ?1",
+            params![outbox_entry_id],
+            |row| row.get::<_, String>(0),
+        );
+
+        match result {
+            Ok(json) => {
+                let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&json)?;
+                tracing::debug!(
+                    outbox_entry_id = %outbox_entry_id,
+                    "Loaded persisted partial apply state"
+                );
+                Ok(Some(state))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(SyncError::from(e)),
+        }
+    }
+
+    /// Remove persisted partial apply state (SYNC-R12).
+    ///
+    /// Called after a partial apply has been fully resolved (all deltas succeeded
+    /// or permanently failed).
+    pub fn remove_partial_apply_state(&self, outbox_entry_id: &str) -> SyncResult<()> {
+        self.conn.execute(
+            "DELETE FROM partial_apply_states WHERE outbox_entry_id = ?1",
+            params![outbox_entry_id],
+        )?;
+        tracing::debug!(
+            outbox_entry_id = %outbox_entry_id,
+            "Removed persisted partial apply state"
+        );
+        Ok(())
+    }
+
+    /// List all outbox entries with persisted partial apply states (SYNC-R12).
+    ///
+    /// Useful for resuming partial applies after daemon restart.
+    pub fn list_partial_apply_states(
+        &self,
+    ) -> SyncResult<Vec<(String, crate::partial_apply::PartialApplyState)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT outbox_entry_id, state_json FROM partial_apply_states ORDER BY recorded_at ASC",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut results = Vec::new();
+        for (entry_id, json) in rows {
+            let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&json)?;
+            results.push((entry_id, state));
+        }
+
+        Ok(results)
     }
 }
 
@@ -646,5 +800,278 @@ mod tests {
         );
         assert_eq!(DeliveryState::parse("acked").unwrap(), DeliveryState::Acked);
         assert!(DeliveryState::parse("bogus").is_err());
+    }
+
+    // ── retry_after tests (SYNC-R11) ────────────────────────────
+
+    #[test]
+    fn outbox_conflicted_retry_none_equivalent_to_no_retry() {
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).expect("append");
+
+        outbox.mark_sent(&entry_id).expect("mark_sent");
+        outbox
+            .mark_conflicted_with_retry(&entry_id, "conflict", &RetryAfterPolicy::None)
+            .expect("mark_conflicted");
+
+        let entry = outbox.get(&entry_id).expect("get");
+        assert_eq!(entry.delivery_state, "conflicted");
+        assert!(entry.next_retry_at.is_none());
+    }
+
+    // ── Partial apply state persistence tests (SYNC-R12) ───────
+
+    #[test]
+    fn outbox_persist_and_load_partial_apply_state() {
+        use crate::partial_apply::{DeltaApplyInfo, PartialApplyResult, PartialApplyState};
+
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).expect("append");
+
+        let partial_result = PartialApplyResult {
+            total_count: 3,
+            succeeded_count: 2,
+            failed_count: 1,
+            succeeded_deltas: vec![
+                DeltaApplyInfo {
+                    delta_index: 0,
+                    apply_status: "applied".to_string(),
+                    error_code: None,
+                    applied_entity_revision: Some(1),
+                },
+                DeltaApplyInfo {
+                    delta_index: 1,
+                    apply_status: "applied".to_string(),
+                    error_code: None,
+                    applied_entity_revision: Some(2),
+                },
+            ],
+            failed_deltas: vec![DeltaApplyInfo {
+                delta_index: 2,
+                apply_status: "rejected".to_string(),
+                error_code: Some("optimistic_lock_failed".to_string()),
+                applied_entity_revision: None,
+            }],
+            retryable: true,
+            data_freshness_hint: Some("hint".to_string()),
+            last_indexed_bundle_id: Some("bdl_prev".to_string()),
+        };
+
+        let state = PartialApplyState::new("bdl_test", "wld_test", partial_result);
+
+        outbox
+            .persist_partial_apply_state(&entry_id, &state)
+            .expect("persist");
+
+        let loaded = outbox
+            .load_partial_apply_state(&entry_id)
+            .expect("load")
+            .expect("state should exist");
+
+        assert_eq!(loaded.bundle_id, "bdl_test");
+        assert_eq!(loaded.world_id, "wld_test");
+        assert_eq!(loaded.result.total_count, 3);
+        assert_eq!(loaded.result.succeeded_count, 2);
+        assert_eq!(loaded.result.failed_count, 1);
+        assert_eq!(loaded.retry_count, 0);
+    }
+
+    #[test]
+    fn outbox_load_nonexistent_partial_apply_state() {
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+
+        let loaded = outbox
+            .load_partial_apply_state("obe_nonexistent")
+            .expect("load");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn outbox_remove_partial_apply_state() {
+        use crate::partial_apply::{PartialApplyResult, PartialApplyState};
+
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).expect("append");
+
+        let state = PartialApplyState::new(
+            "bdl_test",
+            "wld_test",
+            PartialApplyResult {
+                total_count: 1,
+                succeeded_count: 1,
+                failed_count: 0,
+                succeeded_deltas: vec![],
+                failed_deltas: vec![],
+                retryable: false,
+                data_freshness_hint: None,
+                last_indexed_bundle_id: None,
+            },
+        );
+
+        outbox
+            .persist_partial_apply_state(&entry_id, &state)
+            .expect("persist");
+        outbox
+            .remove_partial_apply_state(&entry_id)
+            .expect("remove");
+
+        let loaded = outbox.load_partial_apply_state(&entry_id).expect("load");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn outbox_list_partial_apply_states() {
+        use crate::partial_apply::{DeltaApplyInfo, PartialApplyResult, PartialApplyState};
+
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+
+        let entry_id1 = outbox.append(&cmd).expect("append 1");
+        let entry_id2 = outbox.append(&cmd).expect("append 2");
+
+        let state1 = PartialApplyState::new(
+            "bdl_1",
+            "wld_test",
+            PartialApplyResult {
+                total_count: 2,
+                succeeded_count: 1,
+                failed_count: 1,
+                succeeded_deltas: vec![],
+                failed_deltas: vec![DeltaApplyInfo {
+                    delta_index: 1,
+                    apply_status: "skipped_dependency".to_string(),
+                    error_code: None,
+                    applied_entity_revision: None,
+                }],
+                retryable: true,
+                data_freshness_hint: None,
+                last_indexed_bundle_id: None,
+            },
+        );
+
+        let state2 = PartialApplyState::new(
+            "bdl_2",
+            "wld_test",
+            PartialApplyResult {
+                total_count: 1,
+                succeeded_count: 0,
+                failed_count: 1,
+                succeeded_deltas: vec![],
+                failed_deltas: vec![DeltaApplyInfo {
+                    delta_index: 0,
+                    apply_status: "rejected".to_string(),
+                    error_code: Some("transient_validation_error".to_string()),
+                    applied_entity_revision: None,
+                }],
+                retryable: true,
+                data_freshness_hint: None,
+                last_indexed_bundle_id: None,
+            },
+        );
+
+        outbox
+            .persist_partial_apply_state(&entry_id1, &state1)
+            .expect("persist 1");
+        outbox
+            .persist_partial_apply_state(&entry_id2, &state2)
+            .expect("persist 2");
+
+        let states = outbox.list_partial_apply_states().expect("list");
+        assert_eq!(states.len(), 2);
+        assert_eq!(states[0].1.bundle_id, "bdl_1");
+        assert_eq!(states[1].1.bundle_id, "bdl_2");
+    }
+
+    #[test]
+    fn outbox_persist_partial_apply_state_upsert() {
+        use crate::partial_apply::{PartialApplyResult, PartialApplyState};
+
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).expect("append");
+
+        let state_v1 = PartialApplyState::new(
+            "bdl_test",
+            "wld_test",
+            PartialApplyResult {
+                total_count: 2,
+                succeeded_count: 1,
+                failed_count: 1,
+                succeeded_deltas: vec![],
+                failed_deltas: vec![],
+                retryable: true,
+                data_freshness_hint: None,
+                last_indexed_bundle_id: None,
+            },
+        );
+
+        outbox
+            .persist_partial_apply_state(&entry_id, &state_v1)
+            .expect("persist v1");
+
+        // Persist again (upsert) with updated retry count
+        let mut state_v2 = state_v1;
+        state_v2.increment_retry();
+
+        outbox
+            .persist_partial_apply_state(&entry_id, &state_v2)
+            .expect("persist v2");
+
+        let loaded = outbox
+            .load_partial_apply_state(&entry_id)
+            .expect("load")
+            .expect("state should exist");
+
+        assert_eq!(loaded.retry_count, 1);
+    }
+
+    #[test]
+    fn outbox_conflicted_with_retry_at_past_time() {
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).expect("append");
+
+        outbox.mark_sent(&entry_id).expect("mark_sent");
+
+        // Set retry_after to 1 second ago
+        let past = chrono::Utc::now() - chrono::Duration::seconds(1);
+        outbox
+            .mark_conflicted_with_retry(
+                &entry_id,
+                "transient conflict",
+                &RetryAfterPolicy::AtTime(past),
+            )
+            .expect("mark_conflicted");
+
+        let entry = outbox.get(&entry_id).expect("get");
+        assert_eq!(entry.delivery_state, "conflicted");
+
+        // Entry SHOULD appear in replay since retry_after has passed
+        let entries = outbox.replay().expect("replay");
+        assert!(entries.iter().any(|e| e.outbox_entry_id == entry_id));
+    }
+
+    #[test]
+    fn outbox_conflicted_without_retry_not_in_replay() {
+        let outbox = Outbox::new_in_memory().expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).expect("append");
+
+        outbox.mark_sent(&entry_id).expect("mark_sent");
+        // Legacy mark_conflicted without retry policy
+        outbox
+            .mark_conflicted(&entry_id, "hard conflict")
+            .expect("mark_conflicted");
+
+        let entry = outbox.get(&entry_id).expect("get");
+        assert_eq!(entry.delivery_state, "conflicted");
+        assert!(entry.next_retry_at.is_none());
+
+        // Entry should NOT appear in replay (no retry_after set)
+        let entries = outbox.replay().expect("replay");
+        assert!(entries.iter().all(|e| e.outbox_entry_id != entry_id));
     }
 }
