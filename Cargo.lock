@@ -1694,6 +1694,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-local-db"
+version = "0.1.0"
+dependencies = [
+ "nexus-contracts",
+ "rusqlite",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "nexus-sync"
 version = "0.1.0"
 dependencies = [
