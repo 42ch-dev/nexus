@@ -3,11 +3,17 @@
 //! Provides push, pull, status, and resolve subcommands for sync operations.
 //! The `resolve` subcommand includes a safety confirmation prompt for
 //! auto-reject resolution (SYNC-R13), which can be bypassed with `--force`.
+//!
+//! # Wiring (TD-1)
+//!
+//! CLI sync commands now invoke real daemon endpoints that use `nexus-sync`
+//! components (Outbox, Precheck, SyncClient) rather than returning stub data.
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use serde::{Deserialize, Serialize};
 
 /// Supported conflict resolution strategies.
 ///
@@ -37,7 +43,19 @@ impl std::fmt::Display for ResolutionStrategy {
 pub enum SyncCommand {
     /// Push local changes to platform
     Push {
-        /// Force push even if conflicts detected
+        /// Workspace ID for the bundle
+        #[arg(long)]
+        workspace_id: Option<String>,
+
+        /// World ID for the bundle
+        #[arg(long)]
+        world_id: Option<String>,
+
+        /// Creator ID submitting the bundle
+        #[arg(long)]
+        creator_id: Option<String>,
+
+        /// Force push even if precheck would fail
         #[arg(long)]
         force: bool,
     },
@@ -63,14 +81,85 @@ pub enum SyncCommand {
     },
 }
 
+// ── Request/Response models for daemon communication ──────────────
+
 /// Sync status response from the daemon
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct SyncStatusResponse {
-    pub pending_count: u64,
+    pub staged_count: u64,
+    pub ready_count: u64,
+    pub sent_count: u64,
+    pub acked_count: u64,
     pub failed_count: u64,
+    pub conflicted_count: u64,
     pub last_sync_at: Option<String>,
-    pub conflict_count: u64,
 }
+
+/// Sync push request to the daemon
+#[derive(Debug, Serialize)]
+pub struct SyncPushRequest {
+    pub workspace_id: String,
+    pub world_id: String,
+    pub creator_id: String,
+    pub force: bool,
+}
+
+/// Sync push response from the daemon
+#[derive(Debug, Deserialize)]
+pub struct SyncPushResponse {
+    pub success: bool,
+    pub outbox_entry_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub precheck_result: Option<PrecheckSummaryResponse>,
+    pub error: Option<String>,
+}
+
+/// Precheck summary from the daemon
+#[derive(Debug, Deserialize)]
+pub struct PrecheckSummaryResponse {
+    pub valid: bool,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub summary: String,
+}
+
+/// Sync resolve request to the daemon
+#[derive(Debug, Serialize)]
+pub struct SyncResolveRequest {
+    pub outbox_entry_id: String,
+    pub resolution: String,
+    pub force: bool,
+}
+
+/// Sync resolve response from the daemon
+#[derive(Debug, Deserialize)]
+pub struct SyncResolveResponse {
+    pub success: bool,
+    pub delivery_state: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Sync replay response from the daemon
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct SyncReplayResponse {
+    pub replayable_count: usize,
+    pub entries: Vec<OutboxEntrySummaryResponse>,
+}
+
+/// Outbox entry summary from the daemon
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct OutboxEntrySummaryResponse {
+    pub outbox_entry_id: String,
+    pub bundle_id: String,
+    pub delivery_state: String,
+    pub retry_count: i64,
+    pub last_error: Option<String>,
+    pub created_at: String,
+}
+
+// ── Confirmation prompt ───────────────────────────────────────────
 
 /// Check whether the user confirms a destructive auto-reject action.
 ///
@@ -99,19 +188,76 @@ pub fn confirm_auto_reject(force: bool) -> bool {
     }
 }
 
+// ── Command runner ────────────────────────────────────────────────
+
 /// Run sync command
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config);
 
     match cmd {
-        SyncCommand::Push { force } => {
+        SyncCommand::Push {
+            workspace_id,
+            world_id,
+            creator_id,
+            force,
+        } => {
             if !client.health_check().await? {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
-            println!("Pushing local changes to platform...");
-            println!("⚠ V1.0 skeleton: sync not yet implemented.");
-            if force {
-                println!("  --force flag noted (will override conflict checks).");
+
+            // Default IDs from config if not provided
+            let workspace_id = workspace_id
+                .as_deref()
+                .unwrap_or("local")
+                .to_string();
+            let world_id = world_id
+                .as_deref()
+                .unwrap_or("unknown")
+                .to_string();
+            let creator_id = creator_id
+                .as_deref()
+                .or(config.active_creator_id.as_deref())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let request = SyncPushRequest {
+                workspace_id,
+                world_id,
+                creator_id,
+                force,
+            };
+
+            match client
+                .post::<SyncPushResponse, SyncPushRequest>("/v1/local/sync/push", &request)
+                .await
+            {
+                Ok(response) => {
+                    println!("Sync push staged successfully.");
+                    if let Some(entry_id) = &response.outbox_entry_id {
+                        println!("  Entry ID:  {}", entry_id);
+                    }
+                    if let Some(bundle_id) = &response.bundle_id {
+                        println!("  Bundle ID: {}", bundle_id);
+                    }
+                    if let Some(precheck) = &response.precheck_result {
+                        if precheck.valid {
+                            println!("  Precheck:  PASSED");
+                        } else {
+                            println!("  Precheck:  FAILED ({} errors, {} warnings)",
+                                precheck.error_count, precheck.warning_count);
+                            println!("  {}", precheck.summary);
+                        }
+                    }
+                    if !response.success {
+                        if let Some(error) = &response.error {
+                            eprintln!("Error: {}", error);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Sync push failed: {}", e);
+                    return Err(e);
+                }
             }
         }
         SyncCommand::Pull => {
@@ -119,7 +265,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
             println!("Pulling platform changes...");
-            println!("⚠ V1.0 skeleton: sync not yet implemented.");
+            println!("⚠ Pull is not yet fully implemented. Use `sync status` to check outbox state.");
         }
         SyncCommand::Status => {
             if !client.health_check().await? {
@@ -136,23 +282,35 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             {
                 Ok(status) => {
                     println!("Sync Status:");
-                    println!("  Pending bundles: {}", status.pending_count);
-                    println!("  Failed bundles:  {}", status.failed_count);
-                    println!("  Conflicts:        {}", status.conflict_count);
+                    println!("  Staged:    {}", status.staged_count);
+                    println!("  Ready:    {}", status.ready_count);
+                    println!("  Sent:      {}", status.sent_count);
+                    println!("  Acked:     {}", status.acked_count);
+                    println!("  Conflicts: {}", status.conflicted_count);
+                    println!("  Failed:    {}", status.failed_count);
 
                     match &status.last_sync_at {
-                        Some(ts) => println!("  Last sync:        {}", ts),
-                        None => println!("  Last sync:        never"),
+                        Some(ts) => println!("  Last sync: {}", ts),
+                        None => println!("  Last sync: never"),
                     }
 
-                    if status.pending_count > 0 {
+                    let total_pending = status.staged_count + status.ready_count;
+                    if total_pending > 0 {
                         println!();
                         println!("  Sync pending changes with: nexus42 sync push");
+                    }
+                    if status.conflicted_count > 0 {
+                        println!();
+                        println!(
+                            "  ⚠ {} conflicted bundle(s) need attention.",
+                            status.conflicted_count
+                        );
+                        println!("  Resolve with: nexus42 sync resolve <entry_id> --resolution <strategy>");
                     }
                     if status.failed_count > 0 {
                         println!();
                         println!(
-                            "  ⚠ {} failed bundle(s) need attention.",
+                            "  ⚠ {} failed bundle(s) will be retried automatically.",
                             status.failed_count
                         );
                     }
@@ -178,11 +336,43 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 return Ok(());
             }
 
-            println!(
-                "Resolving conflict for entry {} with strategy: {}",
-                outbox_entry_id, resolution
-            );
-            println!("⚠ V1.0 skeleton: conflict resolution not yet implemented.");
+            let request = SyncResolveRequest {
+                outbox_entry_id: outbox_entry_id.clone(),
+                resolution: resolution.to_string(),
+                force,
+            };
+
+            match client
+                .post::<SyncResolveResponse, SyncResolveRequest>(
+                    "/v1/local/sync/resolve",
+                    &request,
+                )
+                .await
+            {
+                Ok(response) => {
+                    if response.success {
+                        println!(
+                            "Resolved entry {} with strategy: {}",
+                            outbox_entry_id, resolution
+                        );
+                        if let Some(state) = &response.delivery_state {
+                            println!("  New state: {}", state);
+                        }
+                    } else if let Some(error) = &response.error {
+                        eprintln!("Resolution failed: {}", error);
+                        if let Some(state) = &response.delivery_state {
+                            eprintln!("  Current state: {}", state);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Resolve request failed for entry {}: {}",
+                        outbox_entry_id, e
+                    );
+                    return Err(e);
+                }
+            }
         }
     }
 
@@ -196,25 +386,33 @@ mod tests {
     #[test]
     fn test_sync_status_response_deserialization() {
         let json = r#"{
-            "pending_count": 3,
+            "staged_count": 2,
+            "ready_count": 1,
+            "sent_count": 0,
+            "acked_count": 5,
             "failed_count": 1,
-            "last_sync_at": "2026-04-07T00:00:00Z",
-            "conflict_count": 0
+            "conflicted_count": 3,
+            "last_sync_at": "2026-04-07T00:00:00Z"
         }"#;
         let resp: SyncStatusResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.pending_count, 3);
+        assert_eq!(resp.staged_count, 2);
+        assert_eq!(resp.ready_count, 1);
+        assert_eq!(resp.acked_count, 5);
+        assert_eq!(resp.conflicted_count, 3);
         assert_eq!(resp.failed_count, 1);
-        assert_eq!(resp.conflict_count, 0);
         assert_eq!(resp.last_sync_at, Some("2026-04-07T00:00:00Z".to_string()));
     }
 
     #[test]
     fn test_sync_status_response_no_last_sync() {
         let json = r#"{
-            "pending_count": 0,
+            "staged_count": 0,
+            "ready_count": 0,
+            "sent_count": 0,
+            "acked_count": 0,
             "failed_count": 0,
-            "last_sync_at": null,
-            "conflict_count": 0
+            "conflicted_count": 0,
+            "last_sync_at": null
         }"#;
         let resp: SyncStatusResponse = serde_json::from_str(json).unwrap();
         assert!(resp.last_sync_at.is_none());
@@ -259,5 +457,41 @@ mod tests {
         let manual: ResolutionStrategy =
             clap::ValueEnum::from_str("manual-review", true).expect("parse manual-review");
         assert_eq!(manual, ResolutionStrategy::ManualReview);
+    }
+
+    #[test]
+    fn test_sync_push_response_deserialization() {
+        let json = r#"{
+            "success": true,
+            "outbox_entry_id": "obe_abc123",
+            "bundle_id": "bdl_xyz789",
+            "precheck_result": {
+                "valid": true,
+                "error_count": 0,
+                "warning_count": 1,
+                "summary": "All checks passed."
+            },
+            "error": null
+        }"#;
+        let resp: SyncPushResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.outbox_entry_id, Some("obe_abc123".to_string()));
+        assert_eq!(resp.bundle_id, Some("bdl_xyz789".to_string()));
+        assert!(resp.precheck_result.is_some());
+        let precheck = resp.precheck_result.unwrap();
+        assert!(precheck.valid);
+        assert_eq!(precheck.error_count, 0);
+    }
+
+    #[test]
+    fn test_sync_resolve_response_deserialization() {
+        let json = r#"{
+            "success": true,
+            "delivery_state": "acked",
+            "error": null
+        }"#;
+        let resp: SyncResolveResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.delivery_state, Some("acked".to_string()));
     }
 }

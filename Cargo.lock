@@ -1774,6 +1774,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-domain",
  "nexus-local-db",
+ "nexus-sync",
  "rusqlite",
  "serde",
  "serde_json",
