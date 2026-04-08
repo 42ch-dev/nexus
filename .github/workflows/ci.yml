@@ -117,73 +117,113 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-  schema-drift-check:
-    name: Schema Drift Detection
+  schema-consistency-check:
+    name: Schema Consistency Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check DB schema version consistency (CLI vs daemon)
+      - name: Check CLI/daemon dependency on nexus-local-db
         run: |
-          echo "Checking DB_SCHEMA_VERSION consistency across CLI and daemon..."
-          CLI_VERSION=$(grep -oP 'pub const DB_SCHEMA_VERSION: u32 = \K\d+' crates/nexus42/src/db/mod.rs)
-          DAEMON_VERSION=$(grep -oP 'pub const DB_SCHEMA_VERSION: u32 = \K\d+' crates/nexus42d/src/db/schema.rs)
-          echo "CLI DB_SCHEMA_VERSION:    $CLI_VERSION"
-          echo "Daemon DB_SCHEMA_VERSION: $DAEMON_VERSION"
-          if [ "$CLI_VERSION" != "$DAEMON_VERSION" ]; then
-            echo "❌ DB_SCHEMA_VERSION mismatch: CLI=$CLI_VERSION, Daemon=$DAEMON_VERSION"
+          echo "Checking CLI and daemon both depend on nexus-local-db..."
+          if ! grep -q 'nexus-local-db' crates/nexus42/Cargo.toml; then
+            echo "❌ CLI does not depend on nexus-local-db"
             exit 1
           fi
-          echo "✅ DB_SCHEMA_VERSION values match"
-      - name: Check reference_sources table schema consistency
+          if ! grep -q 'nexus-local-db' crates/nexus42d/Cargo.toml; then
+            echo "❌ Daemon does not depend on nexus-local-db"
+            exit 1
+          fi
+          echo "✅ Both CLI and daemon depend on nexus-local-db"
+      - name: Check DB_SCHEMA_VERSION location (single ownership)
         run: |
-          echo "Checking reference_sources table definitions across CLI and daemon..."
-          # Extract column names from each definition (strip SQL comments and whitespace)
-          CLI_COLS=$(sed -n '/CREATE TABLE IF NOT EXISTS reference_sources/,/);/p' crates/nexus42/src/db/mod.rs \
-            | grep -v '^//' \
-            | grep -oP '^\s+\K\w+' \
-            | sort \
-            | tr '\n' ' ')
-          DAEMON_COLS=$(sed -n '/CREATE TABLE IF NOT EXISTS reference_sources/,/);/p' crates/nexus42d/src/db/schema.rs \
-            | grep -v '^//' \
-            | grep -oP '^\s+\K\w+' \
-            | sort \
-            | tr '\n' ' ')
-          echo "CLI reference_sources columns:    $CLI_COLS"
-          echo "Daemon reference_sources columns: $DAEMON_COLS"
-          # Check that the core columns (not daemon-only additions like content) are present in both
-          # CLI has content via ALTER TABLE migration, daemon does NOT have content column
-          # So we check that key columns overlap
-          for col in reference_source_id workspace_id source_type uri title content_hash scan_status created_at updated_at; do
-            if ! echo "$CLI_COLS" | grep -qw "$col"; then
-              echo "❌ CLI reference_sources missing expected column: $col"
+          echo "Checking DB_SCHEMA_VERSION is defined only in nexus-local-db..."
+          # DB_SCHEMA_VERSION should be in nexus-local-db
+          if ! grep -q 'pub const DB_SCHEMA_VERSION: u32' crates/nexus-local-db/src/version.rs; then
+            echo "❌ DB_SCHEMA_VERSION not found in nexus-local-db/src/version.rs"
+            exit 1
+          fi
+          # DB_SCHEMA_VERSION should NOT be duplicated in CLI/daemon (excluding imports)
+          CLI_HAS_CONST=$(grep -E 'pub const DB_SCHEMA_VERSION: u32 = \d+' crates/nexus42/src/db/mod.rs 2>/dev/null | wc -l | tr -d ' ')
+          DAEMON_HAS_CONST=$(grep -E 'pub const DB_SCHEMA_VERSION: u32 = \d+' crates/nexus42d/src/db/schema.rs 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$CLI_HAS_CONST" != "0" ]; then
+            echo "❌ CLI has duplicated DB_SCHEMA_VERSION constant (should import from nexus-local-db)"
+            exit 1
+          fi
+          if [ "$DAEMON_HAS_CONST" != "0" ]; then
+            echo "❌ Daemon has duplicated DB_SCHEMA_VERSION constant (should import from nexus-local-db)"
+            exit 1
+          fi
+          echo "✅ DB_SCHEMA_VERSION is defined only in nexus-local-db"
+      - name: Check SCHEMA_VERSION source from generated contracts
+        run: |
+          echo "Checking SCHEMA_VERSION comes from nexus-contracts generated constants..."
+          # SCHEMA_VERSION should be re-exported from nexus-contracts in nexus-local-db
+          if ! grep -q 'pub use nexus_contracts::generated::LATEST_SCHEMA_VERSION as SCHEMA_VERSION' crates/nexus-local-db/src/version.rs; then
+            echo "❌ SCHEMA_VERSION is not sourced from nexus-contracts::generated::LATEST_SCHEMA_VERSION"
+            exit 1
+          fi
+          # Verify nexus-contracts has the generated constant
+          if ! grep -q 'pub const LATEST_SCHEMA_VERSION: u32' crates/nexus-contracts/src/generated/mod.rs; then
+            echo "❌ LATEST_SCHEMA_VERSION not found in nexus-contracts generated code"
+            exit 1
+          fi
+          echo "✅ SCHEMA_VERSION is sourced from nexus-contracts generated constants"
+      - name: Check no duplicated shared table DDL
+        run: |
+          echo "Checking no duplicated DDL for shared tables (workspace_meta, creators, reference_sources)..."
+          # Shared tables should be defined only in nexus-local-db, not in CLI/daemon
+          for table in workspace_meta creators reference_sources; do
+            CLI_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
+            DAEMON_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42d/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
+            LOCALDB_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-local-db/src/ 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$CLI_DDL" != "0" ]; then
+              echo "❌ CLI has duplicated DDL for $table table (should use nexus-local-db)"
               exit 1
             fi
-            if ! echo "$DAEMON_COLS" | grep -qw "$col"; then
-              echo "❌ Daemon reference_sources missing expected column: $col"
+            if [ "$DAEMON_DDL" != "0" ]; then
+              echo "❌ Daemon has duplicated DDL for $table table (should use nexus-local-db)"
+              exit 1
+            fi
+            if [ "$LOCALDB_DDL" == "0" ]; then
+              echo "❌ $table table DDL not found in nexus-local-db"
               exit 1
             fi
           done
-          echo "✅ reference_sources key columns match (both have: reference_source_id, workspace_id, source_type, uri, title, content_hash, scan_status, created_at, updated_at)"
-      - name: Check wire schema source from generated contracts
+          echo "✅ No duplicated DDL - shared tables defined only in nexus-local-db"
+      - name: Check no deprecated WIRE_SCHEMA_VERSION
         run: |
-          echo "Checking wire schema source from generated contracts..."
-          CONTRACTS_VERSION=$(grep -oP 'pub const LATEST_SCHEMA_VERSION: u32 = \K\d+' crates/nexus-contracts/src/generated/mod.rs)
-          echo "Generated LATEST_SCHEMA_VERSION: $CONTRACTS_VERSION"
-          if ! grep -q 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42/src/db/mod.rs; then
-            echo "❌ CLI WIRE_SCHEMA_VERSION is not sourced from LATEST_SCHEMA_VERSION"
+          echo "Checking no deprecated WIRE_SCHEMA_VERSION key..."
+          # WIRE_SCHEMA_VERSION should NOT exist anywhere (replaced by schema_version)
+          WIRE_IN_CLI=$(grep -r "WIRE_SCHEMA_VERSION" crates/nexus42/src/ 2>/dev/null | wc -l | tr -d ' ')
+          WIRE_IN_DAEMON=$(grep -r "WIRE_SCHEMA_VERSION" crates/nexus42d/src/ 2>/dev/null | wc -l | tr -d ' ')
+          WIRE_IN_LOCALDB=$(grep -r "WIRE_SCHEMA_VERSION" crates/nexus-local-db/src/ 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$WIRE_IN_CLI" != "0" ]; then
+            echo "❌ Deprecated WIRE_SCHEMA_VERSION found in CLI (should use schema_version)"
             exit 1
           fi
-          if ! grep -q 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42d/src/db/schema.rs; then
-            echo "❌ Daemon WIRE_SCHEMA_VERSION is not sourced from LATEST_SCHEMA_VERSION"
+          if [ "$WIRE_IN_DAEMON" != "0" ]; then
+            echo "❌ Deprecated WIRE_SCHEMA_VERSION found in daemon (should use schema_version)"
             exit 1
           fi
-          CLI_WIRE=$(grep -oP 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42/src/db/mod.rs | wc -l | tr -d ' ')
-          DAEMON_WIRE=$(grep -oP 'pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;' crates/nexus42d/src/db/schema.rs | wc -l | tr -d ' ')
-          if [ "$CLI_WIRE" != "1" ] || [ "$DAEMON_WIRE" != "1" ]; then
-            echo "❌ Unexpected wire schema source declarations"
+          if [ "$WIRE_IN_LOCALDB" != "0" ]; then
+            echo "❌ Deprecated WIRE_SCHEMA_VERSION found in nexus-local-db (should use schema_version)"
             exit 1
           fi
-          echo "✅ Wire schema version is sourced from generated contracts"
+          echo "✅ No deprecated WIRE_SCHEMA_VERSION - using schema_version instead"
+      - name: Check CLI/daemon use nexus-local-db API
+        run: |
+          echo "Checking CLI/daemon import from nexus-local-db..."
+          # CLI should import init and RuntimeRole
+          if ! grep -q 'use nexus_local_db::{init, RuntimeRole}' crates/nexus42/src/db/mod.rs; then
+            echo "❌ CLI does not import nexus_local_db::{init, RuntimeRole}"
+            exit 1
+          fi
+          # Daemon should import init and RuntimeRole
+          if ! grep -q 'use nexus_local_db::{init, RuntimeRole}' crates/nexus42d/src/db/schema.rs; then
+            echo "❌ Daemon does not import nexus_local_db::{init, RuntimeRole}"
+            exit 1
+          fi
+          echo "✅ Both CLI and daemon use nexus-local-db API"
 
   rust-tests:
     name: Rust tests

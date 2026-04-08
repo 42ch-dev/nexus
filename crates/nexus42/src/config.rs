@@ -45,6 +45,10 @@ impl CliConfig {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(&config_path)?;
+        // Handle empty files by returning default config
+        if content.trim().is_empty() {
+            return Ok(Self::default());
+        }
         Ok(serde_json::from_str(&content)?)
     }
 
