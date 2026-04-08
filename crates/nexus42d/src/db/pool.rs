@@ -7,9 +7,96 @@
 
 use deadpool_sqlite::{Config, InteractError, Pool, PoolError, Runtime};
 use std::path::Path;
+use std::time::Duration;
 
-/// Default pool size for the daemon
-pub const DEFAULT_POOL_SIZE: usize = 8;
+/// Configuration for the SQLite connection pool.
+///
+/// Controls pool sizing and timeout behaviour. Defaults match the previous
+/// hard-coded values (`max_connections: 8`, `timeout: 30 s`).
+///
+/// # Environment variable overrides
+///
+/// | Variable | Field | Parsing |
+/// |---|---|---|
+/// | `NEXUS_DB_POOL_TIMEOUT_SECS` | `timeout` | Parsed as `u64`; falls back to default on missing/invalid |
+/// | `NEXUS_DB_POOL_MAX_CONNECTIONS` | `max_connections` | Parsed as `usize`; falls back to default on missing/invalid |
+///
+/// # Tuning guidance
+///
+/// - **`timeout`** — maximum time to wait for an available connection.
+///   Increase under heavy concurrent load; decrease to fail fast.
+/// - **`max_connections`** — upper bound on open SQLite connections.
+///   SQLite is file-level-locked, so very high values rarely improve
+///   throughput; 8–16 is usually sufficient for the daemon.
+///
+/// # Example
+///
+/// ```no_run
+/// use nexus42d::db::pool::{DbPool, PoolConfig};
+/// use std::time::Duration;
+///
+/// // Use environment overrides (suitable for production):
+/// let pool = DbPool::new("nexus.db".as_ref(), PoolConfig::from_env())?;
+///
+/// // Or build programmatically:
+/// let config = PoolConfig::default()
+///     .with_timeout(Duration::from_secs(10))
+///     .with_max_connections(4);
+/// let pool = DbPool::new("nexus.db".as_ref(), config)?;
+/// # Ok::<(), deadpool_sqlite::BuildError>(())
+/// ```
+#[derive(Clone, Debug)]
+pub struct PoolConfig {
+    /// Maximum time to wait for an available connection from the pool.
+    pub timeout: Duration,
+    /// Maximum number of connections in the pool.
+    pub max_connections: usize,
+}
+
+impl Default for PoolConfig {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(30),
+            max_connections: 8,
+        }
+    }
+}
+
+impl PoolConfig {
+    /// Create a `PoolConfig` reading overrides from environment variables.
+    ///
+    /// See the [struct-level documentation](PoolConfig) for the variable names
+    /// and fallback behaviour.
+    pub fn from_env() -> Self {
+        let mut cfg = Self::default();
+
+        if let Ok(val) = std::env::var("NEXUS_DB_POOL_TIMEOUT_SECS") {
+            if let Ok(secs) = val.parse::<u64>() {
+                cfg.timeout = Duration::from_secs(secs);
+            }
+        }
+
+        if let Ok(val) = std::env::var("NEXUS_DB_POOL_MAX_CONNECTIONS") {
+            if let Ok(max) = val.parse::<usize>() {
+                cfg.max_connections = max;
+            }
+        }
+
+        cfg
+    }
+
+    /// Set the pool wait timeout.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set the maximum number of connections.
+    pub fn with_max_connections(mut self, max_connections: usize) -> Self {
+        self.max_connections = max_connections;
+        self
+    }
+}
 
 /// Wrapper around deadpool SQLite connection pool
 ///
@@ -21,22 +108,39 @@ pub struct DbPool {
 }
 
 impl DbPool {
-    /// Create a new connection pool for the given database path
+    /// Create a new connection pool with the given configuration.
     ///
     /// # Arguments
     /// * `db_path` - Path to the SQLite database file
-    /// * `max_size` - Maximum number of connections in the pool
+    /// * `config`  - Pool sizing and timeout configuration
     ///
     /// # Errors
     /// Returns `BuildError` if the pool cannot be created (e.g. invalid path)
-    pub fn new(db_path: &Path, max_size: usize) -> Result<Self, deadpool_sqlite::BuildError> {
-        let cfg = Config::new(db_path);
+    pub fn new(db_path: &Path, config: PoolConfig) -> Result<Self, deadpool_sqlite::BuildError> {
+        let mut cfg = Config::new(db_path);
+        cfg.pool = Some(deadpool_sqlite::PoolConfig {
+            max_size: config.max_connections,
+            timeouts: deadpool_sqlite::Timeouts {
+                wait: Some(config.timeout),
+                create: Some(config.timeout),
+                recycle: Some(config.timeout),
+            },
+            ..deadpool_sqlite::PoolConfig::new(config.max_connections)
+        });
+
         let pool = cfg
             .builder(Runtime::Tokio1)
             .expect("builder() is infallible for valid Runtime")
-            .max_size(max_size)
             .build()?;
         Ok(Self { pool })
+    }
+
+    /// Create a connection pool with default configuration.
+    ///
+    /// Convenience wrapper around [`DbPool::new`] with [`PoolConfig::default`].
+    /// Useful in tests and simple setups where custom configuration is unnecessary.
+    pub fn with_defaults(db_path: &Path) -> Result<Self, deadpool_sqlite::BuildError> {
+        Self::new(db_path, PoolConfig::default())
     }
 
     /// Get a connection from the pool
@@ -176,7 +280,8 @@ mod tests {
     #[test]
     fn pool_creates_successfully() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).expect("Pool creation should succeed");
+        let pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+            .expect("Pool creation should succeed");
         assert_eq!(pool.status().size, 0, "Pool should start empty");
     }
 
@@ -184,7 +289,7 @@ mod tests {
     async fn pool_get_returns_working_connection() {
         let (_tmp, db_path) = create_test_db();
 
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2)).unwrap();
         let conn = pool.get().await.expect("Should get connection");
 
         conn.execute("INSERT INTO test (val) VALUES (?1)", ["hello"])
@@ -205,7 +310,7 @@ mod tests {
     async fn pool_supports_concurrent_access() {
         let (_tmp, db_path) = create_test_db();
 
-        let pool = DbPool::new(&db_path, 4).unwrap();
+        let pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(4)).unwrap();
         let pool_clone = pool.clone();
 
         // Spawn 4 concurrent tasks that each insert and read
@@ -248,19 +353,13 @@ mod tests {
         let (_tmp, db_path) = create_test_db();
 
         // Build pool with max_size = 1 and short wait timeout so test doesn't hang
-        let mut cfg = Config::new(&db_path);
-        let pool_config = deadpool_sqlite::PoolConfig::new(1);
-        cfg.pool = Some(deadpool_sqlite::PoolConfig {
-            max_size: 1,
-            timeouts: deadpool_sqlite::Timeouts::wait_millis(50),
-            ..pool_config
-        });
-        let inner_pool = cfg
-            .builder(Runtime::Tokio1)
-            .expect("builder() is infallible for valid Runtime")
-            .build()
-            .expect("Pool creation should succeed");
-        let pool = DbPool { pool: inner_pool };
+        let pool = DbPool::new(
+            &db_path,
+            PoolConfig::default()
+                .with_max_connections(1)
+                .with_timeout(Duration::from_millis(50)),
+        )
+        .expect("Pool creation should succeed");
 
         // Acquire the only connection and hold it
         let conn = pool.get().await.expect("Should get first connection");
@@ -288,5 +387,70 @@ mod tests {
             1,
             "Connection should be returned to pool"
         );
+    }
+
+    // ── PoolConfig tests ──────────────────────────────────────────
+
+    #[test]
+    fn pool_config_default_values() {
+        let cfg = PoolConfig::default();
+        assert_eq!(cfg.timeout, Duration::from_secs(30));
+        assert_eq!(cfg.max_connections, 8);
+    }
+
+    #[test]
+    fn pool_config_builder_chaining() {
+        let cfg = PoolConfig::default()
+            .with_timeout(Duration::from_secs(5))
+            .with_max_connections(16);
+        assert_eq!(cfg.timeout, Duration::from_secs(5));
+        assert_eq!(cfg.max_connections, 16);
+    }
+
+    #[test]
+    fn pool_config_from_env_uses_defaults_when_unset() {
+        // Ensure env vars are NOT set for this test
+        std::env::remove_var("NEXUS_DB_POOL_TIMEOUT_SECS");
+        std::env::remove_var("NEXUS_DB_POOL_MAX_CONNECTIONS");
+
+        let cfg = PoolConfig::from_env();
+        assert_eq!(cfg.timeout, Duration::from_secs(30));
+        assert_eq!(cfg.max_connections, 8);
+    }
+
+    #[test]
+    fn pool_config_from_env_reads_valid_values() {
+        std::env::set_var("NEXUS_DB_POOL_TIMEOUT_SECS", "10");
+        std::env::set_var("NEXUS_DB_POOL_MAX_CONNECTIONS", "4");
+
+        let cfg = PoolConfig::from_env();
+        assert_eq!(cfg.timeout, Duration::from_secs(10));
+        assert_eq!(cfg.max_connections, 4);
+
+        // Clean up
+        std::env::remove_var("NEXUS_DB_POOL_TIMEOUT_SECS");
+        std::env::remove_var("NEXUS_DB_POOL_MAX_CONNECTIONS");
+    }
+
+    #[test]
+    fn pool_config_from_env_ignores_invalid_values() {
+        std::env::set_var("NEXUS_DB_POOL_TIMEOUT_SECS", "not_a_number");
+        std::env::set_var("NEXUS_DB_POOL_MAX_CONNECTIONS", "abc");
+
+        let cfg = PoolConfig::from_env();
+        // Should fall back to defaults
+        assert_eq!(cfg.timeout, Duration::from_secs(30));
+        assert_eq!(cfg.max_connections, 8);
+
+        // Clean up
+        std::env::remove_var("NEXUS_DB_POOL_TIMEOUT_SECS");
+        std::env::remove_var("NEXUS_DB_POOL_MAX_CONNECTIONS");
+    }
+
+    #[test]
+    fn with_defaults_creates_pool() {
+        let (_tmp, db_path) = create_test_db();
+        let pool = DbPool::with_defaults(&db_path).expect("Pool creation should succeed");
+        assert_eq!(pool.status().size, 0, "Pool should start empty");
     }
 }
