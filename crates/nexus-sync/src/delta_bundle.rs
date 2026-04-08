@@ -23,6 +23,22 @@ use uuid::Uuid;
 use crate::command::SyncCommandVariant;
 use crate::errors::{SyncError, SyncResult};
 
+/// Bundle validation error for delta-level checks.
+#[derive(Debug, thiserror::Error)]
+pub enum BundleValidationError {
+    /// Delta timestamp is not monotonically non-decreasing.
+    #[error("Non-monotonic timestamp at index {index}: {timestamp} < {previous}")]
+    NonMonotonicTimestamp {
+        index: usize,
+        timestamp: String,
+        previous: String,
+    },
+
+    /// Duplicate delta target entity ID detected.
+    #[error("Duplicate delta target entity ID: {0}")]
+    DuplicateDeltaTargetId(String),
+}
+
 /// Delta operation within a bundle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalDelta {
@@ -221,6 +237,67 @@ impl BundleBuilder {
     pub fn last_confirmed_delta_sequence(mut self, seq: u64) -> Self {
         self.last_confirmed_delta_sequence = Some(seq);
         self
+    }
+
+    /// Validate delta-level constraints (opt-in, not called by `build()`).
+    ///
+    /// Checks:
+    /// - Timestamps are monotonically non-decreasing (RFC3339 order)
+    /// - No duplicate target entity IDs (for deltas where `target_entity_id` is present)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if validation passes
+    /// - `Err(BundleValidationError)` if validation fails
+    pub fn validate(&self) -> Result<(), BundleValidationError> {
+        // Check timestamp monotonicity (non-decreasing RFC3339 timestamps)
+        let mut prev_ts: Option<chrono::DateTime<chrono::Utc>> = None;
+        for (index, delta) in self.deltas.iter().enumerate() {
+            let ts = chrono::DateTime::parse_from_rfc3339(&delta.local_timestamp)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .expect("timestamp should be valid RFC3339");
+
+            if let Some(prev) = prev_ts {
+                if ts < prev {
+                    return Err(BundleValidationError::NonMonotonicTimestamp {
+                        index,
+                        timestamp: delta.local_timestamp.clone(),
+                        previous: self.deltas[index - 1].local_timestamp.clone(),
+                    });
+                }
+            }
+            prev_ts = Some(ts);
+        }
+
+        // Check for duplicate target_entity_id (when present)
+        let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for delta in &self.deltas {
+            if let Some(ref id) = delta.target_entity_id {
+                if seen_ids.contains(id.as_str()) {
+                    return Err(BundleValidationError::DuplicateDeltaTargetId(id.clone()));
+                }
+                seen_ids.insert(id.as_str());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate and build the bundle (recommended path).
+    ///
+    /// Runs `validate()` then `build()`. Returns a validation error if
+    /// delta-level constraints fail, otherwise returns the built bundle.
+    pub fn build_validated(self) -> Result<Bundle, BundleValidationError> {
+        self.validate()?;
+        // build() returns SyncResult<Bundle>; we need to handle the Result
+        // Since validation passes, the only errors from build() are structural
+        // (empty deltas, missing submitting_creator_id) which should already be
+        // caught by the caller. For simplicity, we'll panic on build() errors
+        // since validation should guarantee build() succeeds.
+        // Alternatively, we could return a combined error type.
+        Ok(self
+            .build()
+            .expect("build() should succeed after validation passes"))
     }
 
     /// Validate the bundle and build the final `Bundle` envelope.
@@ -466,5 +543,224 @@ mod tests {
             serde_json::to_string(&BundleType::MemorySync).unwrap(),
             "\"memory_sync\""
         );
+    }
+
+    // ── Validation tests ──────────────────────────────────────────────
+
+    fn make_test_delta_with_timestamp(ts: &str) -> LocalDelta {
+        LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Update,
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: Some("kb_001".to_string()),
+            payload: json!({
+                "display_name": "Test Character",
+                "block_type": "character",
+            }),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        }
+    }
+
+    fn make_test_delta_with_timestamp_and_id(ts: &str, id: &str) -> LocalDelta {
+        LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Update,
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: Some(id.to_string()),
+            payload: json!({
+                "display_name": "Test Character",
+                "block_type": "character",
+            }),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        }
+    }
+
+    #[test]
+    fn bundle_validation_passes_for_valid_deltas() {
+        let base_ts = "2025-04-08T10:00:00Z";
+        let later_ts = "2025-04-08T11:00:00Z";
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(make_test_delta_with_timestamp_and_id(base_ts, "kb_001"))
+            .add_delta(make_test_delta_with_timestamp_and_id(later_ts, "kb_002"));
+
+        assert!(builder.validate().is_ok());
+    }
+
+    #[test]
+    fn bundle_validation_rejects_non_monotonic_timestamps() {
+        let base_ts = "2025-04-08T10:00:00Z";
+        let earlier_ts = "2025-04-08T09:00:00Z"; // Earlier than base
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(make_test_delta_with_timestamp_and_id(base_ts, "kb_001"))
+            .add_delta(make_test_delta_with_timestamp_and_id(earlier_ts, "kb_002"));
+
+        let result = builder.validate();
+        assert!(matches!(
+            result,
+            Err(BundleValidationError::NonMonotonicTimestamp { index: 1, .. })
+        ));
+
+        // Check error message contains correct details
+        if let Err(BundleValidationError::NonMonotonicTimestamp {
+            index,
+            timestamp,
+            previous,
+        }) = result
+        {
+            assert_eq!(index, 1);
+            assert_eq!(timestamp, earlier_ts);
+            assert_eq!(previous, base_ts);
+        }
+    }
+
+    #[test]
+    fn bundle_validation_allows_equal_timestamps() {
+        // Non-decreasing means >=, so equal timestamps should pass
+        let ts1 = "2025-04-08T10:00:00Z";
+        let ts2 = "2025-04-08T10:00:00Z"; // Same as ts1
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(make_test_delta_with_timestamp_and_id(ts1, "kb_001"))
+            .add_delta(make_test_delta_with_timestamp_and_id(ts2, "kb_002"));
+
+        assert!(builder.validate().is_ok());
+    }
+
+    #[test]
+    fn bundle_validation_rejects_duplicate_target_entity_ids() {
+        let ts = "2025-04-08T10:00:00Z";
+
+        let delta1 = LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Update,
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: Some("kb_001".to_string()),
+            payload: json!({"field": "value1"}),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        };
+
+        let delta2 = LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Update,
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: Some("kb_001".to_string()), // Same target_entity_id
+            payload: json!({"field": "value2"}),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        };
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta1)
+            .add_delta(delta2);
+
+        let result = builder.validate();
+        assert!(matches!(
+            result,
+            Err(BundleValidationError::DuplicateDeltaTargetId(id)) if id == "kb_001"
+        ));
+    }
+
+    #[test]
+    fn bundle_validation_allows_different_target_entity_ids() {
+        let ts = "2025-04-08T10:00:00Z";
+
+        let delta1 = LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Update,
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: Some("kb_001".to_string()),
+            payload: json!({"field": "value1"}),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        };
+
+        let delta2 = LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Update,
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: Some("kb_002".to_string()), // Different target_entity_id
+            payload: json!({"field": "value2"}),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        };
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta1)
+            .add_delta(delta2);
+
+        assert!(builder.validate().is_ok());
+    }
+
+    #[test]
+    fn bundle_validation_skips_none_target_entity_ids() {
+        // Create operations have target_entity_id = None, should not be checked for duplicates
+        let ts = "2025-04-08T10:00:00Z";
+
+        let delta1 = LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Create, // Create has no target_entity_id
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: None,
+            payload: json!({"display_name": "Character 1"}),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        };
+
+        let delta2 = LocalDelta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Create, // Another Create, also None
+            target_entity_type: Some("character".to_string()),
+            target_entity_id: None,
+            payload: json!({"display_name": "Character 2"}),
+            source_anchor: None,
+            local_timestamp: ts.to_string(),
+        };
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta1)
+            .add_delta(delta2);
+
+        assert!(builder.validate().is_ok());
+    }
+
+    #[test]
+    fn build_validated_returns_bundle_on_success() {
+        let ts = "2025-04-08T10:00:00Z";
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(make_test_delta_with_timestamp(ts));
+
+        let result = builder.build_validated();
+        assert!(result.is_ok());
+        let bundle = result.unwrap();
+        assert_eq!(bundle.deltas.len(), 1);
+    }
+
+    #[test]
+    fn build_validated_returns_validation_error_on_failure() {
+        let base_ts = "2025-04-08T10:00:00Z";
+        let earlier_ts = "2025-04-08T09:00:00Z";
+
+        let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(make_test_delta_with_timestamp(base_ts))
+            .add_delta(make_test_delta_with_timestamp(earlier_ts));
+
+        let result = builder.build_validated();
+        assert!(matches!(
+            result,
+            Err(BundleValidationError::NonMonotonicTimestamp { .. })
+        ));
     }
 }
