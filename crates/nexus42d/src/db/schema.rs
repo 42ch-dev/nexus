@@ -5,10 +5,15 @@
 //! the same `state.db` file; CLI-side definitions live in
 //! `crates/nexus42/src/db/schema.rs` and must be kept in sync.
 
+use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
 use rusqlite::Connection;
 
-/// Current schema version, stored in `workspace_meta` as `schema_version`.
-pub const SCHEMA_VERSION: &str = "2";
+/// Database schema version for local SQLite migrations.
+pub const DB_SCHEMA_VERSION: u32 = 1;
+
+/// Wire contract schema version for network payload compatibility.
+/// Sourced from generated contracts to avoid manual drift.
+pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;
 
 /// Schema initializer. All table definitions are centralized here.
 pub struct Schema;
@@ -29,10 +34,14 @@ impl Schema {
         conn.execute_batch(ACP_TOOL_AUDIT_LOG_TABLE)?;
         conn.execute_batch(ACP_SESSIONS_TABLE)?;
 
-        // Seed schema version row (idempotent)
+        // Seed schema version rows (idempotent).
         conn.execute(
-            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('schema_version', ?1)",
-            rusqlite::params![SCHEMA_VERSION],
+            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('db_schema_version', ?1)",
+            rusqlite::params![DB_SCHEMA_VERSION.to_string()],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('wire_schema_version', ?1)",
+            rusqlite::params![WIRE_SCHEMA_VERSION.to_string()],
         )?;
 
         Ok(())
@@ -176,19 +185,27 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_seeded() {
+    fn schema_versions_seeded() {
         let conn = Connection::open_in_memory().unwrap();
         Schema::init(&conn).unwrap();
 
-        let version: String = conn
+        let db_version: String = conn
             .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'schema_version'",
+                "SELECT value FROM workspace_meta WHERE key = 'db_schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let wire_version: String = conn
+            .query_row(
+                "SELECT value FROM workspace_meta WHERE key = 'wire_schema_version'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
 
-        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(db_version, DB_SCHEMA_VERSION.to_string());
+        assert_eq!(wire_version, WIRE_SCHEMA_VERSION.to_string());
     }
 
     #[test]
