@@ -173,18 +173,18 @@
         "long-term"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-09",
-      "notes": "Batch A (3/31) completed: CTX-R4 + SYNC-R10 + SYNC-R13 resolved. Remaining 28 residuals tracked in residual_findings for Batch B/C. Plan remains InProgress as long-term tech-debt cleanup.",
+      "updated_at": "2026-04-08",
+      "notes": "Batch A+B (7/12) completed. Batch B resolved 4 low residuals (QC-W2, QC-W3, QC-W4, QC-W7). Remaining 8 residuals tracked in residual_findings for Batch C. Plan remains InProgress as long-term tech-debt cleanup.",
       "metadata": {
-        "phase": "Batch A completed; Batch B/C pending",
+        "phase": "Batch A+B completed; Batch C pending",
         "priority": "medium",
-        "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (31 total). Batch A (3 critical) completed on 2026-04-09. Batch B (3 medium) and Batch C (25 low) deferred to V1.1+ milestone.",
-        "residual_target": "31 residuals (3 completed in Batch A, 28 remaining)",
-        "effort": "L \u2014 ongoing across multiple milestones (Batch A: S, Batch B: M, Batch C: M)",
+        "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (12 total). Batch A (3 critical) completed on 2026-04-09. Batch B (4 low) completed on 2026-04-08. Batch C (8 low) deferred to V1.1+ milestone.",
+        "residual_target": "12 residuals (7 completed in Batch A+B, 8 remaining)",
+        "effort": "L \u2014 ongoing across multiple milestones (Batch A: S, Batch B: S, Batch C: M)",
         "batch_status": {
           "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
-          "batch_b": "pending (3 medium: CLI-R15, FH-R2, FH-R4)",
-          "batch_c": "pending (25 low: remaining residuals)"
+          "batch_b": "completed (4 low: QC-W2, QC-W4, QC-W3, QC-W7)",
+          "batch_c": "pending (8 low: QC-W1, QC-W5, QC-W6, QC-W8, QC-W9, QC-W10, QC-W11, DM-R3)"
         },
         "gates": {
           "tests": "passed",
@@ -344,23 +344,23 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08T21:00:00Z",
-      "total_open": 12,
+      "updated_at": "2026-04-08T22:00:00Z",
+      "total_open": 8,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 12,
+        "low": 8,
         "nit": 0
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 12,
+        "V1.1": 8,
         "V1.2": 0
       },
       "by_plan": {
         "2025-04-05-domain-models": 1,
-        "2026-04-08-v1.1-tech-debt-mitigation": 11
+        "2026-04-08-v1.1-tech-debt-mitigation": 7
       },
       "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md \u00a7209-211 (historical compatibility rule)",
       "archival_note": "15 closed residuals archived to .agents/plans/archived/residuals/ on 2026-04-09 per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
@@ -391,36 +391,6 @@
           "target": "Before V1.1 release"
         },
         {
-          "id": "QC-W2",
-          "title": "HTTP body size uses Serialization error",
-          "severity": "warning",
-          "source": "QC#1",
-          "scope": "sync_client.rs:263-284",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+"
-        },
-        {
-          "id": "QC-W3",
-          "title": "Pool status monitoring not exposed",
-          "severity": "warning",
-          "source": "QC#1",
-          "scope": "pool.rs:59-61",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+"
-        },
-        {
-          "id": "QC-W4",
-          "title": "InvalidParameterName misuse",
-          "severity": "warning",
-          "source": "QC#2",
-          "scope": "pool.rs:163-171",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "Next batch"
-        },
-        {
           "id": "QC-W5",
           "title": "Body size reads full response",
           "severity": "warning",
@@ -439,16 +409,6 @@
           "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "CI cleanup"
-        },
-        {
-          "id": "QC-W7",
-          "title": "Pool config not tunable",
-          "severity": "warning",
-          "source": "QC#3",
-          "scope": "pool.rs:39-46",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+"
         },
         {
           "id": "QC-W8",
