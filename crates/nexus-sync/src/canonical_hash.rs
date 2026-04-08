@@ -1,9 +1,9 @@
 //! Canonical content hash for delta bundles (TD-5).
 //!
 //! **Preimage (this crate):** `serde_json::to_vec` bytes of the bundle's **`deltas` JSON array
-//! only** (not the full `Bundle` object). See repository `.agents/plans/knowledge/canonical-hash-v1.md` and unit
-//! test `golden_alignment_vector_matches_documented_digest` for the frozen golden vector.
-//! Platforms must use the **same** serialization rules when verifying or reproducing hashes.
+//! only** (not the full `Bundle` object). Normative spec: v1-spec **ADR-006**; OSS companion doc:
+//! `.agents/plans/knowledge/canonical-hash-v1.md`. Unit test `golden_alignment_vector_matches_documented_digest`
+//! locks the ADR §3.3 golden vector. Other stacks must match these bytes for interop.
 //!
 //! Wire format: `sha256:` + 64 lowercase hex digits (see [`is_well_formed_canonical_hash`]).
 //! Same delta sequence and contents produce the same hash for a fixed serialization.
