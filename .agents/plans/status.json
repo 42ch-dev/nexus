@@ -344,24 +344,23 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08T20:00:00Z",
-      "total_open": 9,
+      "updated_at": "2026-04-08T21:00:00Z",
+      "total_open": 12,
       "by_severity": {
         "critical": 0,
-        "high": 1,
+        "high": 0,
         "medium": 0,
-        "low": 10,
+        "low": 12,
         "nit": 0
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 16,
+        "V1.1": 12,
         "V1.2": 0
       },
       "by_plan": {
         "2025-04-05-domain-models": 1,
-        "2026-04-08-v1.1-tech-debt-mitigation": 11,
-        "2026-04-09-v1.1-tech-debt-cleanup-2": 0
+        "2026-04-08-v1.1-tech-debt-mitigation": 11
       },
       "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md \u00a7209-211 (historical compatibility rule)",
       "archival_note": "15 closed residuals archived to .agents/plans/archived/residuals/ on 2026-04-09 per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
