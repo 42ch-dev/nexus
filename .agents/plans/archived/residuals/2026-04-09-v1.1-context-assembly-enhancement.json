@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-09-v1.1-context-assembly-enhancement",
+  "archived_at": "2026-04-08",
+  "closure_note": "All 3 residuals resolved by Plan 11 implementation (3 tasks)",
+  "entries": [
+    {
+      "id": "CTX-R2",
+      "title": "Summary generator lacks file size limit",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 1: SummaryConfig with max_file_size + env var override + 9 tests, commit e2074af"
+    },
+    {
+      "id": "CTX-R3",
+      "title": "Path traversal not explicitly validated in scan_recursive",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 2: validate_path_within_base + 6 tests, commit e2074af"
+    },
+    {
+      "id": "CTX-R5",
+      "title": "UTF-8 truncation safety in opening excerpt",
+      "severity": "high",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 3: truncate_at_char_boundary + 11 comprehensive tests, commit e2074af"
+    }
+  ]
+}

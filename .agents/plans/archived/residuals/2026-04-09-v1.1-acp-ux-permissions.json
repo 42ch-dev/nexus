@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-09-v1.1-acp-ux-permissions",
+  "archived_at": "2026-04-08",
+  "closure_note": "All 6 residuals addressed by Plan 12 implementation (6 tasks). Note: ACP-R3~R7 were tracked informally, only CLI-R5 was in status.json residual_findings.",
+  "entries": [
+    {
+      "id": "CLI-R5",
+      "title": "Local API Unix socket support for better IPC performance",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 1: Transport enum + Unix socket serve loop + 3 tests, commit c76318b"
+    },
+    {
+      "id": "ACP-R3",
+      "title": "Session persistence not implemented",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 2: Session API endpoints + SQLite table + 5 tests, commit 7ad2b44"
+    },
+    {
+      "id": "ACP-R4",
+      "title": "Permission policy not enforced",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 3: Permission checker + integration in tool_execute + 9 tests, commit 737c39a"
+    },
+    {
+      "id": "ACP-R5",
+      "title": "Skills listing incomplete",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 4: agent skills command with V1.0 capabilities + 3 tests, commit d6bf351"
+    },
+    {
+      "id": "ACP-R6",
+      "title": "Agent status not exposed",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 5: RuntimeStatus model + agent status command + 3 tests, commit 2f829c3"
+    },
+    {
+      "id": "ACP-R7",
+      "title": "Error messages not user-friendly",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "Task 6: CliError enhancements with suggestions + 8 tests, commit 97cc9e7"
+    }
+  ]
+}
