@@ -1,12 +1,24 @@
 //! Sync handler — sync status, push, and resolve endpoints
 //!
-//! Wires `nexus-sync` crate components (Outbox, Precheck, SyncClient)
-//! into the daemon API, replacing the previous skeleton/stub handlers.
+//! Uses `nexus-sync` **Outbox**, **BundleBuilder**, and **precheck** on the push path:
+//! builds a minimal bundle (with `canonical_hash`), runs `precheck_bundle_with_auth`,
+//! then persists via **`Outbox::stage`** (`ready`). This is **offline-first**: the
+//! entry is queued locally; **`SyncClient::push_bundle`** to the platform is not
+//! invoked here yet (optional follow-up when URL + token are available).
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
+use nexus_contracts::{
+    CommandOrigin, CommandStatus, CommandType, DeltaOperation, DeltaType, ManuscriptPhase,
+    SyncCommand,
+};
+use nexus_sync::delta_bundle::{BundleBuilder, LocalDelta};
+use nexus_sync::precheck::{
+    precheck_bundle_with_auth, AuthContext, LocalState, PrecheckReport, PrecheckResult,
+    PrecheckSeverity,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -117,6 +129,25 @@ pub struct OutboxEntrySummary {
 
 // ── Handlers ─────────────────────────────────────────────────────
 
+fn precheck_summary_from_report(report: &PrecheckReport) -> PrecheckSummary {
+    let error_count = report
+        .issues
+        .iter()
+        .filter(|i| i.severity == PrecheckSeverity::Error)
+        .count();
+    let warning_count = report
+        .issues
+        .iter()
+        .filter(|i| i.severity == PrecheckSeverity::Warning)
+        .count();
+    PrecheckSummary {
+        valid: !report.has_errors(),
+        error_count,
+        warning_count,
+        summary: report.summary(),
+    }
+}
+
 /// GET /v1/local/sync/status
 ///
 /// Returns real outbox state counts using nexus-sync::Outbox.
@@ -189,8 +220,10 @@ pub async fn status(
 
 /// POST /v1/local/sync/push
 ///
-/// Stage a sync command into the outbox and run precheck validation.
-/// Returns the outbox entry ID and precheck results.
+/// Build a bundle via [`BundleBuilder`] (includes `canonical_hash`), run
+/// `nexus_sync::precheck`, then **`Outbox::stage`** so the entry is `ready`
+/// for a later upload. When precheck reports errors and `force` is false, no
+/// row is written.
 pub async fn push(
     State(state): State<WorkspaceState>,
     Json(req): Json<SyncPushRequest>,
@@ -208,8 +241,32 @@ pub async fn push(
         message: "Sync outbox not initialized".to_string(),
     })?;
 
-    // Build a SyncCommand from the request
-    use nexus_contracts::{CommandOrigin, CommandStatus, CommandType, SyncCommand};
+    // Basic validation before bundle build
+    let mut field_errors = Vec::new();
+    if req.workspace_id.is_empty() {
+        field_errors.push("workspace_id is empty");
+    }
+    if req.world_id.is_empty() {
+        field_errors.push("world_id is empty");
+    }
+    if req.creator_id.is_empty() {
+        field_errors.push("creator_id is empty");
+    }
+    if !field_errors.is_empty() {
+        return Ok(Json(SyncPushResponse {
+            success: false,
+            outbox_entry_id: None,
+            bundle_id: None,
+            precheck_result: Some(PrecheckSummary {
+                valid: false,
+                error_count: field_errors.len(),
+                warning_count: 0,
+                summary: format!("Issues: {}", field_errors.join("; ")),
+            }),
+            error: Some(format!("Invalid push request: {}", field_errors.join("; "))),
+        }));
+    }
+
     let command = SyncCommand {
         schema_version: 1,
         command_id: format!("cmd_{}", uuid::Uuid::new_v4().simple()),
@@ -226,60 +283,76 @@ pub async fn push(
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    // Append the command to the outbox (staged state)
-    let entry_id = outbox
-        .append(&command)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "OUTBOX_APPEND_ERROR".into(),
-            message: format!("Failed to append command to outbox: {}", e),
-        })?;
-
-    info!(outbox_entry_id = %entry_id, "Command staged in outbox");
-
-    // Run precheck if we have local state info
-    // For now, we validate the command has required fields
-    let precheck_summary = if !req.force {
-        // Basic precheck: ensure required fields are non-empty
-        let mut errors = Vec::new();
-        if req.workspace_id.is_empty() {
-            errors.push("workspace_id is empty");
-        }
-        if req.world_id.is_empty() {
-            errors.push("world_id is empty");
-        }
-        if req.creator_id.is_empty() {
-            errors.push("creator_id is empty");
-        }
-
-        Some(PrecheckSummary {
-            valid: errors.is_empty(),
-            error_count: errors.len(),
-            warning_count: 0,
-            summary: if errors.is_empty() {
-                "All checks passed.".to_string()
-            } else {
-                format!("Issues: {}", errors.join("; "))
-            },
-        })
-    } else {
-        None
+    let placeholder = LocalDelta {
+        delta_type: DeltaType::StoryManifest,
+        operation: DeltaOperation::Update,
+        target_entity_type: None,
+        target_entity_id: None,
+        payload: serde_json::json!({ "nexus": "sync_push_heartbeat" }),
+        source_anchor: None,
+        local_timestamp: command.created_at.clone(),
     };
 
-    // Retrieve the entry to get the bundle_id
-    let entry = outbox
-        .get(&entry_id)
+    let idempotency_key = format!("idk_{}", uuid::Uuid::new_v4().simple());
+
+    let bundle = BundleBuilder::new(&req.workspace_id, &req.world_id, &req.creator_id)
+        .submitting_creator_id(&req.creator_id)
+        .manuscript_phase(ManuscriptPhase::Draft)
+        .output_manuscript(false)
+        .command_id(&command.command_id)
+        .idempotency_key(&idempotency_key)
+        .add_delta(placeholder)
+        .build()
+        .map_err(|e| NexusApiError::Internal {
+            code: "BUNDLE_BUILD_ERROR".into(),
+            message: format!("Failed to build sync bundle: {}", e),
+        })?;
+
+    let local_state = LocalState::new(0);
+    let auth = AuthContext::single_creator();
+    let precheck_result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+
+    let precheck_summary = match &precheck_result {
+        PrecheckResult::Valid => PrecheckSummary {
+            valid: true,
+            error_count: 0,
+            warning_count: 0,
+            summary: "All checks passed.".to_string(),
+        },
+        PrecheckResult::Invalid(report) => precheck_summary_from_report(report),
+    };
+
+    if let PrecheckResult::Invalid(report) = &precheck_result {
+        if report.has_errors() && !req.force {
+            return Ok(Json(SyncPushResponse {
+                success: false,
+                outbox_entry_id: None,
+                bundle_id: None,
+                precheck_result: Some(precheck_summary),
+                error: Some("Precheck failed (pass force=true to stage anyway)".to_string()),
+            }));
+        }
+    }
+
+    let entry_id = outbox
+        .stage(&bundle)
         .await
         .map_err(|e| NexusApiError::Internal {
-            code: "OUTBOX_GET_ERROR".into(),
-            message: format!("Failed to retrieve staged entry: {}", e),
+            code: "OUTBOX_STAGE_ERROR".into(),
+            message: format!("Failed to stage bundle in outbox: {}", e),
         })?;
+
+    info!(
+        outbox_entry_id = %entry_id,
+        bundle_id = %bundle.bundle_id,
+        "Bundle staged in outbox (ready)"
+    );
 
     Ok(Json(SyncPushResponse {
         success: true,
         outbox_entry_id: Some(entry_id),
-        bundle_id: Some(entry.bundle_id),
-        precheck_result: precheck_summary,
+        bundle_id: Some(bundle.bundle_id),
+        precheck_result: Some(precheck_summary),
         error: None,
     }))
 }
@@ -572,7 +645,9 @@ mod tests {
         let result = status(State(state)).await;
         assert!(result.is_ok());
         let body = result.unwrap();
-        assert_eq!(body.staged_count, 1);
+        // Push uses Outbox::stage → delivery_state `ready` (not `staged`)
+        assert_eq!(body.ready_count, 1);
+        assert_eq!(body.staged_count, 0);
     }
 
     #[test]
