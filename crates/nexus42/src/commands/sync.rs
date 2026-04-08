@@ -6,8 +6,10 @@
 //!
 //! # Wiring (TD-1)
 //!
-//! CLI sync commands now invoke real daemon endpoints that use `nexus-sync`
-//! components (Outbox, Precheck, SyncClient) rather than returning stub data.
+//! CLI sync commands call daemon HTTP endpoints backed by `nexus-sync` (**Outbox**,
+//! **BundleBuilder**, **precheck**). Push builds a bundle (including `canonical_hash`),
+//! runs precheck, then **`Outbox::stage`** (`ready`). HTTP upload to the platform via
+//! **`SyncClient`** is offline-first (queued locally; optional daemon follow-up).
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
