@@ -386,7 +386,8 @@ fn test_world_membership_domain_contract_roundtrip() {
 fn test_user_domain_contract_roundtrip() {
     let domain_user = User::register("usr_roundtrip", "roundy", "r@example.com", "Round Trip");
 
-    let contract_user: nexus_contracts::User = nexus_contracts::User::from(domain_user.clone());
+    let contract_user: nexus_contracts::User =
+        nexus_contracts::User::try_from(domain_user.clone()).unwrap();
     assert_eq!(contract_user.user_id, "usr_roundtrip");
     assert_eq!(contract_user.username, "roundy");
     assert_eq!(

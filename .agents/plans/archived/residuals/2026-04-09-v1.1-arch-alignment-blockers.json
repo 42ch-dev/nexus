@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-09-v1.1-arch-alignment-blockers",
+  "archived_at": "2026-04-08",
+  "closure_note": "Batch: residual cleanup on branch v1.1-alignment-residuals (precheck hash, User TryFrom, build_validated, sync binding meta, CLI warnings, AGENTS docs)",
+  "entries": [
+    {
+      "id": "ALIGN-PRE-01",
+      "title": "Precheck: validate canonical_hash format (sha256: + 64 hex) and non-empty for production bundles",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "precheck.rs: check_canonical_hash + is_well_formed_canonical_hash; tests"
+    },
+    {
+      "id": "ALIGN-USER-01",
+      "title": "Domain User: use typed enums or fallible wire conversion; remove unwrap/FromStr panic paths",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "nexus-domain User: TryFrom<User> for nexus_contracts::User"
+    },
+    {
+      "id": "ALIGN-CTX-01",
+      "title": "Sync push: validate workspace_id/world_id/creator_id against daemon workspace binding where available",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "nexus42d sync push: optional_sync_push_binding via workspace_meta sync_* keys"
+    },
+    {
+      "id": "ALIGN-NPM-01",
+      "title": "npm @42ch/nexus-contracts version / SemVer policy vs TD-4 TS union narrowing",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "AGENTS.md TypeScript contract package SemVer bullet"
+    },
+    {
+      "id": "ALIGN-BLD-01",
+      "title": "BundleBuilder::build_validated: propagate SyncError instead of expect after validate()",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "delta_bundle.rs: build_validated -> SyncResult<Bundle>"
+    },
+    {
+      "id": "ALIGN-DOC-01",
+      "title": "Document enum_conversions.rs dual-maintenance rule; clarify sync pull scope in plan checklist",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "AGENTS.md Schema/codegen: enum_conversions.rs maintenance rule"
+    },
+    {
+      "id": "ALIGN-CLI-01",
+      "title": "CLI sync push: surface misconfiguration when default workspace/world/creator IDs are used",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08",
+      "closure_evidence": "nexus42 sync push: eprintln warning when placeholder IDs used"
+    }
+  ]
+}
