@@ -120,6 +120,38 @@
       "closed_at": "2026-04-08T22:30:00Z",
       "closure_note": "Added partial_apply_states table to outbox schema. Implemented persist/load/remove/list methods with upsert semantics. Daemon can resume partial apply from persisted state after restart. 5 new outbox persistence tests + 2 new partial_apply tests.",
       "archived_at": "2026-04-09"
+    },
+    {
+      "id": "SYNC-R10",
+      "title": "Outbox schema migration path not documented",
+      "severity": "medium",
+      "source": "QC Consolidated (QC#1)",
+      "scope": "crates/nexus-sync/src/outbox.rs:81-104",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — add schema_version column and migration strategy",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08T19:00:00Z",
+      "closure_note": "Added comprehensive schema migration documentation to outbox.rs module header. Includes: current schema description, v1.1→v1.2 migration plan (3 steps: add column, write on insert, read on query), ALTER TABLE SQL example, future migration guidelines, and migration safety rules. Documentation-only change per plan scope. Part of Batch A tech debt cleanup (plan 2026-04-09-v1.1-tech-debt-cleanup-2).",
+      "closure_evidence": "Module documentation updated in outbox.rs with 'Schema Migration Strategy (SYNC-R10)' section. cargo test --all: all 109 nexus-sync tests pass. cargo clippy --all -- -D warnings: 0 warnings. cargo +nightly fmt --all -- --check: clean.",
+      "archived_at": "2026-04-08"
+    },
+    {
+      "id": "SYNC-R13",
+      "title": "AutoReject resolution safety mechanism",
+      "severity": "medium",
+      "source": "QC Consolidated (QC#3)",
+      "scope": "crates/nexus-sync/src/conflict.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — add confirmation prompt for auto-reject in CLI",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08T19:00:00Z",
+      "closure_note": "Added auto-reject confirmation prompt in CLI sync resolve command. New confirm_auto_reject() function uses dialoguer::Confirm with default=false. Returns false in non-interactive TTY (requires --force). Added --force flag to SyncCommand::Resolve for automation. Added Resolve subcommand with --resolution flag (auto_accept, auto_reject, manual_review). 4 new unit tests: force bypass, no-TTY behavior, strategy display, ValueEnum parsing. Part of Batch A tech debt cleanup (plan 2026-04-09-v1.1-tech-debt-cleanup-2).",
+      "closure_evidence": "cargo test --all: 4 new sync tests pass (test_confirm_auto_reject_force_bypasses_prompt, test_confirm_auto_reject_without_force_in_no_tty, test_resolution_strategy_display, test_resolution_strategy_from_str). cargo clippy --all -- -D warnings: 0 warnings. cargo +nightly fmt --all -- --check: clean. dialoguer 0.11 dependency added to nexus42 Cargo.toml.",
+      "archived_at": "2026-04-08"
     }
   ]
 }

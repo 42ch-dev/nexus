@@ -40,6 +40,60 @@
 //! is a simple command queue, while `outbox_entries` is a full bundle-level sync
 //! outbox with idempotency keys, retry tracking, and delivery state management.
 //! They serve different purposes and should NOT be merged.
+//!
+//! # Schema Migration Strategy (SYNC-R10)
+//!
+//! ## Current Schema (v1.0 / v1.1)
+//!
+//! The `outbox_entries` table currently has no `schema_version` column. The
+//! `OutboxEntry` contract type uses `LATEST_SCHEMA_VERSION` at read time, which
+//! means all rows are assumed to match the current schema version. This is safe
+//! as long as the table structure has not diverged across releases.
+//!
+//! ## v1.1 → v1.2 Migration Plan
+//!
+//! When the outbox schema evolves (e.g., new columns for bundle metadata or
+//! conflict tracking), a `schema_version` column should be added to distinguish
+//! rows written by different schema generations.
+//!
+//! ### Step 1: Add schema_version column
+//!
+//! ```sql
+//! ALTER TABLE outbox_entries ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;
+//! ```
+//!
+//! - Existing rows default to version 1 (matching the current `LATEST_SCHEMA_VERSION`
+//!   value at time of migration).
+//! - New writes use the current `LATEST_SCHEMA_VERSION` from the Bundle envelope.
+//!
+//! ### Step 2: Write schema_version on insert
+//!
+//! Update `append()` and `stage()` to include `schema_version` in their
+//! `INSERT` statements, using `LATEST_SCHEMA_VERSION` as the value.
+//!
+//! ### Step 3: Read schema_version on query
+//!
+//! Update `replay()` and `get()` to read the `schema_version` column from the
+//! database instead of hardcoding `LATEST_SCHEMA_VERSION`. This allows future
+//! code to handle rows from older schema versions gracefully.
+//!
+//! ## Future Migrations
+//!
+//! - Increment `schema_version` when the bundle structure changes in a
+//!   backward-incompatible way.
+//! - Use a migration script (SQL `ALTER TABLE` + Rust code) to handle
+//!   backward compatibility for existing rows.
+//! - The `partial_apply_states` table may also need a `schema_version`
+//!   column if its JSON structure evolves.
+//!
+//! ## Migration Safety
+//!
+//! - All schema changes MUST be additive (new columns with defaults) to
+//!   avoid breaking existing data.
+//! - Never remove or rename columns in a minor version bump.
+//! - The `CREATE TABLE IF NOT EXISTS` pattern ensures idempotent initialization
+//!   but does NOT handle column additions — use explicit `ALTER TABLE` in a
+//!   migration function.
 
 use std::path::Path;
 
