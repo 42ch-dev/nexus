@@ -623,25 +623,26 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08T23:30:00Z",
-      "total_open": 29,
+      "updated_at": "2026-04-09T00:00:00Z",
+      "total_open": 37,
       "by_severity": {
         "high": 0,
         "medium": 10,
         "low": 19,
-        "warning": 1
+        "warning": 8
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 17,
-        "V1.1+": 4
+        "V1.1": 25,
+        "V1.1+": 12
       },
       "by_plan": {
         "domain-models": 0,
         "cli-daemon-foundation": 2,
         "sync-contract": 5,
         "acp-client": 8,
-        "context-assembly": 5
+        "context-assembly": 5,
+        "v1.1-tech-debt-mitigation": 8
       },
       "cross_cutting": [
         {
@@ -699,6 +700,88 @@
           "lifecycle": "resolved",
           "closed_at": "2026-04-06T16:29:44Z",
           "closure_note": "require_workspace middleware applied to 4 guarded route groups"
+        }
+      ],
+      "2026-04-08-v1.1-tech-debt-mitigation": [
+        {
+          "id": "QC-W1",
+          "title": "Migration documentation placement — outbox.rs async migration not in CHANGELOG",
+          "severity": "warning",
+          "source": "QC#1",
+          "scope": "outbox.rs:28-44",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Before V1.1 release"
+        },
+        {
+          "id": "QC-W2",
+          "title": "HTTP body size uses Serialization error variant",
+          "severity": "warning",
+          "source": "QC#1",
+          "scope": "sync_client.rs:263-284",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W3",
+          "title": "Pool status monitoring not exposed",
+          "severity": "warning",
+          "source": "QC#1",
+          "scope": "pool.rs:59-61",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W4",
+          "title": "InvalidParameterName misuse in pool error mapping",
+          "severity": "warning",
+          "source": "QC#2",
+          "scope": "pool.rs:163-171",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Next batch"
+        },
+        {
+          "id": "QC-W5",
+          "title": "Body size reads full response before check",
+          "severity": "warning",
+          "source": "QC#2",
+          "scope": "sync_client.rs:258-284",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ (security)"
+        },
+        {
+          "id": "QC-W6",
+          "title": "Test helper leaks temp directories",
+          "severity": "warning",
+          "source": "QC#2",
+          "scope": "outbox.rs:204-213",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "CI cleanup"
+        },
+        {
+          "id": "QC-W7",
+          "title": "Pool config not tunable at runtime",
+          "severity": "warning",
+          "source": "QC#3",
+          "scope": "pool.rs:39-46",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W8",
+          "title": "Test count discrepancy (7 vs 8)",
+          "severity": "warning",
+          "source": "QC#3",
+          "scope": "status.json:614",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Before merge"
         }
       ]
     },
@@ -784,8 +867,8 @@
         "message": "Wave 2 Batch 2 merged to main: QC三审 APPROVE (unanimous: 0 Critical, 6 Warnings). 4 commits, 14 files (1710 insertions). Residuals: CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. Wave 2 complete (14/14 tasks). Ready for Wave 3."
       },
       {
-        "updated_at": "2026-04-08T23:30:00Z",
-        "message": "Wave 3 Batch A (5 tasks) complete: DEBT-X1 (connection pooling with deadpool-sqlite), DEBT-X2 (schema difference documented), DEBT-X3 (error_code() standardized), SYNC-R4 (8 transaction atomicity tests), SYNC-R5 (HTTP body size limit 10MB). All 109 nexus-sync tests passing, clippy clean, fmt clean. Total open residuals: 34 → 29."
+        "updated_at": "2026-04-09",
+        "message": "Wave 3 Batch A merged to main: QC三审 APPROVE (0 Critical, 8 Warnings). 8 QC Warnings (W-1 through W-8) tracked as residuals for V1.1+. Total open residuals: 29 → 37. Progress: 90% (23/26 tasks complete). Ready for Batch B."
       }
     ],
     "residual_findings": {
@@ -1217,6 +1300,88 @@
           "owner": "@fullstack-dev",
           "target": "V1.1 — split tests into separate files",
           "tracking": null
+        }
+      ],
+      "2026-04-08-v1.1-tech-debt-mitigation": [
+        {
+          "id": "QC-W1",
+          "title": "Migration documentation placement",
+          "severity": "warning",
+          "source": "QC#1",
+          "scope": "outbox.rs:28-44",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Before V1.1 release"
+        },
+        {
+          "id": "QC-W2",
+          "title": "HTTP body size uses Serialization error",
+          "severity": "warning",
+          "source": "QC#1",
+          "scope": "sync_client.rs:263-284",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W3",
+          "title": "Pool status monitoring not exposed",
+          "severity": "warning",
+          "source": "QC#1",
+          "scope": "pool.rs:59-61",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W4",
+          "title": "InvalidParameterName misuse",
+          "severity": "warning",
+          "source": "QC#2",
+          "scope": "pool.rs:163-171",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Next batch"
+        },
+        {
+          "id": "QC-W5",
+          "title": "Body size reads full response",
+          "severity": "warning",
+          "source": "QC#2",
+          "scope": "sync_client.rs:258-284",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W6",
+          "title": "Test helper leaks temp dirs",
+          "severity": "warning",
+          "source": "QC#2",
+          "scope": "outbox.rs:204-213",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "CI cleanup"
+        },
+        {
+          "id": "QC-W7",
+          "title": "Pool config not tunable",
+          "severity": "warning",
+          "source": "QC#3",
+          "scope": "pool.rs:39-46",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "QC-W8",
+          "title": "Test count discrepancy (7 vs 8)",
+          "severity": "warning",
+          "source": "QC#3",
+          "scope": "status.json:614",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Before merge"
         }
       ]
     }
