@@ -1699,6 +1699,7 @@ version = "0.1.0"
 dependencies = [
  "nexus-contracts",
  "rusqlite",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -1736,6 +1737,7 @@ dependencies = [
  "hex",
  "nexus-contracts",
  "nexus-domain",
+ "nexus-local-db",
  "nix",
  "predicates",
  "reqwest 0.12.28",
@@ -1771,6 +1773,7 @@ dependencies = [
  "hyper-util",
  "nexus-contracts",
  "nexus-domain",
+ "nexus-local-db",
  "rusqlite",
  "serde",
  "serde_json",

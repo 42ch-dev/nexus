@@ -12,4 +12,4 @@ nexus-contracts = { path = "../nexus-contracts" }
 thiserror.workspace = true
 
 [dev-dependencies]
-# Will add test dependencies later
+tempfile = "3"
