@@ -564,14 +564,14 @@
       "id": "2026-04-08-v1.1-tech-debt-mitigation",
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
-      "status": "InProgress",
-      "progress": 90,
-      "updated_at": "2026-04-08",
-      "notes": "Wave 1 merged. Batch 1 & 2 merged to main. Wave 2 complete (14/14 tasks). Wave 3 Batch A complete (5/6 tasks: DEBT-X1/X2/X3, SYNC-R4/R5). Wave 3 Batch B pending.",
+      "status": "InReview",
+      "progress": 100,
+      "updated_at": "2026-04-09",
+      "notes": "All 26 tasks complete. Wave 3 Batch B (FH-R1/R3/R6) done. CI drift detection, error code docs, test utils extraction. 662+ tests passing.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
-        "working_branch": "feature/v1.1-wave3-batch1",
+        "working_branch": "feature/v1.1-wave3-batch2",
         "priority": "high",
         "description": "Resolve CRITICAL contract drift (DM-R5), complete missing schemas (delta/workspace-binding/agent-profile), address 27 V1.1 residuals across ACP session/policy, Research extraction, Context Assembly, Multi-Creator governance, and reliability hardening",
         "dependency": "nexus-platform Phase 2 complete (confirmed)",
@@ -586,8 +586,8 @@
         },
         "residual_target": "Resolve 27 HIGH/MEDIUM residuals + 3 missing features",
         "effort": "XL — ~15-20 agent sessions (3 waves)",
-        "qc_status": "APPROVE — QC三审 consolidated (0 Critical, 6 Warnings)",
-        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-batch2.md",
+        "qc_status": "APPROVE — QC三审 unanimous (0 Critical, 3 Warnings, 6 Suggestions)",
+        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-wave3-batchB.md",
         "wave_1_status": "Complete",
         "commits": "7 commits (d2e86c0..0222e46)",
         "files_changed": "54 files (2331 insertions, 205 deletions)",
@@ -613,7 +613,10 @@
         "wave_3_batch1_tasks": "5 tasks: DEBT-X1/X2/X3, SYNC-R4/R5",
         "wave_3_batch1_tests": "109 tests passing (nexus-sync), 8 new transaction atomicity tests",
         "wave_3_batch1_residuals": "DEBT-X1/X2/X3 resolved, SYNC-R4/R5 resolved",
-        "residual_summary": "DEBT-X1/X2/X3, SYNC-R4/R5 resolved. Wave 3 Batch A complete. Remaining open residuals: 29 (reduced from 34)."
+        "wave_3_batch2_status": "Complete",
+        "wave_3_batch2_tasks": "3 tasks: FH-R1 (schema drift detection CI), FH-R3 (error code inconsistency docs), FH-R6 (test helper duplication)",
+        "wave_3_batch2_files": "5 files (CI + errors.rs docs + test_utils.rs + lib.rs + sync.rs migration)",
+        "residual_summary": "FH-R1/R3/R6 resolved. All 26 tasks complete. 11 QC Warnings (W1-W11) tracked for V1.1+."
       }
     }
   ],
@@ -623,26 +626,27 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-09T00:00:00Z",
+      "updated_at": "2026-04-09T04:00:00Z",
       "total_open": 37,
       "by_severity": {
         "high": 0,
-        "medium": 10,
+        "medium": 7,
         "low": 19,
-        "warning": 8
+        "warning": 11
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 25,
-        "V1.1+": 12
+        "V1.1": 22,
+        "V1.1+": 15
       },
       "by_plan": {
         "domain-models": 0,
         "cli-daemon-foundation": 2,
         "sync-contract": 5,
-        "acp-client": 8,
-        "context-assembly": 5,
-        "v1.1-tech-debt-mitigation": 8
+        "acp-client": 1,
+        "context-assembly": 2,
+        "foundation-hardening": 7,
+        "v1.1-tech-debt-mitigation": 11
       },
       "cross_cutting": [
         {
@@ -869,6 +873,14 @@
       {
         "updated_at": "2026-04-09",
         "message": "Wave 3 Batch A merged to main: QC三审 APPROVE (0 Critical, 8 Warnings). 8 QC Warnings (W-1 through W-8) tracked as residuals for V1.1+. Total open residuals: 29 → 37. Progress: 90% (23/26 tasks complete). Ready for Batch B."
+      },
+      {
+        "updated_at": "2026-04-09",
+        "message": "Wave 3 Batch B complete: FH-R1 (schema drift detection CI), FH-R3 (error code inconsistency docs), FH-R6 (test helper duplication). Added schema-drift-check CI job, documented Internal.code vs error_code() design, created test_utils.rs module. 62 nexus42d tests, all workspace tests passing. InReview for QC."
+      },
+      {
+        "updated_at": "2026-04-09",
+        "message": "Wave 3 Batch B QC三审 APPROVE (unanimous: 0 Critical, 3 Warnings, 6 Suggestions). All 26 tasks complete. FH-R1/R3/R6 resolved. 11 QC Warnings (W1-W11) tracked for V1.1+. Ready for merge to main. V1.1 GA ready."
       }
     ],
     "residual_findings": {
@@ -1186,10 +1198,13 @@
           "severity": "medium",
           "source": "QC2-H1",
           "scope": "crates/nexus42/src/db/, crates/nexus42d/src/db/",
-          "decision": "defer",
+          "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — add CI drift-detection job comparing schema constants",
-          "tracking": null
+          "target": "V1.1 — RESOLVED: Added schema-drift-check CI job comparing SCHEMA_VERSION, reference_sources table columns, and LATEST_SCHEMA_VERSION across CLI, daemon, and contracts",
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-09T00:00:00Z",
+          "closure_note": "Added schema-drift-check job to ci.yml with 3 checks: SCHEMA_VERSION consistency (CLI vs daemon), reference_sources key columns (both directions), LATEST_SCHEMA_VERSION match (contracts vs CLI). Fast-failing CI detection."
         },
         {
           "id": "FH-R2",
@@ -1208,10 +1223,13 @@
           "severity": "low",
           "source": "QC1-M3",
           "scope": "crates/nexus42d/src/api/errors.rs",
-          "decision": "defer",
+          "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — document and standardize error code convention",
-          "tracking": null
+          "target": "V1.1 — RESOLVED: Documented two-tier error code strategy in module header and Internal variant doc comment. Internal.code is for internal classification (DATABASE_ERROR, INTERNAL_ERROR), error_code() returns stable public codes (INTERNAL). Documented future direction for finer-grained public codes.",
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-09T00:00:00Z",
+          "closure_note": "Added module-level documentation explaining Internal.code vs error_code() design rationale. Added doc comment on Internal variant explaining code field purpose. Cross-referenced SyncError pattern."
         },
         {
           "id": "FH-R4",
@@ -1241,10 +1259,13 @@
           "severity": "low",
           "source": "QC2-M3",
           "scope": "crates/nexus42d/src/api/",
-          "decision": "defer",
+          "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1 — extract to shared test_utils module",
-          "tracking": null
+          "target": "V1.1 — RESOLVED: Created test_utils.rs module with create_test_workspace() and create_initialized_test_workspace() helpers. Migrated 6 tests (4 from errors.rs, 2 from sync.rs) to use shared helpers. lib.rs exports test_utils under #[cfg(test)].",
+          "tracking": null,
+          "lifecycle": "resolved",
+          "closed_at": "2026-04-09T00:00:00Z",
+          "closure_note": "Created crates/nexus42d/src/test_utils.rs with create_test_workspace() returning (TempDir, PathBuf, PathBuf) and create_initialized_test_workspace() returning (TempDir, PathBuf, PathBuf, PathBuf). Migrated errors.rs (4 integration tests) and sync.rs (2 integration tests). Other files can migrate incrementally."
         },
         {
           "id": "FH-R7",
@@ -1382,6 +1403,36 @@
           "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "Before merge"
+        },
+        {
+          "id": "QC-W9",
+          "title": "CI shell script readability — extract to standalone script",
+          "severity": "warning",
+          "source": "QC#1 (Wave 3 Batch B)",
+          "scope": ".github/workflows/ci.yml:119-177",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — Extract to tooling/check-schema-drift.sh"
+        },
+        {
+          "id": "QC-W10",
+          "title": "TempDir ownership semantics — reinforce with type hint",
+          "severity": "warning",
+          "source": "QC#1 (Wave 3 Batch B)",
+          "scope": "test_utils.rs:11-23, 40-43",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — Add newtype wrapper or compile-time hint"
+        },
+        {
+          "id": "QC-W11",
+          "title": "Schema version type mismatch (u32 vs &str)",
+          "severity": "warning",
+          "source": "QC#1 (Wave 3 Batch B)",
+          "scope": "CI check at ci.yml:171-177 vs crates/nexus-contracts/src/generated/mod.rs:84",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — Standardize schema version type across CLI/daemon/contracts"
         }
       ]
     }
