@@ -17,8 +17,8 @@
     "domain-models"
   ],
   "created_at": "2026-04-09",
-  "updated_at": "2026-04-08",
-  "notes": "TD-1..TD-4 previously merged (see git log). TD-5: BundleBuilder sets sha256:<hexlower> over JSON-serialized deltas. TD-6: schemas/domain/user.schema.json + common AccountStatus/SubscriptionTier; nexus-domain user module; codegen committed. Verified: cargo test/clippy, pnpm typecheck, validate-schemas. Open: plan manual E2E for sync push to platform (TD-1 checklist); QC/QA sign-off before Done.",
+  "updated_at": "2026-04-09",
+  "notes": "TD-1–TD-6 implementation complete on v1.1-arch-alignment-blockers (tip 717c61d; feature 4a50139, TD-4 677877f). 门禁: cargo test/clippy/fmt, pnpm typecheck, validate-schemas, codegen committed. 待办: merge → main, QC/QA 三审收口, TD-1 计划内「手动 sync push 到平台」可选验证。",
   "metadata": {
     "phase": "V1.1 GA — architecture alignment blockers",
     "priority": "high",
@@ -36,7 +36,12 @@
       "tests": "pass",
       "clippy": "pass",
       "fmt": "pass",
-      "codegen": "committed with schemas"
-    }
+      "codegen": "committed with schemas",
+      "typecheck": "pass",
+      "qc_status": "pending",
+      "qa_status": "pending",
+      "merge_to_main": "pending"
+    },
+    "implementation_tip": "717c61d"
   }
 }
