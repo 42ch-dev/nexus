@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// Current schema version, stored in `workspace_meta` as `schema_version`.
-pub const SCHEMA_VERSION: &str = "1";
+pub const SCHEMA_VERSION: &str = "2";
 
 /// Schema initializer. All table definitions are centralized here.
 pub struct Schema;
@@ -27,6 +27,7 @@ impl Schema {
         conn.execute_batch(AUTH_TOKENS_TABLE)?;
         conn.execute_batch(DEVICE_CODE_SESSIONS_TABLE)?;
         conn.execute_batch(ACP_TOOL_AUDIT_LOG_TABLE)?;
+        conn.execute_batch(ACP_SESSIONS_TABLE)?;
 
         // Seed schema version row (idempotent)
         conn.execute(
@@ -128,6 +129,18 @@ CREATE TABLE IF NOT EXISTS acp_tool_audit_log (
 );
 "#;
 
+/// ACP sessions — tracks active ACP agent sessions for persistence across CLI invocations.
+pub const ACP_SESSIONS_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS acp_sessions (
+    session_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_active TEXT NOT NULL,
+    workspace_hint TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +164,8 @@ mod tests {
         assert!(tables.contains(&"reference_sources".to_string()));
         assert!(tables.contains(&"outbox".to_string()));
         assert!(tables.contains(&"auth_tokens".to_string()));
+        assert!(tables.contains(&"acp_tool_audit_log".to_string()));
+        assert!(tables.contains(&"acp_sessions".to_string()));
     }
 
     #[test]
