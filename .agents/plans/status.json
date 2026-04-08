@@ -363,7 +363,7 @@
         "2026-04-08-v1.1-tech-debt-mitigation": 7
       },
       "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md \u00a7209-211 (historical compatibility rule)",
-      "archival_note": "15 closed residuals archived to .agents/plans/archived/residuals/ on 2026-04-09 per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
+      "archival_note": "19 closed residuals archived to .agents/plans/archived/residuals/ (15 on 2026-04-09, 4 Batch B on 2026-04-08) per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
     },
     "residual_findings": {
       "2025-04-05-domain-models": [
