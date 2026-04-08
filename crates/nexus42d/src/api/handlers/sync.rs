@@ -127,30 +127,12 @@ pub async fn status(
 
     match state.outbox() {
         Some(outbox) => {
-            let staged_count = outbox
-                .count_by_state("staged")
-                .await
-                .unwrap_or(0) as u64;
-            let ready_count = outbox
-                .count_by_state("ready")
-                .await
-                .unwrap_or(0) as u64;
-            let sent_count = outbox
-                .count_by_state("sent")
-                .await
-                .unwrap_or(0) as u64;
-            let acked_count = outbox
-                .count_by_state("acked")
-                .await
-                .unwrap_or(0) as u64;
-            let conflicted_count = outbox
-                .count_by_state("conflicted")
-                .await
-                .unwrap_or(0) as u64;
-            let failed_count = outbox
-                .count_by_state("failed")
-                .await
-                .unwrap_or(0) as u64;
+            let staged_count = outbox.count_by_state("staged").await.unwrap_or(0) as u64;
+            let ready_count = outbox.count_by_state("ready").await.unwrap_or(0) as u64;
+            let sent_count = outbox.count_by_state("sent").await.unwrap_or(0) as u64;
+            let acked_count = outbox.count_by_state("acked").await.unwrap_or(0) as u64;
+            let conflicted_count = outbox.count_by_state("conflicted").await.unwrap_or(0) as u64;
+            let failed_count = outbox.count_by_state("failed").await.unwrap_or(0) as u64;
 
             // Get last sync timestamp from workspace_meta
             let last_sync_at: Option<String> = state
@@ -227,17 +209,17 @@ pub async fn push(
     })?;
 
     // Build a SyncCommand from the request
-    use nexus_contracts::generated::SyncCommand;
+    use nexus_contracts::{CommandOrigin, CommandStatus, CommandType, SyncCommand};
     let command = SyncCommand {
         schema_version: 1,
         command_id: format!("cmd_{}", uuid::Uuid::new_v4().simple()),
         workspace_id: req.workspace_id.clone(),
         world_id: req.world_id.clone(),
         creator_id: req.creator_id.clone(),
-        command_type: "sync_push".to_string(),
-        origin: "local_user".to_string(),
+        command_type: CommandType::SyncPush,
+        origin: CommandOrigin::LocalUser,
         output_manuscript: None,
-        status: "pending".to_string(),
+        status: CommandStatus::Pending,
         requested_by: None,
         started_at: None,
         completed_at: None,
@@ -245,10 +227,13 @@ pub async fn push(
     };
 
     // Append the command to the outbox (staged state)
-    let entry_id = outbox.append(&command).await.map_err(|e| NexusApiError::Internal {
-        code: "OUTBOX_APPEND_ERROR".into(),
-        message: format!("Failed to append command to outbox: {}", e),
-    })?;
+    let entry_id = outbox
+        .append(&command)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "OUTBOX_APPEND_ERROR".into(),
+            message: format!("Failed to append command to outbox: {}", e),
+        })?;
 
     info!(outbox_entry_id = %entry_id, "Command staged in outbox");
 
@@ -282,10 +267,13 @@ pub async fn push(
     };
 
     // Retrieve the entry to get the bundle_id
-    let entry = outbox.get(&entry_id).await.map_err(|e| NexusApiError::Internal {
-        code: "OUTBOX_GET_ERROR".into(),
-        message: format!("Failed to retrieve staged entry: {}", e),
-    })?;
+    let entry = outbox
+        .get(&entry_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "OUTBOX_GET_ERROR".into(),
+            message: format!("Failed to retrieve staged entry: {}", e),
+        })?;
 
     Ok(Json(SyncPushResponse {
         success: true,
@@ -317,9 +305,10 @@ pub async fn resolve(
     })?;
 
     // Get the current entry to determine state
-    let entry = outbox.get(&req.outbox_entry_id).await.map_err(|e| {
-        NexusApiError::NotFound(format!("Outbox entry not found: {}", e))
-    })?;
+    let entry = outbox
+        .get(&req.outbox_entry_id)
+        .await
+        .map_err(|e| NexusApiError::NotFound(format!("Outbox entry not found: {}", e)))?;
 
     match req.resolution.as_str() {
         "auto_accept" => {
@@ -328,13 +317,12 @@ pub async fn resolve(
             match entry.delivery_state.as_str() {
                 "conflicted" | "sent" => {
                     // Mark as acked — this effectively "accepts" the server state
-                    outbox
-                        .mark_acked(&req.outbox_entry_id)
-                        .await
-                        .map_err(|e| NexusApiError::Internal {
+                    outbox.mark_acked(&req.outbox_entry_id).await.map_err(|e| {
+                        NexusApiError::Internal {
                             code: "OUTBOX_RESOLVE_ERROR".into(),
                             message: format!("Failed to resolve entry as auto_accept: {}", e),
-                        })?;
+                        }
+                    })?;
 
                     info!(outbox_entry_id = %req.outbox_entry_id, "Resolved as auto_accept (acked)");
                     Ok(Json(SyncResolveResponse {
@@ -350,7 +338,7 @@ pub async fn resolve(
                     );
                     Ok(Json(SyncResolveResponse {
                         success: false,
-                        delivery_state: Some(entry.delivery_state),
+                        delivery_state: Some(entry.delivery_state.as_str().to_string()),
                         error: Some(msg),
                     }))
                 }
@@ -362,7 +350,10 @@ pub async fn resolve(
             match entry.delivery_state.as_str() {
                 "conflicted" | "sent" | "staged" | "ready" => {
                     outbox
-                        .mark_failed(&req.outbox_entry_id, "auto_reject: user chose to discard server changes")
+                        .mark_failed(
+                            &req.outbox_entry_id,
+                            "auto_reject: user chose to discard server changes",
+                        )
                         .await
                         .map_err(|e| NexusApiError::Internal {
                             code: "OUTBOX_RESOLVE_ERROR".into(),
@@ -374,18 +365,15 @@ pub async fn resolve(
                     let updated = outbox.get(&req.outbox_entry_id).await.ok();
                     Ok(Json(SyncResolveResponse {
                         success: true,
-                        delivery_state: updated.map(|e| e.delivery_state),
+                        delivery_state: updated.map(|e| e.delivery_state.as_str().to_string()),
                         error: None,
                     }))
                 }
                 state_str => {
-                    let msg = format!(
-                        "Cannot auto_reject entry in '{}' state",
-                        state_str
-                    );
+                    let msg = format!("Cannot auto_reject entry in '{}' state", state_str);
                     Ok(Json(SyncResolveResponse {
                         success: false,
-                        delivery_state: Some(entry.delivery_state),
+                        delivery_state: Some(entry.delivery_state.as_str().to_string()),
                         error: Some(msg),
                     }))
                 }
@@ -395,13 +383,13 @@ pub async fn resolve(
             // Manual review: just return the current entry details for user inspection
             Ok(Json(SyncResolveResponse {
                 success: false,
-                delivery_state: Some(entry.delivery_state),
+                delivery_state: Some(entry.delivery_state.as_str().to_string()),
                 error: Some("Manual review: entry requires human decision".to_string()),
             }))
         }
         other => Ok(Json(SyncResolveResponse {
             success: false,
-            delivery_state: Some(entry.delivery_state),
+            delivery_state: Some(entry.delivery_state.as_str().to_string()),
             error: Some(format!("Unknown resolution strategy: {}", other)),
         })),
     }
@@ -430,7 +418,7 @@ pub async fn replay(
         .map(|e| OutboxEntrySummary {
             outbox_entry_id: e.outbox_entry_id.clone(),
             bundle_id: e.bundle_id.clone(),
-            delivery_state: e.delivery_state.clone(),
+            delivery_state: e.delivery_state.as_str().to_string(),
             retry_count: e.retry_count.unwrap_or(0u64) as i64,
             last_error: e.last_error.clone(),
             created_at: e.created_at.clone(),
@@ -528,12 +516,7 @@ mod tests {
         use crate::workspace::WorkspaceState;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing_with_outbox(
-            nexus_home,
-            db_path,
-            None,
-        )
-        .await;
+        let state = WorkspaceState::new_for_testing_with_outbox(nexus_home, db_path, None).await;
 
         // Initially, all counts should be 0
         let result = status(State(state)).await;
@@ -551,12 +534,7 @@ mod tests {
         use crate::workspace::WorkspaceState;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing_with_outbox(
-            nexus_home,
-            db_path,
-            None,
-        )
-        .await;
+        let state = WorkspaceState::new_for_testing_with_outbox(nexus_home, db_path, None).await;
 
         let req = SyncPushRequest {
             workspace_id: "wrk_test".to_string(),
@@ -579,12 +557,7 @@ mod tests {
         use crate::workspace::WorkspaceState;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing_with_outbox(
-            nexus_home,
-            db_path,
-            None,
-        )
-        .await;
+        let state = WorkspaceState::new_for_testing_with_outbox(nexus_home, db_path, None).await;
 
         // Push a command
         let req = SyncPushRequest {

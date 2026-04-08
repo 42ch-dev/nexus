@@ -4,6 +4,7 @@
 //! See data-model-v1.md §5.4.
 
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use strum::Display;
 
 /// Membership role enum - matches v1-spec §5.4, §7
@@ -160,8 +161,8 @@ impl From<nexus_contracts::WorldMembership> for WorldMembership {
             membership_id: c.membership_id,
             world_id: c.world_id,
             creator_id: c.creator_id,
-            role: c.role,
-            membership_status: c.membership_status,
+            role: c.role.as_str().to_string(),
+            membership_status: c.membership_status.as_str().to_string(),
             joined_at: c.joined_at,
             permissions: c
                 .permissions
@@ -177,8 +178,9 @@ impl From<WorldMembership> for nexus_contracts::WorldMembership {
             membership_id: d.membership_id,
             world_id: d.world_id,
             creator_id: d.creator_id,
-            role: d.role,
-            membership_status: d.membership_status,
+            role: nexus_contracts::MembershipRole::from_str(&d.role).unwrap(),
+            membership_status: nexus_contracts::MembershipStatus::from_str(&d.membership_status)
+                .unwrap(),
             joined_at: d.joined_at,
             permissions: d
                 .permissions

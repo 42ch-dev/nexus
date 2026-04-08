@@ -6,6 +6,7 @@
 use crate::errors::DomainError;
 use crate::pairing::{Pairing, PairingSource};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Creator status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -202,10 +203,10 @@ impl From<nexus_contracts::Creator> for Creator {
             creator_id: c.creator_id,
             user_id: c.user_id,
             display_name: c.display_name,
-            status: c.status,
+            status: c.status.as_str().to_string(),
             is_platform_owned: c.is_platform_owned,
             api_key_ref: c.api_key_ref,
-            registration_source: c.registration_source,
+            registration_source: c.registration_source.as_str().to_string(),
             persona_summary: c.persona_summary,
             style_profile: c.style_profile.map(|v| {
                 serde_json::from_value(v).unwrap_or(StyleProfile {
@@ -228,10 +229,13 @@ impl From<Creator> for nexus_contracts::Creator {
             creator_id: d.creator_id,
             user_id: d.user_id,
             display_name: d.display_name,
-            status: d.status,
+            status: nexus_contracts::CreatorStatus::from_str(&d.status).unwrap(),
             is_platform_owned: d.is_platform_owned,
             api_key_ref: d.api_key_ref,
-            registration_source: d.registration_source,
+            registration_source: nexus_contracts::RegistrationSource::from_str(
+                &d.registration_source,
+            )
+            .unwrap(),
             persona_summary: d.persona_summary,
             style_profile: d.style_profile.map(|sp| {
                 serde_json::to_value(&StyleProfileJson {

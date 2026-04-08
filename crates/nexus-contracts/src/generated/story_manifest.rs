@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source story-manifest.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{ManifestType, ManuscriptStorage, StoryManifestStatus};
+use serde::{Deserialize, Serialize};
 
 /// StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

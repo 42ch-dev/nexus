@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source reference-source.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{ReferenceSourceType, ScanStatus};
+use serde::{Deserialize, Serialize};
 
 /// ReferenceSource - local-only registration of research/reference sources. Does NOT sync to platform; shared excerpts go through MemoryItem(memory_kind=research_material). Aligned with data-model-v1.md §5.9A.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source workspace-binding.schema.json
 
+use crate::generated::common_types::BindingStatus;
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{BindingStatus};
 
 /// Binding between a local workspace and a remote world. Aligned with data-model-v1.md §5.14.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

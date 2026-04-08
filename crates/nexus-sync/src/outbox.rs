@@ -96,8 +96,10 @@
 //!   migration function.
 
 use std::path::Path;
+use std::str::FromStr;
 
 use nexus_contracts::generated::{Bundle, OutboxEntry, SyncCommand, LATEST_SCHEMA_VERSION};
+use nexus_contracts::DeliveryState;
 use rusqlite::params;
 use uuid::Uuid;
 
@@ -109,45 +111,6 @@ const MAX_RETRIES: u64 = 5;
 
 /// Base delay for exponential backoff in seconds.
 const BASE_RETRY_DELAY_SECS: u64 = 2;
-
-/// Delivery states for outbox entries.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeliveryState {
-    Staged,
-    Ready,
-    Sent,
-    Acked,
-    Conflicted,
-    Failed,
-}
-
-impl DeliveryState {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Staged => "staged",
-            Self::Ready => "ready",
-            Self::Sent => "sent",
-            Self::Acked => "acked",
-            Self::Conflicted => "conflicted",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub fn parse(s: &str) -> SyncResult<Self> {
-        match s {
-            "staged" => Ok(Self::Staged),
-            "ready" => Ok(Self::Ready),
-            "sent" => Ok(Self::Sent),
-            "acked" => Ok(Self::Acked),
-            "conflicted" => Ok(Self::Conflicted),
-            "failed" => Ok(Self::Failed),
-            other => Err(SyncError::OutboxInvalidState {
-                expected: "known state".to_string(),
-                actual: other.to_string(),
-            }),
-        }
-    }
-}
 
 /// A parsed retry-after timestamp, either as an absolute time or relative seconds.
 #[derive(Debug, Clone)]
@@ -573,12 +536,15 @@ impl Outbox {
             )?;
 
             let rows = stmt.query_map(params![now], |row: &rusqlite::Row<'_>| {
+                let delivery_state_str: String = row.get(3)?;
+                let delivery_state = DeliveryState::from_str(&delivery_state_str)
+                    .map_err(|_| rusqlite::types::FromSqlError::InvalidType)?;
                 Ok(OutboxEntry {
                     schema_version: LATEST_SCHEMA_VERSION,
                     outbox_entry_id: row.get(0)?,
                     bundle_id: row.get(1)?,
                     idempotency_key: row.get(2)?,
-                    delivery_state: row.get(3)?,
+                    delivery_state,
                     retry_count: Some(row.get(4)?),
                     last_error: row.get(5)?,
                     next_retry_at: row.get(6)?,
@@ -608,12 +574,15 @@ impl Outbox {
                  WHERE outbox_entry_id = ?1",
                     params![entry_id],
                     |row| {
+                        let delivery_state_str: String = row.get(3)?;
+                        let delivery_state = DeliveryState::from_str(&delivery_state_str)
+                            .map_err(|_| rusqlite::types::FromSqlError::InvalidType)?;
                         Ok(OutboxEntry {
                             schema_version: LATEST_SCHEMA_VERSION,
                             outbox_entry_id: row.get(0)?,
                             bundle_id: row.get(1)?,
                             idempotency_key: row.get(2)?,
-                            delivery_state: row.get(3)?,
+                            delivery_state,
                             retry_count: Some(row.get(4)?),
                             last_error: row.get(5)?,
                             next_retry_at: row.get(6)?,
@@ -802,6 +771,10 @@ impl Outbox {
 mod tests {
     use super::*;
     use nexus_contracts::generated::{Delta, SyncCommand};
+    use nexus_contracts::{
+        CommandOrigin, CommandStatus, CommandType, DeliveryState, DeltaOperation, DeltaType,
+    };
+    use std::str::FromStr;
 
     fn make_test_command() -> SyncCommand {
         SyncCommand {
@@ -810,10 +783,10 @@ mod tests {
             workspace_id: "wrk_test".to_string(),
             world_id: "wld_test".to_string(),
             creator_id: "ctr_test".to_string(),
-            command_type: "sync_push".to_string(),
-            origin: "local_user".to_string(),
+            command_type: CommandType::SyncPush,
+            origin: CommandOrigin::LocalUser,
             output_manuscript: None,
-            status: "pending".to_string(),
+            status: CommandStatus::Pending,
             requested_by: None,
             started_at: None,
             completed_at: None,
@@ -829,7 +802,7 @@ mod tests {
 
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.outbox_entry_id, entry_id);
-        assert_eq!(entry.delivery_state, "staged");
+        assert_eq!(entry.delivery_state, DeliveryState::Staged);
         assert!(entry.bundle_id.starts_with("bdl_"));
     }
 
@@ -841,11 +814,11 @@ mod tests {
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "sent");
+        assert_eq!(entry.delivery_state, DeliveryState::Sent);
 
         outbox.mark_acked(&entry_id).await.expect("mark_acked");
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "acked");
+        assert_eq!(entry.delivery_state, DeliveryState::Acked);
     }
 
     #[tokio::test]
@@ -861,7 +834,7 @@ mod tests {
             .expect("mark_conflicted");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "conflicted");
+        assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert_eq!(entry.last_error, Some("version mismatch".to_string()));
     }
 
@@ -879,7 +852,7 @@ mod tests {
             .expect("mark_failed 1");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "failed");
+        assert_eq!(entry.delivery_state, DeliveryState::Failed);
         assert_eq!(entry.retry_count, Some(1));
         assert!(entry.next_retry_at.is_some());
     }
@@ -952,8 +925,8 @@ mod tests {
             base_versions: serde_json::json!({"world_revision": 1}),
             last_confirmed_delta_sequence: None,
             deltas: vec![Delta {
-                delta_type: "world".to_string(),
-                operation: "create".to_string(),
+                delta_type: DeltaType::World,
+                operation: DeltaOperation::Create,
                 target_entity_type: None,
                 target_entity_id: None,
                 payload: serde_json::json!({}),
@@ -968,7 +941,7 @@ mod tests {
         let entry_id = outbox.stage(&bundle).await.expect("stage");
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.bundle_id, "bdl_test");
-        assert_eq!(entry.delivery_state, "ready");
+        assert_eq!(entry.delivery_state, DeliveryState::Ready);
     }
 
     #[tokio::test]
@@ -1019,11 +992,14 @@ mod tests {
     #[test]
     fn delivery_state_roundtrip() {
         assert_eq!(
-            DeliveryState::parse("staged").unwrap(),
+            DeliveryState::from_str("staged").unwrap(),
             DeliveryState::Staged
         );
-        assert_eq!(DeliveryState::parse("acked").unwrap(), DeliveryState::Acked);
-        assert!(DeliveryState::parse("bogus").is_err());
+        assert_eq!(
+            DeliveryState::from_str("acked").unwrap(),
+            DeliveryState::Acked
+        );
+        assert!(DeliveryState::from_str("bogus").is_err());
     }
 
     // ── retry_after tests (SYNC-R11) ────────────────────────────
@@ -1041,7 +1017,7 @@ mod tests {
             .expect("mark_conflicted");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "conflicted");
+        assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert!(entry.next_retry_at.is_none());
     }
 
@@ -1286,7 +1262,7 @@ mod tests {
             .expect("mark_conflicted");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "conflicted");
+        assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
 
         // Entry SHOULD appear in replay since retry_after has passed
         let entries = outbox.replay().await.expect("replay");
@@ -1307,7 +1283,7 @@ mod tests {
             .expect("mark_conflicted");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "conflicted");
+        assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert!(entry.next_retry_at.is_none());
 
         // Entry should NOT appear in replay (no retry_after set)
@@ -1358,7 +1334,7 @@ mod tests {
         // All entries should exist
         for entry_id in results {
             let entry = outbox.get(&entry_id).await.expect("get");
-            assert_eq!(entry.delivery_state, "sent");
+            assert_eq!(entry.delivery_state, DeliveryState::Sent);
         }
     }
 
@@ -1391,7 +1367,7 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for entry_id in &entry_ids {
             let entry = outbox.get(entry_id).await.expect("get");
-            assert_eq!(entry.delivery_state, "staged");
+            assert_eq!(entry.delivery_state, DeliveryState::Staged);
             assert!(seen.insert(entry_id.clone()));
         }
 
@@ -1418,7 +1394,7 @@ mod tests {
 
         // State should remain 'sent' (transaction rolled back)
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "sent");
+        assert_eq!(entry.delivery_state, DeliveryState::Sent);
     }
 
     #[tokio::test]
@@ -1430,21 +1406,21 @@ mod tests {
 
         // Verify initial state
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "staged");
+        assert_eq!(entry.delivery_state, DeliveryState::Staged);
         assert_eq!(entry.retry_count, Some(0));
 
         // Transition: staged -> sent (should be atomic)
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "sent");
+        assert_eq!(entry.delivery_state, DeliveryState::Sent);
         assert_eq!(entry.retry_count, Some(0));
 
         // Transition: sent -> acked (should be atomic)
         outbox.mark_acked(&entry_id).await.expect("mark_acked");
 
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "acked");
+        assert_eq!(entry.delivery_state, DeliveryState::Acked);
         assert_eq!(entry.retry_count, Some(0));
 
         // Verify all fields updated atomically
@@ -1473,7 +1449,7 @@ mod tests {
 
         // Verify all fields persisted atomically
         let entry = outbox.get(&entry_id).await.expect("get");
-        assert_eq!(entry.delivery_state, "conflicted");
+        assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert_eq!(entry.last_error, Some("transient conflict".to_string()));
         assert!(entry.next_retry_at.is_some());
         assert!(entry.updated_at.is_some());
@@ -1503,7 +1479,7 @@ mod tests {
                 .expect("mark_failed");
 
             let entry = outbox.get(&entry_id).await.expect("get");
-            assert_eq!(entry.delivery_state, "failed");
+            assert_eq!(entry.delivery_state, DeliveryState::Failed);
             assert_eq!(entry.retry_count, Some(i));
             assert!(entry.next_retry_at.is_some());
             assert!(entry
@@ -1535,9 +1511,9 @@ mod tests {
             base_versions: serde_json::json!({"world_revision": 5}),
             last_confirmed_delta_sequence: Some(10),
             deltas: vec![Delta {
-                delta_type: "character".to_string(),
-                operation: "update_name".to_string(),
-                target_entity_type: Some("character".to_string()),
+                delta_type: DeltaType::KeyBlock,
+                operation: DeltaOperation::Update,
+                target_entity_type: Some("key_block".to_string()),
                 target_entity_id: Some("char_001".to_string()),
                 payload: serde_json::json!({"name": "Alice"}),
                 source_anchor: None,
@@ -1553,7 +1529,7 @@ mod tests {
         // Retrieve and verify all bundle metadata persisted atomically
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.bundle_id, "bdl_test");
-        assert_eq!(entry.delivery_state, "ready");
+        assert_eq!(entry.delivery_state, DeliveryState::Ready);
 
         // Verify bundle can be reconstructed from stored payload
         // (this tests that the bundle_payload column was written correctly)
