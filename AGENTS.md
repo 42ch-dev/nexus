@@ -23,10 +23,10 @@ This is the **public open-source monorepo** containing:
 ## Key Naming (Frozen)
 
 - Product: **Nexus**
-- CLI executable: **`nexus42`**
-- Daemon: **`nexus42d`**
-- npm scope: **`@42ch`**
-- Contracts package: **`@42ch/nexus-contracts`**
+- CLI executable: `**nexus42`**
+- Daemon: `**nexus42d`**
+- npm scope: `**@42ch**`
+- Contracts package: `**@42ch/nexus-contracts**`
 
 ## Monorepo Structure (Target)
 
@@ -62,6 +62,7 @@ End-user and contributor-facing content that anyone cloning the repo should read
 - Contributing guidelines
 
 **Do NOT place** the following in `docs/`:
+
 - Architecture review reports, spec revision outputs, gap analyses
 - Per-plan design decisions or implementation notes
 - Any document that is an **input to** or **output from** a specific plan
@@ -77,7 +78,7 @@ Development process artifacts generated during planning and review:
 
 These documents are valuable for agent handoff and cross-session continuity, but are not intended for external consumers.
 
-**Index**: All knowledge documents are catalogued in [`.agents/plans/knowledge/README.md`](.agents/plans/knowledge/README.md) with source plan, description, and status.
+**Index**: All knowledge documents are catalogued in `[.agents/plans/knowledge/README.md](.agents/plans/knowledge/README.md)` with source plan, description, and status.
 
 **Maintenance rules**:
 
@@ -127,7 +128,7 @@ This repository is **public** and plan reports are often **tracked**. Anything y
 
 - **Relative paths from the repository root** (preferred for real files in this repo), e.g. `.agents/plans/status.json`, `crates/nexus42/src/...`.
 - **Neutral placeholders** when the exact mount point does not matter, e.g. `<repository-root>`, `<repository-root>/.worktrees/<branch-name>/` for git worktrees under this repo’s `.worktrees/` convention.
-- **`{PLAN_DIR}`** / `.agents/plans/` when referring to the plan tree, per this file’s naming above.
+- `**{PLAN_DIR}`** / `.agents/plans/` when referring to the plan tree, per this file’s naming above.
 
 **Also avoid** in committed artifacts: internal hostnames, private IP addresses, raw secrets or API keys, and full tool logs that embed your local paths (sanitize or excerpt). Redact before commit if a report must quote command output.
 
@@ -135,25 +136,25 @@ This repository is **public** and plan reports are often **tracked**. Anything y
 
 ### Harness alignment (authoritative mirror)
 
-Plan directory discovery, `status.json` / residual lifecycle, optional `notes.json` and cold snapshots, and merge SSOT expectations follow **Harness Engineering** conventions. This repo aligns with the published OpenCode team config **[btspoony/harness-opencode-team](https://github.com/btspoony/harness-opencode-team)**; the normative document is [`docs/agents/plan-convention.md`](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/plan-convention.md) in that repository (same text as OpenCode global `docs/agents/plan-convention.md` when installed). The sections below are **this repo’s** binding summary; if anything conflicts, reconcile with that upstream document and update this file.
+Plan directory discovery, `status.json` / residual lifecycle, optional `notes.json` and cold snapshots, and merge SSOT expectations follow **Harness Engineering** conventions. This repo aligns with the published OpenCode team config **[btspoony/harness-opencode-team](https://github.com/btspoony/harness-opencode-team)**; the normative document is `[docs/agents/plan-convention.md](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/plan-convention.md)` in that repository (same text as OpenCode global `docs/agents/plan-convention.md` when installed). The sections below are **this repo’s** binding summary; if anything conflicts, reconcile with that upstream document and update this file.
 
 ### `{PLAN_DIR}` discovery
 
-Resolve the plan root in order (first match wins); call the result **`{PLAN_DIR}`**:
+Resolve the plan root in order (first match wins); call the result `**{PLAN_DIR}`**:
 
 1. `.agents/plans/`
 2. `.plans/`
 3. `plans/`
 
-If none exist, the project is treated as **not using** an on-disk plan tree; @project-manager may still run gates and track progress via conversation and completion reports. **This repository** ships with **`.agents/plans/`** as `{PLAN_DIR}`.
+If none exist, the project is treated as **not using** an on-disk plan tree; @project-manager may still run gates and track progress via conversation and completion reports. **This repository** ships with `**.agents/plans/`** as `{PLAN_DIR}`.
 
 **Git:** Prefer **tracking** `{PLAN_DIR}` so clone-based handoff stays reachable; only ignore the whole tree for purely local/private setups, and then do not cite ignored paths as the sole authority in committed docs (same as reachability rules above).
 
-**Superpowers `writing-plans`:** New plan files MUST land under the resolved **`{PLAN_DIR}`** (e.g. `.agents/plans/<plan-id>-<name>.md`), **not** `docs/superpowers/plans/` in this repo.
+**Superpowers `writing-plans`:** New plan files MUST land under the resolved `**{PLAN_DIR}`** (e.g. `.agents/plans/<plan-id>-<name>.md`), **not** `docs/superpowers/plans/` in this repo.
 
 ### Directory Organization
 
-Paths below are under **`{PLAN_DIR}`** (here, usually `.agents/plans/`):
+Paths below are under `**{PLAN_DIR}`** (here, usually `.agents/plans/`):
 
 ```
 {PLAN_DIR}/
@@ -194,10 +195,10 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 - **Entry location**: `status.json` → `metadata.residual_findings[<plan-id>]` (**open items only**; keys must match `plans[].id`).
 - **Empty keys**: When a plan has **no** open residuals, **remove** that `plan-id` key from `metadata.residual_findings` entirely (do not keep `"plan-id": []`).
 - **Close & archive**: set `lifecycle` to `resolved`/`waived`/`superseded`/`duplicate` → add `closed_at` + `closure_note` (and recommended `closure_evidence`) → append to `{PLAN_DIR}/archived/residuals/<plan-id>.json` → remove the row from the open list in `status.json`.
-- **`severity` (JSON SSOT)**: only `critical`, `high`, `medium`, `low`, **`nit`** (lowercase). **`nit`** is lighter than `low` (style/nits). **Do not** write `warning` on new rows; legacy `"warning"` reads as **`low`**. Merge gate: **`critical` / `high`** per team policy and QC baseline; other levels may be tracked as residuals.
-- **`residual_summary`** (optional, in `plans[].metadata`): one-line summary of **open** items only for that plan.
+- `**severity` (JSON SSOT)**: only `critical`, `high`, `medium`, `low`, `**nit`** (lowercase). `**nit**` is lighter than `low` (style/nits). **Do not** write `warning` on new rows; legacy `"warning"` reads as `**low`**. Merge gate: `**critical` / `high`** per team policy and QC baseline; other levels may be tracked as residuals.
+- `**residual_summary**` (optional, in `plans[].metadata`): one-line summary of **open** items only for that plan.
 
-**Program timeline:** Prefer **`{PLAN_DIR}/notes.json`** for cross-plan milestones (see upstream schema). Root **`metadata.notes`** is **legacy** if present; migrate out when practical. **Per-plan `plans[].notes`**: short status string for that plan only.
+**Program timeline:** Prefer `**{PLAN_DIR}/notes.json`** for cross-plan milestones (see upstream schema). Root `**metadata.notes`** is **legacy** if present; migrate out when practical. **Per-plan `plans[].notes`**: short status string for that plan only.
 
 ### Plan Lifecycle
 
@@ -211,19 +212,19 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 
 ### Pre-merge checklist (mandatory)
 
-**Before merging any feature branch or opening a PR that closes plan work**, update **`{PLAN_DIR}/status.json`** (this repo: `.agents/plans/status.json`) so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
+**Before merging any feature branch or opening a PR that closes plan work**, update `**{PLAN_DIR}/status.json`** (this repo: `.agents/plans/status.json`) so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
 
 #### Required updates
 
-1. **`plans[].status`**, **`plans[].notes`**, **`plans[].updated_at`** / **`done_at`** (when applicable): reflect the real branch and merge outcome.
-2. **`plans[].metadata.gates`** (or equivalent): QC / QA / CI parity — e.g. `qc_status`, `qa_status`, `tests`, `clippy`, `validation` — so reviewers see gate state without opening reports.
-3. **`plans[].metadata.residual_summary`**: one-line summary of **open** residuals for that plan only (formal rows stay under `metadata.residual_findings`).
-4. **`metadata.residual_findings[<plan-id>]`**: add or update structured findings from QC; **close and archive** per upstream convention (`{PLAN_DIR}/archived/residuals/<plan-id>.json`) when resolved. Keys use the full plan id (e.g. `2025-04-05-domain-models`), same as `plans[].id`. Remove **empty** `plan-id` keys from the map.
-5. **`metadata.tech_debt_summary`**: refresh `updated_at`, `total_open`, `by_severity`, `by_plan`, and **`by_target`** when the open residual set changes; keep **`cross_cutting`** in sync if you add or resolve program-level debt items (e.g. `DEBT-X*`).
-6. **Program timeline**: append a milestone to **`notes.json`** when the team uses it; otherwise **`metadata.notes`** in `status.json` for significant merges or residual cleanups (legacy; prefer `notes.json` for new program-level logs).
+1. `**plans[].status`**, `**plans[].notes`**, `**plans[].updated_at**` / `**done_at**` (when applicable): reflect the real branch and merge outcome.
+2. `**plans[].metadata.gates**` (or equivalent): QC / QA / CI parity — e.g. `qc_status`, `qa_status`, `tests`, `clippy`, `validation` — so reviewers see gate state without opening reports.
+3. `**plans[].metadata.residual_summary**`: one-line summary of **open** residuals for that plan only (formal rows stay under `metadata.residual_findings`).
+4. `**metadata.residual_findings[<plan-id>]`**: add or update structured findings from QC; **close and archive** per upstream convention (`{PLAN_DIR}/archived/residuals/<plan-id>.json`) when resolved. Keys use the full plan id (e.g. `2025-04-05-domain-models`), same as `plans[].id`. Remove **empty** `plan-id` keys from the map.
+5. `**metadata.tech_debt_summary`**: refresh `updated_at`, `total_open`, `by_severity`, `by_plan`, and `**by_target`** when the open residual set changes; keep `**cross_cutting**` in sync if you add or resolve program-level debt items (e.g. `DEBT-X*`).
+6. **Program timeline**: append a milestone to `**notes.json`** when the team uses it; otherwise `**metadata.notes`** in `status.json` for significant merges or residual cleanups (legacy; prefer `notes.json` for new program-level logs).
 7. **Wire contracts / schemas (when `schemas/` or publish version changes)** — nexus-specific, not `contracts_schema`:
-   - Run **`pnpm run codegen`** and commit **`packages/nexus-contracts/src/generated/`** and **`crates/nexus-contracts/src/generated/`** (CI `verify-codegen` enforces this).
-   - Bump **`schema_version`** and package versions (`packages/nexus-contracts`, `crates/nexus-contracts`) per release policy; note downstream impact (`nexus-platform` consumes `@42ch/nexus-contracts`).
+  - Run `**pnpm run codegen`** and commit `**packages/nexus-contracts/src/generated/`** and `**crates/nexus-contracts/src/generated/`** (CI `verify-codegen` enforces this).
+  - Bump `**schema_version`** and package versions (`packages/nexus-contracts`, `crates/nexus-contracts`) per release policy; note downstream impact (`nexus-platform` consumes `@42ch/nexus-contracts`).
 
 #### Verification commands
 
@@ -244,23 +245,23 @@ jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agent
 
 #### Common mistakes
 
-- Leaving **`tech_debt_summary`** stale after QC triage (counts and `updated_at` disagree with `residual_findings`).
+- Leaving `**tech_debt_summary**` stale after QC triage (counts and `updated_at` disagree with `residual_findings`).
 - **Schema edits without regenerated** `*/generated/` trees — CI fails on drift.
 - **Missing timeline** (`notes.json` or, if legacy, `metadata.notes`) for a merge or bulk residual archival that future agents need for context.
-- Duplicating finding detail only in **`plans[].notes`** instead of **`metadata.residual_findings`** (SSOT for open items).
+- Duplicating finding detail only in `**plans[].notes`** instead of `**metadata.residual_findings`** (SSOT for open items).
 - **Publishing local paths or other machine-specific identifiers** in tracked QC/QA reports or plan notes (for example verbatim `review_cwd` under `/Users/...` or `C:\Users\...`). Replace with repo-relative paths or placeholders per §"No local privacy in committed text" above before commit.
 
 **Rule:** If `status.json` does not reflect reality, treat the branch as **not merge-ready** until it is corrected.
 
 ### Plan items in `status.json`
 
-Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally **`metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; **`plans[].id`** is the only key into `metadata.residual_findings`.
+Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally `**metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; `**plans[].id`** is the only key into `metadata.residual_findings`.
 
-**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`, and **`archived_record`** (relative path under `{PLAN_DIR}` to a cold snapshot when using optional compaction below). Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
+`**plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`, and `**archived_record`** (relative path under `{PLAN_DIR}` to a cold snapshot when using optional compaction below). Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
 
 ### Plan row archival and `status.json` size (optional compaction)
 
-**Why:** Many `Done` rows carry large `metadata` (gates, QC strings, tests, commits, long scope text), so `{PLAN_DIR}/status.json` grows without bound. Open **`metadata.residual_findings`** should stay bounded if closed items move to `archived/residuals/` per the rules above.
+**Why:** Many `Done` rows carry large `metadata` (gates, QC strings, tests, commits, long scope text), so `{PLAN_DIR}/status.json` grows without bound. Open `**metadata.residual_findings`** should stay bounded if closed items move to `archived/residuals/` per the rules above.
 
 **SSOT:** Root `status.json` stays authoritative for **current execution** (non-terminal plans, root `metadata`, **open** residuals). The following is an **opt-in** way to keep the hot file small while preserving history in-repo (reachability: every path must exist in a fresh clone).
 
@@ -278,14 +279,17 @@ Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, 
 - **Optional fields** (human-friendly): `title`, `done_at`
 
 **Removed fields** (available in `archived/plans/<plan-id>.json`):
+
 - `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `notes`
 - Bulky metadata fields: `gates`, `qc_status`, `tests`, `commits`, `description`, `scope`, etc.
 
 **Metadata content**:
-- **`archived_record`**: path relative to `{PLAN_DIR}`, e.g. `archived/plans/<plan-id>.json`
-- Optional one-line **`residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
+
+- `**archived_record`**: path relative to `{PLAN_DIR}`, e.g. `archived/plans/<plan-id>.json`
+- Optional one-line `**residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
 
 **Example ultra-compressed Done plan**:
+
 ```json
 {
   "id": "2025-04-05-domain-models",
@@ -362,6 +366,8 @@ git add packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/gener
 
 If you modify schemas without regenerating, the commit will be rejected by CI. Do NOT hand-edit files under `*/generated/` — always regenerate from schemas.
 
+- **enum_conversions.rs (Rust):** `crates/nexus-contracts/src/enum_conversions.rs` is maintained **next to** generated types, not produced by codegen. When JSON Schema adds or renames enum values, update this file in the same commit as regenerated `src/generated/` and verify with `cargo test -p nexus-contracts`.
+
 **Before opening a PR or merging to `main`:** run the same checks as the `CI` workflow (`.github/workflows/ci.yml`) so local results match GitHub Actions.
 
 ```bash
@@ -396,6 +402,7 @@ pnpm run typecheck
 
 - `nexus-platform` (private repo) consumes `@42ch/nexus-contracts` via npm semver lock
 - **No handwritten second DTO source** in platform — all wire types come from this repo's schemas
+- **SemVer:** bump `packages/nexus-contracts` npm version together with `schema_version` / `crates/nexus-contracts` per release policy. Breaking wire shapes (TypeScript unions or field renames from schema) require a **major** npm bump and a coordinated platform upgrade so consumers do not mix mismatched contract versions.
 
 ## Dev/Test Infrastructure
 
@@ -414,8 +421,31 @@ pnpm run typecheck
 
 ## Versioning & Compatibility
 
+### Wire `schema_version` (generated SSOT)
+
+- `**LATEST_SCHEMA_VERSION`:** `**1`** — constant emitted by codegen into `crates/nexus-contracts/src/generated/mod.rs` and `packages/nexus-contracts/src/generated/index.ts`.
+- Individual DTOs carry a per-type `schema_version` in schema and generated code; the **bundle envelope** and tooling align on the latest value above after `pnpm run codegen`.
+
+### Package versions (current repo snapshot)
+
+These are the **declared versions in-tree** (refresh after releases or workspace bumps):
+
+
+| Deliverable                                                                                                                  | Version                    | Declared in                                       |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------- |
+| Rust crates `**nexus42`**, `**nexus42d`**, `**nexus-contracts**`, `**nexus-domain**`, `**nexus-sync**`, `**nexus-local-db**` | **0.1.0**                  | Root `Cargo.toml` → `[workspace.package] version` |
+| `**nexus-contracts`** on crates.io                                                                                           | **0.1.0** (with workspace) | Same; publish from `crates/nexus-contracts`       |
+| `**@42ch/nexus-contracts`** (npm)                                                                                            | **0.2.0**                  | `packages/nexus-contracts/package.json`           |
+| `**nexus-codegen`** (private tooling)                                                                                        | **0.1.0**                  | `tooling/codegen/package.json`                    |
+| Root `**nexus-monorepo`** meta package                                                                                       | **0.1.0**                  | Root `package.json`                               |
+
+
+**npm vs Rust crate SemVer:** The npm package may use a **different** semantic version than the Rust workspace (e.g. **0.2.0** vs **0.1.0**) while both implement the same `**LATEST_SCHEMA_VERSION`** on the wire. Treat `**schema_version`** / schema compatibility as the cross-language lock; align npm major bumps and Rust breaking releases when wire shapes change.
+
+### Policy (unchanged)
+
 - Schema contracts use `schema_version` field aligned with bundle envelope
-- CLI SemVer must reflect breaking wire changes
+- CLI / daemon crate SemVer must reflect breaking wire changes when you version the binaries
 - `@42ch/nexus-contracts` major bump → coordinated update across CLI + platform API + npm package
 - Compatibility matrix maintained in internal runbook (not in this OSS repo)
 
@@ -426,3 +456,4 @@ pnpm run typecheck
 - **World history is immutable** — changes go through Fork, not in-place mutation
 - **Wire contracts must match schemas** — no drift between `schemas/` and generated types
 - **Single truth source for DTOs** — avoid parallel handwritten types in Rust or TypeScript
+

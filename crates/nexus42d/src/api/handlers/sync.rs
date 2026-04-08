@@ -129,6 +129,54 @@ pub struct OutboxEntrySummary {
 
 // ── Handlers ─────────────────────────────────────────────────────
 
+/// Optional sync context stored in `workspace_meta` (`sync_workspace_id`,
+/// `sync_world_id`, `sync_creator_id`). When all three are present, push requests
+/// must use the same IDs. When none are present, binding checks are skipped.
+async fn optional_sync_push_binding(
+    state: &WorkspaceState,
+) -> Result<Option<(String, String, String)>, NexusApiError> {
+    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_UNAVAILABLE".into(),
+        message: format!("Database connection error: {}", e),
+    })?;
+
+    let workspace_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM workspace_meta WHERE key = 'sync_workspace_id'",
+            [],
+            |row| row.get(0),
+        )
+        .await
+        .unwrap_or(None);
+
+    let world_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM workspace_meta WHERE key = 'sync_world_id'",
+            [],
+            |row| row.get(0),
+        )
+        .await
+        .unwrap_or(None);
+
+    let creator_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM workspace_meta WHERE key = 'sync_creator_id'",
+            [],
+            |row| row.get(0),
+        )
+        .await
+        .unwrap_or(None);
+
+    match (workspace_id, world_id, creator_id) {
+        (None, None, None) => Ok(None),
+        (Some(w), Some(wl), Some(c)) => Ok(Some((w, wl, c))),
+        _ => Err(NexusApiError::InvalidInput {
+            field: "sync_binding".into(),
+            reason: "Set all workspace_meta keys sync_workspace_id, sync_world_id, and sync_creator_id, or none — partial binding is invalid".into(),
+        }),
+    }
+}
+
 fn precheck_summary_from_report(report: &PrecheckReport) -> PrecheckSummary {
     let error_count = report
         .issues
@@ -265,6 +313,29 @@ pub async fn push(
             }),
             error: Some(format!("Invalid push request: {}", field_errors.join("; "))),
         }));
+    }
+
+    if let Some((bound_wrk, bound_wld, bound_ctr)) = optional_sync_push_binding(&state).await? {
+        if req.workspace_id != bound_wrk || req.world_id != bound_wld || req.creator_id != bound_ctr
+        {
+            return Ok(Json(SyncPushResponse {
+                success: false,
+                outbox_entry_id: None,
+                bundle_id: None,
+                precheck_result: Some(PrecheckSummary {
+                    valid: false,
+                    error_count: 1,
+                    warning_count: 0,
+                    summary: format!(
+                        "Push IDs do not match workspace sync binding (expected workspace_id={bound_wrk}, world_id={bound_wld}, creator_id={bound_ctr})"
+                    ),
+                }),
+                error: Some(
+                    "Push workspace_id/world_id/creator_id do not match workspace_meta sync binding"
+                        .to_string(),
+                ),
+            }));
+        }
     }
 
     let command = SyncCommand {
