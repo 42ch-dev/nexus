@@ -190,7 +190,7 @@ mod tests {
     #[tokio::test]
     async fn store_and_retrieve_token() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let expires_at = Utc::now() + chrono::Duration::hours(1);
@@ -208,7 +208,7 @@ mod tests {
     #[tokio::test]
     async fn get_token_returns_none_when_empty() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let token = mgr.get_token().await.unwrap();
@@ -218,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn get_valid_token_returns_none_for_expired_token() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         // Store a token that expired in the past
@@ -234,7 +234,7 @@ mod tests {
     #[tokio::test]
     async fn get_valid_token_returns_token_when_not_expired() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let expires_at = Utc::now() + chrono::Duration::hours(1);
@@ -250,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn clear_tokens_removes_all_tokens() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let expires_at = Utc::now() + chrono::Duration::hours(1);
@@ -268,7 +268,7 @@ mod tests {
     #[tokio::test]
     async fn validate_token_returns_true_for_matching_valid_token() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let expires_at = Utc::now() + chrono::Duration::hours(1);
@@ -283,7 +283,7 @@ mod tests {
     #[tokio::test]
     async fn validate_token_returns_false_for_expired_token() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let expires_at = Utc::now() - chrono::Duration::hours(1);
@@ -297,7 +297,7 @@ mod tests {
     #[tokio::test]
     async fn store_tokens_replaces_existing() {
         let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, 2).unwrap();
+        let pool = DbPool::with_defaults(&db_path).unwrap();
         let mgr = TokenManager::new(pool);
 
         let expires_at = Utc::now() + chrono::Duration::hours(1);

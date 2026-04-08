@@ -2,7 +2,7 @@
 
 pub mod manager;
 
-use crate::db::pool::{DbPool, PooledConn, DEFAULT_POOL_SIZE};
+use crate::db::pool::{DbPool, PoolConfig, PooledConn};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,7 +26,8 @@ impl WorkspaceState {
         db_path: PathBuf,
         workspace_path: Option<String>,
     ) -> Self {
-        let db = DbPool::new(&db_path, 1).expect("Failed to create test database pool");
+        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(1))
+            .expect("Failed to create test database pool");
         Self {
             db,
             nexus_home,
@@ -51,8 +52,8 @@ impl WorkspaceState {
         crate::db::schema::Schema::init(&init_conn)?;
         drop(init_conn);
 
-        // Create connection pool
-        let db = DbPool::new(&db_path, DEFAULT_POOL_SIZE)?;
+        // Create connection pool with environment-configurable settings
+        let db = DbPool::new(&db_path, PoolConfig::from_env())?;
 
         Ok(Self {
             db,
