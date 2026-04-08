@@ -747,8 +747,8 @@ LEGEND:
 
 | Document | Path | Relevance |
 |----------|------|-----------|
-| V1.0-phase1 Architecture Review | `.agents/plans/knowledge/phase1-architecture-review-v1.md` | Primary input — 36 findings |
-| V1.0-phase1 Product Review | `.agents/plans/knowledge/phase1-product-review-v1.md` | Feature completeness and UX assessment |
+| V1.0-phase1 Architecture Review | `.agents/plans/archived/knowledge/phase1-architecture-review-v1.md` | Primary input — 36 findings |
+| V1.0-phase1 Product Review | `.agents/plans/archived/knowledge/phase1-product-review-v1.md` | Feature completeness and UX assessment |
 | ACP Client Tech Spec | `.agents/plans/knowledge/acp-client-tech-spec-v1.md` | Detailed ACP SDK integration design |
 | Plan Status (residuals) | `.agents/plans/status.json` | 38 open residuals, metadata |
 | Knowledge Index | `.agents/plans/knowledge/README.md` | Index of all knowledge documents |

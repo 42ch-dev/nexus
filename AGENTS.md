@@ -44,7 +44,7 @@ tooling/
   codegen/              # Schema → TS + Rust pipeline
 docs/                   # User & contributor docs (installation, architecture, codegen, contributing)
 .agents/plans/
-  archived/             # residuals/ (closed findings); optional plans/ (Done row snapshots — see Plans & Reports)
+  archived/             # residuals/, plans/ (snapshots), knowledge/ (superseded knowledge docs — see knowledge/README.md)
   knowledge/            # Dev-process knowledge (architecture reviews, spec revisions, design decisions)
   reports/              # QC/QA review reports
 .github/workflows/      # CI: see `.github/workflows/ci.yml` (schemas, codegen diff, fmt, clippy, TS typecheck)

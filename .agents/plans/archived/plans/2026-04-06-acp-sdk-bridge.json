@@ -34,7 +34,7 @@
       "dependency": "2026-04-06-foundation-hardening",
       "spec_refs": [
         ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
-        ".agents/plans/knowledge/phase2-architecture-plan-v1.md"
+        ".agents/plans/archived/knowledge/phase2-architecture-plan-v1.md"
       ],
       "effort": "M-L — ~3-6 agent sessions",
       "residual_summary": "10 addressed (1 CRITICAL, 2 HIGH resolved; 4 MEDIUM, 3 LOW partially)"
