@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-04-09T12:00:00Z",
+  "plan": {
+    "id": "2025-04-05-monorepo-structure",
+    "title": "Monorepo Structure Implementation",
+    "file": ".agents/plans/2025-04-05-monorepo-structure.md",
+    "status": "Done",
+    "owner": "@project-manager",
+    "agents": [
+      "@fullstack-dev"
+    ],
+    "progress": 100,
+    "tags": [
+      "phase-0",
+      "foundation",
+      "monorepo"
+    ],
+    "created_at": "2025-04-05",
+    "updated_at": "2026-04-06",
+    "done_at": "2026-04-06",
+    "notes": "Phase 0 complete on main.",
+    "metadata": {
+      "phase": "Phase 0",
+      "branch_policy": "direct on main — initialization",
+      "priority": "high",
+      "description": "Create foundational monorepo directory structure, Rust workspace, TypeScript workspace"
+    }
+  }
+}

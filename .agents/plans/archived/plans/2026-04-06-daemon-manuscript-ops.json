@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-04-09T12:00:00Z",
+  "plan": {
+    "id": "2026-04-06-daemon-manuscript-ops",
+    "title": "Daemon + Manuscript Operations",
+    "file": ".agents/plans/2026-04-06-pre-phase2.md",
+    "status": "Done",
+    "owner": "@project-manager",
+    "agents": [
+      "@fullstack-dev"
+    ],
+    "progress": 100,
+    "tags": [
+      "phase-2",
+      "daemon",
+      "manuscript",
+      "sync-status"
+    ],
+    "created_at": "2026-04-06",
+    "updated_at": "2026-04-07",
+    "done_at": "2026-04-07",
+    "notes": "QA verified PASS — all acceptance criteria met, 3 QC blocking items fixed in commit 5438842.",
+    "metadata": {
+      "phase": "Phase 2",
+      "branch_policy": "feature/v2.0-daemon-manuscript-ops from main",
+      "priority": "high",
+      "description": "Daemon lifecycle (stop, timeout), manuscript file operations, sync status with real data, research list/extract",
+      "dependency": "2026-04-06-foundation-hardening",
+      "spec_refs": [
+        ".agents/plans/knowledge/phase2-architecture-plan-v1.md",
+        ".agents/plans/knowledge/phase2-product-plan-v1.md"
+      ],
+      "effort": "L — ~4-8 agent sessions (2 milestones)",
+      "residual_summary": "9 addressed (2 CRITICAL, 2 HIGH resolved; 1 HIGH, 1 MEDIUM partially; 3 LOW deferred)",
+      "qc_status": "PASS",
+      "qa_report": ".agents/plans/reports/2026-04-06-daemon-manuscript-ops/2026-04-06-daemon-manuscript-ops-qa.md",
+      "fix_commit": "5438842"
+    }
+  }
+}
