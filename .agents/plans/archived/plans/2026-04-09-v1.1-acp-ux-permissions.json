@@ -1,0 +1,47 @@
+{
+  "id": "2026-04-09-v1.1-acp-ux-permissions",
+  "title": "ACP UX & Permission Policy",
+  "file": ".agents/plans/2026-04-09-v1.1-acp-ux-permissions.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.1",
+    "acp",
+    "ux",
+    "permissions"
+  ],
+  "created_at": "2026-04-09",
+  "updated_at": "2026-04-08",
+  "done_at": "2026-04-08",
+  "notes": "Completed: Unix socket, session API, permission enforcement, skills, status, error messages. 822 tests pass.",
+  "metadata": {
+    "priority": "P2",
+    "phase": "Done",
+    "description": "Improve ACP UX: session persistence, permission policy, skills listing, agent status, user-friendly errors. 6 tasks. Depends on Plan 09.",
+    "working_branch": "feature/v1.1-acp-ux",
+    "dependency": "2026-04-09-v1.1-cli-daemon-hardening",
+    "spec_refs": [
+      ".agents/plans/knowledge/acp-client-tech-spec-v1.md"
+    ],
+    "residual_ids": [
+      "CLI-R5",
+      "ACP-R3",
+      "ACP-R4",
+      "ACP-R5",
+      "ACP-R6",
+      "ACP-R7"
+    ],
+    "effort": "M (~5-6 agent sessions)",
+    "gates": {
+      "qc": "skipped",
+      "qa": "self-check",
+      "tests": "passed",
+      "clippy": "passed",
+      "fmt": "passed"
+    }
+  }
+}
