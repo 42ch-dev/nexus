@@ -362,6 +362,8 @@ git add packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/gener
 
 If you modify schemas without regenerating, the commit will be rejected by CI. Do NOT hand-edit files under `*/generated/` — always regenerate from schemas.
 
+**`enum_conversions.rs` (Rust):** `crates/nexus-contracts/src/enum_conversions.rs` is maintained **next to** generated types, not produced by codegen. When JSON Schema adds or renames enum values, update this file in the same commit as regenerated `src/generated/` and verify with `cargo test -p nexus-contracts`.
+
 **Before opening a PR or merging to `main`:** run the same checks as the `CI` workflow (`.github/workflows/ci.yml`) so local results match GitHub Actions.
 
 ```bash
@@ -396,6 +398,7 @@ pnpm run typecheck
 
 - `nexus-platform` (private repo) consumes `@42ch/nexus-contracts` via npm semver lock
 - **No handwritten second DTO source** in platform — all wire types come from this repo's schemas
+- **SemVer:** bump `packages/nexus-contracts` npm version together with `schema_version` / `crates/nexus-contracts` per release policy. Breaking wire shapes (TypeScript unions or field renames from schema) require a **major** npm bump and a coordinated platform upgrade so consumers do not mix mismatched contract versions.
 
 ## Dev/Test Infrastructure
 

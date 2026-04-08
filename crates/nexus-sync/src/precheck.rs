@@ -12,6 +12,7 @@
 
 use nexus_contracts::generated::Bundle;
 
+use crate::canonical_hash::is_well_formed_canonical_hash;
 use crate::errors::{SyncError, SyncResult};
 
 /// Authentication context for precheck validation.
@@ -263,6 +264,9 @@ pub fn precheck_bundle_with_auth(
     // 1. Check required string fields are non-empty
     check_required_fields(bundle, &mut report);
 
+    // 1b. Canonical hash (production bundles with deltas must carry a valid sha256: preimage id)
+    check_canonical_hash(bundle, &mut report);
+
     // 2. Check ID prefixes
     check_id_prefixes(bundle, &mut report);
 
@@ -320,6 +324,28 @@ pub fn precheck_to_result(result: PrecheckResult) -> SyncResult<()> {
 
             Err(SyncError::PrecheckFailed(format!("{primary}\n{message}")))
         }
+    }
+}
+
+fn check_canonical_hash(bundle: &Bundle, report: &mut PrecheckReport) {
+    if bundle.deltas.is_empty() {
+        return;
+    }
+    if bundle.canonical_hash.is_empty() {
+        report.add_issue(PrecheckIssue::error_with_hint(
+            "canonical_hash is empty (required for bundles that include deltas)",
+            "Compute with nexus_sync::canonical_hash::canonical_hash_for_deltas and set on the bundle",
+        ));
+        return;
+    }
+    if !is_well_formed_canonical_hash(&bundle.canonical_hash) {
+        report.add_issue(PrecheckIssue::error_with_hint(
+            &format!(
+                "canonical_hash has invalid format: expected sha256: followed by 64 lowercase hex digits, got {:?}",
+                bundle.canonical_hash
+            ),
+            "Use canonical_hash_for_deltas or reuse the platform-agreed preimage algorithm",
+        ));
     }
 }
 
@@ -558,6 +584,16 @@ mod tests {
     use serde_json::json;
 
     fn valid_bundle() -> Bundle {
+        let deltas = vec![Delta {
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Create,
+            target_entity_type: None,
+            target_entity_id: None,
+            payload: serde_json::json!({"display_name": "Test"}),
+            source_anchor: None,
+            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
+        }];
+        let canonical_hash = crate::canonical_hash::canonical_hash_for_deltas(&deltas).unwrap();
         Bundle {
             schema_version: 1,
             bundle_id: "bdl_test".to_string(),
@@ -570,18 +606,10 @@ mod tests {
             manuscript_phase: Some(ManuscriptPhase::Draft),
             output_manuscript: None,
             idempotency_key: "idk_test".to_string(),
-            canonical_hash: String::new(),
+            canonical_hash,
             base_versions: serde_json::json!({"world_revision": 5}),
             last_confirmed_delta_sequence: Some(10),
-            deltas: vec![Delta {
-                delta_type: DeltaType::KeyBlock,
-                operation: DeltaOperation::Create,
-                target_entity_type: None,
-                target_entity_id: None,
-                payload: serde_json::json!({"display_name": "Test"}),
-                source_anchor: None,
-                local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-            }],
+            deltas,
             bundle_apply_status: None,
             delta_results: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -858,6 +886,32 @@ mod tests {
 
         let result = precheck_bundle(&bundle, &local_state);
         assert_eq!(result, PrecheckResult::Valid);
+    }
+
+    #[test]
+    fn precheck_rejects_malformed_canonical_hash() {
+        let mut bundle = valid_bundle();
+        bundle.canonical_hash = "not-a-hash".to_string();
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+
+        let result = precheck_bundle(&bundle, &local_state);
+        assert!(matches!(result, PrecheckResult::Invalid(_)));
+        if let PrecheckResult::Invalid(report) = result {
+            assert!(report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("canonical_hash")));
+        }
+    }
+
+    #[test]
+    fn precheck_rejects_empty_canonical_hash_when_deltas_present() {
+        let mut bundle = valid_bundle();
+        bundle.canonical_hash = String::new();
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+
+        let result = precheck_bundle(&bundle, &local_state);
+        assert!(matches!(result, PrecheckResult::Invalid(_)));
     }
 
     #[test]

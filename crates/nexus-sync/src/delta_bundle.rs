@@ -39,6 +39,12 @@ pub enum BundleValidationError {
     DuplicateDeltaTargetId(String),
 }
 
+impl From<BundleValidationError> for SyncError {
+    fn from(err: BundleValidationError) -> Self {
+        SyncError::BundleValidation(err.to_string())
+    }
+}
+
 /// Delta operation within a bundle (builder helper).
 ///
 /// Uses contract enum types directly. The `source_anchor` field uses `Value`
@@ -240,19 +246,12 @@ impl BundleBuilder {
 
     /// Validate and build the bundle (recommended path).
     ///
-    /// Runs `validate()` then `build()`. Returns a validation error if
-    /// delta-level constraints fail, otherwise returns the built bundle.
-    pub fn build_validated(self) -> Result<Bundle, BundleValidationError> {
+    /// Runs `validate()` then [`Self::build`]. Propagates [`BundleValidationError`]
+    /// and any [`SyncError`] from bundle construction (e.g. serialization for
+    /// canonical hash).
+    pub fn build_validated(self) -> SyncResult<Bundle> {
         self.validate()?;
-        // build() returns SyncResult<Bundle>; we need to handle the Result
-        // Since validation passes, the only errors from build() are structural
-        // (empty deltas, missing submitting_creator_id) which should already be
-        // caught by the caller. For simplicity, we'll panic on build() errors
-        // since validation should guarantee build() succeeds.
-        // Alternatively, we could return a combined error type.
-        Ok(self
-            .build()
-            .expect("build() should succeed after validation passes"))
+        self.build()
     }
 
     /// Validate the bundle and build the final `Bundle` envelope.
@@ -725,9 +724,12 @@ mod tests {
             .add_delta(make_test_delta_with_timestamp(earlier_ts));
 
         let result = builder.build_validated();
-        assert!(matches!(
-            result,
-            Err(BundleValidationError::NonMonotonicTimestamp { .. })
-        ));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, SyncError::BundleValidation(_)));
+        assert!(
+            err.to_string().contains("Non-monotonic") || err.to_string().contains("monotonic"),
+            "unexpected error: {err}"
+        );
     }
 }
