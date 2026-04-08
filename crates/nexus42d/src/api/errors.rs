@@ -2,6 +2,28 @@
 //!
 //! Standardized error type for all daemon API handlers.
 //! Maps domain errors to proper HTTP status codes with structured JSON responses.
+//!
+//! # Error Code Design
+//!
+//! This module follows a two-tier error code strategy:
+//!
+//! 1. **`error_code()`** returns a **public, stable** error code in UPPER_SNAKE_CASE
+//!    (e.g., `"INTERNAL"`, `"INVALID_INPUT"`). These codes are sent to API clients
+//!    and must remain stable across versions. They intentionally group error categories
+//!    at a coarse level to avoid leaking implementation details.
+//!
+//! 2. **`Internal.code`** holds an **internal classification** string (e.g., `"INTERNAL_ERROR"`,
+//!    `"DATABASE_ERROR"`, `"DATABASE_UNAVAILABLE"`). This field is used for *internal*
+//!    debugging, logging, and error categorization — it is NOT exposed as the `error_code`
+//!    in the API response body (which always returns `"INTERNAL"` for all `Internal` variants).
+//!
+//! This design means `Internal.code` and `error_code()` serve different purposes:
+//! - `Internal.code` → internal classification (fine-grained, for logging/diagnosis)
+//! - `error_code()` → public contract (coarse-grained, for API consumers)
+//!
+//! If finer-grained public error codes are needed in the future, `error_code()` should be
+//! updated to return the specific code rather than a generic one. See also:
+//! `crates/nexus-sync/src/errors.rs` for the SyncError pattern which returns variant-specific codes.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -31,7 +53,13 @@ pub enum NexusApiError {
     #[error("Invalid input: {reason}")]
     InvalidInput { field: String, reason: String },
 
-    /// Internal server error
+    /// Internal server error.
+    ///
+    /// The `code` field provides **internal classification** only (e.g., `"DATABASE_ERROR"`,
+    /// `"INTERNAL_ERROR"`, `"DATABASE_UNAVAILABLE"`). It is used for logging and debugging,
+    /// not for the public API error code. The public `error_code()` method always returns
+    /// `"INTERNAL"` for this variant, intentionally hiding implementation details from
+    /// API consumers. See module-level docs for the full rationale.
     #[error("Internal error: {message}")]
     Internal { code: String, message: String },
 
@@ -218,19 +246,12 @@ mod tests {
     #[tokio::test]
     async fn init_workspace_with_empty_path_returns_400() {
         use crate::api::handlers::workspace::init_workspace;
+        use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
         use axum::Json;
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (_tmp, nexus_home, db_path) = create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
 
         let req = crate::api::handlers::workspace::InitWorkspaceRequest {
@@ -263,18 +284,11 @@ mod tests {
     #[tokio::test]
     async fn creators_without_workspace_returns_empty_list() {
         use crate::api::handlers::creators::list;
+        use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (_tmp, nexus_home, db_path) = create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
 
         let result = list(State(state)).await;
@@ -292,18 +306,11 @@ mod tests {
     #[tokio::test]
     async fn references_without_workspace_returns_empty_list() {
         use crate::api::handlers::references::list;
+        use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (_tmp, nexus_home, db_path) = create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
 
         let result = list(State(state)).await;
@@ -325,18 +332,11 @@ mod tests {
     #[tokio::test]
     async fn manuscript_without_workspace_returns_ok_when_called_directly() {
         use crate::api::handlers::manuscript::status;
+        use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (_tmp, nexus_home, db_path) = create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
 
         let result = status(State(state)).await;
