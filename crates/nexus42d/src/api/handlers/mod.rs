@@ -5,6 +5,7 @@ pub mod auth;
 pub mod context;
 pub mod creators;
 pub mod manuscript;
+pub mod monitoring;
 pub mod permissions;
 pub mod references;
 pub mod runtime;

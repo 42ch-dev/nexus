@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-08-v1.1-tech-debt-mitigation",
+  "batch": "Batch B",
+  "archived_at": "2026-04-08T17:00:00Z",
+  "entries": [
+    {
+      "id": "QC-W2",
+      "title": "HTTP body size error variant",
+      "severity": "warning",
+      "source": "QC#1",
+      "scope": "sync_client.rs:258-284",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+",
+      "closure_evidence": "Commit 7357c22 + fix 5c505e7: Added HttpBodySizeExceeded error variant, updated push_bundle() and pull_sync_state()",
+      "closed_at": "2026-04-08"
+    },
+    {
+      "id": "QC-W3",
+      "title": "Pool status monitoring",
+      "severity": "warning",
+      "source": "QC#1",
+      "scope": "pool.rs:59-61",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+",
+      "closure_evidence": "Commit 7357c22: Added GET /v1/local/monitoring/pool endpoint exposing pool metrics",
+      "closed_at": "2026-04-08"
+    },
+    {
+      "id": "QC-W4",
+      "title": "InvalidParameterName misuse",
+      "severity": "warning",
+      "source": "QC#2",
+      "scope": "pool.rs:163-171",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "Next batch",
+      "closure_evidence": "Commit 7357c22: Replaced InvalidParameterName with domain-specific error mapping",
+      "closed_at": "2026-04-08"
+    },
+    {
+      "id": "QC-W7",
+      "title": "Pool configuration",
+      "severity": "warning",
+      "source": "QC#3",
+      "scope": "pool.rs:39-46",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+",
+      "closure_evidence": "Commit 7357c22: Verified PoolConfig builder pattern + env vars + documentation complete",
+      "closed_at": "2026-04-08"
+    }
+  ]
+}

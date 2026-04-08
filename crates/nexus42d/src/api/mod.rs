@@ -3,6 +3,7 @@
 //! Endpoints:
 //! - GET  /v1/local/runtime/health   — Health check
 //! - GET  /v1/local/runtime/status   — Runtime status
+//! - GET  /v1/local/monitoring/pool  — Database pool status (QC-W3)
 //! - GET  /v1/local/workspace        — Workspace info
 //! - POST /v1/local/workspace/init   — Initialize workspace
 //! - GET  /v1/local/auth/status      — Auth status
@@ -44,6 +45,11 @@ pub fn create_router(state: WorkspaceState) -> Router {
     let runtime_routes = Router::new()
         .route("/v1/local/runtime/health", get(handlers::runtime::health))
         .route("/v1/local/runtime/status", get(handlers::runtime::status));
+
+    let monitoring_routes = Router::new().route(
+        "/v1/local/monitoring/pool",
+        get(handlers::monitoring::pool_status),
+    );
 
     let workspace_routes = Router::new()
         .route("/v1/local/workspace", get(handlers::workspace::info))
@@ -115,6 +121,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
 
     Router::new()
         .merge(runtime_routes)
+        .merge(monitoring_routes)
         .merge(workspace_routes)
         .merge(auth_routes)
         .merge(creator_routes)
