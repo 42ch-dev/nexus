@@ -145,13 +145,10 @@ impl WorkspaceState {
         .map_err(|e| anyhow::anyhow!("Database error: {}", e))?;
 
         // Update in-memory state so is_initialized() returns true
-        *self
-            .workspace_path
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                tracing::warn!("workspace_path mutex poisoned, recovering");
-                poisoned.into_inner()
-            }) = Some(path.to_string());
+        *self.workspace_path.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("workspace_path mutex poisoned, recovering");
+            poisoned.into_inner()
+        }) = Some(path.to_string());
 
         Ok(())
     }

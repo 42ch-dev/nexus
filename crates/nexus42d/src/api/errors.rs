@@ -302,9 +302,7 @@ mod tests {
 
     #[test]
     fn insufficient_permissions_empty_vec() {
-        let err = NexusApiError::InsufficientPermissions {
-            required: vec![],
-        };
+        let err = NexusApiError::InsufficientPermissions { required: vec![] };
         assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
         assert_eq!(err.error_code(), "INSUFFICIENT_PERMISSIONS");
     }
