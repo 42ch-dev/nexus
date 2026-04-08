@@ -519,7 +519,8 @@ mod tests {
     use super::*;
 
     // Valid auth token for tests (64+ chars, alphanumeric + hyphens + underscores + dots)
-    const VALID_TOKEN: &str = "valid_token_1234567890123456789012345678901234567890123456789012345678901234567890";
+    const VALID_TOKEN: &str =
+        "valid_token_1234567890123456789012345678901234567890123456789012345678901234567890";
 
     #[test]
     fn client_creation_requires_base_url() {
@@ -555,7 +556,8 @@ mod tests {
 
     #[test]
     fn client_creation_rejects_invalid_characters() {
-        let invalid_token = "invalid!token#1234567890123456789012345678901234567890123456789012345678901234";
+        let invalid_token =
+            "invalid!token#1234567890123456789012345678901234567890123456789012345678901234";
         let result = SyncClient::new("https://api.example.com", invalid_token);
         assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
         if let Err(SyncError::AuthTokenInvalid(msg)) = result {
@@ -619,15 +621,13 @@ mod tests {
 
     #[test]
     fn builder_rejects_short_token() {
-        let result = SyncClient::builder()
-            .build("https://api.example.com", "short");
+        let result = SyncClient::builder().build("https://api.example.com", "short");
         assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
     }
 
     #[test]
     fn builder_accepts_valid_token() {
-        let result = SyncClient::builder()
-            .build("https://api.example.com", VALID_TOKEN);
+        let result = SyncClient::builder().build("https://api.example.com", VALID_TOKEN);
         assert!(result.is_ok());
     }
 
