@@ -1,165 +1,53 @@
-//! Canonical Database Schema
+//! Daemon Database Schema
 //!
-//! This module is the **single source of truth** for all SQLite table
-//! definitions used by the Nexus daemon. Both the daemon and CLI share
-//! the same `state.db` file; CLI-side definitions live in
-//! `crates/nexus42/src/db/schema.rs` and must be kept in sync.
+//! Delegates all schema initialization to `nexus-local-db` module.
+//! No DDL definitions remain in this file — all tables are centrally managed.
+//!
+//! **All tables** (shared + daemon-only):
+//! - Initialized by `nexus-local-db::init(RuntimeRole::Daemon)`
+//! - Single source of truth in `nexus-local-db/src/schema.rs`
 
-use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
+use nexus_local_db::{init, RuntimeRole};
 use rusqlite::Connection;
 
-/// Database schema version for local SQLite migrations.
-pub const DB_SCHEMA_VERSION: u32 = 1;
-
-/// Wire contract schema version for network payload compatibility.
-/// Sourced from generated contracts to avoid manual drift.
-pub const WIRE_SCHEMA_VERSION: u32 = LATEST_SCHEMA_VERSION;
-
-/// Schema initializer. All table definitions are centralized here.
+/// Schema initializer for daemon runtime.
+///
+/// Delegates to `nexus-local-db::init()` for all table creation.
+/// Safe to call multiple times — uses `IF NOT EXISTS`.
 pub struct Schema;
 
 impl Schema {
-    /// Initialize the database schema.
+    /// Initialize the daemon database schema.
     ///
-    /// Safe to call multiple times — every statement uses `IF NOT EXISTS`.
-    /// Also sets recommended SQLite pragmas.
+    /// Calls `nexus-local-db::init(RuntimeRole::Daemon)` which creates
+    /// all tables (shared + daemon-only) and seeds version keys.
     pub fn init(conn: &Connection) -> Result<(), rusqlite::Error> {
-        conn.execute_batch(PRAGMAS)?;
-        conn.execute_batch(WORKSPACE_META_TABLE)?;
-        conn.execute_batch(CREATORS_TABLE)?;
-        conn.execute_batch(REFERENCE_SOURCES_TABLE)?;
-        conn.execute_batch(OUTBOX_TABLE)?;
-        conn.execute_batch(AUTH_TOKENS_TABLE)?;
-        conn.execute_batch(DEVICE_CODE_SESSIONS_TABLE)?;
-        conn.execute_batch(ACP_TOOL_AUDIT_LOG_TABLE)?;
-        conn.execute_batch(ACP_SESSIONS_TABLE)?;
-
-        // Seed schema version rows (idempotent).
-        conn.execute(
-            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('db_schema_version', ?1)",
-            rusqlite::params![DB_SCHEMA_VERSION.to_string()],
-        )?;
-        conn.execute(
-            "INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('wire_schema_version', ?1)",
-            rusqlite::params![WIRE_SCHEMA_VERSION.to_string()],
-        )?;
-
+        // Delegate to nexus-local-db (shared + daemon-only tables)
+        init(conn, RuntimeRole::Daemon)?;
         Ok(())
     }
 }
 
-/// SQLite pragmas recommended for the workspace database.
-const PRAGMAS: &str = r#"
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-"#;
-
-/// Workspace metadata — key-value store for workspace-level settings.
-const WORKSPACE_META_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS workspace_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-"#;
-
-/// Creator cache — stores registered Creator entities.
-const CREATORS_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS creators (
-    creator_id TEXT PRIMARY KEY,
-    display_name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    cached_at TEXT NOT NULL,
-    data TEXT NOT NULL
-);
-"#;
-
-/// Reference source registry — tracks scanned research references.
-const REFERENCE_SOURCES_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS reference_sources (
-    reference_source_id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL DEFAULT 'local',
-    source_type TEXT NOT NULL,
-    uri TEXT NOT NULL,
-    title TEXT NOT NULL,
-    tags TEXT,
-    content_hash TEXT,
-    scan_status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL,
-    updated_at TEXT
-);
-"#;
-
-/// Outbox queue — pending commands for platform sync.
-const OUTBOX_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS outbox (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    command_type TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL,
-    sent_at TEXT,
-    error TEXT
-);
-"#;
-
-/// Auth tokens — stores OAuth tokens for user authentication.
-pub const AUTH_TOKENS_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS auth_tokens (
-    user_id TEXT PRIMARY KEY,
-    access_token TEXT NOT NULL,
-    refresh_token TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-"#;
-
-/// Device code sessions — tracks OAuth device authorization grants.
-pub const DEVICE_CODE_SESSIONS_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS device_code_sessions (
-    device_code TEXT PRIMARY KEY,
-    user_code TEXT NOT NULL,
-    verification_uri TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
-);
-"#;
-
-/// ACP tool audit log — records all agent tool executions through daemon.
-pub const ACP_TOOL_AUDIT_LOG_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS acp_tool_audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tool_name TEXT NOT NULL,
-    path TEXT NOT NULL,
-    outcome TEXT NOT NULL,
-    agent_id TEXT,
-    session_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"#;
-
-/// ACP sessions — tracks active ACP agent sessions for persistence across CLI invocations.
-pub const ACP_SESSIONS_TABLE: &str = r#"
-CREATE TABLE IF NOT EXISTS acp_sessions (
-    session_id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    last_active TEXT NOT NULL,
-    workspace_hint TEXT NOT NULL DEFAULT '',
-    metadata TEXT NOT NULL DEFAULT '{}'
-);
-"#;
+// All DDL moved to nexus-local-db/src/schema.rs
+// Daemon-only table constants can be imported from nexus_local_db if needed:
+// - nexus_local_db::OUTBOX_TABLE
+// - nexus_local_db::AUTH_TOKENS_TABLE
+// - nexus_local_db::DEVICE_CODE_SESSIONS_TABLE
+// - nexus_local_db::ACP_TOOL_AUDIT_LOG_TABLE
+// - nexus_local_db::ACP_SESSIONS_TABLE
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_local_db::SCHEMA_VERSION;
+    use rusqlite::Connection;
 
     #[test]
-    fn schema_init_creates_tables() {
+    fn schema_init_creates_all_tables() {
         let conn = Connection::open_in_memory().unwrap();
         Schema::init(&conn).unwrap();
 
-        // Verify each table exists
+        // Verify all tables exist (shared + daemon-only)
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             .unwrap()
@@ -168,11 +56,15 @@ mod tests {
             .flatten()
             .collect();
 
+        // Shared tables
         assert!(tables.contains(&"workspace_meta".to_string()));
         assert!(tables.contains(&"creators".to_string()));
         assert!(tables.contains(&"reference_sources".to_string()));
+
+        // Daemon-only tables
         assert!(tables.contains(&"outbox".to_string()));
         assert!(tables.contains(&"auth_tokens".to_string()));
+        assert!(tables.contains(&"device_code_sessions".to_string()));
         assert!(tables.contains(&"acp_tool_audit_log".to_string()));
         assert!(tables.contains(&"acp_sessions".to_string()));
     }
@@ -185,10 +77,11 @@ mod tests {
     }
 
     #[test]
-    fn schema_versions_seeded() {
+    fn schema_versions_seeded_correctly() {
         let conn = Connection::open_in_memory().unwrap();
         Schema::init(&conn).unwrap();
 
+        // Verify db_schema_version (local SQLite structure)
         let db_version: String = conn
             .query_row(
                 "SELECT value FROM workspace_meta WHERE key = 'db_schema_version'",
@@ -196,16 +89,55 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let wire_version: String = conn
+
+        assert_eq!(db_version, nexus_local_db::DB_SCHEMA_VERSION.to_string());
+
+        // Verify schema_version (contract schema version)
+        let schema_version: String = conn
             .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'wire_schema_version'",
+                "SELECT value FROM workspace_meta WHERE key = 'schema_version'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
 
-        assert_eq!(db_version, DB_SCHEMA_VERSION.to_string());
-        assert_eq!(wire_version, WIRE_SCHEMA_VERSION.to_string());
+        assert_eq!(schema_version, SCHEMA_VERSION.to_string());
+
+        // Verify wire_schema_version does NOT exist
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM workspace_meta WHERE key = 'wire_schema_version')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(!exists);
+    }
+
+    #[test]
+    fn reference_sources_has_content_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        Schema::init(&conn).unwrap();
+
+        // Verify content column exists (drift fix validation)
+        conn.execute(
+            "INSERT INTO reference_sources
+             (reference_source_id, workspace_id, source_type, uri, title, content, scan_status, created_at)
+             VALUES ('ref_test', 'local', 'pdf', 'test.pdf', 'Test', 'Extracted text', 'pending', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let content: Option<String> = conn
+            .query_row(
+                "SELECT content FROM reference_sources WHERE reference_source_id = 'ref_test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(content, Some("Extracted text".to_string()));
     }
 
     #[test]
@@ -256,5 +188,31 @@ mod tests {
 
         assert_eq!(tags, Some("tag1,tag2".to_string()));
         assert_eq!(hash, Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn pragmas_are_set() {
+        use tempfile::TempDir;
+
+        // WAL mode requires a persistent database file, not in-memory
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+
+        let conn = Connection::open(&db_path).unwrap();
+        Schema::init(&conn).unwrap();
+
+        // Verify journal_mode is WAL
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(journal_mode, "wal");
+
+        // Verify foreign_keys is ON (returns integer 0 or 1)
+        let foreign_keys: i32 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(foreign_keys, 1);
     }
 }
