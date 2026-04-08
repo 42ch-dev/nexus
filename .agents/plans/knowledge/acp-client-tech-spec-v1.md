@@ -3,7 +3,7 @@
 **Source Plan**: `2025-04-05-acp-client`
 **Author**: @architect
 **Date**: 2026-04-06
-**Status**: Authoritative input for implementation
+**Status**: Active — authoritative input for Plan 12 (`2026-04-09-v1.1-acp-ux-permissions.md`)
 **Supersedes**: Sections 3.3 of Phase 1 Architecture Review
 
 ---

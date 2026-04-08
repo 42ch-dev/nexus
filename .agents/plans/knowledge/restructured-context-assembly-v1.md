@@ -1,8 +1,8 @@
 # Restructured Context Assembly Specification v1
 
-> **Status**: Draft — input for restructuring `.agents/plans/2025-04-05-context-assembly.md`  
+> **Status**: Archived — Plan 11 (`2026-04-09-v1.1-context-assembly-enhancement.md`) is the current authoritative source for context assembly work.
 > **Scope**: CLI-side only (this repo: `nexus`). Platform-side Context Assembly service belongs in private `nexus-platform` repo.  
-> **Supersedes**: The original plan at `.agents/plans/2025-04-05-context-assembly.md` which contained fundamental tech stack and responsibility split violations.
+> **Superseded**: The original plan at `.agents/plans/2025-04-05-context-assembly.md` which contained fundamental tech stack and responsibility split violations.
 
 ---
 
