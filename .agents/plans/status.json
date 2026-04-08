@@ -180,7 +180,7 @@
         "priority": "medium",
         "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (12 total). Batch A (3 critical) completed on 2026-04-09. Batch B (4 low) completed on 2026-04-08. Batch C (8 low) deferred to V1.1+ milestone.",
         "residual_target": "12 residuals (7 completed in Batch A+B, 8 remaining)",
-        "effort": "L \u2014 ongoing across multiple milestones (Batch A: S, Batch B: S, Batch C: M)",
+        "effort": "L — ongoing across multiple milestones (Batch A: S, Batch B: S, Batch C: M)",
         "batch_status": {
           "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
           "batch_b": "completed (4 low: QC-W2, QC-W4, QC-W3, QC-W7)",
@@ -212,7 +212,7 @@
       "created_at": "2026-04-09",
       "updated_at": "2026-04-08",
       "done_at": "2026-04-08",
-      "notes": "Completed: 7 tasks implemented \u2014 tracing (29 statements), pool config builder, auth error variants, bundle validation, schema allOf verification, auth token validation, low-priority polish (dead_code, WAL, race, tuning, mutex, test org). All 12 residuals resolved.",
+      "notes": "Completed: 7 tasks implemented — tracing (29 statements), pool config builder, auth error variants, bundle validation, schema allOf verification, auth token validation, low-priority polish (dead_code, WAL, race, tuning, mutex, test org). All 12 residuals resolved.",
       "metadata": {
         "priority": "P0",
         "phase": "Done",
@@ -336,6 +336,37 @@
         }
       },
       "done_at": "2026-04-08"
+    },
+    {
+      "id": "2026-04-08-local-db-refactor",
+      "title": "Local DB Refactor — Single Ownership Module",
+      "file": ".agents/plans/2026-04-08-local-db-refactor.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "refactor",
+        "foundation",
+        "local-db",
+        "v1.1"
+      ],
+      "created_at": "2026-04-08",
+      "updated_at": "2026-04-08",
+      "notes": "Refactor local SQLite (state.db) into independent module nexus-local-db with decoupled version lines and unified API for CLI/daemon.",
+      "metadata": {
+        "priority": "P1",
+        "phase": "Todo",
+        "description": "Foundational refactor to eliminate schema drift and duplicated logic between CLI and daemon. Creates independent nexus-local-db module with single ownership of shared schema, decoupled version lines (db_schema_version vs schema_version), and unified API.",
+        "working_branch": null,
+        "dependency": null,
+        "spec_refs": [
+          ".agents/plans/knowledge/local-db-refactor-v1.md"
+        ],
+        "effort": "M (~6-8 sessions across 6 phases)"
+      }
     }
   ],
   "metadata": {
@@ -362,8 +393,8 @@
         "2025-04-05-domain-models": 1,
         "2026-04-08-v1.1-tech-debt-mitigation": 7
       },
-      "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md \u00a7209-211 (historical compatibility rule)",
-      "archival_note": "19 closed residuals archived to .agents/plans/archived/residuals/ (15 on 2026-04-09, 4 Batch B on 2026-04-08) per plan-convention.md \u00a7248-286. metadata.notes migrated to notes.json per \u00a7105."
+      "severity_note": "11 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md §209-211 (historical compatibility rule)",
+      "archival_note": "19 closed residuals archived to .agents/plans/archived/residuals/ (15 on 2026-04-09, 4 Batch B on 2026-04-08) per plan-convention.md §248-286. metadata.notes migrated to notes.json per §105."
     },
     "residual_findings": {
       "2025-04-05-domain-models": [
@@ -375,7 +406,7 @@
           "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.1 \u2014 add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
+          "target": "V1.1 — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
           "tracking": null
         }
       ],
@@ -422,23 +453,23 @@
         },
         {
           "id": "QC-W9",
-          "title": "CI shell script readability \u2014 extract to standalone script",
+          "title": "CI shell script readability — extract to standalone script",
           "severity": "warning",
           "source": "QC#1 (Wave 3 Batch B)",
           "scope": ".github/workflows/ci.yml:119-177",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 Extract to tooling/check-schema-drift.sh"
+          "target": "V1.1+ — Extract to tooling/check-schema-drift.sh"
         },
         {
           "id": "QC-W10",
-          "title": "TempDir ownership semantics \u2014 reinforce with type hint",
+          "title": "TempDir ownership semantics — reinforce with type hint",
           "severity": "warning",
           "source": "QC#1 (Wave 3 Batch B)",
           "scope": "test_utils.rs:11-23, 40-43",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 Add newtype wrapper or compile-time hint"
+          "target": "V1.1+ — Add newtype wrapper or compile-time hint"
         },
         {
           "id": "QC-W11",
@@ -448,7 +479,7 @@
           "scope": "CI check at ci.yml:171-177 vs crates/nexus-contracts/src/generated/mod.rs:84",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "V1.1+ \u2014 Standardize schema version type across CLI/daemon/contracts"
+          "target": "V1.1+ — Standardize schema version type across CLI/daemon/contracts"
         }
       ]
     }
