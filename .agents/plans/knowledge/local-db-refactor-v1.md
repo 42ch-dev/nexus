@@ -39,21 +39,25 @@
 
 ### 3.1 Shared Tables (CLI and daemon both depend)
 
-| Table | Purpose | Owner |
-|-------|---------|-------|
-| `workspace_meta` | Local runtime metadata (versions, workspace path, phase, etc.) | Shared |
-| `creators` | Creator local cache | Shared |
-| `reference_sources` | Reference material scan index and status | Shared |
+
+| Table               | Purpose                                                        | Owner  |
+| ------------------- | -------------------------------------------------------------- | ------ |
+| `workspace_meta`    | Local runtime metadata (versions, workspace path, phase, etc.) | Shared |
+| `creators`          | Creator local cache                                            | Shared |
+| `reference_sources` | Reference material scan index and status                       | Shared |
+
 
 ### 3.2 Daemon-only Tables
 
-| Table | Purpose | Owner |
-|-------|---------|-------|
-| `outbox` | Sync command queue | Daemon |
-| `auth_tokens` | OAuth token local storage | Daemon |
+
+| Table                  | Purpose                       | Owner  |
+| ---------------------- | ----------------------------- | ------ |
+| `outbox`               | Sync command queue            | Daemon |
+| `auth_tokens`          | OAuth token local storage     | Daemon |
 | `device_code_sessions` | Device authorization sessions | Daemon |
-| `acp_tool_audit_log` | ACP tool invocation audit | Daemon |
-| `acp_sessions` | ACP session persistence | Daemon |
+| `acp_tool_audit_log`   | ACP tool invocation audit     | Daemon |
+| `acp_sessions`         | ACP session persistence       | Daemon |
+
 
 ---
 
@@ -100,6 +104,7 @@ pub fn validate(conn: &rusqlite::Connection) -> Result<()>;
 ```
 
 **Key constraints**:
+
 - `schema_version` MUST come from generated contracts constants, never hardcode
 - API shape is a specification suggestion, implementation details can vary
 
@@ -156,7 +161,6 @@ pub fn validate(conn: &rusqlite::Connection) -> Result<()>;
   - Defines `DB_SCHEMA_VERSION` and `WIRE_SCHEMA_VERSION`
   - Initializes shared tables (workspace_meta, creators, reference_sources)
   - Comment states "Keep in sync with daemon schema"
-
 - **Daemon schema**: `crates/nexus42d/src/db/schema.rs`
   - Defines same `DB_SCHEMA_VERSION` and `WIRE_SCHEMA_VERSION`
   - Initializes all tables (shared + daemon-only)
@@ -182,3 +186,4 @@ pub fn validate(conn: &rusqlite::Connection) -> Result<()>;
 
 - Inline design spec for `state.db` refactoring
 - Aligned with V1 product semantics: local-first, structured sync, ACP client-only
+
