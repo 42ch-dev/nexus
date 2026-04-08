@@ -564,10 +564,11 @@
       "id": "2026-04-08-v1.1-tech-debt-mitigation",
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
-      "status": "InReview",
+      "status": "Done",
       "progress": 100,
       "updated_at": "2026-04-09",
-      "notes": "All 26 tasks complete. Wave 3 Batch B (FH-R1/R3/R6) done. CI drift detection, error code docs, test utils extraction. 662+ tests passing.",
+      "done_at": "2026-04-09",
+      "notes": "All 26 tasks complete. QC三审 unanimous APPROVE. Wave 3 Batch B (FH-R1/R3/R6) merged. V1.1 GA ready.",
       "metadata": {
         "phase": "V1.1",
         "branch_policy": "feature/v1.1-tech-debt-mitigation from main",
