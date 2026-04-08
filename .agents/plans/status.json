@@ -7,7 +7,7 @@
   "agents": [
     "@fullstack-dev"
   ],
-  "progress": 16,
+  "progress": 66,
   "tags": [
     "v1.1",
     "architecture-alignment",
@@ -18,7 +18,7 @@
   ],
   "created_at": "2026-04-09",
   "updated_at": "2026-04-08",
-  "notes": "TD-1 (sync wiring) completed. Batch 3 done (c5f27d8). TD-2, TD-3 done in Batch 1 (b349201, 8dc8163). Remaining: TD-4 (schema enum typing), TD-5 (canonical_hash), TD-6 (User aggregate).",
+  "notes": "TD-1 (sync wiring) done (c5f27d8). TD-2, TD-3 done (b349201, 8dc8163). TD-4: domain/sync/CLI/daemon aligned with generated enums; build+clippy+tests green (677877f). Remaining: TD-5 (canonical_hash), TD-6 (User aggregate). Run pnpm codegen if schemas touched; TS drift check before merge.",
   "metadata": {
     "phase": "V1.1 GA — architecture alignment blockers",
     "priority": "high",
@@ -35,7 +35,7 @@
     "gates": {
       "tests": "pass",
       "clippy": "pass",
-      "fmt": "pending"
+      "fmt": "pass"
     }
   }
 }
