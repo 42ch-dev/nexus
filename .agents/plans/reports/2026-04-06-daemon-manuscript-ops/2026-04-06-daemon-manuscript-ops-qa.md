@@ -4,7 +4,7 @@
 **Date**: 2026-04-07  
 **Task**: QA Verification of Plan C (Daemon + Manuscript Operations)  
 **Branch**: `feature/v2.0-daemon-manuscript-ops`  
-**Review cwd**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/daemon-manuscript-ops/`  
+**Review cwd**: `<repository-root>/.worktrees/daemon-manuscript-ops/`  
 **Fix Commit**: `5438842` (addressed 3 blocking QC items)  
 **QA Mode**: Full verification — final gate before merge
 

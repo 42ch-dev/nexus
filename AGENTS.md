@@ -116,6 +116,21 @@ cp .agents/local-paths.json.example .agents/local-paths.json
 
 Violations break onboarding and agent handoff for anyone without your local machine layout.
 
+### No local privacy in committed text
+
+This repository is **public** and plan reports are often **tracked**. Anything you commit must not leak **machine-specific** or **personal** layout:
+
+- **Do not** paste absolute paths that expose a home directory or OS username, for example macOS `/Users/<you>/...`, Linux `/home/<you>/...`, or Windows `C:\\Users\\<you>\\...`, even if they point “into” this clone. Those strings identify individuals and local folder choices.
+- **Do not** treat “review cwd”, worktree location, or editor workspace paths as verbatim copy-paste into QC/QA reports, `status.json` prose, or knowledge notes **unless** you normalize them first.
+
+**Use instead** (pick one style and stay consistent within a document):
+
+- **Relative paths from the repository root** (preferred for real files in this repo), e.g. `.agents/plans/status.json`, `crates/nexus42/src/...`.
+- **Neutral placeholders** when the exact mount point does not matter, e.g. `<repository-root>`, `<repository-root>/.worktrees/<branch-name>/` for git worktrees under this repo’s `.worktrees/` convention.
+- **`{PLAN_DIR}`** / `.agents/plans/` when referring to the plan tree, per this file’s naming above.
+
+**Also avoid** in committed artifacts: internal hostnames, private IP addresses, raw secrets or API keys, and full tool logs that embed your local paths (sanitize or excerpt). Redact before commit if a report must quote command output.
+
 ## Plans & Reports Structure
 
 ### Harness alignment (authoritative mirror)
@@ -233,6 +248,7 @@ jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agent
 - **Schema edits without regenerated** `*/generated/` trees — CI fails on drift.
 - **Missing timeline** (`notes.json` or, if legacy, `metadata.notes`) for a merge or bulk residual archival that future agents need for context.
 - Duplicating finding detail only in **`plans[].notes`** instead of **`metadata.residual_findings`** (SSOT for open items).
+- **Publishing local paths or other machine-specific identifiers** in tracked QC/QA reports or plan notes (for example verbatim `review_cwd` under `/Users/...` or `C:\Users\...`). Replace with repo-relative paths or placeholders per §"No local privacy in committed text" above before commit.
 
 **Rule:** If `status.json` does not reflect reality, treat the branch as **not merge-ready** until it is corrected.
 
