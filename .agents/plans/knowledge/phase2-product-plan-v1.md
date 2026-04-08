@@ -3,7 +3,7 @@
 **Date**: 2026-04-06
 **Author**: @product-manager
 **Based on**: Phase 1 Product Review V1, Phase 1 Architecture Review V1
-**Status**: DRAFT — pending PM and user approval
+**Status**: Superseded — merged into `v1.1-overview-v1.md`. P0/P1/P2 features, user stories, and competitive analysis fully retained.
 
 ---
 

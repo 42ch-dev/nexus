@@ -2,7 +2,7 @@
 
 > **Author**: @architect
 > **Date**: 2026-04-06
-> **Status**: Draft — ready for PM review before plan revision
+> **Status**: Superseded by implementation (Wave 1 complete) — all 15 domain aggregates implemented per this spec.
 > **Inputs**: `schemas/domain/*.schema.json`, `schemas/common/*.schema.json`
 > **Relationship**: This spec serves as the **authoritative revision input** for `.agents/plans/2025-04-05-domain-models.md`. It does NOT modify the plan file directly.
 

@@ -4,6 +4,7 @@
 **Reviewer**: @architect
 **Scope**: All Phase 0 + Phase 1 crates and schemas
 **Review type**: READ-ONLY analysis — no source code modifications
+**Status**: Archived — key findings summarized in `v1.1-overview-v1.md` §2.3; retained for detailed reference
 
 ---
 
