@@ -86,6 +86,16 @@ pub enum AgentCommand {
         #[arg(long, name = "AGENT")]
         agent: Option<String>,
     },
+
+    /// List available ACP skills/capabilities
+    Skills {
+        /// Show detailed information including capability IDs
+        #[arg(long, short)]
+        verbose: bool,
+        /// Output format (text or json)
+        #[arg(short = 'o', long = "output", default_value = "text")]
+        output_format: String,
+    },
 }
 
 // ── Entry point ────────────────────────────────────────────────────
@@ -101,6 +111,10 @@ pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
             cwd,
         } => cmd_run(&agent_ref, message, cwd).await,
         AgentCommand::Probe { registry, agent } => cmd_probe(registry, agent).await,
+        AgentCommand::Skills {
+            verbose,
+            output_format,
+        } => cmd_skills(verbose, &output_format).await,
     }
 }
 
@@ -693,6 +707,78 @@ fn describe_distribution(agent: &AgentEntry) -> String {
     }
 }
 
+// ── `agent skills` ────────────────────────────────────────────────
+
+/// List available ACP skills/capabilities that the nexus42 client declares.
+///
+/// Skills are the capability IDs that nexus42 sends during the ACP `initialize`
+/// handshake to tell agents what client-side features are supported.
+async fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
+    // V1.0 capabilities frozen in acp/skills.rs
+    let capabilities = vec![
+        (
+            "file_system.read",
+            "Client can read text files from workspace",
+            "V1.0",
+        ),
+        (
+            "file_system.write",
+            "Client can write text files to workspace",
+            "V1.0",
+        ),
+        (
+            "terminal.create",
+            "Client can create terminal sessions",
+            "V1.0",
+        ),
+        (
+            "terminal.output",
+            "Client can stream terminal output",
+            "V1.0",
+        ),
+        (
+            "terminal.release",
+            "Client can release terminal resources",
+            "V1.0",
+        ),
+    ];
+
+    if output_format == "json" {
+        let output = serde_json::json!({
+            "capabilities": capabilities.iter().map(|(id, desc, version)| {
+                serde_json::json!({
+                    "id": id,
+                    "description": desc,
+                    "since": version,
+                })
+            }).collect::<Vec<_>>(),
+            "total": capabilities.len(),
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!("{}", "Available ACP Skills / Capabilities");
+        println!();
+
+        for (id, desc, version) in &capabilities {
+            if verbose {
+                println!("  {} ({})", id, version);
+                println!("    {}", desc);
+            } else {
+                println!("  {} — {}", id, desc);
+            }
+        }
+
+        println!();
+        println!("Total: {} capabilities (V1.0)", capabilities.len());
+
+        // Note about deferred capabilities
+        println!();
+        println!("Deferred (V1.1+): terminal.kill, terminal.wait_for_exit, slash_commands, agent_plan, session.modes");
+    }
+
+    Ok(())
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -868,5 +954,42 @@ mod tests {
         };
         let desc = describe_distribution(&agent);
         assert!(desc.starts_with("binary"));
+    }
+
+    // ── Skills command tests ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn skills_list_text_output() {
+        let cmd = AgentCommand::Skills {
+            verbose: false,
+            output_format: "text".to_string(),
+        };
+
+        let result = run(cmd, &CliConfig::default()).await;
+        assert!(result.is_ok());
+
+        // Verify we captured output by checking the function doesn't error
+    }
+
+    #[tokio::test]
+    async fn skills_list_json_output() {
+        let cmd = AgentCommand::Skills {
+            verbose: false,
+            output_format: "json".to_string(),
+        };
+
+        let result = run(cmd, &CliConfig::default()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn skills_list_verbose_output() {
+        let cmd = AgentCommand::Skills {
+            verbose: true,
+            output_format: "text".to_string(),
+        };
+
+        let result = run(cmd, &CliConfig::default()).await;
+        assert!(result.is_ok());
     }
 }
