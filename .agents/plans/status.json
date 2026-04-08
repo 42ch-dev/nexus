@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-08",
+  "updated_at": "2026-04-09",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -192,6 +192,138 @@
           "tests": "passed",
           "clippy": "passed",
           "fmt": "passed"
+        }
+      }
+    },
+    {
+      "id": "2026-04-09-v1.1-cli-daemon-hardening",
+      "title": "CLI/Daemon Reliability Hardening",
+      "file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.1",
+        "foundation",
+        "hardening",
+        "p0"
+      ],
+      "created_at": "2026-04-09",
+      "updated_at": "2026-04-09",
+      "notes": "Foundation hardening for V1.1 GA: observability, sync/validation, db/pool hardening, error handling. Prerequisite for all platform V1.1 plans.",
+      "metadata": {
+        "priority": "P0",
+        "phase": "Todo",
+        "description": "Improve CLI/daemon reliability, observability, and error handling. 7 tasks across 4 groups: tracing, sync/validation, auth variants, low-priority polish. Resolves 14 residuals.",
+        "working_branch": "feature/v1.1-cli-daemon-hardening",
+        "dependency": null,
+        "spec_refs": [
+          ".agents/plans/knowledge/v1.1-overview-v1.md"
+        ],
+        "residual_ids": [
+          "CLI-R15",
+          "FH-R2",
+          "FH-R4",
+          "FH-R5",
+          "FH-R7",
+          "FH-R8",
+          "FH-R9",
+          "FH-R10",
+          "FH-R11",
+          "SYNC-R7",
+          "SYNC-R8",
+          "SYNC-R9"
+        ],
+        "effort": "L (~7-9 agent sessions)",
+        "gates": {
+          "qc": "pending",
+          "qa": "pending"
+        }
+      }
+    },
+    {
+      "id": "2026-04-09-v1.1-context-assembly-enhancement",
+      "title": "Context Assembly Enhancement (V1.1 Safety & Validation)",
+      "file": ".agents/plans/2026-04-09-v1.1-context-assembly-enhancement.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.1",
+        "context-assembly",
+        "safety",
+        "validation"
+      ],
+      "created_at": "2026-04-09",
+      "updated_at": "2026-04-09",
+      "notes": "V1.1 safety and validation constraints for CLI-side summary generator. Implements knowledge SSOT §9.1 constraints. Foundation hardening tasks moved to Plan 09.",
+      "metadata": {
+        "priority": "P2",
+        "phase": "Todo",
+        "description": "Implement V1.1 safety and validation constraints for summary generator: file size limit, path traversal validation, UTF-8 truncation safety. 3 tasks. Resolves CTX-R2, CTX-R3, CTX-R5.",
+        "working_branch": "feature/v1.1-context-assembly",
+        "dependency": "2026-04-09-v1.1-cli-daemon-hardening",
+        "spec_refs": [
+          ".agents/plans/knowledge/restructured-context-assembly-v1.md"
+        ],
+        "residual_ids": [
+          "CTX-R2",
+          "CTX-R3",
+          "CTX-R5"
+        ],
+        "effort": "S (~2-3 agent sessions)",
+        "gates": {
+          "qc": "pending",
+          "qa": "pending"
+        }
+      }
+    },
+    {
+      "id": "2026-04-09-v1.1-acp-ux-permissions",
+      "title": "ACP UX & Permission Policy",
+      "file": ".agents/plans/2026-04-09-v1.1-acp-ux-permissions.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.1",
+        "acp",
+        "ux",
+        "permissions"
+      ],
+      "created_at": "2026-04-09",
+      "updated_at": "2026-04-09",
+      "notes": "ACP user experience improvements and permission policy. CLI-only plan with no direct platform dependency. 6 tasks across 3 groups: session management, permission policy, skills & UX polish.",
+      "metadata": {
+        "priority": "P2",
+        "phase": "Todo",
+        "description": "Improve ACP UX: session persistence, permission policy, skills listing, agent status, user-friendly errors. 6 tasks. Depends on Plan 09.",
+        "working_branch": "feature/v1.1-acp-ux",
+        "dependency": "2026-04-09-v1.1-cli-daemon-hardening",
+        "spec_refs": [
+          ".agents/plans/knowledge/acp-client-tech-spec-v1.md"
+        ],
+        "residual_ids": [
+          "CLI-R5",
+          "ACP-R3",
+          "ACP-R4",
+          "ACP-R5",
+          "ACP-R6",
+          "ACP-R7"
+        ],
+        "effort": "M (~5-6 agent sessions)",
+        "gates": {
+          "qc": "pending",
+          "qa": "pending"
         }
       }
     }
