@@ -7,8 +7,8 @@
 //! **Keep in sync with the daemon schema.** Any column addition/removal in the
 //! daemon must be mirrored here.
 
-use rusqlite::Connection;
 use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
+use rusqlite::Connection;
 
 /// Database schema version for local SQLite migrations.
 /// Must match `nexus42d::db::schema::DB_SCHEMA_VERSION`.

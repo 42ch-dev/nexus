@@ -5,8 +5,8 @@
 //! the same `state.db` file; CLI-side definitions live in
 //! `crates/nexus42/src/db/schema.rs` and must be kept in sync.
 
-use rusqlite::Connection;
 use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
+use rusqlite::Connection;
 
 /// Database schema version for local SQLite migrations.
 pub const DB_SCHEMA_VERSION: u32 = 1;

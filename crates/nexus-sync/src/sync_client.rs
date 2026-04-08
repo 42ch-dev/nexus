@@ -293,10 +293,10 @@ impl SyncClient {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
                     if length > self.body_max_size {
-                        return Err(SyncError::Serialization(format!(
-                            "Response body too large: {} bytes (limit: {} bytes)",
-                            length, self.body_max_size
-                        )));
+                        return Err(SyncError::HttpBodySizeExceeded {
+                            actual: length,
+                            limit: self.body_max_size,
+                        });
                     }
                 }
             }
@@ -309,11 +309,10 @@ impl SyncClient {
 
         // Check actual body size (SYNC-R5)
         if text.len() > self.body_max_size {
-            return Err(SyncError::Serialization(format!(
-                "Response body too large: {} bytes (limit: {} bytes)",
-                text.len(),
-                self.body_max_size
-            )));
+            return Err(SyncError::HttpBodySizeExceeded {
+                actual: text.len(),
+                limit: self.body_max_size,
+            });
         }
 
         if status == 409 {
@@ -732,5 +731,27 @@ mod tests {
         let push_response: PushResponse = serde_json::from_str(&body).expect("parse mock response");
         assert!(push_response.success);
         assert_eq!(push_response.world_revision, Some(6));
+    }
+
+    #[test]
+    fn http_body_size_exceeded_error_code() {
+        let error = SyncError::HttpBodySizeExceeded {
+            actual: 15_000_000,
+            limit: 10_000_000,
+        };
+        assert_eq!(error.error_code(), "HTTP_BODY_SIZE_EXCEEDED");
+    }
+
+    #[test]
+    fn http_body_size_exceeded_display_message() {
+        let error = SyncError::HttpBodySizeExceeded {
+            actual: 15_000_000,
+            limit: 10_000_000,
+        };
+        let display = error.to_string();
+        assert!(display.contains("15"));
+        assert!(display.contains("10"));
+        assert!(display.contains("bytes"));
+        assert!(display.contains("exceeded"));
     }
 }
