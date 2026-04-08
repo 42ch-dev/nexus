@@ -2,8 +2,8 @@
 //!
 //! This module provides the `/v1/local/acp/tool/execute` endpoint that routes
 //! agent tool calls through the daemon for:
+//! - Permission checking (against configurable policy)
 //! - Workspace path validation (reject paths outside workspace root)
-//! - Permission checking (auto-grant within workspace for V1.0)
 //! - Audit logging (all tool executions recorded in SQLite)
 //!
 //! # Architecture
@@ -18,19 +18,22 @@
 //!               │   /v1/local/acp/tool/execute
 //!               │
 //!               └─► nexus42d daemon
+//!                   ├─ Permission check
 //!                   ├─ Path validation
 //!                   ├─ Execute tool
 //!                   ├─ Audit logging
 //!                   └─► Return result to CLI
 //! ```
 //!
-//! # V1.0 Scope
+//! # Permission Enforcement (V1.1)
 //!
-//! - File operations: `fs/read_text_file`, `fs/write_text_file`
-//! - Terminal operations: deferred to V1.1 (requires state management)
-//! - Permission policy: auto-grant within workspace (ACP-R7 deferred)
+//! Starting V1.1, the daemon enforces permission policies before executing
+//! tool requests. If the workspace has a `.nexus42/permissions.toml` file,
+//! the daemon loads it and checks tool permissions against the policy.
+//! If no policy file exists, all workspace-bound operations are permitted.
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::permissions;
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
@@ -44,6 +47,9 @@ pub struct ToolExecuteRequest {
     pub tool_name: String,
     /// Tool-specific parameters (JSON object)
     pub parameters: serde_json::Value,
+    /// Optional session ID for audit trail
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Response from tool execution.
@@ -53,6 +59,29 @@ pub struct ToolExecuteResponse {
     pub success: bool,
     /// Tool-specific result (JSON object)
     pub result: serde_json::Value,
+}
+
+/// Load permission policy from workspace if available.
+///
+/// Returns `None` if no policy file exists (all tools permitted).
+fn load_permission_policy(workspace_path: &str) -> Option<std::collections::HashSet<String>> {
+    use std::path::Path;
+
+    let policy_path = Path::new(workspace_path)
+        .join(".nexus42")
+        .join("permissions.toml");
+    if !policy_path.exists() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(&policy_path).ok()?;
+    let policy: toml::Value = toml::from_str(&content).ok()?;
+
+    // Extract the grant list
+    let granted = policy.get("grant")?;
+    granted
+        .as_table()
+        .map(|obj| obj.keys().map(|k| k.to_string()).collect())
 }
 
 /// POST /v1/local/acp/tool/execute
@@ -69,6 +98,14 @@ pub async fn tool_execute(
         parameters = ?req.parameters,
         "Received ACP tool execution request"
     );
+
+    // Check permissions (V1.1: load policy from workspace if available)
+    let workspace_path_str = state.workspace_path().unwrap_or_default();
+    if !workspace_path_str.is_empty() {
+        if let Some(granted) = load_permission_policy(&workspace_path_str) {
+            permissions::check_tool_permission(&req.tool_name, Some(&granted))?;
+        }
+    }
 
     // Validate workspace path for file operations
     if req.tool_name.starts_with("fs/") {

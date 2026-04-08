@@ -15,6 +15,8 @@
 //! - POST /v1/local/context/assemble — Context assembly (auth required)
 //! - GET  /v1/local/sync/status      — Sync status
 //! - POST /v1/local/acp/tool/execute — ACP tool execution (daemon-mediated)
+//! - GET  /v1/local/acp/sessions     — List ACP sessions
+//! - DELETE /v1/local/acp/sessions/{id} — Delete an ACP session
 
 pub mod auth_middleware;
 pub mod errors;
@@ -100,6 +102,17 @@ pub fn create_router(state: WorkspaceState) -> Router {
         post(handlers::acp::tool_execute),
     );
 
+    // ACP session management routes (unguarded — session data in SQLite)
+    let session_routes = Router::new()
+        .route(
+            "/v1/local/acp/sessions",
+            get(handlers::sessions::list_sessions),
+        )
+        .route(
+            "/v1/local/acp/sessions/{id}",
+            axum::routing::delete(handlers::sessions::delete_session),
+        );
+
     Router::new()
         .merge(runtime_routes)
         .merge(workspace_routes)
@@ -110,6 +123,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(context_routes)
         .merge(sync_routes)
         .merge(acp_routes)
+        .merge(session_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
