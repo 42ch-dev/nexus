@@ -225,43 +225,13 @@
     },
     {
       "id": "2026-04-08-local-db-refactor",
-      "title": "Local DB Refactor — Single Ownership Module",
+      "status": "Done",
       "file": ".agents/plans/2026-04-08-local-db-refactor.md",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 18,
-      "tags": [
-        "refactor",
-        "foundation",
-        "local-db",
-        "v1.1"
-      ],
-      "created_at": "2026-04-08",
-      "updated_at": "2026-04-08",
-      "notes": "Phase A (Task 1 & 2) completed: nexus-local-db module skeleton created with DB_SCHEMA_VERSION, RuntimeRole, SchemaVersions types, and SCHEMA_VERSION re-export from nexus-contracts. All tests pass, no clippy warnings. Branch: feature/local-db-refactor.",
       "metadata": {
-        "priority": "P1",
-        "phase": "Phase A completed; Phase B-F pending",
-        "description": "Foundational refactor to eliminate schema drift and duplicated logic between CLI and daemon. Creates independent nexus-local-db module with single ownership of shared schema, decoupled version lines (db_schema_version vs schema_version), and unified API.",
-        "working_branch": "feature/local-db-refactor",
-        "dependency": null,
-        "spec_refs": [
-          ".agents/plans/knowledge/local-db-refactor-v1.md"
-        ],
-        "effort": "M (~6-8 sessions across 6 phases)",
-        "gates": {
-          "tests": "passed",
-          "clippy": "passed",
-          "fmt": "passed"
-        },
-        "completed_tasks": [
-          "Task 1: Create crates/nexus-local-db crate",
-          "Task 2: Define RuntimeRole and SchemaVersions types"
-        ]
-      }
+        "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
+      },
+      "title": "Local DB Refactor — Single Ownership Module",
+      "done_at": "2026-04-08"
     }
   ],
   "metadata": {

@@ -166,11 +166,13 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 
 **Estimated Effort**: S (~1 session)
 **Target**: Provide version read/validate APIs
+**Status**: ✅ Done (2026-04-08)
 
 #### Task 7: Implement `read_versions()` API
 
 **Files**:
 - `crates/nexus-local-db/src/lib.rs`
+- `crates/nexus-local-db/src/error.rs`
 
 **Logic**:
 - Query `workspace_meta` for `db_schema_version`
@@ -178,9 +180,9 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 - Return `SchemaVersions` struct
 
 **Acceptance Criteria**:
-- [ ] Read `db_schema_version` from `workspace_meta`
-- [ ] `schema_version` from generated contracts
-- [ ] Unit tests
+- [x] Read `db_schema_version` from `workspace_meta`
+- [x] `schema_version` from generated contracts
+- [x] Unit tests (6 tests)
 
 ---
 
@@ -188,6 +190,7 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 
 **Files**:
 - `crates/nexus-local-db/src/lib.rs`
+- `crates/nexus-local-db/src/error.rs`
 
 **Logic**:
 - Verify `workspace_meta` table exists
@@ -196,9 +199,9 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 - Check version values are valid u32
 
 **Acceptance Criteria**:
-- [ ] Health check for database state
-- [ ] Returns `Ok(())` or descriptive error
-- [ ] Unit tests
+- [x] Health check for database state
+- [x] Returns `Ok(())` or descriptive error
+- [x] Unit tests (8 tests)
 
 ---
 
@@ -206,6 +209,7 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 
 **Estimated Effort**: M (~2 sessions)
 **Target**: Enable schema migrations with version ordering
+**Status**: ✅ Done (2026-04-08)
 
 #### Task 9: Implement migration registry and runner
 
@@ -220,11 +224,11 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 - Abort on failure, preserve old version
 
 **Acceptance Criteria**:
-- [ ] Migration registry with version-tagged functions
-- [ ] Sequential execution with version update
-- [ ] Idempotent migrations
-- [ ] Failure aborts without corrupting version
-- [ ] Unit tests for migration path
+- [x] Migration registry with version-tagged functions
+- [x] Sequential execution with version update
+- [x] Idempotent migrations
+- [x] Failure aborts without corrupting version
+- [x] Unit tests for migration path (7 tests)
 
 ---
 
@@ -232,15 +236,18 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 
 **Files**:
 - `crates/nexus42/src/commands/db.rs`
+- `crates/nexus42/src/commands/mod.rs`
+- `crates/nexus42/src/main.rs`
 
 **Logic**:
 - Call `read_versions()` and `validate()`
 - Print database status: versions, health, tables
 
 **Acceptance Criteria**:
-- [ ] `nexus42 db status` prints versions and health
-- [ ] Shows `db_schema_version` and `schema_version`
-- [ ] Lists existing tables
+- [x] `nexus42 db status` prints versions and health
+- [x] Shows `db_schema_version` and `schema_version`
+- [x] Lists existing tables
+- [x] Shows pragmas (journal_mode, foreign_keys)
 
 ---
 
@@ -248,6 +255,7 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 
 **Estimated Effort**: S (~1 session)
 **Target**: Add automated checks for schema consistency
+**Status**: ✅ Done (2026-04-08)
 
 #### Task 11: Add schema consistency check to CI
 
@@ -261,9 +269,12 @@ See `.agents/plans/knowledge/local-db-refactor-v1.md` for:
 - No duplicated DDL in CLI/daemon
 
 **Acceptance Criteria**:
-- [ ] CI job verifies schema consistency
-- [ ] Fails if CLI/daemon have duplicated DDL
-- [ ] Fails if `schema_version` hardcoded
+- [x] CI job verifies schema consistency
+- [x] Fails if CLI/daemon have duplicated DDL
+- [x] Fails if `schema_version` hardcoded
+- [x] CI passes for current codebase
+- [x] No clippy warnings
+- [x] Documentation updated
 
 ---
 
@@ -289,19 +300,23 @@ grep "LATEST_SCHEMA_VERSION" crates/nexus-local-db/src/
 
 ## Plan Completion Criteria
 
-- [ ] `crates/nexus-local-db` created and compiles
-- [ ] Shared table DDL in single location
-- [ ] CLI/daemon use unified API from `nexus-local-db`
-- [ ] `db_schema_version` and `schema_version` correctly separated
-- [ ] No `wire_schema_version` key
-- [ ] `init()` idempotent for both roles
-- [ ] `read_versions()` and `validate()` implemented
-- [ ] Migration runner with sequential execution
-- [ ] CLI `db status` command
-- [ ] CI schema consistency checks
-- [ ] All tests passing
-- [ ] 0 clippy warnings
-- [ ] Documentation updated
+- [x] `crates/nexus-local-db` created and compiles
+- [x] Shared table DDL in single location
+- [x] CLI/daemon use unified API from `nexus-local-db`
+- [x] `db_schema_version` and `schema_version` correctly separated
+- [x] No `wire_schema_version` key
+- [x] `init()` idempotent for both roles
+- [x] `read_versions()` and `validate()` implemented
+- [x] Migration runner with sequential execution
+- [x] CLI `db status` command
+- [x] CI schema consistency checks
+- [x] All tests passing
+- [x] 0 clippy warnings
+- [x] Documentation updated
+
+---
+
+**Plan Status**: ✅ Done (2026-04-08)
 
 ---
 
@@ -329,5 +344,6 @@ This is a **foundational refactor** to eliminate schema drift and establish sing
 **Key principle**: Local DB is an **independent capability**, not a "copy of internal details" in CLI/daemon.
 
 **Created**: 2026-04-08
-**Status**: Todo
+**Status**: Done
 **Updated**: 2026-04-08
+**Completed**: 2026-04-08
