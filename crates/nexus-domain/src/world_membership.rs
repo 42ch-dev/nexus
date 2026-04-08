@@ -23,16 +23,18 @@ pub enum MembershipRole {
 #[serde(rename_all = "snake_case")]
 pub enum MembershipStatus {
     Active,
+    Invited,
     Suspended,
-    Left,
+    Removed,
 }
 
 impl MembershipStatus {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Active => "active",
+            Self::Invited => "invited",
             Self::Suspended => "suspended",
-            Self::Left => "left",
+            Self::Removed => "removed",
         }
     }
 }
