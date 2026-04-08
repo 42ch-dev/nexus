@@ -96,6 +96,9 @@ pub enum AgentCommand {
         #[arg(short = 'o', long = "output", default_value = "text")]
         output_format: String,
     },
+
+    /// Show daemon and agent status
+    Status,
 }
 
 // ── Entry point ────────────────────────────────────────────────────
@@ -115,6 +118,7 @@ pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
             verbose,
             output_format,
         } => cmd_skills(verbose, &output_format).await,
+        AgentCommand::Status => cmd_status().await,
     }
 }
 
@@ -707,6 +711,70 @@ fn describe_distribution(agent: &AgentEntry) -> String {
     }
 }
 
+// ── `agent status` ───────────────────────────────────────────────
+
+/// Show daemon and ACP agent status.
+///
+/// Connects to the daemon's runtime status endpoint and displays:
+/// - Daemon connectivity and version
+/// - Uptime and workspace state
+/// - ACP session and tool execution statistics
+async fn cmd_status() -> Result<()> {
+    let client =
+        crate::api::DaemonClient::new(&format!("http://127.0.0.1:{}", crate::config::DAEMON_PORT));
+
+    let status =
+        client
+            .get_runtime_status()
+            .await
+            .map_err(|e| crate::errors::CliError::Daemon {
+                message: format!("Failed to connect to daemon: {}", e),
+            })?;
+
+    // Daemon status
+    println!("Daemon Status");
+    println!("{}", "─".repeat(50));
+    println!("  Daemon:    Running");
+    println!("  Version:  {}", status.version);
+
+    let uptime = status.uptime_seconds;
+    if uptime < 60 {
+        println!("  Uptime:   {}s", uptime);
+    } else if uptime < 3600 {
+        println!("  Uptime:   {}m {}s", uptime / 60, uptime % 60);
+    } else {
+        println!("  Uptime:   {}h {}m", uptime / 3600, (uptime % 3600) / 60);
+    }
+
+    println!(
+        "  Workspace: {}",
+        if status.workspace_initialized {
+            "Initialized"
+        } else {
+            "Not initialized"
+        }
+    );
+
+    // ACP status
+    println!();
+    println!("ACP Status");
+    println!("{}", "─".repeat(50));
+
+    let acp = &status.acp;
+    println!(
+        "  Tool execution: {}",
+        if acp.tool_execution_enabled {
+            "Enabled"
+        } else {
+            "Disabled"
+        }
+    );
+    println!("  Active sessions: {}", acp.active_sessions);
+    println!("  Tool executions: {}", acp.total_tool_executions);
+
+    Ok(())
+}
+
 // ── `agent skills` ────────────────────────────────────────────────
 
 /// List available ACP skills/capabilities that the nexus42 client declares.
@@ -756,7 +824,7 @@ async fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!("{}", "Available ACP Skills / Capabilities");
+        println!("Available ACP Skills / Capabilities");
         println!();
 
         for (id, desc, version) in &capabilities {

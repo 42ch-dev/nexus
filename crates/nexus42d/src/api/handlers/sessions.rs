@@ -132,9 +132,7 @@ pub async fn delete_session(
 /// Cleanup expired sessions (older than 24 hours).
 ///
 /// This can be called periodically by the daemon or on-demand.
-pub async fn cleanup_expired_sessions(
-    state: &WorkspaceState,
-) -> Result<u64, NexusApiError> {
+pub async fn cleanup_expired_sessions(state: &WorkspaceState) -> Result<u64, NexusApiError> {
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
         code: "DB_POOL_ERROR".into(),
         message: format!("failed to get database connection: {}", e),
@@ -210,8 +208,9 @@ mod tests {
         setup_sessions_db(&db_path);
 
         // Delete one session
-        let result =
-            delete_session(State(state.clone()), Path("sess-001".to_string())).await.unwrap();
+        let result = delete_session(State(state.clone()), Path("sess-001".to_string()))
+            .await
+            .unwrap();
         assert!(result.deleted);
         assert_eq!(result.session_id, "sess-001");
 
@@ -228,12 +227,9 @@ mod tests {
 
         setup_sessions_db(&db_path);
 
-        let result = delete_session(
-            State(state),
-            Path("nonexistent".to_string()),
-        )
-        .await
-        .unwrap();
+        let result = delete_session(State(state), Path("nonexistent".to_string()))
+            .await
+            .unwrap();
 
         assert!(!result.deleted);
     }

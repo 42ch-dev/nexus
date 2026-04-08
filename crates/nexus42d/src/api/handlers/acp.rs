@@ -67,7 +67,9 @@ pub struct ToolExecuteResponse {
 fn load_permission_policy(workspace_path: &str) -> Option<std::collections::HashSet<String>> {
     use std::path::Path;
 
-    let policy_path = Path::new(workspace_path).join(".nexus42").join("permissions.toml");
+    let policy_path = Path::new(workspace_path)
+        .join(".nexus42")
+        .join("permissions.toml");
     if !policy_path.exists() {
         return None;
     }
@@ -77,11 +79,9 @@ fn load_permission_policy(workspace_path: &str) -> Option<std::collections::Hash
 
     // Extract the grant list
     let granted = policy.get("grant")?;
-    if let Some(obj) = granted.as_table() {
-        Some(obj.keys().map(|k| k.to_string()).collect())
-    } else {
-        None
-    }
+    granted
+        .as_table()
+        .map(|obj| obj.keys().map(|k| k.to_string()).collect())
 }
 
 /// POST /v1/local/acp/tool/execute
