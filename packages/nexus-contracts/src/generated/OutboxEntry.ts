@@ -1,4 +1,4 @@
-import type { SchemaVersion } from './CommonTypes';
+import type { DeliveryState, SchemaVersion } from './CommonTypes';
 /**
  * Nexus OutboxEntry
  *
@@ -7,17 +7,13 @@ import type { SchemaVersion } from './CommonTypes';
  * @schema_version 1
  * @source outbox-entry.schema.json
  */
-
-/** Inline enum type */
-export type OutboxEntryDeliveryState = 'staged' | 'ready' | 'sent' | 'acked' | 'conflicted' | 'failed';
-
 /** OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13. */
 export interface OutboxEntry {
   schema_version: number;
   outbox_entry_id: string;
   bundle_id: string;
   idempotency_key: string;
-  delivery_state: OutboxEntryDeliveryState;
+  delivery_state: DeliveryState;
   retry_count?: number;
   last_error?: string | null;
   next_retry_at?: string;

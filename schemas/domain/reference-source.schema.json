@@ -20,8 +20,7 @@
       "description": "Workspace this reference belongs to"
     },
     "source_type": {
-      "type": "string",
-      "enum": ["file", "pdf", "url", "note"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ReferenceSourceType",
       "description": "Type of reference source"
     },
     "uri": {
@@ -42,8 +41,7 @@
       "description": "Content hash in sha256:xxx format"
     },
     "scan_status": {
-      "type": "string",
-      "enum": ["pending", "scanned", "failed", "ignored"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ScanStatus",
       "description": "Scan processing status"
     },
     "created_at": {

@@ -6,6 +6,7 @@
 //! @source story-manifest.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{ManifestType, ManuscriptStorage, StoryManifestStatus};
 
 /// StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -15,8 +16,8 @@ pub struct StoryManifest {
     pub story_manifest_id: String,
     pub world_id: String,
     pub creator_id: String,
-    pub manifest_type: String,
-    pub status: String,
+    pub manifest_type: ManifestType,
+    pub status: StoryManifestStatus,
     pub title: String,
     pub summary_unit_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -24,7 +25,7 @@ pub struct StoryManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_manuscript: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub manuscript_storage: Option<String>,
+    pub manuscript_storage: Option<ManuscriptStorage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

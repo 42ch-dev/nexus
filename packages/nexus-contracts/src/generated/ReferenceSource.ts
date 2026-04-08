@@ -1,4 +1,4 @@
-import type { SchemaVersion } from './CommonTypes';
+import type { ReferenceSourceType, ScanStatus, SchemaVersion } from './CommonTypes';
 /**
  * Nexus ReferenceSource
  *
@@ -7,24 +7,17 @@ import type { SchemaVersion } from './CommonTypes';
  * @schema_version 1
  * @source reference-source.schema.json
  */
-
-/** Inline enum type */
-export type ReferenceSourceSourceType = 'file' | 'pdf' | 'url' | 'note';
-
-/** Inline enum type */
-export type ReferenceSourceScanStatus = 'pending' | 'scanned' | 'failed' | 'ignored';
-
 /** ReferenceSource - local-only registration of research/reference sources. Does NOT sync to platform; shared excerpts go through MemoryItem(memory_kind=research_material). Aligned with data-model-v1.md §5.9A. */
 export interface ReferenceSource {
   schema_version: number;
   reference_source_id: string;
   workspace_id: string;
-  source_type: ReferenceSourceSourceType;
+  source_type: ReferenceSourceType;
   uri: string;
   title: string;
   tags?: string[];
   content_hash?: string;
-  scan_status: ReferenceSourceScanStatus;
+  scan_status: ScanStatus;
   created_at: string;
   updated_at?: string;
 }

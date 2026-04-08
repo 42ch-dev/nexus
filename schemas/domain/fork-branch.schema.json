@@ -33,13 +33,11 @@
       "description": "TimelineEvent where the fork occurred"
     },
     "status": {
-      "type": "string",
-      "enum": ["active", "archived"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ForkBranchStatus",
       "description": "ForkBranch status"
     },
     "verification_status": {
-      "type": "string",
-      "enum": ["unverified", "requested", "verified", "rejected"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/VerificationStatus",
       "description": "ForkBranch verification status"
     },
     "created_by_creator_id": {

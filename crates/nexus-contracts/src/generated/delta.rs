@@ -6,14 +6,14 @@
 //! @source delta.schema.json
 
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{SourceAnchor};
+use crate::generated::common_types::{DeltaOperation, DeltaType, SourceAnchor};
 
 /// Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Delta {
-    pub delta_type: String,
-    pub operation: String,
+    pub delta_type: DeltaType,
+    pub operation: DeltaOperation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_entity_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

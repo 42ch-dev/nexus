@@ -22,13 +22,11 @@
       "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "role": {
-      "type": "string",
-      "enum": ["owner", "maintainer", "collaborator", "official_creator"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MembershipRole",
       "description": "Membership role"
     },
     "membership_status": {
-      "type": "string",
-      "enum": ["active", "invited", "suspended", "removed"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MembershipStatus",
       "description": "Membership status"
     },
     "joined_at": {

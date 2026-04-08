@@ -23,13 +23,11 @@
       "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "command_type": {
-      "type": "string",
-      "enum": ["advance_world", "inject_future_event", "extract_kb", "sync_push", "sync_pull", "fork_world", "publish_story"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandType",
       "description": "Normalized business action type"
     },
     "origin": {
-      "type": "string",
-      "enum": ["local_user", "local_agent", "official_creator", "system"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandOrigin",
       "description": "Command origin"
     },
     "output_manuscript": {
@@ -38,8 +36,7 @@
       "description": "Whether this execution requires manuscript output"
     },
     "status": {
-      "type": "string",
-      "enum": ["pending", "running", "completed", "failed", "cancelled"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandStatus",
       "description": "Command execution status"
     },
     "requested_by": {
