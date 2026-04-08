@@ -18,6 +18,8 @@ uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 deadpool-sqlite = "0.8"
+hex = "0.4"
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }

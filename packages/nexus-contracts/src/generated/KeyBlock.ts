@@ -1,4 +1,4 @@
-import type { BlockType, SchemaVersion, SourceAnchor } from './CommonTypes';
+import type { BlockType, KeyBlockStatus, SchemaVersion, SourceAnchor } from './CommonTypes';
 /**
  * Nexus KeyBlock
  *
@@ -7,10 +7,6 @@ import type { BlockType, SchemaVersion, SourceAnchor } from './CommonTypes';
  * @schema_version 1
  * @source key-block.schema.json
  */
-
-/** Inline enum type */
-export type KeyBlockStatus = 'provisional' | 'confirmed' | 'deprecated' | 'merged' | 'deleted';
-
 /** KeyBlock - a structured knowledge unit in a world timeline. Aligned with data-model-v1.md §5.5. */
 export interface KeyBlock {
   schema_version: number;

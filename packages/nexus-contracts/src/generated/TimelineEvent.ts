@@ -1,4 +1,4 @@
-import type { SchemaVersion } from './CommonTypes';
+import type { SchemaVersion, TimelineEventStatus, TimelineEventType } from './CommonTypes';
 /**
  * Nexus TimelineEvent
  *
@@ -7,20 +7,13 @@ import type { SchemaVersion } from './CommonTypes';
  * @schema_version 1
  * @source timeline-event.schema.json
  */
-
-/** Inline enum type */
-export type TimelineEventEventType = 'story_advance' | 'state_update' | 'fork_marker' | 'official_progression' | 'publish_marker';
-
-/** Inline enum type */
-export type TimelineEventStatus = 'canon' | 'provisional' | 'rejected';
-
 /** TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6. */
 export interface TimelineEvent {
   schema_version: number;
   timeline_event_id: string;
   world_id: string;
   branch_id: string;
-  event_type: TimelineEventEventType;
+  event_type: TimelineEventType;
   status: TimelineEventStatus;
   sequence_no: number;
   title?: string;

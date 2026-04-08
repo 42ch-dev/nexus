@@ -8,6 +8,7 @@ use crate::errors::DomainError;
 use crate::source_anchor::SourceAnchor;
 use crate::BlockType;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// KeyBlock status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -267,7 +268,7 @@ impl From<nexus_contracts::KeyBlock> for KeyBlock {
             world_id: c.world_id,
             block_type: c.block_type,
             canonical_name: c.canonical_name,
-            status: c.status,
+            status: c.status.as_str().to_string(),
             revision: c.revision,
             body: c.body.map(|v| {
                 serde_json::from_value(v).unwrap_or(KeyBlockBody {
@@ -292,7 +293,7 @@ impl From<KeyBlock> for nexus_contracts::KeyBlock {
             world_id: d.world_id,
             block_type: d.block_type,
             canonical_name: d.canonical_name,
-            status: d.status,
+            status: nexus_contracts::KeyBlockStatus::from_str(&d.status).unwrap(),
             revision: d.revision,
             body: d.body.map(|b| serde_json::to_value(b).unwrap_or_default()),
             source_anchor: d.source_anchor.map(nexus_contracts::SourceAnchor::from),

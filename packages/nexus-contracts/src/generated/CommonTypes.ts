@@ -40,6 +40,12 @@ export type DeltaSequence = number;
 /** Schema version as integer (e.g., 1) */
 export type SchemaVersion = number;
 
+/** User account status (data-model-v1.md §5.1) */
+export type AccountStatus = 'active' | 'suspended' | 'deleted';
+
+/** User subscription tier (data-model-v1.md §5.1) */
+export type SubscriptionTier = 'free' | 'pro' | 'studio' | 'enterprise';
+
 /** Manuscript lifecycle phase (data-model-v1.md §7, §5.9B) */
 export type ManuscriptPhase = 'brainstorm' | 'draft' | 'review' | 'finalize' | 'published';
 
@@ -57,6 +63,96 @@ export type MemoryType = 'canon' | 'working' | 'experience';
 
 /** DeltaBundle type (data-model-v1.md §5.11) */
 export type BundleType = 'world_sync' | 'memory_sync' | 'publish_metadata';
+
+/** Creator status (data-model-v1.md §5.2) */
+export type CreatorStatus = 'active' | 'archived' | 'locked';
+
+/** How creator was registered (data-model-v1.md §5.2) */
+export type RegistrationSource = 'cli' | 'web_agent' | 'platform';
+
+/** World status (data-model-v1.md §5.3) */
+export type WorldStatus = 'active' | 'paused' | 'archived';
+
+/** Membership role (data-model-v1.md §5.4) */
+export type MembershipRole = 'owner' | 'maintainer' | 'collaborator' | 'official_creator';
+
+/** Membership status (data-model-v1.md §5.4) */
+export type MembershipStatus = 'active' | 'invited' | 'suspended' | 'removed';
+
+/** How pairing was established (data-model-v1.md §5.2A) */
+export type PairingSource = 'auto_cli' | 'manual_web' | 'platform_auto';
+
+/** Pairing status (data-model-v1.md §5.2A) */
+export type PairingStatus = 'active' | 'revoked';
+
+/** KeyBlock status (data-model-v1.md §5.5) */
+export type KeyBlockStatus = 'provisional' | 'confirmed' | 'deprecated' | 'merged' | 'deleted';
+
+/** Timeline event type (data-model-v1.md §5.6) */
+export type TimelineEventType = 'story_advance' | 'state_update' | 'fork_marker' | 'official_progression' | 'publish_marker';
+
+/** Timeline event status (data-model-v1.md §5.6) */
+export type TimelineEventStatus = 'canon' | 'provisional' | 'rejected';
+
+/** Fork branch status (data-model-v1.md §5.7) */
+export type ForkBranchStatus = 'active' | 'archived';
+
+/** Fork branch verification status (data-model-v1.md §5.7) */
+export type VerificationStatus = 'unverified' | 'requested' | 'verified' | 'rejected';
+
+/** Memory content kind (data-model-v1.md §5.8, ADR-001) */
+export type MemoryKind = 'story_summary' | 'research_material' | 'review_note' | 'character_note' | 'world_building' | 'plot_outline' | 'theme_analysis' | 'custom';
+
+/** Memory status (data-model-v1.md §5.8) */
+export type MemoryStatus = 'active' | 'superseded' | 'archived';
+
+/** Story manifest type (data-model-v1.md §5.9) */
+export type ManifestType = 'chapter' | 'arc' | 'story' | 'excerpt';
+
+/** Story manifest status (data-model-v1.md §5.9) */
+export type StoryManifestStatus = 'summary_ready' | 'staged_for_publish' | 'published' | 'archived';
+
+/** Manuscript storage location (data-model-v1.md §5.9) */
+export type ManuscriptStorage = 'none' | 'local_workspace' | 'platform_sandbox';
+
+/** Reference source type (data-model-v1.md §5.9A) */
+export type ReferenceSourceType = 'file' | 'pdf' | 'url' | 'note';
+
+/** Reference scan status (data-model-v1.md §5.9A) */
+export type ScanStatus = 'pending' | 'scanned' | 'failed' | 'ignored';
+
+/** Sync command type (data-model-v1.md §5.10) */
+export type CommandType = 'advance_world' | 'inject_future_event' | 'extract_kb' | 'sync_push' | 'sync_pull' | 'fork_world' | 'publish_story';
+
+/** Command origin (data-model-v1.md §5.10) */
+export type CommandOrigin = 'local_user' | 'local_agent' | 'official_creator' | 'system';
+
+/** Command execution status (data-model-v1.md §5.10) */
+export type CommandStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+/** Delta target aggregate type (data-model-v1.md §5.12) */
+export type DeltaType = 'world' | 'key_block' | 'timeline_event' | 'fork_branch' | 'memory_item' | 'story_manifest';
+
+/** Delta operation (data-model-v1.md §5.12) */
+export type DeltaOperation = 'create' | 'update' | 'upsert' | 'delete' | 'append';
+
+/** Outbox delivery state (data-model-v1.md §5.13) */
+export type DeliveryState = 'staged' | 'ready' | 'sent' | 'acked' | 'conflicted' | 'failed';
+
+/** Workspace binding status (data-model-v1.md §5.14) */
+export type BindingStatus = 'active' | 'unlinked' | 'stale';
+
+/** Agent profile kind (data-model-v1.md §5.15) */
+export type ProfileKind = 'local_agent' | 'platform_hosted';
+
+/** Agent selection mode (data-model-v1.md §5.15) */
+export type SelectionMode = 'registry' | 'manual_command' | 'manual_remote';
+
+/** Agent transport method (data-model-v1.md §5.15) */
+export type Transport = 'stdio' | 'http' | 'websocket';
+
+/** Agent profile status (data-model-v1.md §5.15) */
+export type AgentProfileStatus = 'active' | 'unavailable' | 'deprecated';
 
 /**
  * SourceAnchor - Value object for referencing platform Story summary entities.

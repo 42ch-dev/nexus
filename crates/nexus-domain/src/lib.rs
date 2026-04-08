@@ -28,6 +28,7 @@ pub mod reference_source;
 pub mod source_anchor;
 pub mod story_manifest;
 pub mod timeline_event;
+pub mod user;
 pub mod world;
 pub mod world_membership;
 

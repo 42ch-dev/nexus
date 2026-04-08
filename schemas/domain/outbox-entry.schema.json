@@ -24,8 +24,7 @@
       "description": "Idempotency key for deduplication"
     },
     "delivery_state": {
-      "type": "string",
-      "enum": ["staged", "ready", "sent", "acked", "conflicted", "failed"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeliveryState",
       "description": "Delivery state"
     },
     "retry_count": {

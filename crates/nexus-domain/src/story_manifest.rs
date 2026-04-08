@@ -5,6 +5,7 @@
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Manifest type enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -249,13 +250,13 @@ impl From<nexus_contracts::StoryManifest> for StoryManifest {
             story_manifest_id: c.story_manifest_id,
             world_id: c.world_id,
             creator_id: c.creator_id,
-            manifest_type: c.manifest_type,
-            status: c.status,
+            manifest_type: c.manifest_type.as_str().to_string(),
+            status: c.status.as_str().to_string(),
             title: c.title,
             summary_unit_id: c.summary_unit_id,
             summary_text: c.summary_text,
             output_manuscript: c.output_manuscript,
-            manuscript_storage: c.manuscript_storage,
+            manuscript_storage: c.manuscript_storage.map(|s| s.as_str().to_string()),
             local_path: c.local_path,
             sandbox_path: c.sandbox_path,
             content_hash: c.content_hash,
@@ -273,13 +274,15 @@ impl From<StoryManifest> for nexus_contracts::StoryManifest {
             story_manifest_id: d.story_manifest_id,
             world_id: d.world_id,
             creator_id: d.creator_id,
-            manifest_type: d.manifest_type,
-            status: d.status,
+            manifest_type: nexus_contracts::ManifestType::from_str(&d.manifest_type).unwrap(),
+            status: nexus_contracts::StoryManifestStatus::from_str(&d.status).unwrap(),
             title: d.title,
             summary_unit_id: d.summary_unit_id,
             summary_text: d.summary_text,
             output_manuscript: d.output_manuscript,
-            manuscript_storage: d.manuscript_storage,
+            manuscript_storage: d
+                .manuscript_storage
+                .map(|s| nexus_contracts::ManuscriptStorage::from_str(&s).unwrap()),
             local_path: d.local_path,
             sandbox_path: d.sandbox_path,
             content_hash: d.content_hash,

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-08",
+  "updated_at": "2026-04-09",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -232,6 +232,56 @@
       },
       "title": "Local DB Refactor — Single Ownership Module",
       "done_at": "2026-04-08"
+    },
+    {
+      "id": "2026-04-09-v1.1-arch-alignment-blockers",
+      "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
+      "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "status": "InReview",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.1",
+        "architecture-alignment",
+        "critical",
+        "enum-fix",
+        "sync-wiring",
+        "domain-models"
+      ],
+      "created_at": "2026-04-09",
+      "updated_at": "2026-04-09",
+      "notes": "C-01/H-01 closed in tree: harness status.json + daemon push BundleBuilder/precheck/stage. QC re-review: pass (approve with residuals). QA: pass — see metadata.qa_report. 9 unresolved items under residual_findings[2026-04-09-v1.1-arch-alignment-blockers].",
+      "metadata": {
+        "phase": "V1.1 GA — architecture alignment blockers",
+        "priority": "high",
+        "description": "Resolve 6 Critical+High tech debt items from architecture alignment review: TD-1 (sync wiring), TD-2 (WorldStatus enum), TD-3 (MembershipStatus enum), TD-4 (JSON Schema enum typing), TD-5 (canonical_hash), TD-6 (User aggregate).",
+        "scope": "TD-1 through TD-6; enum alignment, schema codegen, sync wiring, domain models",
+        "working_branch": "v1.1-arch-alignment-blockers",
+        "merge_target": "main",
+        "branch_policy": "create v1.1-arch-alignment-blockers from current",
+        "effort": "L — 4 task groups (~6-10 agent sessions total: B1 XS, B2 M, B3 L, B4 S+M)",
+        "primary_spec": ".agents/plans/knowledge/architecture-alignment-review-v1.md",
+        "spec_refs": [
+          ".agents/plans/knowledge/v1.1-overview-v1.md"
+        ],
+        "gates": {
+          "tests": "pass",
+          "clippy": "pass",
+          "fmt": "pass",
+          "codegen": "no_drift",
+          "typecheck": "pass",
+          "qc_status": "pass_rereview_approve_with_residuals",
+          "qa_status": "pass",
+          "merge_to_main": "pending"
+        },
+        "residual_summary": "9 open residuals (hash/precheck/User/ctx/npm/build_validated/docs/cli nit; optional SyncClient ARCH-SYNC-D1)",
+        "implementation_tip": "refresh at commit after landing A1+A2 sync push + status envelope fixes",
+        "qc_rereview_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qc-rereview.md",
+        "qa_report": ".agents/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qa.md"
+      }
     }
   ],
   "metadata": {
@@ -240,23 +290,24 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-08T23:00:00Z",
-      "total_open": 8,
+      "updated_at": "2026-04-08T15:01:46Z",
+      "total_open": 17,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 8,
-        "nit": 0
+        "medium": 6,
+        "low": 10,
+        "nit": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 8,
+        "V1.1": 17,
         "V1.2": 0
       },
       "by_plan": {
         "2025-04-05-domain-models": 1,
-        "2026-04-08-v1.1-tech-debt-mitigation": 7
+        "2026-04-08-v1.1-tech-debt-mitigation": 7,
+        "2026-04-09-v1.1-arch-alignment-blockers": 9
       },
       "severity_note": "7 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md §209-211 (historical compatibility rule)",
       "archival_note": "19 closed residuals archived to .agents/plans/archived/residuals/ (15 on 2026-04-09, 4 Batch B on 2026-04-08) per plan-convention.md §248-286. 18 Done plans archived to archived/plans/ on 2026-04-08 with ultra-compressed status.json rows."
@@ -345,6 +396,98 @@
           "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "V1.1+ — Standardize schema version type across CLI/daemon/contracts"
+        }
+      ],
+      "2026-04-09-v1.1-arch-alignment-blockers": [
+        {
+          "id": "ARCH-SYNC-D1",
+          "title": "Optional: invoke SyncClient::push_bundle from daemon after local stage when platform URL and auth token are configured",
+          "severity": "low",
+          "source": "qc-consolidated H-01 / post-fix",
+          "scope": "crates/nexus42d/src/api/handlers/sync.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — eager platform push; offline-first queue valid without this"
+        },
+        {
+          "id": "ALIGN-HASH-01",
+          "title": "Define cross-stack canonical_hash preimage (serde JSON bytes vs canonical JSON); align bundle.schema.json + golden vectors with nexus-platform",
+          "severity": "medium",
+          "source": "qc-consolidated M-01 / QC3 F-001 F-002",
+          "scope": "crates/nexus-sync/src/canonical_hash.rs, schemas/domain/bundle.schema.json",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "Before GA cross-verify"
+        },
+        {
+          "id": "ALIGN-PRE-01",
+          "title": "Precheck: validate canonical_hash format (sha256: + 64 hex) and non-empty for production bundles",
+          "severity": "medium",
+          "source": "qc-consolidated M-02 / QC3 F-003",
+          "scope": "crates/nexus-sync/src/precheck.rs",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "ALIGN-USER-01",
+          "title": "Domain User: use typed enums or fallible wire conversion; remove unwrap/FromStr panic paths",
+          "severity": "medium",
+          "source": "qc-consolidated M-03 / QC1 R1-M3",
+          "scope": "crates/nexus-domain/src/user.rs",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "ALIGN-CTX-01",
+          "title": "Sync push: validate workspace_id/world_id/creator_id against daemon workspace binding where available",
+          "severity": "medium",
+          "source": "qc-consolidated M-04 / QC2 R-03",
+          "scope": "crates/nexus42d/src/api/handlers/sync.rs",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "ALIGN-NPM-01",
+          "title": "npm @42ch/nexus-contracts version / SemVer policy vs TD-4 TS union narrowing",
+          "severity": "medium",
+          "source": "qc-consolidated M-05 / QC2 R-05",
+          "scope": "packages/nexus-contracts/package.json, release process",
+          "decision": "open",
+          "owner": "@project-manager",
+          "target": "Before next npm publish"
+        },
+        {
+          "id": "ALIGN-BLD-01",
+          "title": "BundleBuilder::build_validated: propagate SyncError instead of expect after validate()",
+          "severity": "medium",
+          "source": "qc-consolidated M-06 / QC3 F-006",
+          "scope": "crates/nexus-sync/src/delta_bundle.rs",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "ALIGN-DOC-01",
+          "title": "Document enum_conversions.rs dual-maintenance rule; clarify sync pull scope in plan checklist",
+          "severity": "low",
+          "source": "qc-consolidated L-01",
+          "scope": "AGENTS.md or contracts README, plan markdown",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
+        },
+        {
+          "id": "ALIGN-CLI-01",
+          "title": "CLI sync push: surface misconfiguration when default workspace/world/creator IDs are used",
+          "severity": "nit",
+          "source": "qc-consolidated R-07 / QC1 R1-N2",
+          "scope": "crates/nexus42/src/commands/sync.rs",
+          "decision": "open",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+"
         }
       ]
     }

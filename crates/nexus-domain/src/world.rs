@@ -8,6 +8,7 @@ use crate::errors::DomainError;
 use crate::fork_branch::ForkBranch;
 use nexus_contracts::{TimePolicy, Visibility};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// World status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 pub enum WorldStatus {
     Active,
     Archived,
-    Frozen,
+    Paused,
 }
 
 impl WorldStatus {
@@ -23,7 +24,7 @@ impl WorldStatus {
         match self {
             Self::Active => "active",
             Self::Archived => "archived",
-            Self::Frozen => "frozen",
+            Self::Paused => "paused",
         }
     }
 }
@@ -152,7 +153,7 @@ impl From<nexus_contracts::World> for World {
             owner_creator_id: c.owner_creator_id,
             title: c.title,
             slug: c.slug,
-            status: c.status,
+            status: c.status.as_str().to_string(),
             visibility: c.visibility,
             time_policy: c.time_policy,
             canon_revision: c.canon_revision,
@@ -174,7 +175,7 @@ impl From<World> for nexus_contracts::World {
             owner_creator_id: d.owner_creator_id,
             title: d.title,
             slug: d.slug,
-            status: d.status,
+            status: nexus_contracts::WorldStatus::from_str(&d.status).unwrap(),
             visibility: d.visibility,
             time_policy: d.time_policy,
             canon_revision: d.canon_revision,

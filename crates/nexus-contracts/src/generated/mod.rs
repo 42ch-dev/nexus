@@ -22,6 +22,7 @@ pub mod reference_source;
 pub mod story_manifest;
 pub mod sync_command;
 pub mod timeline_event;
+pub mod user;
 pub mod workspace_binding;
 pub mod world_membership;
 pub mod world;
@@ -48,6 +49,7 @@ pub use reference_source::*;
 pub use story_manifest::*;
 pub use sync_command::*;
 pub use timeline_event::*;
+pub use user::*;
 pub use workspace_binding::*;
 pub use world_membership::*;
 pub use world::*;
@@ -73,6 +75,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("StoryManifest", 1),
     ("SyncCommand", 1),
     ("TimelineEvent", 1),
+    ("User", 1),
     ("WorkspaceBinding", 1),
     ("WorldMembership", 1),
     ("World", 1),

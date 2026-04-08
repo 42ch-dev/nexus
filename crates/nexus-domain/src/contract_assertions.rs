@@ -13,6 +13,7 @@ use crate::reference_source::*;
 use crate::source_anchor::*;
 use crate::story_manifest::*;
 use crate::timeline_event::*;
+use crate::user::User;
 use crate::world::*;
 use crate::world_membership::*;
 use crate::{BlockType, MemoryType, TimePolicy, Visibility};
@@ -200,7 +201,10 @@ fn test_keyblock_domain_contract_roundtrip() {
     let domain_kb = KeyBlock::new("wld_test", BlockType::Event, "Test Event");
     let contract_kb: nexus_contracts::KeyBlock = nexus_contracts::KeyBlock::from(domain_kb);
     assert_eq!(contract_kb.block_type, nexus_contracts::BlockType::Event);
-    assert_eq!(contract_kb.status, "provisional");
+    assert_eq!(
+        contract_kb.status,
+        nexus_contracts::KeyBlockStatus::Provisional
+    );
     assert!(contract_kb.key_block_id.starts_with("kb_"));
 }
 
@@ -208,8 +212,14 @@ fn test_keyblock_domain_contract_roundtrip() {
 fn test_creator_domain_contract_roundtrip() {
     let domain_creator = Creator::register("ctr_test", "Test", RegistrationSource::Cli, false);
     let contract_creator: nexus_contracts::Creator = nexus_contracts::Creator::from(domain_creator);
-    assert_eq!(contract_creator.registration_source, "cli");
-    assert_eq!(contract_creator.status, "active");
+    assert_eq!(
+        contract_creator.registration_source,
+        nexus_contracts::RegistrationSource::Cli
+    );
+    assert_eq!(
+        contract_creator.status,
+        nexus_contracts::CreatorStatus::Active
+    );
 }
 
 #[test]
@@ -225,8 +235,14 @@ fn test_memory_item_domain_contract_roundtrip() {
 fn test_fork_branch_domain_contract_roundtrip() {
     let domain_fb = ForkBranch::fork_from("wld_child", "wld_parent", "fbk_root", "evt_1", "ctr_1");
     let contract_fb: nexus_contracts::ForkBranch = nexus_contracts::ForkBranch::from(domain_fb);
-    assert_eq!(contract_fb.status, "active");
-    assert_eq!(contract_fb.verification_status, "unverified");
+    assert_eq!(
+        contract_fb.status,
+        nexus_contracts::ForkBranchStatus::Active
+    );
+    assert_eq!(
+        contract_fb.verification_status,
+        nexus_contracts::VerificationStatus::Unverified
+    );
 }
 
 #[test]
@@ -278,6 +294,9 @@ fn test_all_aggregates_have_schema_version_1() {
 
     let ms = ManuscriptState::new("wrk_test", "wld_test", "ctr_test");
     assert_eq!(ms.schema_version, 1);
+
+    let u = User::register("usr_test", "u_test", "u@example.com", "U Test");
+    assert_eq!(u.schema_version, 1);
 }
 
 #[test]
@@ -297,7 +316,7 @@ fn test_world_domain_contract_roundtrip() {
     assert_eq!(contract_world.owner_creator_id, "ctr_owner");
     assert_eq!(contract_world.title, "Roundtrip World");
     assert_eq!(contract_world.slug, "roundtrip-world");
-    assert_eq!(contract_world.status, "active");
+    assert_eq!(contract_world.status, nexus_contracts::WorldStatus::Active);
     assert_eq!(
         contract_world.visibility,
         nexus_contracts::Visibility::Private
@@ -333,8 +352,14 @@ fn test_world_membership_domain_contract_roundtrip() {
         nexus_contracts::WorldMembership::from(domain_membership.clone());
     assert_eq!(contract_membership.world_id, "wld_roundtrip");
     assert_eq!(contract_membership.creator_id, "ctr_owner");
-    assert_eq!(contract_membership.role, "owner");
-    assert_eq!(contract_membership.membership_status, "active");
+    assert_eq!(
+        contract_membership.role,
+        nexus_contracts::MembershipRole::Owner
+    );
+    assert_eq!(
+        contract_membership.membership_status,
+        nexus_contracts::MembershipStatus::Active
+    );
     assert_eq!(contract_membership.schema_version, 1);
     assert!(contract_membership.permissions.is_some());
 
@@ -355,4 +380,27 @@ fn test_world_membership_domain_contract_roundtrip() {
     // NOTE: MembershipRole enum values are now aligned with v1-spec §5.4, §7.
     // Both schema and domain use: Owner, Maintainer, Collaborator, OfficialCreator.
     // This alignment was completed in DM-R5 resolution.
+}
+
+#[test]
+fn test_user_domain_contract_roundtrip() {
+    let domain_user = User::register("usr_roundtrip", "roundy", "r@example.com", "Round Trip");
+
+    let contract_user: nexus_contracts::User = nexus_contracts::User::from(domain_user.clone());
+    assert_eq!(contract_user.user_id, "usr_roundtrip");
+    assert_eq!(contract_user.username, "roundy");
+    assert_eq!(
+        contract_user.account_status,
+        nexus_contracts::AccountStatus::Active
+    );
+    assert_eq!(
+        contract_user.subscription_tier,
+        nexus_contracts::SubscriptionTier::Free
+    );
+    assert_eq!(contract_user.schema_version, 1);
+
+    let roundtrip: User = User::from(contract_user);
+    assert_eq!(roundtrip.user_id, domain_user.user_id);
+    assert_eq!(roundtrip.username, domain_user.username);
+    assert_eq!(roundtrip.account_status, domain_user.account_status);
 }

@@ -22,13 +22,11 @@
       "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId"
     },
     "pairing_source": {
-      "type": "string",
-      "enum": ["auto_cli", "manual_web", "platform_auto"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/PairingSource",
       "description": "How the pairing was established"
     },
     "status": {
-      "type": "string",
-      "enum": ["active", "revoked"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/PairingStatus",
       "description": "Pairing status"
     },
     "created_at": {

@@ -6,6 +6,7 @@
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Timeline event type enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -243,8 +244,8 @@ impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
             timeline_event_id: c.timeline_event_id,
             world_id: c.world_id,
             branch_id: c.branch_id,
-            event_type: c.event_type,
-            status: c.status,
+            event_type: c.event_type.as_str().to_string(),
+            status: c.status.as_str().to_string(),
             sequence_no: c.sequence_no,
             title: c.title,
             summary: c.summary,
@@ -263,8 +264,8 @@ impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
             timeline_event_id: d.timeline_event_id,
             world_id: d.world_id,
             branch_id: d.branch_id,
-            event_type: d.event_type,
-            status: d.status,
+            event_type: nexus_contracts::TimelineEventType::from_str(&d.event_type).unwrap(),
+            status: nexus_contracts::TimelineEventStatus::from_str(&d.status).unwrap(),
             sequence_no: d.sequence_no,
             title: d.title,
             summary: d.summary,

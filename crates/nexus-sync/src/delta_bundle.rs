@@ -15,7 +15,7 @@
 //! required for context-assembly summary payloads.
 
 use nexus_contracts::generated::{Bundle, Delta, SourceAnchor};
-use nexus_contracts::{BundleType, ManuscriptPhase};
+use nexus_contracts::{BundleType, DeltaOperation, DeltaType, ManuscriptPhase};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -39,7 +39,10 @@ pub enum BundleValidationError {
     DuplicateDeltaTargetId(String),
 }
 
-/// Delta operation within a bundle.
+/// Delta operation within a bundle (builder helper).
+///
+/// Uses contract enum types directly. The `source_anchor` field uses `Value`
+/// for builder convenience, converted to `SourceAnchor` when constructing `Delta`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalDelta {
     /// Target aggregate type for this delta.
@@ -54,59 +57,11 @@ pub struct LocalDelta {
     pub target_entity_id: Option<String>,
     /// Delta payload.
     pub payload: Value,
-    /// Optional source anchor for provenance.
+    /// Optional source anchor for provenance (builder helper: Value → SourceAnchor).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_anchor: Option<Value>,
     /// Local timestamp of this delta.
     pub local_timestamp: String,
-}
-
-/// Target aggregate type for a delta.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeltaType {
-    World,
-    KeyBlock,
-    TimelineEvent,
-    ForkBranch,
-    MemoryItem,
-    StoryManifest,
-}
-
-impl DeltaType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::World => "world",
-            Self::KeyBlock => "key_block",
-            Self::TimelineEvent => "timeline_event",
-            Self::ForkBranch => "fork_branch",
-            Self::MemoryItem => "memory_item",
-            Self::StoryManifest => "story_manifest",
-        }
-    }
-}
-
-/// Operation to apply for a delta.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeltaOperation {
-    Create,
-    Update,
-    Upsert,
-    Delete,
-    Append,
-}
-
-impl DeltaOperation {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Create => "create",
-            Self::Update => "update",
-            Self::Upsert => "upsert",
-            Self::Delete => "delete",
-            Self::Append => "append",
-        }
-    }
 }
 
 /// Bundle builder with fluent API.
@@ -345,8 +300,8 @@ impl BundleBuilder {
                     .source_anchor
                     .and_then(|v| serde_json::from_value::<SourceAnchor>(v).ok());
                 Delta {
-                    delta_type: d.delta_type.as_str().to_string(),
-                    operation: d.operation.as_str().to_string(),
+                    delta_type: d.delta_type,
+                    operation: d.operation,
                     target_entity_type: d.target_entity_type.map(|s| s.to_string()),
                     target_entity_id: d.target_entity_id.map(|s| s.to_string()),
                     payload: d.payload,
@@ -356,8 +311,7 @@ impl BundleBuilder {
             })
             .collect();
 
-        // Compute canonical hash placeholder (V1.0: empty string; real hash TBD)
-        let canonical_hash = String::new();
+        let canonical_hash = crate::canonical_hash::canonical_hash_for_deltas(&delta_values)?;
 
         let bundle = Bundle {
             schema_version: 1,
@@ -481,8 +435,21 @@ mod tests {
 
         assert_eq!(bundle.deltas.len(), 1);
         let delta = &bundle.deltas[0];
-        assert_eq!(delta.delta_type, "story_manifest");
-        assert_eq!(delta.operation, "upsert");
+        assert_eq!(delta.delta_type, DeltaType::StoryManifest);
+        assert_eq!(delta.operation, DeltaOperation::Upsert);
+    }
+
+    #[test]
+    fn bundle_build_sets_non_empty_canonical_hash() {
+        let delta = make_test_delta();
+        let bundle = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta)
+            .build()
+            .expect("should build");
+
+        assert!(bundle.canonical_hash.starts_with("sha256:"));
+        assert_eq!(bundle.canonical_hash.len(), 71);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! @source memory.schema.json
 
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{MemoryType};
+use crate::generated::common_types::{MemoryKind, MemoryStatus, MemoryType};
 
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -25,8 +25,8 @@ pub struct Memory {
     pub world_id: String,
     pub memory_type: MemoryType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_kind: Option<String>,
-    pub status: String,
+    pub memory_kind: Option<MemoryKind>,
+    pub status: MemoryStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

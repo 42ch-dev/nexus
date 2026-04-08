@@ -24,6 +24,7 @@
 //! - [`precheck`]: Local precheck validation stage
 //! - [`errors`]: Sync error types
 
+pub mod canonical_hash;
 pub mod command;
 pub mod conflict;
 pub mod delta_bundle;

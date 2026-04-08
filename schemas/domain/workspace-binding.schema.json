@@ -31,8 +31,7 @@
       "description": "Creator ID associated with this binding"
     },
     "binding_status": {
-      "type": "string",
-      "enum": ["active", "unlinked", "stale"],
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BindingStatus",
       "description": "Current binding status"
     },
     "created_at": {

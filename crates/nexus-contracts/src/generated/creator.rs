@@ -6,6 +6,7 @@
 //! @source creator.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{CreatorStatus, RegistrationSource};
 
 /// Creator entity - a first-class creative agent that can be user-owned or agent-registered. Aligned with data-model-v1.md §5.2.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -16,12 +17,12 @@ pub struct Creator {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
     pub display_name: String,
-    pub status: String,
+    pub status: CreatorStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_platform_owned: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_ref: Option<String>,
-    pub registration_source: String,
+    pub registration_source: RegistrationSource,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persona_summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

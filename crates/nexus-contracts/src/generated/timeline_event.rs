@@ -6,6 +6,7 @@
 //! @source timeline-event.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{TimelineEventStatus, TimelineEventType};
 
 /// TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -15,8 +16,8 @@ pub struct TimelineEvent {
     pub timeline_event_id: String,
     pub world_id: String,
     pub branch_id: String,
-    pub event_type: String,
-    pub status: String,
+    pub event_type: TimelineEventType,
+    pub status: TimelineEventStatus,
     pub sequence_no: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,

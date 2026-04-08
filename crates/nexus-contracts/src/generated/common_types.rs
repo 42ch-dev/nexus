@@ -44,6 +44,25 @@ pub type SchemaVersion = u32;
 
 // ── Enums ─────────────────────────────────────────────────────────────
 
+/// User account status (data-model-v1.md §5.1)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountStatus {
+    Active,
+    Suspended,
+    Deleted,
+}
+
+/// User subscription tier (data-model-v1.md §5.1)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionTier {
+    Free,
+    Pro,
+    Studio,
+    Enterprise,
+}
+
 /// Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +122,304 @@ pub enum BundleType {
     WorldSync,
     MemorySync,
     PublishMetadata,
+}
+
+/// Creator status (data-model-v1.md §5.2)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CreatorStatus {
+    Active,
+    Archived,
+    Locked,
+}
+
+/// How creator was registered (data-model-v1.md §5.2)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistrationSource {
+    Cli,
+    WebAgent,
+    Platform,
+}
+
+/// World status (data-model-v1.md §5.3)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldStatus {
+    Active,
+    Paused,
+    Archived,
+}
+
+/// Membership role (data-model-v1.md §5.4)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MembershipRole {
+    Owner,
+    Maintainer,
+    Collaborator,
+    OfficialCreator,
+}
+
+/// Membership status (data-model-v1.md §5.4)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MembershipStatus {
+    Active,
+    Invited,
+    Suspended,
+    Removed,
+}
+
+/// How pairing was established (data-model-v1.md §5.2A)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingSource {
+    AutoCli,
+    ManualWeb,
+    PlatformAuto,
+}
+
+/// Pairing status (data-model-v1.md §5.2A)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingStatus {
+    Active,
+    Revoked,
+}
+
+/// KeyBlock status (data-model-v1.md §5.5)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyBlockStatus {
+    Provisional,
+    Confirmed,
+    Deprecated,
+    Merged,
+    Deleted,
+}
+
+/// Timeline event type (data-model-v1.md §5.6)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineEventType {
+    StoryAdvance,
+    StateUpdate,
+    ForkMarker,
+    OfficialProgression,
+    PublishMarker,
+}
+
+/// Timeline event status (data-model-v1.md §5.6)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineEventStatus {
+    Canon,
+    Provisional,
+    Rejected,
+}
+
+/// Fork branch status (data-model-v1.md §5.7)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkBranchStatus {
+    Active,
+    Archived,
+}
+
+/// Fork branch verification status (data-model-v1.md §5.7)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationStatus {
+    Unverified,
+    Requested,
+    Verified,
+    Rejected,
+}
+
+/// Memory content kind (data-model-v1.md §5.8, ADR-001)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryKind {
+    StorySummary,
+    ResearchMaterial,
+    ReviewNote,
+    CharacterNote,
+    WorldBuilding,
+    PlotOutline,
+    ThemeAnalysis,
+    Custom,
+}
+
+/// Memory status (data-model-v1.md §5.8)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryStatus {
+    Active,
+    Superseded,
+    Archived,
+}
+
+/// Story manifest type (data-model-v1.md §5.9)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestType {
+    Chapter,
+    Arc,
+    Story,
+    Excerpt,
+}
+
+/// Story manifest status (data-model-v1.md §5.9)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StoryManifestStatus {
+    SummaryReady,
+    StagedForPublish,
+    Published,
+    Archived,
+}
+
+/// Manuscript storage location (data-model-v1.md §5.9)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ManuscriptStorage {
+    None,
+    LocalWorkspace,
+    PlatformSandbox,
+}
+
+/// Reference source type (data-model-v1.md §5.9A)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceSourceType {
+    File,
+    Pdf,
+    Url,
+    Note,
+}
+
+/// Reference scan status (data-model-v1.md §5.9A)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanStatus {
+    Pending,
+    Scanned,
+    Failed,
+    Ignored,
+}
+
+/// Sync command type (data-model-v1.md §5.10)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandType {
+    AdvanceWorld,
+    InjectFutureEvent,
+    ExtractKb,
+    SyncPush,
+    SyncPull,
+    ForkWorld,
+    PublishStory,
+}
+
+/// Command origin (data-model-v1.md §5.10)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandOrigin {
+    LocalUser,
+    LocalAgent,
+    OfficialCreator,
+    System,
+}
+
+/// Command execution status (data-model-v1.md §5.10)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+/// Delta target aggregate type (data-model-v1.md §5.12)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeltaType {
+    World,
+    KeyBlock,
+    TimelineEvent,
+    ForkBranch,
+    MemoryItem,
+    StoryManifest,
+}
+
+/// Delta operation (data-model-v1.md §5.12)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeltaOperation {
+    Create,
+    Update,
+    Upsert,
+    Delete,
+    Append,
+}
+
+/// Outbox delivery state (data-model-v1.md §5.13)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryState {
+    Staged,
+    Ready,
+    Sent,
+    Acked,
+    Conflicted,
+    Failed,
+}
+
+/// Workspace binding status (data-model-v1.md §5.14)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BindingStatus {
+    Active,
+    Unlinked,
+    Stale,
+}
+
+/// Agent profile kind (data-model-v1.md §5.15)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileKind {
+    LocalAgent,
+    PlatformHosted,
+}
+
+/// Agent selection mode (data-model-v1.md §5.15)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionMode {
+    Registry,
+    ManualCommand,
+    ManualRemote,
+}
+
+/// Agent transport method (data-model-v1.md §5.15)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    Stdio,
+    Http,
+    Websocket,
+}
+
+/// Agent profile status (data-model-v1.md §5.15)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentProfileStatus {
+    Active,
+    Unavailable,
+    Deprecated,
 }
 
 // ── SourceAnchor (from source-anchor.schema.json) ─────────────────────

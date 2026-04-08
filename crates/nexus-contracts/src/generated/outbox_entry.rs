@@ -6,6 +6,7 @@
 //! @source outbox-entry.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{DeliveryState};
 
 /// OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -15,7 +16,7 @@ pub struct OutboxEntry {
     pub outbox_entry_id: String,
     pub bundle_id: String,
     pub idempotency_key: String,
-    pub delivery_state: String,
+    pub delivery_state: DeliveryState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
