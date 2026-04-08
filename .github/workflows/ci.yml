@@ -117,6 +117,67 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+  schema-drift-check:
+    name: Schema Drift Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check SCHEMA_VERSION consistency (CLI vs daemon)
+        run: |
+          echo "Checking SCHEMA_VERSION consistency across CLI and daemon..."
+          CLI_VERSION=$(grep -oP 'pub const SCHEMA_VERSION: &str = "\K[^"]+' crates/nexus42/src/db/mod.rs)
+          DAEMON_VERSION=$(grep -oP 'pub const SCHEMA_VERSION: &str = "\K[^"]+' crates/nexus42d/src/db/schema.rs)
+          echo "CLI SCHEMA_VERSION:    $CLI_VERSION"
+          echo "Daemon SCHEMA_VERSION: $DAEMON_VERSION"
+          if [ "$CLI_VERSION" != "$DAEMON_VERSION" ]; then
+            echo "❌ SCHEMA_VERSION mismatch: CLI=$CLI_VERSION, Daemon=$DAEMON_VERSION"
+            exit 1
+          fi
+          echo "✅ SCHEMA_VERSION values match"
+      - name: Check reference_sources table schema consistency
+        run: |
+          echo "Checking reference_sources table definitions across CLI and daemon..."
+          # Extract column names from each definition (strip SQL comments and whitespace)
+          CLI_COLS=$(sed -n '/CREATE TABLE IF NOT EXISTS reference_sources/,/);/p' crates/nexus42/src/db/mod.rs \
+            | grep -v '^//' \
+            | grep -oP '^\s+\K\w+' \
+            | sort \
+            | tr '\n' ' ')
+          DAEMON_COLS=$(sed -n '/CREATE TABLE IF NOT EXISTS reference_sources/,/);/p' crates/nexus42d/src/db/schema.rs \
+            | grep -v '^//' \
+            | grep -oP '^\s+\K\w+' \
+            | sort \
+            | tr '\n' ' ')
+          echo "CLI reference_sources columns:    $CLI_COLS"
+          echo "Daemon reference_sources columns: $DAEMON_COLS"
+          # Check that the core columns (not daemon-only additions like content) are present in both
+          # CLI has content via ALTER TABLE migration, daemon does NOT have content column
+          # So we check that key columns overlap
+          for col in reference_source_id workspace_id source_type uri title content_hash scan_status created_at updated_at; do
+            if ! echo "$CLI_COLS" | grep -qw "$col"; then
+              echo "❌ CLI reference_sources missing expected column: $col"
+              exit 1
+            fi
+            if ! echo "$DAEMON_COLS" | grep -qw "$col"; then
+              echo "❌ Daemon reference_sources missing expected column: $col"
+              exit 1
+            fi
+          done
+          echo "✅ reference_sources key columns match (both have: reference_source_id, workspace_id, source_type, uri, title, content_hash, scan_status, created_at, updated_at)"
+      - name: Check LATEST_SCHEMA_VERSION in generated contracts
+        run: |
+          echo "Checking LATEST_SCHEMA_VERSION in generated contracts..."
+          CONTRACTS_VERSION=$(grep -oP 'pub const LATEST_SCHEMA_VERSION: u32 = \K\d+' crates/nexus-contracts/src/generated/mod.rs)
+          echo "Generated LATEST_SCHEMA_VERSION: $CONTRACTS_VERSION"
+          CLI_VERSION=$(grep -oP 'pub const SCHEMA_VERSION: &str = "\K[^"]+' crates/nexus42/src/db/mod.rs)
+          echo "CLI SCHEMA_VERSION: $CLI_VERSION"
+          # CLI/daemon use string "1", contracts use u32 1 — they should match numerically
+          if [ "$CONTRACTS_VERSION" != "$CLI_VERSION" ]; then
+            echo "❌ LATEST_SCHEMA_VERSION ($CONTRACTS_VERSION) does not match CLI SCHEMA_VERSION ($CLI_VERSION)"
+            exit 1
+          fi
+          echo "✅ Schema versions are consistent"
+
   rust-tests:
     name: Rust tests
     runs-on: ubuntu-latest

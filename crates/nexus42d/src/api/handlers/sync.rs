@@ -112,17 +112,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_status_empty_outbox() {
+        use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (_tmp, nexus_home, db_path) = create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
 
         let result = status(State(state)).await;
@@ -136,17 +129,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_status_with_pending_bundles() {
+        use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
+        let (_tmp, nexus_home, db_path) = create_test_workspace();
 
         // Insert pending outbox entries
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute(
             "INSERT INTO outbox (command_type, payload, status, created_at) VALUES ('sync', '{}', 'pending', '2026-04-07T00:00:00Z')",
             [],
