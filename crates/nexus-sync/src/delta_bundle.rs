@@ -311,8 +311,7 @@ impl BundleBuilder {
             })
             .collect();
 
-        // Compute canonical hash placeholder (V1.0: empty string; real hash TBD)
-        let canonical_hash = String::new();
+        let canonical_hash = crate::canonical_hash::canonical_hash_for_deltas(&delta_values)?;
 
         let bundle = Bundle {
             schema_version: 1,
@@ -438,6 +437,19 @@ mod tests {
         let delta = &bundle.deltas[0];
         assert_eq!(delta.delta_type, DeltaType::StoryManifest);
         assert_eq!(delta.operation, DeltaOperation::Upsert);
+    }
+
+    #[test]
+    fn bundle_build_sets_non_empty_canonical_hash() {
+        let delta = make_test_delta();
+        let bundle = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta)
+            .build()
+            .expect("should build");
+
+        assert!(bundle.canonical_hash.starts_with("sha256:"));
+        assert_eq!(bundle.canonical_hash.len(), 71);
     }
 
     #[test]

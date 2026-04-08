@@ -13,6 +13,7 @@ use crate::reference_source::*;
 use crate::source_anchor::*;
 use crate::story_manifest::*;
 use crate::timeline_event::*;
+use crate::user::User;
 use crate::world::*;
 use crate::world_membership::*;
 use crate::{BlockType, MemoryType, TimePolicy, Visibility};
@@ -293,6 +294,9 @@ fn test_all_aggregates_have_schema_version_1() {
 
     let ms = ManuscriptState::new("wrk_test", "wld_test", "ctr_test");
     assert_eq!(ms.schema_version, 1);
+
+    let u = User::register("usr_test", "u_test", "u@example.com", "U Test");
+    assert_eq!(u.schema_version, 1);
 }
 
 #[test]
@@ -376,4 +380,27 @@ fn test_world_membership_domain_contract_roundtrip() {
     // NOTE: MembershipRole enum values are now aligned with v1-spec §5.4, §7.
     // Both schema and domain use: Owner, Maintainer, Collaborator, OfficialCreator.
     // This alignment was completed in DM-R5 resolution.
+}
+
+#[test]
+fn test_user_domain_contract_roundtrip() {
+    let domain_user = User::register("usr_roundtrip", "roundy", "r@example.com", "Round Trip");
+
+    let contract_user: nexus_contracts::User = nexus_contracts::User::from(domain_user.clone());
+    assert_eq!(contract_user.user_id, "usr_roundtrip");
+    assert_eq!(contract_user.username, "roundy");
+    assert_eq!(
+        contract_user.account_status,
+        nexus_contracts::AccountStatus::Active
+    );
+    assert_eq!(
+        contract_user.subscription_tier,
+        nexus_contracts::SubscriptionTier::Free
+    );
+    assert_eq!(contract_user.schema_version, 1);
+
+    let roundtrip: User = User::from(contract_user);
+    assert_eq!(roundtrip.user_id, domain_user.user_id);
+    assert_eq!(roundtrip.username, domain_user.username);
+    assert_eq!(roundtrip.account_status, domain_user.account_status);
 }

@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source delta.schema.json
 
-use crate::generated::common_types::{DeltaOperation, DeltaType, SourceAnchor};
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{DeltaOperation, DeltaType, SourceAnchor};
 
 /// Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
