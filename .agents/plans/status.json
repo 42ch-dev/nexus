@@ -160,35 +160,34 @@
     },
     {
       "id": "2026-04-09-v1.1-tech-debt-cleanup-2",
-      "title": "V1.2 Tech Debt Cleanup - Batch A",
+      "title": "V1.2 Tech Debt Cleanup (Long-term)",
       "file": ".agents/plans/2026-04-09-v1.1-tech-debt-cleanup-2.md",
-      "status": "InReview",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 90,
+      "progress": 15,
       "tags": [
         "v1.1",
         "tech-debt",
         "quality",
-        "batch-a"
+        "long-term"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-08",
-      "notes": "Batch A: 3 critical residuals (CTX-R4 + SYNC-R10 + SYNC-R13) resolved. CTX-R4 was already implemented; SYNC-R10 migration docs added to outbox.rs; SYNC-R13 auto-reject confirmation prompt added with --force flag. Remaining 28 residuals deferred to V1.1+ milestone.",
+      "updated_at": "2026-04-09",
+      "notes": "Batch A (3/31) completed: CTX-R4 + SYNC-R10 + SYNC-R13 resolved. Remaining 28 residuals tracked in residual_findings for Batch B/C. Plan remains InProgress as long-term tech-debt cleanup.",
       "metadata": {
-        "phase": "Batch A (Immediate)",
-        "priority": "high",
-        "description": "Fix 3 critical residuals blocking Phase 2 progression: CTX-R4 (WorldId validation), SYNC-R10 (schema migration), SYNC-R13 (auto-reject safety).",
-        "residual_target": "3 of 31 open residuals (Batch A: CTX-R4 + SYNC-R10 + SYNC-R13)",
-        "effort": "S — ~2-3 agent sessions",
-        "scope": "Plan tasks: Task 1 (CTX-R4), Task 7 (SYNC-R10), Task 8 (SYNC-R13)",
-        "tasks": [
-          "Task 1: CTX-R4 — WorldId format validation",
-          "Task 7: SYNC-R10 — Outbox schema migration documentation",
-          "Task 8: SYNC-R13 — AutoReject confirmation prompt"
-        ],
+        "phase": "Batch A completed; Batch B/C pending",
+        "priority": "medium",
+        "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (31 total). Batch A (3 critical) completed on 2026-04-09. Batch B (3 medium) and Batch C (25 low) deferred to V1.1+ milestone.",
+        "residual_target": "31 residuals (3 completed in Batch A, 28 remaining)",
+        "effort": "L — ongoing across multiple milestones (Batch A: S, Batch B: M, Batch C: M)",
+        "batch_status": {
+          "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
+          "batch_b": "pending (3 medium: CLI-R15, FH-R2, FH-R4)",
+          "batch_c": "pending (25 low: remaining residuals)"
+        },
         "gates": {
           "tests": "passed",
           "clippy": "passed",
