@@ -44,6 +44,7 @@ tooling/
   codegen/              # Schema → TS + Rust pipeline
 docs/                   # User & contributor docs (installation, architecture, codegen, contributing)
 .agents/plans/
+  archived/             # residuals/ (closed findings); optional plans/ (Done row snapshots — see Plans & Reports)
   knowledge/            # Dev-process knowledge (architecture reviews, spec revisions, design decisions)
   reports/              # QC/QA review reports
 .github/workflows/      # CI: see `.github/workflows/ci.yml` (schemas, codegen diff, fmt, clippy, TS typecheck)
@@ -129,8 +130,9 @@ Violations break onboarding and agent handoff for anyone without your local mach
 │       ├── <plan-id>-review.md           # Architecture review
 │       ├── <plan-id>-qc<#>.md            # QC reports (parallel review)
 │       └── <plan-id>-qc-consolidated.md  # Consolidated QC decision
-├── archived/                     # Archived plans
-│   └── residuals/               # Closed residual findings (per-plan JSON archives)
+├── archived/
+│   ├── plans/                    # Optional: full plan-row snapshots at Done (see § below)
+│   └── residuals/                # Closed residual findings (per-plan JSON archives)
 └── knowledge/                    # Dev-process knowledge (indexed in knowledge/README.md)
 ```
 
@@ -212,7 +214,35 @@ jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agent
 
 Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, `status`, `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `done_at`, `notes`, and optionally **`metadata`** (object; omit or use `{}` if nothing extra). **Do not** duplicate the plan id for residuals lookup; **`plans[].id`** is the only key into `metadata.residual_findings`.
 
-**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`. Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
+**`plans[].metadata`** (optional) holds process context, for example: `branch_policy`, `phase`, `priority`, `description` **or** `scope` (use one as the long-form scope field), `working_branch`, `merge_target`, `gates`, `primary_spec` / `spec_refs` (this repo may use a spec path field such as `wave_0_spec` where plans already do), `blocked_since`, `blocked_reason`, `blocked_by_plan_id`, `dependency`, `next_action`, `qc_status`, `tests`, `commits`, `residual_summary`, and **`archived_record`** (relative path under `.agents/plans/` to a cold snapshot when using optional compaction below). Formal QC rows remain only under **file-level** `metadata.residual_findings[<plan-id>]`.
+
+### Plan row archival and `status.json` size (optional compaction)
+
+**Why:** Many `Done` rows carry large `metadata` (gates, QC strings, tests, commits, long scope text), so `.agents/plans/status.json` grows without bound. Open **`metadata.residual_findings`** should stay bounded if closed items move to `archived/residuals/` per the rules above.
+
+**SSOT:** Root `status.json` stays authoritative for **current execution** (non-terminal plans, root `metadata`, **open** residuals). The following is an **opt-in** way to keep the hot file small while preserving history in-repo (reachability: every path must exist in a fresh clone).
+
+**Cold storage (plan row snapshot at `Done`):**
+
+- **Path:** `.agents/plans/archived/plans/<plan-id>.json`
+- **Content:** Full `plans[]` element as it existed when the plan was marked `Done` (including rich `metadata`), for audit and agent handoff.
+- **Relationship to residuals:** `archived/residuals/<plan-id>.json` stores **closed finding rows**; `archived/plans/<plan-id>.json` stores the **plan row snapshot**. Do not treat the plan snapshot as a second copy of **open** `residual_findings`.
+
+**Slim `Done` row in `status.json` (after the team adopts this):**
+
+- Keep the same **canonical top-level keys**; on `Done` rows, **reduce** `metadata` to what is needed for navigation, typically:
+  - **`archived_record`**: relative path, e.g. `archived/plans/<plan-id>.json`
+  - Optional one-line **`residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
+- Omit bulky fields from the hot row once the snapshot exists (`gates`, `qc_status`, `tests`, `commits`, long `description` / `scope`); they remain in the snapshot file.
+- Keep **`notes`** short (merge outcome, branch, pointer to `reports/<plan-id>/`); do not duplicate QC prose that already lives in reports.
+
+**When to write the snapshot:** Same change set as marking the plan `Done` and completing the pre-merge `status.json` updates (or immediately after merge), once compaction is adopted.
+
+**Optional index:** `.agents/plans/archived/plans/_index.json` — map plan id → relative path for tools that do not glob.
+
+**Optional rolling retention:** To shrink `status.json` further, retain only a **window** of `Done` slim rows in `plans[]` and list older ids only in `_index.json` / snapshot files. If you do this, document it here and update any scripts that assume every historical id appears in `plans[]`.
+
+**Adoption:** Full `Done` rows without snapshots remain valid until the team opts in. Before relying on compaction, align with automation or docs that expect full `metadata` on every `Done` plan.
 
 ### Accessing Plan Information
 
@@ -234,6 +264,9 @@ jq '.metadata.tech_debt_summary' .agents/plans/status.json
 
 # View detailed QC report
 cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-consolidated.md
+
+# If optional compaction is in use: full archived plan row
+cat .agents/plans/archived/plans/2025-04-05-domain-models.json
 ```
 
 ## Development Workflow
