@@ -143,10 +143,12 @@ impl SyncClient {
             let conflict = ConflictResponse::from_json(&text)?;
             tracing::warn!(
                 conflict_type = %conflict.conflict_type,
+                retry_after = ?conflict.retry_after,
                 "Bundle push conflicted (409)"
             );
             return Err(SyncError::SyncConflict {
                 conflict_type: conflict.conflict_type.to_string(),
+                response: Some(Box::new(conflict)),
             });
         }
 
@@ -158,10 +160,12 @@ impl SyncClient {
             let conflict = ConflictResponse::from_json(&text)?;
             tracing::warn!(
                 conflict_type = %conflict.conflict_type,
+                retry_after = ?conflict.retry_after,
                 "Bundle push conflicted (success=false)"
             );
             return Err(SyncError::SyncConflict {
                 conflict_type: conflict.conflict_type.to_string(),
+                response: Some(Box::new(conflict)),
             });
         }
 

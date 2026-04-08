@@ -54,7 +54,12 @@ pub enum SyncError {
 
     /// Platform returned a conflict response.
     #[error("sync conflict: {conflict_type}")]
-    SyncConflict { conflict_type: String },
+    SyncConflict {
+        conflict_type: String,
+        /// The full parsed conflict response, if available (SYNC-R11).
+        /// Allows callers to access `retry_after` and other fields.
+        response: Option<Box<crate::conflict::ConflictResponse>>,
+    },
 
     /// Sync client is not configured (missing base URL or auth token).
     #[error("sync client not configured: {0}")]

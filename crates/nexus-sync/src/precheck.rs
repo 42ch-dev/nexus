@@ -14,6 +14,47 @@ use nexus_contracts::generated::Bundle;
 
 use crate::errors::{SyncError, SyncResult};
 
+/// Authentication context for precheck validation.
+///
+/// In multi-creator worlds, the `submitting_creator_id` in a bundle must
+/// match the authenticated creator to prevent identity spoofing (SYNC-R6).
+/// In single-creator worlds, auth validation is skipped.
+#[derive(Debug, Clone)]
+pub struct AuthContext {
+    /// The authenticated creator ID from the active session/token.
+    /// `None` means no auth context is available (single-creator or unauthenticated).
+    pub authenticated_creator_id: Option<String>,
+    /// Whether this world is multi-creator.
+    /// If `false`, auth match validation is skipped regardless of `authenticated_creator_id`.
+    pub is_multi_creator: bool,
+}
+
+impl AuthContext {
+    /// Create an auth context for a multi-creator world with an authenticated creator.
+    pub fn multi_creator(authenticated_creator_id: &str) -> Self {
+        Self {
+            authenticated_creator_id: Some(authenticated_creator_id.to_string()),
+            is_multi_creator: true,
+        }
+    }
+
+    /// Create an auth context for a single-creator world (auth validation skipped).
+    pub fn single_creator() -> Self {
+        Self {
+            authenticated_creator_id: None,
+            is_multi_creator: false,
+        }
+    }
+
+    /// Create an unauthenticated context (no auth available).
+    pub fn unauthenticated() -> Self {
+        Self {
+            authenticated_creator_id: None,
+            is_multi_creator: false,
+        }
+    }
+}
+
 /// Result of a local precheck validation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrecheckResult {
@@ -184,7 +225,7 @@ impl LocalState {
     }
 }
 
-/// Run local precheck on a bundle before upload.
+/// Run local precheck on a bundle before upload (without auth context).
 ///
 /// Validates:
 /// 1. Required fields are present
@@ -193,7 +234,30 @@ impl LocalState {
 /// 4. World revision matches local state
 /// 5. Command consistency (no conflicting delta operations)
 /// 6. Schema compliance
+///
+/// This overload skips auth match validation. Use [`precheck_bundle_with_auth`]
+/// for multi-creator worlds.
 pub fn precheck_bundle(bundle: &Bundle, local_state: &LocalState) -> PrecheckResult {
+    precheck_bundle_with_auth(bundle, local_state, &AuthContext::unauthenticated())
+}
+
+/// Run local precheck on a bundle before upload with auth context.
+///
+/// Validates:
+/// 1. Required fields are present
+/// 2. IDs have correct prefixes
+/// 3. Delta sequence is monotonic
+/// 4. World revision matches local state
+/// 5. Command consistency (no conflicting delta operations)
+/// 6. Schema compliance
+/// 7. Auth match (SYNC-R6): `submitting_creator_id` matches authenticated identity
+///
+/// In single-creator worlds or when no auth context is provided, step 7 is skipped.
+pub fn precheck_bundle_with_auth(
+    bundle: &Bundle,
+    local_state: &LocalState,
+    auth_context: &AuthContext,
+) -> PrecheckResult {
     let mut report = PrecheckReport::new();
 
     // 1. Check required string fields are non-empty
@@ -213,6 +277,9 @@ pub fn precheck_bundle(bundle: &Bundle, local_state: &LocalState) -> PrecheckRes
 
     // 6. Check schema compliance
     check_schema_compliance(bundle, &mut report);
+
+    // 7. Check auth match (SYNC-R6)
+    check_auth_match(bundle, auth_context, &mut report);
 
     if report.has_errors() {
         tracing::warn!(
@@ -446,6 +513,48 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
         report.add_issue(PrecheckIssue::warning(
             "base_versions is empty (optimistic concurrency baseline missing)",
         ));
+    }
+}
+
+/// Check that `submitting_creator_id` matches the authenticated creator (SYNC-R6).
+///
+/// In multi-creator worlds, this prevents identity spoofing — a malicious actor
+/// cannot submit bundles claiming to be another creator.
+///
+/// In single-creator worlds or when no auth context is available, this check is skipped.
+fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut PrecheckReport) {
+    // Skip validation if not multi-creator
+    if !auth_context.is_multi_creator {
+        return;
+    }
+
+    // Skip validation if no authenticated creator ID (unauthenticated session)
+    let authenticated_id = match &auth_context.authenticated_creator_id {
+        Some(id) => id,
+        None => {
+            // In multi-creator world without auth, that's a configuration issue
+            report.add_issue(PrecheckIssue::error_with_hint(
+                "multi-creator world requires authentication, but no auth context provided",
+                "Ensure the daemon has a valid auth token for the authenticated creator",
+            ));
+            return;
+        }
+    };
+
+    if bundle.submitting_creator_id != *authenticated_id {
+        report.add_issue(PrecheckIssue::error_with_hint(
+            &format!(
+                "submitting_creator_id '{}' does not match authenticated creator '{}'",
+                bundle.submitting_creator_id, authenticated_id
+            ),
+            "Ensure the bundle's submitting_creator_id matches the authenticated session",
+        ));
+        tracing::warn!(
+            bundle_id = %bundle.bundle_id,
+            submitting_creator_id = %bundle.submitting_creator_id,
+            authenticated_creator_id = %authenticated_id,
+            "Auth match validation failed (potential spoofing attempt)"
+        );
     }
 }
 
@@ -683,5 +792,111 @@ mod tests {
         assert_eq!(state.world_revision, 5);
         assert_eq!(state.last_confirmed_delta_sequence, Some(10));
         assert_eq!(state.timeline_head_id, Some("evt_123".to_string()));
+    }
+
+    // ── Auth match validation tests (SYNC-R6) ──────────────────
+
+    #[test]
+    fn precheck_auth_match_valid() {
+        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+        let auth = AuthContext::multi_creator("ctr_test");
+
+        let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+        assert_eq!(result, PrecheckResult::Valid);
+    }
+
+    #[test]
+    fn precheck_auth_match_mismatch_rejects() {
+        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+        let auth = AuthContext::multi_creator("ctr_other");
+
+        let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+        assert!(matches!(result, PrecheckResult::Invalid(_)));
+        if let PrecheckResult::Invalid(report) = result {
+            assert!(report.has_errors());
+            assert!(report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("does not match authenticated creator")));
+        }
+    }
+
+    #[test]
+    fn precheck_auth_match_single_creator_skips() {
+        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+        let auth = AuthContext::single_creator();
+
+        // Single-creator world should skip auth validation even though
+        // there's no authenticated creator
+        let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+        assert_eq!(result, PrecheckResult::Valid);
+    }
+
+    #[test]
+    fn precheck_auth_match_no_auth_in_multi_creator_rejects() {
+        let bundle = valid_bundle();
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+        let auth = AuthContext::unauthenticated(); // no auth, is_multi_creator=false
+
+        // unauthenticated() has is_multi_creator=false, so it skips
+        let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+        assert_eq!(result, PrecheckResult::Valid);
+    }
+
+    #[test]
+    fn precheck_auth_multi_creator_without_auth_context_rejects() {
+        let bundle = valid_bundle();
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+        // Multi-creator world but no authenticated creator ID
+        let auth = AuthContext {
+            authenticated_creator_id: None,
+            is_multi_creator: true,
+        };
+
+        let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+        assert!(matches!(result, PrecheckResult::Invalid(_)));
+        if let PrecheckResult::Invalid(report) = result {
+            assert!(report.has_errors());
+            assert!(report.issues.iter().any(|i| i
+                .message
+                .contains("multi-creator world requires authentication")));
+        }
+    }
+
+    #[test]
+    fn precheck_without_auth_always_passes_auth_check() {
+        // Legacy precheck_bundle (no auth) should always pass regardless of
+        // submitting_creator_id
+        let bundle = valid_bundle();
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+
+        let result = precheck_bundle(&bundle, &local_state);
+        assert_eq!(result, PrecheckResult::Valid);
+    }
+
+    #[test]
+    fn precheck_auth_match_error_supersedes_other_errors() {
+        let mut bundle = valid_bundle();
+        bundle.bundle_id = String::new(); // Also an error
+        let local_state = LocalState::new(5).with_delta_sequence(10);
+        let auth = AuthContext::multi_creator("ctr_other");
+
+        let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
+        assert!(matches!(result, PrecheckResult::Invalid(_)));
+        if let PrecheckResult::Invalid(report) = result {
+            assert!(report.has_errors());
+            // Should have both bundle_id error and auth mismatch
+            assert!(report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("bundle_id")));
+            assert!(report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("does not match authenticated creator")));
+        }
     }
 }

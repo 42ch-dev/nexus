@@ -21,6 +21,9 @@ pub struct ManuscriptMetadata {
     /// Schema version
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
+    /// Content hash for integrity verification (V1.1 CLI-R7)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
 }
 
 fn default_phase() -> String {
@@ -42,6 +45,7 @@ impl ManuscriptMetadata {
             created_at: now.clone(),
             updated_at: now,
             schema_version: 1,
+            content_hash: None,
         }
     }
 }

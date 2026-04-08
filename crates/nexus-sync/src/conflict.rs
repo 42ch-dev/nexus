@@ -217,6 +217,9 @@ impl ConflictResponse {
         if let Some(seq) = self.server_delta_sequence {
             lines.push(format!("Server delta sequence: {seq}"));
         }
+        if let Some(retry) = self.retry_after {
+            lines.push(format!("Retry after: {retry}s"));
+        }
         lines.push(String::new());
 
         for (i, detail) in self.conflicts.iter().enumerate() {
@@ -230,6 +233,18 @@ impl ConflictResponse {
         }
 
         lines.join("\n")
+    }
+
+    /// Convert this conflict's `retry_after` field to a [`crate::outbox::RetryAfterPolicy`].
+    ///
+    /// Returns `RetryAfterPolicy::AfterSeconds` if `retry_after` is set, or
+    /// `RetryAfterPolicy::None` otherwise. The caller is responsible for storing
+    /// this in the outbox entry (SYNC-R11).
+    pub fn retry_after_policy(&self) -> crate::outbox::RetryAfterPolicy {
+        match self.retry_after {
+            Some(secs) if secs > 0 => crate::outbox::RetryAfterPolicy::AfterSeconds(secs),
+            _ => crate::outbox::RetryAfterPolicy::None,
+        }
     }
 }
 
@@ -523,5 +538,123 @@ mod tests {
         let json = serde_json::to_string(&detail).expect("serialize");
         let recovered: ConflictDetail = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(detail, recovered);
+    }
+
+    // ── retry_after tests (SYNC-R11) ────────────────────────────
+
+    #[test]
+    fn conflict_response_parse_retry_after() {
+        let json = r#"{
+            "success": false,
+            "conflict_type": "version_mismatch",
+            "conflicts": [
+                {
+                    "code": "rate_limited",
+                    "message": "Too many requests",
+                    "resolution_hint": "auto_accept"
+                }
+            ],
+            "server_world_revision": 5,
+            "retry_after": 120
+        }"#;
+
+        let response = ConflictResponse::from_json(json).expect("parse");
+        assert_eq!(response.retry_after, Some(120));
+    }
+
+    #[test]
+    fn conflict_response_retry_after_null() {
+        let json = r#"{
+            "success": false,
+            "conflict_type": "version_mismatch",
+            "conflicts": [],
+            "server_world_revision": 5,
+            "retry_after": null
+        }"#;
+
+        let response = ConflictResponse::from_json(json).expect("parse");
+        assert!(response.retry_after.is_none());
+    }
+
+    #[test]
+    fn conflict_response_retry_after_missing() {
+        let json = r#"{
+            "success": false,
+            "conflict_type": "version_mismatch",
+            "conflicts": [],
+            "server_world_revision": 5
+        }"#;
+
+        let response = ConflictResponse::from_json(json).expect("parse");
+        assert!(response.retry_after.is_none());
+    }
+
+    #[test]
+    fn conflict_response_retry_after_policy() {
+        let response = ConflictResponse {
+            success: false,
+            conflict_type: ConflictType::VersionMismatch,
+            conflicts: vec![],
+            server_world_revision: 5,
+            server_delta_sequence: None,
+            retry_after: Some(60),
+        };
+
+        let policy = response.retry_after_policy();
+        assert!(matches!(
+            policy,
+            crate::outbox::RetryAfterPolicy::AfterSeconds(60)
+        ));
+    }
+
+    #[test]
+    fn conflict_response_retry_after_policy_none() {
+        let response = ConflictResponse {
+            success: false,
+            conflict_type: ConflictType::VersionMismatch,
+            conflicts: vec![],
+            server_world_revision: 5,
+            server_delta_sequence: None,
+            retry_after: None,
+        };
+
+        let policy = response.retry_after_policy();
+        assert!(matches!(policy, crate::outbox::RetryAfterPolicy::None));
+    }
+
+    #[test]
+    fn conflict_response_retry_after_zero_is_none() {
+        let response = ConflictResponse {
+            success: false,
+            conflict_type: ConflictType::VersionMismatch,
+            conflicts: vec![],
+            server_world_revision: 5,
+            server_delta_sequence: None,
+            retry_after: Some(0),
+        };
+
+        let policy = response.retry_after_policy();
+        assert!(matches!(policy, crate::outbox::RetryAfterPolicy::None));
+    }
+
+    #[test]
+    fn conflict_summary_includes_retry_after() {
+        let json = r#"{
+            "success": false,
+            "conflict_type": "sequence_conflict",
+            "conflicts": [
+                {
+                    "code": "gap",
+                    "message": "Delta sequence gap detected"
+                }
+            ],
+            "server_world_revision": 5,
+            "server_delta_sequence": 12,
+            "retry_after": 30
+        }"#;
+
+        let response = ConflictResponse::from_json(json).expect("parse");
+        let summary = response.summary();
+        assert!(summary.contains("Retry after: 30s"));
     }
 }

@@ -397,4 +397,42 @@ mod tests {
         let recovered: PartialApplyResult = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(result, recovered);
     }
+
+    #[test]
+    fn partial_apply_state_serialization_roundtrip() {
+        let deltas = vec![
+            make_delta_result(0, "applied", None),
+            make_delta_result(1, "skipped_dependency", None),
+        ];
+
+        let push_response = push_response_with_deltas("partial", deltas);
+        let partial_result = PartialApplyResult::from_push_response(&push_response).expect("parse");
+
+        let mut state = PartialApplyState::new("bdl_test", "wld_test", partial_result);
+        state.increment_retry();
+        state.increment_retry();
+
+        let json = serde_json::to_string(&state).expect("serialize");
+        let recovered: PartialApplyState = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(state.bundle_id, recovered.bundle_id);
+        assert_eq!(state.world_id, recovered.world_id);
+        assert_eq!(state.retry_count, 2);
+        assert_eq!(state.result, recovered.result);
+    }
+
+    #[test]
+    fn partial_apply_state_retryable_deltas_indices() {
+        let deltas = vec![
+            make_delta_result(0, "applied", None),
+            make_delta_result(1, "rejected", Some("optimistic_lock_failed")),
+            make_delta_result(2, "skipped_dependency", None),
+        ];
+
+        let push_response = push_response_with_deltas("partial", deltas);
+        let result = PartialApplyResult::from_push_response(&push_response).expect("parse");
+
+        assert!(result.retryable);
+        assert_eq!(result.failed_delta_indices(), vec![1, 2]);
+    }
 }
