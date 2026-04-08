@@ -170,10 +170,30 @@ impl DbPool {
         self.pool.get().await.map(PooledConn)
     }
 
-    /// Returns pool status information.
+    /// Returns pool status information (QC-W3).
     ///
-    /// Currently unused but retained for the planned `/health` monitoring endpoint (V1.2).
-    #[allow(dead_code)]
+    /// Provides observability for database connection pool metrics:
+    /// - `max_size`: Maximum pool capacity
+    /// - `size`: Current total connections
+    /// - `available`: Idle connections ready for use
+    /// - `waiting`: Pending checkout requests
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nexus42d::db::pool::DbPool;
+    ///
+    /// let pool = DbPool::with_defaults("nexus.db".as_ref())?;
+    /// let status = pool.status();
+    /// println!("Pool: {} connections ({} available, {} waiting)",
+    ///     status.size, status.available, status.waiting);
+    /// # Ok::<(), deadpool_sqlite::BuildError>(())
+    /// ```
+    ///
+    /// # Monitoring Endpoint
+    ///
+    /// Pool status is exposed via `/v1/local/monitoring/pool` API endpoint.
+    /// See `nexus42d::api::handlers::monitoring::pool_status` handler.
     pub fn status(&self) -> deadpool_sqlite::Status {
         self.pool.status()
     }
@@ -267,14 +287,24 @@ impl PooledConn {
 }
 
 /// Convert `InteractError` to a `rusqlite::Error` for ergonomic error handling
+///
+/// # Error Mapping Strategy (QC-W4)
+///
+/// Both `Panic` and `Aborted` are mapped to `SqliteFailure` with distinct error messages,
+/// avoiding misuse of `InvalidParameterName` which is reserved for SQL parameter errors.
+///
+/// - `InteractError::Panic` → `SqliteFailure` (unwinding panic in closure)
+/// - `InteractError::Aborted` → `SqliteFailure` (pool shutdown or timeout)
 fn interact_to_rusqlite_err(e: InteractError) -> rusqlite::Error {
     match e {
-        InteractError::Panic(p) => {
-            rusqlite::Error::InvalidParameterName(format!("Connection interact panicked: {:?}", p))
-        }
-        InteractError::Aborted => {
-            rusqlite::Error::InvalidParameterName("Connection interact aborted".into())
-        }
+        InteractError::Panic(payload) => rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some(format!("Connection interact panicked: {:?}", payload)),
+        ),
+        InteractError::Aborted => rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some("Connection interact aborted (pool shutdown or timeout)".into()),
+        ),
     }
 }
 

@@ -83,6 +83,10 @@ pub enum SyncError {
     #[error("sync request timed out after {seconds}s")]
     SyncTimeout { seconds: u64 },
 
+    /// HTTP response body exceeds configured size limit.
+    #[error("HTTP body size exceeded: {actual} bytes (limit: {limit} bytes)")]
+    HttpBodySizeExceeded { actual: usize, limit: usize },
+
     // ── Conflict resolution errors ────────────────────────────────
     /// Conflict cannot be automatically resolved.
     #[error("unresolvable conflict: {0}")]
@@ -153,6 +157,7 @@ impl SyncError {
             SyncError::SyncNotConfigured(_) => "SYNC_NOT_CONFIGURED",
             SyncError::AuthTokenInvalid(_) => "AUTH_TOKEN_INVALID",
             SyncError::SyncTimeout { .. } => "SYNC_TIMEOUT",
+            SyncError::HttpBodySizeExceeded { .. } => "HTTP_BODY_SIZE_EXCEEDED",
 
             // Conflict resolution errors
             SyncError::UnresolvableConflict(_) => "UNRESOLVABLE_CONFLICT",
