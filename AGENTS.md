@@ -321,6 +321,12 @@ cat .agents/plans/archived/plans/2025-04-05-domain-models.json
 
 ## Development Workflow
 
+**Git worktrees:**
+
+- Put every additional `git worktree` checkout under **this repository root** at `.worktrees/<name>/` only. Do not add worktrees in arbitrary sibling directories outside the clone.
+- The `.worktrees/` directory is listed in `.gitignore`; it keeps parallel branches in one predictable place for tooling and handoff.
+- Example: `git worktree add .worktrees/my-branch -b my-branch`
+
 **Schema/codegen flow:**
 
 - JSON Schema (`schemas/`) → single codegen pass → Rust (`crates/nexus-contracts`) + TypeScript (`packages/nexus-contracts`)
