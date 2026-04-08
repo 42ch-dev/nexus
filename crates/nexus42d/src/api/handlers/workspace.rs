@@ -5,6 +5,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 #[derive(Serialize)]
 pub struct WorkspaceInfo {
@@ -15,6 +16,7 @@ pub struct WorkspaceInfo {
 
 /// GET /v1/local/workspace
 pub async fn info(State(state): State<WorkspaceState>) -> Json<WorkspaceInfo> {
+    info!("Handling workspace info request");
     Json(WorkspaceInfo {
         initialized: state.is_initialized().await,
         workspace_path: state.workspace_path(),
@@ -38,6 +40,9 @@ pub async fn init_workspace(
     State(state): State<WorkspaceState>,
     Json(req): Json<InitWorkspaceRequest>,
 ) -> Result<Json<InitWorkspaceResponse>, NexusApiError> {
+    info!("Handling workspace init request");
+    debug!(path = %req.path, "Initializing workspace");
+
     // Validate input
     if req.path.trim().is_empty() {
         return Err(NexusApiError::InvalidInput {
@@ -54,6 +59,7 @@ pub async fn init_workspace(
             message: e.to_string(),
         })?;
 
+    info!("Workspace init completed");
     Ok(Json(InitWorkspaceResponse {
         success: true,
         message: format!("Workspace initialized at {}", req.path),

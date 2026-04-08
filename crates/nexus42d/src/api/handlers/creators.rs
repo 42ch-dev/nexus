@@ -5,6 +5,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
+use tracing::{debug, info};
 
 #[derive(Serialize)]
 pub struct CreatorInfo {
@@ -23,6 +24,8 @@ pub struct ListCreatorsResponse {
 pub async fn list(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ListCreatorsResponse>, NexusApiError> {
+    info!("Handling list creators request");
+
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_UNAVAILABLE".into(),
         message: format!("Database connection error: {}", e),
@@ -47,5 +50,7 @@ pub async fn list(
             message: e.to_string(),
         })?;
 
+    debug!(count = creators.len(), "Creators retrieved");
+    info!("List creators completed");
     Ok(Json(ListCreatorsResponse { creators }))
 }
