@@ -586,8 +586,8 @@
         },
         "residual_target": "Resolve 27 HIGH/MEDIUM residuals + 3 missing features",
         "effort": "XL — ~15-20 agent sessions (3 waves)",
-        "qc_status": "APPROVE — QC三审 consolidated (0 Critical, 6 Warnings)",
-        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated.md",
+        "qc_status": "APPROVE — QC三审 unanimous (0 Critical, 3 Warnings, 6 Suggestions)",
+        "qc_report": ".agents/plans/reports/2026-04-08-v1.1-tech-debt-mitigation/2026-04-08-v1.1-tech-debt-mitigation-qc-consolidated-wave3-batchB.md",
         "wave_1_status": "Complete",
         "commits": "7 commits (d2e86c0..0222e46)",
         "files_changed": "54 files (2331 insertions, 205 deletions)",
@@ -616,7 +616,7 @@
         "wave_3_batch2_status": "Complete",
         "wave_3_batch2_tasks": "3 tasks: FH-R1 (schema drift detection CI), FH-R3 (error code inconsistency docs), FH-R6 (test helper duplication)",
         "wave_3_batch2_files": "5 files (CI + errors.rs docs + test_utils.rs + lib.rs + sync.rs migration)",
-        "residual_summary": "FH-R1/R3/R6 resolved. All 26 tasks complete. Remaining open residuals: QC W1-W8 for V1.1+."
+        "residual_summary": "FH-R1/R3/R6 resolved. All 26 tasks complete. 11 QC Warnings (W1-W11) tracked for V1.1+."
       }
     }
   ],
@@ -626,18 +626,18 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-09T02:00:00Z",
-      "total_open": 34,
+      "updated_at": "2026-04-09T04:00:00Z",
+      "total_open": 37,
       "by_severity": {
         "high": 0,
         "medium": 7,
         "low": 19,
-        "warning": 8
+        "warning": 11
       },
       "by_target": {
         "V1.0 GA": 0,
         "V1.1": 22,
-        "V1.1+": 12
+        "V1.1+": 15
       },
       "by_plan": {
         "domain-models": 0,
@@ -646,7 +646,7 @@
         "acp-client": 1,
         "context-assembly": 2,
         "foundation-hardening": 7,
-        "v1.1-tech-debt-mitigation": 8
+        "v1.1-tech-debt-mitigation": 11
       },
       "cross_cutting": [
         {
@@ -877,6 +877,10 @@
       {
         "updated_at": "2026-04-09",
         "message": "Wave 3 Batch B complete: FH-R1 (schema drift detection CI), FH-R3 (error code inconsistency docs), FH-R6 (test helper duplication). Added schema-drift-check CI job, documented Internal.code vs error_code() design, created test_utils.rs module. 62 nexus42d tests, all workspace tests passing. InReview for QC."
+      },
+      {
+        "updated_at": "2026-04-09",
+        "message": "Wave 3 Batch B QC三审 APPROVE (unanimous: 0 Critical, 3 Warnings, 6 Suggestions). All 26 tasks complete. FH-R1/R3/R6 resolved. 11 QC Warnings (W1-W11) tracked for V1.1+. Ready for merge to main. V1.1 GA ready."
       }
     ],
     "residual_findings": {
@@ -1399,6 +1403,36 @@
           "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "Before merge"
+        },
+        {
+          "id": "QC-W9",
+          "title": "CI shell script readability — extract to standalone script",
+          "severity": "warning",
+          "source": "QC#1 (Wave 3 Batch B)",
+          "scope": ".github/workflows/ci.yml:119-177",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — Extract to tooling/check-schema-drift.sh"
+        },
+        {
+          "id": "QC-W10",
+          "title": "TempDir ownership semantics — reinforce with type hint",
+          "severity": "warning",
+          "source": "QC#1 (Wave 3 Batch B)",
+          "scope": "test_utils.rs:11-23, 40-43",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — Add newtype wrapper or compile-time hint"
+        },
+        {
+          "id": "QC-W11",
+          "title": "Schema version type mismatch (u32 vs &str)",
+          "severity": "warning",
+          "source": "QC#1 (Wave 3 Batch B)",
+          "scope": "CI check at ci.yml:171-177 vs crates/nexus-contracts/src/generated/mod.rs:84",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "V1.1+ — Standardize schema version type across CLI/daemon/contracts"
         }
       ]
     }
