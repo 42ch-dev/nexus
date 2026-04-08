@@ -17,6 +17,8 @@ rusqlite.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+deadpool-sqlite = "0.8"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
+tempfile = "3"
