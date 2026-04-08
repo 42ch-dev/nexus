@@ -113,6 +113,10 @@
     {
       "updated_at": "2026-04-09T11:30:00Z",
       "message": "Compressed 15 Done plans per plan-convention.md §390-400: Removed redundant metadata fields (qc_status, tests, commits, etc.) and added archived_record pointers to archived/plans/*.json snapshots. Status.json reduced from 40.7KB to 26.4KB (-35%). Plans with open residuals retained residual_summary field."
+    },
+    {
+      "updated_at": "2026-04-09T12:00:00Z",
+      "message": "Ultra-compressed 15 Done plans per plan-convention.md §430-436: Reduced from 13 fields to 6 fields (id, status, file, metadata, title, done_at). Removed redundant fields (owner, agents, progress, tags, created_at, updated_at, notes) now available in archived/plans/*.json snapshots. status.json size: 26.4KB → 20.0KB (-24.5%)."
     }
   ]
 }
