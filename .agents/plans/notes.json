@@ -109,6 +109,10 @@
     {
       "updated_at": "2026-04-09T00:00:00Z",
       "message": "Major status.json cleanup per plan-convention.md: (1) Archived 15 closed residuals to archived/residuals/*.json (DM-R5, CLI-R6/R7/R8, SYNC-R4/R5/R6/R11/R12, ACP-R7, CTX-R6/R7, FH-R1/R3/R6). (2) Migrated metadata.notes to notes.json to reduce status.json size. (3) Updated tech_debt_summary to reflect 31 open residuals. All changes follow §248-286 (archival) and §105 (notes.json) of plan-convention.md."
+    },
+    {
+      "updated_at": "2026-04-09T11:30:00Z",
+      "message": "Compressed 15 Done plans per plan-convention.md §390-400: Removed redundant metadata fields (qc_status, tests, commits, etc.) and added archived_record pointers to archived/plans/*.json snapshots. Status.json reduced from 40.7KB to 26.4KB (-35%). Plans with open residuals retained residual_summary field."
     }
   ]
 }
