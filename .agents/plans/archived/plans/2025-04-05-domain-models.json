@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-04-09T12:00:00Z",
+  "plan": {
+    "id": "2025-04-05-domain-models",
+    "title": "Domain Models Implementation",
+    "file": ".agents/plans/2025-04-05-domain-models.md",
+    "status": "Done",
+    "owner": "@project-manager",
+    "agents": [
+      "@fullstack-dev",
+      "@qc-specialist",
+      "@qc-specialist-2",
+      "@qc-specialist-3"
+    ],
+    "progress": 100,
+    "tags": [
+      "phase-1",
+      "domain",
+      "aggregates"
+    ],
+    "created_at": "2025-04-05",
+    "updated_at": "2026-04-06",
+    "done_at": "2026-04-06",
+    "notes": "Merged to main. 15 aggregates, 133 tests, QC三审 passed.",
+    "metadata": {
+      "phase": "Phase 1",
+      "branch_policy": "feature/v1.0-domain-models from main",
+      "priority": "high",
+      "description": "Implement domain models (15 aggregates) with consistency rules and gates",
+      "wave_0_spec": ".agents/plans/knowledge/revised-domain-models-spec-v1.md",
+      "qc_status": "APPROVE — C-1 and C-2 fixed and verified",
+      "tests": "133 passed, 0 failed",
+      "commits": "8 commits (a22a2cd..e0b9e8c)",
+      "residual_summary": "1 Warning (schema required constraint), 4 Suggestions (test coverage)"
+    }
+  }
+}

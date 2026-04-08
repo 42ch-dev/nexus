@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-04-09T12:00:00Z",
+  "plan": {
+    "id": "2025-04-05-sync-contract",
+    "title": "Sync Contract Implementation",
+    "file": ".agents/plans/2025-04-05-sync-contract.md",
+    "status": "Done",
+    "tags": [
+      "phase-1",
+      "sync",
+      "bundle"
+    ],
+    "created_at": "2025-04-05",
+    "updated_at": "2026-04-06",
+    "done_at": "2026-04-06",
+    "notes": "Merged to main. QC三审 APPROVE (10 blocking issues fixed). QA PASS (226/226 tests). 22 files changed, 4479 insertions. 2 commits + merge.",
+    "metadata": {
+      "phase": "Phase 1",
+      "branch_policy": "feature/v1.0-sync-contract from main",
+      "priority": "high",
+      "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with bundle metadata fields, partial apply semantics, local precheck, and conflict resolution",
+      "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+      "review_verdict": "Request Changes → Resolved (SYNC-R1..R3)",
+      "tasks_added": [
+        "Task 6: Partial Apply Semantics",
+        "Task 7: Local Precheck Stage"
+      ],
+      "task_modified": "Task 1: Schema-anchored (use generated types)",
+      "task_modified_2": "Task 3: Add bundle metadata fields (submitting_creator_id, manuscript_phase, output_manuscript)",
+      "tests": "70 nexus-sync tests, 226 workspace total — all passing",
+      "clippy": "clean — 0 warnings with -D warnings",
+      "qc_status": "APPROVE — 10 blocking issues fixed (SYNC-C1..C5, SYNC-H1..H5)",
+      "qc_report": ".agents/plans/reports/2025-04-05-sync-contract/2025-04-05-sync-contract-qc-consolidated.md",
+      "qc_fixed": [
+        "SYNC-C1: Formatting violations fixed",
+        "SYNC-C2: Fragile conflict detection replaced with JSON parsing",
+        "SYNC-C3: Outbox write methods wrapped in transactions (append, stage, mark_failed)",
+        "SYNC-C4: cli-sync bundle schema delta required fields added",
+        "SYNC-C5: ConflictDetail parsing uses safe conversion",
+        "SYNC-H1: Unsafe unwrap replaced with expect()",
+        "SYNC-H2: ConflictResponse::from_json returns error on missing success field",
+        "SYNC-H3: Duplicate create detection only checks creates WITH target_id",
+        "SYNC-H4: mark_sent no longer allows failed→sent transition",
+        "SYNC-H5: Exponential backoff uses saturating arithmetic"
+      ]
+    }
+  }
+}
