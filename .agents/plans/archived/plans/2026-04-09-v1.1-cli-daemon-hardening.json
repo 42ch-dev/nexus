@@ -1,0 +1,53 @@
+{
+  "id": "2026-04-09-v1.1-cli-daemon-hardening",
+  "title": "CLI/Daemon Reliability Hardening",
+  "file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.1",
+    "foundation",
+    "hardening",
+    "p0"
+  ],
+  "created_at": "2026-04-09",
+  "updated_at": "2026-04-08",
+  "done_at": "2026-04-08",
+  "notes": "Completed: 7 tasks implemented — tracing (29 statements), pool config builder, auth error variants, bundle validation, schema allOf verification, auth token validation, low-priority polish (dead_code, WAL, race, tuning, mutex, test org). All 12 residuals resolved.",
+  "metadata": {
+    "priority": "P0",
+    "phase": "Done",
+    "description": "Improve CLI/daemon reliability, observability, and error handling. 7 tasks across 4 groups: tracing, sync/validation, auth variants, low-priority polish. Resolves 12 residuals (6 medium + 6 low).",
+    "working_branch": "feature/v1.1-cli-daemon-hardening",
+    "dependency": null,
+    "spec_refs": [
+      ".agents/plans/knowledge/v1.1-overview-v1.md"
+    ],
+    "residual_ids": [
+      "CLI-R15",
+      "FH-R2",
+      "FH-R4",
+      "FH-R5",
+      "FH-R7",
+      "FH-R8",
+      "FH-R9",
+      "FH-R10",
+      "FH-R11",
+      "SYNC-R7",
+      "SYNC-R8",
+      "SYNC-R9"
+    ],
+    "effort": "L (~7-9 agent sessions)",
+    "gates": {
+      "qc": "skipped",
+      "qa": "self-check",
+      "tests": "passed",
+      "clippy": "passed",
+      "fmt": "passed"
+    }
+  }
+}
