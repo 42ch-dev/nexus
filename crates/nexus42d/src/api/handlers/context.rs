@@ -2,6 +2,7 @@
 
 use axum::Json;
 use nexus_contracts::generated::ContextAssembleRequestV1;
+use tracing::info;
 
 use crate::api::errors::NexusApiError;
 
@@ -11,6 +12,7 @@ use crate::api::errors::NexusApiError;
 pub async fn assemble(
     Json(_req): Json<ContextAssembleRequestV1>,
 ) -> Result<Json<()>, NexusApiError> {
+    info!("Handling context assemble request");
     Err(NexusApiError::NotImplemented(
         "Context assembly not yet implemented".into(),
     ))

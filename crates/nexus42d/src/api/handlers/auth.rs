@@ -6,6 +6,7 @@ use crate::auth::token_manager::TokenManager;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 // ---- Types ----
 
@@ -39,6 +40,8 @@ pub struct TokenExchangeRequest {
 pub async fn status(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<TokenStatusResponse>, NexusApiError> {
+    info!("Handling auth status request");
+
     let token_manager = TokenManager::new(state.db_pool());
     let token = token_manager.get_valid_token().await?;
 
@@ -47,6 +50,8 @@ pub async fn status(
             let user_id = t.user_id.clone();
             let expires_at = t.expires_at.to_rfc3339();
             let needs_refresh = t.needs_refresh();
+            debug!(user_id = %user_id, needs_refresh, "Auth token found");
+            info!("Auth status completed");
             Ok(Json(TokenStatusResponse {
                 authenticated: true,
                 user_id: Some(user_id),
@@ -54,12 +59,16 @@ pub async fn status(
                 needs_refresh,
             }))
         }
-        None => Ok(Json(TokenStatusResponse {
-            authenticated: false,
-            user_id: None,
-            expires_at: None,
-            needs_refresh: false,
-        })),
+        None => {
+            debug!("No auth token found");
+            info!("Auth status completed");
+            Ok(Json(TokenStatusResponse {
+                authenticated: false,
+                user_id: None,
+                expires_at: None,
+                needs_refresh: false,
+            }))
+        }
     }
 }
 
@@ -71,8 +80,12 @@ pub async fn device_authorization(
     State(state): State<WorkspaceState>,
     Json(_req): Json<DeviceAuthRequest>,
 ) -> Result<(StatusCode, Json<DeviceAuthResponse>), NexusApiError> {
+    info!("Handling device authorization request");
+
     let user_code = format!("{:04}-{:04}", rand_int(1000, 9999), rand_int(1000, 9999));
     let device_code = format!("dc_{}", uuid::Uuid::new_v4());
+
+    debug!(user_code = %user_code, "Generated device code session");
 
     // Store the device code session in SQLite
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
@@ -105,6 +118,7 @@ pub async fn device_authorization(
         message: e.to_string(),
     })?;
 
+    info!("Device authorization completed");
     Ok((
         StatusCode::OK,
         Json(DeviceAuthResponse {
@@ -125,6 +139,8 @@ pub async fn exchange_token(
     State(state): State<WorkspaceState>,
     Json(req): Json<TokenExchangeRequest>,
 ) -> Result<Json<serde_json::Value>, NexusApiError> {
+    info!("Handling token exchange request");
+    debug!(device_code = %req.device_code, "Looking up device code session");
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
         message: format!("Failed to get database connection: {}", e),
@@ -202,6 +218,7 @@ pub async fn exchange_token(
         })
         .await;
 
+    info!("Token exchange completed");
     Ok(Json(serde_json::json!({
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -217,9 +234,12 @@ pub async fn exchange_token(
 pub async fn logout(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<serde_json::Value>, NexusApiError> {
+    info!("Handling logout request");
+
     let token_manager = TokenManager::new(state.db_pool());
     token_manager.clear_tokens().await?;
 
+    info!("Logout completed");
     Ok(Json(serde_json::json!({
         "success": true,
         "message": "Logged out successfully"

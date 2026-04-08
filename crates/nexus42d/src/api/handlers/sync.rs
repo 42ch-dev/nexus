@@ -5,6 +5,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
+use tracing::{debug, info};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct SyncStatusResponse {
@@ -22,6 +23,8 @@ pub struct SyncStatusResponse {
 pub async fn status(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<SyncStatusResponse>, NexusApiError> {
+    info!("Handling sync status request");
+
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_UNAVAILABLE".into(),
         message: format!("Database connection error: {}", e),
@@ -71,6 +74,8 @@ pub async fn status(
     // Count unresolved conflicts (currently no conflict table; always 0)
     let conflict_count: u64 = 0;
 
+    debug!(pending_count, failed_count, conflict_count, last_sync_at = ?last_sync_at, "Sync status retrieved");
+    info!("Sync status completed");
     Ok(Json(SyncStatusResponse {
         pending_count,
         failed_count,
