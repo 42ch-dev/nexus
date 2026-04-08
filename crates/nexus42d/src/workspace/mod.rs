@@ -1,4 +1,12 @@
 //! Workspace Management Module
+//!
+//! # Mutex Poisoning Policy
+//!
+//! This crate uses `unwrap_or_else` on mutex locks to recover from poisoned mutexes.
+//! A poisoned mutex means a thread panicked while holding the lock. Rather than
+//! crashing the entire daemon, we recover the lock and log a warning. The data
+//! may be in an inconsistent state, but for a local development tool this is
+//! preferable to a hard crash.
 
 pub mod manager;
 
@@ -76,7 +84,10 @@ impl WorkspaceState {
     pub async fn is_initialized(&self) -> bool {
         self.workspace_path
             .lock()
-            .expect("workspace_path mutex poisoned")
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("workspace_path mutex poisoned, recovering");
+                poisoned.into_inner()
+            })
             .is_some()
     }
 
@@ -84,7 +95,10 @@ impl WorkspaceState {
     pub fn workspace_path(&self) -> Option<String> {
         self.workspace_path
             .lock()
-            .expect("workspace_path mutex poisoned")
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("workspace_path mutex poisoned, recovering");
+                poisoned.into_inner()
+            })
             .clone()
     }
 
@@ -134,7 +148,10 @@ impl WorkspaceState {
         *self
             .workspace_path
             .lock()
-            .expect("workspace_path mutex poisoned") = Some(path.to_string());
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("workspace_path mutex poisoned, recovering");
+                poisoned.into_inner()
+            }) = Some(path.to_string());
 
         Ok(())
     }
