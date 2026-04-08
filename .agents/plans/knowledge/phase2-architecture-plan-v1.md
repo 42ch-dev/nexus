@@ -1,27 +1,27 @@
-# Phase 2 Architecture Plan — V1.1
+# V1.0-phase2 Architecture Plan — V1.1
 
 **Date**: 2026-04-06
 **Author**: @architect
-**Based on**: Phase 1 Architecture Review V1, Phase 1 Product Review V1
+**Based on**: V1.0-phase1 Architecture Review V1, V1.0-phase1 Product Review V1
 **Status**: Superseded — merged into `v1.1-overview-v1.md`. Key decisions and residual matrix retained as historical reference.
 
 ---
 
 ## Executive Summary
 
-Phase 2 targets the V1.1 release and focuses on three objectives: (1) hardening the foundation to eliminate structural debt that would compound with new features, (2) completing the ACP SDK bridge so that `nexus42 agent run` actually communicates with AI agents, and (3) filling the most critical skeleton commands — manuscript operations and daemon auto-spawn — so that users can perform a complete creative writing workflow.
+V1.0-phase2 targets the V1.1 release and focuses on three objectives: (1) hardening the foundation to eliminate structural debt that would compound with new features, (2) completing the ACP SDK bridge so that `nexus42 agent run` actually communicates with AI agents, and (3) filling the most critical skeleton commands — manuscript operations and daemon auto-spawn — so that users can perform a complete creative writing workflow.
 
-The Phase 1 architecture review identified 3 critical runtime bugs (2 already being fixed in parallel by @fullstack-dev on `fix/v1.0-p0-bugs`), 7 high-severity design issues, and 14 medium-severity concerns. The product review found that only 24% of CLI commands are fully functional, with 43% being skeleton implementations. This plan organizes 38 open residuals and 36 review findings into 5 implementation plans with explicit dependency ordering.
+The V1.0-phase1 architecture review identified 3 critical runtime bugs (2 already being fixed in parallel by @fullstack-dev on `fix/v1.0-p0-bugs`), 7 high-severity design issues, and 14 medium-severity concerns. The product review found that only 24% of CLI commands are fully functional, with 43% being skeleton implementations. This plan organizes 38 open residuals and 36 review findings into 5 implementation plans with explicit dependency ordering.
 
 The recommended approach is sequential: **Foundation Hardening → ACP SDK Bridge → Daemon + Manuscript Operations → Auth Flow → Codegen Alignment**. Foundation Hardening (Plan A) is a hard prerequisite for Plans B–D. Plans C and D can proceed in parallel once Plan A lands. Plan E (Codegen) is independent and can run at any point, but should land before Plan C to prevent further schema-contract drift.
 
 ---
 
-## 1. Phase 2 Goals & Non-Goals
+## 1. V1.0-phase2 Goals & Non-Goals
 
 ### Goals
 
-1. **Eliminate all CRITICAL and HIGH architectural blockers** identified in the Phase 1 review (CLI-DAEMON-1/2/3/4/5, DEBT-X1..X4, CC-ERR-1, CODEGEN-1/2, SYNC-ARCH-1)
+1. **Eliminate all CRITICAL and HIGH architectural blockers** identified in the V1.0-phase1 review (CLI-DAEMON-1/2/3/4/5, DEBT-X1..X4, CC-ERR-1, CODEGEN-1/2, SYNC-ARCH-1)
 2. **Make ACP agent interaction functional** — `nexus42 agent run <agent>` must send prompts to agents and receive responses via the ACP protocol
 3. **Deliver a complete user workflow**: init workspace → create manuscript → manage phases → run agent assistance → sync to platform
 4. **Standardize error propagation** across the CLI–daemon boundary with structured error codes and proper HTTP status codes
@@ -59,11 +59,11 @@ The recommended approach is sequential: **Foundation Hardening → ACP SDK Bridg
 **Effort**: **M** (~2–4 agent sessions)
 **Dependencies**: P0 bug fixes must land first (`fix/v1.0-p0-bugs` branch merge)
 **Owner**: @fullstack-dev
-**Tags**: `phase-2`, `foundation`, `error-strategy`, `sqlite`
+**Tags**: `V1.0-phase2`, `foundation`, `error-strategy`, `sqlite`
 
 #### Description
 
-Resolve the 4 DEBT-X cross-cutting items and standardize error handling across the CLI–daemon boundary. This plan is the hard prerequisite for all subsequent Phase 2 plans — new features built on top of inconsistent error propagation and duplicated schemas would accumulate unmanageable debt.
+Resolve the 4 DEBT-X cross-cutting items and standardize error handling across the CLI–daemon boundary. This plan is the hard prerequisite for all subsequent V1.0-phase2 plans — new features built on top of inconsistent error propagation and duplicated schemas would accumulate unmanageable debt.
 
 #### Key Technical Decisions
 
@@ -173,7 +173,7 @@ Resolve the 4 DEBT-X cross-cutting items and standardize error handling across t
 **Effort**: **M–L** (~3–6 agent sessions)
 **Dependencies**: Plan A (Foundation Hardening) — needs error strategy to handle ACP errors properly
 **Owner**: @fullstack-dev
-**Tags**: `phase-2`, `acp`, `sdk`, `agent-interaction`
+**Tags**: `V1.0-phase2`, `acp`, `sdk`, `agent-interaction`
 **Spec input**: `.agents/plans/knowledge/acp-client-tech-spec-v1.md`
 
 #### Description
@@ -282,7 +282,7 @@ Implement the actual ACP SDK method calls in `AcpSdkAdapter`, replacing all stub
 **Effort**: **L** (~4–8 agent sessions, split into 2 milestones)
 **Dependencies**: Plan A (Foundation Hardening)
 **Owner**: @fullstack-dev
-**Tags**: `phase-2`, `daemon`, `manuscript`, `auto-spawn`
+**Tags**: `V1.0-phase2`, `daemon`, `manuscript`, `auto-spawn`
 
 #### Description
 
@@ -386,7 +386,7 @@ Fill the most critical skeleton commands: daemon auto-spawn, manuscript lifecycl
 **Effort**: **M** (~2–3 agent sessions)
 **Dependencies**: Plan A (Foundation Hardening) — needs error strategy for auth failures
 **Owner**: @fullstack-dev
-**Tags**: `phase-2`, `auth`, `oauth`, `daemon`
+**Tags**: `V1.0-phase2`, `auth`, `oauth`, `daemon`
 
 #### Description
 
@@ -474,7 +474,7 @@ Complete the device code OAuth flow for user authentication, implement token ref
 **Effort**: **S** (~1–2 agent sessions)
 **Dependencies**: None (can run in parallel with Plans A–D)
 **Owner**: @fullstack-dev
-**Tags**: `phase-2`, `codegen`, `contracts`, `schema-first`
+**Tags**: `V1.0-phase2`, `codegen`, `contracts`, `schema-first`
 
 #### Description
 
@@ -597,7 +597,7 @@ LEGEND:
 
 ### 4.1 All 38 Open Residuals — Coverage by Plan
 
-| # | Residual ID | Severity | Source Plan | Phase 2 Plan | Resolution |
+| # | Residual ID | Severity | Source Plan | V1.0-phase2 Plan | Resolution |
 |---|------------|----------|-------------|--------------|------------|
 | 1 | DEBT-X1 | HIGH | cross-cutting | A | Resolved — connection pooling |
 | 2 | DEBT-X2 | HIGH | cross-cutting | A | Resolved — schema dedup |
@@ -647,13 +647,13 @@ LEGEND:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| **Resolved in Phase 2** | 20 | All CRITICAL (3), most HIGH (9 of 11), several MEDIUM (4) |
+| **Resolved in V1.0-phase2** | 20 | All CRITICAL (3), most HIGH (9 of 11), several MEDIUM (4) |
 | **Partially resolved** | 8 | Addressed component but full resolution needs platform API or V1.2 work |
 | **Deferred to V1.2** | 14 | LOW severity, feature gaps requiring V1.2 scope (multi-agent, advanced sync) |
 | **Deferred to V1.1+ sync activation** | 4 | SYNC-R5, R11, R12, R13 — need platform API endpoint |
 | **Accept as-is** | 1 | CTX-R3 — path traversal not a risk for local user-controlled dirs |
 
-**Net reduction**: 38 open → 14 deferred + 1 accepted = **15 open after Phase 2** (all LOW or MEDIUM with clear deferral rationale)
+**Net reduction**: 38 open → 14 deferred + 1 accepted = **15 open after V1.0-phase2** (all LOW or MEDIUM with clear deferral rationale)
 
 ---
 
@@ -747,8 +747,8 @@ LEGEND:
 
 | Document | Path | Relevance |
 |----------|------|-----------|
-| Phase 1 Architecture Review | `.agents/plans/knowledge/phase1-architecture-review-v1.md` | Primary input — 36 findings |
-| Phase 1 Product Review | `.agents/plans/knowledge/phase1-product-review-v1.md` | Feature completeness and UX assessment |
+| V1.0-phase1 Architecture Review | `.agents/plans/knowledge/phase1-architecture-review-v1.md` | Primary input — 36 findings |
+| V1.0-phase1 Product Review | `.agents/plans/knowledge/phase1-product-review-v1.md` | Feature completeness and UX assessment |
 | ACP Client Tech Spec | `.agents/plans/knowledge/acp-client-tech-spec-v1.md` | Detailed ACP SDK integration design |
 | Plan Status (residuals) | `.agents/plans/status.json` | 38 open residuals, metadata |
 | Knowledge Index | `.agents/plans/knowledge/README.md` | Index of all knowledge documents |
@@ -757,17 +757,17 @@ LEGEND:
 
 ## Appendix B: P0 Bug Fix Dependencies
 
-The following bugs are being fixed in parallel by @fullstack-dev on `fix/v1.0-p0-bugs`. Phase 2 plans MUST NOT start until these are merged to `main`:
+The following bugs are being fixed in parallel by @fullstack-dev on `fix/v1.0-p0-bugs`. V1.0-phase2 plans MUST NOT start until these are merged to `main`:
 
-| Bug | Finding ID | Status | Impact on Phase 2 |
+| Bug | Finding ID | Status | Impact on V1.0-phase2 |
 |-----|-----------|--------|-------------------|
 | Workspace init doesn't set `workspace_path` | CLI-DAEMON-1 [CRITICAL] | In progress | Plan A Task 4 (validation middleware) and Plan C Task 4 (manuscript status) depend on correct init |
 | Missing `/v1/local/context/assemble` route | CLI-DAEMON-2 [CRITICAL] | In progress | Plan C Task 2 will register the route — coordinate to avoid merge conflict |
 | Daemon auto-spawn | Product Review §4 | In progress | Plan C Task 1 — coordinate implementation approach |
 
-## Appendix C: Architecture Principles for Phase 2 (from Architecture Review §9.4)
+## Appendix C: Architecture Principles for V1.0-phase2 (from Architecture Review §9.4)
 
-These principles, established during the Phase 1 review, govern all Phase 2 design decisions:
+These principles, established during the V1.0-phase1 review, govern all V1.0-phase2 design decisions:
 
 1. **Every new type must come from schemas** — no more hand-written DTOs that bypass codegen
 2. **Error types must be structured** — no more `anyhow` at API boundaries

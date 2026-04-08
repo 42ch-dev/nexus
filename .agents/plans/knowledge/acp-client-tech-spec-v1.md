@@ -4,7 +4,7 @@
 **Author**: @architect
 **Date**: 2026-04-06
 **Status**: Active — authoritative input for Plan 12 (`2026-04-09-v1.1-acp-ux-permissions.md`)
-**Supersedes**: Sections 3.3 of Phase 1 Architecture Review
+**Supersedes**: Sections 3.3 of V1.0-phase1 Architecture Review
 
 ---
 

@@ -14,7 +14,7 @@
     ],
     "progress": 100,
     "tags": [
-      "phase-2",
+      "V1.0-phase2",
       "codegen",
       "contracts",
       "schema-first"
@@ -24,7 +24,7 @@
     "done_at": "2026-04-07",
     "notes": "Merged to main. QC Approve (single reviewer, S effort). QA PASS. Codegen pipeline fixed, context assembly types generated, registry types generated. 58 files changed, 1215 insertions.",
     "metadata": {
-      "phase": "Phase 2",
+      "phase": "V1.0-phase2",
       "branch_policy": "feature/v2.0-codegen-alignment from main",
       "working_branch": "feature/v2.0-codegen-alignment",
       "priority": "medium",

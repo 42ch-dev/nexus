@@ -1,15 +1,15 @@
-# Phase 1 Product Review — V1.0 GA
+# V1.0-phase1 Product Review — V1.0 GA
 
 **Date**: 2026-04-06
 **Reviewer**: @product-manager
-**Scope**: All Phase 0 + Phase 1 user-facing features
+**Scope**: All Phase 0 + V1.0-phase1 user-facing features
 **Status**: Archived — command analysis summarized in `v1.1-overview-v1.md` §2.1; retained for detailed reference
 
 ---
 
 ## Executive Summary
 
-Nexus42 V1.0 is a **foundationally complete but user-incomplete** creative writing platform CLI. The core infrastructure is solid: 15 domain aggregates with 445 passing tests, a working CLI with 8 command groups, daemon scaffolding, ACP integration for 16 AI agents, and a sync contract library. However, most user-facing commands are **skeleton implementations** that return placeholder output or require manual daemon setup. The product is technically impressive but not yet ready for non-technical users. V1.0 GA would serve early adopters who can tolerate command-line workflows and understand "preview" software. Phase 2 must prioritize filling skeleton commands, improving onboarding documentation, and delivering tangible user value (actual manuscript management, not just metadata tracking).
+Nexus42 V1.0 is a **foundationally complete but user-incomplete** creative writing platform CLI. The core infrastructure is solid: 15 domain aggregates with 445 passing tests, a working CLI with 8 command groups, daemon scaffolding, ACP integration for 16 AI agents, and a sync contract library. However, most user-facing commands are **skeleton implementations** that return placeholder output or require manual daemon setup. The product is technically impressive but not yet ready for non-technical users. V1.0 GA would serve early adopters who can tolerate command-line workflows and understand "preview" software. V1.0-phase2 must prioritize filling skeleton commands, improving onboarding documentation, and delivering tangible user value (actual manuscript management, not just metadata tracking).
 
 ---
 
@@ -614,9 +614,9 @@ This describes the **repository**, not the **product**. A new visitor has no ide
 
 ---
 
-## 9. Phase 2 Product Recommendations
+## 9. V1.0-phase2 Product Recommendations
 
-### Priority Features for Phase 2
+### Priority Features for V1.0-phase2
 
 | Priority | Feature | Rationale | Effort |
 |----------|---------|-----------|--------|
@@ -766,4 +766,4 @@ This describes the **repository**, not the **product**. A new visitor has no ide
 
 ---
 
-*End of Phase 1 Product Review*
+*End of V1.0-phase1 Product Review*

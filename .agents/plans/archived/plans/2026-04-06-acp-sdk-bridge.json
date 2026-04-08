@@ -17,7 +17,7 @@
     ],
     "progress": 100,
     "tags": [
-      "phase-2",
+      "V1.0-phase2",
       "acp",
       "sdk",
       "agent-interaction"
@@ -27,7 +27,7 @@
     "done_at": "2026-04-07",
     "notes": "Merged to main. QC三审 3 rounds (Request Changes → fix → Approve). QA APPROVED. LocalSetBridge, real SDK calls, AcpError integration. 15 files changed, 887 insertions.",
     "metadata": {
-      "phase": "Phase 2",
+      "phase": "V1.0-phase2",
       "branch_policy": "feature/v2.0-acp-sdk-bridge from main",
       "priority": "high",
       "description": "Implement AcpSdkAdapter with LocalSet bridge, complete prompt loop, event handling, and error integration",

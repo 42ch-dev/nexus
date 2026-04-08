@@ -599,7 +599,7 @@ Create file: `docs/CONTRIBUTING.md`
 ### Branch Strategy
 
 - **Phase 0** (initial setup): Commits to `main`
-- **Phase 1+** (feature development): Feature branches from `main`
+- **V1.0-phase1+** (feature development): Feature branches from `main`
   - `feature/<feature-name>` for new features
   - `fix/<bug-name>` for bug fixes
 

@@ -1,8 +1,8 @@
-# Phase 2 Product Plan — V1.1
+# V1.0-phase2 Product Plan — V1.1
 
 **Date**: 2026-04-06
 **Author**: @product-manager
-**Based on**: Phase 1 Product Review V1, Phase 1 Architecture Review V1
+**Based on**: V1.0-phase1 Product Review V1, V1.0-phase1 Architecture Review V1
 **Status**: Superseded — merged into `v1.1-overview-v1.md`. P0/P1/P2 features, user stories, and competitive analysis fully retained.
 
 ---
@@ -168,7 +168,7 @@ Enhancements that can wait for V1.2. These improve polish but aren't required fo
 
 ### Current State (V1.0)
 
-From Phase 1 Product Review:
+From V1.0-phase1 Product Review:
 
 | Status | Count | Percentage |
 |--------|-------|------------|
@@ -410,8 +410,8 @@ See §4 "Command-by-Command Status Plan" table above.
 
 | Document | Location | Purpose |
 |----------|----------|---------|
-| Phase 1 Product Review | `.agents/plans/knowledge/phase1-product-review-v1.md` | Feature completeness analysis, user journey mapping |
-| Phase 1 Architecture Review | `.agents/plans/knowledge/phase1-architecture-review-v1.md` | Technical findings, bug list, debt items |
+| V1.0-phase1 Product Review | `.agents/plans/knowledge/phase1-product-review-v1.md` | Feature completeness analysis, user journey mapping |
+| V1.0-phase1 Architecture Review | `.agents/plans/knowledge/phase1-architecture-review-v1.md` | Technical findings, bug list, debt items |
 | ACP Client Tech Spec | `.agents/plans/knowledge/acp-client-tech-spec-v1.md` | ACP integration details |
 | status.json | `.agents/plans/status.json` | Residual findings, plan tracking |
 | AGENTS.md | Repository root | Development workflow, CI requirements |
@@ -420,7 +420,7 @@ See §4 "Command-by-Command Status Plan" table above.
 
 ## Alignment with Architecture Plan
 
-The @architect is writing a parallel Phase 2 architecture plan. This product plan assumes the following architectural decisions (pending confirmation):
+The @architect is writing a parallel V1.0-phase2 architecture plan. This product plan assumes the following architectural decisions (pending confirmation):
 
 | Product Feature | Architecture Dependency | Status |
 |-----------------|------------------------|--------|
@@ -443,4 +443,4 @@ The @architect is writing a parallel Phase 2 architecture plan. This product pla
 
 ---
 
-*End of Phase 2 Product Plan — V1.1*
+*End of V1.0-phase2 Product Plan — V1.1*

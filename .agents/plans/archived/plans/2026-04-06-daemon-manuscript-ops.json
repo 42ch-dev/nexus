@@ -12,7 +12,7 @@
     ],
     "progress": 100,
     "tags": [
-      "phase-2",
+      "V1.0-phase2",
       "daemon",
       "manuscript",
       "sync-status"
@@ -22,7 +22,7 @@
     "done_at": "2026-04-07",
     "notes": "QA verified PASS — all acceptance criteria met, 3 QC blocking items fixed in commit 5438842.",
     "metadata": {
-      "phase": "Phase 2",
+      "phase": "V1.0-phase2",
       "branch_policy": "feature/v2.0-daemon-manuscript-ops from main",
       "priority": "high",
       "description": "Daemon lifecycle (stop, timeout), manuscript file operations, sync status with real data, research list/extract",
