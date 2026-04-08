@@ -6,6 +6,7 @@
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Pairing source enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,8 +92,8 @@ impl From<nexus_contracts::Pairing> for Pairing {
             pairing_id: c.pairing_id,
             creator_id: c.creator_id,
             user_id: c.user_id,
-            pairing_source: c.pairing_source,
-            status: c.status,
+            pairing_source: c.pairing_source.as_str().to_string(),
+            status: c.status.as_str().to_string(),
             created_at: c.created_at,
             revoked_at: c.revoked_at,
         }
@@ -106,8 +107,8 @@ impl From<Pairing> for nexus_contracts::Pairing {
             pairing_id: d.pairing_id,
             creator_id: d.creator_id,
             user_id: d.user_id,
-            pairing_source: d.pairing_source,
-            status: d.status,
+            pairing_source: nexus_contracts::PairingSource::from_str(&d.pairing_source).unwrap(),
+            status: nexus_contracts::PairingStatus::from_str(&d.status).unwrap(),
             created_at: d.created_at,
             revoked_at: d.revoked_at,
         }

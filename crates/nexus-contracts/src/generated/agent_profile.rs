@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source agent-profile.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{AgentProfileStatus, ProfileKind, SelectionMode, Transport};
+use serde::{Deserialize, Serialize};
 
 /// Configuration for an ACP agent in a workspace. Aligned with data-model-v1.md §5.15.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source timeline-event.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{TimelineEventStatus, TimelineEventType};
+use serde::{Deserialize, Serialize};
 
 /// TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

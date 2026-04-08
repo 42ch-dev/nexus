@@ -434,16 +434,8 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
     let mut seen_creates: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (i, delta) in bundle.deltas.iter().enumerate() {
-        let delta_type = if delta.delta_type.is_empty() {
-            None
-        } else {
-            Some(delta.delta_type.as_str())
-        };
-        let operation = if delta.operation.is_empty() {
-            None
-        } else {
-            Some(delta.operation.as_str())
-        };
+        let delta_type = Some(delta.delta_type.as_str());
+        let operation = Some(delta.operation.as_str());
         let target_id = delta.target_entity_id.as_deref();
 
         // Check that delta_type and operation are present
@@ -562,7 +554,8 @@ fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut Pr
 mod tests {
     use super::*;
     use nexus_contracts::generated::Delta;
-    use nexus_contracts::{BundleType, ManuscriptPhase};
+    use nexus_contracts::{BundleType, DeltaOperation, DeltaType, ManuscriptPhase};
+    use serde_json::json;
 
     fn valid_bundle() -> Bundle {
         Bundle {
@@ -581,8 +574,8 @@ mod tests {
             base_versions: serde_json::json!({"world_revision": 5}),
             last_confirmed_delta_sequence: Some(10),
             deltas: vec![Delta {
-                delta_type: "key_block".to_string(),
-                operation: "create".to_string(),
+                delta_type: DeltaType::KeyBlock,
+                operation: DeltaOperation::Create,
                 target_entity_type: None,
                 target_entity_id: None,
                 payload: serde_json::json!({"display_name": "Test"}),
@@ -703,29 +696,19 @@ mod tests {
     }
 
     #[test]
-    fn precheck_delta_missing_type() {
-        let mut bundle = valid_bundle();
-        bundle.deltas = vec![Delta {
-            delta_type: String::new(),
-            operation: "create".to_string(),
-            target_entity_type: None,
-            target_entity_id: None,
-            payload: serde_json::json!({}),
-            source_anchor: None,
-            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-        }];
-        let local_state = LocalState::new(5).with_delta_sequence(10);
-
-        let result = precheck_bundle(&bundle, &local_state);
-        assert!(matches!(result, PrecheckResult::Invalid(_)));
+    fn precheck_wire_empty_delta_type_rejected_at_deserialize() {
+        let bundle = valid_bundle();
+        let mut v = serde_json::to_value(&bundle).unwrap();
+        v["deltas"][0]["delta_type"] = json!("");
+        assert!(serde_json::from_value::<Bundle>(v).is_err());
     }
 
     #[test]
     fn precheck_create_with_target_id_warning() {
         let mut bundle = valid_bundle();
         bundle.deltas = vec![Delta {
-            delta_type: "key_block".to_string(),
-            operation: "create".to_string(),
+            delta_type: DeltaType::KeyBlock,
+            operation: DeltaOperation::Create,
             target_entity_type: None,
             target_entity_id: Some("kb_existing".to_string()),
             payload: serde_json::json!({}),

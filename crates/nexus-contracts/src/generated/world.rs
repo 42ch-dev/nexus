@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source world.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{TimePolicy, Visibility, WorldStatus};
+use serde::{Deserialize, Serialize};
 
 /// World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

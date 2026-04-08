@@ -270,8 +270,8 @@ impl From<nexus_contracts::Memory> for MemoryItem {
             creator_id: c.creator_id,
             world_id: c.world_id,
             memory_type: c.memory_type,
-            memory_kind: c.memory_kind,
-            status: c.status,
+            memory_kind: c.memory_kind.map(|k| k.as_str().to_string()),
+            status: c.status.as_str().to_string(),
             summary: c.summary,
             embedding_ref: c.embedding_ref,
             source_refs: c.source_refs.map(|refs| {
@@ -298,8 +298,11 @@ impl From<MemoryItem> for nexus_contracts::Memory {
             creator_id: d.creator_id,
             world_id: d.world_id,
             memory_type: d.memory_type,
-            memory_kind: d.memory_kind,
-            status: d.status,
+            memory_kind: d.memory_kind.as_ref().map(|s| {
+                let wire = if s == "generic" { "custom" } else { s.as_str() };
+                nexus_contracts::MemoryKind::from_str(wire).unwrap()
+            }),
+            status: nexus_contracts::MemoryStatus::from_str(&d.status).unwrap(),
             summary: d.summary,
             embedding_ref: d.embedding_ref,
             source_refs: d.source_refs.map(|refs| {
