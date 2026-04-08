@@ -33,7 +33,40 @@ impl fmt::Display for CommandType {
     }
 }
 
+impl fmt::Display for AccountStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl fmt::Display for SubscriptionTier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 // ── as_str() implementations ─────────────────────────────────────────────
+
+impl AccountStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Suspended => "suspended",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+impl SubscriptionTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Free => "free",
+            Self::Pro => "pro",
+            Self::Studio => "studio",
+            Self::Enterprise => "enterprise",
+        }
+    }
+}
 
 impl CreatorStatus {
     pub fn as_str(&self) -> &'static str {
@@ -364,6 +397,33 @@ impl FromStr for CreatorStatus {
             "archived" => Ok(Self::Archived),
             "locked" => Ok(Self::Locked),
             _ => Err(format!("Invalid CreatorStatus: {}", s)),
+        }
+    }
+}
+
+impl FromStr for AccountStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(Self::Active),
+            "suspended" => Ok(Self::Suspended),
+            "deleted" => Ok(Self::Deleted),
+            _ => Err(format!("Invalid AccountStatus: {}", s)),
+        }
+    }
+}
+
+impl FromStr for SubscriptionTier {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "free" => Ok(Self::Free),
+            "pro" => Ok(Self::Pro),
+            "studio" => Ok(Self::Studio),
+            "enterprise" => Ok(Self::Enterprise),
+            _ => Err(format!("Invalid SubscriptionTier: {}", s)),
         }
     }
 }

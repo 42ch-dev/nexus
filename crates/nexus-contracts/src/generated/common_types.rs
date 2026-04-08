@@ -44,6 +44,25 @@ pub type SchemaVersion = u32;
 
 // ── Enums ─────────────────────────────────────────────────────────────
 
+/// User account status (data-model-v1.md §5.1)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountStatus {
+    Active,
+    Suspended,
+    Deleted,
+}
+
+/// User subscription tier (data-model-v1.md §5.1)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionTier {
+    Free,
+    Pro,
+    Studio,
+    Enterprise,
+}
+
 /// Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

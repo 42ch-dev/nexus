@@ -206,14 +206,8 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             }
 
             // Default IDs from config if not provided
-            let workspace_id = workspace_id
-                .as_deref()
-                .unwrap_or("local")
-                .to_string();
-            let world_id = world_id
-                .as_deref()
-                .unwrap_or("unknown")
-                .to_string();
+            let workspace_id = workspace_id.as_deref().unwrap_or("local").to_string();
+            let world_id = world_id.as_deref().unwrap_or("unknown").to_string();
             let creator_id = creator_id
                 .as_deref()
                 .or(config.active_creator_id.as_deref())
@@ -243,8 +237,10 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                         if precheck.valid {
                             println!("  Precheck:  PASSED");
                         } else {
-                            println!("  Precheck:  FAILED ({} errors, {} warnings)",
-                                precheck.error_count, precheck.warning_count);
+                            println!(
+                                "  Precheck:  FAILED ({} errors, {} warnings)",
+                                precheck.error_count, precheck.warning_count
+                            );
                             println!("  {}", precheck.summary);
                         }
                     }
@@ -265,7 +261,9 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
             println!("Pulling platform changes...");
-            println!("⚠ Pull is not yet fully implemented. Use `sync status` to check outbox state.");
+            println!(
+                "⚠ Pull is not yet fully implemented. Use `sync status` to check outbox state."
+            );
         }
         SyncCommand::Status => {
             if !client.health_check().await? {
@@ -343,10 +341,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             };
 
             match client
-                .post::<SyncResolveResponse, SyncResolveRequest>(
-                    "/v1/local/sync/resolve",
-                    &request,
-                )
+                .post::<SyncResolveResponse, SyncResolveRequest>("/v1/local/sync/resolve", &request)
                 .await
             {
                 Ok(response) => {

@@ -27,6 +27,7 @@ export * from './ReferenceSource';
 export * from './StoryManifest';
 export * from './SyncCommand';
 export * from './TimelineEvent';
+export * from './User';
 export * from './WorkspaceBinding';
 export * from './WorldMembership';
 export * from './World';
@@ -52,6 +53,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   StoryManifest: 1,
   SyncCommand: 1,
   TimelineEvent: 1,
+  User: 1,
   WorkspaceBinding: 1,
   WorldMembership: 1,
   World: 1,

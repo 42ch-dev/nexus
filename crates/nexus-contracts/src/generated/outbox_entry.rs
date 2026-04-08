@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source outbox-entry.schema.json
 
-use crate::generated::common_types::DeliveryState;
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{DeliveryState};
 
 /// OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -26,6 +26,16 @@
       "pattern": "^usr_[a-zA-Z0-9]+$",
       "description": "User ID (prefix: 'usr_')"
     },
+    "AccountStatus": {
+      "type": "string",
+      "enum": ["active", "suspended", "deleted"],
+      "description": "User account status (data-model-v1.md §5.1)"
+    },
+    "SubscriptionTier": {
+      "type": "string",
+      "enum": ["free", "pro", "studio", "enterprise"],
+      "description": "User subscription tier (data-model-v1.md §5.1)"
+    },
     "KeyBlockId": {
       "type": "string",
       "pattern": "^kb_[a-zA-Z0-9]+$",

@@ -40,6 +40,12 @@ export type DeltaSequence = number;
 /** Schema version as integer (e.g., 1) */
 export type SchemaVersion = number;
 
+/** User account status (data-model-v1.md §5.1) */
+export type AccountStatus = 'active' | 'suspended' | 'deleted';
+
+/** User subscription tier (data-model-v1.md §5.1) */
+export type SubscriptionTier = 'free' | 'pro' | 'studio' | 'enterprise';
+
 /** Manuscript lifecycle phase (data-model-v1.md §7, §5.9B) */
 export type ManuscriptPhase = 'brainstorm' | 'draft' | 'review' | 'finalize' | 'published';
 
