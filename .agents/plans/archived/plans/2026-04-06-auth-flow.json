@@ -16,7 +16,7 @@
     ],
     "progress": 100,
     "tags": [
-      "phase-2",
+      "V1.0-phase2",
       "auth",
       "oauth",
       "daemon"
@@ -26,7 +26,7 @@
     "done_at": "2026-04-07",
     "notes": "Merged to main. QC三审 Approve. QA PASS. Device code OAuth, token lifecycle, auth middleware, CLI auth client. 15 files changed, 1362 insertions.",
     "metadata": {
-      "phase": "Phase 2",
+      "phase": "V1.0-phase2",
       "branch_policy": "feature/v2.0-auth-flow from main",
       "priority": "medium",
       "description": "Complete device code OAuth flow, token refresh, daemon auth middleware, CLI auth client update",

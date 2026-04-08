@@ -1,8 +1,8 @@
-# Phase 1 Architecture Review — V1.0 GA
+# V1.0-phase1 Architecture Review — V1.0 GA
 
 **Date**: 2026-04-06
 **Reviewer**: @architect
-**Scope**: All Phase 0 + Phase 1 crates and schemas
+**Scope**: All Phase 0 + V1.0-phase1 crates and schemas
 **Review type**: READ-ONLY analysis — no source code modifications
 **Status**: Archived — key findings summarized in `v1.1-overview-v1.md` §2.3; retained for detailed reference
 
@@ -12,7 +12,7 @@
 
 The Nexus42 V1.0 architecture is **structurally sound at the crate boundary level** — the five-crate workspace (contracts, domain, sync, CLI, daemon) follows clean separation of concerns with a unidirectional dependency flow. The domain model is the strongest component: 15 well-designed aggregates with rigorous consistency rules, 133 tests, and proper provisional-to-canon lifecycle gates. The sync mechanism is well-architected with a clean Command → DeltaBundle → Outbox → ConflictResolution pipeline and solid precheck validation.
 
-However, the review identifies **3 critical runtime bugs**, **7 high-severity design issues**, and **14 medium-severity concerns** that should be addressed before or during Phase 2. The most impactful issues are: (1) the ACP SDK integration is structurally complete but **entirely non-functional** — all adapter methods return placeholder responses; (2) the daemon has a **workspace initialization bug** where `is_initialized()` always returns `false`; and (3) the CLI context assembly client calls a daemon route that **does not exist**. Cross-cutting debt (error propagation inconsistency, SQLite schema duplication, connection-per-request) is accurately scoped in the 4 DEBT-X items but should be prioritized early in Phase 2 to prevent accumulation.
+However, the review identifies **3 critical runtime bugs**, **7 high-severity design issues**, and **14 medium-severity concerns** that should be addressed before or during Phase 2. The most impactful issues are: (1) the ACP SDK integration is structurally complete but **entirely non-functional** — all adapter methods return placeholder responses; (2) the daemon has a **workspace initialization bug** where `is_initialized()` always returns `false`; and (3) the CLI context assembly client calls a daemon route that **does not exist**. Cross-cutting debt (error propagation inconsistency, SQLite schema duplication, connection-per-request) is accurately scoped in the 4 DEBT-X items but should be prioritized early in V1.0-phase2 to prevent accumulation.
 
 ---
 
@@ -419,21 +419,21 @@ function generateCommonTypesFile() {
 
 ### 8.2 Pre-Phase-2 Priorities
 
-**Must address BEFORE Phase 2** (blockers for new feature work):
+**Must address BEFORE V1.0-phase2** (blockers for new feature work):
 
 1. **CLI-DAEMON-1** [CRITICAL]: Fix `WorkspaceState::init_workspace()` to set `workspace_path`. Without this, no daemon operation can detect workspace state correctly.
 2. **CLI-DAEMON-2** [CRITICAL]: Register `POST /v1/local/context/assemble` route in daemon, or remove from CLI client.
-3. **DEBT-X1** [HIGH]: SQLite connection pooling. The current per-request pattern will not scale for Phase 2 features (sync daemon loops, concurrent context assembly).
+3. **DEBT-X1** [HIGH]: SQLite connection pooling. The current per-request pattern will not scale for V1.0-phase2 features (sync daemon loops, concurrent context assembly).
 4. **DEBT-X2** [HIGH]: Schema duplication. Three independent SQLite schema definitions will drift further during Phase 2.
 
-**Should address EARLY in Phase 2** (high impact, moderate effort):
+**Should address EARLY in V1.0-phase2** (high impact, moderate effort):
 
 5. **CC-ERR-1** [HIGH]: Standardize error propagation. Define a shared error strategy across CLI/daemon boundary.
 6. **DEBT-X4** [HIGH]: Daemon workspace validation middleware. All handlers should check workspace state before proceeding.
 7. **CODEGEN-1** [HIGH]: Drive CommonTypes generation from `common.schema.json` definitions, not hard-coded lists.
 8. **CODEGEN-2** [HIGH]: Generate types for `context-assembly-v1.schema.json` definitions.
 
-**Can defer to mid/late Phase 2**:
+**Can defer to mid/late V1.0-phase2**:
 
 9. **ACP-ARCH-1**: ACP SDK bridge implementation (needed when agent commands are functional)
 10. **DM-1**: Extract shared `MembershipPermissionCheck` type
@@ -444,18 +444,18 @@ function generateCommonTypesFile() {
 
 | ID | Title | Severity | Scope Accurate? | Recommendation |
 |----|-------|----------|----------------|----------------|
-| DEBT-X1 | SQLite connection pooling | **HIGH** | **Yes** — accurately scopes both `nexus42d` (per-request) and `nexus-sync` (direct connections) | **Promote to Phase 2 Blocker**. Use `deadpool-sqlite` or `r2d2`. |
-| DEBT-X2 | Schema duplication | **HIGH** | **Yes** — 3 locations confirmed | **Promote to Phase 2 Blocker**. Extract to shared crate or centralize through daemon API. |
+| DEBT-X1 | SQLite connection pooling | **HIGH** | **Yes** — accurately scopes both `nexus42d` (per-request) and `nexus-sync` (direct connections) | **Promote to V1.0-phase2 Blocker**. Use `deadpool-sqlite` or `r2d2`. |
+| DEBT-X2 | Schema duplication | **HIGH** | **Yes** — 3 locations confirmed | **Promote to V1.0-phase2 Blocker**. Extract to shared crate or centralize through daemon API. |
 | DEBT-X3 | Error propagation | **MEDIUM** | **Yes** — `anyhow` in daemon, `thiserror` in sync | Acceptable for V1.0 GA. Address early Phase 2. |
-| DEBT-X4 | Workspace validation | **HIGH** | **Yes** — handlers skip state checks | **Promote to Phase 2 Blocker**. Add Axum middleware layer. |
+| DEBT-X4 | Workspace validation | **HIGH** | **Yes** — handlers skip state checks | **Promote to V1.0-phase2 Blocker**. Add Axum middleware layer. |
 
 ---
 
-## 9. Phase 2 Architecture Recommendations
+## 9. V1.0-phase2 Architecture Recommendations
 
-### 9.1 What to Fix First (Phase 2 Blockers)
+### 9.1 What to Fix First (V1.0-phase2 Blockers)
 
-These items must be resolved before starting Phase 2 feature work:
+These items must be resolved before starting V1.0-phase2 feature work:
 
 | Priority | Item | Effort | Agent Sessions |
 |----------|------|--------|----------------|
@@ -467,7 +467,7 @@ These items must be resolved before starting Phase 2 feature work:
 
 **Estimated pre-Phase-2 effort**: **S** total (~3-5 agent sessions).
 
-### 9.2 Architecture Priorities for Phase 2
+### 9.2 Architecture Priorities for V1.0-phase2
 
 | Priority | Area | Rationale |
 |----------|------|-----------|
@@ -477,23 +477,23 @@ These items must be resolved before starting Phase 2 feature work:
 | **4** | Context assembly V1.1 (daemon-side) | CLI types and client exist but daemon handler is missing. |
 | **5** | Auth flow completion | Device code OAuth and token refresh are skeletons. |
 
-### 9.3 Architecture Risks for Phase 2
+### 9.3 Architecture Risks for V1.0-phase2
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
 | ACP SDK breaking changes (v0.10.4 → newer) | Medium | High | Pin exact version; adapter trait isolates changes |
 | SQLite concurrency under sync daemon loops | Medium | Medium | DEBT-X1 (connection pooling) must land first |
 | Context assembly types violating schema-first contract | High | Medium | CLI hand-wrote types instead of using codegen; must align |
-| Platform API contract drift (CLI expects routes platform doesn't serve) | Medium | High | Formalize API contract tests before Phase 2 |
+| Platform API contract drift (CLI expects routes platform doesn't serve) | Medium | High | Formalize API contract tests before V1.0-phase2 |
 | `!Send` futures blocking async runtime | Low | High | `LocalSet` bridge is designed; just needs implementation |
 
-### 9.4 Recommended Architecture Principles for Phase 2
+### 9.4 Recommended Architecture Principles for V1.0-phase2
 
 1. **Every new type must come from schemas** — no more hand-written DTOs that bypass codegen. Fix `context/types.rs` to use generated types.
 2. **Error types must be structured** — no more `anyhow` at API boundaries. Define error codes and propagate them through the full stack.
 3. **Daemon owns all SQLite state** — CLI should access workspace data through daemon API, not direct SQLite connections. This resolves DEBT-X2 naturally.
 4. **HTTP status codes must be meaningful** — daemon handlers should return proper 4xx/5xx status codes, not always 200.
-5. **Auth tokens must have lifecycle management** — implement refresh logic and expiration checks before Phase 2 ships.
+5. **Auth tokens must have lifecycle management** — implement refresh logic and expiration checks before V1.0-phase2 ships.
 
 ---
 

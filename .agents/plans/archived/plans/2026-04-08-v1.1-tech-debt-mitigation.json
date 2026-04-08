@@ -16,7 +16,7 @@
       "working_branch": "feature/v1.1-wave3-batch2",
       "priority": "high",
       "description": "Resolve CRITICAL contract drift (DM-R5), complete missing schemas (delta/workspace-binding/agent-profile), address 27 V1.1 residuals across ACP session/policy, Research extraction, Context Assembly, Multi-Creator governance, and reliability hardening",
-      "dependency": "nexus-platform Phase 2 complete (confirmed)",
+      "dependency": "nexus-platform V1.0-phase2 complete (confirmed)",
       "spec_refs": [
         "nexus-platform/.agents/designs/v1-spec/domain/data-model-v1.md",
         "nexus-platform/.agents/designs/roadmap.md"

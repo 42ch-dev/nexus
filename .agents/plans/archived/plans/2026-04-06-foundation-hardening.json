@@ -16,7 +16,7 @@
     ],
     "progress": 100,
     "tags": [
-      "phase-2",
+      "V1.0-phase2",
       "foundation",
       "error-strategy",
       "sqlite"
@@ -26,7 +26,7 @@
     "done_at": "2026-04-07",
     "notes": "Merged to main. QC三审 APPROVE (4 blocking fixed). QA CONDITIONAL PASS. 480 tests, 0 clippy warnings. 30 files changed, 1822 insertions, 336 deletions.",
     "metadata": {
-      "phase": "Phase 2",
+      "phase": "V1.0-phase2",
       "branch_policy": "feature/v2.0-foundation-hardening from main",
       "priority": "high",
       "description": "Resolve DEBT-X1..X4, standardize error propagation, SQLite schema dedup, workspace validation middleware, unwrap cleanup",

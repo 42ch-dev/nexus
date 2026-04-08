@@ -1,8 +1,8 @@
-# Phase 1 Architecture Review: CLI-Daemon, Sync-Contract, ACP-Client
+# V1.0-phase1 Architecture Review: CLI-Daemon, Sync-Contract, ACP-Client
 
 **Reviewer**: @architect  
 **Date**: 2026-04-06  
-**Scope**: Three Phase 1 implementation plans (`cli-daemon-foundation`, `sync-contract`, `acp-client`)  
+**Scope**: Three V1.0-phase1 implementation plans (`cli-daemon-foundation`, `sync-contract`, `acp-client`)  
 **Cross-referenced with**:
 - `open-source-and-repo-architecture.md` (repo boundary & open-source split)
 - `nexus-platform-monorepo-v1.md` (platform monorepo layout)
@@ -388,7 +388,7 @@ context-assembly ──────────────┘
 ```
 Phase 1a: cli-daemon-foundation (expanded with CLI-R1..R4 resolutions)
 Phase 1b: sync-contract (expanded with SYNC-R1..R3 resolutions)  [can partially parallel with 1a]
-Phase 2:  acp-client (as-is, address ACP-R1/R2 at start)
+V1.0-phase2:  acp-client (as-is, address ACP-R1/R2 at start)
 Phase 3:  context-assembly (rewrite from restructured spec)
 ```
 

@@ -12,7 +12,7 @@
     ],
     "progress": 100,
     "tags": [
-      "phase-1",
+      "V1.0-phase1",
       "cli",
       "daemon"
     ],
@@ -21,7 +21,7 @@
     "done_at": "2026-04-06",
     "notes": "Merged to main. QC三审 passed (2 blocking issues fixed). 156/156 tests passing. 61 files changed. 4 commits merged.",
     "metadata": {
-      "phase": "Phase 1",
+      "phase": "V1.0-phase1",
       "branch_policy": "feature/v1.0-cli-daemon from main",
       "priority": "high",
       "description": "Implement nexus42 CLI and nexus42d daemon with dual-subject auth, Creator/Manuscript/Research command surfaces, HTTP Local API, and SQLite workspace state",

@@ -1,15 +1,15 @@
-# JSON Schema Update for Phase 2 Alignment
+# JSON Schema Update for V1.0-phase2 Alignment
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Update nexus JSON Schemas to align with ADR-002 domain model field renaming and structure changes from nexus-platform Phase 2.
 
-**Architecture:** This plan coordinates with nexus-platform Phase 2 Domain Model Alignment (`.agents/plans/phase2-domain-model-alignment.md`). JSON Schema updates must precede or run in parallel with nexus-platform implementation to unblock Task 8 (contract consumption).
+**Architecture:** This plan coordinates with nexus-platform V1.0-phase2 Domain Model Alignment (`.agents/plans/phase2-domain-model-alignment.md`). JSON Schema updates must precede or run in parallel with nexus-platform implementation to unblock Task 8 (contract consumption).
 
 **Tech Stack:** JSON Schema (Draft 2020-12), TypeScript codegen, Rust codegen
 
 **Prerequisites:**
-- nexus-platform Phase 2 plan locked and ready for execution
+- nexus-platform V1.0-phase2 plan locked and ready for execution
 - ADR-002 approved
 
 ---
@@ -41,7 +41,7 @@
 ## Dependency Chain
 
 ```
-nexus-platform Phase 2 (Task 8)
+nexus-platform V1.0-phase2 (Task 8)
   ↓ (blocked on)
 nexus JSON Schema Update (this plan)
   ↓ (unblocks)
@@ -50,7 +50,7 @@ nexus JSON Schema Update (this plan)
 nexus-platform contract consumption
 ```
 
-**Timing**: This plan should start **immediately** or in parallel with nexus-platform Phase 2 Tasks 1-7.
+**Timing**: This plan should start **immediately** or in parallel with nexus-platform V1.0-phase2 Tasks 1-7.
 
 ---
 
@@ -353,7 +353,7 @@ Refs: ADR-001, ADR-002"
 ## Acceptance Criteria
 
 - [x] All JSON Schemas validate successfully (22/22 valid)
-- [x] Generated TypeScript types match nexus-platform Phase 2 models
+- [x] Generated TypeScript types match nexus-platform V1.0-phase2 models
 - [x] Generated Rust types compile
 - [x] Package version bumped to 0.2.0
 - [x] Documentation updated with migration guide (CHANGELOG.md)
@@ -411,7 +411,7 @@ Refs: ADR-001, ADR-002"
 | Schema update complete | This plan (Tasks 1-3) | — |
 | Types regenerated | This plan (Task 4) | — |
 | Package published | This plan (Task 8) | — |
-| Contract consumption | — | Phase 2 Task 8 |
+| Contract consumption | — | V1.0-phase2 Task 8 |
 
 **Communication**: When Task 4 is complete, notify nexus-platform PM that contracts are ready for consumption.
 
