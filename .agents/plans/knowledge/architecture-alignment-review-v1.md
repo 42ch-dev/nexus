@@ -11,7 +11,7 @@
 
 **Related Documents**:
 
-- [v1.1-overview-v1.md](v1.1-overview-v1.md) — V1.1 development overview, consolidates product/architecture plans and residual handling
+- [v1.1-overview-v2.md](v1.1-overview-v2.md) — V1.1 program overview (nexus OSS); long-form legacy tables in [archived `v1.1-overview-v1.md`](../archived/knowledge/v1.1-overview-v1.md)
 - [README.md](README.md) — Knowledge base index and maintenance guidelines
 - [2026-04-09-v1.1-arch-alignment-closure.md](../2026-04-09-v1.1-arch-alignment-closure.md) — Plan to **fully close** remaining open alignment residuals (canonical_hash cross-stack parity; optional daemon eager push)
 
@@ -359,11 +359,7 @@ After TD-2/TD-3/TD-4 delivery, regenerate or spot-check codegen and update this 
 
 The technical debt items identified in this review are tracked and addressed in:
 
-- **[v1.1-overview-v1.md](v1.1-overview-v1.md)** — Authoritative V1.1 development overview containing:
-  - Execution Plans 09, 11, 12 (status: Done)
-  - Residual-to-plan mapping matrix
-  - Cross-repo dependency coordination with nexus-platform
-  - Priority roadmap and GA criteria
+- **[v1.1-overview-v2.md](v1.1-overview-v2.md)** — Authoritative V1.1 program overview (status-aligned); residual tables and platform coordination narrative. Deep historical matrices: [archived `v1.1-overview-v1.md`](../archived/knowledge/v1.1-overview-v1.md).
 - **[2026-04-09-v1.1-arch-alignment-closure.md](../2026-04-09-v1.1-arch-alignment-closure.md)** — Closes remaining **ALIGN-HASH-01** and **ARCH-SYNC-D1**; after Done, update **§1.2** in this file
 
 ### Knowledge Base Index
