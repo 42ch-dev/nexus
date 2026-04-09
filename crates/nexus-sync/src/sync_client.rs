@@ -18,7 +18,7 @@
 
 use std::time::Duration;
 
-use nexus_contracts::generated::Bundle;
+use nexus_contracts::generated::{Bundle, SyncPullRequest, SyncPullResponse};
 use reqwest::{Client, Method, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 
@@ -409,6 +409,64 @@ impl SyncClient {
             world_revision = pull_response.world_revision,
             is_up_to_date = pull_response.is_up_to_date,
             "Sync state pulled"
+        );
+
+        Ok(pull_response)
+    }
+
+    /// Pull pending bundles from the platform (incremental sync down).
+    ///
+    /// Calls `POST /v1/sync/pull` with [`SyncPullRequest`]. Applies the same body-size
+    /// limits and retry policy as [`Self::push_bundle`].
+    pub async fn pull_bundles(&self, req: &SyncPullRequest) -> SyncResult<SyncPullResponse> {
+        let url = format!("{}/v1/sync/pull", self.base_url);
+        tracing::info!(
+            world_id = %req.world_id,
+            after = ?req.after_confirmed_delta_sequence,
+            "Pulling bundles from platform"
+        );
+
+        let response = self
+            .execute_with_retry(Method::POST, &url, Some(req))
+            .await?;
+
+        let status = response.status().as_u16();
+
+        if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
+            if let Ok(length_str) = content_length.to_str() {
+                if let Ok(length) = length_str.parse::<usize>() {
+                    if length > self.body_max_size {
+                        return Err(SyncError::HttpBodySizeExceeded {
+                            actual: length,
+                            limit: self.body_max_size,
+                        });
+                    }
+                }
+            }
+        }
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| SyncError::Serialization(e.to_string()))?;
+
+        if body.len() > self.body_max_size {
+            return Err(SyncError::HttpBodySizeExceeded {
+                actual: body.len(),
+                limit: self.body_max_size,
+            });
+        }
+
+        if status >= 400 {
+            tracing::error!(status = status, "Platform pull returned error");
+            return Err(SyncError::PlatformError { status, body });
+        }
+
+        let pull_response: SyncPullResponse = serde_json::from_str(&body)?;
+        tracing::info!(
+            world_revision = pull_response.world_revision,
+            bundle_count = pull_response.bundles.len(),
+            "Pull bundles completed"
         );
 
         Ok(pull_response)

@@ -321,6 +321,67 @@ impl Outbox {
         Ok(result)
     }
 
+    /// Stage a bundle only if no row exists with the same `bundle_id` (idempotent pull apply).
+    ///
+    /// Returns `Ok(Some(entry_id))` when a new row was inserted, `Ok(None)` when the bundle
+    /// was already present.
+    pub async fn stage_if_absent(&self, bundle: &Bundle) -> SyncResult<Option<String>> {
+        let new_entry_id = format!("obe_{}", Uuid::new_v4().simple());
+        let now = chrono::Utc::now().to_rfc3339();
+        let bundle_payload = serde_json::to_string(bundle)?;
+        let bundle_id = bundle.bundle_id.clone();
+        let idempotency_key = bundle.idempotency_key.clone();
+        let bundle_id_check = bundle_id.clone();
+        let outbox_entry_id = new_entry_id.clone();
+
+        let conn = self.get_conn().await?;
+        let result = conn
+            .interact(move |conn| {
+                let txn = conn.unchecked_transaction()?;
+                let exists: bool = txn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM outbox_entries WHERE bundle_id = ?1)",
+                    params![bundle_id_check],
+                    |row| row.get(0),
+                )?;
+                if exists {
+                    txn.rollback()?;
+                    return Ok::<_, SyncError>(None);
+                }
+                txn.execute(
+                    "INSERT INTO outbox_entries
+                    (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+                     retry_count, bundle_payload, created_at)
+                 VALUES (?1, ?2, ?3, 'ready', 0, ?4, ?5)",
+                    params![
+                        outbox_entry_id,
+                        bundle_id,
+                        idempotency_key,
+                        bundle_payload,
+                        now,
+                    ],
+                )?;
+                txn.commit()?;
+                Ok(Some(new_entry_id))
+            })
+            .await
+            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))??;
+
+        if let Some(ref id) = result {
+            tracing::debug!(
+                outbox_entry_id = %id,
+                bundle_id = %bundle.bundle_id,
+                "Bundle staged to outbox (pull idempotent)"
+            );
+        } else {
+            tracing::debug!(
+                bundle_id = %bundle.bundle_id,
+                "Skipped staging pull bundle (bundle_id already in outbox)"
+            );
+        }
+
+        Ok(result)
+    }
+
     /// Transition an outbox entry to `sent` state.
     pub async fn mark_sent(&self, outbox_entry_id: &str) -> SyncResult<()> {
         let now = chrono::Utc::now().to_rfc3339();
@@ -942,6 +1003,50 @@ mod tests {
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.bundle_id, "bdl_test");
         assert_eq!(entry.delivery_state, DeliveryState::Ready);
+    }
+
+    #[tokio::test]
+    async fn outbox_stage_if_absent_idempotent() {
+        let outbox = Outbox::new_in_memory().await.expect("create outbox");
+
+        let bundle = Bundle {
+            schema_version: 1,
+            bundle_id: "bdl_pull_once".to_string(),
+            command_id: "cmd_pull".to_string(),
+            workspace_id: "wrk_test".to_string(),
+            world_id: "wld_test".to_string(),
+            creator_id: "ctr_test".to_string(),
+            submitting_creator_id: "ctr_test".to_string(),
+            bundle_type: nexus_contracts::BundleType::WorldSync,
+            manuscript_phase: None,
+            output_manuscript: None,
+            idempotency_key: "idk_pull".to_string(),
+            canonical_hash: "a".repeat(64),
+            base_versions: serde_json::json!({"world_revision": 1}),
+            last_confirmed_delta_sequence: None,
+            deltas: vec![Delta {
+                delta_type: DeltaType::World,
+                operation: DeltaOperation::Create,
+                target_entity_type: None,
+                target_entity_id: None,
+                payload: serde_json::json!({}),
+                source_anchor: None,
+                local_timestamp: "2025-01-01T00:00:00Z".to_string(),
+            }],
+            bundle_apply_status: None,
+            delta_results: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let first = outbox
+            .stage_if_absent(&bundle)
+            .await
+            .expect("stage first")
+            .expect("new entry");
+        let second = outbox.stage_if_absent(&bundle).await.expect("stage second");
+        assert!(second.is_none());
+        let entry = outbox.get(&first).await.expect("get");
+        assert_eq!(entry.bundle_id, "bdl_pull_once");
     }
 
     #[tokio::test]

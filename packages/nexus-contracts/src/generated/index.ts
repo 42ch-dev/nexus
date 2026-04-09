@@ -12,6 +12,8 @@ export * from './CommonTypes';
 // Per-schema modules (stable order: sorted schema paths at load time)
 export * from './RegistryManifest';
 export * from './ConflictResponse';
+export * from './SyncPullRequest';
+export * from './SyncPullResponse';
 export * from './VersionRef';
 export * from './AgentProfile';
 export * from './Bundle';
@@ -38,6 +40,8 @@ export * from './ContextAssemblyV1';
 export const SCHEMA_VERSIONS: Record<string, number> = {
   RegistryManifest: 1,
   ConflictResponse: 1,
+  SyncPullRequest: 1,
+  SyncPullResponse: 1,
   VersionRef: 1,
   AgentProfile: 1,
   Bundle: 1,
