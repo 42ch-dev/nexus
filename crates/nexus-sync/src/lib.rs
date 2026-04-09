@@ -33,6 +33,7 @@ pub mod outbox;
 pub mod partial_apply;
 pub mod pool;
 pub mod precheck;
+pub mod pull_apply;
 pub mod sync_client;
 
 // Re-export common types from nexus-contracts
@@ -43,3 +44,4 @@ pub use nexus_contracts::{
 
 // Re-export sync error types
 pub use errors::{SyncError, SyncResult};
+pub use pull_apply::{apply_pull_response_to_outbox, PullApplySummary};

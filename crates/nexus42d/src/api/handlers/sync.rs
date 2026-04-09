@@ -9,6 +9,11 @@
 //! `SyncClient` validation — min 64 chars), the daemon calls `SyncClient::push_bundle`
 //! after a successful stage. Failures are logged; the entry stays `ready` for retry.
 //! When the env gate is off or unset, behavior is unchanged.
+//!
+//! **Pull:** `POST /v1/local/sync/pull` uses the same `NEXUS_SYNC_PLATFORM_*` credentials
+//! (no `NEXUS_SYNC_EAGER_PUSH` gate) to call `SyncClient::pull_bundles` (`POST /v1/sync/pull`),
+//! then applies bundles with `nexus_sync::apply_pull_response_to_outbox` and
+//! `Outbox::stage_if_absent`.
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
@@ -16,13 +21,14 @@ use axum::extract::State;
 use axum::Json;
 use nexus_contracts::{
     CommandOrigin, CommandStatus, CommandType, DeltaOperation, DeltaType, ManuscriptPhase,
-    SyncCommand,
+    SyncCommand, SyncPullRequest,
 };
 use nexus_sync::delta_bundle::{BundleBuilder, LocalDelta};
 use nexus_sync::precheck::{
     precheck_bundle_with_auth, AuthContext, LocalState, PrecheckReport, PrecheckResult,
     PrecheckSeverity,
 };
+use nexus_sync::pull_apply::apply_pull_response_to_outbox;
 use nexus_sync::sync_client::SyncClient;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
@@ -121,6 +127,20 @@ pub struct SyncReplayResponse {
     pub entries: Vec<OutboxEntrySummary>,
 }
 
+/// Response from POST /v1/local/sync/pull (daemon-local summary after platform pull).
+#[derive(Debug, Serialize)]
+pub struct SyncPullLocalResponse {
+    pub success: bool,
+    pub world_revision: u64,
+    pub confirmed_delta_sequence: u64,
+    pub bundles_received: usize,
+    pub entries_staged: Vec<String>,
+    pub skipped_known_bundles: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_up_to_date: Option<bool>,
+    pub error: Option<String>,
+}
+
 /// Summary of an outbox entry for API responses.
 #[derive(Debug, Serialize)]
 pub struct OutboxEntrySummary {
@@ -188,6 +208,11 @@ fn try_eager_push_config_from_env() -> Option<(String, String)> {
     if std::env::var("NEXUS_SYNC_EAGER_PUSH").ok().as_deref() != Some("1") {
         return None;
     }
+    try_platform_sync_credentials_from_env()
+}
+
+/// Platform URL + token for `SyncClient` (pull and opt-in eager push).
+fn try_platform_sync_credentials_from_env() -> Option<(String, String)> {
     let base = std::env::var("NEXUS_SYNC_PLATFORM_URL")
         .ok()
         .filter(|s| !s.is_empty())?;
@@ -195,6 +220,13 @@ fn try_eager_push_config_from_env() -> Option<(String, String)> {
         .ok()
         .filter(|s| !s.is_empty())?;
     Some((base, token))
+}
+
+fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+    NexusApiError::Internal {
+        code: e.error_code().to_string(),
+        message: e.to_string(),
+    }
 }
 
 fn precheck_summary_from_report(report: &PrecheckReport) -> PrecheckSummary {
@@ -214,6 +246,101 @@ fn precheck_summary_from_report(report: &PrecheckReport) -> PrecheckSummary {
         warning_count,
         summary: report.summary(),
     }
+}
+
+/// POST /v1/local/sync/pull
+///
+/// Calls the platform `POST /v1/sync/pull`, then stages returned bundles into the local
+/// outbox (skipping duplicate `bundle_id`). Requires `NEXUS_SYNC_PLATFORM_URL` and
+/// `NEXUS_SYNC_PLATFORM_TOKEN`.
+pub async fn pull(
+    State(state): State<WorkspaceState>,
+    Json(mut req): Json<SyncPullRequest>,
+) -> Result<Json<SyncPullLocalResponse>, NexusApiError> {
+    info!(world_id = %req.world_id, "Handling sync pull request");
+
+    if req.world_id.is_empty() {
+        return Ok(Json(SyncPullLocalResponse {
+            success: false,
+            world_revision: 0,
+            confirmed_delta_sequence: 0,
+            bundles_received: 0,
+            entries_staged: vec![],
+            skipped_known_bundles: 0,
+            is_up_to_date: None,
+            error: Some("world_id must not be empty".to_string()),
+        }));
+    }
+
+    if req.schema_version == 0 {
+        req.schema_version = 1;
+    }
+
+    let outbox = state.outbox().ok_or_else(|| NexusApiError::Internal {
+        code: "SYNC_NOT_CONFIGURED".into(),
+        message: "Sync outbox not initialized".to_string(),
+    })?;
+
+    if let Some((_, bound_world, _)) = optional_sync_push_binding(&state).await? {
+        if req.world_id != bound_world {
+            return Ok(Json(SyncPullLocalResponse {
+                success: false,
+                world_revision: 0,
+                confirmed_delta_sequence: 0,
+                bundles_received: 0,
+                entries_staged: vec![],
+                skipped_known_bundles: 0,
+                is_up_to_date: None,
+                error: Some(format!(
+                    "world_id does not match workspace sync binding (expected {bound_world})"
+                )),
+            }));
+        }
+    }
+
+    let (base_url, token) = try_platform_sync_credentials_from_env().ok_or_else(|| {
+        NexusApiError::InvalidInput {
+            field: "platform_sync".into(),
+            reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN to pull from the platform"
+                .into(),
+        }
+    })?;
+
+    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+
+    let remote = client
+        .pull_bundles(&req)
+        .await
+        .map_err(map_sync_client_error)?;
+    let bundles_received = remote.bundles.len();
+    let is_up_to_date = remote.is_up_to_date;
+
+    let summary = apply_pull_response_to_outbox(outbox, &remote)
+        .await
+        .map_err(map_sync_client_error)?;
+
+    let ts = chrono::Utc::now().to_rfc3339();
+    if let Ok(conn) = state.db().await {
+        let _ = conn
+            .interact(move |c| {
+                c.execute(
+                    "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('last_sync_at', ?1)",
+                    rusqlite::params![ts],
+                )
+            })
+            .await;
+    }
+
+    Ok(Json(SyncPullLocalResponse {
+        success: true,
+        world_revision: summary.world_revision,
+        confirmed_delta_sequence: summary.confirmed_delta_sequence,
+        bundles_received,
+        entries_staged: summary.staged_entry_ids,
+        skipped_known_bundles: summary.skipped_duplicate_bundles,
+        is_up_to_date,
+        error: None,
+    }))
 }
 
 /// GET /v1/local/sync/status
@@ -696,6 +823,19 @@ mod tests {
         }"#;
         let req: SyncPushRequest = serde_json::from_str(json).unwrap();
         assert!(!req.force);
+    }
+
+    #[test]
+    fn test_sync_pull_request_deserialization() {
+        let json = r#"{
+            "schema_version": 1,
+            "world_id": "wld_x",
+            "after_confirmed_delta_sequence": 4
+        }"#;
+        let req: SyncPullRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.schema_version, 1);
+        assert_eq!(req.world_id, "wld_x");
+        assert_eq!(req.after_confirmed_delta_sequence, Some(4));
     }
 
     #[test]

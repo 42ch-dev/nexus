@@ -39,34 +39,34 @@
 
 ## Acceptance criteria (ship gate)
 
-- [ ] `sync pull` (or equivalent approved command name) applies server deltas to local outbox/state per wire contract; errors map to structured CLI messages.
-- [ ] `sync push` path remains consistent with canonical bundle rules ([`knowledge/canonical-hash-v1.md`](knowledge/canonical-hash-v1.md)).
-- [ ] `cargo test -p nexus-sync` and CLI integration tests cover at least one golden pull + push loop (mock server acceptable).
-- [ ] `cargo clippy --all -- -D warnings` and `pnpm run codegen` + no diff on generated dirs after any schema change.
+- [x] `sync pull` applies server bundles to the local outbox via `Outbox::stage_if_absent` (wire: `SyncPullRequest` / `SyncPullResponse`); daemon returns structured JSON; CLI prints summary or daemon error text.
+- [x] `sync push` path unchanged for canonical bundle rules ([`knowledge/canonical-hash-v1.md`](knowledge/canonical-hash-v1.md)) (still `BundleBuilder` + precheck + `Outbox::stage`).
+- [x] `cargo test -p nexus-sync` includes wiremock pull tests and `sync_push_pull_loop` (mock push + pull); see `crates/nexus-sync/tests/`.
+- [x] `cargo clippy --all -- -D warnings` and `pnpm run codegen` + generated dirs committed for new schemas.
 
 ---
 
 ## Task group A — Inventory & contract gap
 
-- [ ] **A1:** Document current CLI sync subcommands and `SyncClient` public API in a short table (command → crate entrypoint → HTTP route name from capability map if known).
-- [ ] **A2:** List JSON Schema / generated types required for pull; if gaps exist, add schema drafts and run `pnpm run codegen`.
-- [ ] **A3:** Add failing integration test skeleton: `tests/` or `crates/nexus-sync/tests/` — “pull applies empty response” or mock 404 to lock wiring.
+- [x] **A1:** Inventory: [reports/2026-04-10-cli-sync-bidirectional-parity/sync-inventory-a1.md](reports/2026-04-10-cli-sync-bidirectional-parity/sync-inventory-a1.md)
+- [x] **A2:** Added `sync-pull-request` / `sync-pull-response` schemas; `pnpm run codegen`.
+- [x] **A3:** `crates/nexus-sync/tests/sync_pull_client.rs` (empty JSON + 404 → `PlatformError`).
 
 ## Task group B — Implement pull / delta apply
 
-- [ ] **B1:** Implement client method(s) for pull endpoint(s); reuse auth/session from daemon-owned store.
-- [ ] **B2:** Map HTTP errors to `NexusErrorCode` (or existing error enum) at the boundary.
-- [ ] **B3:** Persist applied commands / bundles per `nexus-sync` state machine; extend unit tests.
+- [x] **B1:** `SyncClient::pull_bundles` → `POST /v1/sync/pull`; daemon uses same env credentials as eager push (`NEXUS_SYNC_PLATFORM_*`).
+- [x] **B2:** HTTP ≥400 → `SyncError::PlatformError` with status + body; daemon maps to `NexusApiError::Internal` with `SyncError::error_code()`.
+- [x] **B3:** `apply_pull_response_to_outbox` + `Outbox::stage_if_absent`; unit + integration tests.
 
 ## Task group C — CLI & daemon
 
-- [ ] **C1:** Wire CLI command(s); ensure `daemon status` / health interaction documented if daemon required.
-- [ ] **C2:** Update user-facing help text and `docs/` only if product asks (otherwise keep scope to `.agents` + code).
+- [x] **C1:** `POST /v1/local/sync/pull`; CLI `sync pull` after `health_check`; requires running daemon + platform env on daemon process.
+- [x] **C2:** Help via clap on `pull` (`--world-id`, `--after-sequence`); no `docs/` change.
 
 ## Task group D — Verification
 
-- [ ] **D1:** `cargo test --all` (or scoped crates touched).
-- [ ] **D2:** `cargo +nightly fmt --all` and `cargo clippy --all -- -D warnings`.
+- [x] **D1:** `cargo test -p nexus-sync`, `cargo test -p nexus42 -p nexus42d` (full `cargo test --all` may hit network-dependent `cli_agent` test if CDN unreachable).
+- [x] **D2:** `cargo +nightly fmt --all`, `cargo clippy --all -- -D warnings`, `pnpm run typecheck`.
 
 ---
 
