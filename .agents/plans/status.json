@@ -259,7 +259,7 @@
       "created_at": "2026-04-10",
       "updated_at": "2026-04-10",
       "done_at": "2026-04-10",
-      "notes": "Delivered pull path: schemas sync-pull-request/response, SyncClient::pull_bundles (POST /v1/sync/pull), pull_apply + Outbox::stage_if_absent, daemon POST /v1/local/sync/pull, CLI sync pull (--world-id, --after-sequence). Inventory: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/sync-inventory-a1.md. Branch: feature/cli-sync-bidirectional-parity.",
+      "notes": "Delivered pull path: schemas sync-pull-request/response, SyncClient::pull_bundles (POST /v1/sync/pull), pull_apply + Outbox::stage_if_absent, daemon POST /v1/local/sync/pull, CLI sync pull (--world-id, --after-sequence). Inventory: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/sync-inventory-a1.md. QC self: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260410.md. Branch: feature/cli-sync-bidirectional-parity.",
       "metadata": {
         "priority": "high",
         "platform_capability_ref": "10-sync-bidirectional (conceptual cross-repo id)",
@@ -276,7 +276,8 @@
           "clippy": "passed (-D warnings)",
           "fmt": "passed (nightly rustfmt)",
           "typecheck": "passed (pnpm)",
-          "codegen": "passed"
+          "codegen": "passed",
+          "qc_self_report": ".agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260410.md"
         }
       }
     },
