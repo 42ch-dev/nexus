@@ -102,9 +102,9 @@ cp .agents/local-paths.json.example .agents/local-paths.json
 
 ### 读取规格
 
-直接使用 `specs_root` 作为根路径：
+使用 `.agents/local-paths.json`（从 `.agents/local-paths.json.example` 复制并填写）解析 `specs_root`：
 
-- Roadmap: `{specs_root.roadmap}`
+- **Roadmap**（`roadmap.md`）: `{specs_root.roadmap}` — 由示例中的 `${nexus_platform}` 等占位符在本地展开后的路径；计划在 `status.json` 中标记为 `**Done`** 时需同步更新此文件（见下文 Pre-merge checklist）。
 - Architecture: `{specs_root.v1-spec}/architecture/v1.md`
 - Domain Model: `{specs_root.v1-spec}/domain/data-model-v1.md`
 
@@ -225,6 +225,7 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 7. **Wire contracts / schemas (when `schemas/` or publish version changes)** — nexus-specific, not `contracts_schema`:
   - Run `**pnpm run codegen`** and commit `**packages/nexus-contracts/src/generated/`** and `**crates/nexus-contracts/src/generated/`** (CI `verify-codegen` enforces this).
   - Bump `**schema_version`** and package versions (`packages/nexus-contracts`, `crates/nexus-contracts`) per release policy; note downstream impact (`nexus-platform` consumes `@42ch/nexus-contracts`).
+8. **Roadmap in `nexus-platform` (when a plan is `Done`)** — same discipline as on the private platform repo: in the **same change window** as updating `{PLAN_DIR}/status.json` for a completed plan, edit `**roadmap.md`** at the path configured as `**specs_root.roadmap**` in your local `**.agents/local-paths.json**` (see §External Design Specs and the example file). Reflect completion (e.g. align with `done_at` / merge reality), delivered scope, and any reprioritization so the roadmap matches `**plans[].status**` in this repo. The roadmap file is **not** in the nexus OSS tree; commit that edit in `**nexus-platform`**. Do not paste machine-specific absolute paths into tracked nexus OSS artifacts (QC notes, `status.json` prose, etc.); resolving `specs_root.roadmap` locally is sufficient for the edit.
 
 #### Verification commands
 
@@ -245,6 +246,7 @@ jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agent
 
 #### Common mistakes
 
+- Marking a plan `**Done**` in `status.json` without updating `**roadmap.md**` at `**specs_root.roadmap**` in `**nexus-platform**` (roadmap drifts from actual plan completion).
 - Leaving `**tech_debt_summary**` stale after QC triage (counts and `updated_at` disagree with `residual_findings`).
 - **Schema edits without regenerated** `*/generated/` trees — CI fails on drift.
 - **Missing timeline** (`notes.json` or, if legacy, `metadata.notes`) for a merge or bulk residual archival that future agents need for context.
