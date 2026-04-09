@@ -7,6 +7,8 @@
 pub mod common_types;
 pub mod registry_manifest;
 pub mod conflict_response;
+pub mod sync_pull_request;
+pub mod sync_pull_response;
 pub mod version_ref;
 pub mod agent_profile;
 pub mod bundle;
@@ -34,6 +36,8 @@ pub use common_types::*;
 
 pub use registry_manifest::*;
 pub use conflict_response::*;
+pub use sync_pull_request::*;
+pub use sync_pull_response::*;
 pub use version_ref::*;
 pub use agent_profile::*;
 pub use bundle::*;
@@ -60,6 +64,8 @@ pub use context_assembly_v1::*;
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("RegistryManifest", 1),
     ("ConflictResponse", 1),
+    ("SyncPullRequest", 1),
+    ("SyncPullResponse", 1),
     ("VersionRef", 1),
     ("AgentProfile", 1),
     ("Bundle", 1),

@@ -10,11 +10,14 @@
 //! **BundleBuilder**, **precheck**). Push builds a bundle (including `canonical_hash`),
 //! runs precheck, then **`Outbox::stage`** (`ready`). HTTP upload to the platform via
 //! **`SyncClient`** is offline-first (queued locally; optional daemon follow-up).
+//! Pull calls **`POST /v1/local/sync/pull`**, which uses **`SyncClient::pull_bundles`**
+//! against the platform and stages returned bundles (idempotent by `bundle_id`).
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_contracts::SyncPullRequest;
 use serde::{Deserialize, Serialize};
 
 /// Supported conflict resolution strategies.
@@ -62,8 +65,16 @@ pub enum SyncCommand {
         force: bool,
     },
 
-    /// Pull platform changes to local workspace
-    Pull,
+    /// Pull platform bundles into the local outbox (requires platform URL/token on daemon)
+    Pull {
+        /// World ID to pull (must match workspace sync binding when configured)
+        #[arg(long)]
+        world_id: Option<String>,
+
+        /// Incremental cursor: only bundles after this server confirmed delta sequence
+        #[arg(long)]
+        after_sequence: Option<u64>,
+    },
 
     /// Show sync status
     Status,
@@ -131,6 +142,19 @@ pub struct SyncResolveRequest {
     pub outbox_entry_id: String,
     pub resolution: String,
     pub force: bool,
+}
+
+/// Sync pull response from the daemon (after platform `/v1/sync/pull` + local staging).
+#[derive(Debug, Deserialize)]
+pub struct SyncPullLocalResponse {
+    pub success: bool,
+    pub world_revision: u64,
+    pub confirmed_delta_sequence: u64,
+    pub bundles_received: usize,
+    pub entries_staged: Vec<String>,
+    pub skipped_known_bundles: usize,
+    pub is_up_to_date: Option<bool>,
+    pub error: Option<String>,
 }
 
 /// Sync resolve response from the daemon
@@ -286,14 +310,63 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 }
             }
         }
-        SyncCommand::Pull => {
+        SyncCommand::Pull {
+            world_id,
+            after_sequence,
+        } => {
             if !client.health_check().await? {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
-            println!("Pulling platform changes...");
-            println!(
-                "⚠ Pull is not yet fully implemented. Use `sync status` to check outbox state."
-            );
+
+            let world_id = match world_id {
+                Some(s) => s,
+                None => {
+                    eprintln!(
+                        "Warning: sync pull without --world-id uses placeholder \"unknown\". \
+Set --world-id for real platform sync (and ensure it matches workspace sync binding if set)."
+                    );
+                    "unknown".to_string()
+                }
+            };
+
+            let request = SyncPullRequest {
+                schema_version: 1,
+                world_id,
+                after_confirmed_delta_sequence: after_sequence,
+            };
+
+            match client
+                .post::<SyncPullLocalResponse, SyncPullRequest>("/v1/local/sync/pull", &request)
+                .await
+            {
+                Ok(resp) => {
+                    if resp.success {
+                        println!("Sync pull completed.");
+                        println!("  World revision:           {}", resp.world_revision);
+                        println!(
+                            "  Confirmed delta sequence: {}",
+                            resp.confirmed_delta_sequence
+                        );
+                        println!("  Bundles received:         {}", resp.bundles_received);
+                        println!("  New outbox entries:       {}", resp.entries_staged.len());
+                        if resp.skipped_known_bundles > 0 {
+                            println!("  Skipped (already local): {}", resp.skipped_known_bundles);
+                        }
+                        if let Some(up) = resp.is_up_to_date {
+                            println!("  Server up-to-date flag:   {}", up);
+                        }
+                        for id in &resp.entries_staged {
+                            println!("    - {}", id);
+                        }
+                    } else if let Some(err) = &resp.error {
+                        eprintln!("Sync pull failed: {}", err);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Sync pull request failed: {}", e);
+                    return Err(e);
+                }
+            }
         }
         SyncCommand::Status => {
             if !client.health_check().await? {
@@ -506,6 +579,25 @@ mod tests {
         let precheck = resp.precheck_result.unwrap();
         assert!(precheck.valid);
         assert_eq!(precheck.error_count, 0);
+    }
+
+    #[test]
+    fn test_sync_pull_local_response_deserialization() {
+        let json = r#"{
+            "success": true,
+            "world_revision": 3,
+            "confirmed_delta_sequence": 9,
+            "bundles_received": 1,
+            "entries_staged": ["obe_1"],
+            "skipped_known_bundles": 0,
+            "is_up_to_date": true,
+            "error": null
+        }"#;
+        let resp: SyncPullLocalResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.world_revision, 3);
+        assert_eq!(resp.entries_staged.len(), 1);
+        assert_eq!(resp.skipped_known_bundles, 0);
     }
 
     #[test]

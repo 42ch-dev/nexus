@@ -104,6 +104,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
     let sync_routes = Router::new()
         .route("/v1/local/sync/status", get(handlers::sync::status))
         .route("/v1/local/sync/push", post(handlers::sync::push))
+        .route("/v1/local/sync/pull", post(handlers::sync::pull))
         .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
         .route("/v1/local/sync/replay", get(handlers::sync::replay));
 
