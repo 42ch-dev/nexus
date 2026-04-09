@@ -107,6 +107,9 @@ mod tests {
         const EXPECTED: &str =
             "sha256:b9c07221605405f763956471055fed2ecdfdce7858f423a371aa387eec8befab";
         let got = canonical_hash_for_deltas(&[golden_alignment_fixture_delta()]).unwrap();
-        assert_eq!(got, EXPECTED, "keep in sync with .agents/plans/knowledge/canonical-hash-v1.md");
+        assert_eq!(
+            got, EXPECTED,
+            "keep in sync with .agents/plans/knowledge/canonical-hash-v1.md"
+        );
     }
 }
