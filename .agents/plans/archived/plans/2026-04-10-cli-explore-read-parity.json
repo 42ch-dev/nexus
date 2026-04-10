@@ -1,0 +1,42 @@
+{
+  "id": "2026-04-10-cli-explore-read-parity",
+  "title": "CLI Explore (Read) Parity",
+  "file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.1",
+    "explore",
+    "cli",
+    "platform-parity"
+  ],
+  "created_at": "2026-04-10",
+  "updated_at": "2026-04-10",
+  "done_at": "2026-04-10",
+  "notes": "Delivered: platform Explore schemas (explore-*); SyncClient explore_browse/search (POST /v1/explore/browse|search); daemon POST /v1/local/explore/browse|search; CLI `nexus42 explore browse|search` (--dry-run, global -o json). Wiremock: crates/nexus-sync/tests/explore_client.rs. Sprint matrix: .agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. QC self: .agents/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md. @42ch/nexus-contracts npm 0.2.1 (additive). Branch: feature/cli-explore-read-parity. Merged to main 2026-04-10 via integration branch feature/v1-spec-wire-schema-sprint (fast-forward).",
+  "metadata": {
+    "priority": "medium",
+    "platform_capability_ref": "12-explore-api (conceptual cross-repo id)",
+    "dependency": "2026-04-10-v1-spec-wire-schema-sprint",
+    "spec_refs": [
+      ".agents/plans/knowledge/v1.1-overview-v2.md"
+    ],
+    "working_branch": "feature/cli-explore-read-parity",
+    "merge_target": "main",
+    "merged_at": "2026-04-10",
+    "merged_via": "fast-forward feature/v1-spec-wire-schema-sprint → main",
+    "gates": {
+      "tests": "passed: cargo test -p nexus-sync --test explore_client; cargo test -p nexus42 -p nexus42d",
+      "clippy": "passed (-D warnings)",
+      "fmt": "passed (nightly rustfmt)",
+      "typecheck": "passed (pnpm)",
+      "validate_schemas": "passed (pnpm)",
+      "qc_self_report": ".agents/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md",
+      "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
+    }
+  }
+}
