@@ -7,8 +7,9 @@
 
 pub mod api;
 pub mod auth;
+pub mod cli_config;
 pub mod db;
 pub mod workspace;
 
-#[cfg(test)]
-mod test_utils;
+/// Helpers for integration tests (also used by `tests/*.rs` in this crate).
+pub mod test_utils;

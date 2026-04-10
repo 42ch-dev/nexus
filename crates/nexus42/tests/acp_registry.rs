@@ -4,8 +4,6 @@
 //! parse the manifest JSON, and verify schema conformance.
 
 use nexus42::acp::registry::Registry;
-use serde_json::Value;
-use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -27,8 +27,8 @@ fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
     }
 }
 
-fn manuscript_id_str(v: &str) -> &str {
-    v
+fn nonempty(s: &str) -> bool {
+    !s.is_empty()
 }
 
 /// Daemon response after `POST /v1/local/publish/story`.
@@ -54,19 +54,41 @@ pub async fn story(
     State(state): State<WorkspaceState>,
     Json(mut req): Json<PublishStoryRequest>,
 ) -> Result<Json<PublishStoryLocalResponse>, NexusApiError> {
-    let manuscript_s = manuscript_id_str(&req.manuscript_id);
+    let manuscript_s = req
+        .manuscript_id
+        .as_deref()
+        .filter(|s| nonempty(s))
+        .unwrap_or("(none)");
     info!(
         world_id = %req.world_id,
         manuscript_id = %manuscript_s,
         "Handling publish story request"
     );
 
-    if req.world_id.is_empty() || manuscript_s.is_empty() {
+    if !nonempty(&req.world_id)
+        || !nonempty(&req.title)
+        || !nonempty(&req.idempotency_key)
+        || req.chapter_ids.is_empty()
+        || req.chapter_ids.iter().any(|c| !nonempty(c))
+    {
         return Ok(Json(PublishStoryLocalResponse {
             success: false,
             result: None,
-            error: Some("world_id and manuscript_id must be non-empty strings".into()),
+            error: Some(
+                "world_id, title, idempotency_key must be non-empty; chapter_ids must be non-empty with no blank entries"
+                    .into(),
+            ),
         }));
+    }
+
+    if let Some(ref m) = req.manuscript_id {
+        if !nonempty(m) {
+            return Ok(Json(PublishStoryLocalResponse {
+                success: false,
+                result: None,
+                error: Some("manuscript_id, when set, must not be empty".into()),
+            }));
+        }
     }
 
     if req.schema_version == 0 {
@@ -109,19 +131,39 @@ pub async fn history(
     State(state): State<WorkspaceState>,
     Json(mut req): Json<PublishHistoryRequest>,
 ) -> Result<Json<PublishHistoryLocalResponse>, NexusApiError> {
-    let manuscript_s = manuscript_id_str(&req.manuscript_id);
+    let world_s = req
+        .world_id
+        .as_deref()
+        .filter(|s| nonempty(s))
+        .unwrap_or("(none)");
+    let manuscript_s = req
+        .manuscript_id
+        .as_deref()
+        .filter(|s| nonempty(s))
+        .unwrap_or("(none)");
     info!(
-        world_id = %req.world_id,
+        world_id = %world_s,
         manuscript_id = %manuscript_s,
         "Handling publish history request"
     );
 
-    if req.world_id.is_empty() || manuscript_s.is_empty() {
-        return Ok(Json(PublishHistoryLocalResponse {
-            success: false,
-            history: None,
-            error: Some("world_id and manuscript_id must be non-empty strings".into()),
-        }));
+    if let Some(ref w) = req.world_id {
+        if !nonempty(w) {
+            return Ok(Json(PublishHistoryLocalResponse {
+                success: false,
+                history: None,
+                error: Some("world_id, when set, must not be empty".into()),
+            }));
+        }
+    }
+    if let Some(ref m) = req.manuscript_id {
+        if !nonempty(m) {
+            return Ok(Json(PublishHistoryLocalResponse {
+                success: false,
+                history: None,
+                error: Some("manuscript_id, when set, must not be empty".into()),
+            }));
+        }
     }
 
     if req.schema_version == 0 {
@@ -129,7 +171,7 @@ pub async fn history(
     }
 
     if let Some((_, bound_world, _)) = optional_sync_push_binding(&state).await? {
-        if req.world_id != bound_world {
+        if req.world_id.as_deref() != Some(bound_world.as_str()) {
             return Ok(Json(PublishHistoryLocalResponse {
                 success: false,
                 history: None,

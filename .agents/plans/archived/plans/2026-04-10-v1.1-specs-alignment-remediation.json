@@ -1,0 +1,23 @@
+{
+  "id": "2026-04-10-v1.1-specs-alignment-remediation",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-10-v1.1-specs-alignment-remediation.md",
+  "title": "v1.1 Specs Alignment Remediation (entitlements wire + knowledge refresh)",
+  "done_at": "2026-04-10",
+  "metadata": {
+    "working_branch": "main",
+    "merge_target": "main",
+    "spec_refs": [
+      "knowledge/v1.1-specs-align-review-v1.md"
+    ],
+    "gates": {
+      "validate_schemas": "passed",
+      "codegen": "passed (pnpm run codegen; verify-codegen clean)",
+      "clippy": "passed (cargo clippy --all -- -D warnings)",
+      "rustfmt": "passed (cargo +nightly fmt --check)",
+      "typecheck": "passed (pnpm run typecheck)",
+      "tests": "passed (cargo test --all)",
+      "qc_self": "reports/2026-04-10-v1.1-specs-alignment-remediation/2026-04-10-v1.1-specs-alignment-remediation-qc-self-20260410.md"
+    }
+  }
+}

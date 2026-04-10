@@ -12,6 +12,7 @@ mod context;
 mod db;
 mod errors;
 mod manuscript;
+mod paths;
 
 use clap::{Parser, Subcommand};
 use commands::{

@@ -12,6 +12,7 @@ pub mod context;
 pub mod db;
 pub mod errors;
 pub mod manuscript;
+pub mod paths;
 
 // Re-export commonly used types for convenience
 pub use config::CliConfig;

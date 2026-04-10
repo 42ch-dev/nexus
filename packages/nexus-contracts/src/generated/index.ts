@@ -44,6 +44,7 @@ export * from './ExploreCreatorCard';
 export * from './ExploreFeedResponse';
 export * from './ExploreHit';
 export * from './ExploreSearchRequest';
+export * from './MeEntitlementsResponse';
 export * from './MemoryWebListRequest';
 export * from './MemoryWebListResponse';
 export * from './NotificationsInboxItem';
@@ -51,6 +52,8 @@ export * from './NotificationsListRequest';
 export * from './NotificationsListResponse';
 export * from './NotificationsMarkReadRequest';
 export * from './NotificationsMarkReadResponse';
+export * from './OfficialCreatorQuotaResponse';
+export * from './PublishChapterRequest';
 export * from './PublishHistoryEntry';
 export * from './PublishHistoryRequest';
 export * from './PublishHistoryResponse';
@@ -101,6 +104,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ExploreFeedResponse: 1,
   ExploreHit: 1,
   ExploreSearchRequest: 1,
+  MeEntitlementsResponse: 1,
   MemoryWebListRequest: 1,
   MemoryWebListResponse: 1,
   NotificationsInboxItem: 1,
@@ -108,6 +112,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   NotificationsListResponse: 1,
   NotificationsMarkReadRequest: 1,
   NotificationsMarkReadResponse: 1,
+  OfficialCreatorQuotaResponse: 1,
+  PublishChapterRequest: 1,
   PublishHistoryEntry: 1,
   PublishHistoryRequest: 1,
   PublishHistoryResponse: 1,

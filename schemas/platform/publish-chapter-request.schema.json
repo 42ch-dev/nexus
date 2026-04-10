@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/publish-chapter-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PublishChapterRequest",
+  "description": "Request body for POST /v1/publish/chapters — publish a single chapter artifact (platform Publish API).",
+  "type": "object",
+  "required": ["schema_version", "world_id", "story_manifest_id", "idempotency_key"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "story_manifest_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/StoryManifestId"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Client-supplied idempotency token for safe retries"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Optional display title"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4096,
+      "description": "Optional chapter summary"
+    },
+    "sync_command_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CommandId",
+      "description": "Optional link to originating sync command"
+    }
+  },
+  "additionalProperties": false
+}

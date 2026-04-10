@@ -22,6 +22,36 @@ fn validate_event_id(s: &str) -> std::result::Result<String, String> {
     }
 }
 
+fn validate_fork_branch_id(s: &str) -> std::result::Result<String, String> {
+    if s.starts_with("fbk_") && s.len() > 4 && s[4..].chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(s.to_string())
+    } else {
+        Err(format!(
+            "Invalid fork branch id '{s}': expected fbk_ followed by alphanumeric characters"
+        ))
+    }
+}
+
+fn validate_key_block_limit(s: &str) -> std::result::Result<i64, String> {
+    let n: i64 = s
+        .parse()
+        .map_err(|_| "key_block_limit must be an integer".to_string())?;
+    if !(1..=500).contains(&n) {
+        return Err("key_block_limit must be between 1 and 500".into());
+    }
+    Ok(n)
+}
+
+fn validate_timeline_event_limit(s: &str) -> std::result::Result<i64, String> {
+    let n: i64 = s
+        .parse()
+        .map_err(|_| "timeline_event_limit must be an integer".to_string())?;
+    if !(1..=200).contains(&n) {
+        return Err("timeline_event_limit must be between 1 and 200".into());
+    }
+    Ok(n)
+}
+
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
     /// Fork a new world from a parent world at a timeline event (platform API)
@@ -44,6 +74,9 @@ pub enum WorldCommand {
         /// Skip interactive confirmation
         #[arg(long)]
         yes: bool,
+        /// Optional label stored with the fork on the platform
+        #[arg(long)]
+        fork_title: Option<String>,
     },
     /// Request a read-only world snapshot cursor from the platform
     Snapshot {
@@ -52,6 +85,12 @@ pub enum WorldCommand {
         /// Optional anchor event (evt_…); omit for server-defined head
         #[arg(long, value_parser = validate_event_id)]
         at_event: Option<String>,
+        #[arg(long, value_parser = validate_fork_branch_id)]
+        branch_id: Option<String>,
+        #[arg(long, value_parser = validate_key_block_limit)]
+        key_block_limit: Option<i64>,
+        #[arg(long, value_parser = validate_timeline_event_limit)]
+        timeline_event_limit: Option<i64>,
         #[arg(long)]
         dry_run: bool,
     },
@@ -103,6 +142,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
             creator_id,
             dry_run,
             yes,
+            fork_title,
         } => {
             let creator_id = match creator_id {
                 Some(s) => s,
@@ -118,10 +158,11 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
 
             let req = WorldForkRequest {
                 schema_version: 1,
-                parent_world_id: parent.clone(),
-                child_world_id: child.clone(),
-                forked_from_event_id: at_event.clone(),
-                created_by_creator_id: creator_id,
+                parent_world_id: Some(parent.clone()),
+                child_world_id: Some(child.clone()),
+                forked_from_event_id: Some(at_event.clone()),
+                created_by_creator_id: Some(creator_id),
+                fork_title: fork_title.clone(),
             };
 
             if dry_run {
@@ -172,12 +213,18 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
         WorldCommand::Snapshot {
             world_id,
             at_event,
+            branch_id,
+            key_block_limit,
+            timeline_event_limit,
             dry_run,
         } => {
             let req = WorldSnapshotRequest {
                 schema_version: 1,
                 world_id: world_id.clone(),
                 at_event_id: at_event.clone(),
+                branch_id: branch_id.clone(),
+                key_block_limit,
+                timeline_event_limit,
             };
 
             if dry_run {

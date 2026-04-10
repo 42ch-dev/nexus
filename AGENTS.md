@@ -423,6 +423,14 @@ pnpm run typecheck
 
 **CLI-only note:** ACP Registry is public (`https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`); CLI pulls from it, no API key required.
 
+## Pre-release development (Version in Cargo.toml < 1.0)
+
+Until first release is explicitly shipped and communicated, this repository and its deliverables are in **early / pre-release** development.
+
+- **Breaking changes are expected and allowed** — API shapes, CLI flags, on-disk paths, config file layout, and behavior may change without a deprecation period or compatibility layer unless the team deliberately chooses one.
+- **Local persistence (SQLite, `~/.nexus42/`, workspace layout):** do **not** treat pre-1.0 user data as a long-term migration contract. When schema or layout changes, it is acceptable to **replace, wipe, or require re-init** rather than building multi-version upgrade paths. Prefer the smallest implementation that matches the current spec; document notable breaks in PRs or plan notes when useful.
+- **After first release**, tighten expectations: follow SemVer for published packages and binaries, coordinate wire `schema_version` / npm majors as in **Versioning & Compatibility** below, and treat end-user data + upgrade paths as product commitments unless explicitly scoped as experimental.
+
 ## Versioning & Compatibility
 
 ### Wire `schema_version` (generated SSOT)
@@ -439,7 +447,7 @@ These are the **declared versions in-tree** (refresh after releases or workspace
 | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------- |
 | Rust crates `**nexus42`**, `**nexus42d`**, `**nexus-contracts**`, `**nexus-domain**`, `**nexus-sync**`, `**nexus-local-db**` | **0.1.0**                  | Root `Cargo.toml` → `[workspace.package] version` |
 | `**nexus-contracts`** on crates.io                                                                                           | **0.1.0** (with workspace) | Same; publish from `crates/nexus-contracts`       |
-| `**@42ch/nexus-contracts`** (npm)                                                                                            | **0.2.3**                  | `packages/nexus-contracts/package.json`           |
+| `**@42ch/nexus-contracts`** (npm)                                                                                            | **0.3.0**                  | `packages/nexus-contracts/package.json`           |
 | `**nexus-codegen`** (private tooling)                                                                                        | **0.1.0**                  | `tooling/codegen/package.json`                    |
 | Root `**nexus-monorepo`** meta package                                                                                       | **0.1.0**                  | Root `package.json`                               |
 

@@ -34,48 +34,66 @@ fn cli_shows_version() {
 #[test]
 fn init_workspace_creates_structure() {
     let tmp = TempDir::new().unwrap();
-    let tmp_path = tmp.path();
+    let home = tmp.path();
+    let project = home.join("project");
+    std::fs::create_dir_all(&project).unwrap();
 
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("init")
         .arg("workspace")
         .arg("test-workspace")
-        .current_dir(tmp_path)
+        .arg("--creative-root")
+        .arg(&project)
+        .env("HOME", home)
+        .current_dir(&project)
         .assert()
         .success()
         .stdout(predicate::str::contains("Workspace initialized"));
 
-    // Verify directory structure was created
-    assert!(tmp_path.join("Stories").exists());
-    assert!(tmp_path.join("References").exists());
-    assert!(tmp_path.join(".nexus42").exists());
-    assert!(tmp_path.join(".nexus42/workspace.json").exists());
-    assert!(tmp_path.join(".nexus42/.gitignore").exists());
+    // Creative tree under chosen root (ADR-014 operational state lives under $HOME/.nexus42/...)
+    assert!(project.join("Stories").exists());
+    assert!(project.join("References").exists());
+    assert!(project.join(".nexus42").exists());
+    assert!(project.join(".nexus42/workspace.json").exists());
+    assert!(project.join(".nexus42/.gitignore").exists());
+    let meta = home.join(".nexus42/creators/local/workspaces/default/meta.json");
+    assert!(meta.is_file());
+    let db = home.join(".nexus42/creators/local/workspaces/default/state.db");
+    assert!(db.is_file());
 }
 
 /// Test init workspace does not re-initialize
 #[test]
 fn init_workspace_idempotent() {
     let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let project = home.join("proj");
+    std::fs::create_dir_all(&project).unwrap();
 
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("init")
         .arg("workspace")
-        .current_dir(tmp.path())
+        .arg("--creative-root")
+        .arg(&project)
+        .env("HOME", home)
+        .current_dir(&project)
         .assert()
         .success();
 
-    // Second init should warn already initialized
+    // Second init should no-op (same creator/slug registration)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("init")
         .arg("workspace")
-        .current_dir(tmp.path())
+        .arg("--creative-root")
+        .arg(&project)
+        .env("HOME", home)
+        .current_dir(&project)
         .assert()
         .success()
-        .stdout(predicate::str::contains("already initialized"));
+        .stdout(predicate::str::contains("already registered"));
 }
 
 /// Test auth status (no daemon running)

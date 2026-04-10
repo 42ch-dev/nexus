@@ -2,6 +2,7 @@
 members = [
     "crates/nexus-contracts",
     "crates/nexus-domain",
+    "crates/nexus-home-layout",
     "crates/nexus42",
     "crates/nexus42d",
     "crates/nexus-sync",

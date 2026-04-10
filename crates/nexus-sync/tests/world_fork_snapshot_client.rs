@@ -38,10 +38,11 @@ async fn fork_world_parses_success() {
 
     let req = WorldForkRequest {
         schema_version: 1,
-        parent_world_id: "wld_parent".into(),
-        child_world_id: "wld_child".into(),
-        forked_from_event_id: "evt_fork01".into(),
-        created_by_creator_id: "ctr_test".into(),
+        parent_world_id: Some("wld_parent".into()),
+        child_world_id: Some("wld_child".into()),
+        forked_from_event_id: Some("evt_fork01".into()),
+        created_by_creator_id: Some("ctr_test".into()),
+        fork_title: None,
     };
 
     let r = client.fork_world(&req).await.expect("fork");
@@ -65,10 +66,11 @@ async fn fork_world_maps_400_to_platform_error() {
 
     let req = WorldForkRequest {
         schema_version: 1,
-        parent_world_id: "wld_parent".into(),
-        child_world_id: "wld_child".into(),
-        forked_from_event_id: "evt_fork01".into(),
-        created_by_creator_id: "ctr_test".into(),
+        parent_world_id: Some("wld_parent".into()),
+        child_world_id: Some("wld_child".into()),
+        forked_from_event_id: Some("evt_fork01".into()),
+        created_by_creator_id: Some("ctr_test".into()),
+        fork_title: None,
     };
 
     let err = client.fork_world(&req).await.expect_err("expect 400");
@@ -102,6 +104,9 @@ async fn snapshot_world_parses_success() {
         schema_version: 1,
         world_id: "wld_test".into(),
         at_event_id: None,
+        branch_id: None,
+        key_block_limit: None,
+        timeline_event_limit: None,
     };
 
     let r = client.snapshot_world(&req).await.expect("snapshot");
