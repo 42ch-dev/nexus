@@ -99,10 +99,10 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 - Modify: `crates/nexus42/src/config.rs`
 - Modify: tests under `crates/nexus42/tests/` as needed
 
-- [ ] **Step 1:** Define persistent pointers: **global active `creator_id`** + **per-creator map** `last_workspace_slug` (fallback **`default`**). Optionally mirror wire **`workspace_id`** inside each `meta.json` only.
-- [ ] **Step 2:** Add **`nexus42 creator workspace use`** (and `list` / `create` stubs if phased) that validate `workspace_slug` exists under `creators/<creator_id>/workspaces/<workspace_slug>/` before updating the per-creator active slug.
-- [ ] **Step 3:** `cargo test -p nexus42` — pass.
-- [ ] **Step 4:** Commit `feat(nexus42): track active workspace pointer`
+- [x] **Step 1:** Define persistent pointers: **global active `creator_id`** + **per-creator map** `last_workspace_slug` (fallback **`default`**). Optionally mirror wire **`workspace_id`** inside each `meta.json` only.
+- [x] **Step 2:** Add **`nexus42 creator workspace use`** (and `list` / `create` stubs if phased) that validate `workspace_slug` exists under `creators/<creator_id>/workspaces/<workspace_slug>/` before updating the per-creator active slug.
+- [x] **Step 3:** `cargo test -p nexus42` — pass.
+- [x] **Step 4:** Commit `feat(nexus42): track active workspace pointer`
 
 ---
 
