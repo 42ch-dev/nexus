@@ -4,6 +4,7 @@
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
 
 use crate::auth;
+use crate::commands::init;
 use crate::config::{CliConfig, DEFAULT_WORKSPACE_SLUG};
 use crate::errors::{CliError, Result};
 use crate::paths;
@@ -67,10 +68,16 @@ pub enum CreatorCommand {
 pub enum CreatorWorkspaceCommand {
     /// List workspace slugs that exist on disk under the active creator
     List,
-    /// Create a new workspace (stub — full flow lands with `init` / platform)
+    /// Create a new workspace (ADR-014 operational registration + creative tree)
     Create {
         /// Workspace slug (path segment)
         workspace_slug: String,
+        /// Creative root directory (default: ~/Documents/nexus/<creator>/<slug>)
+        #[arg(long)]
+        creative_root: Option<PathBuf>,
+        /// Display name stored in workspace.json (default: slug)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Set the active workspace slug for the active creator
     Use {
@@ -111,13 +118,7 @@ fn user_home() -> Result<PathBuf> {
 }
 
 fn validate_workspace_slug(slug: &str) -> Result<()> {
-    if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug == "." || slug == ".." {
-        return Err(CliError::Other(format!(
-            "Invalid workspace slug {:?} (use a single path segment)",
-            slug
-        )));
-    }
-    Ok(())
+    init::validate_slug("workspace_slug", slug)
 }
 
 fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Result<()> {
@@ -152,13 +153,45 @@ fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Re
             }
             Ok(())
         }
-        CreatorWorkspaceCommand::Create { workspace_slug } => {
+        CreatorWorkspaceCommand::Create {
+            workspace_slug,
+            creative_root: creative_root_arg,
+            name,
+        } => {
             validate_workspace_slug(&workspace_slug)?;
+            let op_meta = paths::operational_workspace_dir(&home, creator_id, &workspace_slug)
+                .join("meta.json");
+            if op_meta.exists() {
+                return Err(CliError::Other(format!(
+                    "Workspace {:?} already exists for creator {}.",
+                    workspace_slug, creator_id
+                )));
+            }
+            let current_dir = std::env::current_dir()?;
+            let creative_root = match creative_root_arg {
+                Some(p) if p.is_absolute() => p,
+                Some(p) => current_dir.join(p),
+                None => init::default_creative_root(creator_id, &workspace_slug)?,
+            };
+            let workspace_name = name.unwrap_or_else(|| workspace_slug.clone());
+            let db_path = init::materialize_adr014_workspace(
+                &home,
+                creator_id,
+                &workspace_slug,
+                &creative_root,
+                &workspace_name,
+            )?;
+            init::persist_cli_workspace_selection(
+                creative_root.clone(),
+                creator_id.to_string(),
+                workspace_slug.clone(),
+            )?;
             println!(
-                "⚠ Stub: `creator workspace create` will register {:?} once init/platform wiring lands.",
-                workspace_slug
+                "✓ Workspace {:?} created for creator {}.",
+                workspace_slug, creator_id
             );
-            println!("  Active creator: {}", creator_id);
+            println!("  Creative root: {}", creative_root.display());
+            println!("  state.db: {}", db_path.display());
             Ok(())
         }
         CreatorWorkspaceCommand::Use { workspace_slug } => {

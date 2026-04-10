@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-domain = { path = "../nexus-domain" }
+nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 clap = { workspace = true }
 tokio = { workspace = true }
@@ -52,3 +53,5 @@ assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3"
 wiremock = "0.5"
+rusqlite = { workspace = true }
+nexus-local-db = { path = "../nexus-local-db" }

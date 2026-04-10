@@ -118,9 +118,40 @@ pub fn nexus_home() -> anyhow::Result<PathBuf> {
     Ok(home.join(NEXUS_DIR))
 }
 
-/// Get the path to the local SQLite database
+/// User home directory (`$HOME`).
+pub fn user_home_dir() -> anyhow::Result<PathBuf> {
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
+}
+
+/// Resolve `state.db` for the given CLI config (ADR-014 layout when registered, else legacy flat file).
+pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
+    let user_home = user_home_dir()?;
+    let legacy = crate::paths::legacy_flat_state_db_path(&user_home);
+
+    if let Some(cid) = config.active_creator_id.as_deref() {
+        let slug = config.workspace_slug_for_creator(cid);
+        let new_path = crate::paths::state_db_path(&user_home, cid, slug);
+        let meta = crate::paths::operational_workspace_dir(&user_home, cid, slug).join("meta.json");
+        if new_path.exists() || meta.exists() {
+            return Ok(new_path);
+        }
+    }
+
+    if legacy.exists() {
+        return Ok(legacy);
+    }
+
+    if let Some(cid) = config.active_creator_id.as_deref() {
+        let slug = config.workspace_slug_for_creator(cid);
+        return Ok(crate::paths::state_db_path(&user_home, cid, slug));
+    }
+
+    Ok(legacy)
+}
+
+/// Load config and resolve the local SQLite database path.
 pub fn state_db_path() -> anyhow::Result<PathBuf> {
-    Ok(nexus_home()?.join("state.db"))
+    resolve_state_db_path(&CliConfig::load()?)
 }
 
 /// Get the path to the auth storage file

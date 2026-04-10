@@ -85,13 +85,17 @@ impl WorkspaceState {
     /// Initialize workspace state — create nexus home, SQLite database,
     /// and sync outbox.
     pub async fn initialize() -> anyhow::Result<Self> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-            .join(".nexus42");
+        let user_home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
 
-        std::fs::create_dir_all(&home)?;
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home)?;
 
-        let db_path = home.join("state.db");
+        let db_path = crate::cli_config::resolve_state_db_path(&user_home, &nexus_home)?;
+
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         // Create the database file and initialize schema
         let init_conn = rusqlite::Connection::open(&db_path)?;
@@ -101,17 +105,18 @@ impl WorkspaceState {
         // Create connection pool with environment-configurable settings
         let db = DbPool::new(&db_path, PoolConfig::from_env())?;
 
-        // Initialize nexus-sync outbox at {home}/sync/outbox.db
-        let sync_dir = home.join("sync");
+        // Initialize nexus-sync outbox at {nexus_home}/sync/outbox.db
+        let sync_dir = nexus_home.join("sync");
         std::fs::create_dir_all(&sync_dir)?;
         let outbox_path = sync_dir.join("outbox.db");
         let outbox = Outbox::new(&outbox_path).await?;
         tracing::info!("Sync outbox initialized at {:?}", outbox_path);
+        tracing::info!("Workspace state.db at {:?}", db_path);
 
         Ok(Self {
             db,
             outbox: Arc::new(Some(outbox)),
-            nexus_home: home,
+            nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
@@ -211,20 +216,12 @@ impl WorkspaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_workspace;
 
     #[tokio::test]
     async fn init_workspace_sets_is_initialized() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let (tmp, nexus_home, db_path) = create_test_workspace();
         let workspace_dir = tmp.path().join("my-workspace");
-
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        // Set up the database schema
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::db::schema::Schema::init(&conn).unwrap();
-        drop(conn);
 
         let state = WorkspaceState::new_for_testing(
             nexus_home, db_path, None, // no workspace path set initially

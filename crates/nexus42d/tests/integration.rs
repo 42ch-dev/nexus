@@ -3,18 +3,12 @@
 use axum::http::StatusCode;
 use axum::Router;
 use axum_test::TestServer;
-use nexus42d::{api::handlers, workspace::WorkspaceState};
-use tempfile::TempDir;
+use nexus42d::{api::handlers, test_utils::create_test_workspace, workspace::WorkspaceState};
 
-/// Create a test workspace state with temp directory
-fn create_test_state() -> (WorkspaceState, TempDir) {
-    let tmp = TempDir::new().unwrap();
-    let nexus_home = tmp.path().join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-
-    let db_path = nexus_home.join("state.db");
+/// Create a test workspace state with temp directory (ADR-014 layout under `HOME`).
+fn create_test_state() -> (WorkspaceState, nexus42d::test_utils::TestTempRoot) {
+    let (tmp, nexus_home, db_path) = create_test_workspace();
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    nexus42d::db::schema::Schema::init(&conn).unwrap();
 
     // Insert test data
     conn.execute(

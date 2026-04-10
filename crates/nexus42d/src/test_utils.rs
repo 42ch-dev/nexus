@@ -18,14 +18,18 @@ impl Deref for TestTempRoot {
     }
 }
 
-/// Create a temporary workspace directory with an initialized SQLite database.
+const TEST_CREATOR_ID: &str = "test_creator";
+const TEST_WORKSPACE_SLUG: &str = "default";
+
+/// Create a temporary workspace directory with an initialized SQLite database (ADR-014 layout).
 ///
 /// Returns a tuple of `(temp_dir, nexus_home, db_path)` where:
 /// - `temp_dir` is the [`TestTempRoot`] that owns the temporary directory. **The caller
 ///   must keep `temp_dir` alive for the duration of the test**, otherwise the
 ///   temporary directory will be deleted when it is dropped.
-/// - `nexus_home` is the path to the `.nexus42` subdirectory inside the temp dir.
-/// - `db_path` is the path to `state.db` inside `nexus_home`.
+/// - `nexus_home` is the path to the `.nexus42` subdirectory inside the temp dir
+///   (this is **not** the same as `$HOME`; tests should set `HOME` to `temp_dir.path()`).
+/// - `db_path` is the path to `state.db` under `creators/<id>/workspaces/<slug>/`.
 ///
 /// # Example
 ///
@@ -36,9 +40,41 @@ impl Deref for TestTempRoot {
 /// ```
 pub fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     let tmp = TestTempRoot(tempfile::TempDir::new().expect("failed to create temp dir"));
-    let nexus_home = tmp.path().join(".nexus42");
+    let user_home = tmp.path();
+    let nexus_home = user_home.join(".nexus42");
     std::fs::create_dir_all(&nexus_home).expect("failed to create nexus_home dir");
-    let db_path = nexus_home.join("state.db");
+
+    let op_dir = nexus_home_layout::operational_workspace_dir(
+        user_home,
+        TEST_CREATOR_ID,
+        TEST_WORKSPACE_SLUG,
+    );
+    std::fs::create_dir_all(&op_dir).expect("operational dir");
+    let meta = serde_json::json!({
+        "schema_version": 1,
+        "creator_id": TEST_CREATOR_ID,
+        "workspace_slug": TEST_WORKSPACE_SLUG,
+        "local_root": user_home.join("creative"),
+        "created_at": "2020-01-01T00:00:00Z"
+    });
+    std::fs::write(
+        op_dir.join("meta.json"),
+        serde_json::to_string(&meta).expect("meta json"),
+    )
+    .expect("meta.json");
+
+    let cfg = serde_json::json!({
+        "active_creator_id": TEST_CREATOR_ID,
+        "active_workspace_slug_by_creator": { TEST_CREATOR_ID: TEST_WORKSPACE_SLUG }
+    });
+    std::fs::write(
+        nexus_home.join("config.json"),
+        serde_json::to_string(&cfg).expect("config json"),
+    )
+    .expect("config.json");
+
+    let db_path =
+        nexus_home_layout::workspace_state_db_path(user_home, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG);
 
     let conn = rusqlite::Connection::open(&db_path).expect("failed to open database");
     crate::db::schema::Schema::init(&conn).expect("failed to initialize schema");

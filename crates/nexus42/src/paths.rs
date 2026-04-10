@@ -1,52 +1,24 @@
-//! Operational filesystem paths for creator / workspace layout (ADR-014).
-//!
-//! Layout (under the user's home directory):
-//! - `~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/` — operational dir
-//! - `.../state.db` — workspace-local SQLite
-//! - `~/.nexus42/shared/global_state.db` — shared global SQLite
-//!
-//! The CLI binary links this module directly (`main.rs`); some `pub` helpers are not yet
-//! called from binary code until init/daemon wiring (later plan tasks) lands.
+//! Operational filesystem paths (ADR-014). Shared implementation: [`nexus_home_layout`].
 
-#![allow(dead_code)]
+pub use nexus_home_layout::{
+    creator_workspaces_root, legacy_flat_state_db_path, operational_workspace_dir,
+    workspace_state_db_path,
+};
 
-use std::path::{Path, PathBuf};
-
-const NEXUS_DIR: &str = ".nexus42";
-
-/// Resolve `~/.nexus42` from the user's home directory.
-pub fn nexus_root_from_home(home: &Path) -> PathBuf {
-    home.join(NEXUS_DIR)
-}
-
-/// `$HOME/.nexus42/creators/<creator_id>/workspaces/` (parent of each operational workspace dir).
-pub fn creator_workspaces_root(home: &Path, creator_id: &str) -> PathBuf {
-    nexus_root_from_home(home)
-        .join("creators")
-        .join(creator_id)
-        .join("workspaces")
-}
-
-/// Operational directory: `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`.
-pub fn operational_workspace_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
-    creator_workspaces_root(home, creator_id).join(workspace_slug)
-}
-
-/// Workspace-local SQLite path: `.../workspaces/<slug>/state.db`.
-pub fn state_db_path(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
-    operational_workspace_dir(home, creator_id, workspace_slug).join("state.db")
-}
-
-/// Shared global SQLite: `$HOME/.nexus42/shared/global_state.db`.
-pub fn shared_global_db_path(home: &Path) -> PathBuf {
-    nexus_root_from_home(home)
-        .join("shared")
-        .join("global_state.db")
+/// Workspace `state.db` path (alias for plan/ADR naming).
+pub fn state_db_path(
+    home: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> std::path::PathBuf {
+    workspace_state_db_path(home, creator_id, workspace_slug)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_home_layout::shared_global_db_path;
+    use std::path::PathBuf;
 
     #[test]
     fn operational_dir_follows_creator_then_workspace_slug() {
