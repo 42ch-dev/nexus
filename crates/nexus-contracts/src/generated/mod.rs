@@ -39,6 +39,7 @@ pub mod explore_creator_card;
 pub mod explore_feed_response;
 pub mod explore_hit;
 pub mod explore_search_request;
+pub mod me_entitlements_response;
 pub mod memory_web_list_request;
 pub mod memory_web_list_response;
 pub mod notifications_inbox_item;
@@ -46,6 +47,7 @@ pub mod notifications_list_request;
 pub mod notifications_list_response;
 pub mod notifications_mark_read_request;
 pub mod notifications_mark_read_response;
+pub mod official_creator_quota_response;
 pub mod publish_history_entry;
 pub mod publish_history_request;
 pub mod publish_history_response;
@@ -97,6 +99,7 @@ pub use explore_creator_card::*;
 pub use explore_feed_response::*;
 pub use explore_hit::*;
 pub use explore_search_request::*;
+pub use me_entitlements_response::*;
 pub use memory_web_list_request::*;
 pub use memory_web_list_response::*;
 pub use notifications_inbox_item::*;
@@ -104,6 +107,7 @@ pub use notifications_list_request::*;
 pub use notifications_list_response::*;
 pub use notifications_mark_read_request::*;
 pub use notifications_mark_read_response::*;
+pub use official_creator_quota_response::*;
 pub use publish_history_entry::*;
 pub use publish_history_request::*;
 pub use publish_history_response::*;
@@ -154,6 +158,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ExploreFeedResponse", 1),
     ("ExploreHit", 1),
     ("ExploreSearchRequest", 1),
+    ("MeEntitlementsResponse", 1),
     ("MemoryWebListRequest", 1),
     ("MemoryWebListResponse", 1),
     ("NotificationsInboxItem", 1),
@@ -161,6 +166,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("NotificationsListResponse", 1),
     ("NotificationsMarkReadRequest", 1),
     ("NotificationsMarkReadResponse", 1),
+    ("OfficialCreatorQuotaResponse", 1),
     ("PublishHistoryEntry", 1),
     ("PublishHistoryRequest", 1),
     ("PublishHistoryResponse", 1),
