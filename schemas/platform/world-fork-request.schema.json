@@ -3,26 +3,20 @@
   "$id": "https://nexus42.invalid/schemas/platform/world-fork-request.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldForkRequest",
-  "description": "Request body for POST /v1/worlds/fork — create a forked world from a parent at a timeline event (platform client contract).",
+  "description": "Request body for POST /v1/worlds/fork — platform may derive parent world from URL, child world server-side, and creator from auth; body carries fork point and optional title.",
   "type": "object",
-  "required": [
-    "schema_version",
-    "parent_world_id",
-    "child_world_id",
-    "forked_from_event_id",
-    "created_by_creator_id"
-  ],
+  "required": ["schema_version"],
   "properties": {
     "schema_version": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "parent_world_id": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
-      "description": "Source world to fork from"
+      "description": "Source world when not implied by route"
     },
     "child_world_id": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
-      "description": "Desired ID for the new (forked) world"
+      "description": "Desired child world id when client supplies it; otherwise server-generated"
     },
     "forked_from_event_id": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
@@ -30,7 +24,12 @@
     },
     "created_by_creator_id": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
-      "description": "Creator initiating the fork"
+      "description": "Creator initiating the fork when not injected from auth"
+    },
+    "fork_title": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Optional human-readable fork label"
     }
   },
   "additionalProperties": false

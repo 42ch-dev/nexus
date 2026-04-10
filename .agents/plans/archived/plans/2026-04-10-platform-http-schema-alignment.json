@@ -1,0 +1,30 @@
+{
+  "id": "2026-04-10-platform-http-schema-alignment",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-10-platform-http-schema-alignment.md",
+  "title": "Platform HTTP request schema alignment (publish / fork / snapshot)",
+  "done_at": "2026-04-10",
+  "owner": "agent",
+  "agents": ["fullstack-dev"],
+  "progress": 100,
+  "tags": ["contracts", "schemas", "platform", "v1.1"],
+  "created_at": "2026-04-10",
+  "updated_at": "2026-04-10",
+  "notes": "Align JSON Schemas with nexus-platform HTTP API bodies; unblock Plan 22 validator migration. npm @42ch/nexus-contracts 0.3.0 (breaking wire for publish-story / publish-history / world-fork request shapes).",
+  "metadata": {
+    "working_branch": "feature/2026-04-10-platform-http-schema-alignment",
+    "merge_target": "main",
+    "phase": "Done",
+    "priority": "high",
+    "gates": {
+      "validate_schemas": "passed — pnpm run validate-schemas",
+      "codegen": "passed — pnpm run codegen; generated dirs committed",
+      "clippy": "passed — cargo clippy --all -- -D warnings",
+      "rustfmt": "passed — cargo +nightly fmt --all -- --check",
+      "typecheck": "passed — pnpm run typecheck",
+      "tests": "passed — cargo test --all",
+      "schema_drift": "passed — tooling/check-schema-drift.sh",
+      "qc_self": "reports/2026-04-10-platform-http-schema-alignment/2026-04-10-platform-http-schema-alignment-qc-self-20260410.md"
+    }
+  }
+}

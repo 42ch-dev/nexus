@@ -32,6 +32,27 @@ fn validate_story_manifest_id(s: &str) -> std::result::Result<String, String> {
     }
 }
 
+fn validate_command_id(s: &str) -> std::result::Result<String, String> {
+    if s.starts_with("cmd_") && s.len() > 4 && s[4..].chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(s.to_string())
+    } else {
+        Err(format!(
+            "Invalid sync command id '{s}': expected cmd_ followed by alphanumeric characters"
+        ))
+    }
+}
+
+fn validate_chapter_artifact_id(s: &str) -> std::result::Result<String, String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return Err("chapter id must not be empty".into());
+    }
+    if t.len() > 128 {
+        return Err("chapter id must be at most 128 characters".into());
+    }
+    Ok(t.to_string())
+}
+
 fn validate_limit(s: &str) -> std::result::Result<i64, String> {
     let n: i64 = s
         .parse()
@@ -42,16 +63,36 @@ fn validate_limit(s: &str) -> std::result::Result<i64, String> {
     Ok(n)
 }
 
+fn validate_artifact_type(s: &str) -> std::result::Result<String, String> {
+    match s {
+        "chapter" | "story" => Ok(s.to_string()),
+        _ => Err("artifact_type must be 'chapter' or 'story'".into()),
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum PublishCommand {
     /// Submit a publish request for a manuscript (POST /v1/publish/story)
     Story {
         #[arg(long, value_parser = validate_world_id)]
         world_id: String,
+        /// Display title (required by platform wire contract)
+        #[arg(long)]
+        title: String,
+        /// Chapter artifact id to include (repeat for multiple chapters, order preserved)
+        #[arg(long = "chapter-id", value_parser = validate_chapter_artifact_id, action = clap::ArgAction::Append)]
+        chapter_id: Vec<String>,
         #[arg(long, value_parser = validate_manuscript_id)]
-        manuscript_id: String,
+        manuscript_id: Option<String>,
         #[arg(long, value_parser = validate_story_manifest_id)]
         story_manifest_id: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        /// Idempotency token (defaults to a new UUID per invocation)
+        #[arg(long)]
+        idempotency_key: Option<String>,
+        #[arg(long, value_parser = validate_command_id)]
+        sync_command_id: Option<String>,
         #[arg(long)]
         dry_run: bool,
     },
@@ -60,7 +101,9 @@ pub enum PublishCommand {
         #[arg(long, value_parser = validate_world_id)]
         world_id: String,
         #[arg(long, value_parser = validate_manuscript_id)]
-        manuscript_id: String,
+        manuscript_id: Option<String>,
+        #[arg(long, value_parser = validate_artifact_type)]
+        artifact_type: Option<String>,
         #[arg(long)]
         cursor: Option<String>,
         #[arg(long, value_parser = validate_limit)]
@@ -96,15 +139,32 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
     match cmd {
         PublishCommand::Story {
             world_id,
+            title,
+            chapter_id,
             manuscript_id,
             story_manifest_id,
+            summary,
+            idempotency_key,
+            sync_command_id,
             dry_run,
         } => {
+            if chapter_id.is_empty() {
+                return Err(CliError::Config(
+                    "publish story requires at least one --chapter-id".into(),
+                ));
+            }
+            let idempotency_key =
+                idempotency_key.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let req = PublishStoryRequest {
                 schema_version: 1,
                 world_id: world_id.clone(),
                 manuscript_id: manuscript_id.clone(),
                 story_manifest_id: story_manifest_id.clone(),
+                title: title.clone(),
+                summary: summary.clone(),
+                chapter_ids: chapter_id.clone(),
+                idempotency_key,
+                sync_command_id: sync_command_id.clone(),
             };
 
             if dry_run {
@@ -159,14 +219,16 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
         PublishCommand::History {
             world_id,
             manuscript_id,
+            artifact_type,
             cursor,
             limit,
             dry_run,
         } => {
             let req = PublishHistoryRequest {
                 schema_version: 1,
-                world_id: world_id.clone(),
+                world_id: Some(world_id.clone()),
                 manuscript_id: manuscript_id.clone(),
+                artifact_type: artifact_type.clone(),
                 cursor,
                 limit,
             };
