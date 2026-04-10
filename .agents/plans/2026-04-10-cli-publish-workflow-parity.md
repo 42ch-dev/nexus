@@ -34,25 +34,25 @@
 
 ## Acceptance criteria
 
-- [ ] CLI can trigger publish (or staged publish if API requires) and query publish **status/history** per wire types.
-- [ ] Clear errors when local draft state cannot be published (validation messages from API propagated).
-- [ ] Tests: mock publish round-trip + one failure case.
+- [x] CLI can trigger publish (or staged publish if API requires) and query publish **status/history** per wire types.
+- [x] Clear errors when local draft state cannot be published (validation messages from API propagated).
+- [x] Tests: mock publish round-trip + one failure case.
 
 ---
 
 ## Task group A — Contract & flow mapping
 
-- [ ] **A1:** Map each publish-related HTTP operation to CLI flags.
-- [ ] **A2:** Schema gaps → `schemas/` + codegen pipeline.
+- [x] **A1:** Map each publish-related HTTP operation to CLI flags.
+- [x] **A2:** Schema gaps → `schemas/` + codegen pipeline.
 
 ## Task group B — Implementation
 
-- [ ] **B1:** Client methods + daemon routing if needed.
-- [ ] **B2:** CLI commands under manuscript/world namespace per product decision.
+- [x] **B1:** Client methods + daemon routing if needed.
+- [x] **B2:** CLI commands under manuscript/world namespace per product decision.
 
 ## Task group C — Verification
 
-- [ ] **C1:** `cargo test` / clippy.
+- [x] **C1:** `cargo test` / clippy.
 
 ---
 

@@ -37,6 +37,12 @@ export type WorkspaceId = string;
 /** Monotonically increasing sequence number for deltas */
 export type DeltaSequence = number;
 
+/** Manuscript aggregate ID (prefix: 'mss_') */
+export type ManuscriptId = string;
+
+/** StoryManifest ID (prefix: 'stm_') */
+export type StoryManifestId = string;
+
 /** Schema version as integer (e.g., 1) */
 export type SchemaVersion = number;
 
@@ -48,6 +54,9 @@ export type SubscriptionTier = 'free' | 'pro' | 'studio' | 'enterprise';
 
 /** Manuscript lifecycle phase (data-model-v1.md §7, §5.9B) */
 export type ManuscriptPhase = 'brainstorm' | 'draft' | 'review' | 'finalize' | 'published';
+
+/** Outcome of a publish-story operation (platform Publish API wire) */
+export type PublishStoryOutcome = 'submitted' | 'published' | 'rejected' | 'invalid_state';
 
 /** World timeline evolution policy (data-model-v1.md §5.3) */
 export type TimePolicy = 'manual' | 'owner_driven' | 'event_driven';

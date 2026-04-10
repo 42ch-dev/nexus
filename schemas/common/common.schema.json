@@ -71,6 +71,21 @@
       "enum": ["brainstorm", "draft", "review", "finalize", "published"],
       "description": "Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)"
     },
+    "ManuscriptId": {
+      "type": "string",
+      "pattern": "^mss_[a-zA-Z0-9]+$",
+      "description": "Manuscript aggregate ID (prefix: 'mss_')"
+    },
+    "StoryManifestId": {
+      "type": "string",
+      "pattern": "^stm_[a-zA-Z0-9]+$",
+      "description": "StoryManifest ID (prefix: 'stm_')"
+    },
+    "PublishStoryOutcome": {
+      "type": "string",
+      "enum": ["submitted", "published", "rejected", "invalid_state"],
+      "description": "Outcome of a publish-story operation (platform Publish API wire)"
+    },
     "TimePolicy": {
       "type": "string",
       "enum": ["manual", "owner_driven", "event_driven"],

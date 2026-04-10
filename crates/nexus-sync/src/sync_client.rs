@@ -1,7 +1,8 @@
 //! Sync Client
 //!
 //! HTTP client for platform sync API operations.
-//! Implements bundle push, state pull, conflict detection, and read-only Explore calls.
+//! Implements bundle push, state pull, conflict detection, read-only Explore calls,
+//! and platform Publish (story + history) calls.
 //!
 //! Uses `reqwest 0.12` for HTTP with retry logic and exponential backoff.
 //!
@@ -19,7 +20,8 @@
 use std::time::Duration;
 
 use nexus_contracts::generated::{
-    Bundle, ExploreBrowseRequest, ExploreFeedResponse, ExploreSearchRequest, SyncPullRequest,
+    Bundle, ExploreBrowseRequest, ExploreFeedResponse, ExploreSearchRequest, PublishHistoryRequest,
+    PublishHistoryResponse, PublishStoryRequest, PublishStoryResponse, SyncPullRequest,
     SyncPullResponse, WorldForkRequest, WorldForkResponse, WorldSnapshotRequest,
     WorldSnapshotResponse,
 };
@@ -479,6 +481,34 @@ impl SyncClient {
     ) -> SyncResult<ExploreFeedResponse> {
         let url = format!("{}/v1/explore/search", self.base_url);
         tracing::debug!(query_len = req.query.len(), "Explore search");
+        self.post_platform_json(&url, req).await
+    }
+
+    /// Publish a manuscript story on the platform (`POST /v1/publish/story`).
+    pub async fn publish_story(
+        &self,
+        req: &PublishStoryRequest,
+    ) -> SyncResult<PublishStoryResponse> {
+        let url = format!("{}/v1/publish/story", self.base_url);
+        tracing::info!(
+            world_id = %req.world_id,
+            manuscript_id = %req.manuscript_id,
+            "Calling platform publish story"
+        );
+        self.post_platform_json(&url, req).await
+    }
+
+    /// Paginated publish history for a manuscript (`POST /v1/publish/history`).
+    pub async fn publish_history(
+        &self,
+        req: &PublishHistoryRequest,
+    ) -> SyncResult<PublishHistoryResponse> {
+        let url = format!("{}/v1/publish/history", self.base_url);
+        tracing::debug!(
+            world_id = %req.world_id,
+            manuscript_id = %req.manuscript_id,
+            "Calling platform publish history"
+        );
         self.post_platform_json(&url, req).await
     }
 

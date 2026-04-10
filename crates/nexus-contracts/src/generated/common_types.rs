@@ -39,6 +39,12 @@ pub type WorkspaceId = String;
 /// Monotonically increasing sequence number for deltas
 pub type DeltaSequence = u64;
 
+/// Manuscript aggregate ID (prefix: 'mss_')
+pub type ManuscriptId = String;
+
+/// StoryManifest ID (prefix: 'stm_')
+pub type StoryManifestId = String;
+
 /// Schema version as integer (e.g., 1)
 pub type SchemaVersion = u32;
 
@@ -72,6 +78,16 @@ pub enum ManuscriptPhase {
     Review,
     Finalize,
     Published,
+}
+
+/// Outcome of a publish-story operation (platform Publish API wire)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PublishStoryOutcome {
+    Submitted,
+    Published,
+    Rejected,
+    InvalidState,
 }
 
 /// World timeline evolution policy (data-model-v1.md §5.3)

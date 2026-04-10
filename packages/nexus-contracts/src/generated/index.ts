@@ -51,6 +51,11 @@ export * from './NotificationsListRequest';
 export * from './NotificationsListResponse';
 export * from './NotificationsMarkReadRequest';
 export * from './NotificationsMarkReadResponse';
+export * from './PublishHistoryEntry';
+export * from './PublishHistoryRequest';
+export * from './PublishHistoryResponse';
+export * from './PublishStoryRequest';
+export * from './PublishStoryResponse';
 export * from './SocialGraphFeedRequest';
 export * from './SocialGraphFeedResponse';
 export * from './SocialGraphRelationshipRequest';
@@ -103,6 +108,11 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   NotificationsListResponse: 1,
   NotificationsMarkReadRequest: 1,
   NotificationsMarkReadResponse: 1,
+  PublishHistoryEntry: 1,
+  PublishHistoryRequest: 1,
+  PublishHistoryResponse: 1,
+  PublishStoryRequest: 1,
+  PublishStoryResponse: 1,
   SocialGraphFeedRequest: 1,
   SocialGraphFeedResponse: 1,
   SocialGraphRelationshipRequest: 1,

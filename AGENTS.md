@@ -439,7 +439,7 @@ These are the **declared versions in-tree** (refresh after releases or workspace
 | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------- |
 | Rust crates `**nexus42`**, `**nexus42d`**, `**nexus-contracts**`, `**nexus-domain**`, `**nexus-sync**`, `**nexus-local-db**` | **0.1.0**                  | Root `Cargo.toml` → `[workspace.package] version` |
 | `**nexus-contracts`** on crates.io                                                                                           | **0.1.0** (with workspace) | Same; publish from `crates/nexus-contracts`       |
-| `**@42ch/nexus-contracts`** (npm)                                                                                            | **0.2.0**                  | `packages/nexus-contracts/package.json`           |
+| `**@42ch/nexus-contracts`** (npm)                                                                                            | **0.2.3**                  | `packages/nexus-contracts/package.json`           |
 | `**nexus-codegen`** (private tooling)                                                                                        | **0.1.0**                  | `tooling/codegen/package.json`                    |
 | Root `**nexus-monorepo`** meta package                                                                                       | **0.1.0**                  | Root `package.json`                               |
 

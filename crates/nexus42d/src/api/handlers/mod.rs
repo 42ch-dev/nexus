@@ -8,6 +8,7 @@ pub mod explore;
 pub mod manuscript;
 pub mod monitoring;
 pub mod permissions;
+pub mod publish;
 pub mod references;
 pub mod runtime;
 pub mod sessions;
