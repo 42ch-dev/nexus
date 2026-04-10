@@ -3,14 +3,27 @@
 //! This module provides common helpers for setting up test workspaces,
 //! reducing boilerplate across integration tests.
 
+use std::ops::Deref;
 use std::path::PathBuf;
+
+/// Wrapper around [`tempfile::TempDir`] so tests get a `must_use` reminder to keep the root alive.
+#[must_use = "Temporary directory is deleted when dropped; keep TestTempRoot in scope for the whole test."]
+pub struct TestTempRoot(tempfile::TempDir);
+
+impl Deref for TestTempRoot {
+    type Target = tempfile::TempDir;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Create a temporary workspace directory with an initialized SQLite database.
 ///
 /// Returns a tuple of `(temp_dir, nexus_home, db_path)` where:
-/// - `temp_dir` is the `TempDir` that owns the temporary directory. **The caller
+/// - `temp_dir` is the [`TestTempRoot`] that owns the temporary directory. **The caller
 ///   must keep `temp_dir` alive for the duration of the test**, otherwise the
-///   temporary directory will be deleted when `TempDir` is dropped.
+///   temporary directory will be deleted when it is dropped.
 /// - `nexus_home` is the path to the `.nexus42` subdirectory inside the temp dir.
 /// - `db_path` is the path to `state.db` inside `nexus_home`.
 ///
@@ -21,8 +34,8 @@ use std::path::PathBuf;
 /// let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
 /// // `tmp` must stay in scope for the duration of the test
 /// ```
-pub fn create_test_workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
-    let tmp = tempfile::TempDir::new().expect("failed to create temp dir");
+pub fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
+    let tmp = TestTempRoot(tempfile::TempDir::new().expect("failed to create temp dir"));
     let nexus_home = tmp.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_home).expect("failed to create nexus_home dir");
     let db_path = nexus_home.join("state.db");
@@ -40,7 +53,7 @@ pub fn create_test_workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
 /// Returns a tuple of `(temp_dir, nexus_home, db_path, workspace_dir)` where:
 /// - `temp_dir`, `nexus_home`, `db_path` are as in [`create_test_workspace`].
 /// - `workspace_dir` is the path to a created workspace directory.
-pub fn create_initialized_test_workspace() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+pub fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, PathBuf, PathBuf) {
     let (tmp, nexus_home, db_path) = create_test_workspace();
 
     let workspace_dir = tmp.path().join("workspace");

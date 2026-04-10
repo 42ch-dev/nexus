@@ -42,6 +42,8 @@
 
 use std::path::Path;
 use std::str::FromStr;
+#[cfg(test)]
+use std::sync::Arc;
 
 use nexus_contracts::generated::{Bundle, OutboxEntry, SyncCommand, LATEST_SCHEMA_VERSION};
 use nexus_contracts::DeliveryState;
@@ -72,6 +74,9 @@ pub enum RetryAfterPolicy {
 #[derive(Clone)]
 pub struct Outbox {
     pool: OutboxPool,
+    /// Keeps the temp directory alive for [`Outbox::new_in_memory`] tests (no `mem::forget`).
+    #[cfg(test)]
+    _test_temp: Option<Arc<tempfile::TempDir>>,
 }
 
 impl Outbox {
@@ -96,9 +101,18 @@ impl Outbox {
     /// * `db_path` - Path to SQLite database file
     /// * `pool_size` - Maximum number of connections in the pool
     pub async fn with_pool_size<P: AsRef<Path>>(db_path: P, pool_size: usize) -> SyncResult<Self> {
-        let pool = OutboxPool::new(db_path.as_ref(), pool_size)?;
+        let pool = Self::init_pool_with_schema(db_path.as_ref(), pool_size).await?;
+        tracing::info!("Outbox database initialized with connection pool");
+        Ok(Self {
+            pool,
+            #[cfg(test)]
+            _test_temp: None,
+        })
+    }
 
-        // Initialize schema on first connection
+    async fn init_pool_with_schema(db_path: &Path, pool_size: usize) -> SyncResult<OutboxPool> {
+        let pool = OutboxPool::new(db_path, pool_size)?;
+
         let conn = pool
             .get()
             .await
@@ -139,9 +153,7 @@ impl Outbox {
         )
         .await?;
 
-        tracing::info!("Outbox database initialized with connection pool");
-
-        Ok(Self { pool })
+        Ok(pool)
     }
 
     /// Create an outbox using an existing connection pool.
@@ -158,20 +170,29 @@ impl Outbox {
         conn.execute_batch("PRAGMA journal_mode=WAL;").await?;
         drop(conn);
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            #[cfg(test)]
+            _test_temp: None,
+        })
     }
 
     /// Open an in-memory outbox (for testing).
+    ///
+    /// Uses a real file under a [`tempfile::TempDir`] owned by this [`Outbox`] so the directory
+    /// is removed when the last clone of this handle is dropped (no `mem::forget`).
     #[cfg(test)]
     pub async fn new_in_memory() -> SyncResult<Self> {
-        // Create a unique temp path for in-memory database
-        let tmp = tempfile::TempDir::new().map_err(|e| SyncError::OutboxDatabase(e.to_string()))?;
+        let tmp = Arc::new(
+            tempfile::TempDir::new().map_err(|e| SyncError::OutboxDatabase(e.to_string()))?,
+        );
         let db_path = tmp.path().join("test_outbox.db");
-
-        // Keep temp dir alive by leaking it (test only)
-        std::mem::forget(tmp);
-
-        Self::new(&db_path).await
+        let pool = Self::init_pool_with_schema(&db_path, DEFAULT_POOL_SIZE).await?;
+        tracing::info!("Outbox test database initialized (temp-backed file)");
+        Ok(Self {
+            pool,
+            _test_temp: Some(tmp),
+        })
     }
 
     /// Get a pooled connection

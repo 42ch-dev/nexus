@@ -19,7 +19,7 @@
 | ----------- | ------------------------ | ----------------------------------------------------------------------------------------- | ------------------ | ---------------------------------- |
 | **Batch A** | ✅ Completed (2026-04-09) | 3 critical (CTX-R4, SYNC-R10, SYNC-R13)                                                   | S (~2 sessions)    | V1.0-phase2 blocker                |
 | **Batch B** | ✅ Completed (2026-04-08) | 4 low (QC-W2, QC-W4, QC-W3, QC-W7)                                                        | S (~2 sessions)    | V1.1 milestone                     |
-| **Batch C** | 🔶 In progress           | 6 low pending (QC-W5, QC-W6, QC-W8, QC-W10, QC-W11, DM-R3); QC-W1 + QC-W9 done 2026-04-10 | M (~4 sessions)    | V1.1+ milestone                    |
+| **Batch C** | 🔶 In progress           | QC-W5–W11 + QC-W8 doc done 2026-04-10; **DM-R3** still open (plan `2025-04-05-domain-models`) | M (~4 sessions)    | V1.1+ milestone                    |
 | **Batch D** | 🔶 Pending               | 4 medium (TD-7, TD-8, TD-9, TD-10)                                                        | L (~5–9 sessions)  | V1.1+ (in scope after C)           |
 | **Batch E** | ⏸️ Deferred              | 2 low (TD-11, TD-13)                                                                      | L (~6–16 sessions) | **V1.2 only** — not this milestone |
 
@@ -239,13 +239,13 @@
 
 ---
 
-#### Task 7: QC-W5 — Streaming body reader 🔶
+#### Task 7: QC-W5 — Streaming body reader ✅
 
 **Priority**: Low (severity: warning → low)
 **Source**: QC#2, status.json residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]
-**Scope**: `crates/nexus-sync/src/sync_client.rs:258-284`
+**Scope**: `crates/nexus-sync/src/sync_client.rs`
 
-**Context**: Body size check reads full response into memory, inefficient for large bodies.
+**Context**: Body size check previously used `Response::text()`, buffering the full body before enforcing limits.
 
 **Acceptance Criteria**:
 
@@ -254,17 +254,19 @@
 - Add tests for large body handling
 - Document streaming approach
 
+**Evidence**: `SyncClient::read_response_body_limited` uses `Response::chunk()`; wiremock integration test `crates/nexus-sync/tests/body_size_limit.rs`.
+
 **Target**: V1.1+
 
 ---
 
-#### Task 8: QC-W6 — Test helper cleanup 🔶
+#### Task 8: QC-W6 — Test helper cleanup ✅
 
 **Priority**: Low (severity: warning → low)
 **Source**: QC#2, status.json residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]
-**Scope**: `crates/nexus-sync/src/outbox.rs:204-213`
+**Scope**: `crates/nexus-sync/src/outbox.rs` (`Outbox::new_in_memory`)
 
-**Context**: Test helper may leak temporary directories in CI.
+**Context**: `new_in_memory()` leaked `TempDir` via `mem::forget`, leaving temp directories on disk after test runs.
 
 **Acceptance Criteria**:
 
@@ -273,17 +275,19 @@
 - Add cleanup verification tests
 - Document test helper behavior
 
+**Evidence**: `Outbox` holds `#[cfg(test)] Option<Arc<TempDir>>` so the temp directory drops with the last `Outbox` clone; `init_pool_with_schema` shared with production `with_pool_size`.
+
 **Target**: CI cleanup
 
 ---
 
-#### Task 9: QC-W8 — Test count fix 🔶
+#### Task 9: QC-W8 — Test count fix ✅
 
 **Priority**: Low (severity: warning → low)
 **Source**: QC#3, status.json residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]
-**Scope**: `status.json:614` (historical reference)
+**Scope**: Historical plan/QC prose (`status.json:614` reference — obsolete after hot compaction)
 
-**Context**: Test count discrepancy between plan expectation and actual execution (7 vs 8).
+**Context**: Stale “7 vs 8” test count referred to pre-compaction `status.json` lines, not a failing suite.
 
 **Acceptance Criteria**:
 
@@ -291,15 +295,17 @@
 - Update plan/task documentation with correct count
 - Ensure test count tracking is consistent
 
+**Evidence**: This task row + residual archived; canonical counts come from `cargo test` / CI, not static plan line numbers.
+
 **Target**: Before merge
 
 ---
 
-#### Task 10: QC-W10 — TempDir type hint 🔶
+#### Task 10: QC-W10 — TempDir type hint ✅
 
 **Priority**: Low (severity: warning → low)
 **Source**: QC#1 (Wave 3 Batch B), status.json residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]
-**Scope**: `crates/nexus-sync/src/test_utils.rs:11-23, 40-43`
+**Scope**: `crates/nexus42d/src/test_utils.rs` (QC originally cited nexus-sync; daemon helpers were the real site)
 
 **Context**: TempDir ownership semantics could benefit from type hint wrapper.
 
@@ -310,17 +316,19 @@
 - Add tests for wrapper behavior
 - Update all TempDir usages to use new wrapper
 
+**Evidence**: `TestTempRoot` newtype with `#[must_use]` + `Deref`; `create_test_workspace` / `create_initialized_test_workspace` return types updated.
+
 **Target**: V1.1+
 
 ---
 
-#### Task 11: QC-W11 — Schema version type alignment 🔶
+#### Task 11: QC-W11 — Schema version type alignment ✅
 
 **Priority**: Low (severity: warning → low)
 **Source**: QC#1 (Wave 3 Batch B), status.json residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]
-**Scope**: CI check at `.github/workflows/ci.yml:171-177` vs `crates/nexus-contracts/src/generated/mod.rs:84`
+**Scope**: `tooling/check-schema-drift.sh` + generated contracts
 
-**Context**: Schema version type mismatch (u32 vs &str) between CI check and Rust code.
+**Context**: Ensure Rust `LATEST_SCHEMA_VERSION` (u32) and TypeScript export stay numerically aligned.
 
 **Acceptance Criteria**:
 
@@ -328,6 +336,8 @@
 - Update CI check to use consistent type
 - Add tests for schema version comparison
 - Document schema version type decision
+
+**Evidence**: `check-schema-drift.sh` parses `pub const LATEST_SCHEMA_VERSION: u32` and `export const LATEST_SCHEMA_VERSION` and fails CI on mismatch.
 
 **Target**: V1.1+
 

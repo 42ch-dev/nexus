@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-08-v1.1-tech-debt-mitigation",
+  "batch": "Batch C (QC-W5, W6, W8, W10, W11)",
+  "archived_at": "2026-04-10T23:59:00Z",
+  "entries": [
+    {
+      "id": "QC-W5",
+      "title": "Body size reads full response",
+      "severity": "low",
+      "source": "QC#2",
+      "scope": "crates/nexus-sync/src/sync_client.rs",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+",
+      "closure_evidence": "Chunked read via read_response_body_limited + crates/nexus-sync/tests/body_size_limit.rs (Batch C slice commit on main)",
+      "closed_at": "2026-04-10"
+    },
+    {
+      "id": "QC-W6",
+      "title": "Test helper leaks temp dirs",
+      "severity": "low",
+      "source": "QC#2",
+      "scope": "crates/nexus-sync/src/outbox.rs new_in_memory",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "CI cleanup",
+      "closure_evidence": "Arc<TempDir> on Outbox under cfg(test); removed mem::forget (Batch C slice commit on main)",
+      "closed_at": "2026-04-10"
+    },
+    {
+      "id": "QC-W8",
+      "title": "Test count discrepancy (7 vs 8)",
+      "severity": "low",
+      "source": "QC#3",
+      "scope": "plan documentation / historical status.json line refs",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "Before merge",
+      "closure_evidence": "Plan task + residual archive; counts from cargo test / CI (Batch C slice)",
+      "closed_at": "2026-04-10"
+    },
+    {
+      "id": "QC-W10",
+      "title": "TempDir ownership semantics — reinforce with type hint",
+      "severity": "low",
+      "source": "QC#1 (Wave 3 Batch B)",
+      "scope": "crates/nexus42d/src/test_utils.rs",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+",
+      "closure_evidence": "TestTempRoot newtype with #[must_use] + Deref (Batch C slice)",
+      "closed_at": "2026-04-10"
+    },
+    {
+      "id": "QC-W11",
+      "title": "Schema version type mismatch (u32 vs &str)",
+      "severity": "low",
+      "source": "QC#1 (Wave 3 Batch B)",
+      "scope": "tooling/check-schema-drift.sh, generated contracts",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+",
+      "closure_evidence": "Rust vs TS LATEST_SCHEMA_VERSION numeric parity in check-schema-drift.sh (Batch C slice)",
+      "closed_at": "2026-04-10"
+    }
+  ]
+}
