@@ -18,9 +18,8 @@ use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
     daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, init::InitCommand,
-    manuscript::ManuscriptCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
-    world::WorldCommand,
+    manuscript::ManuscriptCommand, policy::PolicyCommand, publish::PublishCommand,
+    research::ResearchCommand, session::SessionCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
