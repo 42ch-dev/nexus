@@ -23,6 +23,10 @@ cargo build --release
 ./target/release/nexus42 agent run claude-acp
 ```
 
+### Local data layout
+
+Operational SQLite (`state.db`) and workspace metadata sit under `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`. The default creative tree is under your **Documents** folder (`Documents/nexus/<creator_id>/<workspace_slug>/`; override with `nexus42 init workspace --creative-root <path>`). If you still have a legacy flat `$HOME/.nexus42/state.db`, move it into the new layout with `nexus42 migrate local-fs --help`.
+
 ## Status
 
 **V1.0 GA** — Foundation release. Core infrastructure complete, Phase 2 in progress.

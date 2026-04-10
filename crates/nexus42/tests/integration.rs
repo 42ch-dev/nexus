@@ -1,6 +1,7 @@
 //! Integration Tests — CLI binary behavior
 
 use assert_cmd::Command;
+use nexus_local_db::{init as db_init, RuntimeRole};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -34,48 +35,66 @@ fn cli_shows_version() {
 #[test]
 fn init_workspace_creates_structure() {
     let tmp = TempDir::new().unwrap();
-    let tmp_path = tmp.path();
+    let home = tmp.path();
+    let project = home.join("project");
+    std::fs::create_dir_all(&project).unwrap();
 
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("init")
         .arg("workspace")
         .arg("test-workspace")
-        .current_dir(tmp_path)
+        .arg("--creative-root")
+        .arg(&project)
+        .env("HOME", home)
+        .current_dir(&project)
         .assert()
         .success()
         .stdout(predicate::str::contains("Workspace initialized"));
 
-    // Verify directory structure was created
-    assert!(tmp_path.join("Stories").exists());
-    assert!(tmp_path.join("References").exists());
-    assert!(tmp_path.join(".nexus42").exists());
-    assert!(tmp_path.join(".nexus42/workspace.json").exists());
-    assert!(tmp_path.join(".nexus42/.gitignore").exists());
+    // Creative tree under chosen root (ADR-014 operational state lives under $HOME/.nexus42/...)
+    assert!(project.join("Stories").exists());
+    assert!(project.join("References").exists());
+    assert!(project.join(".nexus42").exists());
+    assert!(project.join(".nexus42/workspace.json").exists());
+    assert!(project.join(".nexus42/.gitignore").exists());
+    let meta = home.join(".nexus42/creators/local/workspaces/default/meta.json");
+    assert!(meta.is_file());
+    let db = home.join(".nexus42/creators/local/workspaces/default/state.db");
+    assert!(db.is_file());
 }
 
 /// Test init workspace does not re-initialize
 #[test]
 fn init_workspace_idempotent() {
     let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let project = home.join("proj");
+    std::fs::create_dir_all(&project).unwrap();
 
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("init")
         .arg("workspace")
-        .current_dir(tmp.path())
+        .arg("--creative-root")
+        .arg(&project)
+        .env("HOME", home)
+        .current_dir(&project)
         .assert()
         .success();
 
-    // Second init should warn already initialized
+    // Second init should no-op (same creator/slug registration)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("init")
         .arg("workspace")
-        .current_dir(tmp.path())
+        .arg("--creative-root")
+        .arg(&project)
+        .env("HOME", home)
+        .current_dir(&project)
         .assert()
         .success()
-        .stdout(predicate::str::contains("already initialized"));
+        .stdout(predicate::str::contains("already registered"));
 }
 
 /// Test auth status (no daemon running)
@@ -124,6 +143,44 @@ fn auth_logout() {
         .assert()
         .failure() // Daemon not running
         .stderr(predicate::str::contains("Daemon not running"));
+}
+
+/// Legacy flat `state.db` is moved into ADR-014 layout by `migrate local-fs`.
+#[test]
+fn migrate_local_fs_moves_legacy_state_db() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let nexus = home.join(".nexus42");
+    std::fs::create_dir_all(&nexus).unwrap();
+    let legacy = nexus.join("state.db");
+    let conn = rusqlite::Connection::open(&legacy).unwrap();
+    db_init(&conn, RuntimeRole::Cli).unwrap();
+    drop(conn);
+
+    let creative = home.join("creative");
+    std::fs::create_dir_all(&creative).unwrap();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("migrate")
+        .arg("local-fs")
+        .arg("--creator-id")
+        .arg("ctr_mig")
+        .arg("--workspace-slug")
+        .arg("default")
+        .arg("--local-root")
+        .arg(&creative)
+        .arg("--yes")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Migrated legacy"));
+
+    assert!(!legacy.exists(), "legacy file should be renamed away");
+    let migrated = home.join(".nexus42/creators/ctr_mig/workspaces/default/state.db");
+    assert!(migrated.is_file());
+    let backup = nexus.join("state.db.pre-adr014-migrated");
+    assert!(backup.is_file());
 }
 
 /// Test creator command group

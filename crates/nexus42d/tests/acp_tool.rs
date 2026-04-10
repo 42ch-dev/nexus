@@ -13,26 +13,16 @@ use axum::{
     Router,
 };
 use nexus42d::api::handlers::acp::tool_execute;
+use nexus42d::test_utils::create_test_workspace;
 use nexus42d::workspace::WorkspaceState;
 use serde_json::json;
 use tower::ServiceExt;
 
-/// Helper to create a test workspace state with an in-memory database
-fn create_test_workspace() -> (WorkspaceState, tempfile::TempDir) {
-    // Create a temporary directory for the test workspace
-    let tmp = tempfile::TempDir::new().expect("Failed to create temp dir");
+/// Helper to create a test workspace state (ADR-014 layout).
+fn create_test_workspace_state() -> (WorkspaceState, nexus42d::test_utils::TestTempRoot) {
+    let (tmp, nexus_home, db_path) = create_test_workspace();
     let workspace_path = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace_path).expect("Failed to create workspace dir");
-
-    let nexus_home = tmp.path().join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).expect("Failed to create nexus home");
-    let db_path = nexus_home.join("test_state.db");
-
-    // Initialize schema before creating the pool
-    {
-        let conn = rusqlite::Connection::open(&db_path).expect("Failed to open database");
-        nexus42d::db::schema::Schema::init(&conn).expect("Failed to initialize schema");
-    }
 
     let state = WorkspaceState::new_for_testing(
         nexus_home,
@@ -46,7 +36,7 @@ fn create_test_workspace() -> (WorkspaceState, tempfile::TempDir) {
 // RED: Test 1 - Endpoint exists and accepts tool requests
 #[tokio::test]
 async fn test_tool_execute_endpoint_exists() {
-    let (workspace, _tmp) = create_test_workspace();
+    let (workspace, _tmp) = create_test_workspace_state();
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace.clone());
@@ -91,7 +81,7 @@ async fn test_tool_execute_endpoint_exists() {
 // RED: Test 2 - Workspace path validation rejects paths outside workspace
 #[tokio::test]
 async fn test_tool_execute_rejects_path_outside_workspace() {
-    let (workspace, _tmp) = create_test_workspace();
+    let (workspace, _tmp) = create_test_workspace_state();
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace);
@@ -121,7 +111,7 @@ async fn test_tool_execute_rejects_path_outside_workspace() {
 // RED: Test 3 - Tool execution succeeds for valid workspace path
 #[tokio::test]
 async fn test_tool_execute_success_for_valid_path() {
-    let (workspace, _tmp) = create_test_workspace();
+    let (workspace, _tmp) = create_test_workspace_state();
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace.clone());
@@ -158,7 +148,7 @@ async fn test_tool_execute_success_for_valid_path() {
 // RED: Test 4 - Audit log entry created for tool execution
 #[tokio::test]
 async fn test_tool_execute_creates_audit_log_entry() {
-    let (workspace, _tmp) = create_test_workspace();
+    let (workspace, _tmp) = create_test_workspace_state();
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace.clone());

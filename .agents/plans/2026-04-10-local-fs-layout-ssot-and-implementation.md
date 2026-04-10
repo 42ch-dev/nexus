@@ -113,12 +113,12 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 - Modify: `crates/nexus42/src/commands/init.rs`
 - Modify: `crates/nexus42/tests/integration.rs`
 
-- [ ] **Step 1:** Change `init` so **creative root** default matches configurable template **documented in ADR** (e.g. `Documents/nexus/<creator_slug>/<workspace_slug>/`), still creating `Stories/` and `References/` per `{v1-spec/cli-sync/cli-spec-v1.md}` §13.1.
-- [ ] **Step 2:** Write **workspace meta** under `creators/<creator_id>/workspaces/<workspace_slug>/meta.json` (or TOML) with **immutable** `creator_id`, **`workspace_slug`**, `local_root`, optional wire **`workspace_id`**, `created_at`.
-- [ ] **Step 3:** Create empty `state.db` via `nexus-local-db` at `.../workspaces/<workspace_slug>/state.db` (not under `<workspace>/`).
-- [ ] **Step 4:** Update integration test that currently expects `.nexus42` **inside** project dir — align with ADR (operational under home; creative root may still contain a marker file **without** DB if needed for cwd discovery).
-- [ ] **Step 5:** `cargo test -p nexus42` — pass.
-- [ ] **Step 6:** Commit `feat(nexus42): init registers creator/workspace operational tree`
+- [x] **Step 1:** Change `init` so **creative root** default matches configurable template **documented in ADR** (e.g. `Documents/nexus/<creator_slug>/<workspace_slug>/`), still creating `Stories/` and `References/` per `{v1-spec/cli-sync/cli-spec-v1.md}` §13.1.
+- [x] **Step 2:** Write **workspace meta** under `creators/<creator_id>/workspaces/<workspace_slug>/meta.json` (or TOML) with **immutable** `creator_id`, **`workspace_slug`**, `local_root`, optional wire **`workspace_id`**, `created_at`.
+- [x] **Step 3:** Create empty `state.db` via `nexus-local-db` at `.../workspaces/<workspace_slug>/state.db` (not under `<workspace>/`).
+- [x] **Step 4:** Update integration test that currently expects `.nexus42` **inside** project dir — align with ADR (operational under home; creative root may still contain a marker file **without** DB if needed for cwd discovery).
+- [x] **Step 5:** `cargo test -p nexus42` — pass.
+- [x] **Step 6:** Commit `feat(nexus42): init registers creator/workspace operational tree`
 
 ---
 
@@ -130,10 +130,10 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 - Modify: `crates/nexus42d/src/test_utils.rs`
 - Modify: `crates/nexus42d/tests/integration.rs`
 
-- [ ] **Step 1:** Replace `home.join("state.db")` default with resolver that matches Task 2–4 (same path rules).
-- [ ] **Step 2:** Ensure HTTP handlers still obtain a `Connection` or pool from the **active** workspace context (may require passing workspace id from CLI client in early iterations).
-- [ ] **Step 3:** `cargo test -p nexus42d` — pass.
-- [ ] **Step 4:** Commit `feat(nexus42d): open state.db under creators/.../workspaces/...`
+- [x] **Step 1:** Replace `home.join("state.db")` default with resolver that matches Task 2–4 (same path rules).
+- [x] **Step 2:** Ensure HTTP handlers still obtain a `Connection` or pool from the **active** workspace context (may require passing workspace id from CLI client in early iterations).
+- [x] **Step 3:** `cargo test -p nexus42d` — pass.
+- [x] **Step 4:** Commit `feat(nexus42d): open state.db under creators/.../workspaces/...`
 
 ---
 
@@ -141,13 +141,13 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 
 **Files:**
 
-- Create: `crates/nexus42/src/commands/migrate_local_fs.rs` (name as fits CLI style)
+- Create: `crates/nexus42/src/commands/migrate.rs` (`nexus42 migrate local-fs`)
 - Modify: `crates/nexus42/src/main.rs` or command router
 
-- [ ] **Step 1:** Implement **interactive or flag-driven** migration: detect `$HOME/.nexus42/state.db`, prompt for `creator_id` + **`workspace_slug`** (default **`default`**) + creative `local_root`, copy/move DB into `creators/<creator_id>/workspaces/<workspace_slug>/state.db`, write `meta`, archive old path.
-- [ ] **Step 2:** Document migration in `docs/` **only if** user-facing (otherwise keep in command `--help` text + ADR §Consequences).
-- [ ] **Step 3:** Add integration test with temp home asserting post-migration path.
-- [ ] **Step 4:** Commit `feat(nexus42): migrate legacy flat state.db to creator/workspace layout`
+- [x] **Step 1:** Implement **interactive or flag-driven** migration: detect `$HOME/.nexus42/state.db`, prompt for `creator_id` + **`workspace_slug`** (default **`default`**) + creative `local_root`, copy/move DB into `creators/<creator_id>/workspaces/<workspace_slug>/state.db`, write `meta`, archive old path.
+- [x] **Step 2:** Document migration in `docs/` **only if** user-facing (otherwise keep in command `--help` text + ADR §Consequences).
+- [x] **Step 3:** Add integration test with temp home asserting post-migration path.
+- [x] **Step 4:** Commit `feat(nexus42): migrate legacy flat state.db to creator/workspace layout`
 
 ---
 
@@ -158,9 +158,9 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 - Modify: command router under `crates/nexus42/src/`
 - Cross-check: `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2B–§6.2C
 
-- [ ] **Step 1:** Implement **`creator workspace` {list, create, use}** per spec; ensure **`creator use`** updates active Creator and resets slug per §6.2B table note.
-- [ ] **Step 2:** `cargo clippy --all -- -D warnings` — pass.
-- [ ] **Step 3:** Commit `feat(nexus42): creator workspace subcommands and creator use context`
+- [x] **Step 1:** Implement **`creator workspace` {list, create, use}** per spec; ensure **`creator use`** updates active Creator and resets slug per §6.2B table note.
+- [x] **Step 2:** `cargo clippy --all -- -D warnings` — pass.
+- [x] **Step 3:** Commit `feat(nexus42): creator workspace subcommands and creator use context`
 
 ---
 
@@ -171,9 +171,9 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 - Modify: `docs/` only where end-user install paths mention old layout (grep `.nexus42/state.db`)
 - Modify: `AGENTS.md` only if version table or workflow bullets need a one-line pointer to new ADR
 
-- [ ] **Step 1:** `rg 'state\.db|\.nexus42/workspaces' docs crates` — update stale statements.
-- [ ] **Step 2:** Run full CI-equivalent per root `AGENTS.md` (`pnpm run validate-schemas`, `pnpm run codegen` if schemas touched, `cargo +nightly fmt --all -- --check`, `cargo clippy --all -- -D warnings`, `pnpm run typecheck`).
-- [ ] **Step 3:** Commit `docs: align local state paths with creator/workspace ADR`
+- [x] **Step 1:** `rg 'state\.db|\.nexus42/workspaces' docs crates` — update stale statements.
+- [x] **Step 2:** Run full CI-equivalent per root `AGENTS.md` (`pnpm run validate-schemas`, `pnpm run codegen` if schemas touched, `cargo +nightly fmt --all -- --check`, `cargo clippy --all -- -D warnings`, `pnpm run typecheck`).
+- [x] **Step 3:** Commit `docs: align local state paths with creator/workspace ADR`
 
 ---
 

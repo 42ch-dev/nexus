@@ -133,6 +133,10 @@
     {
       "updated_at": "2026-04-11",
       "message": "Plan 2026-04-11-codegen-ref-resolution Done: codegen resolves common $ref string-pattern defs and whole-schema refs; Rust/TS generated types for publish/fork/sync-pull/explore-feed; closed PUBLISH-CODEGEN-01 and FORK-SNAP-01 → archived/residuals/2026-04-10-cli-publish-workflow-parity.json and archived/residuals/2026-04-10-cli-fork-world-snapshot-parity.json; tech_debt_summary open count 0; qc_self reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md."
+    },
+    {
+      "updated_at": "2026-04-10",
+      "message": "Plan 2026-04-10-local-fs-layout-ssot-and-implementation Done: ADR-014 paths (nexus-home-layout), init + creator workspace create + migrate local-fs, nexus42d config-driven state.db, README local layout note; T1 SSOT doc checklist remains manual via local-paths.json."
     }
   ]
 }

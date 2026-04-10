@@ -1,0 +1,11 @@
+[package]
+name = "nexus-home-layout"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared ADR-014 path layout helpers (~/.nexus42/creators/.../workspaces/...)"
+
+[lib]
+path = "src/lib.rs"

@@ -18,8 +18,9 @@ use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
     daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, init::InitCommand,
-    manuscript::ManuscriptCommand, policy::PolicyCommand, publish::PublishCommand,
-    research::ResearchCommand, session::SessionCommand, sync::SyncCommand, world::WorldCommand,
+    manuscript::ManuscriptCommand, migrate::MigrateCommand, policy::PolicyCommand,
+    publish::PublishCommand, research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
+    world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -50,6 +51,12 @@ enum Commands {
     Init {
         #[command(subcommand)]
         command: InitCommand,
+    },
+
+    /// One-shot migrations for local on-disk layout
+    Migrate {
+        #[command(subcommand)]
+        command: MigrateCommand,
     },
 
     /// Authentication (login/logout/status)
@@ -150,6 +157,7 @@ async fn main() {
     // Execute command
     let result = match cli.command {
         Some(Commands::Init { command }) => commands::init::run(command).await,
+        Some(Commands::Migrate { command }) => commands::migrate::run(command).await,
         Some(Commands::Auth { command }) => commands::auth::run(command, &config).await,
         Some(Commands::Daemon { command }) => commands::daemon::run(command, &config).await,
         Some(Commands::Db { command }) => commands::db::run(command, &config).await,
