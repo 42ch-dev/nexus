@@ -6,9 +6,9 @@
 
 **Source:** Consolidated from all plans' residual findings (high, medium, low severity) + architecture alignment review (`.agents/plans/knowledge/architecture-alignment-review-v1.md`).
 
-**Scope ceiling (program intent):** For the current V1.1-era program, implement **at most Batch C and Batch D**. **Batch E is deferred to V1.2** — do not schedule or staff it under this milestone; track TD-11 / TD-13 only as a future V1.2 workstream.
+**Scope:** **Long-lived plan** covering tech-debt and architecture-alignment work across **V1.x** (V1.1 through V1.2 and later V1 releases until the program explicitly retires this plan). **Milestones:** A–D are **delivered** (C+D completed 2026-04-10). **Batch E** (TD-11, TD-13) is scheduled on the **V1.2 track** but remains **owned by this same plan id** — V1.2 is still V1, not a separate product line for plan ownership.
 
-**Priority:** **Lowest** — backfill only; pick up when higher-priority delivery allows. After C+D, this plan may be marked **Done** even though Batch E items remain intentionally out of scope until V1.2.
+**Priority:** **Lowest** — backfill only; pick up when higher-priority delivery allows. **Do not** mark this plan **Done** merely because Batch D closed; keep **InProgress** until Batch E (and any agreed V1.x follow-on) is done or the team moves remaining items to another canonical plan.
 
 ---
 
@@ -20,26 +20,26 @@
 | **Batch A** | ✅ Completed (2026-04-09) | 3 critical (CTX-R4, SYNC-R10, SYNC-R13)                  | S (~2 sessions)    | V1.0-phase2 blocker                |
 | **Batch B** | ✅ Completed (2026-04-08) | 4 low (QC-W2, QC-W4, QC-W3, QC-W7)                       | S (~2 sessions)    | V1.1 milestone                     |
 | **Batch C** | ✅ Completed (2026-04-10) | QC-W1–W11 + **DM-R3** (pairing / fork_branch edge tests) | M (~4 sessions)    | V1.1+ milestone                    |
-| **Batch D** | 🔶 Pending               | 4 medium (TD-7, TD-8, TD-9, TD-10)                       | L (~5–9 sessions)  | V1.1+ (in scope after C)           |
-| **Batch E** | ⏸️ Deferred              | 2 low (TD-11, TD-13)                                     | L (~6–16 sessions) | **V1.2 only** — not this milestone |
+| **Batch D** | ✅ Completed (2026-04-10) | TD-7 resolve; TD-8/10 waive + docs; TD-9 minimal API + doc | L (~5–9 sessions)  | V1.1+ milestone                    |
+| **Batch E** | 🔶 Next (V1.2 schedule)    | 2 low (TD-11, TD-13)                                     | L (~6–16 sessions) | **V1.2 track — same plan**         |
 
 
-**Total Residuals**: 18 tracked historically; **in-scope for closing this plan**: Batch C + D only (Batch E deferred to V1.2).
+**Total Residuals**: 18 tracked historically; **open under this plan**: Batch E + any V1.x follow-up from waived/partial Batch D items (see knowledge docs).
 
 **Source Breakdown**:
 
 - QC reviews: critical/low batches A/B done; remaining low work in **Batch C** (in scope)
-- Architecture alignment: **Batch D** (4 medium) in scope; **Batch E** (2 low) **deferred to V1.2**
+- Architecture alignment: **Batch D** (4 medium) **completed** (2026-04-10); **Batch E** (2 low) **next on V1.2 schedule, still this plan**
 
 **Categories**:
 
 - **MEDIUM (Batch D, in scope):** ForkBranch naming, dual outbox, daemon state machine, OAuth (TD-7–TD-10)
 - **LOW (Batch C, in scope):** QC-driven docs, tests, type alignment
-- **LOW (Batch E, V1.2 deferral):** TD-11, TD-13 — do not schedule under this plan until V1.2
+- **LOW (Batch E, V1.2 schedule):** TD-11, TD-13 — same plan id; staff when V1.2 capacity opens
   - 4 运行时观测性改进（Pool + HTTP error handling）— completed in Batch B
   - 8 长期改进（文档 + 测试基础设施 + 类型对齐）— Batch C（本里程碑）
   - 4 架构对齐改进（命名一致性 + 双 outbox + 状态机 + OAuth）— Batch D（本里程碑）
-  - 2 完整性改进（缺失 CLI 命令 + 测试覆盖）— Batch E（**仅 V1.2**）
+  - 2 完整性改进（缺失 CLI 命令 + 测试覆盖）— Batch E（**V1.2 排期，仍属本计划**）
 
 ---
 
@@ -367,7 +367,7 @@
 ### Batch D: Architecture Alignment — Medium Priority ✅ (closed 2026-04-10)
 
 **Estimated Effort**: L (~5–9 sessions) — **met via resolved + waived + minimal slice per task**
-**Target**: V1.1+ milestone (C+D program cap)
+**Target**: V1.1+ milestone (**milestone delivered**; plan continues for E + follow-ons)
 **Focus**: Architecture alignment gaps identified in architecture alignment review (TD-7–TD-10)
 **Source**: `.agents/plans/knowledge/architecture-alignment-review-v1.md` §2.6
 
@@ -465,12 +465,12 @@
 
 ---
 
-### Batch E: CLI Completeness & Test Coverage — ⏸️ Deferred to V1.2 (out of current scope)
+### Batch E: CLI Completeness & Test Coverage — 🔶 Next (V1.2 schedule, same plan)
 
-**Scheduling:** **Not part of this plan’s milestone.** Execute only after V1.2 planning opens; do not count toward Batch C/D completion or `status.json` progress for this plan until then.
+**Scheduling:** Execute when **V1.2** work is staffed — still under **`v1-tech-debt-cleanup`** (long-lived V1.x plan). Does not retroactively change C/D completion dates.
 
 **Estimated Effort**: L (~6–16 sessions)
-**Target**: **V1.2+ milestone only**
+**Target**: **V1.2 milestone** (within V1 product line)
 **Focus**: Missing CLI commands and integration test coverage from architecture alignment review (TD-11, TD-13)
 **Source**: `.agents/plans/knowledge/architecture-alignment-review-v1.md` §2.3, §2.6
 
@@ -527,13 +527,13 @@
 2. **Batch B (Completed)**: 4 low residuals (QC-W2, QC-W4, QC-W3, QC-W7) — 2026-04-08
 3. **Batch C (Completed)**: QC-W5–W11 + DM-R3 — **2026-04-10**
 4. **Batch D (Completed)**: TD-7 resolved; TD-8/10 waived + documented; TD-9 minimal API + doc — **2026-04-10**
-5. **Batch E (Deferred)**: TD-11, TD-13 — **V1.2 only; excluded from this plan’s schedule**
+5. **Batch E (Next)**: TD-11, TD-13 — **V1.2 schedule; same plan id**
 
-**Parallelization**: Batch B tasks (Pool + HTTP error) completed in single session. **C and D** are lowest-priority backfill; run only when capacity allows. **E** is not parallelized under this plan before V1.2. Batch D Tasks 14 (dual outbox) and 15 (daemon state machine) have no hard dependency on Batch C.
+**Parallelization**: Batch B tasks (Pool + HTTP error) completed in single session. **C and D** are lowest-priority backfill. **E** starts when V1.2 capacity allows. Deferred Batch D follow-ups (full outbox merge, §10.1 FSM, production OAuth) may run in parallel with E as separate tasks under this plan or linked plans.
 
 **Scheduling note**: TD-7 (ForkBranch naming verification) is XS effort and may be completed quickly as a confidence check. TD-10 (OAuth) depends on platform auth endpoints being available.
 
-**Milestone close**: This plan may transition to **Done** once **Batch C and Batch D** meet their completion criteria (or accepted waivers). **Batch E does not block Done** — it is explicitly deferred to V1.2. Each in-scope batch completion updates `status.json` progress and `residual_findings` where applicable.
+**Plan lifecycle**: **Milestone C+D** is **complete** (2026-04-10). The **overall plan** stays **InProgress** until Batch E is delivered (or remaining work is **explicitly** moved to another plan id). Do not use “Batch D done” as a trigger to mark the long-lived plan Done.
 
 ---
 
@@ -551,24 +551,20 @@ cargo +nightly fmt --all -- --check
 
 ## Plan Completion Criteria
 
-**Required to mark this plan Done (V1.1-era milestone, C+D cap):**
+**Milestone C+D (met 2026-04-10):**
 
-- Batch A: 3 critical residuals resolved (CTX-R4, SYNC-R10, SYNC-R13)
-- Batch B: 4 low residuals resolved (QC-W2, QC-W4, QC-W3, QC-W7)
-- Batch C: remaining low resolved or waived (QC-W5, QC-W6, QC-W8, QC-W10, QC-W11, DM-R3; QC-W1 + QC-W9 done)
-- Batch D: 4 medium gaps resolved or waived (TD-7, TD-8, TD-9, TD-10)
+- Batch A–D: delivered per batch sections above (D includes waived/partial items with knowledge).
+
+**Required before marking this long-lived plan Done** (or handing off remaining scope to another canonical plan):
+
+- Batch E: TD-11 and TD-13 meet their acceptance criteria **or** are formally waived/archived with PM decision
+- Any **explicit** program decision on deferred D follow-ups (outbox unification, full daemon FSM, production OAuth) — tracked via knowledge docs + `status.json` / residuals as applicable
 - Tests / clippy / docs: maintained per batch (see Validation Commands)
 
-**Out of scope for this plan’s Done gate:**
+**Current status**: **InProgress** — **lowest priority**; milestone **A–D complete**; **Batch E** next on **V1.2** schedule under **this plan id**  
+**Residuals SSOT**: `status.json` → `metadata.residual_findings` (program-wide items may live on sibling plan ids)
 
-- Batch E (TD-11, TD-13) — **deferred to V1.2**; **does not block** marking this plan Done
-
-**Separate product line:**
-
-- V1.2 release readiness (includes Batch E and other V1.2-only work)
-
-**Current status**: **Done** — milestone **C+D** complete 2026-04-10; Batch E ⏸️ V1.2  
-**Residuals SSOT**: `status.json` → `metadata.residual_findings` (program-wide open items on other plans unchanged)
+**Audit snapshot** (C+D milestone row, historical only): `archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json`
 
 ---
 
@@ -581,7 +577,7 @@ cargo +nightly fmt --all -- --check
 
 ## Notes
 
-This plan is a **long-term tech-debt cleanup** with **lowest scheduling priority**. It covers V1.1-era residuals and architecture gaps **up to Batch C + D**. Batch E is **explicitly deferred to V1.2** and must not consume capacity until V1.2 planning. **C+D completed 2026-04-10**; plan marked **Done** in `status.json` with snapshot `archived/plans/v1-tech-debt-cleanup.json`.
+This plan is a **long-term tech-debt cleanup** with **lowest scheduling priority**, spanning **V1.x** (V1.1 through V1.2+ until retired). **C+D milestone completed 2026-04-10**; the plan remains **InProgress** for **Batch E** and V1.x follow-on work. Point-in-time row after C+D is preserved as `archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json` (audit only).
 
 **Batch A** (3 critical residuals) was prioritized as V1.0-phase2 blocker and completed on 2026-04-09.
 
@@ -601,7 +597,7 @@ This plan is a **long-term tech-debt cleanup** with **lowest scheduling priority
 - TD-9: Minimal `GET /v1/local/daemon/status`; full §10.1 FSM deferred.
 - TD-10: Waived real OAuth in OSS milestone; stub documented with platform dependency.
 
-**Batch E** (2 low) — **deferred to V1.2**; traceability only until a V1.2 plan owns TD-11 / TD-13:
+**Batch E** (2 low) — **next** on **V1.2 schedule**, **same plan** (`v1-tech-debt-cleanup`):
 
 - TD-11: Complete missing CLI commands (~65% coverage → full coverage)
 - TD-13: Improve integration test coverage for sync, CLI, and daemon
@@ -609,5 +605,5 @@ This plan is a **long-term tech-debt cleanup** with **lowest scheduling priority
 **Reorganization**: Plan reorganized on 2026-04-08 based on actual status.json residuals (12 open). Batch B/C restructured per technical domain analysis (方案 A). Batch D/E added on 2026-04-09 from architecture alignment review TD-7–TD-13 (TD-12 excluded as "no actual issue — naming is consistent").
 
 **Created**: 2026-04-09
-**Status**: **Done** — **priority: lowest**; **C+D scope cap** delivered; Batch E → V1.2  
-**Updated**: 2026-04-10 (Batch D closure; plan Done; knowledge + qc_self)
+**Status**: **InProgress** — **priority: lowest**; milestones **A–D** delivered; **Batch E** (V1.2 track) outstanding  
+**Updated**: 2026-04-11 (restore long-lived plan after C+D milestone; Batch E in-scope)

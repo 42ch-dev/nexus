@@ -205,13 +205,45 @@
     },
     {
       "id": "v1-tech-debt-cleanup",
-      "status": "Done",
-      "file": ".agents/plans/v1-tech-debt-cleanup.md",
-      "metadata": {
-        "archived_record": "archived/plans/v1-tech-debt-cleanup.json"
-      },
       "title": "V1 Tech Debt Cleanup (Long-term)",
-      "done_at": "2026-04-10"
+      "file": ".agents/plans/v1-tech-debt-cleanup.md",
+      "status": "InProgress",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 80,
+      "tags": [
+        "v1.1",
+        "v1.2",
+        "tech-debt",
+        "quality",
+        "long-term"
+      ],
+      "created_at": "2026-04-09",
+      "updated_at": "2026-04-11",
+      "notes": "Long-lived plan: milestones A–D delivered (C+D closed 2026-04-10). Remains open for V1.x backfill — Batch E (TD-11, TD-13) on V1.2 schedule and deferred D follow-ups (daemon FSM, outbox merge, real OAuth per knowledge/). C+D point-in-time snapshot: archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json.",
+      "metadata": {
+        "phase": "Batch E next (V1.2 track); same plan id — not Done after D",
+        "priority": "low",
+        "description": "Long-term tech debt across V1.x (including V1.2). A–D batches complete; E and knowledge-documented deferrals remain in-scope under this plan until explicitly retired.",
+        "residual_target": "Batch E TD-11/TD-13; cross-plan open residuals unchanged (SYNC-AUTH-TOKEN-01, PUBLISH-CODEGEN-01, FORK-SNAP-01)",
+        "effort": "L — ongoing lowest-priority backfill",
+        "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
+        "batch_status": {
+          "batch_a": "completed",
+          "batch_b": "completed",
+          "batch_c": "completed — 2026-04-10",
+          "batch_d": "completed — 2026-04-10",
+          "batch_e": "pending — TD-11, TD-13 (V1.2 schedule; same plan)"
+        },
+        "gates": {
+          "tests": "last verified — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
+          "clippy": "passed",
+          "fmt": "passed",
+          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md"
+        }
+      }
     },
     {
       "id": "2026-04-08-local-db-refactor",
@@ -312,7 +344,7 @@
         "2026-04-10-cli-fork-world-snapshot-parity": 1,
         "2026-04-10-cli-publish-workflow-parity": 1
       },
-      "severity_note": "v1-tech-debt-cleanup Done 2026-04-10 (C+D). Open elsewhere: SYNC-AUTH-TOKEN-01 + PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit).",
+      "severity_note": "v1-tech-debt-cleanup InProgress (long-lived): C+D milestone done 2026-04-10; Batch E remains. Open elsewhere: SYNC-AUTH-TOKEN-01 + PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit).",
       "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings."
     },
     "residual_findings": {

@@ -1,4 +1,5 @@
 {
+  "snapshot_purpose": "Point-in-time status row after C+D milestone delivery (2026-04-10). The live plan remains InProgress for long-term V1.x maintenance (Batch E and follow-on work); this file is audit/history only — not the active plan row.",
   "archived_at": "2026-04-10T23:59:59Z",
   "plan_id": "v1-tech-debt-cleanup",
   "snapshot": {

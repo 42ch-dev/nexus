@@ -64,8 +64,8 @@ generated_at: 2026-04-10T23:59:59Z
 | TD-8 dual outbox consolidation | Not done (waived) | `knowledge/dual-outbox-architecture-v1.md`; `archived/residuals/v1-tech-debt-cleanup-batch-d.json` |
 | TD-9 daemon lifecycle | Partial | `GET /v1/local/daemon/status` + tests; full §10.1 FSM deferred per knowledge doc |
 | TD-10 real OAuth | Not done (waived) | `device_flow.rs` module docs; `knowledge/device-flow-oauth-scope-v1.md`; batch-d archive |
-| Plan Done + compaction | Done | `status.json` slim row; `archived/plans/v1-tech-debt-cleanup.json`; `notes.json` entry |
-| Batch E (TD-11, TD-13) | Not done | Explicitly out of scope until V1.2 (unchanged) |
+| Milestone C+D bookkeeping | Done (superseded for plan lifecycle) | Was: `status.json` slim Done row + `archived/plans/v1-tech-debt-cleanup.json` — **reverted 2026-04-11** (see Postscript) |
+| Batch E (TD-11, TD-13) | Not done | **In scope** on V1.2 schedule under same `plan_id` (long-lived plan) |
 
 ## Verification
 
@@ -76,3 +76,7 @@ generated_at: 2026-04-10T23:59:59Z
 - `pnpm run typecheck` — pass
 
 **Note:** Full `cargo test --all` not used as merge gate for this slice (known offline/registry-dependent cases in other crates per prior plan notes).
+
+## Postscript (2026-04-11)
+
+`v1-tech-debt-cleanup` is a **long-lived** V1.x plan. Marking it **Done** after Batch D was incorrect for program intent: **V1.2 (Batch E) remains part of V1**, not a separate plan exit. **Restored** `status` to **InProgress**, removed `archived_record` from the live row, and renamed the C+D snapshot to `archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json` (audit/history only). See `notes.json` and updated `.agents/plans/v1-tech-debt-cleanup.md`.
