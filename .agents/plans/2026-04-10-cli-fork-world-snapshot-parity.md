@@ -14,7 +14,7 @@
 
 - [.agents/plans/knowledge/v1.1-overview-v2.md](knowledge/v1.1-overview-v2.md)
 - Domain: `crates/nexus-domain/src/fork_branch.rs`, `pairing.rs`
-- Residual **DM-R3** (edge tests) may partially overlap — coordinate with `2026-04-09-v1.1-tech-debt-cleanup-2` to avoid duplicate work.
+- Residual **DM-R3** (edge tests) may partially overlap — coordinate with `v1-tech-debt-cleanup` to avoid duplicate work.
 
 **Program ref:** Fork + snapshot capability (platform plan id `11-fork-api`, conceptual).
 

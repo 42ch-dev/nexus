@@ -58,7 +58,7 @@
       "tracking": null,
       "lifecycle": "resolved",
       "closed_at": "2026-04-08T19:00:00Z",
-      "closure_note": "WorldId validation already implemented with validate_world_id() clap validator (wld_ prefix + alphanumeric suffix). 5 unit tests covering valid formats, missing/wrong prefix, empty, special characters, and prefix-only input. Applied via #[arg(value_parser = validate_world_id)] on --world_id flag. Part of Batch A tech debt cleanup (plan 2026-04-09-v1.1-tech-debt-cleanup-2).",
+      "closure_note": "WorldId validation already implemented with validate_world_id() clap validator (wld_ prefix + alphanumeric suffix). 5 unit tests covering valid formats, missing/wrong prefix, empty, special characters, and prefix-only input. Applied via #[arg(value_parser = validate_world_id)] on --world_id flag. Part of Batch A tech debt cleanup (plan v1-tech-debt-cleanup).",
       "closure_evidence": "cargo test --all: 6 context validation tests pass (validate_world_id_accepts_valid_formats, _rejects_missing_prefix, _rejects_wrong_prefix, _rejects_empty, _rejects_special_characters, _rejects_only_prefix). cargo clippy --all -- -D warnings: 0 warnings. cargo +nightly fmt --all -- --check: clean.",
       "archived_at": "2026-04-08"
     }

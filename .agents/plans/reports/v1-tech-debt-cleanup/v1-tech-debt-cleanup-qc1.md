@@ -2,18 +2,18 @@
 report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
-plan_id: "2026-04-09-v1.1-tech-debt-cleanup-2"
+plan_id: "v1-tech-debt-cleanup"
 verdict: "Approve"
 generated_at: "2026-04-08"
 ---
 
-# QC Review Report: Batch B (2026-04-09-v1.1-tech-debt-cleanup-2)
+# QC Review Report: Batch B (v1-tech-debt-cleanup)
 
 ## Review Metadata
 
 | Field | Value |
 |-------|-------|
-| **Plan ID** | `2026-04-09-v1.1-tech-debt-cleanup-2` |
+| **Plan ID** | `v1-tech-debt-cleanup` |
 | **Reviewer** | `@qc-specialist` (QC #1) |
 | **Working Branch** | `feature/v1.1-tech-debt-cleanup-batch-b` |
 | **Review CWD** | `<repository-root>` |
@@ -40,7 +40,7 @@ Batch B implementation successfully addresses all 4 low-severity residuals (QC-W
 
 This review covers Batch B changes as defined in the Assignment:
 
-- **Plan ID**: `2026-04-09-v1.1-tech-debt-cleanup-2` (MUST match QC#2 and QC#3)
+- **Plan ID**: `v1-tech-debt-cleanup` (MUST match QC#2 and QC#3)
 - **Review Range**: `merge-base: origin/main; tip: HEAD on feature/v1.1-tech-debt-cleanup-batch-b` (MUST match QC#2 and QC#3)
 - **Residuals**: QC-W2, QC-W4, QC-W3, QC-W7 (4 low-severity items from `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`)
 

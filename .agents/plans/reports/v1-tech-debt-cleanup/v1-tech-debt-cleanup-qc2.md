@@ -2,7 +2,7 @@
 report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
-plan_id: "2026-04-09-v1.1-tech-debt-cleanup-2"
+plan_id: "v1-tech-debt-cleanup"
 review_range: "merge-base: origin/main; tip: HEAD on feature/v1.1-tech-debt-cleanup-batch-b"
 working_branch: "feature/v1.1-tech-debt-cleanup-batch-b"
 review_cwd: "<repository-root>"

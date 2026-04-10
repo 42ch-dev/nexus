@@ -149,7 +149,7 @@
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-08-v1.1-tech-debt-mitigation.json",
-        "residual_summary": "5 open low (QC-W5,W6,W8,W10,W11); QC-W1/QC-W9 closed 2026-04-10 (cleanup-2 Batch C)"
+        "residual_summary": "5 open low (QC-W5,W6,W8,W10,W11); QC-W1/QC-W9 closed 2026-04-10 (v1-tech-debt-cleanup Batch C)"
       },
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "done_at": "2026-04-09"
@@ -205,9 +205,9 @@
       "done_at": "2026-04-08"
     },
     {
-      "id": "2026-04-09-v1.1-tech-debt-cleanup-2",
-      "title": "V1.2 Tech Debt Cleanup (Long-term)",
-      "file": ".agents/plans/2026-04-09-v1.1-tech-debt-cleanup-2.md",
+      "id": "v1-tech-debt-cleanup",
+      "title": "V1 Tech Debt Cleanup (Long-term)",
+      "file": ".agents/plans/v1-tech-debt-cleanup.md",
       "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
@@ -240,7 +240,7 @@
           "tests": "passed",
           "clippy": "passed",
           "fmt": "passed",
-          "qc_self": "2026-04-10 — reports/2026-04-09-v1.1-tech-debt-cleanup-2/2026-04-09-v1.1-tech-debt-cleanup-2-qc-self-20260410.md"
+          "qc_self": "2026-04-10 — reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410.md"
         }
       }
     },
