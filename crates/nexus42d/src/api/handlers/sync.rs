@@ -157,7 +157,7 @@ pub struct OutboxEntrySummary {
 /// Optional sync context stored in `workspace_meta` (`sync_workspace_id`,
 /// `sync_world_id`, `sync_creator_id`). When all three are present, push requests
 /// must use the same IDs. When none are present, binding checks are skipped.
-async fn optional_sync_push_binding(
+pub(crate) async fn optional_sync_push_binding(
     state: &WorkspaceState,
 ) -> Result<Option<(String, String, String)>, NexusApiError> {
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
@@ -211,8 +211,8 @@ fn try_eager_push_config_from_env() -> Option<(String, String)> {
     try_platform_sync_credentials_from_env()
 }
 
-/// Platform URL + token for `SyncClient` (pull and opt-in eager push).
-fn try_platform_sync_credentials_from_env() -> Option<(String, String)> {
+/// Platform URL + token for `SyncClient` (pull, fork/snapshot proxy, opt-in eager push).
+pub(crate) fn try_platform_sync_credentials_from_env() -> Option<(String, String)> {
     let base = std::env::var("NEXUS_SYNC_PLATFORM_URL")
         .ok()
         .filter(|s| !s.is_empty())?;

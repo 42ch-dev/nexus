@@ -30,6 +30,10 @@ pub mod world_membership;
 pub mod world;
 pub mod meta;
 pub mod context_assembly_v1;
+pub mod world_fork_request;
+pub mod world_fork_response;
+pub mod world_snapshot_request;
+pub mod world_snapshot_response;
 
 // Re-export all types at the generated module level
 pub use common_types::*;
@@ -59,6 +63,10 @@ pub use world_membership::*;
 pub use world::*;
 pub use meta::*;
 pub use context_assembly_v1::*;
+pub use world_fork_request::*;
+pub use world_fork_response::*;
+pub use world_snapshot_request::*;
+pub use world_snapshot_response::*;
 
 /// Schema version constants
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
@@ -87,6 +95,10 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("World", 1),
     ("Meta", 1),
     ("ContextAssemblyV1", 1),
+    ("WorldForkRequest", 1),
+    ("WorldForkResponse", 1),
+    ("WorldSnapshotRequest", 1),
+    ("WorldSnapshotResponse", 1),
 ];
 
 /// Highest schema_version among emitted contract schemas

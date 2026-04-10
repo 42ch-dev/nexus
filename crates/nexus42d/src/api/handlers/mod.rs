@@ -12,3 +12,4 @@ pub mod runtime;
 pub mod sessions;
 pub mod sync;
 pub mod workspace;
+pub mod world;

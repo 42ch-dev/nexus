@@ -30,3 +30,5 @@ pub mod research;
 pub mod session;
 #[deny(clippy::unwrap_used)]
 pub mod sync;
+#[deny(clippy::unwrap_used)]
+pub mod world;
