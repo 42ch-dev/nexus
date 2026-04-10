@@ -22,5 +22,11 @@ pub struct ExploreCreatorCard {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follower_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_platform_owned: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_world_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<Visibility>,
 }
