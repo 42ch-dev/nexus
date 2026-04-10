@@ -297,19 +297,26 @@ fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Result<()
     Ok(())
 }
 
-/// Cache scan results to local SQLite
+/// Cache scan results to local SQLite (uses configured workspace `state.db`).
 fn cache_scan_results(
     files: &[(String, String, std::path::PathBuf)],
     extract_text: bool,
 ) -> Result<()> {
-    use crate::config::state_db_path;
+    let db_path = crate::config::state_db_path()?;
+    cache_scan_results_at(&db_path, files, extract_text)
+}
 
-    let db_path = state_db_path()?;
+/// Cache scan results at an explicit DB path (for tests and callers that already resolved storage).
+fn cache_scan_results_at(
+    db_path: &std::path::Path,
+    files: &[(String, String, std::path::PathBuf)],
+    extract_text: bool,
+) -> Result<()> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    let conn = rusqlite::Connection::open(&db_path)?;
+    let conn = rusqlite::Connection::open(db_path)?;
     crate::db::Schema::init(&conn)?;
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -656,15 +663,17 @@ mod tests {
 
         let files = vec![("test.txt".to_string(), "txt".to_string(), file_path.clone())];
 
+        let db_path = tmp.path().join("state.db");
+
         // Test without extraction
-        let result = cache_scan_results(&files, false);
+        let result = cache_scan_results_at(&db_path, &files, false);
         if let Err(ref e) = result {
             eprintln!("Error in cache_scan_results (no extraction): {:?}", e);
         }
         assert!(result.is_ok());
 
         // Test with extraction
-        let result = cache_scan_results(&files, true);
+        let result = cache_scan_results_at(&db_path, &files, true);
         if let Err(ref e) = result {
             eprintln!("Error in cache_scan_results (with extraction): {:?}", e);
         }
