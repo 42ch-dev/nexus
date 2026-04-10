@@ -56,7 +56,9 @@ const MIN_AUTH_TOKEN_LENGTH: usize = 64;
 /// Token must:
 /// - Not be empty (handled separately in with_config)
 /// - Be at least 64 characters long
-/// - Contain only alphanumeric characters, hyphens, underscores, or dots
+/// - Contain only characters typical of opaque bearer tokens: ASCII alphanumeric,
+///   `-`, `_`, `.`, and standard Base64 alphabet (`+`, `/`, `=`) so platform-issued
+///   Base64-encoded secrets are not rejected.
 fn validate_auth_token(token: &str) -> SyncResult<()> {
     if token.len() < MIN_AUTH_TOKEN_LENGTH {
         return Err(SyncError::AuthTokenInvalid(format!(
@@ -67,15 +69,20 @@ fn validate_auth_token(token: &str) -> SyncResult<()> {
     }
 
     for c in token.chars() {
-        if !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
+        if !is_auth_token_char(c) {
             return Err(SyncError::AuthTokenInvalid(format!(
-                "token contains invalid character '{}'; allowed: alphanumeric, hyphens, underscores, dots",
+                "token contains invalid character '{}'; allowed: ASCII alphanumeric, - _ . + / =",
                 c
             )));
         }
     }
 
     Ok(())
+}
+
+#[inline]
+fn is_auth_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '/' | '=')
 }
 
 /// Successful push response from the platform.
@@ -710,6 +717,15 @@ mod tests {
     #[test]
     fn client_creation_accepts_valid_token() {
         let result = SyncClient::new("https://api.example.com", VALID_TOKEN);
+        assert!(result.is_ok());
+    }
+
+    /// Platform tokens may use standard Base64 (+ / =); previously rejected by validate_auth_token.
+    #[test]
+    fn client_creation_accepts_base64_alphabet_token() {
+        let token = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ab";
+        assert!(token.len() >= MIN_AUTH_TOKEN_LENGTH);
+        let result = SyncClient::new("https://api.example.com", token);
         assert!(result.is_ok());
     }
 

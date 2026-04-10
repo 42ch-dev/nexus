@@ -125,6 +125,10 @@
     {
       "updated_at": "2026-04-11",
       "message": "v1-tech-debt-cleanup restored to InProgress: long-term V1.x maintenance plan — Batch D is a completed milestone only; Batch E (V1.2) and follow-ons stay under this plan id. Milestone snapshot renamed to archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json (removed archived_record from live row)."
+    },
+    {
+      "updated_at": "2026-04-11",
+      "message": "Resolved residual SYNC-AUTH-TOKEN-01 (plan 2026-04-10-cli-sync-bidirectional-parity): SyncClient validate_auth_token now allows standard Base64 +/=; archived/residuals/2026-04-10-cli-sync-bidirectional-parity.json; qc_self reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md."
     }
   ]
 }
