@@ -18,8 +18,12 @@
 
 use std::time::Duration;
 
-use nexus_contracts::generated::{Bundle, SyncPullRequest, SyncPullResponse};
+use nexus_contracts::generated::{
+    Bundle, SyncPullRequest, SyncPullResponse, WorldForkRequest, WorldForkResponse,
+    WorldSnapshotRequest, WorldSnapshotResponse,
+};
 use reqwest::{Client, Method, RequestBuilder, Response};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::conflict::ConflictResponse;
@@ -426,8 +430,45 @@ impl SyncClient {
             "Pulling bundles from platform"
         );
 
+        let pull_response: SyncPullResponse = self.post_platform_json(&url, req).await?;
+        tracing::info!(
+            world_revision = pull_response.world_revision,
+            bundle_count = pull_response.bundles.len(),
+            "Pull bundles completed"
+        );
+
+        Ok(pull_response)
+    }
+
+    /// Fork a world on the platform (`POST /v1/worlds/fork`).
+    pub async fn fork_world(&self, req: &WorldForkRequest) -> SyncResult<WorldForkResponse> {
+        let url = format!("{}/v1/worlds/fork", self.base_url);
+        tracing::info!(
+            parent = %req.parent_world_id,
+            child = %req.child_world_id,
+            "Calling platform world fork"
+        );
+        self.post_platform_json(&url, req).await
+    }
+
+    /// Capture a world snapshot cursor on the platform (`POST /v1/worlds/snapshot`).
+    pub async fn snapshot_world(
+        &self,
+        req: &WorldSnapshotRequest,
+    ) -> SyncResult<WorldSnapshotResponse> {
+        let url = format!("{}/v1/worlds/snapshot", self.base_url);
+        tracing::info!(world_id = %req.world_id, "Calling platform world snapshot");
+        self.post_platform_json(&url, req).await
+    }
+
+    /// POST JSON body, enforce body limits, map HTTP errors — shared by pull-style endpoints.
+    async fn post_platform_json<Req: Serialize + ?Sized, Resp: DeserializeOwned>(
+        &self,
+        url: &str,
+        body: &Req,
+    ) -> SyncResult<Resp> {
         let response = self
-            .execute_with_retry(Method::POST, &url, Some(req))
+            .execute_with_retry(Method::POST, url, Some(body))
             .await?;
 
         let status = response.status().as_u16();
@@ -445,31 +486,24 @@ impl SyncClient {
             }
         }
 
-        let body = response
+        let text = response
             .text()
             .await
             .map_err(|e| SyncError::Serialization(e.to_string()))?;
 
-        if body.len() > self.body_max_size {
+        if text.len() > self.body_max_size {
             return Err(SyncError::HttpBodySizeExceeded {
-                actual: body.len(),
+                actual: text.len(),
                 limit: self.body_max_size,
             });
         }
 
         if status >= 400 {
-            tracing::error!(status = status, "Platform pull returned error");
-            return Err(SyncError::PlatformError { status, body });
+            tracing::error!(status = status, url = %url, "Platform returned error");
+            return Err(SyncError::PlatformError { status, body: text });
         }
 
-        let pull_response: SyncPullResponse = serde_json::from_str(&body)?;
-        tracing::info!(
-            world_revision = pull_response.world_revision,
-            bundle_count = pull_response.bundles.len(),
-            "Pull bundles completed"
-        );
-
-        Ok(pull_response)
+        serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))
     }
 
     /// Execute an HTTP request with automatic retry for transient errors.

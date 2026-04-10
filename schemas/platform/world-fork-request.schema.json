@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/world-fork-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldForkRequest",
+  "description": "Request body for POST /v1/worlds/fork — create a forked world from a parent at a timeline event (platform client contract).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "parent_world_id",
+    "child_world_id",
+    "forked_from_event_id",
+    "created_by_creator_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "parent_world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "Source world to fork from"
+    },
+    "child_world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "Desired ID for the new (forked) world"
+    },
+    "forked_from_event_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "description": "Timeline event that defines the fork point"
+    },
+    "created_by_creator_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Creator initiating the fork"
+    }
+  },
+  "additionalProperties": false
+}

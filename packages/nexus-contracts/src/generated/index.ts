@@ -35,6 +35,10 @@ export * from './WorldMembership';
 export * from './World';
 export * from './Meta';
 export * from './ContextAssemblyV1';
+export * from './WorldForkRequest';
+export * from './WorldForkResponse';
+export * from './WorldSnapshotRequest';
+export * from './WorldSnapshotResponse';
 
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
@@ -63,6 +67,10 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   World: 1,
   Meta: 1,
   ContextAssemblyV1: 1,
+  WorldForkRequest: 1,
+  WorldForkResponse: 1,
+  WorldSnapshotRequest: 1,
+  WorldSnapshotResponse: 1,
 };
 
 // Highest schema_version among emitted contract schemas

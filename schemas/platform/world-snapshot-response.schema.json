@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/world-snapshot-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldSnapshotResponse",
+  "description": "Response body for POST /v1/worlds/snapshot — snapshot anchor and revision metadata.",
+  "type": "object",
+  "required": ["schema_version", "world_id", "world_revision", "captured_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "world_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Server world revision at capture time"
+    },
+    "at_event_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "description": "Resolved anchor event for this snapshot"
+    },
+    "captured_at": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "When the snapshot was taken (server clock, RFC 3339)"
+    }
+  },
+  "additionalProperties": false
+}
