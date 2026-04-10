@@ -1,0 +1,21 @@
+{
+  "id": "2026-04-11-codegen-ref-resolution",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-11-codegen-ref-resolution.md",
+  "title": "Codegen $ref resolution (common IDs + whole-schema refs)",
+  "done_at": "2026-04-11",
+  "metadata": {
+    "working_branch": "feature/codegen-ref-resolution",
+    "merge_target": "main",
+    "merged_at": "2026-04-11",
+    "gates": {
+      "validate_schemas": "passed",
+      "codegen": "pnpm run codegen (CI verify-codegen parity)",
+      "clippy": "passed",
+      "rustfmt": "passed (nightly)",
+      "typecheck": "passed",
+      "tests": "cargo test -p nexus-contracts -p nexus-sync -p nexus42d -p nexus42 --lib; cargo test -p nexus-sync --test publish_client --test world_fork_snapshot_client",
+      "qc_self": "reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md"
+    }
+  }
+}
