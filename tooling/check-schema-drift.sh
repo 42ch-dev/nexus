@@ -47,6 +47,19 @@ if ! grep -q 'pub const LATEST_SCHEMA_VERSION: u32' crates/nexus-contracts/src/g
 fi
 echo "✅ SCHEMA_VERSION is sourced from nexus-contracts generated constants"
 
+echo "==> Checking Rust vs TypeScript LATEST_SCHEMA_VERSION numeric parity..."
+RSV=$(grep -E '^pub const LATEST_SCHEMA_VERSION: u32 = [0-9]+;' crates/nexus-contracts/src/generated/mod.rs | sed -E 's/.*= ([0-9]+);/\1/')
+TSV=$(grep -E '^export const LATEST_SCHEMA_VERSION = [0-9]+;' packages/nexus-contracts/src/generated/index.ts | sed -E 's/.*= ([0-9]+);/\1/')
+if [ -z "$RSV" ] || [ -z "$TSV" ]; then
+  echo "❌ Could not parse LATEST_SCHEMA_VERSION from generated Rust or TS"
+  exit 1
+fi
+if [ "$RSV" != "$TSV" ]; then
+  echo "❌ LATEST_SCHEMA_VERSION mismatch: Rust=$RSV TypeScript=$TSV"
+  exit 1
+fi
+echo "✅ LATEST_SCHEMA_VERSION matches between Rust (u32) and TypeScript (number)"
+
 echo "==> Checking no duplicated shared table DDL..."
 for table in workspace_meta creators reference_sources; do
   CLI_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')

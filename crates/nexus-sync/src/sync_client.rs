@@ -10,6 +10,9 @@
 //!
 //! The client supports body size limits to prevent memory exhaustion from
 //! large HTTP responses. Default limit is 10MB, configurable via builder.
+//! Bodies are read with [`Response::chunk`](reqwest::Response::chunk) so the
+//! implementation can fail as soon as accumulated size exceeds the limit
+//! instead of buffering the entire response first.
 //!
 //! ```ignore
 //! let client = SyncClient::builder()
@@ -277,6 +280,35 @@ impl SyncClient {
         self.body_max_size
     }
 
+    /// Read the full response body as UTF-8, enforcing a maximum accumulated byte size.
+    ///
+    /// Uses incremental [`Response::chunk`](reqwest::Response::chunk) reads so oversized
+    /// responses do not require loading the entire body into memory before the limit check.
+    async fn read_response_body_limited(
+        response: &mut Response,
+        limit: usize,
+    ) -> SyncResult<String> {
+        let mut buf = Vec::new();
+        loop {
+            let chunk = response
+                .chunk()
+                .await
+                .map_err(|e| SyncError::Serialization(e.to_string()))?;
+            let Some(chunk) = chunk else {
+                break;
+            };
+            let next_len = buf.len().saturating_add(chunk.len());
+            if next_len > limit {
+                return Err(SyncError::HttpBodySizeExceeded {
+                    actual: next_len,
+                    limit,
+                });
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        String::from_utf8(buf).map_err(|e| SyncError::Serialization(e.to_string()))
+    }
+
     /// Push a bundle to the platform sync API.
     ///
     /// Returns either a successful `PushResponse` or a `ConflictResponse`.
@@ -289,7 +321,7 @@ impl SyncClient {
             "Pushing bundle to platform"
         );
 
-        let response = self
+        let mut response = self
             .execute_with_retry(Method::POST, &url, Some(bundle))
             .await?;
 
@@ -309,18 +341,7 @@ impl SyncClient {
             }
         }
 
-        let text = response
-            .text()
-            .await
-            .map_err(|e| SyncError::Serialization(e.to_string()))?;
-
-        // Check actual body size (SYNC-R5)
-        if text.len() > self.body_max_size {
-            return Err(SyncError::HttpBodySizeExceeded {
-                actual: text.len(),
-                limit: self.body_max_size,
-            });
-        }
+        let text = Self::read_response_body_limited(&mut response, self.body_max_size).await?;
 
         if status == 409 {
             let conflict = ConflictResponse::from_json(&text)?;
@@ -374,7 +395,7 @@ impl SyncClient {
         let url = format!("{}/v1/sync/state/{world_id}", self.base_url);
         tracing::debug!(world_id = %world_id, "Pulling sync state from platform");
 
-        let response = self
+        let mut response = self
             .execute_with_retry(Method::GET, &url, None::<&Bundle>)
             .await?;
 
@@ -394,18 +415,7 @@ impl SyncClient {
             }
         }
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| SyncError::Serialization(e.to_string()))?;
-
-        // Check actual body size (SYNC-R5)
-        if body.len() > self.body_max_size {
-            return Err(SyncError::HttpBodySizeExceeded {
-                actual: body.len(),
-                limit: self.body_max_size,
-            });
-        }
+        let body = Self::read_response_body_limited(&mut response, self.body_max_size).await?;
 
         if status >= 400 {
             return Err(SyncError::PlatformError { status, body });
@@ -518,7 +528,7 @@ impl SyncClient {
         url: &str,
         body: &Req,
     ) -> SyncResult<Resp> {
-        let response = self
+        let mut response = self
             .execute_with_retry(Method::POST, url, Some(body))
             .await?;
 
@@ -537,17 +547,7 @@ impl SyncClient {
             }
         }
 
-        let text = response
-            .text()
-            .await
-            .map_err(|e| SyncError::Serialization(e.to_string()))?;
-
-        if text.len() > self.body_max_size {
-            return Err(SyncError::HttpBodySizeExceeded {
-                actual: text.len(),
-                limit: self.body_max_size,
-            });
-        }
+        let text = Self::read_response_body_limited(&mut response, self.body_max_size).await?;
 
         if status >= 400 {
             tracing::error!(status = status, url = %url, "Platform returned error");
