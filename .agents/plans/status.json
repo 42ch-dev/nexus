@@ -222,17 +222,19 @@
       ],
       "created_at": "2026-04-09",
       "updated_at": "2026-04-10",
-      "notes": "Batch A+B completed. Batch C: QC-W1 + QC-W9 closed 2026-04-10 (docs/migrations/outbox-schema-v2.md, tooling/check-schema-drift.sh). Six Batch C items + DM-R3 still open under residual_findings.",
+      "notes": "Priority: lowest (backfill). Scope ceiling for this program: finish Batch C + Batch D at most; Batch E (TD-11, TD-13) explicitly deferred to V1.2 — not scheduled here. Batch C: QC-W1/QC-W9 done 2026-04-10; remaining C + D work tracked in plan + residual_findings.",
       "metadata": {
-        "phase": "Batch C in progress (2/8 low closed)",
-        "priority": "medium",
-        "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (12 total). Batch A (3 critical) completed on 2026-04-09. Batch B (4 low) completed on 2026-04-08. Batch C (8 low) deferred to V1.1+ milestone.",
+        "phase": "Batch C in progress; Batch D pending; Batch E out of scope until V1.2",
+        "priority": "low",
+        "description": "Long-term tech-debt cleanup: maximum delivery for this milestone is Batch C + D. Batch E is deferred to V1.2 and excluded from current scheduling. Batch A/B done; Batch C partial.",
         "residual_target": "12 residuals (9 completed in Batch A+B+partial C, 6 Batch C + DM-R3 still tracked)",
-        "effort": "L — ongoing across multiple milestones (Batch A: S, Batch B: S, Batch C: M)",
+        "effort": "L — ongoing; lowest scheduling priority (C+D cap; E → V1.2)",
         "batch_status": {
           "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
           "batch_b": "completed (4 low: QC-W2, QC-W4, QC-W3, QC-W7)",
-          "batch_c": "in progress — QC-W1, QC-W9 done 2026-04-10; pending: QC-W5, QC-W6, QC-W8, QC-W10, QC-W11, DM-R3"
+          "batch_c": "in progress — QC-W1, QC-W9 done 2026-04-10; pending: QC-W5, QC-W6, QC-W8, QC-W10, QC-W11, DM-R3",
+          "batch_d": "pending (TD-7, TD-8, TD-9, TD-10) — in scope for this plan milestone after C",
+          "batch_e": "deferred to V1.2 — TD-11, TD-13; not part of current program scope"
         },
         "gates": {
           "tests": "passed",
