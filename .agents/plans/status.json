@@ -316,14 +316,15 @@
       "id": "2026-04-10-v1-spec-wire-schema-sprint",
       "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
       "file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
-      "progress": 20,
+      "progress": 100,
       "tags": ["v1.1", "contracts", "schemas", "p0", "platform-unblock"],
       "created_at": "2026-04-10",
       "updated_at": "2026-04-10",
-      "notes": "P0: JSON Schema SSOT in nexus per v1-spec + codegen-strategy minimal freeze set; unblocks platform plans 16–21 (conceptual ids) and downstream CLI DTO consumers. Partial: Explore read wire slice + consumers landed on `feature/cli-explore-read-parity` (see coverage-matrix.md). Remaining rows: 17–21 in matrix.",
+      "done_at": "2026-04-10",
+      "notes": "Delivered: wire SSOT for conceptual rows 16–20 — explore-creator-card; social-graph-*; memory-web-list-*; explore-ai-*; notifications-*. Coverage: .agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. Handoff: handoff-note-20260410.md. @42ch/nexus-contracts 0.2.2. TS codegen: array-of-$ref → CommonTypes imports (tooling/codegen). Row 21 (OpenAPI freeze audit) is cross-repo process, not a schema file. Branch: feature/v1-spec-wire-schema-sprint.",
       "metadata": {
         "priority": "critical",
         "phase": "contract-ssot",
@@ -340,13 +341,16 @@
         "spec_refs": [".agents/plans/knowledge/v1.1-overview-v2.md"],
         "working_branch": "feature/v1-spec-wire-schema-sprint",
         "merge_target": "main",
+        "residual_summary": "Plan 21 is audit/process outside this repo SSOT",
         "gates": {
-          "validate_schemas": "passed (pnpm; includes explore-*)",
+          "validate_schemas": "passed (pnpm; 52 schemas)",
           "codegen": "passed (committed generated/)",
           "clippy": "passed (-D warnings)",
+          "fmt": "passed (nightly rustfmt)",
           "typecheck": "passed (pnpm)",
-          "nexus_contracts_tests": "passed (cargo test -p nexus-contracts; crate has 0 tests)",
-          "coverage_matrix": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md"
+          "nexus_contracts_tests": "passed (cargo test -p nexus-contracts; 0 tests)",
+          "coverage_matrix": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md",
+          "handoff": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/handoff-note-20260410.md"
         }
       }
     },

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/social-graph-feed-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SocialGraphFeedRequest",
+  "description": "Request body for personalized social / activity feed listing (platform plan 17).",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque pagination cursor"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Max feed entries (server may cap)"
+    }
+  },
+  "additionalProperties": false
+}

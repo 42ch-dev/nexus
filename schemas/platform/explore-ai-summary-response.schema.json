@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/explore-ai-summary-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ExploreAiSummaryResponse",
+  "description": "Response for Explore AI summarization (platform plan 19).",
+  "type": "object",
+  "required": ["schema_version", "summary"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Generated summary text"
+    },
+    "model": {
+      "type": "string",
+      "description": "Optional model identifier"
+    }
+  },
+  "additionalProperties": false
+}

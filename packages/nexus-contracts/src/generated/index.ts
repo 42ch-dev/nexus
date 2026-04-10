@@ -35,10 +35,26 @@ export * from './WorldMembership';
 export * from './World';
 export * from './Meta';
 export * from './ContextAssemblyV1';
+export * from './ExploreAiAnswerRequest';
+export * from './ExploreAiAnswerResponse';
+export * from './ExploreAiSummaryRequest';
+export * from './ExploreAiSummaryResponse';
 export * from './ExploreBrowseRequest';
+export * from './ExploreCreatorCard';
 export * from './ExploreFeedResponse';
 export * from './ExploreHit';
 export * from './ExploreSearchRequest';
+export * from './MemoryWebListRequest';
+export * from './MemoryWebListResponse';
+export * from './NotificationsInboxItem';
+export * from './NotificationsListRequest';
+export * from './NotificationsListResponse';
+export * from './NotificationsMarkReadRequest';
+export * from './NotificationsMarkReadResponse';
+export * from './SocialGraphFeedRequest';
+export * from './SocialGraphFeedResponse';
+export * from './SocialGraphRelationshipRequest';
+export * from './SocialGraphRelationshipResponse';
 export * from './WorldForkRequest';
 export * from './WorldForkResponse';
 export * from './WorldSnapshotRequest';
@@ -71,10 +87,26 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   World: 1,
   Meta: 1,
   ContextAssemblyV1: 1,
+  ExploreAiAnswerRequest: 1,
+  ExploreAiAnswerResponse: 1,
+  ExploreAiSummaryRequest: 1,
+  ExploreAiSummaryResponse: 1,
   ExploreBrowseRequest: 1,
+  ExploreCreatorCard: 1,
   ExploreFeedResponse: 1,
   ExploreHit: 1,
   ExploreSearchRequest: 1,
+  MemoryWebListRequest: 1,
+  MemoryWebListResponse: 1,
+  NotificationsInboxItem: 1,
+  NotificationsListRequest: 1,
+  NotificationsListResponse: 1,
+  NotificationsMarkReadRequest: 1,
+  NotificationsMarkReadResponse: 1,
+  SocialGraphFeedRequest: 1,
+  SocialGraphFeedResponse: 1,
+  SocialGraphRelationshipRequest: 1,
+  SocialGraphRelationshipResponse: 1,
   WorldForkRequest: 1,
   WorldForkResponse: 1,
   WorldSnapshotRequest: 1,

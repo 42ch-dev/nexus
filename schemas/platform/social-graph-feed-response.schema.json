@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/social-graph-feed-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SocialGraphFeedResponse",
+  "description": "Paginated personalized feed for social graph (platform plan 17). Entries are activity rows; shape may evolve per v1-spec.",
+  "type": "object",
+  "required": ["schema_version", "entries", "has_more"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["edge_id", "verb", "occurred_at"],
+        "properties": {
+          "edge_id": {
+            "type": "string",
+            "description": "Stable id for this feed row / dedupe"
+          },
+          "actor_creator_id": {
+            "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+          },
+          "verb": {
+            "type": "string",
+            "enum": ["followed", "favorited", "published", "commented", "other"],
+            "description": "Activity verb for display"
+          },
+          "target_entity_id": {
+            "type": "string",
+            "description": "Target entity id (world, manuscript, etc.)"
+          },
+          "target_kind": {
+            "type": "string",
+            "enum": ["creator", "world", "manuscript", "other"],
+            "description": "Interpretation of target_entity_id"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable one-line summary"
+          },
+          "occurred_at": {
+            "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Feed rows newest-first per platform policy"
+    },
+    "next_cursor": {
+      "type": "string",
+      "description": "Cursor for the next page when has_more is true"
+    },
+    "has_more": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
