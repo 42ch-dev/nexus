@@ -38,7 +38,7 @@
       "file": ".agents/plans/2025-04-05-domain-models.md",
       "metadata": {
         "archived_record": "archived/plans/2025-04-05-domain-models.json",
-        "residual_summary": "1 open residuals"
+        "residual_summary": "1 open low (DM-R3)"
       },
       "title": "Domain Models Implementation",
       "done_at": "2026-04-06"
@@ -48,8 +48,7 @@
       "status": "Done",
       "file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
       "metadata": {
-        "archived_record": "archived/plans/2025-04-05-cli-daemon-foundation.json",
-        "residual_summary": "1 open residual"
+        "archived_record": "archived/plans/2025-04-05-cli-daemon-foundation.json"
       },
       "title": "CLI + Daemon Foundation",
       "done_at": "2026-04-06"
@@ -79,8 +78,7 @@
       "status": "Done",
       "file": ".agents/plans/2025-04-05-context-assembly.md",
       "metadata": {
-        "archived_record": "archived/plans/2025-04-05-context-assembly.json",
-        "residual_summary": "3 open residuals"
+        "archived_record": "archived/plans/2025-04-05-context-assembly.json"
       },
       "title": "Context Assembly Basic",
       "done_at": "2026-04-06"
@@ -151,7 +149,7 @@
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-08-v1.1-tech-debt-mitigation.json",
-        "residual_summary": "7 open residuals"
+        "residual_summary": "7 open low (QC-W1,W5,W6,W8,W9,W10,W11)"
       },
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "done_at": "2026-04-09"
@@ -161,8 +159,7 @@
       "status": "Done",
       "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
       "metadata": {
-        "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json",
-        "residual_summary": "0 open (ALIGN-HASH-01 + ARCH-SYNC-D1 closed via arch-alignment-closure)"
+        "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json"
       },
       "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
       "done_at": "2026-04-09"
@@ -213,9 +210,16 @@
       "file": ".agents/plans/2026-04-09-v1.1-tech-debt-cleanup-2.md",
       "status": "InProgress",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 15,
-      "tags": ["v1.1", "tech-debt", "quality", "long-term"],
+      "tags": [
+        "v1.1",
+        "tech-debt",
+        "quality",
+        "long-term"
+      ],
       "created_at": "2026-04-09",
       "updated_at": "2026-04-08",
       "notes": "Batch A+B (7/12) completed. Batch B resolved 4 low residuals (QC-W2, QC-W3, QC-W4, QC-W7). Remaining 8 residuals tracked in residual_findings for Batch C. Plan remains InProgress as long-term tech-debt cleanup.",
@@ -249,195 +253,66 @@
     },
     {
       "id": "2026-04-10-cli-sync-bidirectional-parity",
-      "title": "CLI Bidirectional Sync Parity (platform sync)",
-      "file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.1", "sync", "cli", "platform-parity"],
-      "created_at": "2026-04-10",
-      "updated_at": "2026-04-10",
-      "done_at": "2026-04-10",
-      "notes": "Delivered pull path: schemas sync-pull-request/response, SyncClient::pull_bundles (POST /v1/sync/pull), pull_apply + Outbox::stage_if_absent, daemon POST /v1/local/sync/pull, CLI sync pull (--world-id, --after-sequence). Inventory: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/sync-inventory-a1.md. QC self: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260410.md. Branch: feature/cli-sync-bidirectional-parity.",
-"metadata": {
-        "priority": "high",
-        "platform_capability_ref": "10-sync-bidirectional (conceptual cross-repo id)",
-        "dependency": null,
-        "blocks_plans": [
-          "2026-04-10-cli-fork-world-snapshot-parity",
-          "2026-04-10-cli-publish-workflow-parity"
-        ],
-        "spec_refs": [
-          ".agents/plans/knowledge/v1.1-overview-v2.md"
-        ],
-        "working_branch": "feature/cli-sync-bidirectional-parity",
-        "merge_target": "main",
-        "residual_summary": "1 open medium (SYNC-AUTH-TOKEN-01: auth token validation)",
-        "gates": {
-          "tests": "passed: cargo test -p nexus-sync; cargo test -p nexus42 -p nexus42d (full cargo test --all may fail cli_agent without CDN)",
-          "clippy": "passed (-D warnings)",
-          "fmt": "passed (nightly rustfmt)",
-          "typecheck": "passed (pnpm)",
-          "codegen": "passed",
-          "qc_self_report": ".agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260410.md",
-          "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
-        }
-      }
+      "file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-cli-sync-bidirectional-parity.json",
+        "residual_summary": "1 open medium (SYNC-AUTH-TOKEN-01)"
+      },
+      "title": "CLI Bidirectional Sync Parity (platform sync)",
+      "done_at": "2026-04-10"
     },
     {
       "id": "2026-04-10-cli-fork-world-snapshot-parity",
-      "title": "CLI Fork & World Snapshot Parity",
-      "file": ".agents/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.1", "fork", "cli", "platform-parity"],
-      "created_at": "2026-04-10",
-      "updated_at": "2026-04-10",
-      "done_at": "2026-04-10",
-      "notes": "Delivered: schemas platform/world-fork-*, world-snapshot-*; SyncClient fork_world/snapshot_world (POST /v1/worlds/fork|snapshot); daemon POST /v1/local/world/fork|snapshot; CLI `nexus42 world fork` / `world snapshot` (--dry-run, fork --yes). QC self: .agents/plans/reports/2026-04-10-cli-fork-world-snapshot-parity/2026-04-10-cli-fork-world-snapshot-parity-qc-self-20260410.md. Branch: feature/cli-fork-world-snapshot-parity.",
+      "file": ".agents/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
       "metadata": {
-        "priority": "high",
-        "platform_capability_ref": "11-fork-api (conceptual cross-repo id)",
-        "dependency": "2026-04-10-cli-sync-bidirectional-parity",
-        "spec_refs": [".agents/plans/knowledge/v1.1-overview-v2.md"],
-        "working_branch": "feature/cli-fork-world-snapshot-parity",
-        "merge_target": "main",
-        "residual_summary": "1 open nit (codegen fork_branch typing)",
-        "gates": {
-          "tests": "passed: cargo test -p nexus-domain -p nexus-sync -p nexus42 -p nexus42d; cargo test -p nexus-sync --test world_fork_snapshot_client",
-          "clippy": "passed (-D warnings)",
-          "fmt": "passed (nightly rustfmt)",
-          "typecheck": "passed (pnpm)",
-          "codegen": "passed",
-          "qc_self_report": ".agents/plans/reports/2026-04-10-cli-fork-world-snapshot-parity/2026-04-10-cli-fork-world-snapshot-parity-qc-self-20260410.md"
-        }
-      }
+        "archived_record": "archived/plans/2026-04-10-cli-fork-world-snapshot-parity.json",
+        "residual_summary": "1 open nit (FORK-SNAP-01)"
+      },
+      "title": "CLI Fork & World Snapshot Parity",
+      "done_at": "2026-04-10"
     },
     {
       "id": "2026-04-10-v1-spec-wire-schema-sprint",
-      "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
-      "file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.1", "contracts", "schemas", "p0", "platform-unblock"],
-      "created_at": "2026-04-10",
-      "updated_at": "2026-04-10",
-      "done_at": "2026-04-10",
-      "notes": "Delivered: wire SSOT for conceptual rows 16–20 — explore-creator-card; social-graph-*; memory-web-list-*; explore-ai-*; notifications-*. Coverage: .agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. Handoff: handoff-note-20260410.md. @42ch/nexus-contracts 0.2.2. TS codegen: array-of-$ref → CommonTypes imports (tooling/codegen). Row 21 (OpenAPI freeze audit) is cross-repo process, not a schema file. Branch: feature/v1-spec-wire-schema-sprint. Merged to main 2026-04-10 (fast-forward).",
+      "file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
       "metadata": {
-        "priority": "critical",
-        "phase": "contract-ssot",
-        "dependency": null,
-        "blocks_plans": [],
-        "unblocks_conceptual_platform_plans": [
-          "16-v1.0-explore-creator-profile",
-          "17-v1.1-social-graph",
-          "18-v1.1-memory-web-read",
-          "19-v1.1-explore-ai",
-          "20-v1.1-notifications",
-          "21-contracts-openapi-freeze-audit"
-        ],
-        "spec_refs": [".agents/plans/knowledge/v1.1-overview-v2.md"],
-        "working_branch": "feature/v1-spec-wire-schema-sprint",
-        "merge_target": "main",
-        "merged_at": "2026-04-10",
-        "merged_via": "fast-forward feature/v1-spec-wire-schema-sprint → main",
-        "residual_summary": "Plan 21 is audit/process outside this repo SSOT",
-        "gates": {
-          "validate_schemas": "passed (pnpm; 57 schemas on main after follow-on publish schemas on same integration branch)",
-          "codegen": "passed (committed generated/)",
-          "clippy": "passed (-D warnings)",
-          "fmt": "passed (nightly rustfmt)",
-          "typecheck": "passed (pnpm)",
-          "nexus_contracts_tests": "passed (cargo test -p nexus-contracts; 0 tests)",
-          "coverage_matrix": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md",
-          "handoff": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/handoff-note-20260410.md",
-          "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
-        }
-      }
+        "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
+      },
+      "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
+      "done_at": "2026-04-10"
     },
     {
       "id": "2026-04-10-cli-explore-read-parity",
-      "title": "CLI Explore (Read) Parity",
-      "file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.1", "explore", "cli", "platform-parity"],
-      "created_at": "2026-04-10",
-      "updated_at": "2026-04-10",
-      "done_at": "2026-04-10",
-      "notes": "Delivered: platform Explore schemas (explore-*); SyncClient explore_browse/search (POST /v1/explore/browse|search); daemon POST /v1/local/explore/browse|search; CLI `nexus42 explore browse|search` (--dry-run, global -o json). Wiremock: crates/nexus-sync/tests/explore_client.rs. Sprint matrix: .agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. QC self: .agents/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md. @42ch/nexus-contracts npm 0.2.1 (additive). Branch: feature/cli-explore-read-parity. Merged to main 2026-04-10 via integration branch feature/v1-spec-wire-schema-sprint (fast-forward).",
+      "file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
       "metadata": {
-        "priority": "medium",
-        "platform_capability_ref": "12-explore-api (conceptual cross-repo id)",
-        "dependency": "2026-04-10-v1-spec-wire-schema-sprint",
-        "spec_refs": [".agents/plans/knowledge/v1.1-overview-v2.md"],
-        "working_branch": "feature/cli-explore-read-parity",
-        "merge_target": "main",
-        "merged_at": "2026-04-10",
-        "merged_via": "fast-forward feature/v1-spec-wire-schema-sprint → main",
-        "gates": {
-          "tests": "passed: cargo test -p nexus-sync --test explore_client; cargo test -p nexus42 -p nexus42d",
-          "clippy": "passed (-D warnings)",
-          "fmt": "passed (nightly rustfmt)",
-          "typecheck": "passed (pnpm)",
-          "validate_schemas": "passed (pnpm)",
-          "qc_self_report": ".agents/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md",
-          "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
-        }
-      }
+        "archived_record": "archived/plans/2026-04-10-cli-explore-read-parity.json"
+      },
+      "title": "CLI Explore (Read) Parity",
+      "done_at": "2026-04-10"
     },
     {
       "id": "2026-04-10-cli-publish-workflow-parity",
-      "title": "CLI Publish Workflow Parity",
-      "file": ".agents/plans/2026-04-10-cli-publish-workflow-parity.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.1", "publish", "cli", "platform-parity"],
-      "created_at": "2026-04-10",
-      "updated_at": "2026-04-10",
-      "done_at": "2026-04-10",
-      "notes": "Delivered: platform publish wire schemas; SyncClient publish_story/publish_history (POST /v1/publish/story|history); daemon POST /v1/local/publish/story|history; CLI `nexus42 publish story|history`. Wiremock: crates/nexus-sync/tests/publish_client.rs. @42ch/nexus-contracts npm 0.2.3. QC self: .agents/plans/reports/2026-04-10-cli-publish-workflow-parity/2026-04-10-cli-publish-workflow-parity-qc-self-20260410.md. Branch: feature/cli-publish-workflow-parity. Merged to main 2026-04-10 via integration branch feature/v1-spec-wire-schema-sprint (fast-forward).",
+      "file": ".agents/plans/2026-04-10-cli-publish-workflow-parity.md",
       "metadata": {
-        "priority": "medium",
-        "platform_capability_ref": "14-publish-api (conceptual cross-repo id)",
-        "dependency": "2026-04-10-cli-sync-bidirectional-parity",
-        "spec_refs": [".agents/plans/knowledge/v1.1-overview-v2.md"],
-        "working_branch": "feature/cli-publish-workflow-parity",
-        "merge_target": "main",
-        "merged_at": "2026-04-10",
-        "merged_via": "fast-forward feature/v1-spec-wire-schema-sprint → main",
-        "residual_summary": "1 open medium (PUBLISH-CODEGEN-01: codegen Value vs typed fields)",
-        "gates": {
-          "validate_schemas": "passed (pnpm; 57 schemas)",
-          "codegen": "passed (committed generated/)",
-          "clippy": "passed (-D warnings)",
-          "fmt": "passed (nightly rustfmt)",
-          "typecheck": "passed (pnpm)",
-          "tests": "passed: cargo test -p nexus-sync --test publish_client; cargo test -p nexus42 -p nexus42d",
-          "qc_self_report": ".agents/plans/reports/2026-04-10-cli-publish-workflow-parity/2026-04-10-cli-publish-workflow-parity-qc-self-20260410.md",
-          "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
-        }
-      }
+        "archived_record": "archived/plans/2026-04-10-cli-publish-workflow-parity.json",
+        "residual_summary": "1 open medium (PUBLISH-CODEGEN-01)"
+      },
+      "title": "CLI Publish Workflow Parity",
+      "done_at": "2026-04-10"
     },
     {
       "id": "2026-04-10-explore-creator-card-field-gap",
       "status": "Done",
       "file": ".agents/plans/2026-04-10-explore-creator-card-field-gap.md",
-      "title": "ExploreCreatorCard Schema Field Gap Fix",
-      "done_at": "2026-04-10",
       "metadata": {
         "archived_record": "archived/plans/2026-04-10-explore-creator-card-field-gap.json"
-      }
+      },
+      "title": "ExploreCreatorCard Schema Field Gap Fix",
+      "done_at": "2026-04-10"
     }
   ],
   "metadata": {
@@ -468,7 +343,7 @@
         "2026-04-10-cli-publish-workflow-parity": 1
       },
       "severity_note": "7 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md §209-211 (historical compatibility rule). PUBLISH-CODEGEN-01 upgraded from 'nit' to 'medium' per QC triple review (2026-04-10) due to cross-language type safety impact.",
-      "archival_note": "ALIGN-HASH-01 + ARCH-SYNC-D1 closed 2026-04-09 (plan 2026-04-09-v1.1-arch-alignment-closure). Hot status.json Done rows compacted to minimal fields + archived_record 2026-04-10 (optional compaction per AGENTS.md). Added cold snapshot archived/plans/2026-04-09-v1.1-arch-alignment-closure.json. 2026-04-10: branch feature/v1-spec-wire-schema-sprint fast-forward merged to main — wire schema sprint, CLI explore read parity, CLI publish workflow parity, schema $id baseline https://nexus42.invalid, related docs. QC triple review added SYNC-AUTH-TOKEN-01 (medium) and upgraded PUBLISH-CODEGEN-01 to medium."
+      "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings."
     },
     "residual_findings": {
       "2025-04-05-domain-models": [
