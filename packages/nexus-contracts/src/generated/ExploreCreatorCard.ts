@@ -15,5 +15,8 @@ export interface ExploreCreatorCard {
   bio?: string;
   avatar_url?: string;
   follower_count?: number;
+  is_platform_owned?: boolean;
+  created_at?: string;
+  public_world_count?: number;
   visibility?: Visibility;
 }
