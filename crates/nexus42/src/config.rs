@@ -1,6 +1,7 @@
 //! Nexus CLI Configuration
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Default nexus42 home directory name
@@ -20,6 +21,10 @@ pub struct CliConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_creator_id: Option<String>,
 
+    /// Last-selected operational workspace slug per creator (path segment under ADR-014 layout).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub active_workspace_slug_by_creator: HashMap<String, String>,
+
     /// Platform API base URL
     #[serde(default = "default_platform_url")]
     pub platform_url: String,
@@ -36,6 +41,9 @@ fn default_platform_url() -> String {
 fn default_daemon_url() -> String {
     format!("http://127.0.0.1:{DAEMON_PORT}")
 }
+
+/// Default workspace slug when none is stored for a creator.
+pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
 impl CliConfig {
     /// Load configuration from the standard location
@@ -66,6 +74,40 @@ impl CliConfig {
     /// Path to the configuration file
     fn config_path() -> anyhow::Result<PathBuf> {
         Ok(nexus_home()?.join("config.json"))
+    }
+
+    /// Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
+    pub fn workspace_slug_for_creator(&self, creator_id: &str) -> &str {
+        self.active_workspace_slug_by_creator
+            .get(creator_id)
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_WORKSPACE_SLUG)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_slug_defaults_when_unset() {
+        let c = CliConfig::default();
+        assert_eq!(
+            c.workspace_slug_for_creator("ctr_any"),
+            DEFAULT_WORKSPACE_SLUG
+        );
+    }
+
+    #[test]
+    fn workspace_slug_roundtrips_via_json() {
+        let mut c = CliConfig::default();
+        c.active_workspace_slug_by_creator
+            .insert("ctr_a".into(), "staging".into());
+        assert_eq!(c.workspace_slug_for_creator("ctr_a"), "staging");
+        let json = serde_json::to_string(&c).unwrap();
+        let back: CliConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspace_slug_for_creator("ctr_a"), "staging");
     }
 }
 
