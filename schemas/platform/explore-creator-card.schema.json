@@ -34,6 +34,20 @@
       "minimum": 0,
       "description": "Denormalized follower count when exposed"
     },
+    "is_platform_owned": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this is a platform-hosted creator (drives 'Official' badge)"
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Creator registration timestamp ('Member since' display)"
+    },
+    "public_world_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of public active worlds owned by this creator"
+    },
     "visibility": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Visibility",
       "description": "Effective visibility of this card"
