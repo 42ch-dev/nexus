@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/me-entitlements-response.schema.json",
+  "schema_version": 1,
+  "title": "MeEntitlementsResponseV1",
+  "description": "GET /me/entitlements 200 response body. SSOT: v1-spec schema/entitlements-wire-v1.md §3.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "user_id",
+    "subscription_tier",
+    "account_status",
+    "official_creator"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire revision; V1.0 fixed to 1 per entitlements-wire-v1.md"
+    },
+    "user_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId"
+    },
+    "subscription_tier": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SubscriptionTier"
+    },
+    "account_status": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/AccountStatus"
+    },
+    "official_creator": {
+      "type": "object",
+      "required": ["eligible", "max_concurrent_jobs"],
+      "properties": {
+        "eligible": {
+          "type": "boolean"
+        },
+        "max_concurrent_jobs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
