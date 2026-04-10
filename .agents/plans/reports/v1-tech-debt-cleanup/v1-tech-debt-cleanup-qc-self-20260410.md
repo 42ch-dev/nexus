@@ -2,7 +2,7 @@
 report_kind: qc_self
 reviewer: implementer-self-qc
 reviewer_index: 0
-plan_id: "2026-04-09-v1.1-tech-debt-cleanup-2"
+plan_id: "v1-tech-debt-cleanup"
 verdict: "Approve"
 generated_at: "2026-04-10"
 ---
@@ -15,7 +15,7 @@ generated_at: "2026-04-10"
 - Report Timestamp: 2026-04-10
 
 ## Scope
-- plan_id: 2026-04-09-v1.1-tech-debt-cleanup-2
+- plan_id: v1-tech-debt-cleanup
 - Review range / Diff basis: feature branch `feature/v1.1-tech-debt-batch-c-w1-w9` vs prior `main` tip at session start; commits `6f88cb6` (QC-W1), `71a2624` (QC-W9)
 - Working branch (verified): feature/v1.1-tech-debt-batch-c-w1-w9
 - Review cwd (verified): repository root (nexus OSS clone)

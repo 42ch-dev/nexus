@@ -1,4 +1,4 @@
-# V1.2 Tech Debt Cleanup Plan (Long-term)
+# V1 Tech Debt Cleanup (Long-term)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task.
 
