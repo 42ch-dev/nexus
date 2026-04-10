@@ -37,8 +37,7 @@
       "status": "Done",
       "file": ".agents/plans/2025-04-05-domain-models.md",
       "metadata": {
-        "archived_record": "archived/plans/2025-04-05-domain-models.json",
-        "residual_summary": "1 open low (DM-R3)"
+        "archived_record": "archived/plans/2025-04-05-domain-models.json"
       },
       "title": "Domain Models Implementation",
       "done_at": "2026-04-06"
@@ -213,7 +212,7 @@
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 40,
+      "progress": 48,
       "tags": [
         "v1.1",
         "tech-debt",
@@ -222,25 +221,25 @@
       ],
       "created_at": "2026-04-09",
       "updated_at": "2026-04-10",
-      "notes": "Priority: lowest (backfill). Scope ceiling: Batch C + D max; Batch E → V1.2. Batch C: QC-W1/W9 + QC-W5/W6/W8/W10/W11 done 2026-04-10; DM-R3 still open (domain-models). Batch D pending.",
+      "notes": "Priority: lowest (backfill). Batch C complete 2026-04-10 (incl. DM-R3). Next: Batch D (TD-7–TD-10); Batch E → V1.2. Program-wide open residuals: 3 (2 medium + 1 nit on CLI/sync plans).",
       "metadata": {
-        "phase": "Batch C nearly complete (DM-R3 remains); Batch D pending; Batch E out of scope until V1.2",
+        "phase": "Batch C complete; Batch D pending; Batch E out of scope until V1.2",
         "priority": "low",
-        "description": "Long-term tech-debt cleanup: maximum delivery for this milestone is Batch C + D. Batch E is deferred to V1.2 and excluded from current scheduling. Batch A/B done; Batch C partial.",
-        "residual_target": "4 open program-wide (DM-R3 + 3 cross-plan mediums/nits); Batch C QC lows from 2026-04-08 plan archived 2026-04-10",
+        "description": "Long-term tech-debt cleanup: maximum delivery for this milestone is Batch C + D. Batch E is deferred to V1.2 and excluded from current scheduling. Batch A/B/C done; Batch D next.",
+        "residual_target": "3 open cross-plan (SYNC-AUTH-TOKEN-01, PUBLISH-CODEGEN-01, FORK-SNAP-01); Batch C + DM-R3 closed 2026-04-10",
         "effort": "L — ongoing; lowest scheduling priority (C+D cap; E → V1.2)",
         "batch_status": {
           "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
           "batch_b": "completed (4 low: QC-W2, QC-W4, QC-W3, QC-W7)",
-          "batch_c": "nearly complete — QC-W1/W9/W5/W6/W8/W10/W11 done 2026-04-10; pending: DM-R3 (domain-models residual)",
+          "batch_c": "completed — QC-W1/W9/W5/W6/W8/W10/W11 + DM-R3 done 2026-04-10",
           "batch_d": "pending (TD-7, TD-8, TD-9, TD-10) — in scope for this plan milestone after C",
           "batch_e": "deferred to V1.2 — TD-11, TD-13; not part of current program scope"
         },
         "gates": {
-          "tests": "passed",
+          "tests": "passed — cargo test -p nexus-domain (DM-R3 edge tests 2026-04-10)",
           "clippy": "passed",
           "fmt": "passed",
-          "qc_self": "2026-04-10 — reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-w5-w11.md"
+          "qc_self": "2026-04-10 — reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-w5-w11.md; DM-R3 self-check same session"
         }
       }
     },
@@ -325,42 +324,28 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-10T23:59:00Z",
-      "total_open": 4,
+      "total_open": 3,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 1,
+        "low": 0,
         "nit": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 4,
+        "V1.1": 3,
         "V1.2": 0
       },
       "by_plan": {
-        "2025-04-05-domain-models": 1,
         "2026-04-10-cli-sync-bidirectional-parity": 1,
         "2026-04-10-cli-fork-world-snapshot-parity": 1,
         "2026-04-10-cli-publish-workflow-parity": 1
       },
-      "severity_note": "2026-04-08-v1.1-tech-debt-mitigation open lows (QC-W5–W11) closed 2026-04-10; archived batch-c-w5-w11. Remaining: DM-R3 (low), SYNC-AUTH-TOKEN-01 + PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit).",
+      "severity_note": "DM-R3 closed 2026-04-10 (pairing/fork_branch edge tests; archived/residuals/2025-04-05-domain-models.json). Open: SYNC-AUTH-TOKEN-01 + PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit).",
       "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings."
     },
     "residual_findings": {
-      "2025-04-05-domain-models": [
-        {
-          "id": "DM-R3",
-          "title": "Edge-case test coverage for Pairing and ForkBranch lifecycle",
-          "severity": "low",
-          "source": "QC-#2",
-          "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
-          "tracking": null
-        }
-      ],
       "2026-04-10-cli-sync-bidirectional-parity": [
         {
           "id": "SYNC-AUTH-TOKEN-01",

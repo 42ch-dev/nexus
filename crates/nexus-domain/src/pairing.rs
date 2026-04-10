@@ -177,4 +177,44 @@ mod tests {
         let deserialized: Pairing = serde_json::from_str(&json).unwrap();
         assert_eq!(pairing, deserialized);
     }
+
+    #[test]
+    fn authorizes_false_after_revoke_even_when_ids_match() {
+        let mut pairing = Pairing::new("prg_x", "ctr_a", "usr_b", PairingSource::AutoCli);
+        assert!(pairing.authorizes("ctr_a", "usr_b"));
+        pairing.revoke().unwrap();
+        assert!(!pairing.authorizes("ctr_a", "usr_b"));
+    }
+
+    /// Two in-memory aggregates with the same creator+user can both be active; enforcement is
+    /// an application / repository concern (DM-R3 — document domain boundary).
+    #[test]
+    fn two_distinct_active_pairings_same_creator_user_both_authorize() {
+        let a = Pairing::new(
+            "prg_first",
+            "ctr_same",
+            "usr_same",
+            PairingSource::ManualWeb,
+        );
+        let b = Pairing::new(
+            "prg_second",
+            "ctr_same",
+            "usr_same",
+            PairingSource::PlatformAuto,
+        );
+        assert_ne!(a.pairing_id, b.pairing_id);
+        assert!(a.is_active() && b.is_active());
+        assert!(a.authorizes("ctr_same", "usr_same"));
+        assert!(b.authorizes("ctr_same", "usr_same"));
+    }
+
+    #[test]
+    fn revoke_rejects_non_active_status() {
+        let mut pairing = Pairing::new("prg_1", "ctr_1", "usr_1", PairingSource::AutoCli);
+        pairing.status = "pending_review".to_string();
+        assert!(matches!(
+            pairing.revoke(),
+            Err(DomainError::AlreadyInState(s)) if s == "pending_review"
+        ));
+    }
 }
