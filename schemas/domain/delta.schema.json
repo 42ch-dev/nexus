@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/delta.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/delta.schema.json",
   "schema_version": 1,
   "title": "Nexus Delta",
   "description": "Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.",
@@ -8,11 +8,11 @@
   "required": ["delta_type", "operation", "payload", "local_timestamp"],
   "properties": {
     "delta_type": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeltaType",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/DeltaType",
       "description": "Target aggregate type for this delta"
     },
     "operation": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeltaOperation",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/DeltaOperation",
       "description": "Operation to apply"
     },
     "target_entity_type": {
@@ -28,11 +28,11 @@
       "description": "Delta payload (validated by per-type sub-schema)"
     },
     "source_anchor": {
-      "$ref": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
+      "$ref": "https://nexus42.invalid/schemas/common/source-anchor.schema.json",
       "description": "Optional source anchor for provenance"
     },
     "local_timestamp": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Local timestamp of this delta (RFC 3339 UTC)"
     }
   },

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/pairing.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/pairing.schema.json",
   "schema_version": 1,
   "title": "Nexus Pairing",
   "description": "Pairing entity describing Creator <-> User association. Aligned with data-model-v1.md §5.2A.",
@@ -8,7 +8,7 @@
   "required": ["schema_version", "pairing_id", "creator_id", "user_id", "pairing_source", "status", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "pairing_id": {
       "type": "string",
@@ -16,24 +16,24 @@
       "description": "Unique pairing identifier (prefix: 'prg_')"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "user_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId"
     },
     "pairing_source": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/PairingSource",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/PairingSource",
       "description": "How the pairing was established"
     },
     "status": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/PairingStatus",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/PairingStatus",
       "description": "Pairing status"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "revoked_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Revocation timestamp (null if active)"
     }
   },

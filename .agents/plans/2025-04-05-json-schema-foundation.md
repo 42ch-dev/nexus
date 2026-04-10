@@ -53,7 +53,7 @@ Create file: `schemas/meta/meta.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/meta/meta.schema.json",
+  "$id": "https://nexus42.invalid/schemas/meta/meta.schema.json",
   "title": "Nexus Meta Schema",
   "description": "Meta schema defining schema versioning and structure rules for all Nexus schemas",
   "type": "object",
@@ -113,7 +113,7 @@ This directory contains meta schemas defining structure and validation rules for
 
 All Nexus schemas must include:
 - `schema_version`: Integer (e.g., `1`)
-- `$id`: URI following `https://nexus.42ch.io/schemas/<path>/<name>.schema.json`
+- `$id`: URI following `https://nexus42.invalid/schemas/<path>/<name>.schema.json`
 
 Version bumps follow integer monotonic increment:
 - **Breaking changes**: Increment to next integer
@@ -142,7 +142,7 @@ Create file: `schemas/common/common.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/common/common.schema.json",
+  "$id": "https://nexus42.invalid/schemas/common/common.schema.json",
   "schema_version": 1,
   "title": "Nexus Common Types",
   "description": "Common type definitions shared across all Nexus domain schemas.",
@@ -296,7 +296,7 @@ Aligned with: `bundle.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/bundle.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/bundle.schema.json",
   "schema_version": 1,
   "title": "Nexus DeltaBundle Envelope",
   "description": "DeltaBundle envelope containing delta operations for world synchronization.",
@@ -323,35 +323,35 @@ Aligned with: `bundle.schema.json`
       "description": "Envelope schema version"
     },
     "bundle_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BundleId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BundleId",
       "description": "Unique bundle instance ID"
     },
     "command_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CommandId",
       "description": "Attributing SyncCommand ID"
     },
     "workspace_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorkspaceId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorkspaceId",
       "description": "Local workspace binding"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
       "description": "Target world"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "Initiating creator"
     },
     "submitting_creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "Actual submitting creator (may equal creator_id in single-creator scenarios)"
     },
     "bundle_type": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BundleType",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BundleType",
       "description": "world_sync | memory_sync | publish_metadata"
     },
     "manuscript_phase": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ManuscriptPhase",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ManuscriptPhase",
       "description": "Optional but recommended: manuscript phase for downstream gate validation"
     },
     "output_manuscript": {
@@ -377,7 +377,7 @@ Aligned with: `bundle.schema.json`
           "description": "World revision at client-side baseline"
         },
         "timeline_head_id": {
-          "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+          "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
           "description": "Timeline head event ID at baseline"
         },
         "canon_revision": {
@@ -389,7 +389,7 @@ Aligned with: `bundle.schema.json`
       "description": "Optimistic concurrency baseline. At least world_revision or timeline_head_id should be provided."
     },
     "last_confirmed_delta_sequence": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeltaSequence",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/DeltaSequence",
       "description": "Last confirmed delta sequence for conflict detection"
     },
     "deltas": {
@@ -421,11 +421,11 @@ Aligned with: `bundle.schema.json`
             "description": "Delta payload (validated by per-type sub-schema)"
           },
           "source_anchor": {
-            "$ref": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
+            "$ref": "https://nexus42.invalid/schemas/common/source-anchor.schema.json",
             "description": "Optional source anchor for provenance"
           },
           "local_timestamp": {
-            "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
             "description": "Local timestamp of this delta"
           }
         }
@@ -467,7 +467,7 @@ Aligned with: `bundle.schema.json`
       "description": "Server-side per-delta results"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Bundle creation timestamp (RFC 3339 UTC)"
     }
   },
@@ -499,7 +499,7 @@ Aligned with: `schemas/domain/creator.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/creator.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/creator.schema.json",
   "schema_version": 1,
   "title": "Nexus Creator Entity",
   "description": "Creator entity - a first-class creative agent that can be user-owned or agent-registered.",
@@ -507,14 +507,14 @@ Aligned with: `schemas/domain/creator.schema.json`
   "required": ["schema_version", "creator_id", "display_name", "status", "registration_source", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "Unique creator identifier"
     },
     "user_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId",
       "description": "Default paired User ID (null if unpaired)"
     },
     "display_name": {
@@ -575,11 +575,11 @@ Aligned with: `schemas/domain/creator.schema.json`
       "description": "Current experience revision (0 = template-only)"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Creator registration timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last update timestamp"
     }
   },
@@ -611,7 +611,7 @@ Aligned with: `schemas/domain/world.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/world.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/world.schema.json",
   "schema_version": 1,
   "title": "Nexus World Entity",
   "description": "World entity - a narrative universe maintained by creators with timeline evolution.",
@@ -619,14 +619,14 @@ Aligned with: `schemas/domain/world.schema.json`
   "required": ["schema_version", "world_id", "owner_creator_id", "title", "slug", "status", "visibility", "time_policy", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
       "description": "Unique world identifier"
     },
     "owner_creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "World owner creator ID"
     },
     "title": {
@@ -646,12 +646,12 @@ Aligned with: `schemas/domain/world.schema.json`
       "description": "World status"
     },
     "visibility": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Visibility",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Visibility",
       "default": "private",
       "description": "World visibility"
     },
     "time_policy": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimePolicy",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimePolicy",
       "default": "manual",
       "description": "Timeline evolution policy"
     },
@@ -661,11 +661,11 @@ Aligned with: `schemas/domain/world.schema.json`
       "description": "Current canon revision number"
     },
     "current_timeline_head_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
       "description": "Current timeline head event ID"
     },
     "current_time_pointer": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
       "description": "World time progression pointer"
     },
     "root_fork_branch_id": {
@@ -687,11 +687,11 @@ Aligned with: `schemas/domain/world.schema.json`
       "description": "World rule flags"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "World creation timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last update timestamp"
     }
   },
@@ -723,7 +723,7 @@ Aligned with: `schemas/domain/key-block.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/key-block.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/key-block.schema.json",
   "schema_version": 1,
   "title": "Nexus KeyBlock",
   "description": "KeyBlock - a structured knowledge unit in a world timeline.",
@@ -731,18 +731,18 @@ Aligned with: `schemas/domain/key-block.schema.json`
   "required": ["schema_version", "key_block_id", "world_id", "block_type", "canonical_name", "status", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "key_block_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/KeyBlockId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/KeyBlockId",
       "description": "Unique KeyBlock identifier"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
       "description": "World this KB belongs to"
     },
     "block_type": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BlockType",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType",
       "description": "KeyBlock content type"
     },
     "canonical_name": {
@@ -781,19 +781,19 @@ Aligned with: `schemas/domain/key-block.schema.json`
       "description": "KeyBlock body content"
     },
     "source_anchor": {
-      "$ref": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
+      "$ref": "https://nexus42.invalid/schemas/common/source-anchor.schema.json",
       "description": "Source anchor for provenance"
     },
     "created_from_command_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CommandId",
       "description": "SyncCommand that created this KB"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "KB creation timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last update timestamp"
     }
   },
@@ -826,7 +826,7 @@ Aligned with: `schemas/domain/timeline-event.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/timeline-event.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/timeline-event.schema.json",
   "schema_version": 1,
   "title": "Nexus TimelineEvent",
   "description": "TimelineEvent - a canonical event on the world timeline with causality and sequence.",
@@ -834,14 +834,14 @@ Aligned with: `schemas/domain/timeline-event.schema.json`
   "required": ["schema_version", "timeline_event_id", "world_id", "branch_id", "event_type", "status", "sequence_no", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "timeline_event_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
       "description": "Unique TimelineEvent identifier"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
       "description": "World this event belongs to"
     },
     "branch_id": {
@@ -876,23 +876,23 @@ Aligned with: `schemas/domain/timeline-event.schema.json`
     "caused_by_event_ids": {
       "type": "array",
       "items": {
-        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId"
+        "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId"
       },
       "description": "Preceding events that caused this one"
     },
     "affected_key_block_ids": {
       "type": "array",
       "items": {
-        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/KeyBlockId"
+        "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/KeyBlockId"
       },
       "description": "KeyBlocks affected by this event"
     },
     "source_command_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CommandId",
       "description": "SyncCommand that triggered this event"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Event creation timestamp"
     }
   },
@@ -911,7 +911,7 @@ Aligned with: `schemas/domain/memory.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/memory.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/memory.schema.json",
   "schema_version": 1,
   "title": "Nexus MemoryItem",
   "description": "MemoryItem - structured memory for creator experience and world context.",
@@ -919,7 +919,7 @@ Aligned with: `schemas/domain/memory.schema.json`
   "required": ["schema_version", "memory_item_id", "creator_id", "world_id", "memory_type", "status", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "memory_item_id": {
       "type": "string",
@@ -927,15 +927,15 @@ Aligned with: `schemas/domain/memory.schema.json`
       "description": "Unique MemoryItem identifier (prefix: 'mem_')"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "Creator who owns this memory"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
       "description": "World this memory belongs to"
     },
     "memory_type": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MemoryType",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/MemoryType",
       "description": "canon | working | experience"
     },
     "memory_kind": {
@@ -975,19 +975,19 @@ Aligned with: `schemas/domain/memory.schema.json`
       "description": "Source references for provenance"
     },
     "last_accessed_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last access timestamp (nullable)"
     },
     "last_reinforced_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last reinforcement timestamp (nullable)"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Memory creation timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last update timestamp"
     }
   },
@@ -1020,7 +1020,7 @@ Aligned with: `schemas/common/source-anchor.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/common/source-anchor.schema.json",
+  "$id": "https://nexus42.invalid/schemas/common/source-anchor.schema.json",
   "schema_version": 1,
   "title": "Nexus SourceAnchor",
   "description": "Value object for referencing platform Story summary entities without uploading full text.",
@@ -1072,7 +1072,7 @@ Aligned with: `schemas/common/version-ref.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/common/version-ref.schema.json",
+  "$id": "https://nexus42.invalid/schemas/common/version-ref.schema.json",
   "schema_version": 1,
   "title": "Nexus VersionRef",
   "description": "Value object describing the baseline version of a bundle/entity/world.",
@@ -1119,7 +1119,7 @@ Aligned with: `schemas/domain/pairing.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/pairing.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/pairing.schema.json",
   "schema_version": 1,
   "title": "Nexus Pairing",
   "description": "Pairing entity describing Creator <-> User association.",
@@ -1127,7 +1127,7 @@ Aligned with: `schemas/domain/pairing.schema.json`
   "required": ["schema_version", "pairing_id", "creator_id", "user_id", "pairing_source", "status", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "pairing_id": {
       "type": "string",
@@ -1135,10 +1135,10 @@ Aligned with: `schemas/domain/pairing.schema.json`
       "description": "Unique pairing identifier (prefix: 'prg_')"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "user_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId"
     },
     "pairing_source": {
       "type": "string",
@@ -1151,10 +1151,10 @@ Aligned with: `schemas/domain/pairing.schema.json`
       "description": "Pairing status"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "revoked_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Revocation timestamp (null if active)"
     }
   },
@@ -1184,7 +1184,7 @@ Aligned with: `schemas/domain/world-membership.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/world-membership.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/world-membership.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldMembership",
   "description": "WorldMembership entity describing Creator-World relationship with roles and permissions.",
@@ -1192,7 +1192,7 @@ Aligned with: `schemas/domain/world-membership.schema.json`
   "required": ["schema_version", "membership_id", "world_id", "creator_id", "role", "membership_status", "joined_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "membership_id": {
       "type": "string",
@@ -1200,10 +1200,10 @@ Aligned with: `schemas/domain/world-membership.schema.json`
       "description": "Unique membership identifier (prefix: 'mbr_')"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "role": {
       "type": "string",
@@ -1216,7 +1216,7 @@ Aligned with: `schemas/domain/world-membership.schema.json`
       "description": "Membership status"
     },
     "joined_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "permissions": {
       "type": "object",
@@ -1271,7 +1271,7 @@ Aligned with: `schemas/domain/story-manifest.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/story-manifest.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/story-manifest.schema.json",
   "schema_version": 1,
   "title": "Nexus StoryManifest",
   "description": "StoryManifest entity for platform-side chapter/arc manifest and summary.",
@@ -1279,7 +1279,7 @@ Aligned with: `schemas/domain/story-manifest.schema.json`
   "required": ["schema_version", "story_manifest_id", "world_id", "creator_id", "manifest_type", "status", "title", "summary_unit_id", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "story_manifest_id": {
       "type": "string",
@@ -1287,10 +1287,10 @@ Aligned with: `schemas/domain/story-manifest.schema.json`
       "description": "Unique StoryManifest identifier (prefix: 'stm_')"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "manifest_type": {
       "type": "string",
@@ -1343,10 +1343,10 @@ Aligned with: `schemas/domain/story-manifest.schema.json`
       "description": "Published artifact reference"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     }
   },
   "additionalProperties": false
@@ -1375,7 +1375,7 @@ Aligned with: `schemas/domain/sync-command.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/sync-command.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/sync-command.schema.json",
   "schema_version": 1,
   "title": "Nexus SyncCommand",
   "description": "SyncCommand entity representing a business action with audit attribution.",
@@ -1383,19 +1383,19 @@ Aligned with: `schemas/domain/sync-command.schema.json`
   "required": ["schema_version", "command_id", "workspace_id", "world_id", "creator_id", "command_type", "origin", "status", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "command_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CommandId"
     },
     "workspace_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorkspaceId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorkspaceId"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "command_type": {
       "type": "string",
@@ -1418,17 +1418,17 @@ Aligned with: `schemas/domain/sync-command.schema.json`
       "description": "Command execution status"
     },
     "requested_by": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId",
       "description": "User who requested the command"
     },
     "started_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "completed_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     }
   },
   "additionalProperties": false
@@ -1457,7 +1457,7 @@ Aligned with: `schemas/domain/outbox-entry.schema.json`
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/outbox-entry.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/outbox-entry.schema.json",
   "schema_version": 1,
   "title": "Nexus OutboxEntry",
   "description": "OutboxEntry entity representing a local send queue item.",
@@ -1465,7 +1465,7 @@ Aligned with: `schemas/domain/outbox-entry.schema.json`
   "required": ["schema_version", "outbox_entry_id", "bundle_id", "idempotency_key", "delivery_state", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "outbox_entry_id": {
       "type": "string",
@@ -1473,7 +1473,7 @@ Aligned with: `schemas/domain/outbox-entry.schema.json`
       "description": "Unique outbox entry identifier (prefix: 'obx_')"
     },
     "bundle_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BundleId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BundleId"
     },
     "idempotency_key": {
       "type": "string",
@@ -1496,14 +1496,14 @@ Aligned with: `schemas/domain/outbox-entry.schema.json`
       "description": "Last error message (null if no error)"
     },
     "next_retry_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Next retry timestamp (null if not retrying)"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     }
   },
   "additionalProperties": false

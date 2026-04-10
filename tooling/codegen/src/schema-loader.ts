@@ -154,7 +154,7 @@ export function validateSchemaStructure(schema: LoadedSchema): boolean {
  * Handles both local refs (#/definitions/X) and full URIs.
  */
 export function resolveRef(ref: string): string | null {
-  // Full URI ref: https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BundleId
+  // Full URI ref: https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BundleId
   if (ref.includes('#/definitions/')) {
     const match = ref.match(/#\/definitions\/(\w+)$/);
     if (match) {

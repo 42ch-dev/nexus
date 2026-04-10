@@ -1289,7 +1289,7 @@ Write JSON Schema in `schemas/domain/*.schema.json`:
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/bundle.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/bundle.schema.json",
   "schema_version": "1.0.0",
   "title": "Nexus Bundle Envelope",
   "type": "object",

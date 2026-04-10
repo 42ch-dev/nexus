@@ -355,6 +355,8 @@ cat .agents/plans/archived/plans/2025-04-05-domain-models.json
 - Both packages must be published and version-locked with `schema_version`
 - CI validates schemas before generating code
 
+**Schema URI placeholder (production domain TBD):** Committed schema files use **`https://nexus42.invalid`** in `$id` / `$ref` paths (RFC 6761 reserved name; valid HTTPS URIs for validators and tooling). In prose and external-facing docs, write the same logical origin as **`{NEXUS42_BASE_URL}`** (HTTPS origin only, no trailing slash), e.g. `{NEXUS42_BASE_URL}/schemas/...`. Do **not** embed `{NEXUS42_BASE_URL}` inside JSON `$id` / `$ref` strings — those must remain real URIs. See `schemas/meta/README.md` and `docs/CODEGEN.md`.
+
 **⚠️ Mandatory: run codegen after any schema change**
 
 The CI job `verify-codegen` runs `pnpm run codegen` and then checks `git diff` on the generated output directories (`packages/nexus-contracts/src/generated/`, `crates/nexus-contracts/src/generated/`). If generated files are out of sync with committed versions, **CI will fail**.

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/timeline-event.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/timeline-event.schema.json",
   "schema_version": 1,
   "title": "Nexus TimelineEvent",
   "description": "TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.",
@@ -8,14 +8,14 @@
   "required": ["schema_version", "timeline_event_id", "world_id", "branch_id", "event_type", "status", "sequence_no", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "timeline_event_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
       "description": "Unique TimelineEvent identifier"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
       "description": "World this event belongs to"
     },
     "branch_id": {
@@ -23,11 +23,11 @@
       "description": "Fork branch ID (root branch or specific fork)"
     },
     "event_type": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventType",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventType",
       "description": "Type of timeline event"
     },
     "status": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventStatus",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventStatus",
       "description": "Event status"
     },
     "sequence_no": {
@@ -48,23 +48,23 @@
     "caused_by_event_ids": {
       "type": "array",
       "items": {
-        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/TimelineEventId"
+        "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId"
       },
       "description": "Preceding events that caused this one"
     },
     "affected_key_block_ids": {
       "type": "array",
       "items": {
-        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/KeyBlockId"
+        "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/KeyBlockId"
       },
       "description": "KeyBlocks affected by this event"
     },
     "source_command_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CommandId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CommandId",
       "description": "SyncCommand that triggered this event"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Event creation timestamp"
     }
   },

@@ -309,7 +309,7 @@ schemas/
 
 **Strengths:**
 - **Clean layered organization**: meta → common → domain → cli-sync → platform
-- **Canonical `$ref` URIs**: All domain schemas reference `common.schema.json` via canonical URI (`https://nexus.42ch.io/schemas/...`)
+- **Canonical `$ref` URIs**: All domain schemas reference `common.schema.json` via canonical URI (`https://nexus42.invalid/schemas/...`)
 - **Proper validation tooling**: AJV-based `schema-validator.js` catches structural issues in CI
 - **Single-pass codegen**: `pnpm run codegen` generates both TypeScript and Rust from schemas
 

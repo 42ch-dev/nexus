@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/platform/social-graph-feed-request.schema.json",
+  "$id": "https://nexus42.invalid/schemas/platform/social-graph-feed-request.schema.json",
   "schema_version": 1,
   "title": "Nexus SocialGraphFeedRequest",
   "description": "Request body for personalized social / activity feed listing (platform plan 17).",
@@ -8,7 +8,7 @@
   "required": ["schema_version"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "cursor": {
       "type": "string",

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/platform/notifications-inbox-item.schema.json",
+  "$id": "https://nexus42.invalid/schemas/platform/notifications-inbox-item.schema.json",
   "schema_version": 1,
   "title": "Nexus NotificationsInboxItem",
   "description": "Single inbox notification row (platform plan 20).",
@@ -8,7 +8,7 @@
   "required": ["schema_version", "notification_id", "kind", "title", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "notification_id": {
       "type": "string",
@@ -30,11 +30,11 @@
       "description": "Optional detail body"
     },
     "read_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "When marked read; omit when unread"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "link_url": {
       "type": "string",

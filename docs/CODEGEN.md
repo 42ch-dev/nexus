@@ -20,12 +20,14 @@ All wire types are **generated**, not handwritten. This ensures:
 
 ### Define Schema
 
-Write JSON Schema in `schemas/domain/*.schema.json`:
+Write JSON Schema in `schemas/domain/*.schema.json`.
+
+**Schema URIs:** committed files use `https://nexus42.invalid/schemas/...` (valid URI placeholder, RFC 6761). In documentation for a future public deployment, the same path is written as **`{NEXUS42_BASE_URL}/schemas/...`** (origin only, no trailing slash). See `schemas/meta/README.md`.
 
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/bundle.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/bundle.schema.json",
   "schema_version": 1,
   "title": "Nexus Bundle Envelope",
   "type": "object",
@@ -33,7 +35,7 @@ Write JSON Schema in `schemas/domain/*.schema.json`:
   "properties": {
     "schema_version": { "type": "integer", "const": 1 },
     "bundle_id": { "type": "string" },
-    "world_id": { "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId" }
+    "world_id": { "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId" }
   }
 }
 ```

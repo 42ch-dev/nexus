@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/meta/meta.schema.json",
+  "$id": "https://nexus42.invalid/schemas/meta/meta.schema.json",
   "schema_version": 1,
   "title": "Nexus Meta Schema",
   "description": "Meta schema defining schema versioning and structure rules for all Nexus schemas",
@@ -15,8 +15,8 @@
     "$id": {
       "type": "string",
       "format": "uri",
-      "pattern": "^https://nexus\\.42ch\\.io/schemas/.+\\.schema\\.json$",
-      "description": "Schema identifier URI following Nexus namespace convention"
+      "pattern": "^https://nexus42\\.invalid/schemas/.+\\.schema\\.json$",
+      "description": "Schema identifier URI; host is reserved placeholder (RFC 6761 .invalid). In prose use {NEXUS42_BASE_URL}/schemas/... when documenting a future public origin."
     },
     "schema_version": {
       "type": "integer",
