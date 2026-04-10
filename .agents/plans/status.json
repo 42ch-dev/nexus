@@ -227,7 +227,7 @@
         "phase": "Batch E next (V1.2 track); same plan id — not Done after D",
         "priority": "low",
         "description": "Long-term tech debt across V1.x (including V1.2). A–D batches complete; E and knowledge-documented deferrals remain in-scope under this plan until explicitly retired.",
-        "residual_target": "Batch E TD-11/TD-13; cross-plan open residuals unchanged (SYNC-AUTH-TOKEN-01, PUBLISH-CODEGEN-01, FORK-SNAP-01)",
+        "residual_target": "Batch E TD-11/TD-13; cross-plan open residuals: PUBLISH-CODEGEN-01, FORK-SNAP-01",
         "effort": "L — ongoing lowest-priority backfill",
         "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
         "batch_status": {
@@ -241,7 +241,7 @@
           "tests": "last verified — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
           "clippy": "passed",
           "fmt": "passed",
-          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md"
+          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure)"
         }
       }
     },
@@ -260,8 +260,7 @@
       "status": "Done",
       "file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
       "metadata": {
-        "archived_record": "archived/plans/2026-04-10-cli-sync-bidirectional-parity.json",
-        "residual_summary": "1 open medium (SYNC-AUTH-TOKEN-01)"
+        "archived_record": "archived/plans/2026-04-10-cli-sync-bidirectional-parity.json"
       },
       "title": "CLI Bidirectional Sync Parity (platform sync)",
       "done_at": "2026-04-10"
@@ -325,42 +324,28 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-10T23:59:00Z",
-      "total_open": 3,
+      "updated_at": "2026-04-11T00:00:00Z",
+      "total_open": 2,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 2,
+        "medium": 1,
         "low": 0,
         "nit": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 3,
+        "V1.1": 2,
         "V1.2": 0
       },
       "by_plan": {
-        "2026-04-10-cli-sync-bidirectional-parity": 1,
         "2026-04-10-cli-fork-world-snapshot-parity": 1,
         "2026-04-10-cli-publish-workflow-parity": 1
       },
-      "severity_note": "v1-tech-debt-cleanup InProgress (long-lived): C+D milestone done 2026-04-10; Batch E remains. Open elsewhere: SYNC-AUTH-TOKEN-01 + PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit).",
+      "severity_note": "v1-tech-debt-cleanup InProgress (long-lived): C+D milestone done 2026-04-10; Batch E remains. Open elsewhere: PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit). SYNC-AUTH-TOKEN-01 resolved 2026-04-11.",
       "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings."
     },
     "residual_findings": {
-      "2026-04-10-cli-sync-bidirectional-parity": [
-        {
-          "id": "SYNC-AUTH-TOKEN-01",
-          "title": "SyncClient auth token validation may reject legitimate platform tokens (base64 chars +, /, =); verify platform token format before V1.1",
-          "severity": "medium",
-          "source": "QC3-W2, qc_triple 2026-04-10",
-          "scope": "crates/nexus-sync/src/sync_client.rs:57-76",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1 — verify platform token format or loosen validation",
-          "tracking": null
-        }
-      ],
       "2026-04-10-cli-fork-world-snapshot-parity": [
         {
           "id": "FORK-SNAP-01",

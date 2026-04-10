@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-10-cli-sync-bidirectional-parity",
+  "archived_at": "2026-04-11",
+  "entries": [
+    {
+      "id": "SYNC-AUTH-TOKEN-01",
+      "title": "SyncClient auth token validation may reject legitimate platform tokens (base64 chars +, /, =); verify platform token format before V1.1",
+      "severity": "medium",
+      "source": "QC3-W2, qc_triple 2026-04-10",
+      "scope": "crates/nexus-sync/src/sync_client.rs:57-76",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — verify platform token format or loosen validation",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-11",
+      "closure_note": "Extended validate_auth_token to allow standard Base64 alphabet (+, /, =) alongside existing ASCII alnum and - _ .; added unit test client_creation_accepts_base64_alphabet_token.",
+      "closure_evidence": "cargo test -p nexus-sync; see qc-self report 2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md"
+    }
+  ]
+}
