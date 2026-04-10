@@ -353,7 +353,7 @@
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 12,
+      "progress": 25,
       "tags": [
         "cli",
         "daemon",
@@ -362,7 +362,7 @@
       ],
       "created_at": "2026-04-11",
       "updated_at": "2026-04-10",
-      "notes": "T2 delivered: crates/nexus42/src/paths.rs (operational_workspace_dir, state_db_path, shared_global_db_path). Branch feature/local-fs-layout-paths. T1 SSOT verify still pending (local-paths + v1-spec). QC self 2026-04-10.",
+      "notes": "T2+T3: paths + CliConfig.active_workspace_slug_by_creator, creator workspace list/create stub/use, creator use resets slug; main.rs mod paths. T1 SSOT verify still pending. QC self report refreshed 2026-04-10.",
       "metadata": {
         "description": "Implement operational tree under ~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/, creator workspace subcommands, migration from flat state.db; follow plan tasks + v1-spec via specs_root (local-paths.json).",
         "spec_refs": [
@@ -370,8 +370,9 @@
         ],
         "working_branch": "feature/local-fs-layout-paths",
         "gates": {
-          "tests": "cargo test -p nexus42 paths:: — pass (2026-04-10, T2)",
+          "tests": "cargo test -p nexus42 — pass (2026-04-10, T2+T3)",
           "clippy": "cargo clippy --all -- -D warnings — pass (2026-04-10)",
+          "fmt": "cargo +nightly fmt --all -- --check — pass (2026-04-10)",
           "qc_self": "reports/2026-04-10-local-fs-layout-ssot-and-implementation/2026-04-10-local-fs-layout-ssot-and-implementation-qc-self-20260410.md"
         }
       }
