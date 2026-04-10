@@ -4,7 +4,7 @@
 
 **Goal:** Align nexus OSS CLI/daemon with v1-spec **ADR-014** (`{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}`) and synchronized cli-spec / local-db-schema / data-model prose: operational state under `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`, creative roots without DB, **immutable** `(creator_id, workspace_slug)` registration, **active context** via **`creator use` + `creator workspace use`** (default slug **`default`**).
 
-**Architecture:** Introduce a small **path resolver** that maps `(creator_id, workspace_slug)` → DB path; persist **active `creator_id`** and **per-creator active `workspace_slug`** (fallback **`default`**); implement **`nexus42 creator workspace`** subcommands per `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2C; migrate off global `state.db`; keep **nexus-local-db** as SQLite owner.
+**Architecture:** Introduce a small **path resolver** that maps `(creator_id, workspace_slug)` → DB path; persist **active `creator_id`** and **per-creator active `workspace_slug`** (fallback **`default`**); implement **`nexus42 creator workspace`** subcommands per `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2C; keep **nexus-local-db** as SQLite owner. (No legacy flat `state.db` or migration command — product pre-release.)
 
 **Tech Stack:** Rust (`nexus42`, `nexus42d`, `nexus-local-db`), SQLite, existing integration tests under `crates/nexus42` / `crates/nexus42d`.
 
@@ -137,17 +137,9 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 
 ---
 
-### Task 6: One-shot migration from global `state.db`
+### Task 6: One-shot migration from global `state.db` — **removed**
 
-**Files:**
-
-- Create: `crates/nexus42/src/commands/migrate.rs` (`nexus42 migrate local-fs`)
-- Modify: `crates/nexus42/src/main.rs` or command router
-
-- [x] **Step 1:** Implement **interactive or flag-driven** migration: detect `$HOME/.nexus42/state.db`, prompt for `creator_id` + **`workspace_slug`** (default **`default`**) + creative `local_root`, copy/move DB into `creators/<creator_id>/workspaces/<workspace_slug>/state.db`, write `meta`, archive old path.
-- [x] **Step 2:** Document migration in `docs/` **only if** user-facing (otherwise keep in command `--help` text + ADR §Consequences).
-- [x] **Step 3:** Add integration test with temp home asserting post-migration path.
-- [x] **Step 4:** Commit `feat(nexus42): migrate legacy flat state.db to creator/workspace layout`
+**Decision:** Pre-release product; **no** legacy flat `$HOME/.nexus42/state.db` compatibility and **no** `migrate local-fs` command. CLI/daemon require `config.json` active creator + ADR-014 paths only.
 
 ---
 

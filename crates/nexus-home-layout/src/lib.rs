@@ -38,11 +38,6 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
         .join("global_state.db")
 }
 
-/// Legacy flat `state.db` at the nexus config root (pre–ADR-014).
-pub fn legacy_flat_state_db_path(home: &Path) -> PathBuf {
-    nexus_root_from_home(home).join("state.db")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

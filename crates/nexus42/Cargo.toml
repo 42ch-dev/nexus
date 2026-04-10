@@ -53,5 +53,3 @@ assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3"
 wiremock = "0.5"
-rusqlite = { workspace = true }
-nexus-local-db = { path = "../nexus-local-db" }

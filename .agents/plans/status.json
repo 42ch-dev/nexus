@@ -363,7 +363,7 @@
       "created_at": "2026-04-11",
       "updated_at": "2026-04-10",
       "done_at": "2026-04-10",
-      "notes": "T2–T8: nexus-home-layout, init + materialize_adr014_workspace, creator workspace create, migrate local-fs, nexus42d cli_config + ADR test fixtures, integration tests, README local layout. T1 SSOT checklist in plan still human (v1-spec via local-paths.json).",
+      "notes": "T2–T8: nexus-home-layout, init + materialize_adr014_workspace, creator workspace create, nexus42d cli_config + ADR test fixtures, integration tests, README local layout; legacy flat state.db + migrate command removed (pre-release). T1 SSOT checklist in plan still human (v1-spec via local-paths.json).",
       "metadata": {
         "description": "Implement operational tree under ~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/, creator workspace subcommands, migration from flat state.db; follow plan tasks + v1-spec via specs_root (local-paths.json).",
         "spec_refs": [
