@@ -22,7 +22,7 @@
 | Field | Value |
 | --- | --- |
 | **Priority** | Medium |
-| **Dependencies** | `2026-04-10-cli-fork-world-snapshot-parity` (recommended; Explore ordering follows platform program graph) |
+| **Dependencies** | `2026-04-10-v1-spec-wire-schema-sprint` (generated Explore wire DTOs). **Done prerequisite:** `2026-04-10-cli-fork-world-snapshot-parity`. |
 | **Working branch** | `feature/cli-explore-read-parity` |
 
 ## Non-goals (V1)
