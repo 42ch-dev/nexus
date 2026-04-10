@@ -66,7 +66,7 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 - Modify: `crates/nexus42/src/config.rs`
 - Create: `crates/nexus42/src/paths.rs` (or equivalent module name matching crate style)
 
-- [ ] **Step 1: Write failing unit test** for path composition (no network, no DB):
+- [x] **Step 1: Write failing unit test** for path composition (no network, no DB):
 
 ```rust
 #[test]
@@ -82,13 +82,13 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 }
 ```
 
-- [ ] **Step 2:** Run `cargo test -p nexus42 paths::` — expect **fail** (module missing).
+- [x] **Step 2:** Run `cargo test -p nexus42 paths::` — expect **fail** (module missing).
 
-- [ ] **Step 3:** Implement `operational_workspace_dir`, `state_db_path` → `.../state.db`, and `shared_global_db_path` → `.../shared/global_state.db` per **ADR-014**.
+- [x] **Step 3:** Implement `operational_workspace_dir`, `state_db_path` → `.../state.db`, and `shared_global_db_path` → `.../shared/global_state.db` per **ADR-014**.
 
-- [ ] **Step 4:** Run `cargo test -p nexus42 paths::` — expect **pass**.
+- [x] **Step 4:** Run `cargo test -p nexus42 paths::` — expect **pass**.
 
-- [ ] **Step 5:** Commit `feat(nexus42): add operational path helpers for creator/workspace layout`
+- [x] **Step 5:** Commit `feat(nexus42): add operational path helpers for creator/workspace layout`
 
 ---
 
