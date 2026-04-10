@@ -1,6 +1,6 @@
 {
   "name": "@42ch/nexus-contracts",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Nexus Wire Contracts - TypeScript types generated from JSON Schema",
   "author": "42ch",
   "license": "MIT",

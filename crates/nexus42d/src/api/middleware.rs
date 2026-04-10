@@ -56,7 +56,7 @@ pub async fn require_workspace(
 }
 
 // Note: These tests remain inline because they use `crate::test_utils` helpers and
-// `crate::db::schema::Schema`, which are private test-only/internal modules.
+// private router wiring; integration tests cannot easily access `require_workspace`.
 // Integration tests in `tests/` cannot access `#[cfg(test)]` modules or internal
 // crate items directly. The tests also use `super::*` to import private middleware
 // helpers. Consider extracting to `tests/` once the tested items are pub or a public
@@ -65,7 +65,6 @@ pub async fn require_workspace(
 mod tests {
     use crate::api::handlers;
     use crate::api::middleware;
-    use crate::db::schema::Schema;
     use crate::workspace::WorkspaceState;
     use axum::routing::{get, post};
     use axum::Router;
@@ -74,7 +73,7 @@ mod tests {
 
     /// Keeps temp directory alive for the lifetime of the test server.
     struct TestApp {
-        _tmp: tempfile::TempDir,
+        _tmp: crate::test_utils::TestTempRoot,
         server: TestServer,
     }
 
@@ -87,15 +86,7 @@ mod tests {
 
     /// Build a test app with an uninitialized workspace (workspace_path = None).
     fn create_uninitialized_app() -> TestApp {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
         let app = build_router(state);
         let server = TestServer::new(app).unwrap();
@@ -105,28 +96,8 @@ mod tests {
     /// Build a test app with an initialized workspace.
     /// Seeds the database with workspace metadata so handlers return 2xx.
     fn create_initialized_app() -> TestApp {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        Schema::init(&conn).unwrap();
-
-        // Seed workspace_meta so manuscript handler doesn't hit QueryReturnedNoRows
-        conn.execute(
-            "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('manuscript_phase', ?1)",
-            ["brainstorm"],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('active_manifest_id', ?1)",
-            ["manifest-test-1"],
-        )
-        .unwrap();
-        drop(conn);
-
-        let workspace_dir = tmp.path().join("workspace");
+        let (tmp, nexus_home, db_path, workspace_dir) =
+            crate::test_utils::create_initialized_test_workspace();
         let state = WorkspaceState::new_for_testing(
             nexus_home,
             db_path,

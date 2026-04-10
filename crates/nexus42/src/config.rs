@@ -1,6 +1,7 @@
 //! Nexus CLI Configuration
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Default nexus42 home directory name
@@ -20,6 +21,10 @@ pub struct CliConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_creator_id: Option<String>,
 
+    /// Last-selected operational workspace slug per creator (path segment under ADR-014 layout).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub active_workspace_slug_by_creator: HashMap<String, String>,
+
     /// Platform API base URL
     #[serde(default = "default_platform_url")]
     pub platform_url: String,
@@ -36,6 +41,9 @@ fn default_platform_url() -> String {
 fn default_daemon_url() -> String {
     format!("http://127.0.0.1:{DAEMON_PORT}")
 }
+
+/// Default workspace slug when none is stored for a creator.
+pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
 impl CliConfig {
     /// Load configuration from the standard location
@@ -67,6 +75,40 @@ impl CliConfig {
     fn config_path() -> anyhow::Result<PathBuf> {
         Ok(nexus_home()?.join("config.json"))
     }
+
+    /// Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
+    pub fn workspace_slug_for_creator(&self, creator_id: &str) -> &str {
+        self.active_workspace_slug_by_creator
+            .get(creator_id)
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_WORKSPACE_SLUG)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_slug_defaults_when_unset() {
+        let c = CliConfig::default();
+        assert_eq!(
+            c.workspace_slug_for_creator("ctr_any"),
+            DEFAULT_WORKSPACE_SLUG
+        );
+    }
+
+    #[test]
+    fn workspace_slug_roundtrips_via_json() {
+        let mut c = CliConfig::default();
+        c.active_workspace_slug_by_creator
+            .insert("ctr_a".into(), "staging".into());
+        assert_eq!(c.workspace_slug_for_creator("ctr_a"), "staging");
+        let json = serde_json::to_string(&c).unwrap();
+        let back: CliConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspace_slug_for_creator("ctr_a"), "staging");
+    }
 }
 
 /// Get the nexus42 home directory (`$HOME/.nexus42`)
@@ -76,9 +118,26 @@ pub fn nexus_home() -> anyhow::Result<PathBuf> {
     Ok(home.join(NEXUS_DIR))
 }
 
-/// Get the path to the local SQLite database
+/// User home directory (`$HOME`).
+pub fn user_home_dir() -> anyhow::Result<PathBuf> {
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
+}
+
+/// Resolve workspace `state.db` under ADR-014 (`creators/<creator_id>/workspaces/<slug>/state.db`).
+pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
+    let user_home = user_home_dir()?;
+    let cid = config.active_creator_id.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "No active creator configured. Run `nexus42 init workspace` or `nexus42 creator use <id>`."
+        )
+    })?;
+    let slug = config.workspace_slug_for_creator(cid);
+    Ok(crate::paths::state_db_path(&user_home, cid, slug))
+}
+
+/// Load config and resolve the local SQLite database path.
 pub fn state_db_path() -> anyhow::Result<PathBuf> {
-    Ok(nexus_home()?.join("state.db"))
+    resolve_state_db_path(&CliConfig::load()?)
 }
 
 /// Get the path to the auth storage file

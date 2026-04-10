@@ -127,7 +127,7 @@ pub async fn require_auth(
 #[cfg(test)]
 mod tests {
     use crate::api::handlers;
-    use crate::db::schema::Schema;
+    use crate::test_utils::create_test_workspace;
     use crate::workspace::WorkspaceState;
     use axum::routing::{get, post};
     use axum::Router;
@@ -136,7 +136,7 @@ mod tests {
     use serde_json::Value;
 
     struct TestApp {
-        _tmp: tempfile::TempDir,
+        _tmp: crate::test_utils::TestTempRoot,
         server: TestServer,
         state: WorkspaceState,
     }
@@ -149,15 +149,7 @@ mod tests {
     }
 
     fn create_test_app() -> TestApp {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).unwrap();
-        let db_path = nexus_home.join("state.db");
-
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        Schema::init(&conn).unwrap();
-        drop(conn);
-
+        let (tmp, nexus_home, db_path) = create_test_workspace();
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
         let app = build_router(state.clone());
         let server = TestServer::new(app).unwrap();
