@@ -19,7 +19,7 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [dual-outbox-architecture-v1.md](dual-outbox-architecture-v1.md) | `v1-tech-debt-cleanup` | TD-8: documents `nexus-local-db` `outbox` vs `nexus-sync` outbox model; consolidation deferred past V1.1-era C+D cap. | Active |
 | [daemon-lifecycle-api-v1.md](daemon-lifecycle-api-v1.md) | `v1-tech-debt-cleanup` | TD-9: `GET /v1/local/daemon/status` minimal slice vs full cli-spec §10.1 six-state FSM (deferred). | Active |
 | [device-flow-oauth-scope-v1.md](device-flow-oauth-scope-v1.md) | `v1-tech-debt-cleanup` | TD-10: production OAuth dependency on platform; stub `verify_device_code` scope and deferral. | Active |
-| [v1.1-specs-align-review-v1.md](v1.1-specs-align-review-v1.md) | — | **v1-spec ↔ nexus OSS alignment audit (2026-04-10):** entitlements wire gap, doc drift (`architecture-alignment-review-v1` §2.2, `v1.1-overview-v2` vs `status.json`), domain partials, plan 21 process gap; handoff to `.agents/plans/2026-04-10-v1.1-specs-alignment-remediation.md`. | Active |
+| [v1.1-specs-align-review-v1.md](v1.1-specs-align-review-v1.md) | `2026-04-10-v1.1-specs-alignment-remediation` | **v1-spec ↔ nexus OSS alignment audit (2026-04-10);** remediation **Done** (entitlements schemas, knowledge refresh, plan 21 checklist). | Active — audit SSOT; execution archived |
 
 
 ## Archived (`archived/knowledge/`)
