@@ -136,7 +136,7 @@
     },
     {
       "updated_at": "2026-04-10",
-      "message": "Plan 2026-04-10-local-fs-layout-ssot-and-implementation Done: ADR-014 paths (nexus-home-layout), init + creator workspace create + migrate local-fs, nexus42d config-driven state.db, README local layout note; T1 SSOT doc checklist remains manual via local-paths.json."
+      "message": "Plan 2026-04-10-local-fs-layout-ssot-and-implementation Done: ADR-014 paths (nexus-home-layout), init + creator workspace create, nexus42d config-driven state.db, README local layout; legacy/migrate paths later removed (pre-release). T1 SSOT doc checklist remains manual via local-paths.json."
     }
   ]
 }

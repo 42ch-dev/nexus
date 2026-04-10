@@ -123,30 +123,16 @@ pub fn user_home_dir() -> anyhow::Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
 }
 
-/// Resolve `state.db` for the given CLI config (ADR-014 layout when registered, else legacy flat file).
+/// Resolve workspace `state.db` under ADR-014 (`creators/<creator_id>/workspaces/<slug>/state.db`).
 pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     let user_home = user_home_dir()?;
-    let legacy = crate::paths::legacy_flat_state_db_path(&user_home);
-
-    if let Some(cid) = config.active_creator_id.as_deref() {
-        let slug = config.workspace_slug_for_creator(cid);
-        let new_path = crate::paths::state_db_path(&user_home, cid, slug);
-        let meta = crate::paths::operational_workspace_dir(&user_home, cid, slug).join("meta.json");
-        if new_path.exists() || meta.exists() {
-            return Ok(new_path);
-        }
-    }
-
-    if legacy.exists() {
-        return Ok(legacy);
-    }
-
-    if let Some(cid) = config.active_creator_id.as_deref() {
-        let slug = config.workspace_slug_for_creator(cid);
-        return Ok(crate::paths::state_db_path(&user_home, cid, slug));
-    }
-
-    Ok(legacy)
+    let cid = config.active_creator_id.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "No active creator configured. Run `nexus42 init workspace` or `nexus42 creator use <id>`."
+        )
+    })?;
+    let slug = config.workspace_slug_for_creator(cid);
+    Ok(crate::paths::state_db_path(&user_home, cid, slug))
 }
 
 /// Load config and resolve the local SQLite database path.

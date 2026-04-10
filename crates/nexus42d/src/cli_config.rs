@@ -37,33 +37,16 @@ impl CliConfigSnapshot {
     }
 }
 
-/// Resolve `state.db` path mirroring CLI `config::resolve_state_db_path` semantics.
+/// Resolve workspace `state.db` under ADR-014 (same rules as CLI `config::resolve_state_db_path`).
 pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Result<PathBuf> {
     let cfg = CliConfigSnapshot::load(nexus_root)?;
-    let legacy = nexus_home_layout::legacy_flat_state_db_path(user_home);
-
-    if let Some(cid) = cfg.active_creator_id.as_deref() {
-        let slug = cfg.workspace_slug_for_creator(cid);
-        let new_path = nexus_home_layout::workspace_state_db_path(user_home, cid, &slug);
-        let meta =
-            nexus_home_layout::operational_workspace_dir(user_home, cid, &slug).join("meta.json");
-        if new_path.exists() || meta.exists() {
-            return Ok(new_path);
-        }
-    }
-
-    if legacy.exists() {
-        return Ok(legacy);
-    }
-
-    if let Some(cid) = cfg.active_creator_id.as_deref() {
-        let slug = cfg.workspace_slug_for_creator(cid);
-        return Ok(nexus_home_layout::workspace_state_db_path(
-            user_home, cid, &slug,
-        ));
-    }
-
-    anyhow::bail!(
-        "No local Nexus database found. Run `nexus42 init workspace` or `nexus42 migrate local-fs` if upgrading."
-    );
+    let cid = cfg.active_creator_id.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "No active creator in ~/.nexus42/config.json. Run `nexus42 init workspace` or `nexus42 creator use <id>`."
+        )
+    })?;
+    let slug = cfg.workspace_slug_for_creator(cid);
+    Ok(nexus_home_layout::workspace_state_db_path(
+        user_home, cid, &slug,
+    ))
 }

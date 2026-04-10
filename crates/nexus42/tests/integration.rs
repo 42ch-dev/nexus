@@ -1,7 +1,6 @@
 //! Integration Tests — CLI binary behavior
 
 use assert_cmd::Command;
-use nexus_local_db::{init as db_init, RuntimeRole};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -143,44 +142,6 @@ fn auth_logout() {
         .assert()
         .failure() // Daemon not running
         .stderr(predicate::str::contains("Daemon not running"));
-}
-
-/// Legacy flat `state.db` is moved into ADR-014 layout by `migrate local-fs`.
-#[test]
-fn migrate_local_fs_moves_legacy_state_db() {
-    let tmp = TempDir::new().unwrap();
-    let home = tmp.path();
-    let nexus = home.join(".nexus42");
-    std::fs::create_dir_all(&nexus).unwrap();
-    let legacy = nexus.join("state.db");
-    let conn = rusqlite::Connection::open(&legacy).unwrap();
-    db_init(&conn, RuntimeRole::Cli).unwrap();
-    drop(conn);
-
-    let creative = home.join("creative");
-    std::fs::create_dir_all(&creative).unwrap();
-
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("migrate")
-        .arg("local-fs")
-        .arg("--creator-id")
-        .arg("ctr_mig")
-        .arg("--workspace-slug")
-        .arg("default")
-        .arg("--local-root")
-        .arg(&creative)
-        .arg("--yes")
-        .env("HOME", home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Migrated legacy"));
-
-    assert!(!legacy.exists(), "legacy file should be renamed away");
-    let migrated = home.join(".nexus42/creators/ctr_mig/workspaces/default/state.db");
-    assert!(migrated.is_file());
-    let backup = nexus.join("state.db.pre-adr014-migrated");
-    assert!(backup.is_file());
 }
 
 /// Test creator command group
