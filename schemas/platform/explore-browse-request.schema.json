@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/explore-browse-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ExploreBrowseRequest",
+  "description": "Request body for POST /v1/explore/browse — read-only directory-style listing.",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque pagination cursor from a prior response"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Max entries to return (server may cap)"
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["all", "worlds", "creators", "manuscripts"],
+      "description": "Optional filter for entry kinds"
+    }
+  },
+  "additionalProperties": false
+}
