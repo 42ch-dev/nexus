@@ -117,6 +117,10 @@
     {
       "updated_at": "2026-04-09T12:00:00Z",
       "message": "Ultra-compressed 15 Done plans per plan-convention.md §430-436: Reduced from 13 fields to 6 fields (id, status, file, metadata, title, done_at). Removed redundant fields (owner, agents, progress, tags, created_at, updated_at, notes) now available in archived/plans/*.json snapshots. status.json size: 26.4KB → 20.0KB (-24.5%)."
+    },
+    {
+      "updated_at": "2026-04-10",
+      "message": "v1-tech-debt-cleanup marked Done: Batch D closed (TD-7 resolve; TD-8/10 waive + knowledge; TD-9 minimal GET /v1/local/daemon/status). Snapshot archived/plans/v1-tech-debt-cleanup.json; Batch D residuals archived/residuals/v1-tech-debt-cleanup-batch-d.json; qc_self reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md."
     }
   ]
 }

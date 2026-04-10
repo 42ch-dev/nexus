@@ -245,6 +245,29 @@ fn test_fork_branch_domain_contract_roundtrip() {
     );
 }
 
+/// TD-7: `parent_branch_id` and `forked_from_event_id` must match across domain, contracts, and
+/// `schemas/domain/fork-branch.schema.json` (verified manually in knowledge doc).
+#[test]
+fn test_fork_branch_parent_branch_and_event_ids_roundtrip() {
+    let domain_fb = ForkBranch::fork_from(
+        "wld_child",
+        "wld_parent",
+        "fbk_parent_branch_99",
+        "evt_fork_point_abc",
+        "ctr_owner",
+    );
+    let contract_fb: nexus_contracts::ForkBranch =
+        nexus_contracts::ForkBranch::from(domain_fb.clone());
+    assert_eq!(contract_fb.parent_branch_id, "fbk_parent_branch_99");
+    assert_eq!(contract_fb.forked_from_event_id, "evt_fork_point_abc");
+
+    let back = ForkBranch::from(contract_fb);
+    assert_eq!(back.parent_branch_id, "fbk_parent_branch_99");
+    assert_eq!(back.forked_from_event_id, "evt_fork_point_abc");
+    assert_eq!(back.world_id, domain_fb.world_id);
+    assert_eq!(back.parent_world_id, domain_fb.parent_world_id);
+}
+
 #[test]
 fn test_all_aggregates_have_schema_version_1() {
     let kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");

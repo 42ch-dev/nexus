@@ -3,6 +3,7 @@
 //! Endpoints:
 //! - GET  /v1/local/runtime/health   — Health check
 //! - GET  /v1/local/runtime/status   — Runtime status
+//! - GET  /v1/local/daemon/status   — Daemon lifecycle snapshot (minimal; see knowledge doc)
 //! - GET  /v1/local/monitoring/pool  — Database pool status (QC-W3)
 //! - GET  /v1/local/workspace        — Workspace info
 //! - POST /v1/local/workspace/init   — Initialize workspace
@@ -37,7 +38,7 @@ use tower_http::cors::CorsLayer;
 /// Create the Local API router
 ///
 /// **Unguarded routes** (no auth, no workspace init):
-/// - runtime health & status
+/// - runtime health & status, daemon lifecycle snapshot (`/v1/local/daemon/status`)
 /// - workspace info & init
 /// - auth status, device authorization, token exchange, logout
 ///
@@ -46,7 +47,11 @@ use tower_http::cors::CorsLayer;
 pub fn create_router(state: WorkspaceState) -> Router {
     let runtime_routes = Router::new()
         .route("/v1/local/runtime/health", get(handlers::runtime::health))
-        .route("/v1/local/runtime/status", get(handlers::runtime::status));
+        .route("/v1/local/runtime/status", get(handlers::runtime::status))
+        .route(
+            "/v1/local/daemon/status",
+            get(handlers::runtime::daemon_status),
+        );
 
     let monitoring_routes = Router::new().route(
         "/v1/local/monitoring/pool",
