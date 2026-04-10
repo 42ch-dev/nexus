@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/cli-sync/sync-pull-response.schema.json",
+  "$id": "https://nexus42.invalid/schemas/cli-sync/sync-pull-response.schema.json",
   "schema_version": 1,
   "title": "Nexus SyncPullResponse",
   "description": "Response body for POST /v1/sync/pull — bundles to apply locally plus server cursors.",
@@ -8,7 +8,7 @@
   "required": ["schema_version", "world_revision", "confirmed_delta_sequence", "bundles"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "world_revision": {
       "type": "integer",
@@ -28,7 +28,7 @@
       "type": "array",
       "description": "Bundles the client should apply (e.g. stage into local outbox)",
       "items": {
-        "$ref": "https://nexus.42ch.io/schemas/domain/bundle.schema.json"
+        "$ref": "https://nexus42.invalid/schemas/domain/bundle.schema.json"
       }
     }
   },

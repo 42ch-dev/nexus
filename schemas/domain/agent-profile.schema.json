@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/agent-profile.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/agent-profile.schema.json",
   "schema_version": 1,
   "title": "AgentProfile",
   "description": "Configuration for an ACP agent in a workspace. Aligned with data-model-v1.md §5.15.",
@@ -21,11 +21,11 @@
       "description": "Workspace this profile belongs to"
     },
     "profile_kind": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/ProfileKind",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ProfileKind",
       "description": "Kind of agent profile (local or platform-hosted)"
     },
     "selection_mode": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SelectionMode",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SelectionMode",
       "description": "How agent is selected"
     },
     "registry_agent_id": {
@@ -37,7 +37,7 @@
       "description": "Command to launch agent (if selection_mode=manual_command or manual_remote)"
     },
     "transport": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Transport",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Transport",
       "description": "Transport method for agent communication"
     },
     "default_output_manuscript": {
@@ -49,15 +49,15 @@
       "description": "ACP protocol version (e.g., 1)"
     },
     "status": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/AgentProfileStatus",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/AgentProfileStatus",
       "description": "Profile status"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Creation timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last update timestamp"
     }
   },

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/outbox-entry.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/outbox-entry.schema.json",
   "schema_version": 1,
   "title": "Nexus OutboxEntry",
   "description": "OutboxEntry entity representing a local send queue item. Aligned with data-model-v1.md §5.13.",
@@ -8,7 +8,7 @@
   "required": ["schema_version", "outbox_entry_id", "bundle_id", "idempotency_key", "delivery_state", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "outbox_entry_id": {
       "type": "string",
@@ -16,7 +16,7 @@
       "description": "Unique outbox entry identifier (prefix: 'obx_')"
     },
     "bundle_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/BundleId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BundleId"
     },
     "idempotency_key": {
       "type": "string",
@@ -24,7 +24,7 @@
       "description": "Idempotency key for deduplication"
     },
     "delivery_state": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/DeliveryState",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/DeliveryState",
       "description": "Delivery state"
     },
     "retry_count": {
@@ -38,14 +38,14 @@
       "description": "Last error message (null if no error)"
     },
     "next_retry_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Next retry timestamp (null if not retrying)"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     }
   },
   "additionalProperties": false

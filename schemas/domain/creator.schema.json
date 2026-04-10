@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/domain/creator.schema.json",
+  "$id": "https://nexus42.invalid/schemas/domain/creator.schema.json",
   "schema_version": 1,
   "title": "Nexus Creator Entity",
   "description": "Creator entity - a first-class creative agent that can be user-owned or agent-registered. Aligned with data-model-v1.md §5.2.",
@@ -8,14 +8,14 @@
   "required": ["schema_version", "creator_id", "display_name", "status", "registration_source", "created_at"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
       "description": "Unique creator identifier"
     },
     "user_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/UserId",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId",
       "description": "Default paired User ID (null if unpaired)"
     },
     "display_name": {
@@ -25,7 +25,7 @@
       "description": "Creator display name"
     },
     "status": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorStatus",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorStatus",
       "description": "Creator status"
     },
     "is_platform_owned": {
@@ -38,7 +38,7 @@
       "description": "Reference to platform-stored ACP/agent credential"
     },
     "registration_source": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/RegistrationSource",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/RegistrationSource",
       "description": "How this creator was registered"
     },
     "persona_summary": {
@@ -74,11 +74,11 @@
       "description": "Current experience revision (0 = template-only)"
     },
     "created_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Creator registration timestamp"
     },
     "updated_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp",
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
       "description": "Last update timestamp"
     }
   },

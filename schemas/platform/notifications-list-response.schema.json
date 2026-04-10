@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/platform/notifications-list-response.schema.json",
+  "$id": "https://nexus42.invalid/schemas/platform/notifications-list-response.schema.json",
   "schema_version": 1,
   "title": "Nexus NotificationsListResponse",
   "description": "Paginated notifications list (platform plan 20). Item shape matches NotificationsInboxItem fields for wire stability.",
@@ -8,7 +8,7 @@
   "required": ["schema_version", "items", "has_more"],
   "properties": {
     "schema_version": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
     },
     "items": {
       "type": "array",
@@ -33,10 +33,10 @@
             "maxLength": 8192
           },
           "read_at": {
-            "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
           },
           "created_at": {
-            "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
           },
           "link_url": {
             "type": "string",

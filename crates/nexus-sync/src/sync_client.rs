@@ -186,7 +186,7 @@ impl SyncClient {
     /// Create a new sync client with default configuration.
     ///
     /// # Arguments
-    /// * `platform_base_url` - Base URL of the platform sync API (e.g., "https://api.nexus.42ch.io")
+    /// * `platform_base_url` - Base URL of the platform sync API (e.g. `{NEXUS42_BASE_URL}` / your staging origin)
     /// * `auth_token` - Bearer token for authentication
     ///
     /// # Body Size Limit

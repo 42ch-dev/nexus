@@ -284,7 +284,7 @@ Aligned with the minimal request shape for `POST /v1/local/context/assemble`, wr
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus.42ch.io/schemas/platform/context-assembly-v1.schema.json",
+  "$id": "https://nexus42.invalid/schemas/platform/context-assembly-v1.schema.json",
   "schema_version": 1,
   "title": "ContextAssembleRequestV1",
   "description": "Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform.",
@@ -297,13 +297,13 @@ Aligned with the minimal request shape for `POST /v1/local/context/assemble`, wr
       "description": "Caller-generated traceable ID (Local API envelope)"
     },
     "workspace_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorkspaceId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorkspaceId"
     },
     "creator_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/CreatorId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
     },
     "include_memory": {
       "type": "boolean",
@@ -374,10 +374,10 @@ Aligned with the minimal output shape for `POST /v1/local/context/assemble`, wra
       "description": "Human-readable error message if success=false"
     },
     "world_id": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
     },
     "assembled_at": {
-      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/Timestamp"
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
     },
     "data_freshness_hint": {
       "type": ["string", "null"],
