@@ -112,6 +112,10 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route("/v1/local/world/fork", post(handlers::world::fork))
         .route("/v1/local/world/snapshot", post(handlers::world::snapshot));
 
+    let explore_routes = Router::new()
+        .route("/v1/local/explore/browse", post(handlers::explore::browse))
+        .route("/v1/local/explore/search", post(handlers::explore::search));
+
     // ACP tool execution routes (unguarded — workspace validation in handler)
     let acp_routes = Router::new().route(
         "/v1/local/acp/tool/execute",
@@ -140,6 +144,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(context_routes)
         .merge(sync_routes)
         .merge(world_routes)
+        .merge(explore_routes)
         .merge(acp_routes)
         .merge(session_routes)
         .layer(CorsLayer::permissive())

@@ -1,7 +1,7 @@
 //! Sync Client
 //!
 //! HTTP client for platform sync API operations.
-//! Implements bundle push, state pull, and conflict detection.
+//! Implements bundle push, state pull, conflict detection, and read-only Explore calls.
 //!
 //! Uses `reqwest 0.12` for HTTP with retry logic and exponential backoff.
 //!
@@ -19,8 +19,9 @@
 use std::time::Duration;
 
 use nexus_contracts::generated::{
-    Bundle, SyncPullRequest, SyncPullResponse, WorldForkRequest, WorldForkResponse,
-    WorldSnapshotRequest, WorldSnapshotResponse,
+    Bundle, ExploreBrowseRequest, ExploreFeedResponse, ExploreSearchRequest, SyncPullRequest,
+    SyncPullResponse, WorldForkRequest, WorldForkResponse, WorldSnapshotRequest,
+    WorldSnapshotResponse,
 };
 use reqwest::{Client, Method, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
@@ -458,6 +459,26 @@ impl SyncClient {
     ) -> SyncResult<WorldSnapshotResponse> {
         let url = format!("{}/v1/worlds/snapshot", self.base_url);
         tracing::info!(world_id = %req.world_id, "Calling platform world snapshot");
+        self.post_platform_json(&url, req).await
+    }
+
+    /// Read-only Explore browse (`POST /v1/explore/browse`).
+    pub async fn explore_browse(
+        &self,
+        req: &ExploreBrowseRequest,
+    ) -> SyncResult<ExploreFeedResponse> {
+        let url = format!("{}/v1/explore/browse", self.base_url);
+        tracing::debug!(?req.scope, "Explore browse");
+        self.post_platform_json(&url, req).await
+    }
+
+    /// Read-only Explore search (`POST /v1/explore/search`).
+    pub async fn explore_search(
+        &self,
+        req: &ExploreSearchRequest,
+    ) -> SyncResult<ExploreFeedResponse> {
+        let url = format!("{}/v1/explore/search", self.base_url);
+        tracing::debug!(query_len = req.query.len(), "Explore search");
         self.post_platform_json(&url, req).await
     }
 

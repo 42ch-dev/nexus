@@ -16,9 +16,9 @@ mod manuscript;
 use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
-    daemon::DaemonCommand, db::DbCommand, init::InitCommand, manuscript::ManuscriptCommand,
-    policy::PolicyCommand, research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
-    world::WorldCommand,
+    daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, init::InitCommand,
+    manuscript::ManuscriptCommand, policy::PolicyCommand, research::ResearchCommand,
+    session::SessionCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -79,6 +79,12 @@ enum Commands {
     World {
         #[command(subcommand)]
         command: WorldCommand,
+    },
+
+    /// Explore browse and search (read-only, platform via daemon)
+    Explore {
+        #[command(subcommand)]
+        command: ExploreCommand,
     },
 
     /// Manage Creator entities (register, pair, credentials)
@@ -142,6 +148,9 @@ async fn main() {
         Some(Commands::Db { command }) => commands::db::run(command, &config).await,
         Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
         Some(Commands::World { command }) => commands::world::run(command, &config).await,
+        Some(Commands::Explore { command }) => {
+            commands::explore::run(command, &config, &cli.output_format).await
+        }
         Some(Commands::Creator { command }) => commands::creator::run(command, &config).await,
         Some(Commands::Manuscript { command }) => commands::manuscript::run(command, &config).await,
         Some(Commands::Research { command }) => commands::research::run(command, &config).await,
