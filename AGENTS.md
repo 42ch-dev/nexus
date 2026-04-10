@@ -225,7 +225,7 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 7. **Wire contracts / schemas (when `schemas/` or publish version changes)** — nexus-specific, not `contracts_schema`:
   - Run `**pnpm run codegen`** and commit `**packages/nexus-contracts/src/generated/`** and `**crates/nexus-contracts/src/generated/`** (CI `verify-codegen` enforces this).
   - Bump `**schema_version`** and package versions (`packages/nexus-contracts`, `crates/nexus-contracts`) per release policy; note downstream impact (`nexus-platform` consumes `@42ch/nexus-contracts`).
-8. **Roadmap in `nexus-platform` (when a plan is `Done`)** — same discipline as on the private platform repo: in the **same change window** as updating `{PLAN_DIR}/status.json` for a completed plan, edit `**roadmap.md`** at the path configured as `**specs_root.roadmap**` in your local `**.agents/local-paths.json**` (see §External Design Specs and the example file). Reflect completion (e.g. align with `done_at` / merge reality), delivered scope, and any reprioritization so the roadmap matches `**plans[].status**` in this repo. The roadmap file is **not** in the nexus OSS tree; commit that edit in `**nexus-platform`**. Do not paste machine-specific absolute paths into tracked nexus OSS artifacts (QC notes, `status.json` prose, etc.); resolving `specs_root.roadmap` locally is sufficient for the edit.
+8. **Roadmap in `nexus-platform` (when a plan is `Done`)** — same discipline as on the private platform repo: in the **same change window** as updating `{PLAN_DIR}/status.json` for a completed plan, edit `**roadmap.md`** at the path configured as `**specs_root.roadmap`** in your local `**.agents/local-paths.json**` (see §External Design Specs and the example file). Reflect completion (e.g. align with `done_at` / merge reality), delivered scope, and any reprioritization so the roadmap matches `**plans[].status**` in this repo. The roadmap file is **not** in the nexus OSS tree; commit that edit in `**nexus-platform`**. Do not paste machine-specific absolute paths into tracked nexus OSS artifacts (QC notes, `status.json` prose, etc.); resolving `specs_root.roadmap` locally is sufficient for the edit.
 
 #### Verification commands
 
@@ -355,7 +355,7 @@ cat .agents/plans/archived/plans/2025-04-05-domain-models.json
 - Both packages must be published and version-locked with `schema_version`
 - CI validates schemas before generating code
 
-**Schema URI placeholder (production domain TBD):** Committed schema files use **`https://nexus42.invalid`** in `$id` / `$ref` paths (RFC 6761 reserved name; valid HTTPS URIs for validators and tooling). In prose and external-facing docs, write the same logical origin as **`{NEXUS42_BASE_URL}`** (HTTPS origin only, no trailing slash), e.g. `{NEXUS42_BASE_URL}/schemas/...`. Do **not** embed `{NEXUS42_BASE_URL}` inside JSON `$id` / `$ref` strings — those must remain real URIs. See `schemas/meta/README.md` and `docs/CODEGEN.md`.
+**Schema URI placeholder (production domain TBD):** Committed schema files use `**https://nexus42.invalid`** in `$id` / `$ref` paths (RFC 6761 reserved name; valid HTTPS URIs for validators and tooling). In prose and external-facing docs, write the same logical origin as `**{NEXUS42_BASE_URL}**` (HTTPS origin only, no trailing slash), e.g. `{NEXUS42_BASE_URL}/schemas/...`. Do **not** embed `{NEXUS42_BASE_URL}` inside JSON `$id` / `$ref` strings — those must remain real URIs. See `schemas/meta/README.md` and `docs/CODEGEN.md`.
 
 **⚠️ Mandatory: run codegen after any schema change**
 
