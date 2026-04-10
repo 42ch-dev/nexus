@@ -31,54 +31,56 @@
 
 Add fields to capture the full platform API shape:
 
-- [ ] Add `title` (string, required, min 1, max 256)
-- [ ] Add `summary` (string, optional, max 4096)
-- [ ] Add `chapter_ids` (array of string, required, min 1)
-- [ ] Add `idempotency_key` (string, required)
-- [ ] Add `sync_command_id` (string, optional)
-- [ ] Make `story_manifest_id` remain optional
-- [ ] Remove `manuscript_id` from required (platform derives or doesn't use)
+- [x] Add `title` (string, required, min 1, max 256)
+- [x] Add `summary` (string, optional, max 4096)
+- [x] Add `chapter_ids` (array of string, required, min 1)
+- [x] Add `idempotency_key` (string, required)
+- [x] Add `sync_command_id` (string, optional)
+- [x] Make `story_manifest_id` remain optional
+- [x] Remove `manuscript_id` from required (platform derives or doesn't use)
 
 ### Task 2: Create `publish-chapter-request.schema.json`
 
 New schema for `POST /v1/publish/chapters`:
 
-- [ ] Required: `schema_version`, `world_id`, `story_manifest_id`, `idempotency_key`
-- [ ] Optional: `title` (string), `summary` (string), `sync_command_id` (string)
+- [x] Required: `schema_version`, `world_id`, `story_manifest_id`, `idempotency_key`
+- [x] Optional: `title` (string), `summary` (string), `sync_command_id` (string)
 
 ### Task 3: Update `publish-history-request.schema.json`
 
-- [ ] Make `manuscript_id` optional (platform doesn't require it)
-- [ ] Add `artifact_type` (enum: "chapter", "story", optional) — platform's filter
+- [x] Make `manuscript_id` optional (platform doesn't require it)
+- [x] Add `artifact_type` (enum: "chapter", "story", optional) — platform's filter
 
 ### Task 4: Update `world-fork-request.schema.json`
 
 The platform route derives parent_world_id from URL, created_by_creator_id from auth, and child_world_id server-side. Only `forked_from_event_id` (and optionally `fork_title`) comes from the body.
 
-- [ ] Make `parent_world_id` optional (can come from URL path param)
-- [ ] Make `child_world_id` optional (server-generated)
-- [ ] Make `created_by_creator_id` optional (injected from auth)
-- [ ] Add `fork_title` (string, optional)
-- [ ] Keep `forked_from_event_id` optional
+- [x] Make `parent_world_id` optional (can come from URL path param)
+- [x] Make `child_world_id` optional (server-generated)
+- [x] Make `created_by_creator_id` optional (injected from auth)
+- [x] Add `fork_title` (string, optional)
+- [x] Keep `forked_from_event_id` optional
 
 ### Task 5: Update `world-snapshot-request.schema.json`
 
-- [ ] Add `branch_id` (string, optional)
-- [ ] Add `key_block_limit` (integer, optional, min 1, max 500)
-- [ ] Add `timeline_event_limit` (integer, optional, min 1, max 200)
-- [ ] Keep `at_event_id` optional
+- [x] Add `branch_id` (string, optional)
+- [x] Add `key_block_limit` (integer, optional, min 1, max 500)
+- [x] Add `timeline_event_limit` (integer, optional, min 1, max 200)
+- [x] Keep `at_event_id` optional
 
 ### Task 6: Verify Explore AI schemas
 
-- [ ] Check if `explore-ai-answer-request` and `explore-ai-summary-request` match platform validators
-- [ ] Update if gaps found (expected to be minor — Plan 19 was built recently)
+- [x] Check if `explore-ai-answer-request` and `explore-ai-summary-request` match platform validators
+- [x] Update if gaps found (expected to be minor — Plan 19 was built recently)
+
+**Note (2026-04-10)**: Reviewed both schemas against this plan’s scope; no additional fields required for the platform HTTP alignment slice. No schema edits.
 
 ### Task 7: Regenerate contracts
 
-- [ ] Run `pnpm run codegen` in nexus
-- [ ] Build `nexus/packages/nexus-contracts`
-- [ ] Bump contracts version (patch or minor depending on breaking changes)
-- [ ] Verify generated types include new fields
+- [x] Run `pnpm run codegen` in nexus
+- [x] Build `nexus/packages/nexus-contracts`
+- [x] Bump contracts version (patch or minor depending on breaking changes)
+- [x] Verify generated types include new fields
 
 ---
 

@@ -30,8 +30,13 @@ async fn publish_story_parses_success() {
     let req = PublishStoryRequest {
         schema_version: 1,
         world_id: "wld_x".into(),
-        manuscript_id: "mss_y".into(),
+        manuscript_id: Some("mss_y".into()),
         story_manifest_id: Some("stm_z".into()),
+        title: "T".into(),
+        summary: None,
+        chapter_ids: vec!["chap_1".into()],
+        idempotency_key: "idem_1".into(),
+        sync_command_id: None,
     };
 
     let r = client.publish_story(&req).await.expect("publish_story");
@@ -59,8 +64,13 @@ async fn publish_story_maps_422_to_platform_error() {
     let req = PublishStoryRequest {
         schema_version: 1,
         world_id: "wld_x".into(),
-        manuscript_id: "mss_y".into(),
+        manuscript_id: Some("mss_y".into()),
         story_manifest_id: None,
+        title: "T".into(),
+        summary: None,
+        chapter_ids: vec!["c1".into()],
+        idempotency_key: "k".into(),
+        sync_command_id: None,
     };
 
     let err = client.publish_story(&req).await.expect_err("expect 422");
@@ -94,8 +104,9 @@ async fn publish_history_parses_success() {
 
     let req = PublishHistoryRequest {
         schema_version: 1,
-        world_id: "wld_x".into(),
-        manuscript_id: "mss_y".into(),
+        world_id: Some("wld_x".into()),
+        manuscript_id: Some("mss_y".into()),
+        artifact_type: None,
         cursor: None,
         limit: Some(10),
     };

@@ -464,8 +464,8 @@ impl SyncClient {
     pub async fn fork_world(&self, req: &WorldForkRequest) -> SyncResult<WorldForkResponse> {
         let url = format!("{}/v1/worlds/fork", self.base_url);
         tracing::info!(
-            parent = %req.parent_world_id,
-            child = %req.child_world_id,
+            parent = ?req.parent_world_id.as_deref(),
+            child = ?req.child_world_id.as_deref(),
             "Calling platform world fork"
         );
         self.post_platform_json(&url, req).await
@@ -509,7 +509,7 @@ impl SyncClient {
         let url = format!("{}/v1/publish/story", self.base_url);
         tracing::info!(
             world_id = %req.world_id,
-            manuscript_id = %req.manuscript_id,
+            manuscript_id = ?req.manuscript_id.as_deref(),
             "Calling platform publish story"
         );
         self.post_platform_json(&url, req).await
@@ -522,8 +522,8 @@ impl SyncClient {
     ) -> SyncResult<PublishHistoryResponse> {
         let url = format!("{}/v1/publish/history", self.base_url);
         tracing::debug!(
-            world_id = %req.world_id,
-            manuscript_id = %req.manuscript_id,
+            world_id = ?req.world_id.as_deref(),
+            manuscript_id = ?req.manuscript_id.as_deref(),
             "Calling platform publish history"
         );
         self.post_platform_json(&url, req).await

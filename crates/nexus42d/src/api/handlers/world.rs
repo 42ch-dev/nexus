@@ -19,6 +19,10 @@ use nexus_sync::sync_client::SyncClient;
 use serde::Serialize;
 use tracing::info;
 
+fn nonempty(s: &str) -> bool {
+    !s.is_empty()
+}
+
 fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
@@ -53,24 +57,39 @@ pub async fn fork(
     State(state): State<WorkspaceState>,
     Json(mut req): Json<WorldForkRequest>,
 ) -> Result<Json<WorldForkLocalResponse>, NexusApiError> {
-    info!(
-        parent = %req.parent_world_id,
-        child = %req.child_world_id,
-        "Handling world fork request"
-    );
+    let parent = req.parent_world_id.as_deref().unwrap_or("");
+    let child = req.child_world_id.as_deref().unwrap_or("");
+    info!(parent = %parent, child = %child, "Handling world fork request");
 
-    if req.parent_world_id.is_empty()
-        || req.child_world_id.is_empty()
-        || req.forked_from_event_id.is_empty()
-        || req.created_by_creator_id.is_empty()
-    {
+    let parent_nonempty = req
+        .parent_world_id
+        .as_ref()
+        .map(|s| nonempty(s))
+        .unwrap_or(false);
+    let child_nonempty = req
+        .child_world_id
+        .as_ref()
+        .map(|s| nonempty(s))
+        .unwrap_or(false);
+    let fork_evt_nonempty = req
+        .forked_from_event_id
+        .as_ref()
+        .map(|s| nonempty(s))
+        .unwrap_or(false);
+    let creator_nonempty = req
+        .created_by_creator_id
+        .as_ref()
+        .map(|s| nonempty(s))
+        .unwrap_or(false);
+
+    if !parent_nonempty || !child_nonempty || !fork_evt_nonempty || !creator_nonempty {
         return Ok(Json(WorldForkLocalResponse {
             success: false,
             fork_branch: None,
             error: Some(
-                "parent_world_id, child_world_id, forked_from_event_id, and created_by_creator_id must be non-empty"
+                "parent_world_id, child_world_id, forked_from_event_id, and created_by_creator_id must be set and non-empty for local proxy"
                     .to_string(),
-        ),
+            ),
         }));
     }
 
@@ -78,16 +97,18 @@ pub async fn fork(
         req.schema_version = 1;
     }
 
-    if req.parent_world_id == req.child_world_id {
-        return Ok(Json(WorldForkLocalResponse {
-            success: false,
-            fork_branch: None,
-            error: Some("child_world_id must differ from parent_world_id".to_string()),
-        }));
+    if let (Some(ref p), Some(ref c)) = (&req.parent_world_id, &req.child_world_id) {
+        if nonempty(p) && nonempty(c) && p == c {
+            return Ok(Json(WorldForkLocalResponse {
+                success: false,
+                fork_branch: None,
+                error: Some("child_world_id must differ from parent_world_id".to_string()),
+            }));
+        }
     }
 
     if let Some((_, bound_world, _)) = optional_sync_push_binding(&state).await? {
-        if req.parent_world_id != bound_world {
+        if req.parent_world_id.as_deref() != Some(bound_world.as_str()) {
             return Ok(Json(WorldForkLocalResponse {
                 success: false,
                 fork_branch: None,
@@ -163,6 +184,19 @@ pub async fn snapshot(
                 at_event_id: None,
                 captured_at: None,
                 error: Some("at_event_id, when set, must not be empty".to_string()),
+            }));
+        }
+    }
+
+    if let Some(ref bid) = req.branch_id {
+        if bid.is_empty() {
+            return Ok(Json(WorldSnapshotLocalResponse {
+                success: false,
+                world_id: req.world_id.clone(),
+                world_revision: 0,
+                at_event_id: None,
+                captured_at: None,
+                error: Some("branch_id, when set, must not be empty".to_string()),
             }));
         }
     }

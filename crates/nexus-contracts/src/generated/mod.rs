@@ -48,6 +48,7 @@ pub mod notifications_list_response;
 pub mod notifications_mark_read_request;
 pub mod notifications_mark_read_response;
 pub mod official_creator_quota_response;
+pub mod publish_chapter_request;
 pub mod publish_history_entry;
 pub mod publish_history_request;
 pub mod publish_history_response;
@@ -108,6 +109,7 @@ pub use notifications_list_response::*;
 pub use notifications_mark_read_request::*;
 pub use notifications_mark_read_response::*;
 pub use official_creator_quota_response::*;
+pub use publish_chapter_request::*;
 pub use publish_history_entry::*;
 pub use publish_history_request::*;
 pub use publish_history_response::*;
@@ -167,6 +169,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("NotificationsMarkReadRequest", 1),
     ("NotificationsMarkReadResponse", 1),
     ("OfficialCreatorQuotaResponse", 1),
+    ("PublishChapterRequest", 1),
     ("PublishHistoryEntry", 1),
     ("PublishHistoryRequest", 1),
     ("PublishHistoryResponse", 1),

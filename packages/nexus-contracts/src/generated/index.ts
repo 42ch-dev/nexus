@@ -53,6 +53,7 @@ export * from './NotificationsListResponse';
 export * from './NotificationsMarkReadRequest';
 export * from './NotificationsMarkReadResponse';
 export * from './OfficialCreatorQuotaResponse';
+export * from './PublishChapterRequest';
 export * from './PublishHistoryEntry';
 export * from './PublishHistoryRequest';
 export * from './PublishHistoryResponse';
@@ -112,6 +113,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   NotificationsMarkReadRequest: 1,
   NotificationsMarkReadResponse: 1,
   OfficialCreatorQuotaResponse: 1,
+  PublishChapterRequest: 1,
   PublishHistoryEntry: 1,
   PublishHistoryRequest: 1,
   PublishHistoryResponse: 1,
