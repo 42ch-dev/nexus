@@ -27,8 +27,8 @@ fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
     }
 }
 
-fn manuscript_id_str(v: &serde_json::Value) -> &str {
-    v.as_str().unwrap_or("")
+fn manuscript_id_str(v: &str) -> &str {
+    v
 }
 
 /// Daemon response after `POST /v1/local/publish/story`.

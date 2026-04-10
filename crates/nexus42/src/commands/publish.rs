@@ -103,8 +103,8 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
             let req = PublishStoryRequest {
                 schema_version: 1,
                 world_id: world_id.clone(),
-                manuscript_id: serde_json::Value::String(manuscript_id.clone()),
-                story_manifest_id: story_manifest_id.map(serde_json::Value::String),
+                manuscript_id: manuscript_id.clone(),
+                story_manifest_id: story_manifest_id.clone(),
             };
 
             if dry_run {
@@ -166,7 +166,7 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
             let req = PublishHistoryRequest {
                 schema_version: 1,
                 world_id: world_id.clone(),
-                manuscript_id: serde_json::Value::String(manuscript_id.clone()),
+                manuscript_id: manuscript_id.clone(),
                 cursor,
                 limit,
             };

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-10",
+  "updated_at": "2026-04-11",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -227,7 +227,7 @@
         "phase": "Batch E next (V1.2 track); same plan id — not Done after D",
         "priority": "low",
         "description": "Long-term tech debt across V1.x (including V1.2). A–D batches complete; E and knowledge-documented deferrals remain in-scope under this plan until explicitly retired.",
-        "residual_target": "Batch E TD-11/TD-13; cross-plan open residuals: PUBLISH-CODEGEN-01, FORK-SNAP-01",
+        "residual_target": "Batch E TD-11/TD-13 (V1.2 track)",
         "effort": "L — ongoing lowest-priority backfill",
         "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
         "batch_status": {
@@ -241,7 +241,7 @@
           "tests": "last verified — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
           "clippy": "passed",
           "fmt": "passed",
-          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure)"
+          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure); reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md (PUBLISH-CODEGEN-01 / FORK-SNAP-01 closure)"
         }
       }
     },
@@ -270,8 +270,7 @@
       "status": "Done",
       "file": ".agents/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
       "metadata": {
-        "archived_record": "archived/plans/2026-04-10-cli-fork-world-snapshot-parity.json",
-        "residual_summary": "1 open nit (FORK-SNAP-01)"
+        "archived_record": "archived/plans/2026-04-10-cli-fork-world-snapshot-parity.json"
       },
       "title": "CLI Fork & World Snapshot Parity",
       "done_at": "2026-04-10"
@@ -301,8 +300,7 @@
       "status": "Done",
       "file": ".agents/plans/2026-04-10-cli-publish-workflow-parity.md",
       "metadata": {
-        "archived_record": "archived/plans/2026-04-10-cli-publish-workflow-parity.json",
-        "residual_summary": "1 open medium (PUBLISH-CODEGEN-01)"
+        "archived_record": "archived/plans/2026-04-10-cli-publish-workflow-parity.json"
       },
       "title": "CLI Publish Workflow Parity",
       "done_at": "2026-04-10"
@@ -316,6 +314,26 @@
       },
       "title": "ExploreCreatorCard Schema Field Gap Fix",
       "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-11-codegen-ref-resolution",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-11-codegen-ref-resolution.md",
+      "title": "Codegen $ref resolution (common IDs + whole-schema refs)",
+      "done_at": "2026-04-11",
+      "metadata": {
+        "working_branch": "feature/codegen-ref-resolution",
+        "merge_target": "main",
+        "gates": {
+          "validate_schemas": "passed",
+          "codegen": "pnpm run codegen (CI verify-codegen parity)",
+          "clippy": "passed",
+          "rustfmt": "passed (nightly)",
+          "typecheck": "passed",
+          "tests": "cargo test -p nexus-contracts -p nexus-sync -p nexus42d -p nexus42 --lib; cargo test -p nexus-sync --test publish_client --test world_fork_snapshot_client",
+          "qc_self": "reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md"
+        }
+      }
     }
   ],
   "metadata": {
@@ -324,54 +342,24 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-11T00:00:00Z",
-      "total_open": 2,
+      "updated_at": "2026-04-11T12:00:00Z",
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
+        "medium": 0,
         "low": 0,
-        "nit": 1
+        "nit": 0
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 2,
+        "V1.1": 0,
         "V1.2": 0
       },
-      "by_plan": {
-        "2026-04-10-cli-fork-world-snapshot-parity": 1,
-        "2026-04-10-cli-publish-workflow-parity": 1
-      },
-      "severity_note": "v1-tech-debt-cleanup InProgress (long-lived): C+D milestone done 2026-04-10; Batch E remains. Open elsewhere: PUBLISH-CODEGEN-01 (medium), FORK-SNAP-01 (nit). SYNC-AUTH-TOKEN-01 resolved 2026-04-11.",
+      "by_plan": {},
+      "severity_note": "v1-tech-debt-cleanup InProgress (long-lived): C+D milestone done 2026-04-10; Batch E (V1.2) remains. Cross-plan codegen residuals PUBLISH-CODEGEN-01 and FORK-SNAP-01 resolved 2026-04-11 (plan 2026-04-11-codegen-ref-resolution). SYNC-AUTH-TOKEN-01 resolved 2026-04-11.",
       "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings."
     },
-    "residual_findings": {
-      "2026-04-10-cli-fork-world-snapshot-parity": [
-        {
-          "id": "FORK-SNAP-01",
-          "title": "WorldForkResponse.fork_branch generated as serde_json::Value; prefer nested ForkBranch type when codegen supports ref objects",
-          "severity": "nit",
-          "source": "qc_self 2026-04-10",
-          "scope": "crates/nexus-contracts/src/generated/world_fork_response.rs, tooling/codegen",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+ / codegen improvement",
-          "tracking": null
-        }
-      ],
-      "2026-04-10-cli-publish-workflow-parity": [
-        {
-          "id": "PUBLISH-CODEGEN-01",
-          "title": "Rust codegen emits serde_json::Value for $ref string-pattern fields (TS correctly emits string); cross-language type safety gap affecting publish/fork wire types",
-          "severity": "medium",
-          "source": "qc_self 2026-04-10, QC3-W1, qc_triple 2026-04-10",
-          "scope": "crates/nexus-contracts/src/generated/publish_*.rs, world_fork_response.rs, tooling/codegen",
-          "decision": "defer",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+ — codegen improvement to follow $ref chains for string-pattern types",
-          "tracking": null
-        }
-      ]
-    }
+    "residual_findings": {}
   }
 }

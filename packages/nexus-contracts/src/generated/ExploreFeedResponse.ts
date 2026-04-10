@@ -1,3 +1,4 @@
+import type { ExploreHit } from './ExploreHit';
 import type { SchemaVersion } from './CommonTypes';
 /**
  * Nexus ExploreFeedResponse
@@ -10,7 +11,7 @@ import type { SchemaVersion } from './CommonTypes';
 /** Paginated Explore results for browse and search responses (POST /v1/explore/browse | /v1/explore/search). */
 export interface ExploreFeedResponse {
   schema_version: number;
-  entries: unknown[];
+  entries: ExploreHit[];
   next_cursor?: string;
   has_more: boolean;
 }

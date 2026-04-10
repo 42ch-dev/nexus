@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-10-cli-fork-world-snapshot-parity",
+  "archived_at": "2026-04-11",
+  "entries": [
+    {
+      "id": "FORK-SNAP-01",
+      "title": "WorldForkResponse.fork_branch generated as serde_json::Value; prefer nested ForkBranch type when codegen supports ref objects",
+      "severity": "nit",
+      "source": "qc_self 2026-04-10",
+      "scope": "crates/nexus-contracts/src/generated/world_fork_response.rs, tooling/codegen",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+ / codegen improvement",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-11",
+      "closure_note": "Extended resolveRef for whole-schema and relative .schema.json URIs; Rust/TS emit ForkBranch; downstream CLI/daemon/tests updated.",
+      "closure_evidence": "plan 2026-04-11-codegen-ref-resolution; pnpm run codegen; cargo clippy --all"
+    }
+  ]
+}

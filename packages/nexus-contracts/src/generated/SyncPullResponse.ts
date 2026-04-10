@@ -1,3 +1,4 @@
+import type { Bundle } from './Bundle';
 import type { SchemaVersion } from './CommonTypes';
 /**
  * Nexus SyncPullResponse
@@ -13,5 +14,5 @@ export interface SyncPullResponse {
   world_revision: number;
   confirmed_delta_sequence: number;
   is_up_to_date?: boolean;
-  bundles: unknown[];
+  bundles: Bundle[];
 }

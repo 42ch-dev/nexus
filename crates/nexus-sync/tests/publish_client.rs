@@ -30,8 +30,8 @@ async fn publish_story_parses_success() {
     let req = PublishStoryRequest {
         schema_version: 1,
         world_id: "wld_x".into(),
-        manuscript_id: serde_json::Value::String("mss_y".into()),
-        story_manifest_id: Some(serde_json::Value::String("stm_z".into())),
+        manuscript_id: "mss_y".into(),
+        story_manifest_id: Some("stm_z".into()),
     };
 
     let r = client.publish_story(&req).await.expect("publish_story");
@@ -59,7 +59,7 @@ async fn publish_story_maps_422_to_platform_error() {
     let req = PublishStoryRequest {
         schema_version: 1,
         world_id: "wld_x".into(),
-        manuscript_id: serde_json::Value::String("mss_y".into()),
+        manuscript_id: "mss_y".into(),
         story_manifest_id: None,
     };
 
@@ -95,7 +95,7 @@ async fn publish_history_parses_success() {
     let req = PublishHistoryRequest {
         schema_version: 1,
         world_id: "wld_x".into(),
-        manuscript_id: serde_json::Value::String("mss_y".into()),
+        manuscript_id: "mss_y".into(),
         cursor: None,
         limit: Some(10),
     };
@@ -103,6 +103,5 @@ async fn publish_history_parses_success() {
     let r = client.publish_history(&req).await.expect("history");
     assert_eq!(r.entries.len(), 1);
     assert!(!r.has_more);
-    let e0 = r.entries[0].as_object().expect("history entry object");
-    assert_eq!(e0.get("outcome").and_then(|v| v.as_str()), Some("rejected"));
+    assert_eq!(r.entries[0].outcome.as_str(), "rejected");
 }

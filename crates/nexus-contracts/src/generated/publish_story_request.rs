@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct PublishStoryRequest {
     pub schema_version: u32,
     pub world_id: String,
-    pub manuscript_id: serde_json::Value,
+    pub manuscript_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub story_manifest_id: Option<serde_json::Value>,
+    pub story_manifest_id: Option<String>,
 }

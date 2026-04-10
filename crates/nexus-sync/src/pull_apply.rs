@@ -1,8 +1,8 @@
 //! Apply a platform [`SyncPullResponse`] to the local [`Outbox`].
 
-use nexus_contracts::generated::{Bundle, SyncPullResponse};
+use nexus_contracts::generated::SyncPullResponse;
 
-use crate::errors::{SyncError, SyncResult};
+use crate::errors::SyncResult;
 use crate::outbox::Outbox;
 
 /// Summary of applying a pull response to the outbox.
@@ -22,11 +22,8 @@ pub async fn apply_pull_response_to_outbox(
     let mut staged_entry_ids = Vec::new();
     let mut skipped_duplicate_bundles = 0usize;
 
-    for raw in &response.bundles {
-        let bundle: Bundle = serde_json::from_value(raw.clone()).map_err(|e| {
-            SyncError::BundleValidation(format!("pull bundle JSON does not match Bundle: {e}"))
-        })?;
-        match outbox.stage_if_absent(&bundle).await? {
+    for bundle in &response.bundles {
+        match outbox.stage_if_absent(bundle).await? {
             Some(id) => staged_entry_ids.push(id),
             None => skipped_duplicate_bundles += 1,
         }

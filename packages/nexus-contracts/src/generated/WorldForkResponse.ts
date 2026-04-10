@@ -1,3 +1,4 @@
+import type { ForkBranch } from './ForkBranch';
 import type { SchemaVersion } from './CommonTypes';
 /**
  * Nexus WorldForkResponse
@@ -10,5 +11,5 @@ import type { SchemaVersion } from './CommonTypes';
 /** Response body for POST /v1/worlds/fork — created ForkBranch record. */
 export interface WorldForkResponse {
   schema_version: number;
-  fork_branch: unknown;
+  fork_branch: ForkBranch;
 }
