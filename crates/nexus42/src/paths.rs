@@ -4,6 +4,11 @@
 //! - `~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/` — operational dir
 //! - `.../state.db` — workspace-local SQLite
 //! - `~/.nexus42/shared/global_state.db` — shared global SQLite
+//!
+//! The CLI binary links this module directly (`main.rs`); some `pub` helpers are not yet
+//! called from binary code until init/daemon wiring (later plan tasks) lands.
+
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -14,13 +19,17 @@ pub fn nexus_root_from_home(home: &Path) -> PathBuf {
     home.join(NEXUS_DIR)
 }
 
-/// Operational directory: `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`.
-pub fn operational_workspace_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
+/// `$HOME/.nexus42/creators/<creator_id>/workspaces/` (parent of each operational workspace dir).
+pub fn creator_workspaces_root(home: &Path, creator_id: &str) -> PathBuf {
     nexus_root_from_home(home)
         .join("creators")
         .join(creator_id)
         .join("workspaces")
-        .join(workspace_slug)
+}
+
+/// Operational directory: `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`.
+pub fn operational_workspace_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
+    creator_workspaces_root(home, creator_id).join(workspace_slug)
 }
 
 /// Workspace-local SQLite path: `.../workspaces/<slug>/state.db`.
@@ -64,6 +73,15 @@ mod tests {
         assert_eq!(
             shared_global_db_path(&home),
             PathBuf::from("/h/.nexus42/shared/global_state.db")
+        );
+    }
+
+    #[test]
+    fn creator_workspaces_root_layout() {
+        let home = PathBuf::from("/x");
+        assert_eq!(
+            creator_workspaces_root(&home, "ctr_1"),
+            PathBuf::from("/x/.nexus42/creators/ctr_1/workspaces")
         );
     }
 }
