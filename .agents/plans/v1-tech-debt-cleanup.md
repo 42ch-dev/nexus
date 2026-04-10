@@ -19,7 +19,7 @@
 | ----------- | ------------------------ | ----------------------------------------------------------------------------------------- | ------------------ | ---------------------------------- |
 | **Batch A** | ✅ Completed (2026-04-09) | 3 critical (CTX-R4, SYNC-R10, SYNC-R13)                                                   | S (~2 sessions)    | V1.0-phase2 blocker                |
 | **Batch B** | ✅ Completed (2026-04-08) | 4 low (QC-W2, QC-W4, QC-W3, QC-W7)                                                        | S (~2 sessions)    | V1.1 milestone                     |
-| **Batch C** | 🔶 In progress           | QC-W5–W11 + QC-W8 doc done 2026-04-10; **DM-R3** still open (plan `2025-04-05-domain-models`) | M (~4 sessions)    | V1.1+ milestone                    |
+| **Batch C** | ✅ Completed (2026-04-10) | QC-W1–W11 + **DM-R3** (pairing / fork_branch edge tests)                                    | M (~4 sessions)    | V1.1+ milestone                    |
 | **Batch D** | 🔶 Pending               | 4 medium (TD-7, TD-8, TD-9, TD-10)                                                        | L (~5–9 sessions)  | V1.1+ (in scope after C)           |
 | **Batch E** | ⏸️ Deferred              | 2 low (TD-11, TD-13)                                                                      | L (~6–16 sessions) | **V1.2 only** — not this milestone |
 
@@ -343,7 +343,7 @@
 
 ---
 
-#### Task 12: DM-R3 — Edge-case test coverage 🔶
+#### Task 12: DM-R3 — Edge-case test coverage ✅
 
 **Priority**: Low
 **Source**: QC-#2, status.json residual_findings["2025-04-05-domain-models"]
@@ -357,6 +357,8 @@
 - Add tests for fork cycle detection
 - Verify existing tests cover key scenarios
 - Document test coverage
+
+**Evidence**: Unit tests: `authorizes_false_after_revoke_even_when_ids_match`, `two_distinct_active_pairings_same_creator_user_both_authorize`, `revoke_rejects_non_active_status`; `fork_from_allows_child_world_equal_to_parent_world_id`, `request_verification_fails_when_archived`, `request_verification_second_call_invalid_transition`, `verify_after_reject_is_invalid_transition`, `validate_write_scope_fails_when_archived`. Residual archived to `archived/residuals/2025-04-05-domain-models.json`.
 
 **Target**: V1.1
 

@@ -56,6 +56,19 @@
       "closed_at": "2026-04-07T18:16:41Z",
       "closure_note": "Fixed in feature/v1.1-tech-debt-mitigation: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. All tests pass.",
       "archived_at": "2026-04-09"
+    },
+    {
+      "id": "DM-R3",
+      "title": "Edge-case test coverage for Pairing and ForkBranch lifecycle",
+      "severity": "low",
+      "source": "QC-#2",
+      "scope": "crates/nexus-domain/src/pairing.rs, crates/nexus-domain/src/fork_branch.rs",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — add boundary/edge-case tests for concurrent pairing conflicts, fork cycle detection",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-10",
+      "closure_note": "Added unit tests: pairing revoke/authorize edge cases, duplicate active pairings (domain boundary), non-active revoke; fork self-parent world, archived verification/write-scope, duplicate request_verification, verify after reject."
     }
   ]
 }

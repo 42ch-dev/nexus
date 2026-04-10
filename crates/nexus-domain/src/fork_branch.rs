@@ -337,4 +337,81 @@ mod tests {
         let deserialized: ForkBranch = serde_json::from_str(&json).unwrap();
         assert_eq!(fb, deserialized);
     }
+
+    /// Current aggregate does not forbid world_id == parent_world_id (self-loop); callers must
+    /// enforce lineage invariants if needed (DM-R3 — cycle / lineage edge case).
+    #[test]
+    fn fork_from_allows_child_world_equal_to_parent_world_id() {
+        let fb = ForkBranch::fork_from("wld_same", "wld_same", "fbk_root", "evt_line", "ctr_1");
+        assert_eq!(fb.world_id, fb.parent_world_id);
+        assert!(fb.validate_write_scope("wld_same").is_ok());
+    }
+
+    #[test]
+    fn request_verification_fails_when_archived() {
+        let mut fb = ForkBranch::fork_from(
+            "wld_child",
+            "wld_parent",
+            "fbk_root",
+            "evt_123",
+            "ctr_creator1",
+        );
+        fb.archive().unwrap();
+        assert!(matches!(
+            fb.request_verification(),
+            Err(DomainError::InvalidState { expected, actual })
+                if expected == "active" && actual == "archived"
+        ));
+    }
+
+    #[test]
+    fn request_verification_second_call_invalid_transition() {
+        let mut fb = ForkBranch::fork_from(
+            "wld_child",
+            "wld_parent",
+            "fbk_root",
+            "evt_123",
+            "ctr_creator1",
+        );
+        fb.request_verification().unwrap();
+        assert!(matches!(
+            fb.request_verification(),
+            Err(DomainError::InvalidTransition { from, to })
+                if from == "requested" && to == "requested"
+        ));
+    }
+
+    #[test]
+    fn verify_after_reject_is_invalid_transition() {
+        let mut fb = ForkBranch::fork_from(
+            "wld_child",
+            "wld_parent",
+            "fbk_root",
+            "evt_123",
+            "ctr_creator1",
+        );
+        fb.request_verification().unwrap();
+        fb.reject("policy").unwrap();
+        assert!(matches!(
+            fb.verify(),
+            Err(DomainError::InvalidTransition { from, to })
+                if from == "rejected" && to == "verified"
+        ));
+    }
+
+    #[test]
+    fn validate_write_scope_fails_when_archived() {
+        let mut fb = ForkBranch::fork_from(
+            "wld_child",
+            "wld_parent",
+            "fbk_root",
+            "evt_123",
+            "ctr_creator1",
+        );
+        fb.archive().unwrap();
+        assert!(matches!(
+            fb.validate_write_scope("wld_child"),
+            Err(DomainError::InvalidForkWriteScope(msg)) if msg.contains("not active")
+        ));
+    }
 }
