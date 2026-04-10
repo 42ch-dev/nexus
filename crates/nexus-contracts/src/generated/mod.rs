@@ -46,6 +46,11 @@ pub mod notifications_list_request;
 pub mod notifications_list_response;
 pub mod notifications_mark_read_request;
 pub mod notifications_mark_read_response;
+pub mod publish_history_entry;
+pub mod publish_history_request;
+pub mod publish_history_response;
+pub mod publish_story_request;
+pub mod publish_story_response;
 pub mod social_graph_feed_request;
 pub mod social_graph_feed_response;
 pub mod social_graph_relationship_request;
@@ -99,6 +104,11 @@ pub use notifications_list_request::*;
 pub use notifications_list_response::*;
 pub use notifications_mark_read_request::*;
 pub use notifications_mark_read_response::*;
+pub use publish_history_entry::*;
+pub use publish_history_request::*;
+pub use publish_history_response::*;
+pub use publish_story_request::*;
+pub use publish_story_response::*;
 pub use social_graph_feed_request::*;
 pub use social_graph_feed_response::*;
 pub use social_graph_relationship_request::*;
@@ -151,6 +161,11 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("NotificationsListResponse", 1),
     ("NotificationsMarkReadRequest", 1),
     ("NotificationsMarkReadResponse", 1),
+    ("PublishHistoryEntry", 1),
+    ("PublishHistoryRequest", 1),
+    ("PublishHistoryResponse", 1),
+    ("PublishStoryRequest", 1),
+    ("PublishStoryResponse", 1),
     ("SocialGraphFeedRequest", 1),
     ("SocialGraphFeedResponse", 1),
     ("SocialGraphRelationshipRequest", 1),

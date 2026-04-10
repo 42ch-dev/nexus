@@ -14,6 +14,8 @@
 //! - GET  /v1/local/manuscript       — Manuscript status (auth required)
 //! - GET  /v1/local/references       — List reference sources (auth required)
 //! - POST /v1/local/context/assemble — Context assembly (auth required)
+//! - POST /v1/local/publish/story — Publish manuscript story (platform proxy)
+//! - POST /v1/local/publish/history — Publish history (platform proxy)
 //! - GET  /v1/local/sync/status      — Sync status
 //! - POST /v1/local/acp/tool/execute — ACP tool execution (daemon-mediated)
 //! - GET  /v1/local/acp/sessions     — List ACP sessions
@@ -116,6 +118,13 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route("/v1/local/explore/browse", post(handlers::explore::browse))
         .route("/v1/local/explore/search", post(handlers::explore::search));
 
+    let publish_routes = Router::new()
+        .route("/v1/local/publish/story", post(handlers::publish::story))
+        .route(
+            "/v1/local/publish/history",
+            post(handlers::publish::history),
+        );
+
     // ACP tool execution routes (unguarded — workspace validation in handler)
     let acp_routes = Router::new().route(
         "/v1/local/acp/tool/execute",
@@ -145,6 +154,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(sync_routes)
         .merge(world_routes)
         .merge(explore_routes)
+        .merge(publish_routes)
         .merge(acp_routes)
         .merge(session_routes)
         .layer(CorsLayer::permissive())

@@ -240,6 +240,17 @@ impl StoryManifestStatus {
     }
 }
 
+impl PublishStoryOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Submitted => "submitted",
+            Self::Published => "published",
+            Self::Rejected => "rejected",
+            Self::InvalidState => "invalid_state",
+        }
+    }
+}
+
 impl ManuscriptStorage {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -631,6 +642,20 @@ impl FromStr for StoryManifestStatus {
             "published" => Ok(Self::Published),
             "archived" => Ok(Self::Archived),
             _ => Err(format!("Invalid StoryManifestStatus: {}", s)),
+        }
+    }
+}
+
+impl FromStr for PublishStoryOutcome {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "submitted" => Ok(Self::Submitted),
+            "published" => Ok(Self::Published),
+            "rejected" => Ok(Self::Rejected),
+            "invalid_state" => Ok(Self::InvalidState),
+            _ => Err(format!("Invalid PublishStoryOutcome: {}", s)),
         }
     }
 }

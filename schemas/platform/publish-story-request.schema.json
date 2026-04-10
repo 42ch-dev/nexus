@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/publish-story-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PublishStoryRequest",
+  "description": "Request body for POST /v1/publish/story — explicit story/manuscript publish (platform Publish API; plan 14 slice).",
+  "type": "object",
+  "required": ["schema_version", "world_id", "manuscript_id"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "World that owns the manuscript"
+    },
+    "manuscript_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ManuscriptId",
+      "description": "Manuscript aggregate to publish"
+    },
+    "story_manifest_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/StoryManifestId",
+      "description": "Optional specific manifest; when omitted the platform may use the active manifest"
+    }
+  },
+  "additionalProperties": false
+}

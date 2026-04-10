@@ -27,6 +27,8 @@ pub mod manuscript;
 #[deny(clippy::unwrap_used)]
 pub mod policy;
 #[deny(clippy::unwrap_used)]
+pub mod publish;
+#[deny(clippy::unwrap_used)]
 pub mod research;
 #[deny(clippy::unwrap_used)]
 pub mod session;
