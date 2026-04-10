@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-08-v1.1-tech-debt-mitigation",
+  "batch": "Batch C (partial)",
+  "archived_at": "2026-04-10T12:00:00Z",
+  "entries": [
+    {
+      "id": "QC-W1",
+      "title": "Migration documentation placement",
+      "severity": "low",
+      "source": "QC#1",
+      "scope": "outbox.rs:28-44",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "Before V1.1 release",
+      "closure_evidence": "Commit 6f88cb6: Added docs/migrations/outbox-schema-v2.md; outbox.rs points to repo-root guide",
+      "closed_at": "2026-04-10"
+    },
+    {
+      "id": "QC-W9",
+      "title": "CI shell script readability — extract to standalone script",
+      "severity": "low",
+      "source": "QC#1 (Wave 3 Batch B)",
+      "scope": ".github/workflows/ci.yml:119-177",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+ — Extract to tooling/check-schema-drift.sh",
+      "closure_evidence": "Commit 71a2624: tooling/check-schema-drift.sh + ci.yml invokes script",
+      "closed_at": "2026-04-10"
+    }
+  ]
+}

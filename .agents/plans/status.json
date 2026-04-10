@@ -149,7 +149,7 @@
       "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-08-v1.1-tech-debt-mitigation.json",
-        "residual_summary": "7 open low (QC-W1,W5,W6,W8,W9,W10,W11)"
+        "residual_summary": "5 open low (QC-W5,W6,W8,W10,W11); QC-W1/QC-W9 closed 2026-04-10 (cleanup-2 Batch C)"
       },
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "done_at": "2026-04-09"
@@ -213,7 +213,7 @@
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 15,
+      "progress": 22,
       "tags": [
         "v1.1",
         "tech-debt",
@@ -221,23 +221,24 @@
         "long-term"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-08",
-      "notes": "Batch A+B (7/12) completed. Batch B resolved 4 low residuals (QC-W2, QC-W3, QC-W4, QC-W7). Remaining 8 residuals tracked in residual_findings for Batch C. Plan remains InProgress as long-term tech-debt cleanup.",
+      "updated_at": "2026-04-10",
+      "notes": "Batch A+B completed. Batch C: QC-W1 + QC-W9 closed 2026-04-10 (docs/migrations/outbox-schema-v2.md, tooling/check-schema-drift.sh). Six Batch C items + DM-R3 still open under residual_findings.",
       "metadata": {
-        "phase": "Batch A+B completed; Batch C pending",
+        "phase": "Batch C in progress (2/8 low closed)",
         "priority": "medium",
         "description": "Long-term tech-debt cleanup plan covering all V1.1 residuals (12 total). Batch A (3 critical) completed on 2026-04-09. Batch B (4 low) completed on 2026-04-08. Batch C (8 low) deferred to V1.1+ milestone.",
-        "residual_target": "12 residuals (7 completed in Batch A+B, 8 remaining)",
+        "residual_target": "12 residuals (9 completed in Batch A+B+partial C, 6 Batch C + DM-R3 still tracked)",
         "effort": "L — ongoing across multiple milestones (Batch A: S, Batch B: S, Batch C: M)",
         "batch_status": {
           "batch_a": "completed (3 residuals: CTX-R4, SYNC-R10, SYNC-R13)",
           "batch_b": "completed (4 low: QC-W2, QC-W4, QC-W3, QC-W7)",
-          "batch_c": "pending (8 low: QC-W1, QC-W5, QC-W6, QC-W8, QC-W9, QC-W10, QC-W11, DM-R3)"
+          "batch_c": "in progress — QC-W1, QC-W9 done 2026-04-10; pending: QC-W5, QC-W6, QC-W8, QC-W10, QC-W11, DM-R3"
         },
         "gates": {
           "tests": "passed",
           "clippy": "passed",
-          "fmt": "passed"
+          "fmt": "passed",
+          "qc_self": "2026-04-10 — reports/2026-04-09-v1.1-tech-debt-cleanup-2/2026-04-09-v1.1-tech-debt-cleanup-2-qc-self-20260410.md"
         }
       }
     },
@@ -321,28 +322,28 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-10T19:00:00Z",
-      "total_open": 11,
+      "updated_at": "2026-04-10T22:30:00Z",
+      "total_open": 9,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 8,
+        "low": 6,
         "nit": 1
       },
       "by_target": {
         "V1.0 GA": 0,
-        "V1.1": 11,
+        "V1.1": 9,
         "V1.2": 0
       },
       "by_plan": {
         "2025-04-05-domain-models": 1,
-        "2026-04-08-v1.1-tech-debt-mitigation": 7,
+        "2026-04-08-v1.1-tech-debt-mitigation": 5,
         "2026-04-10-cli-sync-bidirectional-parity": 1,
         "2026-04-10-cli-fork-world-snapshot-parity": 1,
         "2026-04-10-cli-publish-workflow-parity": 1
       },
-      "severity_note": "7 QC Warnings from v1.1-tech-debt-mitigation (QC-W1..W11) use historical 'warning' severity and are counted as 'low' per plan-convention.md §209-211 (historical compatibility rule). PUBLISH-CODEGEN-01 upgraded from 'nit' to 'medium' per QC triple review (2026-04-10) due to cross-language type safety impact.",
+      "severity_note": "Open rows under 2026-04-08-v1.1-tech-debt-mitigation use machine severity 'low' (QC-W1/QC-W9 closed 2026-04-10; legacy 'warning' normalized). PUBLISH-CODEGEN-01 is medium per QC triple review (2026-04-10).",
       "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings."
     },
     "residual_findings": {
@@ -361,19 +362,9 @@
       ],
       "2026-04-08-v1.1-tech-debt-mitigation": [
         {
-          "id": "QC-W1",
-          "title": "Migration documentation placement",
-          "severity": "warning",
-          "source": "QC#1",
-          "scope": "outbox.rs:28-44",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "Before V1.1 release"
-        },
-        {
           "id": "QC-W5",
           "title": "Body size reads full response",
-          "severity": "warning",
+          "severity": "low",
           "source": "QC#2",
           "scope": "sync_client.rs:258-284",
           "decision": "accept",
@@ -383,7 +374,7 @@
         {
           "id": "QC-W6",
           "title": "Test helper leaks temp dirs",
-          "severity": "warning",
+          "severity": "low",
           "source": "QC#2",
           "scope": "outbox.rs:204-213",
           "decision": "accept",
@@ -393,7 +384,7 @@
         {
           "id": "QC-W8",
           "title": "Test count discrepancy (7 vs 8)",
-          "severity": "warning",
+          "severity": "low",
           "source": "QC#3",
           "scope": "status.json:614",
           "decision": "accept",
@@ -401,19 +392,9 @@
           "target": "Before merge"
         },
         {
-          "id": "QC-W9",
-          "title": "CI shell script readability — extract to standalone script",
-          "severity": "warning",
-          "source": "QC#1 (Wave 3 Batch B)",
-          "scope": ".github/workflows/ci.yml:119-177",
-          "decision": "accept",
-          "owner": "@fullstack-dev",
-          "target": "V1.1+ — Extract to tooling/check-schema-drift.sh"
-        },
-        {
           "id": "QC-W10",
           "title": "TempDir ownership semantics — reinforce with type hint",
-          "severity": "warning",
+          "severity": "low",
           "source": "QC#1 (Wave 3 Batch B)",
           "scope": "test_utils.rs:11-23, 40-43",
           "decision": "accept",
@@ -423,9 +404,9 @@
         {
           "id": "QC-W11",
           "title": "Schema version type mismatch (u32 vs &str)",
-          "severity": "warning",
+          "severity": "low",
           "source": "QC#1 (Wave 3 Batch B)",
-          "scope": "CI check at ci.yml:171-177 vs crates/nexus-contracts/src/generated/mod.rs:84",
+          "scope": "CI check at ci.yml vs crates/nexus-contracts/src/generated/mod.rs (LATEST_SCHEMA_VERSION)",
           "decision": "accept",
           "owner": "@fullstack-dev",
           "target": "V1.1+ — Standardize schema version type across CLI/daemon/contracts"
