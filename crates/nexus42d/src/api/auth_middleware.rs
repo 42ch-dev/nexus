@@ -173,7 +173,11 @@ mod tests {
 
         let runtime_routes = Router::new()
             .route("/v1/local/runtime/health", get(handlers::runtime::health))
-            .route("/v1/local/runtime/status", get(handlers::runtime::status));
+            .route("/v1/local/runtime/status", get(handlers::runtime::status))
+            .route(
+                "/v1/local/daemon/status",
+                get(handlers::runtime::daemon_status),
+            );
 
         let workspace_routes = Router::new()
             .route("/v1/local/workspace", get(handlers::workspace::info))

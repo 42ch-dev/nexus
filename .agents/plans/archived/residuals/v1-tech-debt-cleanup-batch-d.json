@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "plan_id": "v1-tech-debt-cleanup",
+  "batch": "Batch D (TD-7 — TD-10)",
+  "archived_at": "2026-04-10T23:59:59Z",
+  "entries": [
+    {
+      "id": "TD-7",
+      "title": "ForkBranch parent_branch_id / forked_from_event_id alignment",
+      "severity": "medium",
+      "source": "v1-tech-debt-cleanup Batch D, architecture-alignment-review-v1",
+      "scope": "schemas/domain/fork-branch.schema.json, crates/nexus-contracts, crates/nexus-domain",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1-era C+D",
+      "closure_evidence": "knowledge/fork-branch-contract-alignment-v1.md; contract_assertions::test_fork_branch_parent_branch_and_event_ids_roundtrip",
+      "closed_at": "2026-04-10",
+      "lifecycle": "resolved",
+      "closure_note": "Verified schema ↔ contracts ↔ domain naming; added roundtrip test."
+    },
+    {
+      "id": "TD-8",
+      "title": "Consolidate dual outbox (nexus-local-db vs nexus-sync)",
+      "severity": "medium",
+      "source": "v1-tech-debt-cleanup Batch D",
+      "scope": "crates/nexus-local-db, crates/nexus-sync",
+      "decision": "waived",
+      "owner": "@project-manager",
+      "target": "V1.2+ migration",
+      "closure_evidence": "knowledge/dual-outbox-architecture-v1.md",
+      "closed_at": "2026-04-10",
+      "lifecycle": "waived",
+      "closure_note": "Full schema merge out of scope for C+D; documented split and follow-up."
+    },
+    {
+      "id": "TD-9",
+      "title": "Daemon lifecycle vs cli-spec §10.1",
+      "severity": "medium",
+      "source": "v1-tech-debt-cleanup Batch D",
+      "scope": "crates/nexus42d Local API",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1-era partial + V1.2+ FSM",
+      "closure_evidence": "GET /v1/local/daemon/status; knowledge/daemon-lifecycle-api-v1.md; nexus42d tests (middleware + integration)",
+      "closed_at": "2026-04-10",
+      "lifecycle": "resolved",
+      "closure_note": "Minimal lifecycle JSON probe shipped; six-state FSM explicitly deferred to V1.2+."
+    },
+    {
+      "id": "TD-10",
+      "title": "Real device flow OAuth vs stub verify_device_code",
+      "severity": "medium",
+      "source": "v1-tech-debt-cleanup Batch D",
+      "scope": "crates/nexus42d/src/auth/device_flow.rs, platform OAuth",
+      "decision": "waived",
+      "owner": "@project-manager",
+      "target": "V1.2+ with platform endpoints",
+      "closure_evidence": "knowledge/device-flow-oauth-scope-v1.md; module docs in device_flow.rs",
+      "closed_at": "2026-04-10",
+      "lifecycle": "waived",
+      "closure_note": "Production OAuth requires platform contracts and CI stubs; not delivered in OSS C+D cap."
+    }
+  ]
+}

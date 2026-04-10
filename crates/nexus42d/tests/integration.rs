@@ -49,6 +49,10 @@ fn build_test_app(state: WorkspaceState) -> Router {
             axum::routing::get(handlers::runtime::status),
         )
         .route(
+            "/v1/local/daemon/status",
+            axum::routing::get(handlers::runtime::daemon_status),
+        )
+        .route(
             "/v1/local/workspace",
             axum::routing::get(handlers::workspace::info),
         )
@@ -102,6 +106,21 @@ async fn status_endpoint() {
     assert_eq!(body["version"], "0.1.0");
     assert!(body["uptime_seconds"].as_u64().is_some());
     assert_eq!(body["workspace_initialized"], true);
+}
+
+#[tokio::test]
+async fn daemon_status_endpoint() {
+    let (state, _tmp) = create_test_state();
+    let app = build_test_app(state);
+
+    let server = TestServer::new(app).unwrap();
+    let response = server.get("/v1/local/daemon/status").await;
+
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["lifecycle_state"], "running");
+    assert_eq!(body["version"], "0.1.0");
+    assert!(body["implementation_scope"].as_str().unwrap().len() > 0);
 }
 
 #[tokio::test]

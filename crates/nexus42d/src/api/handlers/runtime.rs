@@ -40,6 +40,30 @@ pub struct AcpStatusInfo {
     pub total_tool_executions: u64,
 }
 
+#[derive(Serialize)]
+pub struct DaemonStatusResponse {
+    /// Normalized lifecycle name aligned with cli-spec-v1 §10.1 (`snake_case`).
+    /// While the Local API is accepting connections, this is `running`.
+    pub lifecycle_state: &'static str,
+    pub version: String,
+    /// Human-readable scope note for consumers (full six-state FSM is not yet implemented).
+    pub implementation_scope: &'static str,
+}
+
+/// GET /v1/local/daemon/status — minimal lifecycle probe (TD-9 partial delivery).
+///
+/// Exposes a stable JSON shape for automation. **Not** a full §10.1 state machine yet; see
+/// `.agents/plans/knowledge/daemon-lifecycle-api-v1.md`.
+pub async fn daemon_status(State(_state): State<WorkspaceState>) -> Json<DaemonStatusResponse> {
+    info!("Handling daemon lifecycle status request");
+    Json(DaemonStatusResponse {
+        lifecycle_state: "running",
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        implementation_scope:
+            "listening — full Stopped/Starting/Degraded/Stopping/Failed FSM deferred",
+    })
+}
+
 /// GET /v1/local/runtime/status
 pub async fn status(State(state): State<WorkspaceState>) -> Json<StatusResponse> {
     info!("Handling runtime status request");

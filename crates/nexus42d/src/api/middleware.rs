@@ -144,7 +144,11 @@ mod tests {
 
         let runtime_routes = Router::new()
             .route("/v1/local/runtime/health", get(handlers::runtime::health))
-            .route("/v1/local/runtime/status", get(handlers::runtime::status));
+            .route("/v1/local/runtime/status", get(handlers::runtime::status))
+            .route(
+                "/v1/local/daemon/status",
+                get(handlers::runtime::daemon_status),
+            );
 
         let workspace_routes = Router::new()
             .route("/v1/local/workspace", get(handlers::workspace::info))
@@ -220,6 +224,20 @@ mod tests {
             "runtime status should return 2xx without init, got {}",
             response.status_code(),
         );
+    }
+
+    #[tokio::test]
+    async fn daemon_status_works_without_init() {
+        let app = create_uninitialized_app();
+        let response = app.get("/v1/local/daemon/status").await;
+        assert!(
+            response.status_code().is_success(),
+            "daemon status should return 2xx without init, got {}",
+            response.status_code(),
+        );
+        let body: serde_json::Value = response.json();
+        assert_eq!(body["lifecycle_state"], "running");
+        assert!(body["version"].as_str().is_some());
     }
 
     #[tokio::test]
