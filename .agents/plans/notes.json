@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-09",
+  "updated_at": "2026-04-11",
   "entries": [
     {
       "updated_at": "2026-04-05",
@@ -120,7 +120,11 @@
     },
     {
       "updated_at": "2026-04-10",
-      "message": "v1-tech-debt-cleanup marked Done: Batch D closed (TD-7 resolve; TD-8/10 waive + knowledge; TD-9 minimal GET /v1/local/daemon/status). Snapshot archived/plans/v1-tech-debt-cleanup.json; Batch D residuals archived/residuals/v1-tech-debt-cleanup-batch-d.json; qc_self reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md."
+      "message": "v1-tech-debt-cleanup Batch D closed (TD-7 resolve; TD-8/10 waive + knowledge; TD-9 minimal GET /v1/local/daemon/status). Milestone snapshot later kept as archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json; Batch D residuals archived/residuals/v1-tech-debt-cleanup-batch-d.json; qc_self reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md. (Plan later restored InProgress 2026-04-11 — see next entry.)"
+    },
+    {
+      "updated_at": "2026-04-11",
+      "message": "v1-tech-debt-cleanup restored to InProgress: long-term V1.x maintenance plan — Batch D is a completed milestone only; Batch E (V1.2) and follow-ons stay under this plan id. Milestone snapshot renamed to archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json (removed archived_record from live row)."
     }
   ]
 }
