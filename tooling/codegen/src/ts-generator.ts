@@ -286,10 +286,32 @@ function resolveTSType(
     return { tsType: 'unknown' };
   }
 
-  // Handle type arrays (e.g., ["string", "null"])
+  // Handle type arrays (e.g., ["string", "null"], ["array", "null"])
   if (Array.isArray(type)) {
     const nonNullTypes = type.filter(t => t !== 'null');
     const hasNull = type.includes('null');
+    if (nonNullTypes.length === 1 && nonNullTypes[0] === 'array' && propDef.items) {
+      const items = propDef.items as Record<string, unknown>;
+      if (items.type === 'object' && items.properties) {
+        const path = `${inlineEnumPathPrefix}${toPascalCase(propName)}`;
+        const inner = buildInlineObjectType(items, inlineEnums, localDefinitions, path);
+        const tsType = `${inner}[]`;
+        return { tsType: hasNull ? `${tsType} | null` : tsType };
+      }
+      const inner = resolveTSType(
+        items,
+        '',
+        inlineEnums,
+        localDefinitions,
+        `${inlineEnumPathPrefix}${toPascalCase(propName)}`,
+      );
+      const tsType = `${inner.tsType}[]`;
+      return {
+        tsType: hasNull ? `${tsType} | null` : tsType,
+        commonRef: inner.commonRef,
+        deltaRef: inner.deltaRef,
+      };
+    }
     if (nonNullTypes.length === 1) {
       const base = resolveSingleTSType(
         nonNullTypes[0],
@@ -302,6 +324,28 @@ function resolveTSType(
       return { tsType: hasNull ? `${base} | null` : base };
     }
     return { tsType: 'unknown' };
+  }
+
+  // Array of $ref (e.g. MemoryType[]) must bubble commonRef / deltaRef for imports
+  if (type === 'array' && propDef.items) {
+    const items = propDef.items as Record<string, unknown>;
+    if (items.type === 'object' && items.properties) {
+      const path = `${inlineEnumPathPrefix}${toPascalCase(propName)}`;
+      const inner = buildInlineObjectType(items, inlineEnums, localDefinitions, path);
+      return { tsType: `${inner}[]` };
+    }
+    const inner = resolveTSType(
+      items,
+      '',
+      inlineEnums,
+      localDefinitions,
+      `${inlineEnumPathPrefix}${toPascalCase(propName)}`,
+    );
+    return {
+      tsType: `${inner.tsType}[]`,
+      commonRef: inner.commonRef,
+      deltaRef: inner.deltaRef,
+    };
   }
 
   return {
@@ -346,7 +390,6 @@ function resolveSingleTSType(
     case 'array': {
       if (propDef.items) {
         const items = propDef.items as Record<string, unknown>;
-        // Check if items is an object with its own properties
         if (items.type === 'object' && items.properties) {
           const path = `${inlineEnumPathPrefix}${toPascalCase(propName)}`;
           return buildInlineObjectType(items, inlineEnums, localDefinitions, path) + '[]';

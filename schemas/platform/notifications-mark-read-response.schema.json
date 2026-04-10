@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/notifications-mark-read-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus NotificationsMarkReadResponse",
+  "description": "Response for mark-read mutations (platform plan 20).",
+  "type": "object",
+  "required": ["schema_version", "success", "updated_count"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "updated_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows affected"
+    },
+    "error": {
+      "type": "string",
+      "description": "Error detail when success is false"
+    }
+  },
+  "additionalProperties": false
+}

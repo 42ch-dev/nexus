@@ -30,10 +30,26 @@ pub mod world_membership;
 pub mod world;
 pub mod meta;
 pub mod context_assembly_v1;
+pub mod explore_ai_answer_request;
+pub mod explore_ai_answer_response;
+pub mod explore_ai_summary_request;
+pub mod explore_ai_summary_response;
 pub mod explore_browse_request;
+pub mod explore_creator_card;
 pub mod explore_feed_response;
 pub mod explore_hit;
 pub mod explore_search_request;
+pub mod memory_web_list_request;
+pub mod memory_web_list_response;
+pub mod notifications_inbox_item;
+pub mod notifications_list_request;
+pub mod notifications_list_response;
+pub mod notifications_mark_read_request;
+pub mod notifications_mark_read_response;
+pub mod social_graph_feed_request;
+pub mod social_graph_feed_response;
+pub mod social_graph_relationship_request;
+pub mod social_graph_relationship_response;
 pub mod world_fork_request;
 pub mod world_fork_response;
 pub mod world_snapshot_request;
@@ -67,10 +83,26 @@ pub use world_membership::*;
 pub use world::*;
 pub use meta::*;
 pub use context_assembly_v1::*;
+pub use explore_ai_answer_request::*;
+pub use explore_ai_answer_response::*;
+pub use explore_ai_summary_request::*;
+pub use explore_ai_summary_response::*;
 pub use explore_browse_request::*;
+pub use explore_creator_card::*;
 pub use explore_feed_response::*;
 pub use explore_hit::*;
 pub use explore_search_request::*;
+pub use memory_web_list_request::*;
+pub use memory_web_list_response::*;
+pub use notifications_inbox_item::*;
+pub use notifications_list_request::*;
+pub use notifications_list_response::*;
+pub use notifications_mark_read_request::*;
+pub use notifications_mark_read_response::*;
+pub use social_graph_feed_request::*;
+pub use social_graph_feed_response::*;
+pub use social_graph_relationship_request::*;
+pub use social_graph_relationship_response::*;
 pub use world_fork_request::*;
 pub use world_fork_response::*;
 pub use world_snapshot_request::*;
@@ -103,10 +135,26 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("World", 1),
     ("Meta", 1),
     ("ContextAssemblyV1", 1),
+    ("ExploreAiAnswerRequest", 1),
+    ("ExploreAiAnswerResponse", 1),
+    ("ExploreAiSummaryRequest", 1),
+    ("ExploreAiSummaryResponse", 1),
     ("ExploreBrowseRequest", 1),
+    ("ExploreCreatorCard", 1),
     ("ExploreFeedResponse", 1),
     ("ExploreHit", 1),
     ("ExploreSearchRequest", 1),
+    ("MemoryWebListRequest", 1),
+    ("MemoryWebListResponse", 1),
+    ("NotificationsInboxItem", 1),
+    ("NotificationsListRequest", 1),
+    ("NotificationsListResponse", 1),
+    ("NotificationsMarkReadRequest", 1),
+    ("NotificationsMarkReadResponse", 1),
+    ("SocialGraphFeedRequest", 1),
+    ("SocialGraphFeedResponse", 1),
+    ("SocialGraphRelationshipRequest", 1),
+    ("SocialGraphRelationshipResponse", 1),
     ("WorldForkRequest", 1),
     ("WorldForkResponse", 1),
     ("WorldSnapshotRequest", 1),

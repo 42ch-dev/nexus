@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus.42ch.io/schemas/platform/memory-web-list-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus MemoryWebListRequest",
+  "description": "Request body for memory web read — list / filter MemoryItem rows for a world (platform plan 18). Aligns with domain memory.schema.json field semantics.",
+  "type": "object",
+  "required": ["schema_version", "world_id"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "world_id": {
+      "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque pagination cursor"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "memory_types": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MemoryType"
+      },
+      "description": "Filter by MemoryItem.memory_type"
+    },
+    "memory_kinds": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MemoryKind"
+      },
+      "description": "Filter by MemoryItem.memory_kind when set"
+    },
+    "statuses": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus.42ch.io/schemas/common/common.schema.json#/definitions/MemoryStatus"
+      },
+      "description": "Filter by MemoryItem.status"
+    }
+  },
+  "additionalProperties": false
+}
