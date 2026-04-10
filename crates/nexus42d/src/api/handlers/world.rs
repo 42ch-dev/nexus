@@ -14,7 +14,7 @@ use crate::api::handlers::sync::{
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
-use nexus_contracts::{WorldForkRequest, WorldSnapshotRequest};
+use nexus_contracts::{ForkBranch, WorldForkRequest, WorldSnapshotRequest};
 use nexus_sync::sync_client::SyncClient;
 use serde::Serialize;
 use tracing::info;
@@ -31,7 +31,7 @@ fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
 pub struct WorldForkLocalResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fork_branch: Option<serde_json::Value>,
+    pub fork_branch: Option<ForkBranch>,
     pub error: Option<String>,
 }
 

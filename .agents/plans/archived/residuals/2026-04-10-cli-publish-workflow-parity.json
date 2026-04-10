@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-10-cli-publish-workflow-parity",
+  "archived_at": "2026-04-11",
+  "entries": [
+    {
+      "id": "PUBLISH-CODEGEN-01",
+      "title": "Rust codegen emits serde_json::Value for $ref string-pattern fields (TS correctly emits string); cross-language type safety gap affecting publish/fork wire types",
+      "severity": "medium",
+      "source": "qc_self 2026-04-10, QC3-W1, qc_triple 2026-04-10",
+      "scope": "crates/nexus-contracts/src/generated/publish_*.rs, world_fork_response.rs, tooling/codegen",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "V1.1+ — codegen improvement to follow $ref chains for string-pattern types",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-11",
+      "closure_note": "getCommonRustType derives String/integer from COMMON_DEFINITIONS for all non-enum defs; whole-schema $ref emits cross-module structs (e.g. Vec<Bundle>, Vec<PublishHistoryEntry>).",
+      "closure_evidence": "plan 2026-04-11-codegen-ref-resolution; cargo test -p nexus-sync -p nexus42d -p nexus42 --lib"
+    }
+  ]
+}

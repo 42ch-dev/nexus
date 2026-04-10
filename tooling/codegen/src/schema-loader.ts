@@ -166,7 +166,16 @@ export function resolveRef(ref: string): string | null {
   if (localMatch) {
     return localMatch[1];
   }
-  // Whole-schema ref (e.g., source-anchor.schema.json, delta.schema.json)
+  // Relative file ref (e.g. bundle.schema.json → "delta.schema.json")
+  if (/^[A-Za-z0-9_.-]+\.schema\.json$/.test(ref)) {
+    return schemaToTypeName(ref);
+  }
+  // Whole-schema HTTPS URI: .../fork-branch.schema.json (no #/definitions)
+  const fileOnlyMatch = ref.match(/\/([A-Za-z0-9_.-]+\.schema\.json)$/);
+  if (fileOnlyMatch && !ref.includes('#/definitions/')) {
+    return schemaToTypeName(fileOnlyMatch[1]);
+  }
+  // Whole-schema ref (legacy substring checks)
   if (ref.includes('source-anchor.schema.json')) {
     return 'SourceAnchor';
   }

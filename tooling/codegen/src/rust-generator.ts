@@ -356,8 +356,11 @@ function resolveRustTypeFull(
     if (defName && localDefinitions && defName in localDefinitions) {
       return { rustType: defName };
     }
-    if (defName) {
+    if (defName && COMMON_DEFINITIONS.has(defName)) {
       return { rustType: getCommonRustType(defName) };
+    }
+    if (defName) {
+      return { rustType: defName, crossModuleImport: defName };
     }
     return { rustType: 'serde_json::Value' };
   }
@@ -448,27 +451,18 @@ function resolveSingleRustType(
 }
 
 /**
- * Get Rust type for a common definition name.
+ * Get Rust type for a common.schema.json definition (non-enum).
+ * Enum definitions are handled via isCommonEnum before this is called.
  */
 function getCommonRustType(defName: string): string {
-  switch (defName) {
-    case 'SchemaVersion':
-      return 'u32';
-    case 'DeltaSequence':
-      return 'u64';
-    case 'Timestamp':
-    case 'WorldId':
-    case 'CreatorId':
-    case 'UserId':
-    case 'KeyBlockId':
-    case 'TimelineEventId':
-    case 'BundleId':
-    case 'CommandId':
-    case 'WorkspaceId':
-      return 'String';
-    default:
-      return 'serde_json::Value';
+  const def = COMMON_DEFINITIONS.get(defName);
+  if (!def) {
+    return 'serde_json::Value';
   }
+  if (def.type === 'integer') {
+    return defName === 'SchemaVersion' ? 'u32' : 'u64';
+  }
+  return 'String';
 }
 
 /**

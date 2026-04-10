@@ -130,26 +130,21 @@ function generateTSTypeFile(
     commonTypeImports.add('SourceAnchor');
   }
 
-  // Check if Delta is referenced anywhere in this schema (but not in delta.schema.json itself)
-  if (schemaJSON.includes('delta.schema.json') && schema.fileName !== 'delta.schema.json') {
-    crossFileImports.add('Delta');
-  }
-
   // Generate main interface from top-level properties
   if (hasTopLevel) {
-    const { fieldsText, imports } = generateTSTypeFields(
-      schema.schemaContent,
-      schema.typeName,
-      commonTypeImports,
-      allInlineEnums,
-      localDefinitions,
-    );
-    for (const imp of imports) {
-      if (imp === 'Delta') {
-        crossFileImports.add('Delta');
-      } else {
-        commonTypeImports.add(imp);
-      }
+    const { fieldsText, commonImports: fieldCommon, crossSchemaImports: fieldCross } =
+      generateTSTypeFields(
+        schema.schemaContent,
+        schema.typeName,
+        commonTypeImports,
+        allInlineEnums,
+        localDefinitions,
+      );
+    for (const imp of fieldCommon) {
+      commonTypeImports.add(imp);
+    }
+    for (const imp of fieldCross) {
+      crossFileImports.add(imp);
     }
     content += fieldsText + '\n';
   }
@@ -161,19 +156,19 @@ function generateTSTypeFile(
       if (def.type !== 'object' || !def.properties) continue;
 
       definitionNames.push(defName);
-      const { fieldsText, imports } = generateTSTypeFields(
-        def,
-        defName,
-        commonTypeImports,
-        allInlineEnums,
-        localDefinitions,
-      );
-      for (const imp of imports) {
-        if (imp === 'Delta') {
-          crossFileImports.add('Delta');
-        } else {
-          commonTypeImports.add(imp);
-        }
+      const { fieldsText, commonImports: fieldCommon, crossSchemaImports: fieldCross } =
+        generateTSTypeFields(
+          def,
+          defName,
+          commonTypeImports,
+          allInlineEnums,
+          localDefinitions,
+        );
+      for (const imp of fieldCommon) {
+        commonTypeImports.add(imp);
+      }
+      for (const imp of fieldCross) {
+        crossFileImports.add(imp);
       }
       content += fieldsText + '\n';
     }
@@ -182,12 +177,15 @@ function generateTSTypeFile(
   // Build imports
   const commonImports = [...commonTypeImports].sort();
   const crossImports = [...crossFileImports].sort();
-  
+
   if (commonImports.length > 0) {
     content = `import type { ${commonImports.join(', ')} } from './CommonTypes';\n` + content;
   }
   if (crossImports.length > 0) {
-    content = `import type { ${crossImports.join(', ')} } from './Delta';\n` + content;
+    const crossLines = crossImports.map(
+      name => `import type { ${name} } from './${name}';`,
+    );
+    content = `${crossLines.join('\n')}\n` + content;
   }
 
   // Define inline enums as type aliases
@@ -218,22 +216,32 @@ function generateTSTypeFields(
   existingImports: Set<string>,
   inlineEnums: Map<string, string[]>,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): { fieldsText: string; imports: Set<string> } {
+): {
+  fieldsText: string;
+  commonImports: Set<string>;
+  crossSchemaImports: Set<string>;
+} {
   const properties = (schemaContent.properties || {}) as Record<string, unknown>;
   const requiredFields = (schemaContent.required || []) as string[];
-  const newImports: Set<string> = new Set();
+  const commonImports = new Set<string>();
+  const crossSchemaImports = new Set<string>();
   const fields: string[] = [];
 
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { tsType, commonRef, deltaRef } = resolveTSType(def, propName, inlineEnums, localDefinitions, typeName);
+    const { tsType, commonRef, crossSchemaRef } = resolveTSType(
+      def,
+      propName,
+      inlineEnums,
+      localDefinitions,
+      typeName,
+    );
     if (commonRef) {
-      newImports.add(commonRef);
+      commonImports.add(commonRef);
     }
-    if (deltaRef) {
-      // Delta is a cross-file import, will be handled separately
-      newImports.add(deltaRef);
+    if (crossSchemaRef) {
+      crossSchemaImports.add(crossSchemaRef);
     }
     const optionalMark = isRequired ? '' : '?';
     // Quote property names that contain hyphens (invalid in unquoted TS identifiers)
@@ -243,13 +251,13 @@ function generateTSTypeFields(
 
   const desc = (schemaContent.description || typeName) as string;
   const fieldsText = `/** ${desc} */\nexport interface ${typeName} {\n${fields.join('\n')}\n}`;
-  return { fieldsText, imports: newImports };
+  return { fieldsText, commonImports, crossSchemaImports };
 }
 
 /**
  * Resolve a property definition to a TypeScript type string.
- * Returns { tsType, commonRef?, deltaRef? } where commonRef is set if this maps to a CommonTypes export,
- * and deltaRef is set if this maps to a Delta type (cross-file import).
+ * Returns { tsType, commonRef?, crossSchemaRef? } where commonRef maps to CommonTypes,
+ * and crossSchemaRef names another generated schema module (e.g. Delta, ForkBranch).
  *
  * @param inlineEnumPathPrefix PascalCase path prefix for inline string enums (e.g. Creator, CreatorMetadata)
  *        so barrel `export *` does not collide on names like `Status` across modules.
@@ -260,7 +268,7 @@ function resolveTSType(
   inlineEnums: Map<string, string[]>,
   localDefinitions: Record<string, Record<string, unknown>> | undefined,
   inlineEnumPathPrefix: string,
-): { tsType: string; commonRef?: string; deltaRef?: string } {
+): { tsType: string; commonRef?: string; crossSchemaRef?: string } {
   const ref = propDef.$ref as string | undefined;
   const type = propDef.type;
 
@@ -271,7 +279,7 @@ function resolveTSType(
       return { tsType: 'SourceAnchor', commonRef: 'SourceAnchor' };
     }
     if (defName === 'Delta') {
-      return { tsType: 'Delta', deltaRef: 'Delta' };
+      return { tsType: 'Delta', crossSchemaRef: 'Delta' };
     }
     if (defName && isCommonEnum(defName)) {
       return { tsType: defName, commonRef: defName };
@@ -280,8 +288,11 @@ function resolveTSType(
     if (defName && localDefinitions && defName in localDefinitions) {
       return { tsType: defName };
     }
+    if (defName && COMMON_DEFINITIONS.has(defName)) {
+      return { tsType: getCommonBaseType(defName) };
+    }
     if (defName) {
-      return { tsType: getCommonBaseType(defName), commonRef: undefined };
+      return { tsType: defName, crossSchemaRef: defName };
     }
     return { tsType: 'unknown' };
   }
@@ -309,7 +320,7 @@ function resolveTSType(
       return {
         tsType: hasNull ? `${tsType} | null` : tsType,
         commonRef: inner.commonRef,
-        deltaRef: inner.deltaRef,
+        crossSchemaRef: inner.crossSchemaRef,
       };
     }
     if (nonNullTypes.length === 1) {
@@ -326,7 +337,7 @@ function resolveTSType(
     return { tsType: 'unknown' };
   }
 
-  // Array of $ref (e.g. MemoryType[]) must bubble commonRef / deltaRef for imports
+  // Array of $ref (e.g. MemoryType[]) must bubble commonRef / crossSchemaRef for imports
   if (type === 'array' && propDef.items) {
     const items = propDef.items as Record<string, unknown>;
     if (items.type === 'object' && items.properties) {
@@ -344,7 +355,7 @@ function resolveTSType(
     return {
       tsType: `${inner.tsType}[]`,
       commonRef: inner.commonRef,
-      deltaRef: inner.deltaRef,
+      crossSchemaRef: inner.crossSchemaRef,
     };
   }
 

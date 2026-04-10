@@ -8,7 +8,7 @@ use crate::commands::context::validate_world_id;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_contracts::{WorldForkRequest, WorldSnapshotRequest};
+use nexus_contracts::{ForkBranch, WorldForkRequest, WorldSnapshotRequest};
 use serde::Deserialize;
 
 /// Validate timeline event id prefix `evt_`.
@@ -60,7 +60,7 @@ pub enum WorldCommand {
 #[derive(Debug, Deserialize)]
 pub struct WorldForkLocalResponse {
     pub success: bool,
-    pub fork_branch: Option<serde_json::Value>,
+    pub fork_branch: Option<ForkBranch>,
     pub error: Option<String>,
 }
 
@@ -153,10 +153,11 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
                     if resp.success {
                         println!("World fork completed.");
                         if let Some(fb) = resp.fork_branch {
-                            match serde_json::to_string_pretty(&fb) {
-                                Ok(s) => println!("{}", s),
-                                Err(_) => println!("{}", fb),
-                            }
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&fb)
+                                    .unwrap_or_else(|_| format!("{fb:#?}"))
+                            );
                         }
                     } else if let Some(err) = resp.error {
                         eprintln!("World fork failed: {}", err);

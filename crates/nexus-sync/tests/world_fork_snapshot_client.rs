@@ -46,7 +46,8 @@ async fn fork_world_parses_success() {
 
     let r = client.fork_world(&req).await.expect("fork");
     assert_eq!(r.schema_version, 1);
-    assert!(r.fork_branch.is_object());
+    assert_eq!(r.fork_branch.fork_branch_id, "fbk_child01");
+    assert_eq!(r.fork_branch.world_id, "wld_child");
 }
 
 #[tokio::test]

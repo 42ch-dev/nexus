@@ -1,3 +1,4 @@
+import type { PublishHistoryEntry } from './PublishHistoryEntry';
 import type { SchemaVersion } from './CommonTypes';
 /**
  * Nexus PublishHistoryResponse
@@ -10,7 +11,7 @@ import type { SchemaVersion } from './CommonTypes';
 /** Response body for POST /v1/publish/history. */
 export interface PublishHistoryResponse {
   schema_version: number;
-  entries: unknown[];
+  entries: PublishHistoryEntry[];
   next_cursor?: string;
   has_more: boolean;
 }

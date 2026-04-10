@@ -6,11 +6,12 @@
 //! @source world-fork-response.schema.json
 
 use serde::{Deserialize, Serialize};
+use crate::generated::fork_branch::ForkBranch;
 
 /// Response body for POST /v1/worlds/fork — created ForkBranch record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldForkResponse {
     pub schema_version: u32,
-    pub fork_branch: serde_json::Value,
+    pub fork_branch: ForkBranch,
 }

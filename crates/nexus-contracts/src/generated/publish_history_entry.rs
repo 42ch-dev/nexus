@@ -15,7 +15,7 @@ pub struct PublishHistoryEntry {
     pub occurred_at: String,
     pub outcome: PublishStoryOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub story_manifest_id: Option<serde_json::Value>,
+    pub story_manifest_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub published_artifact_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
