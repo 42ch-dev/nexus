@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/official-creator-quota-response.schema.json",
+  "schema_version": 1,
+  "title": "OfficialCreatorQuotaResponseV1",
+  "description": "GET /official-creator/quota 200 response body. SSOT: v1-spec schema/entitlements-wire-v1.md §4.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "user_id",
+    "quota_period_start",
+    "quota_period_end",
+    "official_runs_consumed",
+    "official_runs_limit",
+    "official_runs_remaining",
+    "max_concurrent_official_jobs"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire revision; V1.0 fixed to 1 per entitlements-wire-v1.md"
+    },
+    "user_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/UserId"
+    },
+    "quota_period_start": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "quota_period_end": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "official_runs_consumed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "official_runs_limit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "official_runs_remaining": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_concurrent_official_jobs": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}
