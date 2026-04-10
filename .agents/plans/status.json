@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-10",
+  "updated_at": "2026-04-11",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -343,6 +343,32 @@
       },
       "title": "Platform HTTP request schema alignment (publish / fork / snapshot)",
       "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-local-fs-layout-ssot-and-implementation",
+      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
+      "file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "cli",
+        "daemon",
+        "local-db",
+        "v1-spec"
+      ],
+      "created_at": "2026-04-11",
+      "updated_at": "2026-04-11",
+      "notes": "Spec SSOT in nexus-platform v1-spec (ADR-014, cli-spec §6.2–§13); nexus knowledge pointer: local-fs-layout-creator-workspace-v1.md",
+      "metadata": {
+        "description": "Implement operational tree under ~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/, creator workspace subcommands, migration from flat state.db; follow plan tasks + v1-spec via specs_root (local-paths.json).",
+        "spec_refs": [
+          ".agents/plans/knowledge/local-fs-layout-creator-workspace-v1.md"
+        ]
+      }
     }
   ],
   "metadata": {
