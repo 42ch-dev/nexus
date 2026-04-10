@@ -4,7 +4,7 @@ Tracks conceptual platform plans from `2026-04-10-v1-spec-wire-schema-sprint` vs
 
 | Conceptual ref | Schema files (`schemas/platform/`) | Codegen (Rust + TS) | In-repo consumer (CLI/daemon) | Status |
 | --- | --- | --- | --- | --- |
-| 16 — explore / creator profile | `explore-hit`, `explore-feed-response`, `explore-browse-request`, `explore-search-request`, `explore-creator-card` | Yes | Explore read path implemented (`nexus42 explore`, daemon, `SyncClient`); creator **card** is wire-only until platform/list endpoints land | **Done** (SSOT); CLI list/detail TBD on platform routes |
+| 16 — explore / creator profile | `explore-hit`, `explore-feed-response`, `explore-browse-request`, `explore-search-request`, `explore-creator-card` (10 fields) | Yes | Explore read path implemented (`nexus42 explore`, daemon, `SyncClient`); creator **card** is wire-only until platform/list endpoints land | **Done** (SSOT); CLI list/detail TBD on platform routes. 2026-04-10: gap fix — added `is_platform_owned`, `created_at`, `public_world_count` per platform Plan 16 spec matrix. |
 | 17 — social graph | `social-graph-relationship-request`, `social-graph-relationship-response`, `social-graph-feed-request`, `social-graph-feed-response` | Yes | — | **Done** (wire SSOT) |
 | 18 — memory web read | `memory-web-list-request`, `memory-web-list-response` | Yes | — | **Done** (wire SSOT); list **item** uses inline enums aligned with `common` Memory* (codegen import limitation for nested `$ref`) |
 | 19 — explore AI | `explore-ai-answer-request`, `explore-ai-answer-response`, `explore-ai-summary-request`, `explore-ai-summary-response` | Yes | — | **Done** (wire SSOT) |
