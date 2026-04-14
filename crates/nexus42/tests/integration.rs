@@ -317,3 +317,46 @@ fn context_assemble_with_world_id_connects_daemon() {
         .failure()
         .stderr(predicate::str::contains("Error"));
 }
+
+/// Test soul command group help
+#[test]
+fn soul_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("soul")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("init"))
+        .stdout(predicate::str::contains("show"))
+        .stdout(predicate::str::contains("edit-personality"))
+        .stdout(predicate::str::contains("validate"));
+}
+
+/// Test soul requires active creator
+#[test]
+fn soul_requires_active_creator() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("soul")
+        .arg("show")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No active creator"));
+}
+
+/// Test soul validate requires active creator
+#[test]
+fn soul_validate_requires_active_creator() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("soul")
+        .arg("validate")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No active creator"));
+}

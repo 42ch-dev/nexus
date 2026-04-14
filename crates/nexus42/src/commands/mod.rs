@@ -37,6 +37,8 @@ pub mod runtime_mode;
 #[deny(clippy::unwrap_used)]
 pub mod session;
 #[deny(clippy::unwrap_used)]
+pub mod soul;
+#[deny(clippy::unwrap_used)]
 pub mod sync;
 #[deny(clippy::unwrap_used)]
 pub mod world;

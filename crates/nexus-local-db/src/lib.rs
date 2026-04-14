@@ -14,6 +14,7 @@ mod error;
 mod identity;
 mod migration;
 mod schema;
+mod soul_meta;
 mod version;
 
 // Re-export version constants
@@ -37,6 +38,11 @@ pub use schema::{
 pub use identity::{
     create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
     list_local_identities, LocalIdentityRow,
+};
+
+// Re-export soul_meta CRUD components
+pub use soul_meta::{
+    delete as delete_soul_meta, get as get_soul_meta, upsert as upsert_soul_meta, SoulMeta,
 };
 
 /// Runtime role for database initialization

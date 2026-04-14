@@ -37,3 +37,6 @@ tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors"] }
 url = "2"
 strum = { version = "0.26", features = ["derive"] }
+pulldown-cmark = "0.12"
+pulldown-cmark-frontmatter = "0.2"
+serde_yaml = "0.9"
