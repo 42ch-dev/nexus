@@ -219,7 +219,6 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 
 /// Run sync command
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
-    runtime_guard::require_platform(&config.runtime_mode(), "sync")?;
     let client = DaemonClient::from_config(config);
 
     match cmd {
@@ -229,6 +228,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             creator_id,
             force,
         } => {
+            runtime_guard::require_platform(&config.runtime_mode(), "sync push")?;
             if !client.health_check().await? {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
@@ -316,6 +316,7 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
             world_id,
             after_sequence,
         } => {
+            runtime_guard::require_platform(&config.runtime_mode(), "sync pull")?;
             if !client.health_check().await? {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
@@ -429,6 +430,7 @@ Set --world-id for real platform sync (and ensure it matches workspace sync bind
             resolution,
             force,
         } => {
+            runtime_guard::require_platform(&config.runtime_mode(), "sync resolve")?;
             if !client.health_check().await? {
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
