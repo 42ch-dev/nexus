@@ -6,6 +6,7 @@ use rusqlite::{params, Connection};
 
 /// SOUL metadata record.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SoulMeta {
     pub creator_id: String,
     pub file_path: String,
@@ -17,6 +18,7 @@ pub struct SoulMeta {
 }
 
 /// Upsert SOUL metadata (insert or update).
+#[allow(dead_code)]
 pub fn upsert(conn: &Connection, meta: &SoulMeta) -> Result<(), rusqlite::Error> {
     conn.execute(
         "INSERT INTO soul_meta (creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at)
@@ -41,6 +43,7 @@ pub fn upsert(conn: &Connection, meta: &SoulMeta) -> Result<(), rusqlite::Error>
 }
 
 /// Get SOUL metadata for a creator.
+#[allow(dead_code)]
 pub fn get(conn: &Connection, creator_id: &str) -> Result<Option<SoulMeta>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at
@@ -65,6 +68,7 @@ pub fn get(conn: &Connection, creator_id: &str) -> Result<Option<SoulMeta>, rusq
 }
 
 /// Delete SOUL metadata for a creator.
+#[allow(dead_code)]
 pub fn delete(conn: &Connection, creator_id: &str) -> Result<bool, rusqlite::Error> {
     let affected = conn.execute(
         "DELETE FROM soul_meta WHERE creator_id = ?1",
