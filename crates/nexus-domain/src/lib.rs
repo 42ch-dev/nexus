@@ -16,6 +16,7 @@
 
 pub mod consistency;
 pub mod context_assembly;
+pub mod experience_aggregation;
 #[cfg(test)]
 pub mod contract_assertions;
 pub mod creator;
