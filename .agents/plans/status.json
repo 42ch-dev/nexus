@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-10",
+  "updated_at": "2026-04-14",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -346,40 +346,13 @@
     },
     {
       "id": "2026-04-10-local-fs-layout-ssot-and-implementation",
-      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
-      "file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
       "status": "Done",
-      "owner": "@fullstack-dev",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "cli",
-        "daemon",
-        "local-db",
-        "v1-spec"
-      ],
-      "created_at": "2026-04-11",
-      "updated_at": "2026-04-10",
-      "done_at": "2026-04-10",
-      "notes": "T2–T8: nexus-home-layout, init + materialize_adr014_workspace, creator workspace create, nexus42d cli_config + ADR test fixtures, integration tests, README local layout; legacy flat state.db + migrate command removed (pre-release). T1 SSOT checklist in plan still human (v1-spec via local-paths.json).",
+      "file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
       "metadata": {
-        "description": "Implement operational tree under ~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/, creator workspace subcommands, migration from flat state.db; follow plan tasks + v1-spec via specs_root (local-paths.json).",
-        "spec_refs": [
-          ".agents/plans/knowledge/local-fs-layout-creator-workspace-v1.md"
-        ],
-        "working_branch": "feature/local-fs-layout-paths",
-        "gates": {
-          "tests": "cargo test --all — pass (2026-04-10)",
-          "clippy": "cargo clippy --all -- -D warnings — pass (2026-04-10)",
-          "fmt": "cargo +nightly fmt --all -- --check — pass (2026-04-10)",
-          "validation": "pnpm run validate-schemas — pass (2026-04-10)",
-          "codegen": "pnpm run codegen + git diff generated — clean (2026-04-10)",
-          "typecheck": "pnpm run typecheck — pass (2026-04-10)",
-          "qc_self": "reports/2026-04-10-local-fs-layout-ssot-and-implementation/2026-04-10-local-fs-layout-ssot-and-implementation-qc-self-20260410.md (prior); refresh if policy requires new self-review after merge"
-        }
-      }
+        "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
+      },
+      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
+      "done_at": "2026-04-10"
     }
   ],
   "metadata": {
@@ -404,7 +377,7 @@
       },
       "by_plan": {},
       "severity_note": "v1-tech-debt-cleanup InProgress (long-lived): C+D milestone done 2026-04-10; Batch E (V1.2) remains. Cross-plan codegen residuals PUBLISH-CODEGEN-01 and FORK-SNAP-01 resolved 2026-04-11 (plan 2026-04-11-codegen-ref-resolution). SYNC-AUTH-TOKEN-01 resolved 2026-04-11.",
-      "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings. 2026-04-11: 2026-04-11-codegen-ref-resolution Done row compacted to archived_record (gates/working_branch in archived/plans/2026-04-11-codegen-ref-resolution.json). 2026-04-10: 2026-04-10-v1.1-specs-alignment-remediation Done + archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json. 2026-04-10: 2026-04-10-platform-http-schema-alignment Done + archived/plans/2026-04-10-platform-http-schema-alignment.json."
+      "archival_note": "Hot status.json compaction 2026-04-10: five 2026-04-10 CLI/platform Done rows moved to archived/plans/*.json; stale residual_summary removed where plan id has no open residual_findings. 2026-04-11: 2026-04-11-codegen-ref-resolution Done row compacted to archived_record (gates/working_branch in archived/plans/2026-04-11-codegen-ref-resolution.json). 2026-04-10: 2026-04-10-v1.1-specs-alignment-remediation Done + archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json. 2026-04-10: 2026-04-10-platform-http-schema-alignment Done + archived/plans/2026-04-10-platform-http-schema-alignment.json. 2026-04-14: 2026-04-10-local-fs-layout-ssot-and-implementation compacted to archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json."
     },
     "residual_findings": {}
   }
