@@ -200,6 +200,99 @@ fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
     Ok(())
 }
 
+/// Resolve the active local identity for the current session.
+///
+/// Resolution order:
+/// 1. Check `active_creator_id` from CLI config
+/// 2. If set, verify it exists in local_identities (for persistent) or accept as-is (for anonymous)
+/// 3. If no identity is set, return `None` (caller should prompt to create one)
+///
+/// Returns the resolved identity info or `None` if no identity is configured.
+#[allow(dead_code)]
+pub fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
+    let cli_config = CliConfig::load()?;
+    let creator_id = match &cli_config.active_creator_id {
+        Some(id) => id.clone(),
+        None => return Ok(None),
+    };
+
+    // Check if it's a persistent identity in the DB
+    let conn = open_global_db()?;
+    let row = get_local_identity(&conn, &creator_id)?;
+
+    match row {
+        Some(db_row) => {
+            let identity_type = db_row.identity_type.as_str();
+            Ok(Some(ResolvedIdentity {
+                creator_id,
+                identity_type: identity_type.to_string(),
+                display_name: db_row.display_name,
+                is_anonymous: identity_type == "anonymous",
+                is_persistent: identity_type == "persistent",
+                platform_linked: db_row.platform_linked,
+                platform_creator_id: db_row.platform_creator_id,
+            }))
+        }
+        None => {
+            // The active_creator_id might be a platform creator (from previous session)
+            // or an anonymous identity that wasn't persisted
+            if creator_id.starts_with("ctr_anon") {
+                Ok(Some(ResolvedIdentity {
+                    creator_id,
+                    identity_type: "anonymous".to_string(),
+                    display_name: None,
+                    is_anonymous: true,
+                    is_persistent: false,
+                    platform_linked: false,
+                    platform_creator_id: None,
+                }))
+            } else {
+                // Might be a platform creator ID; return minimal info
+                Ok(Some(ResolvedIdentity {
+                    creator_id,
+                    identity_type: "platform".to_string(),
+                    display_name: None,
+                    is_anonymous: false,
+                    is_persistent: false,
+                    platform_linked: false,
+                    platform_creator_id: None,
+                }))
+            }
+        }
+    }
+}
+
+/// Resolved identity information for the active session.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ResolvedIdentity {
+    pub creator_id: String,
+    pub identity_type: String,
+    pub display_name: Option<String>,
+    pub is_anonymous: bool,
+    pub is_persistent: bool,
+    pub platform_linked: bool,
+    pub platform_creator_id: Option<String>,
+}
+
+impl ResolvedIdentity {
+    /// Check if this is an ephemeral (anonymous) identity.
+    #[allow(dead_code)]
+    pub fn is_ephemeral(&self) -> bool {
+        self.is_anonymous
+    }
+
+    /// Warning message for anonymous identities.
+    #[allow(dead_code)]
+    pub fn ephemeral_warning(&self) -> Option<&'static str> {
+        if self.is_anonymous {
+            Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 identity create --persistent` for a saved identity.")
+        } else {
+            None
+        }
+    }
+}
+
 fn kind_label(kind: &IdentityKindArg) -> &'static str {
     match kind {
         IdentityKindArg::Anonymous => "anonymous",
