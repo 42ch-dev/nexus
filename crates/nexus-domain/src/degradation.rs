@@ -255,6 +255,38 @@ impl DegradationGuard {
         Self::new(DegradationPolicy::default(), initial_mode)
     }
 
+    /// Restore a guard directly from a persisted snapshot.
+    ///
+    /// Sets the degradation state and effective mode without replaying
+    /// failures, avoiding unintended re-degradation (C-001).
+    ///
+    /// The `effective_mode` is computed from `original_mode` by applying
+    /// `state.depth()` downgrades. Cooldown and health-check timestamps
+    /// are intentionally cleared so the system can re-evaluate health.
+    pub fn restore_from_snapshot(
+        snap: &DegradationSnapshot,
+        original_mode: DomainRuntimeMode,
+    ) -> Self {
+        let mut effective_mode = original_mode;
+        for _ in 0..snap.state.depth() {
+            if let Some(downgraded) = effective_mode.downgrade() {
+                effective_mode = downgraded;
+            } else {
+                break;
+            }
+        }
+
+        Self {
+            policy: DegradationPolicy::default(),
+            current_mode: effective_mode,
+            degradation_state: snap.state,
+            failure_count: snap.failure_count,
+            last_failure_time: None,
+            last_health_check: None,
+            last_upgrade_attempt: None,
+        }
+    }
+
     /// Access the current runtime mode (may have been downgraded by degradation).
     pub fn current_mode(&self) -> &DomainRuntimeMode {
         &self.current_mode

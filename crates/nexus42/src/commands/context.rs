@@ -211,19 +211,22 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 /// Create a DegradationGuard from config, restoring from persisted snapshot if available.
 pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
     let mode = config.runtime_mode();
-    let mut guard = DegradationGuard::with_defaults(mode);
 
-    // Restore from persisted snapshot if degradation was previously recorded
+    // If snapshot exists with non-Normal state, restore directly without
+    // replaying failures (avoids unintended re-degradation — C-001).
     if let Some(snap) = config.degradation_snapshot() {
         if snap.state != nexus_domain::degradation::DegradationState::Normal {
-            // Apply the persisted degradation state
-            for _ in 0..snap.failure_count {
-                guard.record_platform_result(false, Some("restored from snapshot".to_string()));
-            }
+            return DegradationGuard::restore_from_snapshot(snap, mode);
         }
+        // Normal state with failures: replay to restore failure_count only
+        let mut guard = DegradationGuard::with_defaults(mode);
+        for _ in 0..snap.failure_count {
+            guard.record_platform_result(false, None);
+        }
+        return guard;
     }
 
-    guard
+    DegradationGuard::with_defaults(mode)
 }
 
 /// Persist degradation guard state to config.
@@ -377,92 +380,29 @@ async fn try_platform_assemble(
     config: &CliConfig,
     _hint: Option<&str>,
 ) -> Option<AssembleResponse> {
-    let daemon = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config);
 
-    // Build a minimal request — platform assemble requires a world_id.
-    // Use a placeholder that will result in a 404/422 if no world is configured,
-    // which is treated as "platform unavailable" for fallback purposes.
-    let request = ContextAssembleRequestV1 {
-        request_id: format!("req_{}", uuid::Uuid::new_v4().simple()),
-        workspace_id: "wrk_default".to_string(),
-        creator_id: config
-            .active_creator_id
-            .clone()
-            .unwrap_or_else(|| "ctr_unknown".to_string()),
-        world_id: "wld_default".to_string(),
-        include_memory: Some(true),
-        include_timeline: Some(false),
-        include_story_summaries: Some(false),
-        memory_kinds: None,
-        max_timeline_events: None,
-        max_story_summaries: None,
-    };
+    // Use call_assemble which sends the request shape the daemon expects
+    // (W-1 fix: ContextClient::assemble sent ContextAssembleRequestV1 causing 422).
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .unwrap_or("ctr_unknown");
+    let runtime_mode_str = config.runtime_mode().to_string();
 
-    let client = ContextClient::new(daemon);
-
-    match client.assemble(&request).await {
-        Ok(response) if is_error(&response) => {
-            tracing::debug!(
-                code = ?error_code(&response),
-                "Platform assemble returned error response"
-            );
+    match client
+        .call_assemble(creator_id, "wrk_default", &runtime_mode_str, _hint)
+        .await
+    {
+        Ok(Some(response)) => Some(response),
+        Ok(None) => {
+            tracing::debug!("Platform assemble returned None (unavailable)");
             None
-        }
-        Ok(response) => {
-            // Convert ContextAssembleResponseV1 to domain AssembleResponse
-            Some(convert_to_domain_response(&response))
         }
         Err(e) => {
             tracing::debug!(error = %e, "Failed to reach daemon for platform assemble");
             None
         }
-    }
-}
-
-/// Convert a ContextAssembleResponseV1 (wire) to a domain AssembleResponse.
-fn convert_to_domain_response(
-    response: &crate::context::types::ContextAssembleResponseV1,
-) -> AssembleResponse {
-    use nexus_domain::context_assembly::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
-
-    let memory_items = response
-        .memory_items
-        .as_ref()
-        .map(|items| {
-            items
-                .iter()
-                .map(|m| MemoryItemRef {
-                    memory_id: m.memory_id.clone(),
-                    content_summary: m.content.clone(),
-                    relevance_score: None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let timeline = response
-        .timeline_events
-        .as_ref()
-        .map(|events| {
-            events
-                .iter()
-                .map(|e| TimelineEventRef {
-                    event_id: e.event_id.clone(),
-                    event_type: e.event_type.clone(),
-                    timestamp: e.occurred_at.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    AssembleResponse {
-        memory_items,
-        kb: Vec::new(), // Wire response doesn't have KB entries yet
-        timeline,
-        metadata: AssembleMetadata {
-            assembled_at: response.assembled_at.clone(),
-            token_count_estimate: None,
-        },
     }
 }
 
@@ -807,10 +747,14 @@ mod tests {
     }
 
     /// create_degradation_guard restores from persisted snapshot.
+    ///
+    /// C-001: For non-Normal state, restoration must NOT replay failures
+    /// (which would trigger unintended re-degradation).
     #[test]
     fn create_guard_restores_from_snapshot() {
         use nexus_domain::degradation::DegradationState;
 
+        // Non-Normal state: should restore directly without replaying failures
         let mut config = CliConfig::default();
         config.runtime_mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
         config.degradation_snapshot = Some(nexus_domain::DegradationSnapshot {
@@ -821,7 +765,23 @@ mod tests {
 
         let guard = create_degradation_guard(&config);
 
-        // Should restore the degraded state
+        // State should be restored directly
+        assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
         assert_eq!(guard.failure_count(), 2);
+        // Mode should be downgraded one level from CloudEnhanced
+        assert_eq!(*guard.current_mode(), DomainRuntimeMode::new(RuntimeMode::LocalFirst));
+
+        // Normal state with failures: should replay to restore failure_count
+        let mut config2 = CliConfig::default();
+        config2.runtime_mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        config2.degradation_snapshot = Some(nexus_domain::DegradationSnapshot {
+            state: DegradationState::Normal,
+            failure_count: 1,
+            last_health_check: None,
+        });
+
+        let guard2 = create_degradation_guard(&config2);
+        assert_eq!(guard2.degradation_state(), DegradationState::Normal);
+        assert_eq!(guard2.failure_count(), 1);
     }
 }
