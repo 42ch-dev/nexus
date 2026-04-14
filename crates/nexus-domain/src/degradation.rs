@@ -119,6 +119,16 @@ impl DegradationState {
     pub fn is_degraded(&self) -> bool {
         !matches!(self, DegradationState::Normal)
     }
+
+    /// Human-readable label for CLI output.
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            DegradationState::Normal => "Normal",
+            DegradationState::DegradedLevel1 => "Degraded (Level 1)",
+            DegradationState::DegradedLevel2 => "Degraded (Level 2)",
+            DegradationState::ForcedLocalOnly => "Forced local_only",
+        }
+    }
 }
 
 impl std::fmt::Display for DegradationState {
@@ -163,6 +173,54 @@ impl HealthCheckResult {
             response_time_ms: None,
             error_message: Some(error.into()),
             checked_at: chrono::Utc::now(),
+        }
+    }
+}
+
+/// Serializable snapshot of degradation guard state for config persistence.
+///
+/// This lightweight struct captures the display-relevant degradation state
+/// and can be stored inline in `config.json` (V1.2 MVP strategy).
+/// It is decoupled from the full [`DegradationGuard`] which holds runtime policy
+/// and mutable state not suitable for simple persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct DegradationSnapshot {
+    /// Current degradation state.
+    pub state: DegradationState,
+    /// Number of consecutive platform failures.
+    pub failure_count: u32,
+    /// Last health check result (if any).
+    pub last_health_check: Option<HealthCheckSnapshot>,
+}
+
+/// Serializable record of a platform health check for config persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct HealthCheckSnapshot {
+    /// Whether the platform responded successfully.
+    pub is_healthy: bool,
+    /// ISO 8601 timestamp of the check.
+    pub checked_at: String,
+}
+
+impl DegradationSnapshot {
+    /// Create a new snapshot with the given state and failure count.
+    pub fn new(state: DegradationState, failure_count: u32) -> Self {
+        Self {
+            state,
+            failure_count,
+            last_health_check: None,
+        }
+    }
+
+    /// Create a snapshot from a live [`DegradationGuard`].
+    pub fn from_guard(guard: &DegradationGuard) -> Self {
+        Self {
+            state: guard.degradation_state(),
+            failure_count: guard.failure_count(),
+            last_health_check: guard.last_health_check().map(|h| HealthCheckSnapshot {
+                is_healthy: h.is_healthy,
+                checked_at: h.checked_at.to_rfc3339(),
+            }),
         }
     }
 }
@@ -732,6 +790,64 @@ mod tests {
         assert_eq!(
             *guard.current_mode(),
             DomainRuntimeMode::new(RuntimeMode::LocalOnly)
+        );
+    }
+
+    // ── DegradationSnapshot tests ──────────────────────────────────────
+
+    #[test]
+    fn snapshot_new_creates_default() {
+        let snap = DegradationSnapshot::new(DegradationState::Normal, 0);
+        assert_eq!(snap.state, DegradationState::Normal);
+        assert_eq!(snap.failure_count, 0);
+        assert!(snap.last_health_check.is_none());
+    }
+
+    #[test]
+    fn snapshot_from_guard_captures_state() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let mut guard = DegradationGuard::with_defaults(mode);
+
+        // Record some failures to get non-trivial state
+        guard.record_platform_result(false, Some("err".into()));
+        guard.record_platform_result(false, Some("err".into()));
+
+        let snap = DegradationSnapshot::from_guard(&guard);
+        assert_eq!(snap.state, DegradationState::Normal); // not yet at threshold
+        assert_eq!(snap.failure_count, 2);
+        assert!(snap.last_health_check.is_some());
+        assert!(!snap.last_health_check.as_ref().unwrap().is_healthy);
+    }
+
+    #[test]
+    fn snapshot_serde_roundtrip() {
+        let mut snap = DegradationSnapshot::new(DegradationState::DegradedLevel1, 3);
+        snap.last_health_check = Some(HealthCheckSnapshot {
+            is_healthy: false,
+            checked_at: "2026-04-15T10:30:00Z".to_string(),
+        });
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: DegradationSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap, back);
+    }
+
+    // ── DegradationState::display_label tests ──────────────────────────
+
+    #[test]
+    fn display_label_returns_human_readable() {
+        assert_eq!(DegradationState::Normal.display_label(), "Normal");
+        assert_eq!(
+            DegradationState::DegradedLevel1.display_label(),
+            "Degraded (Level 1)"
+        );
+        assert_eq!(
+            DegradationState::DegradedLevel2.display_label(),
+            "Degraded (Level 2)"
+        );
+        assert_eq!(
+            DegradationState::ForcedLocalOnly.display_label(),
+            "Forced local_only"
         );
     }
 }
