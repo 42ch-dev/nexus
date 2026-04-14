@@ -51,6 +51,42 @@ impl DomainRuntimeMode {
             .map(Self::new)
             .map_err(DomainError::ValidationError)
     }
+
+    /// Downgrade to a more local-first mode.
+    /// Chain: cloud_enhanced → local_first → local_only
+    /// Returns None if already at local_only (cannot downgrade further).
+    pub fn downgrade(&self) -> Option<DomainRuntimeMode> {
+        match self.0 {
+            RuntimeMode::CloudEnhanced => Some(DomainRuntimeMode(RuntimeMode::LocalFirst)),
+            RuntimeMode::LocalFirst => Some(DomainRuntimeMode(RuntimeMode::LocalOnly)),
+            RuntimeMode::LocalOnly => None,
+        }
+    }
+
+    /// Upgrade to a more cloud-enhanced mode.
+    /// Chain: local_only → local_first → cloud_enhanced
+    /// Returns None if already at cloud_enhanced (cannot upgrade further).
+    pub fn upgrade(&self) -> Option<DomainRuntimeMode> {
+        match self.0 {
+            RuntimeMode::LocalOnly => Some(DomainRuntimeMode(RuntimeMode::LocalFirst)),
+            RuntimeMode::LocalFirst => Some(DomainRuntimeMode(RuntimeMode::CloudEnhanced)),
+            RuntimeMode::CloudEnhanced => None,
+        }
+    }
+
+    /// Calculate degradation depth from a target mode.
+    /// 0 = same mode, 1 = one level down, 2 = two levels down.
+    pub fn degradation_depth_to(&self, target: &DomainRuntimeMode) -> u32 {
+        match (self.0, target.0) {
+            (RuntimeMode::CloudEnhanced, RuntimeMode::CloudEnhanced) => 0,
+            (RuntimeMode::CloudEnhanced, RuntimeMode::LocalFirst) => 1,
+            (RuntimeMode::CloudEnhanced, RuntimeMode::LocalOnly) => 2,
+            (RuntimeMode::LocalFirst, RuntimeMode::LocalFirst) => 0,
+            (RuntimeMode::LocalFirst, RuntimeMode::LocalOnly) => 1,
+            (RuntimeMode::LocalOnly, RuntimeMode::LocalOnly) => 0,
+            _ => 0, // Upgrades or invalid combinations
+        }
+    }
 }
 
 impl fmt::Display for DomainRuntimeMode {
@@ -132,5 +168,81 @@ mod tests {
                 .to_string(),
             "cloud_enhanced"
         );
+    }
+
+    #[test]
+    fn downgrade_chain() {
+        let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let local_first = cloud.downgrade().unwrap();
+        assert_eq!(local_first, DomainRuntimeMode::new(RuntimeMode::LocalFirst));
+
+        let local_only = local_first.downgrade().unwrap();
+        assert_eq!(local_only, DomainRuntimeMode::new(RuntimeMode::LocalOnly));
+
+        // Cannot downgrade from local_only
+        assert!(local_only.downgrade().is_none());
+    }
+
+    #[test]
+    fn upgrade_chain() {
+        let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
+        let local_first = local_only.upgrade().unwrap();
+        assert_eq!(local_first, DomainRuntimeMode::new(RuntimeMode::LocalFirst));
+
+        let cloud = local_first.upgrade().unwrap();
+        assert_eq!(cloud, DomainRuntimeMode::new(RuntimeMode::CloudEnhanced));
+
+        // Cannot upgrade from cloud_enhanced
+        assert!(cloud.upgrade().is_none());
+    }
+
+    #[test]
+    fn downgrade_upgrade_are_inverses() {
+        let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let downgraded = cloud.downgrade().unwrap();
+        let upgraded = downgraded.upgrade().unwrap();
+        assert_eq!(cloud, upgraded);
+
+        let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
+        let upgraded = local_only.upgrade().unwrap();
+        let downgraded = upgraded.downgrade().unwrap();
+        assert_eq!(local_only, downgraded);
+    }
+
+    #[test]
+    fn degradation_depth_same_mode() {
+        for mode_str in ["local_only", "local_first", "cloud_enhanced"] {
+            let mode = DomainRuntimeMode::parse(mode_str).unwrap();
+            assert_eq!(
+                mode.degradation_depth_to(&mode),
+                0,
+                "same mode should have depth 0: {mode_str}"
+            );
+        }
+    }
+
+    #[test]
+    fn degradation_depth_one_level() {
+        let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let local_first = DomainRuntimeMode::new(RuntimeMode::LocalFirst);
+        let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
+
+        assert_eq!(cloud.degradation_depth_to(&local_first), 1);
+        assert_eq!(local_first.degradation_depth_to(&local_only), 1);
+    }
+
+    #[test]
+    fn degradation_depth_two_levels() {
+        let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
+        assert_eq!(cloud.degradation_depth_to(&local_only), 2);
+    }
+
+    #[test]
+    fn degradation_depth_upgrade_returns_zero() {
+        let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
+        let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        // Upgrading (reverse direction) should return 0
+        assert_eq!(local_only.degradation_depth_to(&cloud), 0);
     }
 }
