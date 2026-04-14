@@ -245,4 +245,56 @@ mod tests {
         // Upgrading (reverse direction) should return 0
         assert_eq!(local_only.degradation_depth_to(&cloud), 0);
     }
+
+    // ── T6.9: Mode Switch Test Cases ─────────────────────────────────────
+
+    #[test]
+    fn mode_switch_chain_cloud_to_local_only() {
+        let cloud = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
+        let local_first = cloud.downgrade().unwrap();
+        assert_eq!(local_first.to_string(), "local_first");
+        let local_only = local_first.downgrade().unwrap();
+        assert_eq!(local_only.to_string(), "local_only");
+        assert!(local_only.downgrade().is_none()); // floor
+    }
+
+    #[test]
+    fn mode_upgrade_chain_local_only_to_cloud() {
+        let local_only = DomainRuntimeMode::parse("local_only").unwrap();
+        let local_first = local_only.upgrade().unwrap();
+        assert_eq!(local_first.to_string(), "local_first");
+        let cloud = local_first.upgrade().unwrap();
+        assert_eq!(cloud.to_string(), "cloud_enhanced");
+        assert!(cloud.upgrade().is_none()); // ceiling
+    }
+
+    #[test]
+    fn degradation_depth_calculation() {
+        let cloud = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
+        let local_first = DomainRuntimeMode::parse("local_first").unwrap();
+        let local_only = DomainRuntimeMode::parse("local_only").unwrap();
+
+        assert_eq!(cloud.degradation_depth_to(&cloud), 0);
+        assert_eq!(cloud.degradation_depth_to(&local_first), 1);
+        assert_eq!(cloud.degradation_depth_to(&local_only), 2);
+        assert_eq!(local_first.degradation_depth_to(&local_only), 1);
+    }
+
+    #[test]
+    fn mode_switch_preserves_constraints() {
+        // Cloud enhanced: allows platform + allows LLM
+        let cloud = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
+        assert!(cloud.allows_platform());
+        assert!(cloud.allows_platform_llm());
+
+        // Local first: allows platform, denies LLM
+        let degraded = cloud.downgrade().unwrap();
+        assert!(degraded.allows_platform());
+        assert!(!degraded.allows_platform_llm());
+
+        // Local only: denies both
+        let floor = degraded.downgrade().unwrap();
+        assert!(!floor.allows_platform());
+        assert!(!floor.allows_platform_llm());
+    }
 }

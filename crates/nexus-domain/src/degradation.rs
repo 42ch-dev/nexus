@@ -265,6 +265,11 @@ impl DegradationGuard {
         self.degradation_state
     }
 
+    /// Access the current degradation state (convenience alias).
+    pub fn state(&self) -> DegradationState {
+        self.degradation_state
+    }
+
     /// Access the degradation policy.
     pub fn policy(&self) -> &DegradationPolicy {
         &self.policy
@@ -429,6 +434,12 @@ impl DegradationGuard {
         self.failure_count = 0;
         self.last_failure_time = None;
         self.last_upgrade_attempt = None;
+    }
+
+    /// Set degradation state directly for testing purposes.
+    #[cfg(test)]
+    pub(crate) fn set_state_for_testing(&mut self, state: DegradationState) {
+        self.degradation_state = state;
     }
 
     fn update_health_check(
@@ -849,5 +860,82 @@ mod tests {
             DegradationState::ForcedLocalOnly.display_label(),
             "Forced local_only"
         );
+    }
+
+    // ── T6.10: Degradation Behavior Tests ────────────────────────────────
+
+    #[test]
+    fn degradation_guard_triggers_after_threshold() {
+        let policy = DegradationPolicy {
+            failure_threshold: 3,
+            failure_window_secs: 60,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        // Record 3 failures within window
+        guard.record_platform_result(false, Some("timeout".into()));
+        guard.record_platform_result(false, Some("timeout".into()));
+        guard.record_platform_result(false, Some("timeout".into()));
+
+        assert_eq!(guard.state(), DegradationState::DegradedLevel1);
+        assert_eq!(guard.current_mode().to_string(), "local_first");
+    }
+
+    #[test]
+    fn degradation_reset_after_success() {
+        let policy = DegradationPolicy {
+            failure_threshold: 2,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        guard.record_platform_result(false, Some("err".into()));
+        guard.record_platform_result(false, Some("err".into()));
+        assert_eq!(guard.state(), DegradationState::DegradedLevel1);
+
+        // Success resets failure count
+        guard.record_platform_result(true, None);
+        assert_eq!(guard.failure_count(), 0);
+    }
+
+    #[test]
+    fn upgrade_blocked_without_cooldown() {
+        // When cooldown is 0, upgrade is blocked if no healthy platform check
+        let policy = DegradationPolicy {
+            upgrade_cooldown_secs: 0,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("local_first").unwrap());
+        guard.set_state_for_testing(DegradationState::DegradedLevel1);
+
+        // Try upgrade without healthy check - blocked
+        // (upgrade_cooldown_secs is 0 but last_upgrade_attempt is None, so this passes)
+        // Then it checks last_health_check which is None - so no upgrade
+        // Actually with cooldown=0, the upgrade will proceed if health is healthy
+        // Since we haven't recorded a health check, last_health_check is None
+        // and the upgrade fails because platform is not confirmed healthy
+        assert!(!guard.try_upgrade());
+    }
+
+    #[test]
+    fn max_degradation_depth_respects_policy() {
+        let policy = DegradationPolicy {
+            max_degradation_depth: 1, // Only one level allowed
+            failure_threshold: 1,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        guard.record_platform_result(false, Some("err".into()));
+        assert_eq!(guard.state(), DegradationState::DegradedLevel1);
+
+        // Cannot degrade further (policy depth = 1)
+        guard.record_platform_result(false, Some("err".into()));
+        assert_ne!(guard.state(), DegradationState::DegradedLevel2); // stays at level 1
     }
 }
