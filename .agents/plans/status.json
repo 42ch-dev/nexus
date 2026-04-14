@@ -1,45 +1,783 @@
 {
-  "id": "2026-04-14-v1.2-local-only-runtime",
-  "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
-  "file": ".agents/plans/2026-04-14-v1.2-local-only-runtime.md",
-  "status": "InReview",
-  "owner": "@project-manager",
-  "agents": [
-    "@fullstack-dev"
-  ],
-  "progress": 100,
-  "tags": [
-    "v1.2",
-    "implementation",
-    "ws2",
-    "runtime",
-    "milestone-m1"
-  ],
-  "created_at": "2026-04-14",
+  "version": 1,
   "updated_at": "2026-04-14",
-  "notes": "WS2b: Runtime mode behavior, constraints enforcement, minimal runnable CLI flow with fallback rules. Depends on WS2a identity.",
+  "plans": [
+    {
+      "id": "2025-04-05-monorepo-structure",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-monorepo-structure.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-monorepo-structure.json"
+      },
+      "title": "Monorepo Structure Implementation",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-json-schema-foundation",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-json-schema-foundation.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-json-schema-foundation.json"
+      },
+      "title": "JSON Schema Foundation",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-codegen-pipeline",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-codegen-pipeline.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-codegen-pipeline.json"
+      },
+      "title": "Codegen Pipeline",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-domain-models",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-domain-models.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-domain-models.json"
+      },
+      "title": "Domain Models Implementation",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-cli-daemon-foundation",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-cli-daemon-foundation.json"
+      },
+      "title": "CLI + Daemon Foundation",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-sync-contract",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-sync-contract.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-sync-contract.json"
+      },
+      "title": "Sync Contract Implementation",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-acp-client",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-acp-client.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-acp-client.json"
+      },
+      "title": "ACP Client Integration",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2025-04-05-context-assembly",
+      "status": "Done",
+      "file": ".agents/plans/2025-04-05-context-assembly.md",
+      "metadata": {
+        "archived_record": "archived/plans/2025-04-05-context-assembly.json"
+      },
+      "title": "Context Assembly Basic",
+      "done_at": "2026-04-06"
+    },
+    {
+      "id": "2026-04-06-foundation-hardening",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-06-foundation-hardening.json"
+      },
+      "title": "Foundation Hardening",
+      "done_at": "2026-04-07"
+    },
+    {
+      "id": "2026-04-06-acp-sdk-bridge",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-06-acp-sdk-bridge.json"
+      },
+      "title": "ACP SDK Bridge Implementation",
+      "done_at": "2026-04-07"
+    },
+    {
+      "id": "2026-04-06-daemon-manuscript-ops",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-06-daemon-manuscript-ops.json"
+      },
+      "title": "Daemon + Manuscript Operations",
+      "done_at": "2026-04-07"
+    },
+    {
+      "id": "2026-04-06-auth-flow",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-06-auth-flow.json"
+      },
+      "title": "Auth Flow Completion",
+      "done_at": "2026-04-07"
+    },
+    {
+      "id": "2026-04-06-codegen-alignment",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-06-codegen-alignment.json"
+      },
+      "title": "Codegen & Contract Alignment",
+      "done_at": "2026-04-07"
+    },
+    {
+      "id": "2026-04-07-json-schema-update-phase2",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-07-json-schema-update-phase2.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-07-json-schema-update-phase2.json"
+      },
+      "title": "JSON Schema Update for V1.0-phase2 Alignment",
+      "done_at": "2026-04-08"
+    },
+    {
+      "id": "2026-04-08-v1.1-tech-debt-mitigation",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-08-v1.1-tech-debt-mitigation.json"
+      },
+      "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
+      "done_at": "2026-04-09"
+    },
+    {
+      "id": "2026-04-09-v1.1-arch-alignment-blockers",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json"
+      },
+      "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
+      "done_at": "2026-04-09"
+    },
+    {
+      "id": "2026-04-09-v1.1-arch-alignment-closure",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-closure.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-closure.json"
+      },
+      "title": "V1.1 Architecture Alignment \u2014 Final Closure",
+      "done_at": "2026-04-09"
+    },
+    {
+      "id": "2026-04-09-v1.1-cli-daemon-hardening",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-09-v1.1-cli-daemon-hardening.json"
+      },
+      "title": "CLI/Daemon Reliability Hardening",
+      "done_at": "2026-04-08"
+    },
+    {
+      "id": "2026-04-09-v1.1-context-assembly-enhancement",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-09-v1.1-context-assembly-enhancement.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-09-v1.1-context-assembly-enhancement.json"
+      },
+      "title": "Context Assembly Enhancement (V1.1 Safety & Validation)",
+      "done_at": "2026-04-08"
+    },
+    {
+      "id": "2026-04-09-v1.1-acp-ux-permissions",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-09-v1.1-acp-ux-permissions.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-09-v1.1-acp-ux-permissions.json"
+      },
+      "title": "ACP UX & Permission Policy",
+      "done_at": "2026-04-08"
+    },
+    {
+      "id": "v1-tech-debt-cleanup",
+      "title": "V1 Tech Debt Cleanup (Long-term)",
+      "file": ".agents/plans/v1-tech-debt-cleanup.md",
+      "status": "InProgress",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 80,
+      "tags": [
+        "v1.1",
+        "v1.2",
+        "tech-debt",
+        "quality",
+        "long-term"
+      ],
+      "created_at": "2026-04-09",
+      "updated_at": "2026-04-11",
+      "notes": "Long-lived plan: milestones A\u2013D delivered (C+D closed 2026-04-10). Remains open for V1.x backfill \u2014 Batch E (TD-11, TD-13) on V1.2 schedule and deferred D follow-ups (daemon FSM, outbox merge, real OAuth per knowledge/). C+D point-in-time snapshot: archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json.",
+      "metadata": {
+        "phase": "Batch E next (V1.2 track); same plan id \u2014 not Done after D",
+        "priority": "low",
+        "description": "Long-term tech debt across V1.x (including V1.2). A\u2013D batches complete; E and knowledge-documented deferrals remain in-scope under this plan until explicitly retired.",
+        "residual_target": "Batch E TD-11/TD-13 (V1.2 track)",
+        "effort": "L \u2014 ongoing lowest-priority backfill",
+        "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
+        "batch_status": {
+          "batch_a": "completed",
+          "batch_b": "completed",
+          "batch_c": "completed \u2014 2026-04-10",
+          "batch_d": "completed \u2014 2026-04-10",
+          "batch_e": "pending \u2014 TD-11, TD-13 (V1.2 schedule; same plan)"
+        },
+        "gates": {
+          "tests": "last verified \u2014 cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
+          "clippy": "passed",
+          "fmt": "passed",
+          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure); reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md (PUBLISH-CODEGEN-01 / FORK-SNAP-01 closure)"
+        },
+        "workstream": "WS5",
+        "milestone": "parallel (non-blocking for M3)",
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md"
+      }
+    },
+    {
+      "id": "2026-04-08-local-db-refactor",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-08-local-db-refactor.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
+      },
+      "title": "Local DB Refactor \u2014 Single Ownership Module",
+      "done_at": "2026-04-08"
+    },
+    {
+      "id": "2026-04-10-cli-sync-bidirectional-parity",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-cli-sync-bidirectional-parity.json"
+      },
+      "title": "CLI Bidirectional Sync Parity (platform sync)",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-cli-fork-world-snapshot-parity",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-cli-fork-world-snapshot-parity.json"
+      },
+      "title": "CLI Fork & World Snapshot Parity",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-v1-spec-wire-schema-sprint",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
+      },
+      "title": "V1-Spec Wire Schema Sprint \u2014 Platform Contract Unblock",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-cli-explore-read-parity",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-cli-explore-read-parity.json"
+      },
+      "title": "CLI Explore (Read) Parity",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-cli-publish-workflow-parity",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-cli-publish-workflow-parity.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-cli-publish-workflow-parity.json"
+      },
+      "title": "CLI Publish Workflow Parity",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-explore-creator-card-field-gap",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-explore-creator-card-field-gap.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-explore-creator-card-field-gap.json"
+      },
+      "title": "ExploreCreatorCard Schema Field Gap Fix",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-11-codegen-ref-resolution",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-11-codegen-ref-resolution.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-11-codegen-ref-resolution.json"
+      },
+      "title": "Codegen $ref resolution (common IDs + whole-schema refs)",
+      "done_at": "2026-04-11"
+    },
+    {
+      "id": "2026-04-10-v1.1-specs-alignment-remediation",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-v1.1-specs-alignment-remediation.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json"
+      },
+      "title": "v1.1 Specs Alignment Remediation (entitlements wire + knowledge refresh)",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-platform-http-schema-alignment",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-platform-http-schema-alignment.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-platform-http-schema-alignment.json"
+      },
+      "title": "Platform HTTP request schema alignment (publish / fork / snapshot)",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-10-local-fs-layout-ssot-and-implementation",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
+      },
+      "title": "Local FS layout (ADR-014) \u2014 CLI/daemon paths & creator workspace",
+      "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-14-v1.2-reclassification-baseline",
+      "title": "V1.2 WS1: Version Reclassification Baseline",
+      "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@product-manager"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.2",
+        "planning",
+        "ws1",
+        "milestone-m1"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "done_at": "2026-04-14",
+      "notes": "WS1 done. Reclassification matrix (knowledge/v1.2-reclassification-matrix-v1.md) committed with version-tagging rules and blocking map. QC skipped \u2014 product-docs only.",
+      "metadata": {
+        "phase": "Done",
+        "priority": "high",
+        "workstream": "WS1",
+        "milestone": "M1",
+        "dependency": [],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Reclassification matrix, blocking/non-blocking map, version-tagging rules for future plan rows",
+        "deliverables": [
+          "knowledge/v1.2-reclassification-matrix-v1.md",
+          "knowledge/README.md updated",
+          "Plan Tasks section updated"
+        ],
+        "qc": "skipped \u2014 product-docs only",
+        "qa": "skipped \u2014 product-docs only",
+        "effort": "M \u2014 PM + product analysis; ~2 agent sessions",
+        "commits": "4a23c6d docs(plan): add V1.2 reclassification matrix \u2014 WS1 deliverable"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-local-only-identity",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-only-identity.json",
+        "residual_summary": "7 open residuals"
+      },
+      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "done_at": "2026-04-14"
+    },
+    {
+      "id": "2026-04-14-v1.2-local-only-runtime",
+      "status": "Done",
+      "file": ".agents/plans/2026-04-14-v1.2-local-only-runtime.md",
+      "metadata": {
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-only-runtime.json",
+        "residual_summary": "2 open residuals"
+      },
+      "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
+      "done_at": "2026-04-14"
+    },
+    {
+      "id": "2026-04-14-v1.2-soul-lifecycle",
+      "title": "V1.2 WS3a: Local SOUL Lifecycle",
+      "file": ".agents/plans/2026-04-14-v1.2-soul-lifecycle.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws3",
+        "soul",
+        "milestone-m2"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS3a: Local SOUL lifecycle as foundation of the local truth pipeline. Depends on M1 (WS2b).",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS3",
+        "milestone": "M2",
+        "dependency": [
+          "2026-04-14-v1.2-local-only-runtime"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "SOUL lifecycle implementation \u2014 creation, accumulation, retrieval as local source-of-truth; state transitions and data ownership",
+        "deliverables": [
+          "SOUL lifecycle path implementation",
+          "State transition definitions",
+          "Data ownership notes"
+        ],
+        "acceptance_evidence": [
+          "Scenario regression: SOUL create \u2192 accumulate \u2192 retrieve",
+          "Deterministic behavior checks"
+        ],
+        "effort": "L \u2014 SOUL model + lifecycle + tests; ~3-4 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-local-memory-pipeline",
+      "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
+      "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws3",
+        "memory",
+        "kb",
+        "milestone-m2"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS3b: Long-term memory + KB load + output generation as local source-of-truth chain. Depends on WS3a (SOUL).",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS3",
+        "milestone": "M2",
+        "dependency": [
+          "2026-04-14-v1.2-soul-lifecycle"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Local long-term memory, KB load, output generation \u2014 completing the local truth chain from SOUL through to user-facing output",
+        "deliverables": [
+          "Long-term memory lifecycle implementation",
+          "KB load and query implementation",
+          "Output generation pipeline",
+          "Integration with SOUL lifecycle"
+        ],
+        "acceptance_evidence": [
+          "R3: local truth core chain regression (SOUL/memory/KB/output)",
+          "Scenario regression: create \u2192 accumulate \u2192 retrieve \u2192 output"
+        ],
+        "effort": "XL \u2014 memory + KB + output integration; ~5-6 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-runtime-compatibility",
+      "title": "V1.2 WS4: Runtime Compatibility (local_first/cloud_enhanced)",
+      "file": ".agents/plans/2026-04-14-v1.2-runtime-compatibility.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws4",
+        "compatibility",
+        "milestone-m2"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS4: Switchable/runnable/degradable local_first + cloud_enhanced mode in V1.2 (no V1.3 optimization gates). Parallel with WS3.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "medium",
+        "workstream": "WS4",
+        "milestone": "M2",
+        "dependency": [
+          "2026-04-14-v1.2-local-only-runtime"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Mode switch rules, degradation behavior spec for platform unavailable states, no mandatory performance/accuracy threshold in V1.2",
+        "deliverables": [
+          "Mode switch implementation",
+          "Degradation behavior for platform unavailable",
+          "Fallback path validation"
+        ],
+        "acceptance_evidence": [
+          "R4: mode switch and degradation regression (local_first/cloud_enhanced fallback)"
+        ],
+        "effort": "M \u2014 mode switch + degradation + tests; ~2-3 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-regression-suite",
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1\u2013R5)",
+      "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "testing",
+        "regression",
+        "milestone-m3",
+        "release-gate"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "M3 gate: Implement minimum automated regression set (R1\u2013R5) as V1.2 hard release gate. Depends on M2 completion.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "M3-gate",
+        "milestone": "M3",
+        "dependency": [
+          "2026-04-14-v1.2-local-memory-pipeline",
+          "2026-04-14-v1.2-runtime-compatibility"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Minimum automated regression set \u2014 R1 (anonymous identity e2e), R2 (persistent identity e2e), R3 (local truth chain), R4 (mode switch/degradation), R5 (no-platform guard)",
+        "deliverables": [
+          "R1\u2013R5 automated test implementations",
+          "CI integration for regression gate",
+          "Regression gate documentation"
+        ],
+        "acceptance_evidence": [
+          "All R1\u2013R5 pass in automated run",
+          "CI pipeline green on regression suite"
+        ],
+        "effort": "L \u2014 5 regression scenarios + CI + docs; ~3-4 agent sessions"
+      }
+    }
+  ],
   "metadata": {
-    "phase": "InReview",
-    "priority": "high",
-    "workstream": "WS2",
-    "milestone": "M1",
-    "dependency": [
-      "2026-04-14-v1.2-local-only-identity"
-    ],
-    "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-    "scope": "Runtime mode behavior and constraints, minimal runnable flow, fallback rules, no-platform guard enforcement",
-    "deliverables": [
-      "Runtime mode enforcement implementation",
-      "Minimal runnable CLI flow without platform hard dependency",
-      "Fallback rules for prohibited platform paths"
-    ],
-    "acceptance_evidence": [
-      "R5: no-platform dependency guard for local_only path",
-      "End-to-end CLI scenario runs without platform"
-    ],
-    "effort": "L — runtime wiring + guards + tests; ~3-4 agent sessions",
-    "working_branch": "feature/v1.2-ws2b-runtime",
-    "merge_target": "feature/v1.2"
+    "versioning": {
+      "phase_1_branch_prefix": "feature/v1.0-",
+      "phase_2_branch_prefix": "feature/v2.0-"
+    },
+    "tech_debt_summary": {
+      "updated_at": "2026-04-10T18:00:00Z",
+      "total_open": 7,
+      "by_severity": {
+        "critical": 0,
+        "high": 0,
+        "medium": 1,
+        "low": 4,
+        "nit": 2
+      },
+      "by_target": {
+        "V1.0": 0,
+        "V1.1": 0,
+        "V1.2": 7
+      },
+      "by_plan": {
+        "2026-04-14-v1.2-local-only-identity": 7
+      }
+    },
+    "residual_findings": {
+      "2026-04-14-v1.2-local-only-identity": [
+        {
+          "id": "R1",
+          "title": "CLI test coverage gap \u2014 only 1 trivial test for identity commands",
+          "severity": "medium",
+          "source": "QC-#1 (W4), QC-#3 (S1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.2 M1 \u2014 supplement during WS2b integration or T3 QA",
+          "tracking": "T3 QA verification"
+        },
+        {
+          "id": "R2",
+          "title": "resolve_active_identity is dead code \u2014 #[allow(dead_code)]",
+          "severity": "low",
+          "source": "QC-#1 (W3), QC-#2 (W4), QC-#3 (W1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) \u2014 wire into runtime identity resolution",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R3",
+          "title": "display_name has no empty/whitespace validation",
+          "severity": "low",
+          "source": "QC-#1 (W5)",
+          "scope": "schemas/domain/local-identity.schema.json, crates/nexus-domain/src/local_identity.rs",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Low priority \u2014 add minLength:1 to schema and domain validation",
+          "tracking": null
+        },
+        {
+          "id": "R4",
+          "title": "use_identity vs resolve_active_identity behavioral inconsistency for anonymous IDs",
+          "severity": "low",
+          "source": "QC-#2 (W4), QC-#3 (W1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) \u2014 unify identity resolution paths",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R5",
+          "title": "UUID v4 vs counter-based ID generation \u2014 no spec requirement for ordering",
+          "severity": "nit",
+          "source": "QC-#3 (W3)",
+          "scope": "crates/nexus-domain/src/local_identity.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "UUID v4 is collision-safe; counter not required by spec",
+          "tracking": null
+        },
+        {
+          "id": "R6",
+          "title": "ResolvedIdentity uses raw String for identity_type instead of LocalIdentityType enum",
+          "severity": "low",
+          "source": "QC-#1 (S4)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) \u2014 refactor when wiring resolve_active_identity",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R7",
+          "title": "thiserror alignment \u2014 LocalDbError uses manual Display/Error vs domain thiserror",
+          "severity": "nit",
+          "source": "QC-#1 (S1)",
+          "scope": "crates/nexus-local-db/src/error.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "Style improvement \u2014 no functional impact",
+          "tracking": null
+        }
+      ],
+      "2026-04-14-v1.2-local-only-runtime": [
+        {
+          "id": "R3",
+          "title": "Daemon mode staleness after CLI config change",
+          "severity": "low",
+          "source": "QC-1, QC-2, QC-3",
+          "scope": "crates/nexus42d/src/workspace/mod.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "T6 (WS4: runtime compatibility)",
+          "tracking": null
+        },
+        {
+          "id": "R4",
+          "title": "classify_operation fail-open default for unknown ops",
+          "severity": "nit",
+          "source": "QC-2",
+          "scope": "crates/nexus-domain/src/runtime_guard.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target": "V1.3+",
+          "tracking": null
+        }
+      ]
+    },
+    "v1.2_program": {
+      "compass": "knowledge/v1.2-delivery-compass-v1.md",
+      "status": "planned",
+      "workstreams": {
+        "WS1": "2026-04-14-v1.2-reclassification-baseline",
+        "WS2": [
+          "2026-04-14-v1.2-local-only-identity",
+          "2026-04-14-v1.2-local-only-runtime"
+        ],
+        "WS3": [
+          "2026-04-14-v1.2-soul-lifecycle",
+          "2026-04-14-v1.2-local-memory-pipeline"
+        ],
+        "WS4": "2026-04-14-v1.2-runtime-compatibility",
+        "WS5": "v1-tech-debt-cleanup (Batch E)"
+      },
+      "milestones": {
+        "M1": {
+          "label": "Reclassification + minimal local path runnable",
+          "plans": [
+            "2026-04-14-v1.2-reclassification-baseline",
+            "2026-04-14-v1.2-local-only-identity",
+            "2026-04-14-v1.2-local-only-runtime"
+          ],
+          "entry": "scope lock confirmed; version reclassification baseline drafted",
+          "exit": "legacy items mapped to V1.2~V1.4/Backlog; local_only dual identity minimal flow runnable"
+        },
+        "M2": {
+          "label": "Local truth pipeline complete",
+          "plans": [
+            "2026-04-14-v1.2-soul-lifecycle",
+            "2026-04-14-v1.2-local-memory-pipeline",
+            "2026-04-14-v1.2-runtime-compatibility"
+          ],
+          "entry": "M1 done",
+          "exit": "local SOUL/memory/KB/output path integrated; mode switch and degradation behavior at V1.2 target level"
+        },
+        "M3": {
+          "label": "Release pre-gate",
+          "plans": [
+            "2026-04-14-v1.2-regression-suite"
+          ],
+          "entry": "M2 done",
+          "exit": "minimum automated regression set (R1\u2013R5) passes; Batch E tracked as parallel non-blocking lane"
+        }
+      },
+      "regression_gate": {
+        "R1": "local_only anonymous/temporary identity end-to-end",
+        "R2": "local_only local persistent identity end-to-end",
+        "R3": "local truth core chain regression (SOUL/memory/KB/output)",
+        "R4": "mode switch and degradation regression (local_first/cloud_enhanced fallback)",
+        "R5": "no-platform dependency guard for local_only path"
+      },
+      "created_at": "2026-04-14"
+    }
   }
 }
