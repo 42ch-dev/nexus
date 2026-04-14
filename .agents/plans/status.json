@@ -510,7 +510,7 @@
         "@fullstack-dev",
         "@fullstack-dev-2"
       ],
-      "progress": 10,
+      "progress": 33,
       "tags": [
         "v1.2",
         "implementation",
@@ -519,8 +519,8 @@
         "milestone-m2"
       ],
       "created_at": "2026-04-14",
-      "updated_at": "2026-04-15",
-      "notes": "Phase 1: T6.1-T6.3 done (domain model + guard + downgrade/upgrade). T6.4+ pending.",
+      "updated_at": "2026-04-15T00:00:00Z",
+      "notes": "T6.1-T6.4 (Phase 1) complete. T6.4 commit: 765b11a.",
       "metadata": {
         "phase": "implement",
         "priority": "medium",
