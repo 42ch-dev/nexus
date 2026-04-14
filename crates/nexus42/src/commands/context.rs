@@ -7,6 +7,7 @@ use crate::context::types::ContextAssembleRequestV1;
 use crate::context::types::{error_code, error_message, is_error, MemoryKind};
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_domain::runtime_guard;
 
 /// Validate WorldId format: must start with 'wld_' followed by alphanumeric characters
 pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
@@ -97,6 +98,9 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             max_file_size,
             output_file,
         } => {
+            // Guard: context assemble requires platform (ADR-017 D5)
+            runtime_guard::require_platform(&config.runtime_mode(), "context assemble")?;
+
             // Resolve workspace_id and creator_id from config if not provided
             let workspace_id = workspace_id.unwrap_or_else(|| {
                 config

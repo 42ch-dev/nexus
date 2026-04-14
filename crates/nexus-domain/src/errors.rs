@@ -95,6 +95,11 @@ pub enum DomainError {
     /// Unknown or invalid local identity type string.
     #[error("invalid identity type: {0}")]
     InvalidIdentityType(String),
+
+    // ── Runtime mode errors ───────────────────────────────────────────
+    /// Operation requires platform connectivity but current mode prohibits it.
+    #[error("operation '{operation}' is not available in {mode} mode")]
+    PlatformOperationProhibited { mode: String, operation: String },
 }
 
 #[cfg(test)]
@@ -275,5 +280,18 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("invalid identity type"), "msg: {msg}");
         assert!(msg.contains("bogus_type"), "msg: {msg}");
+    }
+
+    #[test]
+    fn test_display_platform_operation_prohibited() {
+        let err = DomainError::PlatformOperationProhibited {
+            mode: "local_only".to_string(),
+            operation: "sync".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not available in local_only mode"),
+            "msg: {msg}"
+        );
     }
 }
