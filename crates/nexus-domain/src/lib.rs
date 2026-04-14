@@ -36,6 +36,9 @@ pub mod world_membership;
 // Re-export error types
 pub use errors::DomainError;
 
+// Re-export validation helpers
+pub use local_identity::is_valid_creator_id;
+
 // Re-export common types from nexus-contracts
 pub use nexus_contracts::{
     BlockType, BundleType, CreatorId, KeyBlockId, ManuscriptPhase, MemoryType, TimePolicy,

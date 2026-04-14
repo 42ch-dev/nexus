@@ -10,6 +10,7 @@ use crate::config::{self, CliConfig};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_domain::local_identity::LocalIdentity;
+use nexus_domain::{is_valid_creator_id, DomainError};
 use nexus_local_db::{
     create_local_identity, get_local_identity, link_to_platform, list_local_identities, RuntimeRole,
 };
@@ -202,6 +203,14 @@ fn use_identity(creator_id: String) -> Result<()> {
 
 /// Link a local identity to a platform Creator.
 fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
+    if !is_valid_creator_id(&platform_id) {
+        return Err(DomainError::InvalidIdFormat(format!(
+            "platform_id '{}' does not match CreatorId pattern (expected: ctr_ followed by alphanumeric characters)",
+            platform_id
+        ))
+        .into());
+    }
+
     let conn = open_global_db()?;
     link_to_platform(&conn, &creator_id, &platform_id)?;
 
@@ -317,5 +326,14 @@ mod tests {
     fn test_kind_label() {
         assert_eq!(kind_label(&IdentityKindArg::Anonymous), "anonymous");
         assert_eq!(kind_label(&IdentityKindArg::Persistent), "persistent");
+    }
+
+    #[test]
+    fn test_link_identity_rejects_invalid_platform_id() {
+        // Verify that invalid platform IDs are caught before DB call
+        assert!(!is_valid_creator_id("invalid_id"));
+        assert!(!is_valid_creator_id("ctr_"));
+        assert!(!is_valid_creator_id("ctr_abc_def"));
+        assert!(is_valid_creator_id("ctr_Platform123"));
     }
 }

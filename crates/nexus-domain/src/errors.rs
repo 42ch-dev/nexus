@@ -91,6 +91,10 @@ pub enum DomainError {
     #[allow(dead_code)]
     #[error("invalid ID format: {0}")]
     InvalidIdFormat(String),
+
+    /// Unknown or invalid local identity type string.
+    #[error("invalid identity type: {0}")]
+    InvalidIdentityType(String),
 }
 
 #[cfg(test)]
@@ -263,5 +267,13 @@ mod tests {
         let err = DomainError::InvalidIdFormat("missing prefix".to_string());
         let msg = err.to_string();
         assert!(msg.contains("invalid ID format"), "msg: {msg}");
+    }
+
+    #[test]
+    fn test_display_invalid_identity_type() {
+        let err = DomainError::InvalidIdentityType("bogus_type".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("invalid identity type"), "msg: {msg}");
+        assert!(msg.contains("bogus_type"), "msg: {msg}");
     }
 }
