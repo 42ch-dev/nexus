@@ -21,6 +21,7 @@ export * from './Creator';
 export * from './Delta';
 export * from './ForkBranch';
 export * from './KeyBlock';
+export * from './LocalIdentity';
 export * from './ManuscriptState';
 export * from './Memory';
 export * from './OutboxEntry';
@@ -81,6 +82,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   Delta: 1,
   ForkBranch: 1,
   KeyBlock: 1,
+  LocalIdentity: 1,
   ManuscriptState: 1,
   Memory: 1,
   OutboxEntry: 1,
