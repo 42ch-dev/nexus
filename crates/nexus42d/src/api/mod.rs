@@ -21,6 +21,10 @@
 //! - POST /v1/local/acp/tool/execute — ACP tool execution (daemon-mediated)
 //! - GET  /v1/local/acp/sessions     — List ACP sessions
 //! - DELETE /v1/local/acp/sessions/{id} — Delete an ACP session
+//! - POST /v1/local/memory/pending-review — Create pending review entry (session-end capture)
+//! - GET  /v1/local/memory/pending-review — List pending reviews for creator
+//! - GET  /v1/local/memory/pending-review/count — Count pending reviews
+//! - DELETE /v1/local/memory/pending-review/{id} — Delete pending review
 
 pub mod auth_middleware;
 pub mod errors;
@@ -147,6 +151,25 @@ pub fn create_router(state: WorkspaceState) -> Router {
             axum::routing::delete(handlers::sessions::delete_session),
         );
 
+    // Memory pending review routes (unguarded — for session-end capture)
+    let memory_routes = Router::new()
+        .route(
+            "/v1/local/memory/pending-review",
+            post(handlers::memory::create_pending_review),
+        )
+        .route(
+            "/v1/local/memory/pending-review",
+            get(handlers::memory::list_pending_reviews),
+        )
+        .route(
+            "/v1/local/memory/pending-review/count",
+            get(handlers::memory::count_pending_reviews),
+        )
+        .route(
+            "/v1/local/memory/pending-review/{id}",
+            axum::routing::delete(handlers::memory::delete_pending_review),
+        );
+
     Router::new()
         .merge(runtime_routes)
         .merge(monitoring_routes)
@@ -162,6 +185,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(publish_routes)
         .merge(acp_routes)
         .merge(session_routes)
+        .merge(memory_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

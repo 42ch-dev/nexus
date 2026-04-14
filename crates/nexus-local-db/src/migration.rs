@@ -48,6 +48,16 @@ fn migrate_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Migration: add memory_pending_review and memory_fragments tables (V1.2 — memory pipeline).
+///
+/// Creates the two tables for session-end review queue and memory fragments.
+/// See creator-memory-soul-lifecycle-v1.md §6.2 and §7.2.
+fn migrate_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(crate::schema::MEMORY_PENDING_REVIEW_TABLE)?;
+    conn.execute_batch(crate::schema::MEMORY_FRAGMENTS_TABLE)?;
+    Ok(())
+}
+
 /// Registry of all migrations, sorted by version
 ///
 /// Migrations are executed in order from lowest to highest version.
@@ -61,6 +71,10 @@ pub fn get_migrations() -> Vec<Migration> {
         Migration {
             version: 3,
             up: migrate_v3,
+        },
+        Migration {
+            version: 4,
+            up: migrate_v4,
         },
     ]
 }
@@ -255,16 +269,17 @@ mod tests {
     #[test]
     fn get_migrations_returns_ordered_vec() {
         let migrations = get_migrations();
-        assert!(migrations.len() >= 2);
+        assert!(migrations.len() >= 3);
         assert_eq!(migrations[0].version, 2);
         assert_eq!(migrations[1].version, 3);
+        assert_eq!(migrations[2].version, 4);
     }
 
     #[test]
     fn migration_registry_can_be_extended() {
         // This test demonstrates that migrations can be added to registry
         let migrations = get_migrations();
-        assert!(migrations.len() >= 2);
+        assert!(migrations.len() >= 3);
 
         // When migrations are added, they should be sorted by version
         // (not tested here since registry has one entry, but documented)
