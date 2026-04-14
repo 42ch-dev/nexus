@@ -141,6 +141,22 @@ CREATE TABLE IF NOT EXISTS acp_sessions (
 );
 "#;
 
+/// Local identities — stores local-only creator identities (anonymous and persistent).
+///
+/// Used in `local_only` mode (ADR-017) for identities that do not require platform registration.
+/// Anonymous identities are ephemeral; persistent identities survive restarts.
+/// All identities use `ctr_` prefix IDs matching the CreatorId pattern.
+pub const LOCAL_IDENTITIES_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS local_identities (
+    creator_id TEXT PRIMARY KEY,
+    identity_type TEXT NOT NULL,
+    display_name TEXT,
+    created_at TEXT NOT NULL,
+    platform_linked INTEGER NOT NULL DEFAULT 0,
+    platform_creator_id TEXT
+);
+"#;
+
 /// Initialize shared tables (used by both CLI and daemon).
 ///
 /// Creates the three shared tables with `IF NOT EXISTS` for idempotency.
@@ -149,6 +165,7 @@ pub fn init_shared_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
     conn.execute_batch(WORKSPACE_META_TABLE)?;
     conn.execute_batch(CREATORS_TABLE)?;
     conn.execute_batch(REFERENCE_SOURCES_TABLE)?;
+    conn.execute_batch(LOCAL_IDENTITIES_TABLE)?;
     Ok(())
 }
 
@@ -240,6 +257,7 @@ mod tests {
         assert!(tables.contains(&"workspace_meta".to_string()));
         assert!(tables.contains(&"creators".to_string()));
         assert!(tables.contains(&"reference_sources".to_string()));
+        assert!(tables.contains(&"local_identities".to_string()));
     }
 
     #[test]
@@ -272,6 +290,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(content, Some("Extracted text".to_string()));
+    }
+
+    #[test]
+    fn local_identities_table_has_required_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_shared_tables(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO local_identities
+             (creator_id, identity_type, display_name, created_at, platform_linked)
+             VALUES ('ctr_localTest123', 'persistent', 'Test User', '2026-01-01T00:00:00Z', 0)",
+            [],
+        )
+        .unwrap();
+
+        let (identity_type, platform_linked): (String, i32) = conn
+            .query_row(
+                "SELECT identity_type, platform_linked FROM local_identities WHERE creator_id = 'ctr_localTest123'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(identity_type, "persistent");
+        assert_eq!(platform_linked, 0);
     }
 
     #[test]

@@ -21,6 +21,8 @@ pub mod db;
 #[deny(clippy::unwrap_used)]
 pub mod explore;
 #[deny(clippy::unwrap_used)]
+pub mod identity;
+#[deny(clippy::unwrap_used)]
 pub mod init;
 #[deny(clippy::unwrap_used)]
 pub mod manuscript;

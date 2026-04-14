@@ -400,44 +400,14 @@
     },
     {
       "id": "2026-04-14-v1.2-local-only-identity",
-      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "status": "Done",
       "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.2",
-        "implementation",
-        "ws2",
-        "identity",
-        "milestone-m1"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime).",
       "metadata": {
-        "phase": "Todo",
-        "priority": "high",
-        "workstream": "WS2",
-        "milestone": "M1",
-        "dependency": [],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Dual local identity schema, store, CRUD; anonymous temporary + local persistent identity implementation",
-        "deliverables": [
-          "Identity schema and store implementation",
-          "Anonymous/temporary identity path",
-          "Local persistent identity path (no platform dependency)"
-        ],
-        "acceptance_evidence": [
-          "R1: local_only anonymous/temporary identity end-to-end",
-          "R2: local_only local persistent identity end-to-end"
-        ],
-        "effort": "L — schema + implementation + tests; ~3-4 agent sessions"
-      }
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-only-identity.json",
+        "residual_summary": "7 open residuals"
+      },
+      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "done_at": "2026-04-14"
     },
     {
       "id": "2026-04-14-v1.2-local-only-runtime",
@@ -664,22 +634,104 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-10T18:00:00Z",
-      "total_open": 0,
+      "total_open": 7,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 0,
-        "nit": 0
+        "medium": 1,
+        "low": 4,
+        "nit": 2
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
-        "V1.2": 0
+        "V1.2": 7
       },
-      "by_plan": {}
+      "by_plan": {
+        "2026-04-14-v1.2-local-only-identity": 7
+      }
     },
-    "residual_findings": {},
+    "residual_findings": {
+      "2026-04-14-v1.2-local-only-identity": [
+        {
+          "id": "R1",
+          "title": "CLI test coverage gap — only 1 trivial test for identity commands",
+          "severity": "medium",
+          "source": "QC-#1 (W4), QC-#3 (S1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.2 M1 — supplement during WS2b integration or T3 QA",
+          "tracking": "T3 QA verification"
+        },
+        {
+          "id": "R2",
+          "title": "resolve_active_identity is dead code — #[allow(dead_code)]",
+          "severity": "low",
+          "source": "QC-#1 (W3), QC-#2 (W4), QC-#3 (W1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) — wire into runtime identity resolution",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R3",
+          "title": "display_name has no empty/whitespace validation",
+          "severity": "low",
+          "source": "QC-#1 (W5)",
+          "scope": "schemas/domain/local-identity.schema.json, crates/nexus-domain/src/local_identity.rs",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Low priority — add minLength:1 to schema and domain validation",
+          "tracking": null
+        },
+        {
+          "id": "R4",
+          "title": "use_identity vs resolve_active_identity behavioral inconsistency for anonymous IDs",
+          "severity": "low",
+          "source": "QC-#2 (W4), QC-#3 (W1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) — unify identity resolution paths",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R5",
+          "title": "UUID v4 vs counter-based ID generation — no spec requirement for ordering",
+          "severity": "nit",
+          "source": "QC-#3 (W3)",
+          "scope": "crates/nexus-domain/src/local_identity.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "UUID v4 is collision-safe; counter not required by spec",
+          "tracking": null
+        },
+        {
+          "id": "R6",
+          "title": "ResolvedIdentity uses raw String for identity_type instead of LocalIdentityType enum",
+          "severity": "low",
+          "source": "QC-#1 (S4)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) — refactor when wiring resolve_active_identity",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R7",
+          "title": "thiserror alignment — LocalDbError uses manual Display/Error vs domain thiserror",
+          "severity": "nit",
+          "source": "QC-#1 (S1)",
+          "scope": "crates/nexus-local-db/src/error.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "Style improvement — no functional impact",
+          "tracking": null
+        }
+      ]
+    },
     "v1.2_program": {
       "compass": "knowledge/v1.2-delivery-compass-v1.md",
       "status": "planned",
@@ -737,3 +789,4 @@
     }
   }
 }
+

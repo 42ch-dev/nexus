@@ -21,6 +21,7 @@ pub mod creator;
 pub mod errors;
 pub mod fork_branch;
 pub mod key_block;
+pub mod local_identity;
 pub mod manuscript_state;
 pub mod memory_item;
 pub mod pairing;
@@ -34,6 +35,9 @@ pub mod world_membership;
 
 // Re-export error types
 pub use errors::DomainError;
+
+// Re-export validation helpers
+pub use local_identity::is_valid_creator_id;
 
 // Re-export common types from nexus-contracts
 pub use nexus_contracts::{
