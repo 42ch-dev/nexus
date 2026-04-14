@@ -176,10 +176,16 @@ CREATE TABLE IF NOT EXISTS soul_meta (
 ///
 /// Stores structured queue entries for nexus42d review → memory promotion.
 /// See creator-memory-soul-lifecycle-v1.md §6.2.
+///
+/// ## Constraints
+///
+/// - `UNIQUE(session_id)`: Ensures one pending review per ACP session.
+///   Prevents duplicate entries when CLI retries on network failures.
+/// - Handler uses `INSERT OR IGNORE` for idempotent retries without 500 errors.
 pub const MEMORY_PENDING_REVIEW_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS memory_pending_review (
     pending_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    session_id TEXT NOT NULL UNIQUE,
     creator_id TEXT NOT NULL,
     world_id TEXT,
     task_kind TEXT NOT NULL DEFAULT 'unknown',
