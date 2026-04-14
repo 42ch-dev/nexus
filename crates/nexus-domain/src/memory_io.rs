@@ -137,7 +137,7 @@ pub fn save_memory(
         )));
     }
     ensure_memory_dir(home, creator_id)?;
-    let content = memory.render();
+    let content = memory.render()?;
     let path = memory_path(home, creator_id, slug);
     std::fs::write(&path, &content)
         .map_err(|e| DomainError::ValidationError(format!("cannot write memory file: {e}")))?;

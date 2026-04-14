@@ -191,7 +191,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
         ContextCommand::AssembleLocal {
             max_tokens,
             include_fragments,
-        } => assemble_local(config, max_tokens, include_fragments),
+        } => assemble_local(config, max_tokens, include_fragments).await,
     }
 }
 
@@ -199,7 +199,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 ///
 /// Assembles context from SOUL.md, long-term memories, and fragment keywords
 /// without requiring platform connectivity or the daemon.
-fn assemble_local(
+async fn assemble_local(
     config: &CliConfig,
     max_tokens: Option<usize>,
     include_fragments: bool,
@@ -230,7 +230,7 @@ fn assemble_local(
 
     // 3. Build fragment keywords (best-effort from daemon, optional)
     let fragment_keywords = if include_fragments {
-        collect_fragment_keywords(config)
+        collect_fragment_keywords(config).await
     } else {
         Vec::new()
     };
@@ -258,54 +258,60 @@ fn assemble_local(
 }
 
 /// Best-effort collection of fragment keywords from the daemon.
-/// Returns empty vec if daemon is unavailable.
-fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
-    // Try to fetch fragment keywords from daemon API.
-    // This is best-effort: if daemon is down, return empty.
-    try_fetch_fragment_keywords(config).unwrap_or_default()
-}
+/// Returns empty vec if daemon is unavailable or endpoint doesn't exist (404).
+async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
+    let url = format!("{}/v1/local/memory/fragments", config.daemon_url);
 
-/// Attempt to fetch fragment keywords from the daemon.
-fn try_fetch_fragment_keywords(config: &CliConfig) -> std::result::Result<Vec<String>, ()> {
-    // The daemon API is async but we call it synchronously with a minimal runtime.
-    // For local-only mode, we just return empty — fragments require the daemon.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|_| ())?;
-
-    rt.block_on(async {
-        let url = format!("{}/v1/local/memory/fragments", config.daemon_url);
-
-        let response = reqwest::Client::new()
-            .get(&url)
-            .timeout(std::time::Duration::from_secs(3))
-            .send()
-            .await
-            .map_err(|_| ())?;
-
-        if !response.status().is_success() {
-            return Err(());
+    let response = match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(3))
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::debug!(error = %e, "Failed to reach daemon for fragment keywords");
+            return Vec::new();
         }
+    };
 
-        let data: serde_json::Value = response.json().await.map_err(|_| ())?;
+    // Gracefully handle 404 (endpoint may not be implemented yet)
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        tracing::debug!("Daemon does not implement /v1/local/memory/fragments, skipping");
+        return Vec::new();
+    }
 
-        // Extract keywords from fragment records
-        let mut keywords = Vec::new();
-        if let Some(fragments) = data.get("fragments").and_then(|v| v.as_array()) {
-            for fragment in fragments {
-                if let Some(kws) = fragment.get("keywords").and_then(|v| v.as_array()) {
-                    for kw in kws {
-                        if let Some(s) = kw.as_str() {
-                            keywords.push(s.to_string());
-                        }
+    if !response.status().is_success() {
+        tracing::debug!(
+            status = %response.status(),
+            "Unexpected status from fragment keywords endpoint"
+        );
+        return Vec::new();
+    }
+
+    let data: serde_json::Value = match response.json().await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::debug!(error = %e, "Failed to parse fragment keywords response");
+            return Vec::new();
+        }
+    };
+
+    // Extract keywords from fragment records
+    let mut keywords = Vec::new();
+    if let Some(fragments) = data.get("fragments").and_then(|v| v.as_array()) {
+        for fragment in fragments {
+            if let Some(kws) = fragment.get("keywords").and_then(|v| v.as_array()) {
+                for kw in kws {
+                    if let Some(s) = kw.as_str() {
+                        keywords.push(s.to_string());
                     }
                 }
             }
         }
+    }
 
-        Ok(keywords)
-    })
+    keywords
 }
 
 #[cfg(test)]

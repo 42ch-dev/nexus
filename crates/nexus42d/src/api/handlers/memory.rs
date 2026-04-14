@@ -72,11 +72,11 @@ pub async fn create_pending_review(
         "Creating pending review entry"
     );
 
-    // Validate creator_id format (must start with ctr_)
-    if !req.creator_id.starts_with("ctr_") {
+    // Validate creator_id format (must be a valid creator ID: ctr_<alphanumeric>+)
+    if !nexus_domain::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_'".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
         });
     }
 
@@ -137,10 +137,10 @@ pub async fn list_pending_reviews(
     info!(creator_id = %params.creator_id, "Listing pending reviews");
 
     // Validate creator_id format
-    if !params.creator_id.starts_with("ctr_") {
+    if !nexus_domain::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_'".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
         });
     }
 
@@ -208,10 +208,10 @@ pub async fn count_pending_reviews(
     info!(creator_id = %params.creator_id, "Counting pending reviews");
 
     // Validate creator_id format
-    if !params.creator_id.starts_with("ctr_") {
+    if !nexus_domain::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_'".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
         });
     }
 

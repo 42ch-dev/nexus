@@ -147,9 +147,11 @@ impl LongTermMemory {
     /// ---
     /// Body content here.
     /// ```
-    pub fn render(&self) -> String {
-        let yaml = serde_yaml::to_string(&self.frontmatter).unwrap_or_default();
-        format!("---\n{yaml}---\n{}", self.body)
+    pub fn render(&self) -> Result<String, DomainError> {
+        let yaml = serde_yaml::to_string(&self.frontmatter).map_err(|e| {
+            DomainError::ValidationError(format!("failed to serialize memory frontmatter: {e}"))
+        })?;
+        Ok(format!("---\n{yaml}---\n{}", self.body))
     }
 
     /// Parse a memory file's content (frontmatter + body).
@@ -365,7 +367,7 @@ mod tests {
         mem.set_body("This is the memory body.\nWith multiple lines.");
         mem.add_source_session("sess_abc123");
 
-        let rendered = mem.render();
+        let rendered = mem.render().unwrap();
         let parsed = LongTermMemory::parse(&rendered).unwrap();
 
         assert_eq!(parsed.frontmatter.nexus_memory_version, MEMORY_FILE_VERSION);
