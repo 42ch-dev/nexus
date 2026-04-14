@@ -402,10 +402,11 @@
       "id": "2026-04-14-v1.2-local-only-identity",
       "title": "V1.2 WS2a: local_only Dual Identity Strategy",
       "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@qa-engineer"
       ],
       "progress": 100,
       "tags": [
@@ -417,9 +418,10 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-14",
-      "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime).",
+      "done_at": "2026-04-14",
+      "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime). QA verified pass.",
       "metadata": {
-        "phase": "InReview",
+        "phase": "Done",
         "priority": "high",
         "workstream": "WS2",
         "milestone": "M1",
@@ -450,7 +452,16 @@
       "8d096c4",
       "40da6f1"
     ],
-    "qc_fix": "T2 — C1/W1/W2 resolved (error conflation, silent default, CLI validation skip)"
+    "qc_fix": "T2 — C1/W1/W2 resolved (error conflation, silent default, CLI validation skip)",
+    "qa_status": "pass",
+    "qa_report": "reports/2026-04-14-v1.2-local-only-identity/2026-04-14-v1.2-local-only-identity-qa.md",
+    "gates": {
+      "tests": "pass — 400+ tests, 0 failures",
+      "clippy": "pass — 0 warnings",
+      "fmt": "pass — no diff",
+      "codegen": "pass — no diff",
+      "schemas": "pass — 61/61 valid",
+      "qc": "pass — C1/W1/W2 fixed in 40da6f1"
       }
     },
     {
