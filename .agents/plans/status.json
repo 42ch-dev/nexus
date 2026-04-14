@@ -440,15 +440,17 @@
         "tests": "cargo test --all: all pass",
         "clippy": "cargo clippy --all -- -D warnings: clean",
         "validation": "cargo +nightly fmt --all -- --check: clean",
-        "commits": [
-          "9e1a770",
-          "ed856e0",
-          "2da5539",
-          "16dcc2c",
-          "0a88b38",
-          "0477498",
-          "8d096c4"
-        ]
+    "commits": [
+      "9e1a770",
+      "ed856e0",
+      "2da5539",
+      "16dcc2c",
+      "0a88b38",
+      "0477498",
+      "8d096c4",
+      "40da6f1"
+    ],
+    "qc_fix": "T2 — C1/W1/W2 resolved (error conflation, silent default, CLI validation skip)"
       }
     },
     {
