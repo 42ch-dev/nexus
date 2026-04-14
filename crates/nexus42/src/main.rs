@@ -19,8 +19,8 @@ use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
     daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, identity::IdentityCommand,
     init::InitCommand, manuscript::ManuscriptCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, session::SessionCommand, sync::SyncCommand,
-    world::WorldCommand,
+    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
+    session::SessionCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -142,6 +142,12 @@ enum Commands {
         #[command(subcommand)]
         command: IdentityCommand,
     },
+
+    /// Runtime mode management (local_only / local_first / cloud_enhanced)
+    RuntimeMode {
+        #[command(subcommand)]
+        command: RuntimeModeCommand,
+    },
 }
 
 #[tokio::main]
@@ -176,6 +182,9 @@ async fn main() {
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
+        Some(Commands::RuntimeMode { command }) => {
+            commands::runtime_mode::run(command, &config).await
+        }
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

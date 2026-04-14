@@ -33,6 +33,8 @@ pub mod publish;
 #[deny(clippy::unwrap_used)]
 pub mod research;
 #[deny(clippy::unwrap_used)]
+pub mod runtime_mode;
+#[deny(clippy::unwrap_used)]
 pub mod session;
 #[deny(clippy::unwrap_used)]
 pub mod sync;
