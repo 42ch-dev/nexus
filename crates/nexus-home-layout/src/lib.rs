@@ -38,6 +38,50 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
         .join("global_state.db")
 }
 
+/// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (ADR-014, ADR-016 D1).
+///
+/// # Defense-in-depth
+///
+/// If `creator_id` contains path traversal components (`..`, `/`, `\`), this
+/// function panics rather than silently resolving to an unexpected path.
+/// Callers (e.g., `soul_io::validate_creator_id()`) should validate `creator_id`
+/// before calling this, but this acts as a safety net.
+pub fn creator_soul_md_path(home: &Path, creator_id: &str) -> PathBuf {
+    assert_creator_id_safe(creator_id);
+    nexus_root_from_home(home)
+        .join("creators")
+        .join(creator_id)
+        .join("SOUL.md")
+}
+
+/// Assert that `creator_id` does not contain path-traversal characters.
+///
+/// This is a low-overhead sanity check; `nexus-domain::is_valid_creator_id()`
+/// is the authoritative validator. This catches the most dangerous patterns:
+/// `/`, `\`, `..`, and control characters.
+fn assert_creator_id_safe(id: &str) {
+    for ch in id.chars() {
+        if ch == '/' || ch == '\\' {
+            panic!(
+                "creator_id contains path separator: {id:?} — \
+                 this would be a path-traversal vulnerability"
+            );
+        }
+    }
+    if id.contains("..") {
+        panic!(
+            "creator_id contains '..': {id:?} — \
+             this would be a path-traversal vulnerability"
+        );
+    }
+    if id.chars().any(|c| c.is_control()) {
+        panic!(
+            "creator_id contains control characters: {id:?} — \
+             this would be a path-traversal vulnerability"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,5 +102,42 @@ mod tests {
             workspace_state_db_path(&home, "c", "w"),
             PathBuf::from("/h/.nexus42/creators/c/workspaces/w/state.db")
         );
+    }
+
+    #[test]
+    fn soul_md_path_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            creator_soul_md_path(&home, "ctr_test"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/SOUL.md")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "path separator")]
+    fn soul_md_path_rejects_forward_slash() {
+        let home = PathBuf::from("/h");
+        let _ = creator_soul_md_path(&home, "../../etc/passwd");
+    }
+
+    #[test]
+    #[should_panic(expected = "path separator")]
+    fn soul_md_path_rejects_backslash() {
+        let home = PathBuf::from("/h");
+        let _ = creator_soul_md_path(&home, "ctr_bad\\etc");
+    }
+
+    #[test]
+    #[should_panic(expected = "'..'")]
+    fn soul_md_path_rejects_dotdot() {
+        let home = PathBuf::from("/h");
+        let _ = creator_soul_md_path(&home, "ctr_.._secret");
+    }
+
+    #[test]
+    #[should_panic(expected = "control characters")]
+    fn soul_md_path_rejects_control_chars() {
+        let home = PathBuf::from("/h");
+        let _ = creator_soul_md_path(&home, "ctr_\x00null");
     }
 }

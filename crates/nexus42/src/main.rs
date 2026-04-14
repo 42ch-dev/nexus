@@ -20,7 +20,7 @@ use commands::{
     daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, identity::IdentityCommand,
     init::InitCommand, manuscript::ManuscriptCommand, policy::PolicyCommand,
     publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
-    session::SessionCommand, sync::SyncCommand, world::WorldCommand,
+    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -148,6 +148,12 @@ enum Commands {
         #[command(subcommand)]
         command: RuntimeModeCommand,
     },
+
+    /// SOUL management (local personality and experience)
+    Soul {
+        #[command(subcommand)]
+        command: SoulCommand,
+    },
 }
 
 #[tokio::main]
@@ -185,6 +191,7 @@ async fn main() {
         Some(Commands::RuntimeMode { command }) => {
             commands::runtime_mode::run(command, &config).await
         }
+        Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

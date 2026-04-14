@@ -8,12 +8,16 @@ repository.workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-home-layout = { path = "../nexus-home-layout" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 strum.workspace = true
+pulldown-cmark = { workspace = true }
+pulldown-cmark-frontmatter = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 jsonschema = "0.17"

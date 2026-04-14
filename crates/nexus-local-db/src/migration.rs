@@ -40,15 +40,29 @@ fn migrate_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Migration: add soul_meta table (V1.2 — SOUL lifecycle)
+///
+/// Creates the `soul_meta` table for per-creator SOUL.md metadata tracking.
+fn migrate_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(crate::schema::SOUL_META_TABLE)?;
+    Ok(())
+}
+
 /// Registry of all migrations, sorted by version
 ///
 /// Migrations are executed in order from lowest to highest version.
 /// The registry should contain all migrations from initial schema to latest.
 pub fn get_migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 2,
-        up: migrate_v2,
-    }]
+    vec![
+        Migration {
+            version: 2,
+            up: migrate_v2,
+        },
+        Migration {
+            version: 3,
+            up: migrate_v3,
+        },
+    ]
 }
 
 /// Run pending migrations on database
@@ -239,17 +253,18 @@ mod tests {
     }
 
     #[test]
-    fn get_migrations_returns_non_empty_vec() {
+    fn get_migrations_returns_ordered_vec() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 1);
+        assert!(migrations.len() >= 2);
         assert_eq!(migrations[0].version, 2);
+        assert_eq!(migrations[1].version, 3);
     }
 
     #[test]
     fn migration_registry_can_be_extended() {
         // This test demonstrates that migrations can be added to registry
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 1);
+        assert!(migrations.len() >= 2);
 
         // When migrations are added, they should be sorted by version
         // (not tested here since registry has one entry, but documented)
