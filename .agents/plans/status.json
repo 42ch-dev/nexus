@@ -241,7 +241,11 @@
           "clippy": "passed",
           "fmt": "passed",
           "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure); reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md (PUBLISH-CODEGEN-01 / FORK-SNAP-01 closure)"
-        }
+        },
+        "workstream": "WS5",
+        "milestone": "parallel (non-blocking for M3)",
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md"
       }
     },
     {
@@ -353,6 +357,299 @@
       },
       "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
       "done_at": "2026-04-10"
+    },
+    {
+      "id": "2026-04-14-v1.2-reclassification-baseline",
+      "title": "V1.2 WS1: Version Reclassification Baseline",
+      "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@product-manager"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "planning",
+        "ws1",
+        "milestone-m1"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS1: Transform legacy roadmap items into V1.2/V1.3/V1.4/Backlog with explicit ownership and blocking relationships.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS1",
+        "milestone": "M1",
+        "dependency": [],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Reclassification matrix, blocking/non-blocking map, version-tagging rules for future plan rows",
+        "deliverables": [
+          "Reclassification matrix committed in docs/design space",
+          "References to source ADR/spec anchors"
+        ],
+        "effort": "M — PM + product analysis; ~2 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-local-only-identity",
+      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws2",
+        "identity",
+        "milestone-m1"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime).",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS2",
+        "milestone": "M1",
+        "dependency": [],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Dual local identity schema, store, CRUD; anonymous temporary + local persistent identity implementation",
+        "deliverables": [
+          "Identity schema and store implementation",
+          "Anonymous/temporary identity path",
+          "Local persistent identity path (no platform dependency)"
+        ],
+        "acceptance_evidence": [
+          "R1: local_only anonymous/temporary identity end-to-end",
+          "R2: local_only local persistent identity end-to-end"
+        ],
+        "effort": "L — schema + implementation + tests; ~3-4 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-local-only-runtime",
+      "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
+      "file": ".agents/plans/2026-04-14-v1.2-local-only-runtime.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws2",
+        "runtime",
+        "milestone-m1"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS2b: Runtime mode behavior, constraints enforcement, minimal runnable CLI flow with fallback rules. Depends on WS2a identity.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS2",
+        "milestone": "M1",
+        "dependency": [
+          "2026-04-14-v1.2-local-only-identity"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Runtime mode behavior and constraints, minimal runnable flow, fallback rules, no-platform guard enforcement",
+        "deliverables": [
+          "Runtime mode enforcement implementation",
+          "Minimal runnable CLI flow without platform hard dependency",
+          "Fallback rules for prohibited platform paths"
+        ],
+        "acceptance_evidence": [
+          "R5: no-platform dependency guard for local_only path",
+          "End-to-end CLI scenario runs without platform"
+        ],
+        "effort": "L — runtime wiring + guards + tests; ~3-4 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-soul-lifecycle",
+      "title": "V1.2 WS3a: Local SOUL Lifecycle",
+      "file": ".agents/plans/2026-04-14-v1.2-soul-lifecycle.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws3",
+        "soul",
+        "milestone-m2"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS3a: Local SOUL lifecycle as foundation of the local truth pipeline. Depends on M1 (WS2b).",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS3",
+        "milestone": "M2",
+        "dependency": [
+          "2026-04-14-v1.2-local-only-runtime"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "SOUL lifecycle implementation — creation, accumulation, retrieval as local source-of-truth; state transitions and data ownership",
+        "deliverables": [
+          "SOUL lifecycle path implementation",
+          "State transition definitions",
+          "Data ownership notes"
+        ],
+        "acceptance_evidence": [
+          "Scenario regression: SOUL create → accumulate → retrieve",
+          "Deterministic behavior checks"
+        ],
+        "effort": "L — SOUL model + lifecycle + tests; ~3-4 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-local-memory-pipeline",
+      "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
+      "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws3",
+        "memory",
+        "kb",
+        "milestone-m2"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS3b: Long-term memory + KB load + output generation as local source-of-truth chain. Depends on WS3a (SOUL).",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "WS3",
+        "milestone": "M2",
+        "dependency": [
+          "2026-04-14-v1.2-soul-lifecycle"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Local long-term memory, KB load, output generation — completing the local truth chain from SOUL through to user-facing output",
+        "deliverables": [
+          "Long-term memory lifecycle implementation",
+          "KB load and query implementation",
+          "Output generation pipeline",
+          "Integration with SOUL lifecycle"
+        ],
+        "acceptance_evidence": [
+          "R3: local truth core chain regression (SOUL/memory/KB/output)",
+          "Scenario regression: create → accumulate → retrieve → output"
+        ],
+        "effort": "XL — memory + KB + output integration; ~5-6 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-runtime-compatibility",
+      "title": "V1.2 WS4: Runtime Compatibility (local_first/cloud_enhanced)",
+      "file": ".agents/plans/2026-04-14-v1.2-runtime-compatibility.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "implementation",
+        "ws4",
+        "compatibility",
+        "milestone-m2"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "WS4: Switchable/runnable/degradable local_first + cloud_enhanced mode in V1.2 (no V1.3 optimization gates). Parallel with WS3.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "medium",
+        "workstream": "WS4",
+        "milestone": "M2",
+        "dependency": [
+          "2026-04-14-v1.2-local-only-runtime"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Mode switch rules, degradation behavior spec for platform unavailable states, no mandatory performance/accuracy threshold in V1.2",
+        "deliverables": [
+          "Mode switch implementation",
+          "Degradation behavior for platform unavailable",
+          "Fallback path validation"
+        ],
+        "acceptance_evidence": [
+          "R4: mode switch and degradation regression (local_first/cloud_enhanced fallback)"
+        ],
+        "effort": "M — mode switch + degradation + tests; ~2-3 agent sessions"
+      }
+    },
+    {
+      "id": "2026-04-14-v1.2-regression-suite",
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
+      "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.2",
+        "testing",
+        "regression",
+        "milestone-m3",
+        "release-gate"
+      ],
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-14",
+      "notes": "M3 gate: Implement minimum automated regression set (R1–R5) as V1.2 hard release gate. Depends on M2 completion.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "workstream": "M3-gate",
+        "milestone": "M3",
+        "dependency": [
+          "2026-04-14-v1.2-local-memory-pipeline",
+          "2026-04-14-v1.2-runtime-compatibility"
+        ],
+        "v1.2_scope": true,
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "scope": "Minimum automated regression set — R1 (anonymous identity e2e), R2 (persistent identity e2e), R3 (local truth chain), R4 (mode switch/degradation), R5 (no-platform guard)",
+        "deliverables": [
+          "R1–R5 automated test implementations",
+          "CI integration for regression gate",
+          "Regression gate documentation"
+        ],
+        "acceptance_evidence": [
+          "All R1–R5 pass in automated run",
+          "CI pipeline green on regression suite"
+        ],
+        "effort": "L — 5 regression scenarios + CI + docs; ~3-4 agent sessions"
+      }
     }
   ],
   "metadata": {
@@ -377,6 +674,61 @@
       },
       "by_plan": {}
     },
-    "residual_findings": {}
+    "residual_findings": {},
+    "v1.2_program": {
+      "compass": "knowledge/v1.2-delivery-compass-v1.md",
+      "status": "planned",
+      "workstreams": {
+        "WS1": "2026-04-14-v1.2-reclassification-baseline",
+        "WS2": [
+          "2026-04-14-v1.2-local-only-identity",
+          "2026-04-14-v1.2-local-only-runtime"
+        ],
+        "WS3": [
+          "2026-04-14-v1.2-soul-lifecycle",
+          "2026-04-14-v1.2-local-memory-pipeline"
+        ],
+        "WS4": "2026-04-14-v1.2-runtime-compatibility",
+        "WS5": "v1-tech-debt-cleanup (Batch E)"
+      },
+      "milestones": {
+        "M1": {
+          "label": "Reclassification + minimal local path runnable",
+          "plans": [
+            "2026-04-14-v1.2-reclassification-baseline",
+            "2026-04-14-v1.2-local-only-identity",
+            "2026-04-14-v1.2-local-only-runtime"
+          ],
+          "entry": "scope lock confirmed; version reclassification baseline drafted",
+          "exit": "legacy items mapped to V1.2~V1.4/Backlog; local_only dual identity minimal flow runnable"
+        },
+        "M2": {
+          "label": "Local truth pipeline complete",
+          "plans": [
+            "2026-04-14-v1.2-soul-lifecycle",
+            "2026-04-14-v1.2-local-memory-pipeline",
+            "2026-04-14-v1.2-runtime-compatibility"
+          ],
+          "entry": "M1 done",
+          "exit": "local SOUL/memory/KB/output path integrated; mode switch and degradation behavior at V1.2 target level"
+        },
+        "M3": {
+          "label": "Release pre-gate",
+          "plans": [
+            "2026-04-14-v1.2-regression-suite"
+          ],
+          "entry": "M2 done",
+          "exit": "minimum automated regression set (R1–R5) passes; Batch E tracked as parallel non-blocking lane"
+        }
+      },
+      "regression_gate": {
+        "R1": "local_only anonymous/temporary identity end-to-end",
+        "R2": "local_only local persistent identity end-to-end",
+        "R3": "local truth core chain regression (SOUL/memory/KB/output)",
+        "R4": "mode switch and degradation regression (local_first/cloud_enhanced fallback)",
+        "R5": "no-platform dependency guard for local_only path"
+      },
+      "created_at": "2026-04-14"
+    }
   }
 }
