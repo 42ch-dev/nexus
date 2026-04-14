@@ -1,5 +1,6 @@
 //! Nexus CLI Configuration
 
+use nexus_domain::runtime_mode::DomainRuntimeMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -32,6 +33,11 @@ pub struct CliConfig {
     /// Daemon local API base URL
     #[serde(default = "default_daemon_url")]
     pub daemon_url: String,
+
+    /// Runtime mode controlling platform dependency behavior.
+    /// Defaults to `local_only` for V1.2 MVP (ADR-017).
+    #[serde(default = "default_runtime_mode")]
+    pub runtime_mode: DomainRuntimeMode,
 }
 
 fn default_platform_url() -> String {
@@ -40,6 +46,10 @@ fn default_platform_url() -> String {
 
 fn default_daemon_url() -> String {
     format!("http://127.0.0.1:{DAEMON_PORT}")
+}
+
+fn default_runtime_mode() -> DomainRuntimeMode {
+    DomainRuntimeMode::default()
 }
 
 /// Default workspace slug when none is stored for a creator.
@@ -58,6 +68,11 @@ impl CliConfig {
             return Ok(Self::default());
         }
         Ok(serde_json::from_str(&content)?)
+    }
+
+    /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
+    pub fn runtime_mode(&self) -> DomainRuntimeMode {
+        self.runtime_mode
     }
 
     /// Save configuration to the standard location
@@ -108,6 +123,28 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         let back: CliConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.workspace_slug_for_creator("ctr_a"), "staging");
+    }
+
+    #[test]
+    fn runtime_mode_defaults_to_local_only() {
+        let c = CliConfig::default();
+        assert!(c.runtime_mode().is_local_only());
+    }
+
+    #[test]
+    fn runtime_mode_roundtrips_via_json() {
+        let mut c = CliConfig::default();
+        c.runtime_mode = DomainRuntimeMode::from_str("cloud_enhanced").unwrap();
+        let json = serde_json::to_string(&c).unwrap();
+        let back: CliConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.runtime_mode().to_string(), "cloud_enhanced");
+    }
+
+    #[test]
+    fn runtime_mode_parses_from_config_file() {
+        let json = r#"{"runtime_mode": "local_first"}"#;
+        let c: CliConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(c.runtime_mode().to_string(), "local_first");
     }
 }
 
