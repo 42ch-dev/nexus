@@ -1,4 +1,4 @@
-//! Context Command — `nexus42 context assemble`
+//! Context Command — `nexus42 context assemble` and `nexus42 context assemble-local`
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
@@ -80,6 +80,17 @@ pub enum ContextCommand {
         /// Output file path (default: stdout as JSON)
         #[arg(long)]
         output_file: Option<String>,
+    },
+
+    /// Run Stage-0 local context assembly and output result (local-only)
+    AssembleLocal {
+        /// Max tokens for context (optional budget)
+        #[arg(long)]
+        max_tokens: Option<usize>,
+
+        /// Include fragment keywords section
+        #[arg(long, default_value_t = true)]
+        include_fragments: bool,
     },
 }
 
@@ -177,7 +188,127 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 
             Ok(())
         }
+        ContextCommand::AssembleLocal {
+            max_tokens,
+            include_fragments,
+        } => assemble_local(config, max_tokens, include_fragments),
     }
+}
+
+/// Stage-0 local context assembly (spec §9, §9.2).
+///
+/// Assembles context from SOUL.md, long-term memories, and fragment keywords
+/// without requiring platform connectivity or the daemon.
+fn assemble_local(
+    config: &CliConfig,
+    max_tokens: Option<usize>,
+    include_fragments: bool,
+) -> Result<()> {
+    let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
+        crate::errors::CliError::Other(
+            "No active creator set. Run `nexus42 identity use <id>` first.".to_string(),
+        )
+    })?;
+
+    let home = crate::config::user_home_dir()?;
+
+    // 1. Load SOUL.md
+    let soul = nexus_domain::soul_io::load(&home, creator_id)?;
+
+    // 2. List long-term memories (skip personality_core — already in SOUL personality)
+    let slugs = nexus_domain::memory_io::list_memories(&home, creator_id)?;
+    let mut long_term_memories = Vec::new();
+    for slug in &slugs {
+        if let Ok(mem) = nexus_domain::memory_io::load_memory(&home, creator_id, slug) {
+            // Skip personality_core memories (already in SOUL personality section)
+            if mem.frontmatter.memory_kind == "personality_core" {
+                continue;
+            }
+            long_term_memories.push(mem);
+        }
+    }
+
+    // 3. Build fragment keywords (best-effort from daemon, optional)
+    let fragment_keywords = if include_fragments {
+        collect_fragment_keywords(config)
+    } else {
+        Vec::new()
+    };
+
+    // 4. Build Stage0Assembly
+    let assembly = nexus_domain::Stage0Assembly {
+        personality: soul.personality.clone().unwrap_or_default(),
+        experience: soul.experience.clone().unwrap_or_default(),
+        long_term_memories,
+        fragment_keywords,
+        system_prefix: String::new(),
+        user_prompt: String::new(),
+        max_tokens,
+    };
+
+    // 5. Assemble
+    let output = if max_tokens.is_some() {
+        assembly.assemble_with_truncation()
+    } else {
+        assembly.assemble()
+    };
+
+    println!("{}", output);
+    Ok(())
+}
+
+/// Best-effort collection of fragment keywords from the daemon.
+/// Returns empty vec if daemon is unavailable.
+fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
+    // Try to fetch fragment keywords from daemon API.
+    // This is best-effort: if daemon is down, return empty.
+    match try_fetch_fragment_keywords(config) {
+        Ok(keywords) => keywords,
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Attempt to fetch fragment keywords from the daemon.
+fn try_fetch_fragment_keywords(config: &CliConfig) -> std::result::Result<Vec<String>, ()> {
+    // The daemon API is async but we call it synchronously with a minimal runtime.
+    // For local-only mode, we just return empty — fragments require the daemon.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| ())?;
+
+    rt.block_on(async {
+        let url = format!("{}/v1/local/memory/fragments", config.daemon_url);
+
+        let response = reqwest::Client::new()
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .map_err(|_| ())?;
+
+        if !response.status().is_success() {
+            return Err(());
+        }
+
+        let data: serde_json::Value = response.json().await.map_err(|_| ())?;
+
+        // Extract keywords from fragment records
+        let mut keywords = Vec::new();
+        if let Some(fragments) = data.get("fragments").and_then(|v| v.as_array()) {
+            for fragment in fragments {
+                if let Some(kws) = fragment.get("keywords").and_then(|v| v.as_array()) {
+                    for kw in kws {
+                        if let Some(s) = kw.as_str() {
+                            keywords.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(keywords)
+    })
 }
 
 #[cfg(test)]
@@ -236,5 +367,18 @@ mod tests {
         let result = validate_world_id("wld_");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("alphanumeric characters"));
+    }
+
+    /// Test that AssembleLocal variant exists
+    #[test]
+    fn context_command_assemble_local_exists() {
+        let _cmd = ContextCommand::AssembleLocal {
+            max_tokens: Some(1000),
+            include_fragments: true,
+        };
+        let _cmd = ContextCommand::AssembleLocal {
+            max_tokens: None,
+            include_fragments: false,
+        };
     }
 }

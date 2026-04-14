@@ -18,9 +18,10 @@ use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
     daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, identity::IdentityCommand,
-    init::InitCommand, manuscript::ManuscriptCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
-    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
+    init::InitCommand, manuscript::ManuscriptCommand, memory::MemoryCommand,
+    policy::PolicyCommand, publish::PublishCommand, research::ResearchCommand,
+    runtime_mode::RuntimeModeCommand, session::SessionCommand, soul::SoulCommand,
+    sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -154,6 +155,12 @@ enum Commands {
         #[command(subcommand)]
         command: SoulCommand,
     },
+
+    /// Long-term memory management
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
 }
 
 #[tokio::main]
@@ -192,6 +199,7 @@ async fn main() {
             commands::runtime_mode::run(command, &config).await
         }
         Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
+        Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

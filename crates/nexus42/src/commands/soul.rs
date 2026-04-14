@@ -20,6 +20,8 @@ pub enum SoulCommand {
     },
     /// Validate SOUL.md structure and sections
     Validate,
+    /// Push personality section to long-term memory
+    PushPersonality,
 }
 
 pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
@@ -36,6 +38,7 @@ pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
             edit_personality(config, creator_id, content).await
         }
         SoulCommand::Validate => validate(config, creator_id).await,
+        SoulCommand::PushPersonality => push_personality(config, creator_id).await,
     }
 }
 
@@ -145,6 +148,28 @@ async fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+    }
+    Ok(())
+}
+
+async fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
+    let home = config::user_home_dir()?;
+    let soul = soul_io::load(&home, creator_id)?;
+
+    let memory = nexus_domain::personality_sync::push_personality_to_memory(
+        &home,
+        creator_id,
+        &soul,
+    )?;
+
+    println!(
+        "Personality pushed to long-term memory for creator '{}'.",
+        creator_id
+    );
+    println!("  Memory ID: {}", memory.frontmatter.memory_id);
+    println!("  Kind: {}", memory.frontmatter.memory_kind);
+    if let Some(path) = &memory.source_path {
+        println!("  Path: {}", path.display());
     }
     Ok(())
 }
