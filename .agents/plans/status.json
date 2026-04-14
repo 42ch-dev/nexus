@@ -424,7 +424,7 @@
       "id": "2026-04-14-v1.2-soul-lifecycle",
       "title": "V1.2 WS3a: Local SOUL Lifecycle",
       "file": ".agents/plans/2026-04-14-v1.2-soul-lifecycle.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
@@ -441,7 +441,7 @@
       "updated_at": "2026-04-14",
       "notes": "WS3a: Local SOUL lifecycle as foundation of the local truth pipeline. Depends on M1 (WS2b).",
       "metadata": {
-        "phase": "Todo",
+        "phase": "InProgress",
         "priority": "high",
         "workstream": "WS3",
         "milestone": "M2",
@@ -460,7 +460,9 @@
           "Scenario regression: SOUL create \u2192 accumulate \u2192 retrieve",
           "Deterministic behavior checks"
         ],
-        "effort": "L \u2014 SOUL model + lifecycle + tests; ~3-4 agent sessions"
+        "effort": "L \u2014 SOUL model + lifecycle + tests; ~3-4 agent sessions",
+        "working_branch": "feature/v1.2-ws3a-soul",
+        "merge_target": "feature/v1.2"
       }
     },
     {
