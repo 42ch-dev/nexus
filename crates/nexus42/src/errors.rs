@@ -50,6 +50,14 @@ pub enum CliError {
 
     Acp(AcpError),
 
+    /// Operation requires platform connectivity but current mode prohibits it.
+    PlatformOperationProhibited {
+        /// Runtime mode that blocked the operation (e.g. "local_only")
+        mode: String,
+        /// Operation that was blocked (e.g. "sync push")
+        operation: String,
+    },
+
     /// Agent not found with ID
     AgentNotFound {
         /// Agent ID that was requested
@@ -132,6 +140,15 @@ impl fmt::Display for CliError {
             Self::Config(msg) => write!(f, "Configuration error: {}", msg),
             Self::Api { status, message } => write!(f, "API error: {} — {}", status, message),
             Self::Acp(err) => write!(f, "ACP error: {}", err),
+            Self::PlatformOperationProhibited { mode, operation } => {
+                write!(
+                    f,
+                    "Operation '{}' is not available in {} mode.\n\n  Suggestion: \
+                     This operation requires platform connectivity. Switch to \
+                     `local_first` or `cloud_enhanced` mode with `nexus42 config set runtime_mode <mode>`.",
+                    operation, mode
+                )
+            }
             Self::Other(msg) => write!(f, "{}", msg),
         }
     }
@@ -198,7 +215,12 @@ impl From<chrono::ParseError> for CliError {
 
 impl From<nexus_domain::errors::DomainError> for CliError {
     fn from(err: nexus_domain::errors::DomainError) -> Self {
-        CliError::Other(format!("Domain error: {}", err))
+        match err {
+            nexus_domain::errors::DomainError::PlatformOperationProhibited { mode, operation } => {
+                CliError::PlatformOperationProhibited { mode, operation }
+            }
+            other => CliError::Other(format!("Domain error: {}", other)),
+        }
     }
 }
 
@@ -334,5 +356,46 @@ mod tests {
         assert!(display.contains("Daemon not running"));
         assert!(display.contains("Suggestion:"));
         assert!(display.contains("nexus42 daemon start"));
+    }
+
+    #[test]
+    fn platform_operation_prohibited_display() {
+        let err = CliError::PlatformOperationProhibited {
+            mode: "local_only".to_string(),
+            operation: "sync push".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("not available in local_only mode"));
+        assert!(display.contains("sync push"));
+        assert!(display.contains("Suggestion:"));
+    }
+
+    #[test]
+    fn domain_error_platform_prohibited_maps_to_cli_variant() {
+        let domain_err = nexus_domain::errors::DomainError::PlatformOperationProhibited {
+            mode: "local_only".to_string(),
+            operation: "sync push".to_string(),
+        };
+        let cli_err: CliError = domain_err.into();
+        match cli_err {
+            CliError::PlatformOperationProhibited { mode, operation } => {
+                assert_eq!(mode, "local_only");
+                assert_eq!(operation, "sync push");
+            }
+            _ => panic!("Expected CliError::PlatformOperationProhibited variant"),
+        }
+    }
+
+    #[test]
+    fn domain_error_other_maps_to_cli_other() {
+        let domain_err = nexus_domain::errors::DomainError::ValidationError("test".to_string());
+        let cli_err: CliError = domain_err.into();
+        match cli_err {
+            CliError::Other(msg) => {
+                assert!(msg.contains("Domain error:"));
+                assert!(msg.contains("validation error"));
+            }
+            _ => panic!("Expected CliError::Other variant"),
+        }
     }
 }
