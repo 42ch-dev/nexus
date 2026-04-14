@@ -1703,6 +1703,8 @@ dependencies = [
  "serde_yaml",
  "strum 0.26.3",
  "thiserror 1.0.69",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

@@ -4,11 +4,18 @@
 //! determining whether to drop, fragment, promote to long-term memory,
 //! merge, or trigger SOUL experience aggregation.
 //!
-//! See creator-memory-soul-lifecycle-v1.md §7.2.
+//! Also provides promotion functions for converting pending reviews
+//! into long-term memory files with idempotency guarantees.
+//!
+//! See creator-memory-soul-lifecycle-v1.md §7.2, §7.3.
 
+use std::future::Future;
+use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+
+use crate::{DomainError, LongTermMemory};
 
 /// Review action determined by classification algorithm.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -462,6 +469,191 @@ fn extract_keywords(text: &str) -> Vec<String> {
     keywords
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Promotion functions (T5.9, T5.10)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Trait for summarizing session digests into long-term memory content.
+///
+/// This abstracts the ACP-based summarization so the domain layer
+/// doesn't need to depend on the CLI's ACP client directly.
+/// Implementations can use local ACP agents or other summarizers.
+///
+/// The trait is designed for async operations since ACP calls are async.
+#[allow(async_fn_in_trait)]
+pub trait SessionDigestSummarizer: Send + Sync {
+    /// Summarize a session digest into a long-term memory markdown body.
+    ///
+    /// The implementation should:
+    /// - Generate a well-structured memory entry
+    /// - Include key facts, decisions, and context from the session
+    /// - Produce output suitable for markdown storage
+    ///
+    /// Returns the markdown body (without frontmatter, which is added by `LongTermMemory`).
+    fn summarize(
+        &self,
+        session_id: &str,
+        task_kind: &str,
+        raw_digest: &str,
+        world_id: Option<&str>,
+    ) -> impl Future<Output = Result<String, DomainError>> + Send;
+}
+
+/// Check if a session has already been promoted to long-term memory.
+///
+/// Idempotency check (T5.10): The same `session_id` must not produce
+/// duplicate long-term memories. This function scans all memories
+/// for the creator and checks their `source_session_ids` frontmatter field.
+///
+/// Returns `true` if the session is already present in any memory's
+/// `source_session_ids` list.
+///
+/// # Example
+///
+/// ```rust
+/// use std::path::PathBuf;
+/// use nexus_domain::review::check_session_already_promoted;
+///
+/// let home = PathBuf::from("/tmp/test_home");
+/// let already = check_session_already_promoted(&home, "ctr_test", "sess_123").unwrap();
+/// if already {
+///     println!("Session already promoted — skipping");
+/// }
+/// ```
+pub fn check_session_already_promoted(
+    home: &Path,
+    creator_id: &str,
+    session_id: &str,
+) -> Result<bool, DomainError> {
+    // List all long-term memories for this creator
+    let slugs = crate::memory_io::list_memories(home, creator_id)?;
+
+    // Check each memory's source_session_ids
+    for slug in slugs {
+        if let Ok(memory) = crate::memory_io::load_memory(home, creator_id, &slug) {
+            if memory
+                .frontmatter
+                .source_session_ids
+                .contains(&session_id.to_string())
+            {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+/// Promote a pending review to a long-term memory file.
+///
+/// This function (T5.9):
+/// 1. Checks idempotency (skips if session already promoted)
+/// 2. Calls the summarizer to generate memory content
+/// 3. Creates a `LongTermMemory` with the summarized content
+/// 4. Saves the memory via `memory_io::save_memory`
+/// 5. Adds the session_id to `source_session_ids`
+///
+/// The `memory_kind` is determined from `task_kind`:
+/// - "brainstorm" → "story_summary"
+/// - "outline" → "plot_outline"
+/// - "chapter" → "story_summary"
+/// - "research" → "research_material"
+/// - default → "custom"
+///
+/// Returns the created `LongTermMemory` with its `memory_id`.
+///
+/// # Errors
+///
+/// Returns `DomainError::ValidationError` if:
+/// - Session already promoted (idempotency check)
+/// - Summarizer fails (graceful degradation)
+/// - Memory save fails
+///
+/// # Example
+///
+/// ```rust
+/// use std::path::PathBuf;
+/// use nexus_domain::review::{promote_to_long_term, PendingReviewInput, SessionDigestSummarizer};
+/// use nexus_domain::DomainError;
+///
+/// struct MockSummarizer;
+/// impl SessionDigestSummarizer for MockSummarizer {
+///     async fn summarize(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> Result<String, DomainError> {
+///         Ok("This is a summarized memory entry.".to_string())
+///     }
+/// }
+///
+/// // Example usage (async context):
+/// // let home = PathBuf::from("/tmp/test_home");
+/// // let input = PendingReviewInput { ... };
+/// // let summarizer = MockSummarizer;
+/// // let memory = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await.unwrap();
+/// ```
+pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
+    home: &Path,
+    creator_id: &str,
+    record: &PendingReviewInput,
+    summarizer: &S,
+) -> Result<LongTermMemory, DomainError> {
+    // 1. Check idempotency
+    if check_session_already_promoted(home, creator_id, &record.session_id)? {
+        return Err(DomainError::ValidationError(format!(
+            "Session '{}' already promoted to long-term memory",
+            record.session_id
+        )));
+    }
+
+    // 2. Call summarizer to generate content
+    let body = summarizer
+        .summarize(
+            &record.session_id,
+            &record.task_kind,
+            &record.raw_digest,
+            record.world_id.as_deref(),
+        )
+        .await?;
+
+    // 3. Determine memory_kind from task_kind
+    let memory_kind = task_kind_to_memory_kind(&record.task_kind);
+
+    // 4. Create LongTermMemory
+    let mut memory = LongTermMemory::new(memory_kind);
+    memory.set_body(&body);
+    memory.add_source_session(&record.session_id);
+
+    // 5. Validate before saving
+    memory.validate()?;
+
+    // 6. Generate slug from memory_id (strip mem_ prefix)
+    let slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
+
+    // 7. Save via memory_io
+    crate::memory_io::save_memory(home, creator_id, &slug, &memory)?;
+
+    tracing::info!(
+        memory_id = %memory.frontmatter.memory_id,
+        session_id = %record.session_id,
+        memory_kind = %memory_kind,
+        "Promoted session to long-term memory"
+    );
+
+    Ok(memory)
+}
+
+/// Map task_kind to memory_kind for promotion.
+///
+/// This determines the appropriate `memory_kind` field in the
+/// long-term memory frontmatter based on the session's task type.
+fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
+    match task_kind.to_lowercase().as_str() {
+        "brainstorm" => "story_summary",
+        "outline" => "plot_outline",
+        "chapter" => "story_summary",
+        "research" => "research_material",
+        _ => "custom",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -648,5 +840,143 @@ mod tests {
         let decision = classify_pending_review(&input);
         assert_eq!(decision.action, ReviewAction::FragmentOnly);
         assert!(decision.reason.contains("outline"));
+    }
+
+    // ── Promotion tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn task_kind_to_memory_kind_mapping() {
+        assert_eq!(task_kind_to_memory_kind("brainstorm"), "story_summary");
+        assert_eq!(task_kind_to_memory_kind("BRAINSTORM"), "story_summary");
+        assert_eq!(task_kind_to_memory_kind("outline"), "plot_outline");
+        assert_eq!(task_kind_to_memory_kind("chapter"), "story_summary");
+        assert_eq!(task_kind_to_memory_kind("research"), "research_material");
+        assert_eq!(task_kind_to_memory_kind("unknown"), "custom");
+        assert_eq!(task_kind_to_memory_kind("invalid"), "custom");
+    }
+
+    #[test]
+    fn check_session_already_promoted_returns_false_when_no_memories() {
+        let home = std::path::PathBuf::from("/tmp/test_promotion_empty");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let result = check_session_already_promoted(&home, "ctr_test", "sess_123");
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn promote_to_long_term_creates_valid_memory() {
+        use std::path::PathBuf;
+
+        // Mock summarizer
+        struct MockSummarizer;
+        impl SessionDigestSummarizer for MockSummarizer {
+            async fn summarize(
+                &self,
+                _session_id: &str,
+                _task_kind: &str,
+                _raw_digest: &str,
+                _world_id: Option<&str>,
+            ) -> Result<String, DomainError> {
+                Ok("This is a summarized memory entry from the session.".to_string())
+            }
+        }
+
+        let home = PathBuf::from("/tmp/test_promotion_create");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let input = sample_input("brainstorm", "Session digest for testing promotion.");
+        let summarizer = MockSummarizer;
+
+        let memory = promote_to_long_term(&home, "ctr_test", &input, &summarizer)
+            .await
+            .unwrap();
+
+        // Check memory properties
+        assert!(memory.frontmatter.memory_id.starts_with("mem_"));
+        assert_eq!(memory.frontmatter.memory_kind, "story_summary");
+        assert!(memory.body.contains("summarized memory entry"));
+        assert!(memory
+            .frontmatter
+            .source_session_ids
+            .contains(&"sess_test".to_string()));
+        assert!(memory.validate().is_ok());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn promote_to_long_term_rejects_duplicate_session() {
+        use std::path::PathBuf;
+
+        struct MockSummarizer;
+        impl SessionDigestSummarizer for MockSummarizer {
+            async fn summarize(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: Option<&str>,
+            ) -> Result<String, DomainError> {
+                Ok("Summarized content.".to_string())
+            }
+        }
+
+        let home = PathBuf::from("/tmp/test_promotion_idempotent");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let input = sample_input("chapter", "First promotion.");
+        let summarizer = MockSummarizer;
+
+        // First promotion succeeds
+        let _ = promote_to_long_term(&home, "ctr_test", &input, &summarizer)
+            .await
+            .unwrap();
+
+        // Second promotion with same session_id fails
+        let result = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("already promoted"));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn promote_to_long_term_gracefully_handles_summarizer_failure() {
+        use std::path::PathBuf;
+
+        struct FailingSummarizer;
+        impl SessionDigestSummarizer for FailingSummarizer {
+            async fn summarize(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: Option<&str>,
+            ) -> Result<String, DomainError> {
+                Err(DomainError::ValidationError(
+                    "Summarizer unavailable".to_string(),
+                ))
+            }
+        }
+
+        let home = PathBuf::from("/tmp/test_promotion_failure");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let input = sample_input("brainstorm", "Session to promote.");
+        let summarizer = FailingSummarizer;
+
+        let result = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Summarizer unavailable"));
+
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
