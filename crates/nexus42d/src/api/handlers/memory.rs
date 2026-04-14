@@ -61,6 +61,12 @@ pub struct CountPendingReviewsResponse {
 ///
 /// Creates a new pending review entry from a session-end capture event.
 /// This endpoint is called by the CLI when an ACP session ends.
+///
+/// ## Idempotency
+///
+/// Uses `INSERT OR IGNORE` to handle retries gracefully. If a pending_id or
+/// session_id already exists, the insert is silently skipped, returning success.
+/// This prevents 500 errors when the CLI retries on network failures.
 pub async fn create_pending_review(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreatePendingReviewRequest>,
@@ -72,13 +78,8 @@ pub async fn create_pending_review(
         "Creating pending review entry"
     );
 
-    // Validate creator_id format (must start with ctr_)
-    if !req.creator_id.starts_with("ctr_") {
-        return Err(NexusApiError::InvalidInput {
-            field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_'".into(),
-        });
-    }
+    // Validate input fields
+    validate_pending_review_input(&req)?;
 
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_UNAVAILABLE".into(),
@@ -102,9 +103,11 @@ pub async fn create_pending_review(
     let world_id = req.world_id.clone();
     let raw_digest = req.raw_digest.clone();
 
+    // Use INSERT OR IGNORE for idempotent behavior on retries
+    // (handles both duplicate pending_id and duplicate session_id)
     conn.interact(move |conn| {
         conn.execute(
-            "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+            "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at],
         )
@@ -119,12 +122,89 @@ pub async fn create_pending_review(
         message: e.to_string(),
     })?;
 
-    debug!(pending_id = %req.pending_id, "Pending review entry created");
+    debug!(pending_id = %req.pending_id, "Pending review entry created (or ignored on duplicate)");
 
     Ok(Json(CreatePendingReviewResponse {
         success: true,
         pending_id: req.pending_id,
     }))
+}
+
+/// Validate input fields for create_pending_review.
+///
+/// Returns 400 Bad Request with field-level detail on validation failure.
+fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(), NexusApiError> {
+    // pending_id: non-empty, max 128 chars
+    if req.pending_id.is_empty() {
+        return Err(NexusApiError::InvalidInput {
+            field: "pending_id".into(),
+            reason: "pending_id must not be empty".into(),
+        });
+    }
+    if req.pending_id.len() > 128 {
+        return Err(NexusApiError::InvalidInput {
+            field: "pending_id".into(),
+            reason: "pending_id must be at most 128 characters".into(),
+        });
+    }
+
+    // session_id: non-empty, max 128 chars
+    if req.session_id.is_empty() {
+        return Err(NexusApiError::InvalidInput {
+            field: "session_id".into(),
+            reason: "session_id must not be empty".into(),
+        });
+    }
+    if req.session_id.len() > 128 {
+        return Err(NexusApiError::InvalidInput {
+            field: "session_id".into(),
+            reason: "session_id must be at most 128 characters".into(),
+        });
+    }
+
+    // creator_id: non-empty, must start with ctr_
+    if !req.creator_id.starts_with("ctr_") {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".into(),
+            reason: "creator_id must start with 'ctr_'".into(),
+        });
+    }
+
+    // raw_digest: non-empty, max 64KB
+    if req.raw_digest.is_empty() {
+        return Err(NexusApiError::InvalidInput {
+            field: "raw_digest".into(),
+            reason: "raw_digest must not be empty".into(),
+        });
+    }
+    if req.raw_digest.len() > 64 * 1024 {
+        return Err(NexusApiError::InvalidInput {
+            field: "raw_digest".into(),
+            reason: "raw_digest must be at most 64KB".into(),
+        });
+    }
+
+    // task_kind: if provided, max 64 chars
+    if let Some(task_kind) = &req.task_kind {
+        if task_kind.len() > 64 {
+            return Err(NexusApiError::InvalidInput {
+                field: "task_kind".into(),
+                reason: "task_kind must be at most 64 characters".into(),
+            });
+        }
+    }
+
+    // world_id: if provided, max 128 chars
+    if let Some(world_id) = &req.world_id {
+        if world_id.len() > 128 {
+            return Err(NexusApiError::InvalidInput {
+                field: "world_id".into(),
+                reason: "world_id must be at most 128 characters".into(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 /// GET /v1/local/memory/pending-review?creator_id=...
