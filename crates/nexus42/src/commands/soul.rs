@@ -1,7 +1,5 @@
 //! SOUL management commands.
 
-#![deny(clippy::unwrap_used)]
-
 use crate::config;
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -51,10 +49,7 @@ async fn init(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let doc = soul_io::create(&home, creator_id)?;
     doc.validate()?;
     println!("SOUL.md initialized for creator '{}'.", creator_id);
-    println!(
-        "Path: {}",
-        soul_io::soul_path(&home, creator_id).display()
-    );
+    println!("Path: {}", soul_io::soul_path(&home, creator_id).display());
     Ok(())
 }
 
@@ -88,10 +83,7 @@ async fn edit_personality(
     };
     doc.set_personality(new_content);
     soul_io::save(&home, creator_id, &doc)?;
-    println!(
-        "Personality section updated for creator '{}'.",
-        creator_id
-    );
+    println!("Personality section updated for creator '{}'.", creator_id);
     Ok(())
 }
 
