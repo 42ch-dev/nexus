@@ -18,6 +18,8 @@ strum.workspace = true
 pulldown-cmark = { workspace = true }
 pulldown-cmark-frontmatter = { workspace = true }
 serde_yaml = { workspace = true }
+tracing.workspace = true
 
 [dev-dependencies]
 jsonschema = "0.17"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
