@@ -11,8 +11,7 @@ use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_domain::local_identity::LocalIdentity;
 use nexus_local_db::{
-    create_local_identity, get_local_identity, link_to_platform, list_local_identities,
-    RuntimeRole,
+    create_local_identity, get_local_identity, link_to_platform, list_local_identities, RuntimeRole,
 };
 use rusqlite::Connection;
 
@@ -100,19 +99,25 @@ fn list_identities() -> Result<()> {
 
     for identity in &identities {
         let active_mark = active_id
-            .map(|a| if a == identity.creator_id { " (active)" } else { "" })
+            .map(|a| {
+                if a == identity.creator_id {
+                    " (active)"
+                } else {
+                    ""
+                }
+            })
             .unwrap_or("");
 
         let linked_mark = if identity.platform_linked {
-            format!(" → {}", identity.platform_creator_id.as_deref().unwrap_or("?"))
+            format!(
+                " → {}",
+                identity.platform_creator_id.as_deref().unwrap_or("?")
+            )
         } else {
             String::new()
         };
 
-        let name_display = identity
-            .display_name
-            .as_deref()
-            .unwrap_or("(no name)");
+        let name_display = identity.display_name.as_deref().unwrap_or("(no name)");
 
         let kind_label = match identity.identity_type.as_str() {
             "anonymous" => "anon",
@@ -150,7 +155,11 @@ fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
         )?;
     }
 
-    println!("Created {} identity: {}", kind_label(&kind), identity.creator_id);
+    println!(
+        "Created {} identity: {}",
+        kind_label(&kind),
+        identity.creator_id
+    );
     if let Some(ref name) = identity.display_name {
         println!("  Name: {}", name);
     }
