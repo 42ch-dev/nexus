@@ -434,12 +434,12 @@
       "id": "2026-04-14-v1.2-local-memory-pipeline",
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.2",
         "implementation",
@@ -450,9 +450,11 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-14",
-      "notes": "QC approve with residuals. All 3 Critical + 6 Warning fixed. Ready for QA verification.",
+      "done_at": "2026-04-14",
+      "notes": "QA approved. All 12 ACs verified. 9 residuals tracked for V1.3/V1.4.",
       "metadata": {
-        "phase": "review",
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
+        "phase": "done",
         "priority": "high",
         "workstream": "WS3",
         "milestone": "M2",
@@ -478,12 +480,13 @@
         "branch_policy": "create feature/v1.2-ws3b-memory from feature/v1.2",
         "batch_count": 6,
         "gates": {
-          "tests": "pass",
-          "clippy": "pass",
+          "tests": "pass — cargo test --all (593 tests, 0 failures)",
+          "clippy": "pass — cargo clippy --all -- -D warnings",
           "fmt": "pass",
           "qc_status": "approve-with-residuals",
           "qc_fixes": "b2069f8,3bf75d6",
-          "qa_status": "pending"
+          "qa_status": "approve",
+          "qa_report": "reports/2026-04-14-v1.2-local-memory-pipeline/2026-04-14-v1.2-local-memory-pipeline-qa.md"
         },
         "commits": [
           "09ddc4b T5.1+T5.2+T5.13+T5.14 domain model + file I/O + context assembly",
@@ -494,7 +497,7 @@
           "2c6380f T5.15-T5.16 memory CLI commands",
           "3721e71 T5.17 E2E tests"
         ],
-        "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred)"
+        "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in metadata.residual_findings"
       }
     },
     {
