@@ -26,6 +26,7 @@ pub mod manuscript_state;
 pub mod memory_item;
 pub mod pairing;
 pub mod reference_source;
+pub mod review;
 pub mod runtime_guard;
 pub mod runtime_mode;
 pub mod soul;

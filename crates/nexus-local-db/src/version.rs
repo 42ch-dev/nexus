@@ -7,7 +7,7 @@
 ///
 /// This version tracks SQLite structure migrations only.
 /// Increment when adding new tables, columns, or modifying DDL.
-pub const DB_SCHEMA_VERSION: u32 = 3;
+pub const DB_SCHEMA_VERSION: u32 = 4;
 
 /// Contract schema version from generated wire types
 ///

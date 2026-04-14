@@ -172,6 +172,38 @@ CREATE TABLE IF NOT EXISTS soul_meta (
 );
 "#;
 
+/// Pending review queue — captures session-end events for memory review.
+///
+/// Stores structured queue entries for nexus42d review → memory promotion.
+/// See creator-memory-soul-lifecycle-v1.md §6.2.
+pub const MEMORY_PENDING_REVIEW_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS memory_pending_review (
+    pending_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    creator_id TEXT NOT NULL,
+    world_id TEXT,
+    task_kind TEXT NOT NULL DEFAULT 'unknown',
+    raw_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"#;
+
+/// Memory fragments — lightweight review artifacts with keywords.
+///
+/// Stores keyword-indexed fragments from review decisions.
+/// See creator-memory-soul-lifecycle-v1.md §7.2.
+pub const MEMORY_FRAGMENTS_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS memory_fragments (
+    fragment_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    creator_id TEXT NOT NULL,
+    keywords TEXT NOT NULL DEFAULT '[]',
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ttl TEXT
+);
+"#;
+
 /// Initialize shared tables (used by both CLI and daemon).
 ///
 /// Creates the three shared tables with `IF NOT EXISTS` for idempotency.
@@ -186,7 +218,7 @@ pub fn init_shared_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
 
 /// Initialize daemon-only tables.
 ///
-/// Creates the five daemon-specific tables with `IF NOT EXISTS` for idempotency.
+/// Creates the seven daemon-specific tables with `IF NOT EXISTS` for idempotency.
 /// Called by `init()` when role is `Daemon`.
 pub fn init_daemon_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(OUTBOX_TABLE)?;
@@ -194,6 +226,9 @@ pub fn init_daemon_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
     conn.execute_batch(DEVICE_CODE_SESSIONS_TABLE)?;
     conn.execute_batch(ACP_TOOL_AUDIT_LOG_TABLE)?;
     conn.execute_batch(ACP_SESSIONS_TABLE)?;
+    conn.execute_batch(SOUL_META_TABLE)?;
+    conn.execute_batch(MEMORY_PENDING_REVIEW_TABLE)?;
+    conn.execute_batch(MEMORY_FRAGMENTS_TABLE)?;
     Ok(())
 }
 
@@ -457,6 +492,9 @@ mod tests {
         assert!(tables.contains(&"device_code_sessions".to_string()));
         assert!(tables.contains(&"acp_tool_audit_log".to_string()));
         assert!(tables.contains(&"acp_sessions".to_string()));
+        assert!(tables.contains(&"soul_meta".to_string()));
+        assert!(tables.contains(&"memory_pending_review".to_string()));
+        assert!(tables.contains(&"memory_fragments".to_string()));
     }
 
     #[test]
@@ -586,5 +624,104 @@ mod tests {
 
         assert_eq!(workspace_hint, "");
         assert_eq!(metadata, "{}");
+    }
+
+    #[test]
+    fn memory_pending_review_table_has_required_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_daemon_tables(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+             VALUES ('pending_001', 'sess_001', 'ctr_test', 'wld_test', 'brainstorm', 'session summary text', '2026-04-14T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let (task_kind, raw_digest): (String, String) = conn
+            .query_row(
+                "SELECT task_kind, raw_digest FROM memory_pending_review WHERE pending_id = 'pending_001'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(task_kind, "brainstorm");
+        assert_eq!(raw_digest, "session summary text");
+    }
+
+    #[test]
+    fn memory_pending_review_table_has_defaults() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_daemon_tables(&conn).unwrap();
+
+        // Insert with minimal fields (task_kind and created_at have defaults)
+        conn.execute(
+            "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, raw_digest)
+             VALUES ('pending_002', 'sess_002', 'ctr_test', 'minimal digest')",
+            [],
+        )
+        .unwrap();
+
+        let (task_kind, created_at): (String, String) = conn
+            .query_row(
+                "SELECT task_kind, created_at FROM memory_pending_review WHERE pending_id = 'pending_002'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(task_kind, "unknown");
+        assert!(!created_at.is_empty());
+    }
+
+    #[test]
+    fn memory_fragments_table_has_required_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_daemon_tables(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl)
+             VALUES ('frag_001', 'sess_001', 'ctr_test', '[\"keyword1\", \"keyword2\"]', 'fragment summary', '2026-04-14T00:00:00Z', '30d')",
+            [],
+        )
+        .unwrap();
+
+        let (keywords, summary): (String, String) = conn
+            .query_row(
+                "SELECT keywords, summary FROM memory_fragments WHERE fragment_id = 'frag_001'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(keywords, "[\"keyword1\", \"keyword2\"]");
+        assert_eq!(summary, "fragment summary");
+    }
+
+    #[test]
+    fn memory_fragments_table_has_defaults() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_daemon_tables(&conn).unwrap();
+
+        // Insert with minimal fields (keywords, summary, and created_at have defaults)
+        conn.execute(
+            "INSERT INTO memory_fragments (fragment_id, session_id, creator_id)
+             VALUES ('frag_002', 'sess_002', 'ctr_test')",
+            [],
+        )
+        .unwrap();
+
+        let (keywords, summary, created_at): (String, String, String) = conn
+            .query_row(
+                "SELECT keywords, summary, created_at FROM memory_fragments WHERE fragment_id = 'frag_002'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!(keywords, "[]");
+        assert_eq!(summary, "");
+        assert!(!created_at.is_empty());
     }
 }
