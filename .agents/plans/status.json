@@ -510,7 +510,7 @@
         "@fullstack-dev",
         "@fullstack-dev-2"
       ],
-      "progress": 40,
+      "progress": 42,
       "tags": [
         "v1.2",
         "implementation",
@@ -519,8 +519,8 @@
         "milestone-m2"
       ],
       "created_at": "2026-04-14",
-      "updated_at": "2026-04-15T12:00:00Z",
-      "notes": "T6.1-T6.5 complete. T6.5 commit: 5aabb32. T6.4 commit: 765b11a.",
+      "updated_at": "2026-04-15T02:06:00Z",
+      "notes": "T6.1-T6.6 complete. Phase 1 + T6.5/T6.6 (Phase 2 partial) done. T6.6 commit: 36a7d26.",
       "metadata": {
         "phase": "implement",
         "priority": "medium",
@@ -546,16 +546,17 @@
         "branch_policy": "create feature/v1.2-ws4-runtime-compatibility from feature/v1.2",
         "batch_count": 6,
         "gates": {
-          "tests": "passing (394/394, 26 new degradation tests, 3 new assembly tests)",
+          "tests": "passing (593 tests, 26 new degradation tests, 6 new assemble tests)",
           "clippy": "clean",
-          "fmt": "pending",
+          "fmt": "pass",
           "qc_status": "pending",
           "qa_status": "pending"
         },
         "commits": {
           "T6.1": "46df122 feat(domain): define DegradationPolicy domain model (T6.1)",
           "T6.3": "daf12c9 feat(domain): add downgrade/upgrade/degradation_depth_to to DomainRuntimeMode (T6.3)",
-          "T6.5": "5aabb32 feat(domain): add TwoStageAssembly model for local_first/cloud_enhanced context assembly (T6.5)"
+          "T6.5": "5aabb32 feat(domain): add TwoStageAssembly model for local_first/cloud_enhanced context assembly (T6.5)",
+          "T6.6": "36a7d26 feat(nexus42,nexus42d): implement daemon client and handler for context/assemble (T6.6)"
         }
       }
     },
