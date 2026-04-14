@@ -402,12 +402,12 @@
       "id": "2026-04-14-v1.2-local-only-identity",
       "title": "V1.2 WS2a: local_only Dual Identity Strategy",
       "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.2",
         "implementation",
@@ -419,7 +419,7 @@
       "updated_at": "2026-04-14",
       "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime).",
       "metadata": {
-        "phase": "Todo",
+        "phase": "InReview",
         "priority": "high",
         "workstream": "WS2",
         "milestone": "M1",
@@ -436,7 +436,19 @@
           "R1: local_only anonymous/temporary identity end-to-end",
           "R2: local_only local persistent identity end-to-end"
         ],
-        "effort": "L — schema + implementation + tests; ~3-4 agent sessions"
+        "effort": "L — schema + implementation + tests; ~3-4 agent sessions",
+        "tests": "cargo test --all: all pass",
+        "clippy": "cargo clippy --all -- -D warnings: clean",
+        "validation": "cargo +nightly fmt --all -- --check: clean",
+        "commits": [
+          "9e1a770",
+          "ed856e0",
+          "2da5539",
+          "16dcc2c",
+          "0a88b38",
+          "0477498",
+          "8d096c4"
+        ]
       }
     },
     {
