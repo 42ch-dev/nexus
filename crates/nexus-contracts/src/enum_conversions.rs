@@ -2,10 +2,34 @@
 //!
 //! Provides `Display`, `as_str()`, and `FromStr` implementations for enum types
 //! generated from JSON Schema. This file extends generated types without modifying them.
+//!
+//! Also defines hand-maintained enums that have a JSON Schema but are pure enums
+//! not natively supported by the codegen pipeline (e.g. `RuntimeMode`).
 
 use crate::generated::common_types::*;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+
+// ── Hand-maintained enums (JSON Schema truth source, codegen-incompatible) ──
+
+/// Creator runtime mode controlling platform dependency behavior.
+///
+/// See `schemas/domain/runtime-mode.schema.json` for authoritative definition.
+/// ADR-015 (local_first / cloud_enhanced), ADR-017 (local_only).
+///
+/// Codegen does not emit standalone enum types; this definition mirrors the
+/// JSON Schema `enum` values and is kept in sync manually.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeMode {
+    /// No platform HTTP dependency for Creator's end-to-end loop (ADR-017).
+    LocalOnly,
+    /// Optional platform structured services; no platform LLM (ADR-015).
+    LocalFirst,
+    /// Full platform capabilities including hosted LLM (ADR-015).
+    CloudEnhanced,
+}
 
 // ── Display implementations for tracing/logging ──────────────────────────
 
@@ -40,6 +64,12 @@ impl fmt::Display for AccountStatus {
 }
 
 impl fmt::Display for SubscriptionTier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl fmt::Display for RuntimeMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
@@ -393,6 +423,17 @@ impl AgentProfileStatus {
             Self::Active => "active",
             Self::Unavailable => "unavailable",
             Self::Deprecated => "deprecated",
+        }
+    }
+}
+
+impl RuntimeMode {
+    /// String representation matching JSON Schema enum values.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuntimeMode::LocalOnly => "local_only",
+            RuntimeMode::LocalFirst => "local_first",
+            RuntimeMode::CloudEnhanced => "cloud_enhanced",
         }
     }
 }
@@ -841,6 +882,21 @@ impl FromStr for AgentProfileStatus {
             "unavailable" => Ok(Self::Unavailable),
             "deprecated" => Ok(Self::Deprecated),
             _ => Err(format!("Invalid AgentProfileStatus: {}", s)),
+        }
+    }
+}
+
+impl FromStr for RuntimeMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "local_only" => Ok(RuntimeMode::LocalOnly),
+            "local_first" => Ok(RuntimeMode::LocalFirst),
+            "cloud_enhanced" => Ok(RuntimeMode::CloudEnhanced),
+            _ => Err(format!(
+                "unknown runtime mode: '{s}'; expected local_only, local_first, or cloud_enhanced"
+            )),
         }
     }
 }
