@@ -31,19 +31,24 @@ pub struct Migration {
     pub up: fn(&Connection) -> Result<(), rusqlite::Error>,
 }
 
+/// Migration: add local_identities table (V1.2 — local_only identity support)
+///
+/// Creates the `local_identities` table for anonymous and persistent
+/// local-only creator identities (ADR-017).
+fn migrate_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(crate::schema::LOCAL_IDENTITIES_TABLE)?;
+    Ok(())
+}
+
 /// Registry of all migrations, sorted by version
 ///
 /// Migrations are executed in order from lowest to highest version.
 /// The registry should contain all migrations from initial schema to latest.
 pub fn get_migrations() -> Vec<Migration> {
-    // Currently no migrations needed - initial schema is v1
-    // Future migrations will be added here:
-    // vec![
-    //     Migration { version: 1, up: migrate_v1 },
-    //     Migration { version: 2, up: migrate_v2 },
-    //     Migration { version: 3, up: migrate_v3 },
-    // ]
-    vec![]
+    vec![Migration {
+        version: 2,
+        up: migrate_v2,
+    }]
 }
 
 /// Run pending migrations on database
@@ -138,7 +143,10 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init(&conn, RuntimeRole::Cli).unwrap();
 
-        // Current version is 1, no migrations in registry
+        // Current version is 2 (bumped), but init already creates the table,
+        // so migrations from v1 to v2 are a no-op since init_shared_tables
+        // already ran. However, if db_schema_version is seeded to 2,
+        // no pending migrations exist.
         let result = run_migrations(&conn);
         assert!(result.is_ok());
 
@@ -231,23 +239,19 @@ mod tests {
     }
 
     #[test]
-    fn get_migrations_returns_empty_vec() {
+    fn get_migrations_returns_non_empty_vec() {
         let migrations = get_migrations();
-        assert!(migrations.is_empty());
+        assert_eq!(migrations.len(), 1);
+        assert_eq!(migrations[0].version, 2);
     }
 
     #[test]
     fn migration_registry_can_be_extended() {
         // This test demonstrates that migrations can be added to registry
-        // Currently empty, but future migrations will be added like:
-        // vec![
-        //     Migration { version: 2, up: migrate_v2 },
-        //     Migration { version: 3, up: migrate_v3 },
-        // ]
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 0);
+        assert_eq!(migrations.len(), 1);
 
         // When migrations are added, they should be sorted by version
-        // (not tested here since registry is empty, but documented)
+        // (not tested here since registry has one entry, but documented)
     }
 }
