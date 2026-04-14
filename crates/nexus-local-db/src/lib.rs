@@ -14,6 +14,7 @@ mod error;
 mod identity;
 mod migration;
 mod schema;
+mod soul_meta;
 mod version;
 
 // Re-export version constants
