@@ -28,6 +28,7 @@ pub mod manuscript_state;
 pub mod memory_io;
 pub mod memory_item;
 pub mod pairing;
+pub mod personality_sync;
 pub mod reference_source;
 pub mod review;
 pub mod runtime_guard;
