@@ -124,13 +124,21 @@ pub fn link_to_platform(
         let existing = get_local_identity(conn, creator_id)?;
         match existing {
             Some(row) if row.platform_linked => {
-                return Err(LocalDbError::Rusqlite(rusqlite::Error::QueryReturnedNoRows));
+                return Err(LocalDbError::IdentityAlreadyLinked {
+                    creator_id: creator_id.to_string(),
+                });
             }
             None => {
-                return Err(LocalDbError::Rusqlite(rusqlite::Error::QueryReturnedNoRows));
+                return Err(LocalDbError::IdentityNotFound {
+                    creator_id: creator_id.to_string(),
+                });
             }
             _ => {
-                return Err(LocalDbError::Rusqlite(rusqlite::Error::QueryReturnedNoRows));
+                // Identity exists but not linked — shouldn't happen since UPDATE affected 0
+                // with `platform_linked = 0` condition, but handle defensively
+                return Err(LocalDbError::IdentityNotFound {
+                    creator_id: creator_id.to_string(),
+                });
             }
         }
     }
@@ -267,6 +275,31 @@ mod tests {
         let conn = setup_db();
         let result = link_to_platform(&conn, "ctr_nonexistent", "ctr_Platform123");
         assert!(result.is_err());
+        assert!(matches!(result, Err(LocalDbError::IdentityNotFound { .. })));
+    }
+
+    #[test]
+    fn link_already_linked_identity() {
+        let conn = setup_db();
+        create_local_identity(
+            &conn,
+            "ctr_localAlreadyLinked",
+            "persistent",
+            Some("Test"),
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+        // First link succeeds
+        link_to_platform(&conn, "ctr_localAlreadyLinked", "ctr_Platform123").unwrap();
+
+        // Second link fails with IdentityAlreadyLinked
+        let result = link_to_platform(&conn, "ctr_localAlreadyLinked", "ctr_Another456");
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(LocalDbError::IdentityAlreadyLinked { .. })
+        ));
     }
 
     #[test]
