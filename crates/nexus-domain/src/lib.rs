@@ -56,10 +56,10 @@ pub use context_assembly::TwoStageAssembly;
 pub use context_assembly::{
     AssembleMetadata, AssembleResponse, KbEntry, MemoryItemRef, TimelineEventRef,
 };
+pub use degradation::{DegradationSnapshot, HealthCheckSnapshot};
 pub use long_term_memory::LongTermMemory;
 pub use review::{check_session_already_promoted, promote_to_long_term, SessionDigestSummarizer};
 pub use runtime_mode::DomainRuntimeMode;
-pub use degradation::{DegradationSnapshot, HealthCheckSnapshot};
 pub use soul::SoulDocument;
 
 // Re-export common types from nexus-contracts

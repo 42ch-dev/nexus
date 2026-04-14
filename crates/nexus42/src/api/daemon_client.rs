@@ -5,6 +5,7 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
+use nexus_domain::AssembleResponse;
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 
@@ -158,6 +159,62 @@ impl DaemonClient {
             status,
             message: body,
         }
+    }
+
+    /// Call platform `context/assemble` API via daemon proxy.
+    ///
+    /// Daemon forwards to platform or returns mock response for testing.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(AssembleResponse))` on success (platform or mock)
+    /// - `Ok(None)` on platform unavailable (503) — triggers fallback
+    /// - `Err(CliError)` on other errors
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with status 403 if `runtime_mode` is `local_only`
+    /// (platform assemble is prohibited in that mode).
+    #[allow(dead_code)] // Wired into CLI commands in T6.8
+    pub async fn call_assemble(
+        &self,
+        creator_id: &str,
+        workspace_slug: &str,
+        runtime_mode: &str,
+        prompt_hint: Option<&str>,
+    ) -> Result<Option<AssembleResponse>> {
+        let url = format!("{}/api/v1/context/assemble", self.base_url);
+
+        let body = serde_json::json!({
+            "creator_id": creator_id,
+            "workspace_slug": workspace_slug,
+            "runtime_mode": runtime_mode,
+            "prompt_hint": prompt_hint,
+        });
+
+        let resp = self.http.post(&url).json(&body).send().await?;
+
+        let status = resp.status().as_u16();
+
+        if status == 503 {
+            // Platform unavailable - return None (trigger fallback)
+            return Ok(None);
+        }
+
+        if status == 403 {
+            // local_only mode blocked - return structured error
+            return Err(CliError::PlatformOperationProhibited {
+                mode: "local_only".to_string(),
+                operation: "context assemble".to_string(),
+            });
+        }
+
+        if !resp.status().is_success() {
+            return Err(Self::parse_error_response(status, resp).await);
+        }
+
+        let assemble_resp: AssembleResponse = resp.json().await?;
+        Ok(Some(assemble_resp))
     }
 }
 
