@@ -49,9 +49,7 @@ pub trait ExperienceSynthesizer: Send + Sync {
     fn synthesize(
         &self,
         entries: &[ExperienceEntry],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<String, DomainError>> + Send + '_>,
-    >;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, DomainError>> + Send + '_>>;
 }
 
 /// A single experience entry for synthesis.
@@ -419,7 +417,9 @@ mod tests {
         memory_io::save_memory(&home, "ctr_test", "adventure-story", &mem1).unwrap();
 
         let mut mem2 = LongTermMemory::new("character_note");
-        mem2.set_body("Alice is a brave and resourceful protagonist who overcomes great obstacles.");
+        mem2.set_body(
+            "Alice is a brave and resourceful protagonist who overcomes great obstacles.",
+        );
         memory_io::save_memory(&home, "ctr_test", "alice-note", &mem2).unwrap();
 
         // Create a non-experience memory (should be ignored)
@@ -427,9 +427,7 @@ mod tests {
         mem3.set_body("Research on medieval castles.");
         memory_io::save_memory(&home, "ctr_test", "castle-research", &mem3).unwrap();
 
-        let result = aggregate_experience(&home, "ctr_test", None)
-            .await
-            .unwrap();
+        let result = aggregate_experience(&home, "ctr_test", None).await.unwrap();
 
         assert_eq!(result.memories_processed, 2);
         assert!(!result.used_acp);
@@ -500,9 +498,9 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<String, DomainError>> + Send + '_>,
             > {
-                Box::pin(async move {
-                    Err(DomainError::ValidationError("ACP unavailable".to_string()))
-                })
+                Box::pin(
+                    async move { Err(DomainError::ValidationError("ACP unavailable".to_string())) },
+                )
             }
         }
 
@@ -524,6 +522,271 @@ mod tests {
         assert_eq!(result.memories_processed, 1);
         // Should have deterministic fallback output
         assert!(result.experience_markdown.contains("Story Summary"));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // ── E2E-style tests (T5.17) ─────────────────────────────────────
+
+    /// Full pipeline: SOUL init → create memories → aggregate experience → assemble context
+    #[tokio::test]
+    async fn e2e_soul_init_memories_aggregate_assemble() {
+        let home = std::path::PathBuf::from("/tmp/test_e2e_full_pipeline");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let creator_id = "ctr_e2e";
+
+        // 1. Initialize SOUL
+        let soul = crate::soul_io::create(&home, creator_id).unwrap();
+        soul.validate().unwrap();
+
+        // 2. Set personality
+        let mut soul = crate::soul_io::load(&home, creator_id).unwrap();
+        soul.set_personality("A bold and creative writer focused on sci-fi.".to_string());
+        crate::soul_io::save(&home, creator_id, &soul).unwrap();
+
+        // 3. Push personality to memory
+        let personality_mem =
+            crate::personality_sync::push_personality_to_memory(&home, creator_id, &soul).unwrap();
+        assert_eq!(personality_mem.frontmatter.memory_kind, "personality_core");
+
+        // 4. Create experience-type memories
+        let mut story = LongTermMemory::new("story_summary");
+        story.set_body("Wrote a cyberpunk novelette about AI consciousness.");
+        memory_io::save_memory(&home, creator_id, "cyberpunk-story", &story).unwrap();
+
+        let mut char_note = LongTermMemory::new("character_note");
+        char_note.set_body("Developed Zara, a hacker protagonist with trust issues.");
+        memory_io::save_memory(&home, creator_id, "zara-character", &char_note).unwrap();
+
+        // 5. Aggregate experience (deterministic)
+        let result = aggregate_experience(&home, creator_id, None).await.unwrap();
+        assert_eq!(result.memories_processed, 2);
+        assert!(!result.used_acp);
+        assert!(result.experience_markdown.contains("cyberpunk-story"));
+        assert!(result.experience_markdown.contains("zara-character"));
+
+        // 6. Assemble context (Stage-0)
+        let slugs = memory_io::list_memories(&home, creator_id).unwrap();
+        let mut memories = Vec::new();
+        for slug in &slugs {
+            if let Ok(mem) = memory_io::load_memory(&home, creator_id, slug) {
+                memories.push(mem);
+            }
+        }
+
+        let reloaded_soul = crate::soul_io::load(&home, creator_id).unwrap();
+        let assembly = crate::Stage0Assembly {
+            personality: reloaded_soul.personality.clone().unwrap_or_default(),
+            experience: reloaded_soul.experience.clone().unwrap_or_default(),
+            long_term_memories: memories,
+            fragment_keywords: vec![],
+            system_prefix: String::new(),
+            user_prompt: "Write chapter 1".to_string(),
+            max_tokens: None,
+        };
+
+        let output = assembly.assemble();
+
+        // Verify §9.2 ordering
+        let personality_pos = output.find("## Personality").expect("personality heading");
+        let mem_pos = output.find("### Memory:").expect("memory heading");
+        let exp_pos = output.find("## Experience").expect("experience heading");
+        let prompt_pos = output.find("Write chapter 1").expect("user prompt");
+
+        assert!(
+            personality_pos < mem_pos,
+            "§9.2: personality before memories"
+        );
+        assert!(mem_pos < exp_pos, "§9.2: memories before experience");
+        assert!(exp_pos < prompt_pos, "§9.2: experience before prompt");
+
+        // Verify personality content present
+        assert!(output.contains("bold and creative"));
+
+        // 7. Verify personality push-down → memory file exists
+        let loaded_personality =
+            memory_io::load_memory(&home, creator_id, "personality-core").unwrap();
+        assert!(loaded_personality.body.contains("bold and creative"));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Verify §9.2 ordering with multiple memory kinds
+    #[tokio::test]
+    async fn e2e_verify_section_ordering_with_multiple_kinds() {
+        let home = std::path::PathBuf::from("/tmp/test_e2e_ordering");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let creator_id = "ctr_order";
+
+        // Create SOUL
+        let mut soul = crate::soul_io::create(&home, creator_id).unwrap();
+        soul.set_personality("Test personality.".to_string());
+        soul.set_experience("Test experience.".to_string());
+        crate::soul_io::save(&home, creator_id, &soul).unwrap();
+
+        // Create memories of different kinds
+        let kinds = vec![
+            ("world_building", "wb-map", "World map notes."),
+            ("character_note", "cn-hero", "Hero backstory."),
+            ("story_summary", "ss-plot", "Plot outline."),
+        ];
+        for (kind, slug, body) in &kinds {
+            let mut mem = LongTermMemory::new(kind);
+            mem.set_body(body);
+            memory_io::save_memory(&home, creator_id, slug, &mem).unwrap();
+        }
+
+        // Assemble
+        let slugs = memory_io::list_memories(&home, creator_id).unwrap();
+        let mut memories = Vec::new();
+        for slug in &slugs {
+            if let Ok(mem) = memory_io::load_memory(&home, creator_id, slug) {
+                memories.push(mem);
+            }
+        }
+
+        let soul = crate::soul_io::load(&home, creator_id).unwrap();
+        let assembly = crate::Stage0Assembly {
+            personality: soul.personality.clone().unwrap_or_default(),
+            experience: soul.experience.clone().unwrap_or_default(),
+            long_term_memories: memories,
+            fragment_keywords: vec!["keyword1".to_string()],
+            system_prefix: String::new(),
+            user_prompt: String::new(),
+            max_tokens: None,
+        };
+
+        let output = assembly.assemble();
+
+        // Verify all sections present in correct order
+        let pers = output.find("## Personality").unwrap();
+        let mem = output.find("### Memory:").unwrap();
+        let kw = output.find("### Fragment keywords").unwrap();
+        let exp = output.find("## Experience").unwrap();
+
+        assert!(pers < mem);
+        assert!(mem < kw);
+        assert!(kw < exp);
+        assert!(output.contains("keyword1"));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Verify experience aggregation → SOUL.md updated
+    #[tokio::test]
+    async fn e2e_experience_aggregation_updates_soul() {
+        let home = std::path::PathBuf::from("/tmp/test_e2e_agg_soul");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let creator_id = "ctr_aggsoul";
+
+        // Create SOUL with empty experience
+        let soul = crate::soul_io::create(&home, creator_id).unwrap();
+        let exp_before = soul.experience.as_deref().unwrap_or("");
+        assert!(exp_before.is_empty());
+
+        // Create experience memories
+        let mut mem1 = LongTermMemory::new("theme_analysis");
+        mem1.set_body("Themes of isolation and connection in modern fiction.");
+        memory_io::save_memory(&home, creator_id, "isolation-theme", &mem1).unwrap();
+
+        // Aggregate
+        let result = aggregate_experience(&home, creator_id, None).await.unwrap();
+        assert_eq!(result.memories_processed, 1);
+        assert!(result.experience_markdown.contains("isolation-theme"));
+
+        // Verify SOUL.md was updated on disk
+        let reloaded = crate::soul_io::load(&home, creator_id).unwrap();
+        let exp_after = reloaded.experience.as_deref().unwrap_or("");
+        assert!(!exp_after.is_empty());
+        assert!(exp_after.contains("Theme Analysis"));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Verify personality push-down → verify memory file created
+    #[tokio::test]
+    async fn e2e_personality_push_creates_memory_file() {
+        let home = std::path::PathBuf::from("/tmp/test_e2e_push");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let creator_id = "ctr_pushtest";
+
+        // Create SOUL with personality
+        let mut soul = crate::soul_io::create(&home, creator_id).unwrap();
+        soul.set_personality("A minimalist prose style with sharp dialogue.".to_string());
+        crate::soul_io::save(&home, creator_id, &soul).unwrap();
+
+        // Push personality to memory
+        let memory =
+            crate::personality_sync::push_personality_to_memory(&home, creator_id, &soul).unwrap();
+
+        // Verify file exists and is valid
+        let loaded = memory_io::load_memory(&home, creator_id, "personality-core").unwrap();
+        assert_eq!(loaded.frontmatter.memory_kind, "personality_core");
+        assert!(loaded.body.contains("minimalist prose style"));
+        assert!(loaded.validate().is_ok());
+
+        // Re-push should preserve memory_id
+        let memory2 =
+            crate::personality_sync::push_personality_to_memory(&home, creator_id, &soul).unwrap();
+        assert_eq!(
+            memory.frontmatter.memory_id, memory2.frontmatter.memory_id,
+            "re-push should preserve memory_id"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Verify token truncation preserves personality
+    #[tokio::test]
+    async fn e2e_token_truncation_preserves_personality() {
+        let home = std::path::PathBuf::from("/tmp/test_e2e_truncate");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let creator_id = "ctr_truncate";
+
+        // Create SOUL
+        let mut soul = crate::soul_io::create(&home, creator_id).unwrap();
+        soul.set_personality("Critical personality text.".to_string());
+        soul.set_experience("E".repeat(500));
+        crate::soul_io::save(&home, creator_id, &soul).unwrap();
+
+        // Create a large memory
+        let mut mem = LongTermMemory::new("story_summary");
+        mem.set_body(&"M".repeat(1000));
+        memory_io::save_memory(&home, creator_id, "big-mem", &mem).unwrap();
+
+        // Load memories
+        let slugs = memory_io::list_memories(&home, creator_id).unwrap();
+        let mut memories = Vec::new();
+        for slug in &slugs {
+            if let Ok(m) = memory_io::load_memory(&home, creator_id, slug) {
+                memories.push(m);
+            }
+        }
+
+        // Assemble with tiny budget
+        let soul = crate::soul_io::load(&home, creator_id).unwrap();
+        let assembly = crate::Stage0Assembly {
+            personality: soul.personality.clone().unwrap_or_default(),
+            experience: soul.experience.clone().unwrap_or_default(),
+            long_term_memories: memories,
+            fragment_keywords: vec![],
+            system_prefix: String::new(),
+            user_prompt: "Do task".to_string(),
+            max_tokens: Some(15),
+        };
+
+        let output = assembly.assemble_with_truncation();
+
+        // Personality MUST be preserved (spec §9.3)
+        assert!(
+            output.contains("Critical personality text."),
+            "Personality should never be truncated: {output}"
+        );
 
         let _ = std::fs::remove_dir_all(&home);
     }

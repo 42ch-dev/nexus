@@ -16,11 +16,11 @@
 
 pub mod consistency;
 pub mod context_assembly;
-pub mod experience_aggregation;
 #[cfg(test)]
 pub mod contract_assertions;
 pub mod creator;
 pub mod errors;
+pub mod experience_aggregation;
 pub mod fork_branch;
 pub mod key_block;
 pub mod local_identity;

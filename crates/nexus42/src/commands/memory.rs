@@ -31,14 +31,10 @@ pub enum MemoryCommand {
     },
 
     /// Show a specific memory
-    Show {
-        slug: String,
-    },
+    Show { slug: String },
 
     /// Edit an existing memory (opens in editor)
-    Edit {
-        slug: String,
-    },
+    Edit { slug: String },
 
     /// Delete a memory
     Delete {
@@ -65,9 +61,11 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
 
     match command {
         MemoryCommand::List => list(config, creator_id),
-        MemoryCommand::Create { slug, kind, content } => {
-            create(config, creator_id, &slug, &kind, content).await
-        }
+        MemoryCommand::Create {
+            slug,
+            kind,
+            content,
+        } => create(config, creator_id, &slug, &kind, content).await,
         MemoryCommand::Show { slug } => show(config, creator_id, &slug),
         MemoryCommand::Edit { slug } => edit(config, creator_id, &slug).await,
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
@@ -88,10 +86,7 @@ fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
     println!("Long-term memories for creator '{}':\n", creator_id);
 
     // Header
-    println!(
-        "{:<30} {:<20} {}",
-        "SLUG", "KIND", "UPDATED AT"
-    );
+    println!("{:<30} {:<20} UPDATED_AT", "SLUG", "KIND");
     println!("{}", "-".repeat(80));
 
     for slug in &slugs {
@@ -102,7 +97,7 @@ fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
                 println!("{:<30} {:<20} {}", slug, kind, updated);
             }
             Err(_) => {
-                println!("{:<30} {:<20} {}", slug, "(unreadable)", "");
+                println!("{:<30} {:<20} ", slug, "(unreadable)");
             }
         }
     }
@@ -129,14 +124,11 @@ async fn create(
     }
 
     // Check if memory already exists
-    match memory_io::load_memory(&home, creator_id, slug) {
-        Ok(_) => {
-            return Err(crate::errors::CliError::Other(format!(
-                "Memory '{}' already exists for creator '{}'. Use `memory edit {}` to modify it.",
-                slug, creator_id, slug
-            )));
-        }
-        Err(_) => {} // Expected: memory doesn't exist yet
+    if memory_io::load_memory(&home, creator_id, slug).is_ok() {
+        return Err(crate::errors::CliError::Other(format!(
+            "Memory '{}' already exists for creator '{}'. Use `memory edit {}` to modify it.",
+            slug, creator_id, slug
+        )));
     }
 
     // Validate kind
@@ -158,10 +150,7 @@ async fn create(
     memory.set_body(&body);
     memory_io::save_memory(&home, creator_id, slug, &memory)?;
 
-    println!(
-        "Memory '{}' created for creator '{}'.",
-        slug, creator_id
-    );
+    println!("Memory '{}' created for creator '{}'.", slug, creator_id);
     println!("  Kind: {}", kind);
     println!(
         "  Path: {}",
@@ -212,7 +201,10 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
 
     if !force {
         // Confirm deletion
-        println!("Delete memory '{}' for creator '{}'? [y/N]", slug, creator_id);
+        println!(
+            "Delete memory '{}' for creator '{}'? [y/N]",
+            slug, creator_id
+        );
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
         if !input.trim().eq_ignore_ascii_case("y") {
@@ -247,7 +239,11 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
 
     let temp_dir = std::env::temp_dir();
     let safe_prefix = prefix.to_lowercase().replace(' ', "-");
-    let file_name = format!("nexus42-{}-{}.md", safe_prefix, uuid::Uuid::new_v4().simple());
+    let file_name = format!(
+        "nexus42-{}-{}.md",
+        safe_prefix,
+        uuid::Uuid::new_v4().simple()
+    );
     let temp_path = temp_dir.join(&file_name);
 
     std::fs::write(&temp_path, initial_content)?;
@@ -256,10 +252,7 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         .arg(&temp_path)
         .status()
         .map_err(|e| {
-            crate::errors::CliError::Other(format!(
-                "Failed to open editor {}: {}",
-                editor, e
-            ))
+            crate::errors::CliError::Other(format!("Failed to open editor {}: {}", editor, e))
         })?;
 
     if !status.success() {
