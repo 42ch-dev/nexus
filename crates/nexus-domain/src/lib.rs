@@ -21,6 +21,7 @@ pub mod creator;
 pub mod errors;
 pub mod fork_branch;
 pub mod key_block;
+pub mod local_identity;
 pub mod manuscript_state;
 pub mod memory_item;
 pub mod pairing;
