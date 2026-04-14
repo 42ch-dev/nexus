@@ -268,7 +268,7 @@ fn daemon_status_not_running() {
         .stdout(predicate::str::contains("Not running"));
 }
 
-/// Test sync status shows daemon not running message
+/// Test sync status is blocked in local_only mode
 #[test]
 fn sync_status_without_daemon() {
     Command::cargo_bin("nexus42")
@@ -276,8 +276,8 @@ fn sync_status_without_daemon() {
         .arg("sync")
         .arg("status")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("not running"));
+        .failure()
+        .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
 /// Test context assemble command validates --world-id requirement

@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn runtime_mode_roundtrips_via_json() {
         let mut c = CliConfig::default();
-        c.runtime_mode = DomainRuntimeMode::from_str("cloud_enhanced").unwrap();
+        c.runtime_mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         let json = serde_json::to_string(&c).unwrap();
         let back: CliConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.runtime_mode().to_string(), "cloud_enhanced");

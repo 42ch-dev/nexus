@@ -46,10 +46,10 @@ impl DomainRuntimeMode {
     }
 
     /// Parse from string (matches JSON Schema enum values).
-    pub fn from_str(s: &str) -> Result<Self, DomainError> {
+    pub fn parse(s: &str) -> Result<Self, DomainError> {
         RuntimeMode::from_str(s)
             .map(Self::new)
-            .map_err(|e| DomainError::ValidationError(e))
+            .map_err(DomainError::ValidationError)
     }
 }
 
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn local_only_prohibits_platform() {
-        let mode = DomainRuntimeMode::from_str("local_only").unwrap();
+        let mode = DomainRuntimeMode::parse("local_only").unwrap();
         assert!(mode.is_local_only());
         assert!(!mode.allows_platform());
         assert!(!mode.allows_platform_llm());
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn local_first_allows_platform_but_not_llm() {
-        let mode = DomainRuntimeMode::from_str("local_first").unwrap();
+        let mode = DomainRuntimeMode::parse("local_first").unwrap();
         assert!(!mode.is_local_only());
         assert!(mode.allows_platform());
         assert!(!mode.allows_platform_llm());
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn cloud_enhanced_allows_all() {
-        let mode = DomainRuntimeMode::from_str("cloud_enhanced").unwrap();
+        let mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         assert!(!mode.is_local_only());
         assert!(mode.allows_platform());
         assert!(mode.allows_platform_llm());
@@ -112,26 +112,22 @@ mod tests {
 
     #[test]
     fn invalid_string_returns_error() {
-        let result = DomainRuntimeMode::from_str("invalid_mode");
+        let result = DomainRuntimeMode::parse("invalid_mode");
         assert!(result.is_err());
     }
 
     #[test]
     fn display_matches_schema_values() {
         assert_eq!(
-            DomainRuntimeMode::from_str("local_only")
-                .unwrap()
-                .to_string(),
+            DomainRuntimeMode::parse("local_only").unwrap().to_string(),
             "local_only"
         );
         assert_eq!(
-            DomainRuntimeMode::from_str("local_first")
-                .unwrap()
-                .to_string(),
+            DomainRuntimeMode::parse("local_first").unwrap().to_string(),
             "local_first"
         );
         assert_eq!(
-            DomainRuntimeMode::from_str("cloud_enhanced")
+            DomainRuntimeMode::parse("cloud_enhanced")
                 .unwrap()
                 .to_string(),
             "cloud_enhanced"

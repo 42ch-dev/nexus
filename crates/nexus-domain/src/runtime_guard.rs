@@ -84,19 +84,19 @@ mod tests {
 
     #[test]
     fn local_only_blocks_sync() {
-        let mode = DomainRuntimeMode::from_str("local_only").unwrap();
+        let mode = DomainRuntimeMode::parse("local_only").unwrap();
         assert!(require_platform(&mode, "sync").is_err());
     }
 
     #[test]
     fn local_first_allows_sync() {
-        let mode = DomainRuntimeMode::from_str("local_first").unwrap();
+        let mode = DomainRuntimeMode::parse("local_first").unwrap();
         assert!(require_platform(&mode, "sync").is_ok());
     }
 
     #[test]
     fn cloud_enhanced_allows_sync() {
-        let mode = DomainRuntimeMode::from_str("cloud_enhanced").unwrap();
+        let mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         assert!(require_platform(&mode, "sync").is_ok());
     }
 
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn check_operation_passes_for_local_ops_in_any_mode() {
         for mode_str in ["local_only", "local_first", "cloud_enhanced"] {
-            let mode = DomainRuntimeMode::from_str(mode_str).unwrap();
+            let mode = DomainRuntimeMode::parse(mode_str).unwrap();
             assert!(
                 check_operation(&mode, "identity").is_ok(),
                 "mode: {mode_str}"
@@ -131,21 +131,21 @@ mod tests {
 
     #[test]
     fn check_operation_blocks_platform_in_local_only() {
-        let mode = DomainRuntimeMode::from_str("local_only").unwrap();
+        let mode = DomainRuntimeMode::parse("local_only").unwrap();
         assert!(check_operation(&mode, "sync").is_err());
         assert!(check_operation(&mode, "publish").is_err());
     }
 
     #[test]
     fn blocked_categories_local_only() {
-        let mode = DomainRuntimeMode::from_str("local_only").unwrap();
+        let mode = DomainRuntimeMode::parse("local_only").unwrap();
         let blocked = blocked_categories(&mode);
         assert!(blocked.contains(&OperationCategory::PlatformRequired));
     }
 
     #[test]
     fn blocked_categories_cloud_enhanced() {
-        let mode = DomainRuntimeMode::from_str("cloud_enhanced").unwrap();
+        let mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         let blocked = blocked_categories(&mode);
         assert!(blocked.is_empty());
     }
