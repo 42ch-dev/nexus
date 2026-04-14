@@ -1,0 +1,67 @@
+{
+  "id": "2026-04-14-v1.2-local-only-identity",
+  "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+  "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev",
+    "@qa-engineer"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.2",
+    "implementation",
+    "ws2",
+    "identity",
+    "milestone-m1"
+  ],
+  "created_at": "2026-04-14",
+  "updated_at": "2026-04-14",
+  "done_at": "2026-04-14",
+  "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime). QA verified pass.",
+  "metadata": {
+    "phase": "Done",
+    "priority": "high",
+    "workstream": "WS2",
+    "milestone": "M1",
+    "dependency": [],
+    "v1.2_scope": true,
+    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "scope": "Dual local identity schema, store, CRUD; anonymous temporary + local persistent identity implementation",
+    "deliverables": [
+      "Identity schema and store implementation",
+      "Anonymous/temporary identity path",
+      "Local persistent identity path (no platform dependency)"
+    ],
+    "acceptance_evidence": [
+      "R1: local_only anonymous/temporary identity end-to-end",
+      "R2: local_only local persistent identity end-to-end"
+    ],
+    "effort": "L \u2014 schema + implementation + tests; ~3-4 agent sessions",
+    "tests": "cargo test --all: all pass",
+    "clippy": "cargo clippy --all -- -D warnings: clean",
+    "validation": "cargo +nightly fmt --all -- --check: clean",
+    "commits": [
+      "9e1a770",
+      "ed856e0",
+      "2da5539",
+      "16dcc2c",
+      "0a88b38",
+      "0477498",
+      "8d096c4",
+      "40da6f1"
+    ],
+    "qc_fix": "T2 \u2014 C1/W1/W2 resolved (error conflation, silent default, CLI validation skip)",
+    "qa_status": "pass",
+    "qa_report": "reports/2026-04-14-v1.2-local-only-identity/2026-04-14-v1.2-local-only-identity-qa.md",
+    "gates": {
+      "tests": "pass \u2014 400+ tests, 0 failures",
+      "clippy": "pass \u2014 0 warnings",
+      "fmt": "pass \u2014 no diff",
+      "codegen": "pass \u2014 no diff",
+      "schemas": "pass \u2014 61/61 valid",
+      "qc": "pass \u2014 C1/W1/W2 fixed in 40da6f1"
+    }
+  }
+}
