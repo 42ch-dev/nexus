@@ -6,6 +6,7 @@ pub mod context;
 pub mod creators;
 pub mod explore;
 pub mod manuscript;
+pub mod memory;
 pub mod monitoring;
 pub mod permissions;
 pub mod publish;

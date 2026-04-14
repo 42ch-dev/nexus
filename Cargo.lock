@@ -1716,6 +1716,7 @@ version = "0.1.0"
 dependencies = [
  "nexus-contracts",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
 ]
