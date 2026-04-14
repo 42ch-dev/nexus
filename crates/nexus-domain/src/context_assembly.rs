@@ -1,8 +1,11 @@
-//! Stage-0 local context assembly (spec §9, §9.2).
+//! Context assembly for ACP sessions (spec §9, §9.2).
 //!
-//! Assembles the final context package for a new ACP Session in `local_only`
-//! mode (ADR-017). Combines SOUL.md sections, long-term memories, fragment
-//! keywords, and the user prompt into a single ordered context string.
+//! Two assembly strategies:
+//!
+//! **Stage-0** (`local_only` mode, ADR-017):
+//! Assembles the final context package from local sources only. Combines
+//! SOUL.md sections, long-term memories, fragment keywords, and the user
+//! prompt into a single ordered context string.
 //!
 //! Assembly ordering (spec §9.2):
 //! 1. System/policy prefix (runtime injection)
@@ -12,13 +15,28 @@
 //! 5. `## Experience` (aggregated result from SOUL.md)
 //! 6. User task prompt
 //!
+//! **Two-Stage** (`local_first` / `cloud_enhanced` modes):
+//! Stage-1 calls platform `context/assemble` API; Stage-2 merges the
+//! platform response with local SOUL, memories, and fragments.
+//!
+//! Assembly ordering (spec §9.2 two-stage):
+//! 1. System/policy prefix
+//! 2. `## Personality`
+//! 3. Long-term memories (local)
+//! 4. Fragment keywords (local)
+//! 5. Memory items from Stage-1 (deduped with local)
+//! 6. KB + Timeline from Stage-1
+//! 7. `## Experience`
+//! 8. User prompt
+//!
 //! Token budget / truncation (spec §9.3):
 //! - Uses chars/4 heuristic for token estimation
 //! - Personality section is NEVER truncated
 //! - Truncatable sections are dropped from the end when budget exceeded
 
+use crate::runtime_mode::DomainRuntimeMode;
 use crate::LongTermMemory;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 /// Section heading for fragment keywords.
 const FRAGMENT_KEYWORDS_HEADING: &str = "### Fragment keywords (deduped)";
@@ -281,6 +299,299 @@ fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
     match truncate_at {
         Some(pos) if pos > 0 => format!("{}…", &text[..pos]),
         _ => format!("{}…", &text[..max_chars.min(text.len())]),
+    }
+}
+
+// ── Two-Stage Assembly (local_first / cloud_enhanced) ────────────
+
+/// Section heading for platform memory items.
+const PLATFORM_MEMORY_HEADING: &str = "### Platform Memory Items";
+
+/// Section heading for knowledge base entries.
+const KB_HEADING: &str = "### Knowledge Base";
+
+/// Section heading for timeline events.
+const TIMELINE_HEADING: &str = "### Timeline Events";
+
+/// Two-stage context assembly for `local_first` / `cloud_enhanced` modes.
+///
+/// Stage-1: Call platform `context/assemble` API.
+/// Stage-2: Merge platform response with local SOUL + memories + fragments.
+///
+/// Spec: `creator-memory-soul-lifecycle-v1.md` §9
+pub struct TwoStageAssembly {
+    /// Stage-1 response from platform (optional — may fail or return empty).
+    pub stage1_response: Option<AssembleResponse>,
+    /// Local SOUL personality section.
+    pub personality: String,
+    /// Local SOUL experience section.
+    pub experience: String,
+    /// Local long-term memories.
+    pub long_term_memories: Vec<LongTermMemory>,
+    /// Local fragment keywords (union from memory_fragments).
+    pub fragment_keywords: Vec<String>,
+    /// User task prompt.
+    pub user_prompt: String,
+    /// System/policy prefix.
+    pub system_prefix: String,
+    /// Token budget.
+    pub max_tokens: Option<usize>,
+    /// Current runtime mode (for merge rules).
+    pub runtime_mode: DomainRuntimeMode,
+}
+
+/// Response from platform `context/assemble` API (Stage-1).
+///
+/// Minimal wire shape for V1.2.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssembleResponse {
+    /// Memory items from platform vector search (optional).
+    pub memory_items: Vec<MemoryItemRef>,
+    /// Knowledge base entries (optional).
+    pub kb: Vec<KbEntry>,
+    /// Timeline events (optional).
+    pub timeline: Vec<TimelineEventRef>,
+    /// Assembly metadata from platform.
+    pub metadata: AssembleMetadata,
+}
+
+/// Reference to a memory item (from platform).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MemoryItemRef {
+    pub memory_id: String,
+    pub content_summary: String,
+    pub relevance_score: Option<f32>,
+}
+
+/// Knowledge base entry reference.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KbEntry {
+    pub entry_id: String,
+    pub title: String,
+    pub content: String,
+}
+
+/// Timeline event reference.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TimelineEventRef {
+    pub event_id: String,
+    pub event_type: String,
+    pub timestamp: String,
+}
+
+/// Assembly metadata from platform.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssembleMetadata {
+    pub assembled_at: String,
+    pub token_count_estimate: Option<u32>,
+}
+
+impl TwoStageAssembly {
+    /// Assemble the final context (Stage-2 merge).
+    ///
+    /// Merge rules (spec §9.2):
+    /// 1. System prefix
+    /// 2. Personality (SOUL)
+    /// 3. Long-term memories (local)
+    /// 4. Fragment keywords (local)
+    /// 5. Memory items from Stage-1 (deduped: local wins for same `memory_id`)
+    /// 6. KB + Timeline from Stage-1 (if available)
+    /// 7. Experience (SOUL)
+    /// 8. User prompt
+    pub fn assemble(&self) -> String {
+        let mut parts = Vec::new();
+
+        // 1. System/policy prefix
+        if !self.system_prefix.is_empty() {
+            parts.push(self.system_prefix.clone());
+        }
+
+        // 2. ## Personality
+        if !self.personality.is_empty() {
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+        }
+
+        // 3. Long-term memories (local, sorted by kind then recency)
+        let sorted = self.sorted_memories();
+        for mem in &sorted {
+            let title = format!("### Memory: {}", mem.frontmatter.memory_id);
+            parts.push(format!("{title}\n\n{}", mem.body));
+        }
+
+        // 4. Fragment keywords (deduped, omit if empty)
+        let keywords = self.deduped_keywords();
+        if !keywords.is_empty() {
+            parts.push(format!(
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                keywords.join(", ")
+            ));
+        }
+
+        // 5–6. Platform data from Stage-1 (if available)
+        if let Some(ref response) = self.stage1_response {
+            // 5. Memory items (deduped with local per §9.1.1)
+            let deduped_items = self.deduped_platform_memories(&response.memory_items);
+            if !deduped_items.is_empty() {
+                let mem_lines: Vec<String> = deduped_items
+                    .iter()
+                    .map(|item| {
+                        let score = item
+                            .relevance_score
+                            .map(|s| format!(" [relevance: {s:.2}]"))
+                            .unwrap_or_default();
+                        format!(
+                            "- {} ({}): {}{score}",
+                            item.memory_id, item.memory_id, item.content_summary
+                        )
+                    })
+                    .collect();
+                parts.push(format!(
+                    "{PLATFORM_MEMORY_HEADING}\n\n{}",
+                    mem_lines.join("\n")
+                ));
+            }
+
+            // 6a. Knowledge base entries
+            if !response.kb.is_empty() {
+                let kb_lines: Vec<String> = response
+                    .kb
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "- **{}** ({}): {}",
+                            entry.title, entry.entry_id, entry.content
+                        )
+                    })
+                    .collect();
+                parts.push(format!("{KB_HEADING}\n\n{}", kb_lines.join("\n")));
+            }
+
+            // 6b. Timeline events
+            if !response.timeline.is_empty() {
+                let tl_lines: Vec<String> = response
+                    .timeline
+                    .iter()
+                    .map(|evt| {
+                        format!(
+                            "- [{}] {} ({})",
+                            evt.timestamp, evt.event_type, evt.event_id
+                        )
+                    })
+                    .collect();
+                parts.push(format!("{TIMELINE_HEADING}\n\n{}", tl_lines.join("\n")));
+            }
+        }
+
+        // 7. ## Experience
+        if !self.experience.is_empty() {
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+        }
+
+        // 8. User prompt
+        if !self.user_prompt.is_empty() {
+            parts.push(self.user_prompt.clone());
+        }
+
+        parts.join("\n\n")
+    }
+
+    /// Assemble with fallback to Stage0Assembly if Stage-1 failed.
+    ///
+    /// When `stage1_response` is `None`, returns Stage0-style output
+    /// (local data only, no platform sections).
+    pub fn assemble_with_fallback(&self) -> String {
+        if self.stage1_response.is_none() {
+            return self.assemble_stage0_fallback();
+        }
+        self.assemble()
+    }
+
+    /// Fallback assembly when platform unavailable (Stage0 ordering).
+    ///
+    /// Reuses Stage0Assembly ordering:
+    /// system → personality → memories → keywords → experience → prompt
+    fn assemble_stage0_fallback(&self) -> String {
+        let mut parts = Vec::new();
+
+        // 1. System/policy prefix
+        if !self.system_prefix.is_empty() {
+            parts.push(self.system_prefix.clone());
+        }
+
+        // 2. ## Personality
+        if !self.personality.is_empty() {
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+        }
+
+        // 3. Long-term memories (sorted by kind then recency)
+        let sorted = self.sorted_memories();
+        for mem in &sorted {
+            let title = format!("### Memory: {}", mem.frontmatter.memory_id);
+            parts.push(format!("{title}\n\n{}", mem.body));
+        }
+
+        // 4. Fragment keywords (deduped, omit if empty)
+        let keywords = self.deduped_keywords();
+        if !keywords.is_empty() {
+            parts.push(format!(
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                keywords.join(", ")
+            ));
+        }
+
+        // 5. ## Experience
+        if !self.experience.is_empty() {
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+        }
+
+        // 6. User prompt
+        if !self.user_prompt.is_empty() {
+            parts.push(self.user_prompt.clone());
+        }
+
+        parts.join("\n\n")
+    }
+
+    /// Dedup platform memory items against local memories (spec §9.1.1).
+    ///
+    /// If a local long-term memory and a platform `memory_item` share the
+    /// same `memory_id`, the platform item is excluded (local wins).
+    fn deduped_platform_memories<'a>(&self, items: &'a [MemoryItemRef]) -> Vec<&'a MemoryItemRef> {
+        let local_ids: HashSet<&str> = self
+            .long_term_memories
+            .iter()
+            .map(|m| m.frontmatter.memory_id.as_str())
+            .collect();
+        items
+            .iter()
+            .filter(|item| !local_ids.contains(item.memory_id.as_str()))
+            .collect()
+    }
+
+    /// Sort memories by `memory_kind` (alphabetical), then by `updated_at`
+    /// descending (most recent first).
+    fn sorted_memories(&self) -> Vec<&LongTermMemory> {
+        let mut sorted: Vec<&LongTermMemory> = self.long_term_memories.iter().collect();
+        sorted.sort_by(|a, b| {
+            let kind_cmp = a.frontmatter.memory_kind.cmp(&b.frontmatter.memory_kind);
+            if kind_cmp != std::cmp::Ordering::Equal {
+                return kind_cmp;
+            }
+            // Most recent first (reverse chronological)
+            b.frontmatter.updated_at.cmp(&a.frontmatter.updated_at)
+        });
+        sorted
+    }
+
+    /// Deduplicate fragment keywords using a BTreeSet for deterministic ordering.
+    fn deduped_keywords(&self) -> Vec<String> {
+        let set: BTreeSet<String> = self
+            .fragment_keywords
+            .iter()
+            .map(|k| k.trim().to_lowercase())
+            .filter(|k| !k.is_empty())
+            .collect();
+        set.into_iter().collect()
     }
 }
 
@@ -604,5 +915,187 @@ mod tests {
             "should keep complete words: {result}"
         );
         assert!(result.ends_with('…'));
+    }
+
+    // ── TwoStageAssembly tests ───────────────────────────────────────
+
+    fn make_two_stage_with_stage1() -> TwoStageAssembly {
+        use crate::runtime_mode::DomainRuntimeMode;
+        use nexus_contracts::RuntimeMode;
+
+        TwoStageAssembly {
+            stage1_response: Some(AssembleResponse {
+                memory_items: vec![
+                    MemoryItemRef {
+                        memory_id: "mem_platform_1".to_string(),
+                        content_summary: "Platform memory summary".to_string(),
+                        relevance_score: Some(0.95),
+                    },
+                    MemoryItemRef {
+                        memory_id: "mem_platform_2".to_string(),
+                        content_summary: "Another platform memory".to_string(),
+                        relevance_score: None,
+                    },
+                ],
+                kb: vec![KbEntry {
+                    entry_id: "kb_1".to_string(),
+                    title: "World Building Guide".to_string(),
+                    content: "Keep worlds consistent.".to_string(),
+                }],
+                timeline: vec![TimelineEventRef {
+                    event_id: "evt_1".to_string(),
+                    event_type: "session_created".to_string(),
+                    timestamp: "2026-04-14T10:00:00Z".to_string(),
+                }],
+                metadata: AssembleMetadata {
+                    assembled_at: "2026-04-14T12:00:00Z".to_string(),
+                    token_count_estimate: Some(500),
+                },
+            }),
+            personality: "Creative and bold.".to_string(),
+            experience: "10 years of writing.".to_string(),
+            long_term_memories: vec![make_memory(
+                "story_summary",
+                "Local memory body.",
+                "2026-04-14T00:00:00Z",
+            )],
+            fragment_keywords: vec!["character".to_string(), "plot".to_string()],
+            user_prompt: "Write chapter 3.".to_string(),
+            system_prefix: "You are a helpful assistant.".to_string(),
+            max_tokens: None,
+            runtime_mode: DomainRuntimeMode::new(RuntimeMode::LocalFirst),
+        }
+    }
+
+    #[test]
+    fn two_stage_assemble_with_stage1_data() {
+        let asm = make_two_stage_with_stage1();
+        let output = asm.assemble();
+
+        // Verify §9.2 ordering: system → personality → memories → keywords → memory_items → kb/timeline → experience → prompt
+        let sys_pos = output.find("You are a helpful assistant.").unwrap();
+        let pers_pos = output.find(PERSONALITY_HEADING).unwrap();
+        let mem_pos = output.find("### Memory:").unwrap();
+        let kw_pos = output.find(FRAGMENT_KEYWORDS_HEADING).unwrap();
+        let platform_mem_pos = output.find("mem_platform_1").unwrap();
+        let kb_pos = output.find("World Building Guide").unwrap();
+        let exp_pos = output.find(EXPERIENCE_HEADING).unwrap();
+        let prompt_pos = output.find("Write chapter 3.").unwrap();
+
+        assert!(sys_pos < pers_pos, "system should come before personality");
+        assert!(
+            pers_pos < mem_pos,
+            "personality should come before memories"
+        );
+        assert!(mem_pos < kw_pos, "memories should come before keywords");
+        assert!(
+            kw_pos < platform_mem_pos,
+            "keywords should come before platform memory_items"
+        );
+        assert!(
+            platform_mem_pos < kb_pos,
+            "platform memory_items should come before kb"
+        );
+        assert!(kb_pos < exp_pos, "kb should come before experience");
+        assert!(exp_pos < prompt_pos, "experience should come before prompt");
+
+        // Platform data should be present
+        assert!(output.contains("Platform memory summary"));
+        assert!(output.contains("Keep worlds consistent."));
+        assert!(output.contains("session_created"));
+    }
+
+    #[test]
+    fn two_stage_fallback_when_stage1_none() {
+        use crate::runtime_mode::DomainRuntimeMode;
+        use nexus_contracts::RuntimeMode;
+
+        let asm = TwoStageAssembly {
+            stage1_response: None,
+            personality: "A writer.".to_string(),
+            experience: "Some experience.".to_string(),
+            long_term_memories: vec![make_memory(
+                "character_note",
+                "Alice profile.",
+                "2026-04-14T00:00:00Z",
+            )],
+            fragment_keywords: vec!["plot".to_string()],
+            user_prompt: "Task.".to_string(),
+            system_prefix: String::new(),
+            max_tokens: None,
+            runtime_mode: DomainRuntimeMode::new(RuntimeMode::LocalFirst),
+        };
+
+        let output = asm.assemble_with_fallback();
+
+        // Should contain local data (Stage0 ordering)
+        assert!(output.contains(PERSONALITY_HEADING));
+        assert!(output.contains("A writer."));
+        assert!(output.contains("### Memory:"));
+        assert!(output.contains("Alice profile."));
+        assert!(output.contains("plot"));
+        assert!(output.contains(EXPERIENCE_HEADING));
+        assert!(output.contains("Some experience."));
+        assert!(output.contains("Task."));
+
+        // Should NOT contain any platform-only sections
+        assert!(!output.contains("### Platform Memory Items"));
+    }
+
+    #[test]
+    fn memory_dedup_local_over_platform() {
+        use crate::runtime_mode::DomainRuntimeMode;
+        use nexus_contracts::RuntimeMode;
+
+        // Local memory with ID that also appears in platform response
+        let mut local_mem = make_memory(
+            "story_summary",
+            "LOCAL content wins.",
+            "2026-04-14T00:00:00Z",
+        );
+        local_mem.frontmatter.memory_id = "mem_overlap".to_string();
+
+        let asm = TwoStageAssembly {
+            stage1_response: Some(AssembleResponse {
+                memory_items: vec![
+                    MemoryItemRef {
+                        memory_id: "mem_overlap".to_string(), // Same ID as local!
+                        content_summary: "PLATFORM content should be deduped.".to_string(),
+                        relevance_score: Some(0.9),
+                    },
+                    MemoryItemRef {
+                        memory_id: "mem_platform_only".to_string(),
+                        content_summary: "Platform-only memory.".to_string(),
+                        relevance_score: Some(0.8),
+                    },
+                ],
+                kb: Vec::new(),
+                timeline: Vec::new(),
+                metadata: AssembleMetadata {
+                    assembled_at: "2026-04-14T12:00:00Z".to_string(),
+                    token_count_estimate: None,
+                },
+            }),
+            personality: String::new(),
+            experience: String::new(),
+            long_term_memories: vec![local_mem],
+            fragment_keywords: Vec::new(),
+            user_prompt: String::new(),
+            system_prefix: String::new(),
+            max_tokens: None,
+            runtime_mode: DomainRuntimeMode::new(RuntimeMode::CloudEnhanced),
+        };
+
+        let output = asm.assemble();
+
+        // Local content should appear (under ### Memory heading)
+        assert!(output.contains("LOCAL content wins."));
+        // Platform content for same ID should NOT appear
+        assert!(
+            !output.contains("PLATFORM content should be deduped."),
+            "platform memory with same ID as local should be deduped"
+        );
+        // Platform-only memory should still appear
+        assert!(output.contains("Platform-only memory."));
     }
 }
