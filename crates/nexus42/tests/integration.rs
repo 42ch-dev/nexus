@@ -283,10 +283,14 @@ fn sync_status_without_daemon() {
 /// Test sync push is blocked in local_only mode with PlatformOperationProhibited error
 #[test]
 fn sync_push_blocked_in_local_only() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("sync")
         .arg("push")
+        .env("HOME", home)
         .assert()
         .failure()
         .stderr(predicate::str::contains("not available in local_only mode"));
