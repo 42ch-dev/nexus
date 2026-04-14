@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-11T12:00:00Z",
+  "updated_at": "2026-04-14T00:00:00Z",
   "entries": [
     {
       "updated_at": "2026-04-05",
@@ -137,6 +137,18 @@
     {
       "updated_at": "2026-04-10",
       "message": "Plan 2026-04-10-local-fs-layout-ssot-and-implementation Done: ADR-014 paths (nexus-home-layout), init + creator workspace create, nexus42d config-driven state.db, README local layout; legacy/migrate paths later removed (pre-release). T1 SSOT doc checklist remains manual via local-paths.json."
+    },
+    {
+      "updated_at": "2026-04-14",
+      "message": "Policy update: avoid metadata.*_note fields in .agents/plans/status.json. Moved previous tech_debt_summary severity_note and archival_note narrative into notes.json. Keep status.json focused on machine-readable structured fields; write timeline/context notes here."
+    },
+    {
+      "updated_at": "2026-04-14",
+      "message": "Carried-over note (from former metadata.tech_debt_summary.severity_note): v1-tech-debt-cleanup remains InProgress (long-lived), C+D milestone done 2026-04-10, Batch E (V1.2) pending; cross-plan residual closures include PUBLISH-CODEGEN-01/FORK-SNAP-01 (plan 2026-04-11-codegen-ref-resolution) and SYNC-AUTH-TOKEN-01."
+    },
+    {
+      "updated_at": "2026-04-14",
+      "message": "Carried-over note (from former metadata.tech_debt_summary.archival_note): hot status compactions include 2026-04-10 CLI/platform done-row archival set, 2026-04-11 codegen-ref-resolution row compaction, and 2026-04-14 local-fs-layout row compaction to archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json."
     }
   ]
 }
