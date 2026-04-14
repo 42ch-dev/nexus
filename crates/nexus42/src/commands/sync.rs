@@ -18,6 +18,7 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::SyncPullRequest;
+use nexus_domain::runtime_guard;
 use serde::{Deserialize, Serialize};
 
 /// Supported conflict resolution strategies.
@@ -218,6 +219,7 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 
 /// Run sync command
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
+    runtime_guard::require_platform(&config.runtime_mode(), "sync")?;
     let client = DaemonClient::from_config(config);
 
     match cmd {
