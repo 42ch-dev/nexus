@@ -157,6 +157,21 @@ CREATE TABLE IF NOT EXISTS local_identities (
 );
 "#;
 
+/// SOUL metadata — lightweight per-creator SOUL.md tracking.
+///
+/// Stores path, hashes, and timestamps for fast lookups without file I/O.
+pub const SOUL_META_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS soul_meta (
+    creator_id TEXT NOT NULL PRIMARY KEY,
+    file_path TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    personality_hash TEXT,
+    experience_hash TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"#;
+
 /// Initialize shared tables (used by both CLI and daemon).
 ///
 /// Creates the three shared tables with `IF NOT EXISTS` for idempotency.
