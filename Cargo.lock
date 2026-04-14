@@ -1695,6 +1695,7 @@ dependencies = [
  "chrono",
  "jsonschema",
  "nexus-contracts",
+ "nexus-home-layout",
  "pulldown-cmark 0.12.2",
  "pulldown-cmark-frontmatter",
  "serde",
