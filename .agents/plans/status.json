@@ -504,12 +504,13 @@
       "id": "2026-04-14-v1.2-runtime-compatibility",
       "title": "V1.2 WS4: Runtime Compatibility (local_first/cloud_enhanced)",
       "file": ".agents/plans/2026-04-14-v1.2-runtime-compatibility.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@fullstack-dev-2"
       ],
-      "progress": 0,
+      "progress": 10,
       "tags": [
         "v1.2",
         "implementation",
@@ -518,10 +519,10 @@
         "milestone-m2"
       ],
       "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "WS4: Switchable/runnable/degradable local_first + cloud_enhanced mode in V1.2 (no V1.3 optimization gates). Parallel with WS3.",
+      "updated_at": "2026-04-15",
+      "notes": "Phase 1: Mode Switch + Degradation Foundation — T6.1-T6.3",
       "metadata": {
-        "phase": "Todo",
+        "phase": "implement",
         "priority": "medium",
         "workstream": "WS4",
         "milestone": "M2",
@@ -539,7 +540,18 @@
         "acceptance_evidence": [
           "R4: mode switch and degradation regression (local_first/cloud_enhanced fallback)"
         ],
-        "effort": "M — mode switch + degradation + tests; ~2-3 agent sessions"
+        "effort": "M — mode switch + degradation + tests; ~2-3 agent sessions",
+        "working_branch": "feature/v1.2-ws4-runtime-compatibility",
+        "merge_target": "feature/v1.2",
+        "branch_policy": "create feature/v1.2-ws4-runtime-compatibility from feature/v1.2",
+        "batch_count": 6,
+        "gates": {
+          "tests": "pending",
+          "clippy": "pending",
+          "fmt": "pending",
+          "qc_status": "pending",
+          "qa_status": "pending"
+        }
       }
     },
     {
