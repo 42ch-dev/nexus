@@ -26,6 +26,8 @@ pub mod manuscript_state;
 pub mod memory_item;
 pub mod pairing;
 pub mod reference_source;
+pub mod runtime_guard;
+pub mod runtime_mode;
 pub mod source_anchor;
 pub mod story_manifest;
 pub mod timeline_event;
@@ -38,6 +40,9 @@ pub use errors::DomainError;
 
 // Re-export validation helpers
 pub use local_identity::is_valid_creator_id;
+
+// Re-export domain types
+pub use runtime_mode::DomainRuntimeMode;
 
 // Re-export common types from nexus-contracts
 pub use nexus_contracts::{
