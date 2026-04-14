@@ -14,6 +14,9 @@ thiserror.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 strum.workspace = true
+pulldown-cmark = { workspace = true }
+pulldown-cmark-frontmatter = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 jsonschema = "0.17"
