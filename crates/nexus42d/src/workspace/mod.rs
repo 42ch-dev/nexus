@@ -98,9 +98,7 @@ impl WorkspaceState {
 
         // Read runtime mode from CLI config
         let cli_snapshot = crate::cli_config::CliConfigSnapshot::load(&nexus_home)?;
-        let runtime_mode = cli_snapshot
-            .runtime_mode
-            .unwrap_or(RuntimeMode::LocalOnly);
+        let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
 
         let db_path = crate::cli_config::resolve_state_db_path(&user_home, &nexus_home)?;
 

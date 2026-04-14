@@ -53,8 +53,8 @@ fn show(config: &CliConfig) -> Result<()> {
 }
 
 fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
-    let new_mode =
-        DomainRuntimeMode::from_str(mode_str).map_err(|e| crate::errors::CliError::Config(e.to_string()))?;
+    let new_mode = DomainRuntimeMode::parse(mode_str)
+        .map_err(|e| crate::errors::CliError::Config(e.to_string()))?;
 
     let old_mode = config.runtime_mode();
     if old_mode == new_mode {
