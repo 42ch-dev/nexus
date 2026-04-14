@@ -27,6 +27,8 @@ pub struct StatusResponse {
     pub workspace_initialized: bool,
     /// ACP status information (V1.1)
     pub acp: AcpStatusInfo,
+    /// Current runtime mode (local_only / local_first / cloud_enhanced).
+    pub runtime_mode: String,
 }
 
 /// ACP-related status information included in runtime status.
@@ -76,6 +78,7 @@ pub async fn status(State(state): State<WorkspaceState>) -> Json<StatusResponse>
         uptime_seconds: state.uptime_seconds().await,
         workspace_initialized: state.is_initialized().await,
         acp: acp_status,
+        runtime_mode: state.runtime_mode_as_str().to_string(),
     })
 }
 

@@ -11,6 +11,7 @@
 pub mod manager;
 
 use crate::db::pool::{DbPool, PoolConfig, PooledConn};
+use nexus_contracts::RuntimeMode;
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,6 +28,8 @@ pub struct WorkspaceState {
     db_path: PathBuf,
     started_at: std::time::Instant,
     workspace_path: Arc<std::sync::Mutex<Option<String>>>,
+    /// Runtime mode read from CLI config at startup.
+    runtime_mode: RuntimeMode,
 }
 
 impl WorkspaceState {
@@ -49,6 +52,7 @@ impl WorkspaceState {
             db_path,
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
+            runtime_mode: RuntimeMode::LocalOnly,
         }
     }
 
@@ -79,6 +83,7 @@ impl WorkspaceState {
             db_path,
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
+            runtime_mode: RuntimeMode::LocalOnly,
         }
     }
 
@@ -90,6 +95,12 @@ impl WorkspaceState {
 
         let nexus_home = user_home.join(".nexus42");
         std::fs::create_dir_all(&nexus_home)?;
+
+        // Read runtime mode from CLI config
+        let cli_snapshot = crate::cli_config::CliConfigSnapshot::load(&nexus_home)?;
+        let runtime_mode = cli_snapshot
+            .runtime_mode
+            .unwrap_or(RuntimeMode::LocalOnly);
 
         let db_path = crate::cli_config::resolve_state_db_path(&user_home, &nexus_home)?;
 
@@ -120,6 +131,7 @@ impl WorkspaceState {
             db_path,
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
+            runtime_mode,
         })
     }
 
@@ -179,6 +191,16 @@ impl WorkspaceState {
     /// Get uptime in seconds
     pub async fn uptime_seconds(&self) -> u64 {
         self.started_at.elapsed().as_secs()
+    }
+
+    /// Current runtime mode (from CLI config at startup).
+    pub fn runtime_mode(&self) -> &RuntimeMode {
+        &self.runtime_mode
+    }
+
+    /// Runtime mode as a string matching JSON Schema enum values.
+    pub fn runtime_mode_as_str(&self) -> &'static str {
+        self.runtime_mode.as_str()
     }
 
     /// Initialize a workspace at the given path
