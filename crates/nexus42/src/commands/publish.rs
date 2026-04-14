@@ -10,6 +10,7 @@ use clap::Subcommand;
 use nexus_contracts::{
     PublishHistoryRequest, PublishHistoryResponse, PublishStoryRequest, PublishStoryResponse,
 };
+use nexus_domain::runtime_guard;
 use serde::{Deserialize, Serialize};
 
 fn validate_manuscript_id(s: &str) -> std::result::Result<String, String> {
@@ -133,6 +134,7 @@ fn is_json_output(output_format: &str) -> bool {
 
 /// Run publish subcommands
 pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -> Result<()> {
+    runtime_guard::require_platform(&config.runtime_mode(), "publish")?;
     let client = DaemonClient::from_config(config);
     let json_out = is_json_output(output_format);
 
