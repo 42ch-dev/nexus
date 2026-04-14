@@ -450,7 +450,7 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-14",
-      "notes": "All 17 subtasks implemented across 3 phases (2 parallel + 1 serial). 2 dev tracks: fullstack-dev (domain/SOUL/CLI) + fullstack-dev-2 (DB/session/review). Ready for QC triple review.",
+      "notes": "QC approve with residuals. All 3 Critical + 6 Warning fixed. Ready for QA verification.",
       "metadata": {
         "phase": "review",
         "priority": "high",
@@ -481,7 +481,8 @@
           "tests": "pass",
           "clippy": "pass",
           "fmt": "pass",
-          "qc_status": "pending",
+          "qc_status": "approve-with-residuals",
+          "qc_fixes": "b2069f8,3bf75d6",
           "qa_status": "pending"
         },
         "commits": [
@@ -492,7 +493,8 @@
           "175c8ba T5.12 experience aggregation",
           "2c6380f T5.15-T5.16 memory CLI commands",
           "3721e71 T5.17 E2E tests"
-        ]
+        ],
+        "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred)"
       }
     },
     {
@@ -707,6 +709,107 @@
           "decision": "accept",
           "owner": "fullstack-dev",
           "target": "V1.3+",
+          "tracking": null
+        }
+      ],
+      "2026-04-14-v1.2-local-memory-pipeline": [
+        {
+          "id": "R4",
+          "title": "Duplicate code in experience_aggregation (aggregate vs preview)",
+          "severity": "low",
+          "source": "QC1-W1, QC2-W2",
+          "scope": "experience_aggregation.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R7",
+          "title": "O(N) idempotency check on promotion (file I/O scan)",
+          "severity": "low",
+          "source": "QC2-W3, QC3-perf",
+          "scope": "review.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3+",
+          "tracking": null
+        },
+        {
+          "id": "R8",
+          "title": "Session capture durability gap (fire-and-forget)",
+          "severity": "medium",
+          "source": "QC3-W1",
+          "scope": "session_capture.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R9",
+          "title": "Fragment TTL has no cleanup mechanism",
+          "severity": "low",
+          "source": "QC3-W2",
+          "scope": "schema.rs",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.4",
+          "tracking": null
+        },
+        {
+          "id": "R10",
+          "title": "Slug collision risk (memory_id to slug truncation)",
+          "severity": "nit",
+          "source": "QC3-W3",
+          "scope": "review.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R11",
+          "title": "Review/Fragments CLI commands are stubs",
+          "severity": "low",
+          "source": "QC1-W6, QC3-W5",
+          "scope": "commands/memory.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R13",
+          "title": "Inefficient keyword dedup (Vec vs HashSet)",
+          "severity": "nit",
+          "source": "QC1-S2, QC2-S1",
+          "scope": "memory_fragment.rs",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R14",
+          "title": "EXPERIENCE_MEMORY_KINDS hardcoded not derived from enum",
+          "severity": "low",
+          "source": "QC1-S1, QC3-W4",
+          "scope": "experience_aggregation.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R15",
+          "title": "Token estimation is chars/4 approximation",
+          "severity": "nit",
+          "source": "QC3-S2",
+          "scope": "context_assembly.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
           "tracking": null
         }
       ]
