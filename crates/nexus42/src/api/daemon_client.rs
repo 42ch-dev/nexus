@@ -64,6 +64,12 @@ impl DaemonClient {
         }
     }
 
+    /// Get the base URL for this daemon client.
+    #[allow(dead_code)]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     /// Check if the daemon is running and healthy.
     ///
     /// Uses the client's configured timeout. Returns `Ok(false)` on any error

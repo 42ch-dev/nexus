@@ -51,6 +51,7 @@ pub use local_identity::is_valid_creator_id;
 // Re-export domain types
 pub use context_assembly::Stage0Assembly;
 pub use long_term_memory::LongTermMemory;
+pub use review::{check_session_already_promoted, promote_to_long_term, SessionDigestSummarizer};
 pub use runtime_mode::DomainRuntimeMode;
 pub use soul::SoulDocument;
 
