@@ -520,7 +520,7 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-15",
-      "notes": "Phase 1: Mode Switch + Degradation Foundation — T6.1-T6.3",
+      "notes": "Phase 1: T6.1-T6.3 done (domain model + guard + downgrade/upgrade). T6.4+ pending.",
       "metadata": {
         "phase": "implement",
         "priority": "medium",
@@ -546,11 +546,15 @@
         "branch_policy": "create feature/v1.2-ws4-runtime-compatibility from feature/v1.2",
         "batch_count": 6,
         "gates": {
-          "tests": "pending",
-          "clippy": "pending",
+          "tests": "passing (387/387, 23 new degradation tests)",
+          "clippy": "clean",
           "fmt": "pending",
           "qc_status": "pending",
           "qa_status": "pending"
+        },
+        "commits": {
+          "T6.1": "46df122 feat(domain): define DegradationPolicy domain model (T6.1)",
+          "T6.3": "daf12c9 feat(domain): add downgrade/upgrade/degradation_depth_to to DomainRuntimeMode (T6.3)"
         }
       }
     },
