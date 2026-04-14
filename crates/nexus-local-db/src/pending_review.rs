@@ -142,7 +142,7 @@ mod tests {
     fn sample_record(pending_id: &str) -> PendingReviewRecord {
         PendingReviewRecord {
             pending_id: pending_id.to_string(),
-            session_id: "sess_test".to_string(),
+            session_id: format!("sess_{}", pending_id), // Unique per record
             creator_id: "ctr_test".to_string(),
             world_id: Some("wld_test".to_string()),
             task_kind: "brainstorm".to_string(),
@@ -179,11 +179,13 @@ mod tests {
         let record1 = sample_record("pending_001");
         let record2 = PendingReviewRecord {
             pending_id: "pending_002".to_string(),
+            session_id: "sess_pending_002".to_string(), // Unique session_id
             creator_id: "ctr_other".to_string(),
             ..sample_record("pending_002")
         };
         let record3 = PendingReviewRecord {
             pending_id: "pending_003".to_string(),
+            session_id: "sess_pending_003".to_string(), // Unique session_id
             created_at: "2026-04-14T12:00:00Z".to_string(),
             ..sample_record("pending_003")
         };
@@ -224,7 +226,7 @@ mod tests {
         assert_eq!(count_pending_reviews(&conn, "ctr_test").unwrap(), 0);
 
         let record1 = sample_record("pending_001");
-        let record2 = sample_record("pending_002");
+        let record2 = sample_record("pending_002"); // Unique session_id
         create_pending_review(&conn, &record1).unwrap();
         create_pending_review(&conn, &record2).unwrap();
 
@@ -237,6 +239,7 @@ mod tests {
         let conn = setup_db();
         let record = PendingReviewRecord {
             pending_id: "pending_null".to_string(),
+            session_id: "sess_pending_null".to_string(), // Unique session_id
             world_id: None,
             ..sample_record("pending_null")
         };
