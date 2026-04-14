@@ -262,10 +262,7 @@ fn assemble_local(
 fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
     // Try to fetch fragment keywords from daemon API.
     // This is best-effort: if daemon is down, return empty.
-    match try_fetch_fragment_keywords(config) {
-        Ok(keywords) => keywords,
-        Err(_) => Vec::new(),
-    }
+    try_fetch_fragment_keywords(config).unwrap_or_default()
 }
 
 /// Attempt to fetch fragment keywords from the daemon.
