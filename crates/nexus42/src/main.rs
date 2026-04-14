@@ -17,8 +17,8 @@ mod paths;
 use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
-    daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, init::InitCommand,
-    manuscript::ManuscriptCommand, policy::PolicyCommand, publish::PublishCommand,
+    daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, identity::IdentityCommand,
+    init::InitCommand, manuscript::ManuscriptCommand, policy::PolicyCommand, publish::PublishCommand,
     research::ResearchCommand, session::SessionCommand, sync::SyncCommand, world::WorldCommand,
 };
 
@@ -135,6 +135,12 @@ enum Commands {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+
+    /// Local identity management (local_only mode)
+    Identity {
+        #[command(subcommand)]
+        command: IdentityCommand,
+    },
 }
 
 #[tokio::main]
@@ -168,6 +174,7 @@ async fn main() {
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
+        Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())
