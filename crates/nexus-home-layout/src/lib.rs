@@ -38,6 +38,14 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
         .join("global_state.db")
 }
 
+/// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (ADR-014, ADR-016 D1).
+pub fn creator_soul_md_path(home: &Path, creator_id: &str) -> PathBuf {
+    nexus_root_from_home(home)
+        .join("creators")
+        .join(creator_id)
+        .join("SOUL.md")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +65,15 @@ mod tests {
         assert_eq!(
             workspace_state_db_path(&home, "c", "w"),
             PathBuf::from("/h/.nexus42/creators/c/workspaces/w/state.db")
+        );
+    }
+
+    #[test]
+    fn soul_md_path_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            creator_soul_md_path(&home, "ctr_test"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/SOUL.md")
         );
     }
 }
