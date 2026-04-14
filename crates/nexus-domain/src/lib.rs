@@ -28,6 +28,8 @@ pub mod pairing;
 pub mod reference_source;
 pub mod runtime_guard;
 pub mod runtime_mode;
+pub mod soul;
+pub mod soul_io;
 pub mod source_anchor;
 pub mod story_manifest;
 pub mod timeline_event;
@@ -43,6 +45,7 @@ pub use local_identity::is_valid_creator_id;
 
 // Re-export domain types
 pub use runtime_mode::DomainRuntimeMode;
+pub use soul::SoulDocument;
 
 // Re-export common types from nexus-contracts
 pub use nexus_contracts::{
