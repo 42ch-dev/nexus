@@ -16,6 +16,7 @@ pub mod creator;
 pub mod delta;
 pub mod fork_branch;
 pub mod key_block;
+pub mod local_identity;
 pub mod manuscript_state;
 pub mod memory;
 pub mod outbox_entry;
@@ -77,6 +78,7 @@ pub use creator::*;
 pub use delta::*;
 pub use fork_branch::*;
 pub use key_block::*;
+pub use local_identity::*;
 pub use manuscript_state::*;
 pub use memory::*;
 pub use outbox_entry::*;
@@ -137,6 +139,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("Delta", 1),
     ("ForkBranch", 1),
     ("KeyBlock", 1),
+    ("LocalIdentity", 1),
     ("ManuscriptState", 1),
     ("Memory", 1),
     ("OutboxEntry", 1),
