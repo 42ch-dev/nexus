@@ -233,6 +233,7 @@ impl MemoryKind {
             Self::WorldBuilding => "world_building",
             Self::PlotOutline => "plot_outline",
             Self::ThemeAnalysis => "theme_analysis",
+            Self::PersonalityCore => "personality_core",
             Self::Custom => "custom",
         }
     }
@@ -640,6 +641,7 @@ impl FromStr for MemoryKind {
             "world_building" => Ok(Self::WorldBuilding),
             "plot_outline" => Ok(Self::PlotOutline),
             "theme_analysis" => Ok(Self::ThemeAnalysis),
+            "personality_core" => Ok(Self::PersonalityCore),
             "custom" => Ok(Self::Custom),
             _ => Err(format!("Invalid MemoryKind: {}", s)),
         }

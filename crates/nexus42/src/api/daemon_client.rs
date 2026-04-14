@@ -57,7 +57,10 @@ impl DaemonClient {
             .connect_timeout(connect_timeout)
             .timeout(request_timeout)
             .build()
-            .expect("Failed to build reqwest Client");
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "Failed to build reqwest Client, using default");
+                reqwest::Client::new()
+            });
         Self {
             base_url: base_url.to_string(),
             http,

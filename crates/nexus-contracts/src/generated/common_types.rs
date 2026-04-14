@@ -264,6 +264,7 @@ pub enum MemoryKind {
     WorldBuilding,
     PlotOutline,
     ThemeAnalysis,
+    PersonalityCore,
     Custom,
 }
 

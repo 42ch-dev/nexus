@@ -88,7 +88,10 @@ pub async fn aggregate_experience(
     for slug in &slugs {
         let memory = match memory_io::load_memory(home, creator_id, slug) {
             Ok(m) => m,
-            Err(_) => continue, // Skip unreadable memories
+            Err(e) => {
+                tracing::warn!(slug = %slug, error = %e, "Skipping unreadable memory during experience aggregation");
+                continue;
+            }
         };
 
         if EXPERIENCE_MEMORY_KINDS.contains(&memory.frontmatter.memory_kind.as_str()) {
@@ -150,7 +153,10 @@ pub async fn aggregate_experience_preview(
     for slug in &slugs {
         let memory = match memory_io::load_memory(home, creator_id, slug) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!(slug = %slug, error = %e, "Skipping unreadable memory during experience aggregation preview");
+                continue;
+            }
         };
 
         if EXPERIENCE_MEMORY_KINDS.contains(&memory.frontmatter.memory_kind.as_str()) {
