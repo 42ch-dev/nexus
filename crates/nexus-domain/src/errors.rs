@@ -100,6 +100,19 @@ pub enum DomainError {
     /// Operation requires platform connectivity but current mode prohibits it.
     #[error("operation '{operation}' is not available in {mode} mode")]
     PlatformOperationProhibited { mode: String, operation: String },
+
+    // ── SOUL errors ─────────────────────────────────────────────────────
+    /// SOUL.md file not found at expected path.
+    #[error("SOUL.md not found for creator '{creator_id}' at {path}")]
+    SoulNotFound { creator_id: String, path: String },
+
+    /// SOUL.md is missing a required H2 section.
+    #[error("SOUL.md is missing required section '{section}'")]
+    SoulMissingSection { section: String },
+
+    /// SOUL.md frontmatter is invalid.
+    #[error("SOUL.md frontmatter error: {0}")]
+    SoulFrontmatterError(String),
 }
 
 #[cfg(test)]
