@@ -15,6 +15,7 @@
 //! `nexus-contracts` generated types. See `contract_assertions` module.
 
 pub mod consistency;
+pub mod context_assembly;
 #[cfg(test)]
 pub mod contract_assertions;
 pub mod creator;
@@ -22,7 +23,9 @@ pub mod errors;
 pub mod fork_branch;
 pub mod key_block;
 pub mod local_identity;
+pub mod long_term_memory;
 pub mod manuscript_state;
+pub mod memory_io;
 pub mod memory_item;
 pub mod pairing;
 pub mod reference_source;
@@ -44,6 +47,8 @@ pub use errors::DomainError;
 pub use local_identity::is_valid_creator_id;
 
 // Re-export domain types
+pub use context_assembly::Stage0Assembly;
+pub use long_term_memory::LongTermMemory;
 pub use runtime_mode::DomainRuntimeMode;
 pub use soul::SoulDocument;
 
