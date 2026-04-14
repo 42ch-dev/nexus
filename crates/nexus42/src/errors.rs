@@ -232,6 +232,12 @@ impl From<AcpError> for CliError {
     }
 }
 
+impl From<nexus_local_db::LocalDbError> for CliError {
+    fn from(err: nexus_local_db::LocalDbError) -> Self {
+        CliError::Other(format!("local database error: {}", err))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
