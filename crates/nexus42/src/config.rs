@@ -1,6 +1,7 @@
 //! Nexus CLI Configuration
 
 use nexus_domain::runtime_mode::DomainRuntimeMode;
+use nexus_domain::DegradationSnapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -38,6 +39,11 @@ pub struct CliConfig {
     /// Defaults to `local_only` for V1.2 MVP (ADR-017).
     #[serde(default = "default_runtime_mode")]
     pub runtime_mode: DomainRuntimeMode,
+
+    /// Persisted degradation guard state (inline in config.json for V1.2 MVP).
+    /// Written by the daemon/runtime when degradation occurs; read-only for CLI display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degradation_snapshot: Option<DegradationSnapshot>,
 }
 
 fn default_platform_url() -> String {
@@ -73,6 +79,11 @@ impl CliConfig {
     /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
     pub fn runtime_mode(&self) -> DomainRuntimeMode {
         self.runtime_mode
+    }
+
+    /// Persisted degradation guard snapshot, if available.
+    pub fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
+        self.degradation_snapshot.as_ref()
     }
 
     /// Save configuration to the standard location
@@ -145,6 +156,45 @@ mod tests {
         let json = r#"{"runtime_mode": "local_first"}"#;
         let c: CliConfig = serde_json::from_str(json).unwrap();
         assert_eq!(c.runtime_mode().to_string(), "local_first");
+    }
+
+    #[test]
+    fn degradation_snapshot_defaults_to_none() {
+        let c = CliConfig::default();
+        assert!(c.degradation_snapshot().is_none());
+    }
+
+    #[test]
+    fn degradation_snapshot_roundtrips_via_json() {
+        use nexus_domain::degradation::DegradationState;
+        use nexus_domain::HealthCheckSnapshot;
+
+        let mut c = CliConfig::default();
+        c.degradation_snapshot = Some(DegradationSnapshot {
+            state: DegradationState::DegradedLevel1,
+            failure_count: 3,
+            last_health_check: Some(HealthCheckSnapshot {
+                is_healthy: false,
+                checked_at: "2026-04-15T10:30:00Z".to_string(),
+            }),
+        });
+
+        let json = serde_json::to_string(&c).unwrap();
+        let back: CliConfig = serde_json::from_str(&json).unwrap();
+
+        let snap = back.degradation_snapshot().unwrap();
+        assert_eq!(snap.state, DegradationState::DegradedLevel1);
+        assert_eq!(snap.failure_count, 3);
+        let hc = snap.last_health_check.as_ref().unwrap();
+        assert!(!hc.is_healthy);
+        assert_eq!(hc.checked_at, "2026-04-15T10:30:00Z");
+    }
+
+    #[test]
+    fn degradation_snapshot_absent_key_loads_as_none() {
+        let json = r#"{"runtime_mode": "local_only"}"#;
+        let c: CliConfig = serde_json::from_str(json).unwrap();
+        assert!(c.degradation_snapshot().is_none());
     }
 }
 
