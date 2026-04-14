@@ -11,6 +11,7 @@
 //! See `.agents/plans/knowledge/local-db-refactor-v1.md` for design baseline.
 
 mod error;
+mod identity;
 mod migration;
 mod schema;
 mod version;
@@ -30,6 +31,12 @@ pub use schema::{
     ACP_SESSIONS_TABLE, ACP_TOOL_AUDIT_LOG_TABLE, AUTH_TOKENS_TABLE, CREATORS_TABLE,
     DEVICE_CODE_SESSIONS_TABLE, LOCAL_IDENTITIES_TABLE, OUTBOX_TABLE, PRAGMAS,
     REFERENCE_SOURCES_TABLE, WORKSPACE_META_TABLE,
+};
+
+// Re-export identity CRUD components
+pub use identity::{
+    create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
+    list_local_identities, LocalIdentityRow,
 };
 
 /// Runtime role for database initialization
