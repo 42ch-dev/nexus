@@ -19,6 +19,7 @@ pub mod context_assembly;
 #[cfg(test)]
 pub mod contract_assertions;
 pub mod creator;
+pub mod degradation;
 pub mod errors;
 pub mod experience_aggregation;
 pub mod fork_branch;
