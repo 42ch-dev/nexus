@@ -40,6 +40,11 @@ pub use identity::{
     list_local_identities, LocalIdentityRow,
 };
 
+// Re-export soul_meta CRUD components
+pub use soul_meta::{
+    delete as delete_soul_meta, get as get_soul_meta, upsert as upsert_soul_meta, SoulMeta,
+};
+
 /// Runtime role for database initialization
 ///
 /// Determines which tables to initialize:

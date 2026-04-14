@@ -2,22 +2,52 @@
 //!
 //! Handles reading, writing, and creating SOUL.md files on disk.
 //! Uses `nexus_home_layout` for path resolution.
+//!
+//! All public functions that accept a `creator_id` validate it at the top
+//! to prevent path-traversal attacks (malicious IDs like `../../etc/`).
 
-use crate::{DomainError, SoulDocument};
+use crate::{is_valid_creator_id, DomainError, SoulDocument};
 use std::path::{Path, PathBuf};
 
+/// Validate that `creator_id` is safe to use in filesystem paths.
+///
+/// Rejects IDs containing path separators, `..` components, backslashes,
+/// or control characters, and requires the standard `ctr_` prefix.
+fn validate_creator_id(creator_id: &str) -> Result<(), DomainError> {
+    if is_valid_creator_id(creator_id) {
+        Ok(())
+    } else {
+        Err(DomainError::InvalidIdFormat(format!(
+            "creator_id '{creator_id}' is not a valid CreatorId (must match ^ctr_[a-zA-Z0-9]+$ and contain no path separators or control characters)"
+        )))
+    }
+}
+
 /// Resolve the SOUL.md path for a creator using the home layout.
+///
+/// # Panics (defense-in-depth)
+///
+/// This function does **not** validate `creator_id` on its own — callers
+/// that reach this through the public API should already have passed
+/// `validate_creator_id()`. If you call this directly with untrusted input,
+/// run `validate_creator_id()` first.
 pub fn soul_path(home: &Path, creator_id: &str) -> PathBuf {
     nexus_home_layout::creator_soul_md_path(home, creator_id)
 }
 
 /// Check if a SOUL.md exists for the given creator.
 pub fn exists(home: &Path, creator_id: &str) -> bool {
+    // Existence check: silently return false for invalid IDs rather than
+    // erroring, matching common "check then maybe create" patterns.
+    if !is_valid_creator_id(creator_id) {
+        return false;
+    }
     soul_path(home, creator_id).exists()
 }
 
 /// Read and parse SOUL.md for a creator.
 pub fn load(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> {
+    validate_creator_id(creator_id)?;
     let path = soul_path(home, creator_id);
     if !path.exists() {
         return Err(DomainError::SoulNotFound {
@@ -35,6 +65,7 @@ pub fn load(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> 
 
 /// Create a new SOUL.md for a creator. Fails if it already exists.
 pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> {
+    validate_creator_id(creator_id)?;
     let path = soul_path(home, creator_id);
     if path.exists() {
         return Err(DomainError::ValidationError(format!(
@@ -48,7 +79,7 @@ pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError
     }
     let doc = SoulDocument::for_creator(creator_id);
     let content = doc.render();
-    std::fs::write(&path, content)
+    std::fs::write(&path, &content)
         .map_err(|e| DomainError::ValidationError(format!("cannot write SOUL.md: {e}")))?;
     let mut loaded_doc = load(home, creator_id)?;
     loaded_doc.source_path = Some(path);
@@ -57,6 +88,7 @@ pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError
 
 /// Save an existing SOUL.md (overwrites). Must already exist.
 pub fn save(home: &Path, creator_id: &str, doc: &SoulDocument) -> Result<(), DomainError> {
+    validate_creator_id(creator_id)?;
     let path = soul_path(home, creator_id);
     if !path.exists() {
         return Err(DomainError::SoulNotFound {
@@ -72,6 +104,7 @@ pub fn save(home: &Path, creator_id: &str, doc: &SoulDocument) -> Result<(), Dom
 
 /// Validate an existing SOUL.md (check sections and return parsed doc).
 pub fn validate(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> {
+    validate_creator_id(creator_id)?;
     let doc = load(home, creator_id)?;
     doc.validate()?;
     Ok(doc)
@@ -79,6 +112,7 @@ pub fn validate(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainErr
 
 /// Delete SOUL.md for a creator.
 pub fn delete(home: &Path, creator_id: &str) -> Result<(), DomainError> {
+    validate_creator_id(creator_id)?;
     let path = soul_path(home, creator_id);
     if !path.exists() {
         return Err(DomainError::SoulNotFound {
@@ -97,7 +131,12 @@ mod tests {
     use std::path::PathBuf;
 
     fn fake_home() -> PathBuf {
-        PathBuf::from("/tmp/test_soul_io")
+        // Each test gets a unique temp dir to avoid parallel test races.
+        let id = std::thread::current()
+            .name()
+            .unwrap_or("unknown")
+            .replace("::", "_");
+        PathBuf::from(format!("/tmp/test_soul_io_{id}"))
     }
 
     fn cleanup(home: &Path) {
@@ -166,5 +205,71 @@ mod tests {
         create(&home, "ctr_val").unwrap();
         assert!(validate(&home, "ctr_val").is_ok());
         cleanup(&home);
+    }
+
+    // ── R1: path traversal rejection tests ─────────────────────────────
+
+    #[test]
+    fn load_rejects_path_traversal() {
+        let home = fake_home();
+        let result = load(&home, "../../etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid ID format"), "err: {err}");
+    }
+
+    #[test]
+    fn create_rejects_path_traversal() {
+        let home = fake_home();
+        cleanup(&home);
+        let result = create(&home, "../../etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid ID format"), "err: {err}");
+        cleanup(&home);
+    }
+
+    #[test]
+    fn save_rejects_path_traversal() {
+        let home = fake_home();
+        let result = save(
+            &home,
+            "../../../tmp/evil",
+            &SoulDocument::for_creator("ctr_legit"),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid ID format"),);
+    }
+
+    #[test]
+    fn validate_rejects_path_traversal() {
+        let home = fake_home();
+        let result = validate(&home, "ctr_.._escape");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid ID format"),);
+    }
+
+    #[test]
+    fn delete_rejects_path_traversal() {
+        let home = fake_home();
+        let result = delete(&home, "ctr_../evil");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid ID format"),);
+    }
+
+    #[test]
+    fn exists_returns_false_for_invalid_id() {
+        let home = fake_home();
+        assert!(!exists(&home, "../../etc"));
+        assert!(!exists(&home, "ctr_../escape"));
     }
 }
