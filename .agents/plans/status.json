@@ -206,12 +206,13 @@
       "id": "v1-tech-debt-cleanup",
       "title": "V1 Tech Debt Cleanup (Long-term)",
       "file": ".agents/plans/v1-tech-debt-cleanup.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@qa-engineer"
       ],
-      "progress": 80,
+      "progress": 100,
       "tags": [
         "v1.1",
         "v1.2",
@@ -220,32 +221,43 @@
         "long-term"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-11",
-      "notes": "Long-lived plan: milestones A–D delivered (C+D closed 2026-04-10). Remains open for V1.x backfill — Batch E (TD-11, TD-13) on V1.2 schedule and deferred D follow-ups (daemon FSM, outbox merge, real OAuth per knowledge/). C+D point-in-time snapshot: archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json.",
+      "updated_at": "2026-04-15",
+      "done_at": "2026-04-15",
+      "notes": "All batches A-E complete. Batch E (TD-11/TD-13) delivered: 6 CLI commands (clone, unlink, config, debug, doctor) + 70 integration tests. Deferred D follow-ups (daemon FSM, outbox merge, real OAuth) remain in knowledge docs for V1.3+.",
       "metadata": {
-        "phase": "Batch E next (V1.2 track); same plan id — not Done after D",
+        "phase": "done",
         "priority": "low",
-        "description": "Long-term tech debt across V1.x (including V1.2). A–D batches complete; E and knowledge-documented deferrals remain in-scope under this plan until explicitly retired.",
-        "residual_target": "Batch E TD-11/TD-13 (V1.2 track)",
-        "effort": "L — ongoing lowest-priority backfill",
+        "description": "Long-term tech debt across V1.x (including V1.2). All batches A-E complete. Deferred D follow-ups documented in knowledge/.",
+        "residual_target": "none — all Batch E items delivered",
+        "effort": "L — complete",
         "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
         "batch_status": {
           "batch_a": "completed",
           "batch_b": "completed",
           "batch_c": "completed — 2026-04-10",
           "batch_d": "completed — 2026-04-10",
-          "batch_e": "pending — TD-11, TD-13 (V1.2 schedule; same plan)"
+          "batch_e": "completed — 2026-04-15 (TD-11: 6 CLI commands, TD-13: 70 integration tests)"
         },
         "gates": {
-          "tests": "last verified — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
-          "clippy": "passed",
-          "fmt": "passed",
-          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure); reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md (PUBLISH-CODEGEN-01 / FORK-SNAP-01 closure)"
+          "tests": "pass — cargo test --all (1628 tests, 0 failures)",
+          "clippy": "pass — cargo clippy --all -- -D warnings",
+          "fmt": "pass",
+          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260415-batch-e.md"
         },
         "workstream": "WS5",
-        "milestone": "parallel (non-blocking for M3)",
+        "milestone": "parallel (non-blocking for M3) — complete",
         "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md"
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "commits": [
+          "76dd924 feat(cli): add nexus42 clone command (E1)",
+          "f11c541 feat(cli): add nexus42 identity unlink command (E2)",
+          "3595c30 feat(cli): add nexus42 config command group (E3)",
+          "707ae5a feat(cli): add CliConfig get/set/unset/path methods (E4)",
+          "e03f43e feat(cli): add nexus42 debug command group (E5)",
+          "d521fb3 feat(cli): add nexus42 doctor diagnostic command (E6)",
+          "7d00303 test(sync+cli): E7/E8 integration tests",
+          "89db1f9 test: E9/E10 integration tests for daemon HTTP and ACP session lifecycle"
+        ]
       }
     },
     {
