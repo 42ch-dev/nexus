@@ -576,6 +576,37 @@
         }
       },
       "done_at": "2026-04-15"
+    },
+    {
+      "id": "2026-04-15-v1.3-preflight-implementation-plan",
+      "title": "V1.3 Preflight Implementation Plan",
+      "file": ".agents/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.3",
+        "preflight",
+        "planning",
+        "quality"
+      ],
+      "created_at": "2026-04-15",
+      "updated_at": "2026-04-15",
+      "notes": "Code-bearing deferred findings converted into executable task plan before v1.3 start.",
+      "metadata": {
+        "phase": "Todo",
+        "priority": "high",
+        "scope": "Review-quality signal, memory review/fragments E2E, runtime_mode contract alignment, unignored integration/regression coverage",
+        "dependency": [
+          "2026-04-14-v1.2-regression-suite"
+        ],
+        "plan_source": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md"
+      },
+      "done_at": null
     }
   ],
   "metadata": {
@@ -585,24 +616,26 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-15",
-      "total_open": 23,
+      "total_open": 40,
       "by_severity": {
-        "critical": 0,
+        "critical": 1,
         "high": 0,
         "medium": 4,
-        "low": 8,
-        "nit": 11
+        "low": 19,
+        "nit": 16
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
-        "V1.2": 23
+        "V1.2": 23,
+        "V1.3": 17
       },
       "by_plan": {
         "2026-04-14-v1.2-local-only-identity": 7,
         "2026-04-14-v1.2-local-only-runtime": 2,
         "2026-04-14-v1.2-local-memory-pipeline": 9,
-        "2026-04-14-v1.2-runtime-compatibility": 5
+        "2026-04-14-v1.2-runtime-compatibility": 5,
+        "v1.2-program-review": 17
       }
     },
     "residual_findings": {
@@ -866,11 +899,200 @@
           "target": "V1.2 cleanup",
           "tracking": null
         }
+      ],
+      "v1.2-program-review": [
+        {
+          "id": "C-001",
+          "title": "Review classification purely length-based",
+          "severity": "critical",
+          "source": "QC consolidated (v1.2-program-review)",
+          "scope": "crates/nexus-domain/src/review.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md"
+        },
+        {
+          "id": "W-003",
+          "title": "Slug collision risk",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "memory slug generation path",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "W-004",
+          "title": "Temp file leak on editor crash",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "CLI editor temp file flow",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "M3",
+          "title": "RuntimeMode missing from TS contracts",
+          "severity": "low",
+          "source": "QC#2",
+          "scope": "packages/nexus-contracts/src/generated",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-001",
+          "title": "H2 sections newline loss",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "markdown/output formatting",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-002",
+          "title": "Silent fallback for invalid task_kind",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "review classification parsing",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-003",
+          "title": "DegradationGuard Send/Sync bounds",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "runtime degradation guard",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-004",
+          "title": "Token estimation byte vs char",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "context token estimation",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-005",
+          "title": "Delete confirmation bypassable",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "CLI delete confirmation path",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-006",
+          "title": "Experience aggregation duplicate code",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "experience aggregation implementation",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-007",
+          "title": "Runtime mode set no daemon warning",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "runtime-mode CLI command",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "S-008",
+          "title": "Clone no runtime mode check",
+          "severity": "low",
+          "source": "QC#1",
+          "scope": "clone command runtime guard",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "N-001",
+          "title": "ResolvedIdentity dead code",
+          "severity": "nit",
+          "source": "QC#1",
+          "scope": "identity command",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "N-002",
+          "title": "Doctor version_check misleading Ok",
+          "severity": "nit",
+          "source": "QC#1",
+          "scope": "doctor command",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "N-003",
+          "title": "Missing creator_id index",
+          "severity": "nit",
+          "source": "QC#1",
+          "scope": "sqlite schema/indexes",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R-QC3-002",
+          "title": "ACP tool tests ignored",
+          "severity": "nit",
+          "source": "QC#3",
+          "scope": "crates/nexus42d/tests/integration.rs",
+          "decision": "defer",
+          "owner": "qa-engineer",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R-QC3-003",
+          "title": "Context assemble test skipped",
+          "severity": "nit",
+          "source": "QC#3",
+          "scope": "regression/context assemble coverage",
+          "decision": "defer",
+          "owner": "qa-engineer",
+          "target": "V1.3",
+          "tracking": null
+        }
       ]
     },
     "v1.2_program": {
       "compass": "knowledge/v1.2-delivery-compass-v1.md",
-      "status": "planned",
+      "status": "done",
       "workstreams": {
         "WS1": "2026-04-14-v1.2-reclassification-baseline",
         "WS2": [
@@ -921,7 +1143,8 @@
         "R4": "mode switch and degradation regression (local_first/cloud_enhanced fallback)",
         "R5": "no-platform dependency guard for local_only path"
       },
-      "created_at": "2026-04-14"
+      "created_at": "2026-04-14",
+      "updated_at": "2026-04-15"
     }
   }
 }
