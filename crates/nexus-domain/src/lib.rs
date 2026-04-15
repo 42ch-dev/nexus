@@ -56,7 +56,9 @@ pub use context_assembly::TwoStageAssembly;
 pub use context_assembly::{
     AssembleMetadata, AssembleResponse, KbEntry, MemoryItemRef, TimelineEventRef,
 };
-pub use degradation::{DegradationGuard, DegradationPolicy, DegradationSnapshot, HealthCheckSnapshot};
+pub use degradation::{
+    DegradationGuard, DegradationPolicy, DegradationSnapshot, HealthCheckSnapshot,
+};
 pub use long_term_memory::LongTermMemory;
 pub use review::{check_session_already_promoted, promote_to_long_term, SessionDigestSummarizer};
 pub use runtime_mode::DomainRuntimeMode;

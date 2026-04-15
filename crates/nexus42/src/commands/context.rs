@@ -10,8 +10,8 @@ use clap::Subcommand;
 use nexus_contracts::RuntimeMode;
 use nexus_domain::runtime_guard;
 use nexus_domain::{
-    context_assembly::AssembleResponse, DegradationGuard, DomainRuntimeMode,
-    Stage0Assembly, TwoStageAssembly,
+    context_assembly::AssembleResponse, DegradationGuard, DomainRuntimeMode, Stage0Assembly,
+    TwoStageAssembly,
 };
 
 #[cfg(test)]
@@ -204,7 +204,10 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             max_tokens,
             include_fragments,
             hint,
-        } => assemble_local_with_routing(config, max_tokens, include_fragments, hint.as_deref()).await,
+        } => {
+            assemble_local_with_routing(config, max_tokens, include_fragments, hint.as_deref())
+                .await
+        }
     }
 }
 
@@ -289,7 +292,8 @@ pub async fn assemble_context(
     match mode.inner() {
         RuntimeMode::LocalOnly => {
             // Stage-0 only — no platform dependency
-            let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
+            let stage0 =
+                build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
             Ok(if max_tokens.is_some() {
                 stage0.assemble_with_truncation()
             } else {
@@ -303,14 +307,18 @@ pub async fn assemble_context(
             match platform_result {
                 Some(response) => {
                     guard.record_platform_result(true, None);
-                    let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
+                    let stage0 =
+                        build_stage0_from_local(config, hint, max_tokens, include_fragments)
+                            .await?;
                     let two_stage = build_two_stage_from_local(&stage0, response, mode);
                     Ok(two_stage.assemble())
                 }
                 None => {
                     // Platform failed — record and fall back to Stage0
                     guard.record_platform_result(false, Some("assemble unavailable".to_string()));
-                    let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
+                    let stage0 =
+                        build_stage0_from_local(config, hint, max_tokens, include_fragments)
+                            .await?;
                     Ok(if max_tokens.is_some() {
                         stage0.assemble_with_truncation()
                     } else {
@@ -384,10 +392,7 @@ async fn try_platform_assemble(
 
     // Use call_assemble which sends the request shape the daemon expects
     // (W-1 fix: ContextClient::assemble sent ContextAssembleRequestV1 causing 422).
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .unwrap_or("ctr_unknown");
+    let creator_id = config.active_creator_id.as_deref().unwrap_or("ctr_unknown");
     let runtime_mode_str = config.runtime_mode().to_string();
 
     match client
@@ -572,9 +577,7 @@ mod tests {
 
     /// Helper: create a platform AssembleResponse for routing tests.
     fn make_platform_response() -> AssembleResponse {
-        use nexus_domain::context_assembly::{
-            AssembleMetadata, MemoryItemRef, TimelineEventRef,
-        };
+        use nexus_domain::context_assembly::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
 
         AssembleResponse {
             memory_items: vec![MemoryItemRef {
@@ -623,7 +626,10 @@ mod tests {
         );
 
         // Guard should remain in Normal state (no platform call attempted)
-        assert_eq!(guard.degradation_state(), nexus_domain::degradation::DegradationState::Normal);
+        assert_eq!(
+            guard.degradation_state(),
+            nexus_domain::degradation::DegradationState::Normal
+        );
         assert_eq!(guard.failure_count(), 0);
     }
 
@@ -661,7 +667,10 @@ mod tests {
         );
 
         // Guard should be in Normal state (platform succeeded)
-        assert_eq!(guard.degradation_state(), nexus_domain::degradation::DegradationState::Normal);
+        assert_eq!(
+            guard.degradation_state(),
+            nexus_domain::degradation::DegradationState::Normal
+        );
         assert_eq!(guard.failure_count(), 0);
     }
 
@@ -690,7 +699,10 @@ mod tests {
         // Guard should record the failure
         assert_eq!(guard.failure_count(), 1);
         // Not yet at threshold (default is 3), so still Normal
-        assert_eq!(guard.degradation_state(), nexus_domain::degradation::DegradationState::Normal);
+        assert_eq!(
+            guard.degradation_state(),
+            nexus_domain::degradation::DegradationState::Normal
+        );
     }
 
     /// Degradation triggers after threshold failures.
@@ -713,7 +725,10 @@ mod tests {
         assert_eq!(guard.failure_count(), 0); // reset after degradation
 
         // Current mode should be downgraded
-        assert_eq!(*guard.current_mode(), DomainRuntimeMode::new(RuntimeMode::LocalFirst));
+        assert_eq!(
+            *guard.current_mode(),
+            DomainRuntimeMode::new(RuntimeMode::LocalFirst)
+        );
     }
 
     /// local_first mode falls back to Stage0 on platform failure.
@@ -726,7 +741,10 @@ mod tests {
         guard.record_platform_result(false, Some("connection refused".to_string()));
 
         assert_eq!(guard.failure_count(), 1);
-        assert_eq!(guard.degradation_state(), nexus_domain::degradation::DegradationState::Normal);
+        assert_eq!(
+            guard.degradation_state(),
+            nexus_domain::degradation::DegradationState::Normal
+        );
     }
 
     /// build_two_stage_from_local produces correct TwoStageAssembly.
@@ -769,7 +787,10 @@ mod tests {
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
         assert_eq!(guard.failure_count(), 2);
         // Mode should be downgraded one level from CloudEnhanced
-        assert_eq!(*guard.current_mode(), DomainRuntimeMode::new(RuntimeMode::LocalFirst));
+        assert_eq!(
+            *guard.current_mode(),
+            DomainRuntimeMode::new(RuntimeMode::LocalFirst)
+        );
 
         // Normal state with failures: should replay to restore failure_count
         let mut config2 = CliConfig::default();
