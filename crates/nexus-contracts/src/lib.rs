@@ -6,8 +6,5 @@
 pub mod enum_conversions;
 pub mod generated;
 
-// Re-export all generated types at crate root
+// Re-export all generated types at crate root (includes RuntimeMode from runtime-mode.schema.json)
 pub use generated::*;
-
-// Re-export hand-maintained enum types from enum_conversions
-pub use enum_conversions::RuntimeMode;

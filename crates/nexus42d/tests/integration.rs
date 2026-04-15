@@ -641,23 +641,26 @@ async fn acp_sessions_delete_not_found() {
 // (crates/nexus42d/tests/acp_tool.rs). The external integration tests here use
 // temp paths outside workspace which correctly return 403 Forbidden.
 /// Test: ACP tool execute endpoint - fs/read_text_file success
-/// Skipped: Requires proper workspace path setup; tested internally in acp_tool.rs
+/// Uses workspace-safe fixture path (under workspace root) to pass path validation.
 #[tokio::test]
-#[ignore]
 async fn acp_tool_execute_read_file_success() {
     let (state, _tmp) = create_test_state();
-    let app = build_extended_test_app(state);
+    let app = build_extended_test_app(state.clone());
 
     let server = TestServer::new(app).unwrap();
 
-    // Create a temp file to read
-    let temp_file = std::env::temp_dir().join("nexus_test_read.txt");
-    std::fs::write(&temp_file, "Hello, Nexus test!").unwrap();
+    // Create a test file inside the workspace root to pass path validation
+    let workspace_root = state.workspace_path().unwrap_or_default();
+    let workspace_dir = std::path::Path::new(&workspace_root);
+    std::fs::create_dir_all(workspace_dir).ok();
+    let test_file = workspace_dir.join("tmp").join("acp-tool-test-read.txt");
+    std::fs::create_dir_all(test_file.parent().unwrap()).unwrap();
+    std::fs::write(&test_file, "Hello, Nexus test!").unwrap();
 
     let payload = serde_json::json!({
         "tool_name": "fs/read_text_file",
         "parameters": {
-            "path": temp_file.to_str().unwrap()
+            "path": test_file.to_str().unwrap()
         },
         "session_id": "sess_tool_001"
     });
@@ -672,27 +675,29 @@ async fn acp_tool_execute_read_file_success() {
     assert_eq!(body["result"]["content"], "Hello, Nexus test!");
 
     // Cleanup
-    std::fs::remove_file(&temp_file).ok();
+    std::fs::remove_file(&test_file).ok();
 }
 
 /// Test: ACP tool execute endpoint - fs/write_text_file success
-/// Skipped: Returns 403 Forbidden (correct security behavior - path outside workspace)
-/// Path validation is tested in internal tests (acp_tool.rs)
+/// Uses workspace-safe fixture path (under workspace root) to pass path validation.
 #[tokio::test]
-#[ignore]
 async fn acp_tool_execute_write_file_success() {
     let (state, _tmp) = create_test_state();
-    let app = build_extended_test_app(state);
+    let app = build_extended_test_app(state.clone());
 
     let server = TestServer::new(app).unwrap();
 
-    // Use a temp file path
-    let temp_file = std::env::temp_dir().join("nexus_test_write.txt");
+    // Create a test file path inside the workspace root to pass path validation
+    let workspace_root = state.workspace_path().unwrap_or_default();
+    let workspace_dir = std::path::Path::new(&workspace_root);
+    std::fs::create_dir_all(workspace_dir).ok();
+    let test_file = workspace_dir.join("tmp").join("acp-tool-test-write.txt");
+    std::fs::create_dir_all(test_file.parent().unwrap()).unwrap();
 
     let payload = serde_json::json!({
         "tool_name": "fs/write_text_file",
         "parameters": {
-            "path": temp_file.to_str().unwrap(),
+            "path": test_file.to_str().unwrap(),
             "content": "Written by Nexus ACP tool test"
         },
         "session_id": "sess_tool_002"
@@ -708,11 +713,11 @@ async fn acp_tool_execute_write_file_success() {
     assert_eq!(body["result"]["written"], true);
 
     // Verify file was written
-    let content = std::fs::read_to_string(&temp_file).unwrap();
+    let content = std::fs::read_to_string(&test_file).unwrap();
     assert_eq!(content, "Written by Nexus ACP tool test");
 
     // Cleanup
-    std::fs::remove_file(&temp_file).ok();
+    std::fs::remove_file(&test_file).ok();
 }
 
 /// Test: ACP tool execute endpoint - rejects unsupported tool

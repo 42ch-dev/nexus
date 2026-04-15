@@ -253,9 +253,63 @@ fn r3_local_truth_chain() {
         .success()
         .stdout(predicate::str::contains("world_building"));
 
-    // Note: context assemble-local has a clap bug with -h flag collision
-    // Skip the assemble-local test - the memory and soul initialization works
     // R3 verification: SOUL init + memory creation chain works
+}
+
+/// Regression R3: context assemble-local executes without panic or skip
+///
+/// Validates the clap -h flag collision fix (hint short alias removed)
+/// and that assemble-local runs successfully in a local_only workspace.
+#[test]
+fn r3_context_assemble_local_executes_without_placeholder_skip() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let workspace = tmp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    // Create a persistent identity (required for workspace operations)
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("AssembleTestUser")
+        .env("HOME", home)
+        .assert()
+        .success();
+
+    // Init workspace
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("init")
+        .arg("workspace")
+        .arg("--creative-root")
+        .arg(&workspace)
+        .env("HOME", home)
+        .current_dir(&workspace)
+        .assert()
+        .success();
+
+    // Init SOUL (required by assemble-local)
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("soul")
+        .arg("init")
+        .env("HOME", home)
+        .current_dir(&workspace)
+        .assert()
+        .success();
+
+    // Run context assemble-local — must not panic (clap -h fix) and succeed
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["context", "assemble-local", "--max-tokens", "1200"])
+        .env("HOME", home)
+        .current_dir(&workspace)
+        .assert()
+        .success();
 }
 
 /// Regression R3: SOUL validation works

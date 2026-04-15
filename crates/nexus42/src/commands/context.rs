@@ -101,7 +101,7 @@ pub enum ContextCommand {
         include_fragments: bool,
 
         /// Optional prompt hint for platform assemble (used in two-stage modes)
-        #[arg(short, long)]
+        #[arg(long)]
         hint: Option<String>,
     },
 }
