@@ -9,6 +9,10 @@
 #[deny(clippy::unwrap_used)]
 pub mod agent;
 #[deny(clippy::unwrap_used)]
+pub mod debug;
+#[deny(clippy::unwrap_used)]
+pub mod doctor;
+#[deny(clippy::unwrap_used)]
 pub mod auth;
 #[deny(clippy::unwrap_used)]
 pub mod clone;
