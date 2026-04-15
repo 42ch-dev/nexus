@@ -22,6 +22,7 @@ pub mod memory;
 pub mod outbox_entry;
 pub mod pairing;
 pub mod reference_source;
+pub mod runtime_mode;
 pub mod story_manifest;
 pub mod sync_command;
 pub mod timeline_event;
@@ -84,6 +85,7 @@ pub use memory::*;
 pub use outbox_entry::*;
 pub use pairing::*;
 pub use reference_source::*;
+pub use runtime_mode::*;
 pub use story_manifest::*;
 pub use sync_command::*;
 pub use timeline_event::*;
@@ -145,6 +147,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("OutboxEntry", 1),
     ("Pairing", 1),
     ("ReferenceSource", 1),
+    ("RuntimeMode", 1),
     ("StoryManifest", 1),
     ("SyncCommand", 1),
     ("TimelineEvent", 1),

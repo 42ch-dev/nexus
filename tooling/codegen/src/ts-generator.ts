@@ -38,15 +38,19 @@ export function generateTSTypes(schemas: LoadedSchema[]): void {
   for (const schema of schemas) {
     if (schema.isExplicitlySkipped) continue;
 
-    const hasTopLevel = !schema.isDefinitionsOnly;
+    const hasTopLevel = !schema.isDefinitionsOnly && !schema.isStandaloneEnum;
     const hasDefs = schemaHasObjectDefinitions(schema);
 
-    if (!hasTopLevel && !hasDefs) continue;
+    if (!hasTopLevel && !hasDefs && !schema.isStandaloneEnum) continue;
 
     schemasWithTypes.push(schema);
 
-    // Generate individual type files
-    generateTSTypeFile(schema, outputDir, hasTopLevel, hasDefs);
+    if (schema.isStandaloneEnum) {
+      generateTSEnumFile(schema, outputDir);
+    } else {
+      // Generate individual type files
+      generateTSTypeFile(schema, outputDir, hasTopLevel, hasDefs);
+    }
   }
 
   // Generate index.ts with re-exports
@@ -92,6 +96,30 @@ export const LATEST_SCHEMA_VERSION = ${latest};
 `;
 
   writeFile(path.join(outputDir, 'index.ts'), content);
+}
+
+/**
+ * Generate TypeScript type alias file for a standalone enum schema.
+ *
+ * Produces a `type X = 'a' | 'b' | 'c';` from a JSON Schema with
+ * `type: "string"` and `enum: [...]`.
+ */
+function generateTSEnumFile(schema: LoadedSchema, outputDir: string): void {
+  const values = schema.schemaContent.enum as string[];
+  const content = `/**
+ * ${schema.schemaContent.title || schema.typeName}
+ *
+ * ${schema.schemaContent.description || 'Generated from JSON Schema'}
+ *
+ * @schema_version ${schema.schemaVersion}
+ * @source ${schema.fileName}
+ */
+
+/** ${schema.schemaContent.description || schema.typeName} */
+export type ${schema.typeName} = ${values.map(v => `'${v}'`).join(' | ')};
+`;
+
+  writeFile(path.join(outputDir, `${schema.typeName}.ts`), content);
 }
 
 /**
