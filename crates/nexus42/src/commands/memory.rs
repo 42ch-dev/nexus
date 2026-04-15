@@ -3,6 +3,7 @@
 //! CRUD operations for long-term memories, review pipeline,
 //! and fragment management.
 
+use crate::api::daemon_client::DaemonClient;
 use crate::config;
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -218,18 +219,34 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     Ok(())
 }
 
-async fn review(_config: &CliConfig, _creator_id: &str) -> Result<()> {
-    // Review requires the daemon to access pending review queue
-    // Fall back gracefully if daemon is not available
-    println!("Review queue requires a running daemon.");
-    println!("Start the daemon with `nexus42 daemon start` and retry.");
+async fn review(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let result = client.review_pending_memories(creator_id).await?;
+    println!(
+        "Review completed: promoted={}, fragmented={}, dropped={}",
+        result.promoted, result.fragmented, result.dropped
+    );
     Ok(())
 }
 
-async fn fragments(_config: &CliConfig) -> Result<()> {
-    // Fragments require the daemon API
-    println!("Fragment listing requires a running daemon.");
-    println!("Start the daemon with `nexus42 daemon start` and retry.");
+async fn fragments(config: &CliConfig) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let rows = client.list_memory_fragments().await?;
+
+    if rows.is_empty() {
+        println!("No memory fragments found.");
+        return Ok(());
+    }
+
+    println!("Memory fragments:\n");
+    println!("{:<30} SUMMARY", "FRAGMENT_ID");
+    println!("{}", "-".repeat(80));
+
+    for f in &rows {
+        println!("{:<30} {}", f.fragment_id, f.summary);
+    }
+
+    println!("\n{} fragments", rows.len());
     Ok(())
 }
 
