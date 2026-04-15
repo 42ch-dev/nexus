@@ -13,6 +13,10 @@ pub struct RuntimeStatus {
     pub workspace_initialized: bool,
     /// ACP status information (V1.1)
     pub acp: AcpStatusInfo,
+    /// Current runtime mode (local_only / local_first / cloud_enhanced)
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub runtime_mode: String,
 }
 
 /// ACP-related status information included in runtime status (V1.1).
@@ -43,7 +47,8 @@ mod tests {
                 "tool_execution_enabled": true,
                 "active_sessions": 5,
                 "total_tool_executions": 42
-            }
+            },
+            "runtime_mode": "local_only"
         });
 
         let status: RuntimeStatus = serde_json::from_value(json).expect("Failed to deserialize");
@@ -54,6 +59,7 @@ mod tests {
         assert!(status.acp.tool_execution_enabled);
         assert_eq!(status.acp.active_sessions, 5);
         assert_eq!(status.acp.total_tool_executions, 42);
+        assert_eq!(status.runtime_mode, "local_only");
     }
 
     #[test]
@@ -74,6 +80,8 @@ mod tests {
         assert!(!status.acp.tool_execution_enabled);
         assert_eq!(status.acp.active_sessions, 0);
         assert_eq!(status.acp.total_tool_executions, 0);
+        // runtime_mode defaults to empty string when missing
+        assert!(status.runtime_mode.is_empty());
     }
 
     #[test]
