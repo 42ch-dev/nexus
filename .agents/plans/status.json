@@ -515,12 +515,12 @@
       "id": "2026-04-14-v1.2-regression-suite",
       "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
       "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
-        "@qa-engineer"
+        "qa-engineer"
       ],
-      "progress": 0,
+      "progress": 20,
       "tags": [
         "v1.2",
         "testing",
@@ -529,10 +529,10 @@
         "release-gate"
       ],
       "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "M3 gate: Implement minimum automated regression set (R1–R5) as V1.2 hard release gate. Depends on M2 completion.",
+      "updated_at": "2026-04-15",
+      "notes": "M3 gate started. R4 verified in T6 QA. Implementing R1-R3 + R5.",
       "metadata": {
-        "phase": "Todo",
+        "phase": "implement",
         "priority": "high",
         "workstream": "M3-gate",
         "milestone": "M3",
@@ -542,17 +542,26 @@
         ],
         "v1.2_scope": true,
         "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Minimum automated regression set — R1 (anonymous identity e2e), R2 (persistent identity e2e), R3 (local truth chain), R4 (mode switch/degradation), R5 (no-platform guard)",
+        "scope": "Minimum automated regression set",
         "deliverables": [
           "R1–R5 automated test implementations",
-          "CI integration for regression gate",
+          "CI integration",
           "Regression gate documentation"
         ],
         "acceptance_evidence": [
-          "All R1–R5 pass in automated run",
-          "CI pipeline green on regression suite"
+          "All R1–R5 pass",
+          "CI pipeline green"
         ],
-        "effort": "L — 5 regression scenarios + CI + docs; ~3-4 agent sessions"
+        "effort": "L — 5 regression scenarios + CI + docs",
+        "working_branch": "feature/v1.2-m3-regression-suite",
+        "merge_target": "feature/v1.2",
+        "r4_status": "verified in T6 QA (commit 1e63679)",
+        "gates": {
+          "tests": "pending",
+          "clippy": "pending",
+          "qc_status": "pending",
+          "qa_status": "pending"
+        }
       }
     }
   ],
