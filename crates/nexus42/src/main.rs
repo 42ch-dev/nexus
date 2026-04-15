@@ -18,10 +18,11 @@ use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, clone::CloneArgs, config::ConfigCommand,
     context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand, db::DbCommand,
-    explore::ExploreCommand, identity::IdentityCommand, init::InitCommand,
-    manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
-    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
+    debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
+    identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
+    memory::MemoryCommand, policy::PolicyCommand, publish::PublishCommand,
+    research::ResearchCommand, runtime_mode::RuntimeModeCommand, session::SessionCommand,
+    soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -70,6 +71,18 @@ enum Commands {
     Db {
         #[command(subcommand)]
         command: DbCommand,
+    },
+
+    /// Internal debugging utilities
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommand,
+    },
+
+    /// Diagnostic health checks
+    Doctor {
+        #[command(subcommand)]
+        command: DoctorCommand,
     },
 
     /// Synchronize workspace with platform
@@ -191,6 +204,8 @@ async fn main() {
         Some(Commands::Auth { command }) => commands::auth::run(command, &config).await,
         Some(Commands::Daemon { command }) => commands::daemon::run(command, &config).await,
         Some(Commands::Db { command }) => commands::db::run(command, &config).await,
+        Some(Commands::Debug { command }) => commands::debug::run(command, &config).await,
+        Some(Commands::Doctor { command }) => commands::doctor::run(command, &config).await,
         Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
         Some(Commands::World { command }) => commands::world::run(command, &config).await,
         Some(Commands::Clone { args }) => commands::clone::run(args, &config).await,
