@@ -61,6 +61,16 @@ fn default_runtime_mode() -> DomainRuntimeMode {
 /// Default workspace slug when none is stored for a creator.
 pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
+/// Valid configuration keys for `nexus42 config` commands.
+/// MVP: only top-level fields with simple types; nested keys are not supported.
+pub const VALID_CONFIG_KEYS: &[&str] = &[
+    "workspace_path",
+    "active_creator_id",
+    "platform_url",
+    "daemon_url",
+    "runtime_mode",
+];
+
 impl CliConfig {
     /// Load configuration from the standard location
     pub fn load() -> anyhow::Result<Self> {
@@ -102,6 +112,11 @@ impl CliConfig {
         Ok(nexus_home()?.join("config.json"))
     }
 
+    /// Public path to the configuration file (for `config path` command)
+    pub fn path() -> anyhow::Result<PathBuf> {
+        Self::config_path()
+    }
+
     /// Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> &str {
         self.active_workspace_slug_by_creator
@@ -109,6 +124,107 @@ impl CliConfig {
             .map(|s| s.as_str())
             .filter(|s| !s.is_empty())
             .unwrap_or(DEFAULT_WORKSPACE_SLUG)
+    }
+
+    /// Get a configuration value by key name.
+    /// Returns the value as a JSON string representation.
+    /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
+    /// For fields with defaults (platform_url, daemon_url), returns the default if empty.
+    pub fn get(&self, key: &str) -> anyhow::Result<String> {
+        Self::validate_key(key)?;
+        match key {
+            "workspace_path" => Ok(self
+                .workspace_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()),
+            "active_creator_id" => Ok(self.active_creator_id.clone().unwrap_or_default()),
+            "platform_url" => Ok(if self.platform_url.is_empty() {
+                default_platform_url()
+            } else {
+                self.platform_url.clone()
+            }),
+            "daemon_url" => Ok(if self.daemon_url.is_empty() {
+                default_daemon_url()
+            } else {
+                self.daemon_url.clone()
+            }),
+            "runtime_mode" => Ok(self.runtime_mode.to_string()),
+            _ => Err(anyhow::anyhow!("Unsupported config key: {}", key)),
+        }
+    }
+
+    /// Set a configuration value by key name.
+    /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
+    pub fn set(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
+        Self::validate_key(key)?;
+        match key {
+            "workspace_path" => {
+                self.workspace_path = if value.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(value))
+                };
+            }
+            "active_creator_id" => {
+                self.active_creator_id = if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                };
+            }
+            "platform_url" => {
+                self.platform_url = value.to_string();
+            }
+            "daemon_url" => {
+                self.daemon_url = value.to_string();
+            }
+            "runtime_mode" => {
+                self.runtime_mode = DomainRuntimeMode::parse(value)
+                    .map_err(|e| anyhow::anyhow!("Invalid runtime_mode '{}': {}", value, e))?;
+            }
+            _ => Err(anyhow::anyhow!("Unsupported config key: {}", key))?,
+        }
+        Ok(())
+    }
+
+    /// Unset (remove) a configuration key.
+    /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
+    /// For string fields, clears to empty/default.
+    pub fn unset(&mut self, key: &str) -> anyhow::Result<()> {
+        Self::validate_key(key)?;
+        match key {
+            "workspace_path" => {
+                self.workspace_path = None;
+            }
+            "active_creator_id" => {
+                self.active_creator_id = None;
+            }
+            "platform_url" => {
+                self.platform_url = default_platform_url();
+            }
+            "daemon_url" => {
+                self.daemon_url = default_daemon_url();
+            }
+            "runtime_mode" => {
+                self.runtime_mode = default_runtime_mode();
+            }
+            _ => Err(anyhow::anyhow!("Unsupported config key: {}", key))?,
+        }
+        Ok(())
+    }
+
+    /// Validate that a key is in the allowed set.
+    fn validate_key(key: &str) -> anyhow::Result<()> {
+        if !VALID_CONFIG_KEYS.contains(&key) {
+            Err(anyhow::anyhow!(
+                "Invalid config key '{}'. Valid keys: {}",
+                key,
+                VALID_CONFIG_KEYS.join(", ")
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -195,6 +311,132 @@ mod tests {
         let json = r#"{"runtime_mode": "local_only"}"#;
         let c: CliConfig = serde_json::from_str(json).unwrap();
         assert!(c.degradation_snapshot().is_none());
+    }
+
+    #[test]
+    fn get_valid_key_returns_value() {
+        let c = CliConfig::default();
+        assert_eq!(c.get("runtime_mode").unwrap(), "local_only");
+        assert_eq!(c.get("platform_url").unwrap(), "https://api.nexus42.io");
+        assert_eq!(c.get("daemon_url").unwrap(), "http://127.0.0.1:8420");
+    }
+
+    #[test]
+    fn get_optional_field_returns_empty_when_unset() {
+        let c = CliConfig::default();
+        assert_eq!(c.get("workspace_path").unwrap(), "");
+        assert_eq!(c.get("active_creator_id").unwrap(), "");
+    }
+
+    #[test]
+    fn get_optional_field_returns_value_when_set() {
+        let mut c = CliConfig::default();
+        c.workspace_path = Some(PathBuf::from("/test/path"));
+        c.active_creator_id = Some("ctr_test".to_string());
+        assert_eq!(c.get("workspace_path").unwrap(), "/test/path");
+        assert_eq!(c.get("active_creator_id").unwrap(), "ctr_test");
+    }
+
+    #[test]
+    fn get_invalid_key_returns_error() {
+        let c = CliConfig::default();
+        let err = c.get("invalid_key").unwrap_err();
+        assert!(err.to_string().contains("Invalid config key"));
+        assert!(err.to_string().contains("invalid_key"));
+    }
+
+    #[test]
+    fn set_runtime_mode_updates_value() {
+        let mut c = CliConfig::default();
+        c.set("runtime_mode", "cloud_enhanced").unwrap();
+        assert_eq!(c.runtime_mode.to_string(), "cloud_enhanced");
+    }
+
+    #[test]
+    fn set_invalid_runtime_mode_returns_error() {
+        let mut c = CliConfig::default();
+        let err = c.set("runtime_mode", "invalid_mode").unwrap_err();
+        assert!(err.to_string().contains("Invalid runtime_mode"));
+    }
+
+    #[test]
+    fn set_string_field_updates_value() {
+        let mut c = CliConfig::default();
+        c.set("platform_url", "https://custom.api.io").unwrap();
+        assert_eq!(c.platform_url, "https://custom.api.io");
+        c.set("active_creator_id", "ctr_new").unwrap();
+        assert_eq!(c.active_creator_id, Some("ctr_new".to_string()));
+    }
+
+    #[test]
+    fn set_optional_field_to_empty_clears_it() {
+        let mut c = CliConfig::default();
+        c.workspace_path = Some(PathBuf::from("/test"));
+        c.set("workspace_path", "").unwrap();
+        assert!(c.workspace_path.is_none());
+        c.active_creator_id = Some("ctr_old".to_string());
+        c.set("active_creator_id", "").unwrap();
+        assert!(c.active_creator_id.is_none());
+    }
+
+    #[test]
+    fn set_invalid_key_returns_error() {
+        let mut c = CliConfig::default();
+        let err = c.set("invalid_key", "value").unwrap_err();
+        assert!(err.to_string().contains("Invalid config key"));
+    }
+
+    #[test]
+    fn unset_optional_field_clears_it() {
+        let mut c = CliConfig::default();
+        c.workspace_path = Some(PathBuf::from("/test"));
+        c.unset("workspace_path").unwrap();
+        assert!(c.workspace_path.is_none());
+        c.active_creator_id = Some("ctr_test".to_string());
+        c.unset("active_creator_id").unwrap();
+        assert!(c.active_creator_id.is_none());
+    }
+
+    #[test]
+    fn unset_string_field_reverts_to_default() {
+        let mut c = CliConfig::default();
+        c.platform_url = "https://custom.api.io".to_string();
+        c.unset("platform_url").unwrap();
+        assert_eq!(c.platform_url, "https://api.nexus42.io");
+        c.daemon_url = "http://custom:9999".to_string();
+        c.unset("daemon_url").unwrap();
+        assert_eq!(c.daemon_url, "http://127.0.0.1:8420");
+    }
+
+    #[test]
+    fn unset_runtime_mode_reverts_to_default() {
+        let mut c = CliConfig::default();
+        c.runtime_mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
+        c.unset("runtime_mode").unwrap();
+        assert!(c.runtime_mode.is_local_only());
+    }
+
+    #[test]
+    fn unset_invalid_key_returns_error() {
+        let mut c = CliConfig::default();
+        let err = c.unset("invalid_key").unwrap_err();
+        assert!(err.to_string().contains("Invalid config key"));
+    }
+
+    #[test]
+    fn path_returns_config_json_path() {
+        let path = CliConfig::path().unwrap();
+        assert!(path.ends_with("config.json"));
+        assert!(path.to_string_lossy().contains(".nexus42"));
+    }
+
+    #[test]
+    fn valid_config_keys_are_documented() {
+        assert!(VALID_CONFIG_KEYS.contains(&"runtime_mode"));
+        assert!(VALID_CONFIG_KEYS.contains(&"platform_url"));
+        assert!(VALID_CONFIG_KEYS.contains(&"daemon_url"));
+        assert!(VALID_CONFIG_KEYS.contains(&"workspace_path"));
+        assert!(VALID_CONFIG_KEYS.contains(&"active_creator_id"));
     }
 }
 
