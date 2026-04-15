@@ -11,8 +11,12 @@
 //! See `.agents/plans/knowledge/local-db-refactor-v1.md` for design baseline.
 
 mod error;
+mod identity;
+mod memory_fragment;
 mod migration;
+mod pending_review;
 mod schema;
+mod soul_meta;
 mod version;
 
 // Re-export version constants
@@ -28,8 +32,32 @@ pub use migration::{get_migrations, run_migrations, Migration};
 pub use schema::{
     init_daemon_tables, init_shared_tables, migrate_wire_to_schema_version, seed_versions,
     ACP_SESSIONS_TABLE, ACP_TOOL_AUDIT_LOG_TABLE, AUTH_TOKENS_TABLE, CREATORS_TABLE,
-    DEVICE_CODE_SESSIONS_TABLE, OUTBOX_TABLE, PRAGMAS, REFERENCE_SOURCES_TABLE,
+    DEVICE_CODE_SESSIONS_TABLE, LOCAL_IDENTITIES_TABLE, MEMORY_FRAGMENTS_TABLE,
+    MEMORY_PENDING_REVIEW_TABLE, OUTBOX_TABLE, PRAGMAS, REFERENCE_SOURCES_TABLE, SOUL_META_TABLE,
     WORKSPACE_META_TABLE,
+};
+
+// Re-export identity CRUD components
+pub use identity::{
+    create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
+    list_local_identities, unlink_from_platform, LocalIdentityRow,
+};
+
+// Re-export soul_meta CRUD components
+pub use soul_meta::{
+    delete as delete_soul_meta, get as get_soul_meta, upsert as upsert_soul_meta, SoulMeta,
+};
+
+// Re-export pending_review CRUD components
+pub use pending_review::{
+    count_pending_reviews, create_pending_review, delete_pending_review, get_pending_review,
+    list_pending_reviews, PendingReviewRecord,
+};
+
+// Re-export memory_fragment CRUD components
+pub use memory_fragment::{
+    create_fragment, delete_fragment, get_all_keywords, list_fragments, list_fragments_by_session,
+    MemoryFragmentRecord,
 };
 
 /// Runtime role for database initialization

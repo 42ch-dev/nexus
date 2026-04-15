@@ -22,6 +22,7 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.1-specs-align-review-v1.md](v1.1-specs-align-review-v1.md) | `2026-04-10-v1.1-specs-alignment-remediation` | **v1-spec ↔ nexus OSS audit + §6「V1.1 完成度边界」** (plan rows vs platform vs spec deferrals); remediation **Done**. | Active — audit + completion-boundary SSOT |
 | [local-fs-layout-creator-workspace-v1.md](local-fs-layout-creator-workspace-v1.md) | `2026-04-10-local-fs-layout-ssot-and-implementation` | **Non-normative pointer** — definitions only in v1-spec (`adr-014`, `cli-spec` §6.2–§13, `local-db-schema`, `data-model` §5.14, `auth-session-model` §6). | Active — clone handoff only |
 | [v1.2-delivery-compass-v1.md](v1.2-delivery-compass-v1.md) | V1.2 program planning | **Implementation-period SSOT** for V1.2 delivery: scope lock, V1.2~V1.4 reclassification compass, milestone gates (M1/M2/M3), minimum regression gate, cross-repo dependency boundaries, risk controls, and `{v1-spec}`-style spec reference index. | Active — V1.2 planning and execution compass |
+| [v1.2-reclassification-matrix-v1.md](v1.2-reclassification-matrix-v1.md) | `2026-04-14-v1.2-reclassification-baseline` (WS1) | **V1.2/V1.3/V1.4/Backlog reclassification matrix**: maps every ADR anchor, spec entry, roadmap theme, backlog item, and tech debt to a program version track with blocking relationships, repo ownership, and version-tagging rules for future plan rows. | Active — V1.2 WS1 deliverable |
 
 
 ## Archived (`archived/knowledge/`)

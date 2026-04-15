@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-14",
+  "updated_at": "2026-04-15T15:30:00Z",
   "plans": [
     {
       "id": "2025-04-05-monorepo-structure",
@@ -206,12 +206,13 @@
       "id": "v1-tech-debt-cleanup",
       "title": "V1 Tech Debt Cleanup (Long-term)",
       "file": ".agents/plans/v1-tech-debt-cleanup.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@fullstack-dev"
+        "@fullstack-dev",
+        "@qa-engineer"
       ],
-      "progress": 80,
+      "progress": 100,
       "tags": [
         "v1.1",
         "v1.2",
@@ -220,32 +221,43 @@
         "long-term"
       ],
       "created_at": "2026-04-09",
-      "updated_at": "2026-04-11",
-      "notes": "Long-lived plan: milestones A–D delivered (C+D closed 2026-04-10). Remains open for V1.x backfill — Batch E (TD-11, TD-13) on V1.2 schedule and deferred D follow-ups (daemon FSM, outbox merge, real OAuth per knowledge/). C+D point-in-time snapshot: archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json.",
+      "updated_at": "2026-04-15",
+      "done_at": "2026-04-15",
+      "notes": "All batches A-E complete. Batch E (TD-11/TD-13) delivered: 6 CLI commands (clone, unlink, config, debug, doctor) + 70 integration tests. Deferred D follow-ups (daemon FSM, outbox merge, real OAuth) remain in knowledge docs for V1.3+.",
       "metadata": {
-        "phase": "Batch E next (V1.2 track); same plan id — not Done after D",
+        "phase": "done",
         "priority": "low",
-        "description": "Long-term tech debt across V1.x (including V1.2). A–D batches complete; E and knowledge-documented deferrals remain in-scope under this plan until explicitly retired.",
-        "residual_target": "Batch E TD-11/TD-13 (V1.2 track)",
-        "effort": "L — ongoing lowest-priority backfill",
+        "description": "Long-term tech debt across V1.x (including V1.2). All batches A-E complete. Deferred D follow-ups documented in knowledge/.",
+        "residual_target": "none — all Batch E items delivered",
+        "effort": "L — complete",
         "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
         "batch_status": {
           "batch_a": "completed",
           "batch_b": "completed",
           "batch_c": "completed — 2026-04-10",
           "batch_d": "completed — 2026-04-10",
-          "batch_e": "pending — TD-11, TD-13 (V1.2 schedule; same plan)"
+          "batch_e": "completed — 2026-04-15 (TD-11: 6 CLI commands, TD-13: 70 integration tests)"
         },
         "gates": {
-          "tests": "last verified — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
-          "clippy": "passed",
-          "fmt": "passed",
-          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md; reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260411.md (SYNC-AUTH-TOKEN-01 closure); reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md (PUBLISH-CODEGEN-01 / FORK-SNAP-01 closure)"
+          "tests": "pass — cargo test --all (1628 tests, 0 failures)",
+          "clippy": "pass — cargo clippy --all -- -D warnings",
+          "fmt": "pass",
+          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260415-batch-e.md"
         },
         "workstream": "WS5",
-        "milestone": "parallel (non-blocking for M3)",
+        "milestone": "parallel (non-blocking for M3) — complete",
         "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md"
+        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+        "commits": [
+          "76dd924 feat(cli): add nexus42 clone command (E1)",
+          "f11c541 feat(cli): add nexus42 identity unlink command (E2)",
+          "3595c30 feat(cli): add nexus42 config command group (E3)",
+          "707ae5a feat(cli): add CliConfig get/set/unset/path methods (E4)",
+          "e03f43e feat(cli): add nexus42 debug command group (E5)",
+          "d521fb3 feat(cli): add nexus42 doctor diagnostic command (E6)",
+          "7d00303 test(sync+cli): E7/E8 integration tests",
+          "89db1f9 test: E9/E10 integration tests for daemon HTTP and ACP session lifecycle"
+        ]
       }
     },
     {
@@ -362,12 +374,12 @@
       "id": "2026-04-14-v1.2-reclassification-baseline",
       "title": "V1.2 WS1: Version Reclassification Baseline",
       "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.2",
         "planning",
@@ -376,9 +388,10 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-14",
-      "notes": "WS1: Transform legacy roadmap items into V1.2/V1.3/V1.4/Backlog with explicit ownership and blocking relationships.",
+      "done_at": "2026-04-14",
+      "notes": "WS1 done. Reclassification matrix (knowledge/v1.2-reclassification-matrix-v1.md) committed with version-tagging rules and blocking map. QC skipped — product-docs only.",
       "metadata": {
-        "phase": "Todo",
+        "phase": "Done",
         "priority": "high",
         "workstream": "WS1",
         "milestone": "M1",
@@ -387,149 +400,58 @@
         "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
         "scope": "Reclassification matrix, blocking/non-blocking map, version-tagging rules for future plan rows",
         "deliverables": [
-          "Reclassification matrix committed in docs/design space",
-          "References to source ADR/spec anchors"
+          "knowledge/v1.2-reclassification-matrix-v1.md",
+          "knowledge/README.md updated",
+          "Plan Tasks section updated"
         ],
-        "effort": "M — PM + product analysis; ~2 agent sessions"
+        "qc": "skipped — product-docs only",
+        "qa": "skipped — product-docs only",
+        "effort": "M — PM + product analysis; ~2 agent sessions",
+        "commits": "4a23c6d docs(plan): add V1.2 reclassification matrix — WS1 deliverable"
       }
     },
     {
       "id": "2026-04-14-v1.2-local-only-identity",
-      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "status": "Done",
       "file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.2",
-        "implementation",
-        "ws2",
-        "identity",
-        "milestone-m1"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "WS2a: Anonymous/temporary + local persistent identity without platform registration dependency. Blocks WS2b (runtime).",
       "metadata": {
-        "phase": "Todo",
-        "priority": "high",
-        "workstream": "WS2",
-        "milestone": "M1",
-        "dependency": [],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Dual local identity schema, store, CRUD; anonymous temporary + local persistent identity implementation",
-        "deliverables": [
-          "Identity schema and store implementation",
-          "Anonymous/temporary identity path",
-          "Local persistent identity path (no platform dependency)"
-        ],
-        "acceptance_evidence": [
-          "R1: local_only anonymous/temporary identity end-to-end",
-          "R2: local_only local persistent identity end-to-end"
-        ],
-        "effort": "L — schema + implementation + tests; ~3-4 agent sessions"
-      }
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-only-identity.json",
+        "residual_summary": "7 open residuals"
+      },
+      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "done_at": "2026-04-14"
     },
     {
       "id": "2026-04-14-v1.2-local-only-runtime",
-      "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
+      "status": "Done",
       "file": ".agents/plans/2026-04-14-v1.2-local-only-runtime.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.2",
-        "implementation",
-        "ws2",
-        "runtime",
-        "milestone-m1"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "WS2b: Runtime mode behavior, constraints enforcement, minimal runnable CLI flow with fallback rules. Depends on WS2a identity.",
       "metadata": {
-        "phase": "Todo",
-        "priority": "high",
-        "workstream": "WS2",
-        "milestone": "M1",
-        "dependency": [
-          "2026-04-14-v1.2-local-only-identity"
-        ],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Runtime mode behavior and constraints, minimal runnable flow, fallback rules, no-platform guard enforcement",
-        "deliverables": [
-          "Runtime mode enforcement implementation",
-          "Minimal runnable CLI flow without platform hard dependency",
-          "Fallback rules for prohibited platform paths"
-        ],
-        "acceptance_evidence": [
-          "R5: no-platform dependency guard for local_only path",
-          "End-to-end CLI scenario runs without platform"
-        ],
-        "effort": "L — runtime wiring + guards + tests; ~3-4 agent sessions"
-      }
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-only-runtime.json",
+        "residual_summary": "2 open residuals"
+      },
+      "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
+      "done_at": "2026-04-14"
     },
     {
       "id": "2026-04-14-v1.2-soul-lifecycle",
-      "title": "V1.2 WS3a: Local SOUL Lifecycle",
+      "status": "Done",
       "file": ".agents/plans/2026-04-14-v1.2-soul-lifecycle.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.2",
-        "implementation",
-        "ws3",
-        "soul",
-        "milestone-m2"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "WS3a: Local SOUL lifecycle as foundation of the local truth pipeline. Depends on M1 (WS2b).",
       "metadata": {
-        "phase": "Todo",
-        "priority": "high",
-        "workstream": "WS3",
-        "milestone": "M2",
-        "dependency": [
-          "2026-04-14-v1.2-local-only-runtime"
-        ],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "SOUL lifecycle implementation — creation, accumulation, retrieval as local source-of-truth; state transitions and data ownership",
-        "deliverables": [
-          "SOUL lifecycle path implementation",
-          "State transition definitions",
-          "Data ownership notes"
-        ],
-        "acceptance_evidence": [
-          "Scenario regression: SOUL create → accumulate → retrieve",
-          "Deterministic behavior checks"
-        ],
-        "effort": "L — SOUL model + lifecycle + tests; ~3-4 agent sessions"
-      }
+        "archived_record": "archived/plans/2026-04-14-v1.2-soul-lifecycle.json"
+      },
+      "title": "V1.2 WS3a: Local SOUL Lifecycle",
+      "done_at": "2026-04-14"
     },
     {
       "id": "2026-04-14-v1.2-local-memory-pipeline",
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.2",
         "implementation",
@@ -540,9 +462,11 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-14",
-      "notes": "WS3b: Long-term memory + KB load + output generation as local source-of-truth chain. Depends on WS3a (SOUL).",
+      "done_at": "2026-04-14",
+      "notes": "QA approved. All 12 ACs verified. 9 residuals tracked for V1.3/V1.4.",
       "metadata": {
-        "phase": "Todo",
+        "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
+        "phase": "done",
         "priority": "high",
         "workstream": "WS3",
         "milestone": "M2",
@@ -562,61 +486,53 @@
           "R3: local truth core chain regression (SOUL/memory/KB/output)",
           "Scenario regression: create → accumulate → retrieve → output"
         ],
-        "effort": "XL — memory + KB + output integration; ~5-6 agent sessions"
+        "effort": "XL",
+        "working_branch": "feature/v1.2-ws3b-memory",
+        "merge_target": "feature/v1.2",
+        "branch_policy": "create feature/v1.2-ws3b-memory from feature/v1.2",
+        "batch_count": 6,
+        "gates": {
+          "tests": "pass — cargo test --all (593 tests, 0 failures)",
+          "clippy": "pass — cargo clippy --all -- -D warnings",
+          "fmt": "pass",
+          "qc_status": "approve-with-residuals",
+          "qc_fixes": "b2069f8,3bf75d6",
+          "qa_status": "approve",
+          "qa_report": "reports/2026-04-14-v1.2-local-memory-pipeline/2026-04-14-v1.2-local-memory-pipeline-qa.md"
+        },
+        "commits": [
+          "09ddc4b T5.1+T5.2+T5.13+T5.14 domain model + file I/O + context assembly",
+          "8763479 T5.3-T5.8 DB migration + CRUD + review pipeline",
+          "dd2b129 T5.11 personality push-down",
+          "020c450 T5.5-T5.10 session capture and promotion",
+          "175c8ba T5.12 experience aggregation",
+          "2c6380f T5.15-T5.16 memory CLI commands",
+          "3721e71 T5.17 E2E tests"
+        ],
+        "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in metadata.residual_findings"
       }
     },
     {
       "id": "2026-04-14-v1.2-runtime-compatibility",
-      "title": "V1.2 WS4: Runtime Compatibility (local_first/cloud_enhanced)",
+      "status": "Done",
       "file": ".agents/plans/2026-04-14-v1.2-runtime-compatibility.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.2",
-        "implementation",
-        "ws4",
-        "compatibility",
-        "milestone-m2"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "WS4: Switchable/runnable/degradable local_first + cloud_enhanced mode in V1.2 (no V1.3 optimization gates). Parallel with WS3.",
       "metadata": {
-        "phase": "Todo",
-        "priority": "medium",
-        "workstream": "WS4",
-        "milestone": "M2",
-        "dependency": [
-          "2026-04-14-v1.2-local-only-runtime"
-        ],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Mode switch rules, degradation behavior spec for platform unavailable states, no mandatory performance/accuracy threshold in V1.2",
-        "deliverables": [
-          "Mode switch implementation",
-          "Degradation behavior for platform unavailable",
-          "Fallback path validation"
-        ],
-        "acceptance_evidence": [
-          "R4: mode switch and degradation regression (local_first/cloud_enhanced fallback)"
-        ],
-        "effort": "M — mode switch + degradation + tests; ~2-3 agent sessions"
-      }
+        "archived_record": "archived/plans/2026-04-14-v1.2-runtime-compatibility.json",
+        "residual_summary": "5 residuals deferred to V1.3 (W-2 window semantics, W-3 placeholders, W-4 upgrade cooldown, L-1 URL mismatch, L-2 plan docs)"
+      },
+      "title": "V1.2 WS4: Runtime Compatibility",
+      "done_at": "2026-04-15"
     },
     {
       "id": "2026-04-14-v1.2-regression-suite",
       "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
       "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
-        "@qa-engineer"
+        "qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.2",
         "testing",
@@ -625,10 +541,10 @@
         "release-gate"
       ],
       "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "notes": "M3 gate: Implement minimum automated regression set (R1–R5) as V1.2 hard release gate. Depends on M2 completion.",
+      "updated_at": "2026-04-15",
+      "notes": "R1-R5 regression tests implemented + verified. QC approved. CI integration complete.",
       "metadata": {
-        "phase": "Todo",
+        "phase": "implement",
         "priority": "high",
         "workstream": "M3-gate",
         "milestone": "M3",
@@ -638,18 +554,28 @@
         ],
         "v1.2_scope": true,
         "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Minimum automated regression set — R1 (anonymous identity e2e), R2 (persistent identity e2e), R3 (local truth chain), R4 (mode switch/degradation), R5 (no-platform guard)",
+        "scope": "Minimum automated regression set",
         "deliverables": [
           "R1–R5 automated test implementations",
-          "CI integration for regression gate",
+          "CI integration",
           "Regression gate documentation"
         ],
         "acceptance_evidence": [
-          "All R1–R5 pass in automated run",
-          "CI pipeline green on regression suite"
+          "All R1–R5 pass",
+          "CI pipeline green"
         ],
-        "effort": "L — 5 regression scenarios + CI + docs; ~3-4 agent sessions"
-      }
+        "effort": "L — 5 regression scenarios + CI + docs",
+        "working_branch": "feature/v1.2-m3-regression-suite",
+        "merge_target": "feature/v1.2",
+        "r4_status": "verified in T6 QA (commit 1e63679)",
+        "gates": {
+          "tests": "passing",
+          "clippy": "clean",
+          "qc_status": "approved",
+          "qa_status": "verified"
+        }
+      },
+      "done_at": "2026-04-15"
     }
   ],
   "metadata": {
@@ -658,23 +584,290 @@
       "phase_2_branch_prefix": "feature/v2.0-"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-10T18:00:00Z",
-      "total_open": 0,
+      "updated_at": "2026-04-15",
+      "total_open": 23,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 0,
-        "nit": 0
+        "medium": 4,
+        "low": 8,
+        "nit": 11
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
-        "V1.2": 0
+        "V1.2": 23
       },
-      "by_plan": {}
+      "by_plan": {
+        "2026-04-14-v1.2-local-only-identity": 7,
+        "2026-04-14-v1.2-local-only-runtime": 2,
+        "2026-04-14-v1.2-local-memory-pipeline": 9,
+        "2026-04-14-v1.2-runtime-compatibility": 5
+      }
     },
-    "residual_findings": {},
+    "residual_findings": {
+      "2026-04-14-v1.2-local-only-identity": [
+        {
+          "id": "R1",
+          "title": "CLI test coverage gap — only 1 trivial test for identity commands",
+          "severity": "medium",
+          "source": "QC-#1 (W4), QC-#3 (S1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "V1.2 M1 — supplement during WS2b integration or T3 QA",
+          "tracking": "T3 QA verification"
+        },
+        {
+          "id": "R2",
+          "title": "resolve_active_identity is dead code — #[allow(dead_code)]",
+          "severity": "low",
+          "source": "QC-#1 (W3), QC-#2 (W4), QC-#3 (W1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) — wire into runtime identity resolution",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R3",
+          "title": "display_name has no empty/whitespace validation",
+          "severity": "low",
+          "source": "QC-#1 (W5)",
+          "scope": "schemas/domain/local-identity.schema.json, crates/nexus-domain/src/local_identity.rs",
+          "decision": "accept",
+          "owner": "@fullstack-dev",
+          "target": "Low priority — add minLength:1 to schema and domain validation",
+          "tracking": null
+        },
+        {
+          "id": "R4",
+          "title": "use_identity vs resolve_active_identity behavioral inconsistency for anonymous IDs",
+          "severity": "low",
+          "source": "QC-#2 (W4), QC-#3 (W1)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) — unify identity resolution paths",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R5",
+          "title": "UUID v4 vs counter-based ID generation — no spec requirement for ordering",
+          "severity": "nit",
+          "source": "QC-#3 (W3)",
+          "scope": "crates/nexus-domain/src/local_identity.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "UUID v4 is collision-safe; counter not required by spec",
+          "tracking": null
+        },
+        {
+          "id": "R6",
+          "title": "ResolvedIdentity uses raw String for identity_type instead of LocalIdentityType enum",
+          "severity": "low",
+          "source": "QC-#1 (S4)",
+          "scope": "crates/nexus42/src/commands/identity.rs",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target": "T3 (WS2b runtime) — refactor when wiring resolve_active_identity",
+          "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
+        },
+        {
+          "id": "R7",
+          "title": "thiserror alignment — LocalDbError uses manual Display/Error vs domain thiserror",
+          "severity": "nit",
+          "source": "QC-#1 (S1)",
+          "scope": "crates/nexus-local-db/src/error.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "Style improvement — no functional impact",
+          "tracking": null
+        }
+      ],
+      "2026-04-14-v1.2-local-only-runtime": [
+        {
+          "id": "R3",
+          "title": "Daemon mode staleness after CLI config change",
+          "severity": "low",
+          "source": "QC-1, QC-2, QC-3",
+          "scope": "crates/nexus42d/src/workspace/mod.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "T6 (WS4: runtime compatibility)",
+          "tracking": null
+        },
+        {
+          "id": "R4",
+          "title": "classify_operation fail-open default for unknown ops",
+          "severity": "nit",
+          "source": "QC-2",
+          "scope": "crates/nexus-domain/src/runtime_guard.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target": "V1.3+",
+          "tracking": null
+        }
+      ],
+      "2026-04-14-v1.2-local-memory-pipeline": [
+        {
+          "id": "R4",
+          "title": "Duplicate code in experience_aggregation (aggregate vs preview)",
+          "severity": "low",
+          "source": "QC1-W1, QC2-W2",
+          "scope": "experience_aggregation.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R7",
+          "title": "O(N) idempotency check on promotion (file I/O scan)",
+          "severity": "low",
+          "source": "QC2-W3, QC3-perf",
+          "scope": "review.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3+",
+          "tracking": null
+        },
+        {
+          "id": "R8",
+          "title": "Session capture durability gap (fire-and-forget)",
+          "severity": "medium",
+          "source": "QC3-W1",
+          "scope": "session_capture.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R9",
+          "title": "Fragment TTL has no cleanup mechanism",
+          "severity": "low",
+          "source": "QC3-W2",
+          "scope": "schema.rs",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.4",
+          "tracking": null
+        },
+        {
+          "id": "R10",
+          "title": "Slug collision risk (memory_id to slug truncation)",
+          "severity": "nit",
+          "source": "QC3-W3",
+          "scope": "review.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R11",
+          "title": "Review/Fragments CLI commands are stubs",
+          "severity": "low",
+          "source": "QC1-W6, QC3-W5",
+          "scope": "commands/memory.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R13",
+          "title": "Inefficient keyword dedup (Vec vs HashSet)",
+          "severity": "nit",
+          "source": "QC1-S2, QC2-S1",
+          "scope": "memory_fragment.rs",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R14",
+          "title": "EXPERIENCE_MEMORY_KINDS hardcoded not derived from enum",
+          "severity": "low",
+          "source": "QC1-S1, QC3-W4",
+          "scope": "experience_aggregation.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R15",
+          "title": "Token estimation is chars/4 approximation",
+          "severity": "nit",
+          "source": "QC3-S2",
+          "scope": "context_assembly.rs",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        }
+      ],
+      "2026-04-14-v1.2-runtime-compatibility": [
+        {
+          "id": "R1",
+          "title": "should_degrade window semantics incorrect",
+          "severity": "medium",
+          "source": "QC1-W1, QC2-W-3",
+          "scope": "degradation.rs:334-346",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R2",
+          "title": "Placeholder world_id in two-stage assembly",
+          "severity": "medium",
+          "source": "QC1-W2, QC2-W-4",
+          "scope": "context.rs:376-420",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R3",
+          "title": "last_upgrade_attempt not persisted",
+          "severity": "medium",
+          "source": "QC3-W-002",
+          "scope": "degradation.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R4",
+          "title": "Dead call_assemble URL mismatch",
+          "severity": "low",
+          "source": "QC1-W4",
+          "scope": "daemon_client.rs:186",
+          "decision": "accept",
+          "owner": null,
+          "target": "V1.3",
+          "tracking": null
+        },
+        {
+          "id": "R5",
+          "title": "Plan file vs test existence mismatch",
+          "severity": "low",
+          "source": "QC3-W-001",
+          "scope": "plan.md",
+          "decision": "defer",
+          "owner": null,
+          "target": "V1.2 cleanup",
+          "tracking": null
+        }
+      ]
+    },
     "v1.2_program": {
       "compass": "knowledge/v1.2-delivery-compass-v1.md",
       "status": "planned",

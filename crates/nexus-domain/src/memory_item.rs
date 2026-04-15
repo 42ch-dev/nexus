@@ -29,7 +29,7 @@ impl MemoryStatus {
 
 /// Memory kind enum - matches v1-spec §5.8 and ADR-001.
 /// Schema defines: story_summary, research_material, review_note, character_note,
-/// world_building, plot_outline, theme_analysis, custom.
+/// world_building, plot_outline, theme_analysis, personality_core, custom.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, strum::Display)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -41,6 +41,8 @@ pub enum MemoryKind {
     WorldBuilding,
     PlotOutline,
     ThemeAnalysis,
+    /// Personality track pushed from SOUL.md (spec §4.2).
+    PersonalityCore,
     Custom,
 }
 
@@ -55,6 +57,7 @@ impl MemoryKind {
             Self::WorldBuilding => "world_building",
             Self::PlotOutline => "plot_outline",
             Self::ThemeAnalysis => "theme_analysis",
+            Self::PersonalityCore => "personality_core",
             Self::Custom => "custom",
         }
     }
@@ -69,6 +72,7 @@ impl MemoryKind {
             "world_building".to_string(),
             "plot_outline".to_string(),
             "theme_analysis".to_string(),
+            "personality_core".to_string(),
             "custom".to_string(),
         ]
     }
@@ -98,6 +102,7 @@ impl FromStr for MemoryKind {
             "world_building" => Ok(Self::WorldBuilding),
             "plot_outline" => Ok(Self::PlotOutline),
             "theme_analysis" => Ok(Self::ThemeAnalysis),
+            "personality_core" => Ok(Self::PersonalityCore),
             "custom" => Ok(Self::Custom),
             _ => Err(ParseMemoryKindError(s.to_string())),
         }
@@ -437,9 +442,10 @@ mod tests {
             MemoryKind::WorldBuilding,
             MemoryKind::PlotOutline,
             MemoryKind::ThemeAnalysis,
+            MemoryKind::PersonalityCore,
             MemoryKind::Custom,
         ];
-        assert_eq!(kinds.len(), 8);
+        assert_eq!(kinds.len(), 9);
     }
 
     #[test]
@@ -454,6 +460,7 @@ mod tests {
         assert_eq!(MemoryKind::WorldBuilding.to_string(), "world_building");
         assert_eq!(MemoryKind::PlotOutline.to_string(), "plot_outline");
         assert_eq!(MemoryKind::ThemeAnalysis.to_string(), "theme_analysis");
+        assert_eq!(MemoryKind::PersonalityCore.to_string(), "personality_core");
         assert_eq!(MemoryKind::Custom.to_string(), "custom");
     }
 
@@ -482,6 +489,7 @@ mod tests {
             "world_building",
             "plot_outline",
             "theme_analysis",
+            "personality_core",
             "custom",
         ] {
             let json = format!(r#""{}""#, kind_str);
@@ -495,6 +503,7 @@ mod tests {
     fn test_memory_kind_from_str() {
         use std::str::FromStr;
         assert!(MemoryKind::from_str("story_summary").is_ok());
+        assert!(MemoryKind::from_str("personality_core").is_ok());
         assert!(MemoryKind::from_str("invalid_kind").is_err());
         assert_eq!(MemoryKind::from_str("custom").unwrap(), MemoryKind::Custom);
     }
@@ -502,8 +511,9 @@ mod tests {
     #[test]
     fn test_memory_kind_all_as_strings() {
         let strings = MemoryKind::all_as_strings();
-        assert_eq!(strings.len(), 8);
+        assert_eq!(strings.len(), 9);
         assert!(strings.contains(&"story_summary".to_string()));
+        assert!(strings.contains(&"personality_core".to_string()));
         assert!(strings.contains(&"custom".to_string()));
     }
 }
