@@ -139,4 +139,77 @@ mod tests {
         let text = "Discussed three key themes for the novel: narrative structure, character arcs, and emotional resonance.";
         assert!(is_high_signal(text));
     }
+
+    // --- Boundary tests (W-001) ---
+
+    #[test]
+    fn single_token_passes_unique_and_alpha_but_fails_repeated() {
+        // 1 token: unique_ratio=1.0, alpha_ratio=1.0, repeated_token_ratio=1.0
+        // repeated_token_ratio 1.0 > 0.45 → fails
+        assert!(!is_high_signal("hello"));
+        let q = quality_signal("hello");
+        assert_eq!(q.unique_ratio, 1.0);
+        assert_eq!(q.repeated_token_ratio, 1.0);
+    }
+
+    #[test]
+    fn exact_thresholds_all_met() {
+        // Construct text where all three thresholds are barely met
+        // Need: unique ≥ 0.35, alpha ≥ 0.65, repeated ≤ 0.45
+        // "one two three four five six seven" = 7 unique tokens
+        // unique_ratio=1.0, alpha=1.0, repeated=1/7≈0.143
+        assert!(is_high_signal("one two three four five six seven"));
+    }
+
+    #[test]
+    fn just_below_unique_ratio_threshold() {
+        // Need unique_ratio < 0.35: many tokens but few unique
+        // 10 tokens, 3 unique = 0.30 < 0.35
+        let text = "x x x x x x x y z"; // 9 tokens, 3 unique → 0.333 < 0.35
+        let q = quality_signal(text);
+        assert!(
+            q.unique_ratio < 0.35,
+            "unique_ratio should be below 0.35: got {}",
+            q.unique_ratio
+        );
+        assert!(!is_high_signal(text));
+    }
+
+    #[test]
+    fn just_above_repeated_token_threshold() {
+        // 10 tokens, one token repeated 5 times = 0.50 > 0.45 → fails
+        let text = "word word word word word a b c d e"; // 5/10 = 0.50
+        let q = quality_signal(text);
+        assert!(
+            q.repeated_token_ratio > 0.45,
+            "repeated_token_ratio should exceed 0.45: got {}",
+            q.repeated_token_ratio
+        );
+        assert!(!is_high_signal(text));
+    }
+
+    #[test]
+    fn just_below_repeated_token_threshold_passes() {
+        // 10 tokens, one token repeated 4 times = 0.40 ≤ 0.45 → passes (if other thresholds met)
+        let text = "alpha beta alpha beta alpha delta epsilon zeta"; // 7 tokens, alpha=3/7≈0.43 ≤ 0.45
+        let q = quality_signal(text);
+        assert!(
+            q.repeated_token_ratio <= 0.45,
+            "repeated_token_ratio should be at or below 0.45: got {}",
+            q.repeated_token_ratio
+        );
+        // Also check other thresholds are met
+        assert!(q.unique_ratio >= 0.35, "unique_ratio: {}", q.unique_ratio);
+        assert!(q.alpha_ratio >= 0.65, "alpha_ratio: {}", q.alpha_ratio);
+        assert!(is_high_signal(text));
+    }
+
+    #[test]
+    fn whitespace_only_is_zero_signals() {
+        let q = quality_signal("   \t\n  ");
+        assert_eq!(q.unique_ratio, 0.0);
+        assert_eq!(q.alpha_ratio, 0.0);
+        assert_eq!(q.repeated_token_ratio, 0.0);
+        assert!(!is_high_signal("   \t\n  "));
+    }
 }

@@ -1,5 +1,6 @@
 //! API response models for daemon communication
 
+use nexus_contracts::RuntimeMode;
 use serde::Deserialize;
 
 /// Runtime status response from daemon's `/v1/local/runtime/status` endpoint.
@@ -16,7 +17,7 @@ pub struct RuntimeStatus {
     /// Current runtime mode (local_only / local_first / cloud_enhanced)
     #[serde(default)]
     #[allow(dead_code)]
-    pub runtime_mode: String,
+    pub runtime_mode: Option<RuntimeMode>,
 }
 
 /// ACP-related status information included in runtime status (V1.1).
@@ -82,7 +83,7 @@ mod tests {
         assert!(status.acp.tool_execution_enabled);
         assert_eq!(status.acp.active_sessions, 5);
         assert_eq!(status.acp.total_tool_executions, 42);
-        assert_eq!(status.runtime_mode, "local_only");
+        assert_eq!(status.runtime_mode, Some(RuntimeMode::LocalOnly));
     }
 
     #[test]
@@ -103,8 +104,8 @@ mod tests {
         assert!(!status.acp.tool_execution_enabled);
         assert_eq!(status.acp.active_sessions, 0);
         assert_eq!(status.acp.total_tool_executions, 0);
-        // runtime_mode defaults to empty string when missing
-        assert!(status.runtime_mode.is_empty());
+        // runtime_mode defaults to None when missing
+        assert!(status.runtime_mode.is_none());
     }
 
     #[test]
