@@ -32,6 +32,7 @@ pub mod world_membership;
 pub mod world;
 pub mod meta;
 pub mod context_assembly_v1;
+pub mod creator_runtime_policy_response;
 pub mod explore_ai_answer_request;
 pub mod explore_ai_answer_response;
 pub mod explore_ai_summary_request;
@@ -95,6 +96,7 @@ pub use world_membership::*;
 pub use world::*;
 pub use meta::*;
 pub use context_assembly_v1::*;
+pub use creator_runtime_policy_response::*;
 pub use explore_ai_answer_request::*;
 pub use explore_ai_answer_response::*;
 pub use explore_ai_summary_request::*;
@@ -157,6 +159,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("World", 1),
     ("Meta", 1),
     ("ContextAssemblyV1", 1),
+    ("CreatorRuntimePolicyResponse", 1),
     ("ExploreAiAnswerRequest", 1),
     ("ExploreAiAnswerResponse", 1),
     ("ExploreAiSummaryRequest", 1),

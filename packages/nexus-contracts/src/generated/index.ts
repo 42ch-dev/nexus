@@ -37,6 +37,7 @@ export * from './WorldMembership';
 export * from './World';
 export * from './Meta';
 export * from './ContextAssemblyV1';
+export * from './CreatorRuntimePolicyResponse';
 export * from './ExploreAiAnswerRequest';
 export * from './ExploreAiAnswerResponse';
 export * from './ExploreAiSummaryRequest';
@@ -99,6 +100,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   World: 1,
   Meta: 1,
   ContextAssemblyV1: 1,
+  CreatorRuntimePolicyResponse: 1,
   ExploreAiAnswerRequest: 1,
   ExploreAiAnswerResponse: 1,
   ExploreAiSummaryRequest: 1,
