@@ -120,6 +120,10 @@ pub async fn run(args: CloneArgs, config: &CliConfig) -> Result<()> {
         return Err(CliError::DaemonNotRunning);
     }
 
+    eprintln!(
+        "Warning: daemon endpoint /v1/local/world/clone not yet implemented. Clone will fail if attempted."
+    );
+
     let resp = client
         .post::<WorldCloneResponse, serde_json::Value>("/v1/local/world/clone", &body)
         .await?;
