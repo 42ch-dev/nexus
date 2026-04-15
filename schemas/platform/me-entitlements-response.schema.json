@@ -10,7 +10,10 @@
     "user_id",
     "subscription_tier",
     "account_status",
-    "official_creator"
+    "official_creator",
+    "runtime_policy",
+    "memory_structured_write",
+    "memory_vector_index"
   ],
   "properties": {
     "schema_version": {
@@ -40,6 +43,27 @@
         }
       },
       "additionalProperties": false
+    },
+    "runtime_policy": {
+      "type": "string",
+      "enum": ["local_first", "cloud_enhanced"],
+      "default": "cloud_enhanced",
+      "description": "Creator runtime policy — local_first forbids server-side generative LLM calls"
+    },
+    "memory_structured_write": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether memory structured write is enabled"
+    },
+    "memory_vector_index": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether memory vector indexing/embedding is enabled"
+    },
+    "local_first_embedding_remaining": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Remaining embedding quota for local_first creators (null for cloud_enhanced)"
     }
   },
   "additionalProperties": false
