@@ -370,7 +370,7 @@
       "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
-        "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in metadata.residual_findings"
+        "residual_summary": "8 open residuals (1 medium, 4 low, 3 nit) — R11 (CLI stubs) resolved by v1.3-preflight T2"
       },
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "done_at": "2026-04-14"
@@ -443,26 +443,26 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-15",
-      "total_open": 40,
+      "total_open": 35,
       "by_severity": {
-        "critical": 1,
+        "critical": 0,
         "high": 0,
         "medium": 4,
-        "low": 19,
-        "nit": 16
+        "low": 17,
+        "nit": 14
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
-        "V1.2": 23,
+        "V1.2": 18,
         "V1.3": 17
       },
       "by_plan": {
         "2026-04-14-v1.2-local-only-identity": 7,
         "2026-04-14-v1.2-local-only-runtime": 2,
-        "2026-04-14-v1.2-local-memory-pipeline": 9,
+        "2026-04-14-v1.2-local-memory-pipeline": 8,
         "2026-04-14-v1.2-runtime-compatibility": 5,
-        "v1.2-program-review": 17
+        "v1.2-program-review": 13
       }
     },
     "residual_findings": {
@@ -626,17 +626,6 @@
           "tracking": null
         },
         {
-          "id": "R11",
-          "title": "Review/Fragments CLI commands are stubs",
-          "severity": "low",
-          "source": "QC1-W6, QC3-W5",
-          "scope": "commands/memory.rs",
-          "decision": "accept",
-          "owner": null,
-          "target": "V1.3",
-          "tracking": null
-        },
-        {
           "id": "R13",
           "title": "Inefficient keyword dedup (Vec vs HashSet)",
           "severity": "nit",
@@ -729,17 +718,6 @@
       ],
       "v1.2-program-review": [
         {
-          "id": "C-001",
-          "title": "Review classification purely length-based",
-          "severity": "critical",
-          "source": "QC consolidated (v1.2-program-review)",
-          "scope": "crates/nexus-domain/src/review.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target": "V1.3",
-          "tracking": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md"
-        },
-        {
           "id": "W-003",
           "title": "Slug collision risk",
           "severity": "low",
@@ -758,17 +736,6 @@
           "scope": "CLI editor temp file flow",
           "decision": "defer",
           "owner": null,
-          "target": "V1.3",
-          "tracking": null
-        },
-        {
-          "id": "M3",
-          "title": "RuntimeMode missing from TS contracts",
-          "severity": "low",
-          "source": "QC#2",
-          "scope": "packages/nexus-contracts/src/generated",
-          "decision": "defer",
-          "owner": "fullstack-dev",
           "target": "V1.3",
           "tracking": null
         },
@@ -890,28 +857,6 @@
           "scope": "sqlite schema/indexes",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target": "V1.3",
-          "tracking": null
-        },
-        {
-          "id": "R-QC3-002",
-          "title": "ACP tool tests ignored",
-          "severity": "nit",
-          "source": "QC#3",
-          "scope": "crates/nexus42d/tests/integration.rs",
-          "decision": "defer",
-          "owner": "qa-engineer",
-          "target": "V1.3",
-          "tracking": null
-        },
-        {
-          "id": "R-QC3-003",
-          "title": "Context assemble test skipped",
-          "severity": "nit",
-          "source": "QC#3",
-          "scope": "regression/context assemble coverage",
-          "decision": "defer",
-          "owner": "qa-engineer",
           "target": "V1.3",
           "tracking": null
         }
