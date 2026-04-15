@@ -71,7 +71,7 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
         MemoryCommand::Edit { slug } => edit(config, creator_id, &slug).await,
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
         MemoryCommand::Review => review(config, creator_id).await,
-        MemoryCommand::Fragments => fragments(config).await,
+        MemoryCommand::Fragments => fragments(config, creator_id).await,
     }
 }
 
@@ -222,16 +222,20 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
 async fn review(config: &CliConfig, creator_id: &str) -> Result<()> {
     let client = DaemonClient::from_config(config);
     let result = client.review_pending_memories(creator_id).await?;
-    println!(
-        "Review completed: promoted={}, fragmented={}, dropped={}",
-        result.promoted, result.fragmented, result.dropped
-    );
+    if result.promoted + result.fragmented + result.dropped == 0 {
+        println!("No pending memories to review.");
+    } else {
+        println!(
+            "Review completed: promoted={}, fragmented={}, dropped={}",
+            result.promoted, result.fragmented, result.dropped
+        );
+    }
     Ok(())
 }
 
-async fn fragments(config: &CliConfig) -> Result<()> {
+async fn fragments(config: &CliConfig, creator_id: &str) -> Result<()> {
     let client = DaemonClient::from_config(config);
-    let rows = client.list_memory_fragments().await?;
+    let rows = client.list_memory_fragments(creator_id).await?;
 
     if rows.is_empty() {
         println!("No memory fragments found.");
@@ -239,7 +243,7 @@ async fn fragments(config: &CliConfig) -> Result<()> {
     }
 
     println!("Memory fragments:\n");
-    println!("{:<30} SUMMARY", "FRAGMENT_ID");
+    println!("{:<30} {:<20} SUMMARY", "FRAGMENT_ID", "");
     println!("{}", "-".repeat(80));
 
     for f in &rows {
