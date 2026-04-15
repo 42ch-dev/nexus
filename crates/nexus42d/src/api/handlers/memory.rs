@@ -162,11 +162,12 @@ fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(),
         });
     }
 
-    // creator_id: non-empty, must start with ctr_
-    if !req.creator_id.starts_with("ctr_") {
+    // creator_id: non-empty, must match ctr_<alphanumeric> pattern
+    if !nexus_domain::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_'".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                .into(),
         });
     }
 
@@ -331,20 +332,96 @@ pub struct CountPendingReviewsQuery {
     pub creator_id: String,
 }
 
-/// DELETE /v1/local/memory/pending-review/{id}
+/// Query parameters for deleting a pending review.
+#[derive(Debug, Deserialize)]
+pub struct DeletePendingReviewQuery {
+    pub creator_id: String,
+}
+
+/// DELETE /v1/local/memory/pending-review/{id}?creator_id=...
 ///
-/// Deletes a pending review by its ID.
+/// Deletes a pending review by its ID, but only if it belongs to the specified creator.
 pub async fn delete_pending_review(
     State(state): State<WorkspaceState>,
     Path(pending_id): Path<String>,
+    Query(params): Query<DeletePendingReviewQuery>,
 ) -> Result<Json<DeletePendingReviewResponse>, NexusApiError> {
-    info!(pending_id = %pending_id, "Deleting pending review");
+    info!(
+        pending_id = %pending_id,
+        creator_id = %params.creator_id,
+        "Deleting pending review"
+    );
+
+    // Validate creator_id format
+    if !nexus_domain::is_valid_creator_id(&params.creator_id) {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                .into(),
+        });
+    }
 
     let conn = state.db().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_UNAVAILABLE".into(),
         message: format!("Database connection error: {}", e),
     })?;
 
+    // Verify ownership before deletion
+    let pending_id_clone = pending_id.clone();
+    let creator_id_clone = params.creator_id.clone();
+    let review: Option<PendingReviewInfo> = conn
+        .interact(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
+                 FROM memory_pending_review WHERE pending_id = ?1",
+            )?;
+            let mut rows = stmt.query_map(rusqlite::params![pending_id_clone], |row| {
+                Ok(PendingReviewInfo {
+                    pending_id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    creator_id: row.get(2)?,
+                    world_id: row.get(3)?,
+                    task_kind: row.get(4)?,
+                    raw_digest: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?;
+            match rows.next() {
+                Some(Ok(row)) => Ok(Some(row)),
+                Some(Err(e)) => Err(e),
+                None => Ok(None),
+            }
+        })
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to lookup pending review: {}", e),
+        })?
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?;
+
+    match review {
+        None => {
+            return Err(NexusApiError::NotFound(format!(
+                "pending review '{}' not found",
+                pending_id
+            )));
+        }
+        Some(ref r) if r.creator_id != creator_id_clone => {
+            return Err(NexusApiError::Forbidden {
+                resource: "pending_review".into(),
+                reason: format!(
+                    "pending review '{}' does not belong to creator '{}'",
+                    pending_id, params.creator_id
+                ),
+            });
+        }
+        _ => {}
+    }
+
+    // Proceed with deletion
     let pending_id_clone = pending_id.clone();
     let affected = conn
         .interact(move |conn| {
@@ -363,12 +440,7 @@ pub async fn delete_pending_review(
             message: e.to_string(),
         })?;
 
-    if affected == 0 {
-        return Err(NexusApiError::NotFound(format!(
-            "pending review '{}' not found",
-            pending_id
-        )));
-    }
+    debug_assert!(affected > 0, "Expected 1 row deleted after ownership check");
 
     Ok(Json(DeletePendingReviewResponse {
         success: true,
