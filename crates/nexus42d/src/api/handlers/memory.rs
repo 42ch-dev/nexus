@@ -166,8 +166,7 @@ fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(),
     if !nexus_domain::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
-                .into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
         });
     }
 
@@ -356,8 +355,7 @@ pub async fn delete_pending_review(
     if !nexus_domain::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
-                .into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
         });
     }
 
