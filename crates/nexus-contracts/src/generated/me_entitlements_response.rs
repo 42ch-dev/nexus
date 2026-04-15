@@ -17,9 +17,4 @@ pub struct MeEntitlementsResponse {
     pub subscription_tier: SubscriptionTier,
     pub account_status: AccountStatus,
     pub official_creator: serde_json::Value,
-    pub runtime_policy: String,
-    pub memory_structured_write: bool,
-    pub memory_vector_index: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_first_embedding_remaining: Option<u64>,
 }
