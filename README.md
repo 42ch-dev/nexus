@@ -44,4 +44,4 @@ cargo build --release
 
 ## License
 
-MIT
+GPL-3.0-only (GNU General Public License v3.0)
