@@ -83,7 +83,21 @@ impl CliConfig {
         if content.trim().is_empty() {
             return Ok(Self::default());
         }
-        Ok(serde_json::from_str(&content)?)
+        match serde_json::from_str::<CliConfig>(&content) {
+            Ok(cfg) => Ok(cfg),
+            Err(e) => {
+                // Backup corrupted file and re-initialize with defaults
+                tracing::warn!(
+                    "Config file corrupted, backing up and re-initializing: {}",
+                    e
+                );
+                let bak = config_path.with_extension("json.bak");
+                if let Err(rename_err) = std::fs::rename(&config_path, &bak) {
+                    tracing::error!("Failed to backup corrupted config: {}", rename_err);
+                }
+                Ok(Self::default())
+            }
+        }
     }
 
     /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
