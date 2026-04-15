@@ -175,7 +175,6 @@ impl DaemonClient {
     ///
     /// Returns `CliError::Api` with status 403 if `runtime_mode` is `local_only`
     /// (platform assemble is prohibited in that mode).
-    #[allow(dead_code)] // Wired into CLI commands in T6.8
     pub async fn call_assemble(
         &self,
         creator_id: &str,
@@ -183,7 +182,7 @@ impl DaemonClient {
         runtime_mode: &str,
         prompt_hint: Option<&str>,
     ) -> Result<Option<AssembleResponse>> {
-        let url = format!("{}/api/v1/context/assemble", self.base_url);
+        let url = format!("{}/v1/local/context/assemble", self.base_url);
 
         let body = serde_json::json!({
             "creator_id": creator_id,
