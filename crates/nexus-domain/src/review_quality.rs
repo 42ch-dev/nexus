@@ -36,11 +36,11 @@ pub fn quality_signal(input: &str) -> QualitySignal {
     }
 
     // Unique ratio: unique lowercased tokens / total tokens
-    let mut seen: HashMap<&str, usize> = HashMap::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
     let mut max_count: usize = 0;
     for tok in &tokens {
         let lower = tok.to_lowercase();
-        let entry = seen.entry(Box::leak(lower.into_boxed_str())).or_insert(0);
+        let entry = seen.entry(lower).or_insert(0);
         *entry += 1;
         if *entry > max_count {
             max_count = *entry;
