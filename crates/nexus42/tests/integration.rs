@@ -364,3 +364,460 @@ fn soul_validate_requires_active_creator() {
         .failure()
         .stderr(predicate::str::contains("No active creator"));
 }
+
+// =============================================================================
+// E8: Integration tests for new CLI commands (clone, unlink, config, debug, doctor)
+// =============================================================================
+
+/// Test clone command shows help
+#[test]
+fn clone_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("clone")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("WORLD_REF"))
+        .stdout(predicate::str::contains("--source"))
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("--yes"));
+}
+
+/// Test clone requires world_ref argument
+#[test]
+fn clone_requires_world_ref() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("clone")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("WORLD_REF"));
+}
+
+/// Test clone dry-run without daemon (prints JSON, no daemon needed)
+#[test]
+fn clone_dry_run_no_daemon() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("clone")
+        .arg("wld_test123")
+        .arg("--dry-run")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"world_ref\""))
+        .stdout(predicate::str::contains("\"source\""));
+}
+
+/// Test clone with --source platform
+#[test]
+fn clone_dry_run_source_platform() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("clone")
+        .arg("wld_test123")
+        .arg("--source")
+        .arg("platform")
+        .arg("--dry-run")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("platform"));
+}
+
+/// Test clone with --source local
+#[test]
+fn clone_dry_run_source_local() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("clone")
+        .arg("wld_test123")
+        .arg("--source")
+        .arg("local")
+        .arg("--dry-run")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("local"));
+}
+
+/// Test clone rejects invalid world_ref format
+#[test]
+fn clone_rejects_invalid_world_ref() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("clone")
+        .arg("wld_") // Too short - invalid
+        .arg("--dry-run")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure();
+}
+
+/// Test config command shows help
+#[test]
+fn config_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("get"))
+        .stdout(predicate::str::contains("set"))
+        .stdout(predicate::str::contains("unset"))
+        .stdout(predicate::str::contains("path"));
+}
+
+/// Test config get existing key (runtime_mode has default)
+#[test]
+fn config_get_runtime_mode() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("get")
+        .arg("runtime_mode")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("runtime_mode"));
+}
+
+/// Test config get non-existent key shows unset
+#[test]
+fn config_get_nonexistent_key() {
+    let tmp = TempDir::new().unwrap();
+    // workspace_path is optional and defaults to empty
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("get")
+        .arg("workspace_path")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(unset)"));
+}
+
+/// Test config set updates value
+#[test]
+fn config_set_platform_url() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("set")
+        .arg("platform_url")
+        .arg("https://test.nexus42.io")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Set platform_url"));
+}
+
+/// Test config set invalid key fails
+#[test]
+fn config_set_invalid_key_fails() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("set")
+        .arg("invalid_key")
+        .arg("some_value")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid config key"));
+}
+
+/// Test config unset reverts to default
+#[test]
+fn config_unset_resets_to_default() {
+    let tmp = TempDir::new().unwrap();
+    // First set a custom value
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("set")
+        .arg("platform_url")
+        .arg("https://custom.io")
+        .env("HOME", tmp.path())
+        .assert()
+        .success();
+
+    // Then unset it
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("unset")
+        .arg("platform_url")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unset"));
+}
+
+/// Test config path shows location
+#[test]
+fn config_path_shows_location() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("config")
+        .arg("path")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config.json"));
+}
+
+/// Test debug command shows help
+#[test]
+fn debug_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("debug")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dump-workspace"))
+        .stdout(predicate::str::contains("replay-delta"));
+}
+
+/// Test debug dump-workspace runs without error (daemon may not be running)
+#[test]
+fn debug_dump_workspace_no_panic() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("debug")
+        .arg("dump-workspace")
+        .env("HOME", tmp.path())
+        .assert()
+        .success(); // Should not panic, may show daemon not running
+}
+
+/// Test debug dump-workspace with json format (default)
+#[test]
+fn debug_dump_workspace_json_format() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("debug")
+        .arg("dump-workspace")
+        .arg("--format")
+        .arg("json")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"config\""));
+}
+
+/// Test debug dump-workspace with toml format
+#[test]
+fn debug_dump_workspace_toml_format() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("debug")
+        .arg("dump-workspace")
+        .arg("--format")
+        .arg("toml")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config"));
+}
+
+/// Test debug replay-delta requires delta_id
+#[test]
+fn debug_replay_delta_requires_id() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("debug")
+        .arg("replay-delta")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("DELTA_ID"));
+}
+
+/// Test debug replay-delta with nonexistent delta (daemon not running)
+#[test]
+fn debug_replay_delta_nonexistent() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("debug")
+        .arg("replay-delta")
+        .arg("delta-nonexistent-123")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Daemon not running"));
+}
+
+/// Test doctor command shows help
+#[test]
+fn doctor_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("check"));
+}
+
+/// Test doctor check runs (daemon may not be running)
+#[test]
+fn doctor_check_no_panic() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nexus42 doctor"));
+}
+
+/// Test doctor check shows daemon status
+#[test]
+fn doctor_check_shows_daemon_status() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Daemon connectivity"));
+}
+
+/// Test doctor check shows config status
+#[test]
+fn doctor_check_shows_config_status() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Config file"));
+}
+
+/// Test doctor check shows database status
+#[test]
+fn doctor_check_shows_database_status() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Database"));
+}
+
+/// Test doctor check shows workspace status
+#[test]
+fn doctor_check_shows_workspace_status() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Workspace directory"));
+}
+
+/// Test doctor check shows version compatibility
+#[test]
+fn doctor_check_shows_version_compatibility() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Version compatibility"));
+}
+
+/// Test doctor check shows summary
+#[test]
+fn doctor_check_shows_summary() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("doctor")
+        .arg("check")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Summary:"));
+}
+
+/// Test identity command shows help (includes unlink subcommand)
+#[test]
+fn identity_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("identity")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("create"))
+        .stdout(predicate::str::contains("use"))
+        .stdout(predicate::str::contains("link"))
+        .stdout(predicate::str::contains("unlink"));
+}
+
+/// Test identity unlink requires creator_id
+#[test]
+fn identity_unlink_requires_creator_id() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("identity")
+        .arg("unlink")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("CREATOR_ID"));
+}
+
+/// Test identity unlink with nonexistent creator_id (local database exists but identity not found)
+#[test]
+fn identity_unlink_nonexistent_creator() {
+    let tmp = TempDir::new().unwrap();
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("identity")
+        .arg("unlink")
+        .arg("ctr_nonexistent")
+        .env("HOME", tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
