@@ -369,7 +369,7 @@ async fn memory_create_pending_review_endpoint() {
     let payload = serde_json::json!({
         "pending_id": "mem_test_001",
         "session_id": "sess_test_001",
-        "creator_id": "ctr_test_001",
+        "creator_id": "ctr_test001",
         "world_id": "wld_test_001",
         "task_kind": "brainstorm",
         "raw_digest": "Test digest content for pending review"
@@ -396,7 +396,7 @@ async fn memory_create_pending_review_idempotent_retry() {
     let payload = serde_json::json!({
         "pending_id": "mem_idempotent_001",
         "session_id": "sess_idempotent_001",
-        "creator_id": "ctr_test_001",
+        "creator_id": "ctr_test001",
         "raw_digest": "Digest content"
     });
 
@@ -415,7 +415,7 @@ async fn memory_create_pending_review_idempotent_retry() {
     response2.assert_status_ok();
 }
 
-/// Test: create pending review rejects invalid creator_id (must start with ctr_)
+/// Test: create pending review rejects invalid creator_id (must match ctr_<alphanumeric>)
 #[tokio::test]
 async fn memory_create_pending_review_rejects_invalid_creator_id() {
     let (state, _tmp) = create_test_state();
@@ -449,7 +449,7 @@ async fn memory_create_pending_review_rejects_empty_pending_id() {
     let payload = serde_json::json!({
         "pending_id": "",
         "session_id": "sess_001",
-        "creator_id": "ctr_test_001",
+        "creator_id": "ctr_test001",
         "raw_digest": "Test digest"
     });
     let response = server
@@ -501,14 +501,14 @@ async fn memory_delete_pending_review_endpoint() {
     let conn = rusqlite::Connection::open(db_path).unwrap();
     conn.execute(
         "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-         VALUES ('mem_delete_001', 'sess_delete_001', 'ctr_test_001', 'wld_001', 'brainstorm', 'digest content', '2026-04-15T00:00:00Z')",
+         VALUES ('mem_delete_001', 'sess_delete_001', 'ctr_test001', 'wld_001', 'brainstorm', 'digest content', '2026-04-15T00:00:00Z')",
         [],
     )
     .unwrap();
     drop(conn);
 
     let response = server
-        .delete("/v1/local/memory/pending-review/mem_delete_001")
+        .delete("/v1/local/memory/pending-review/mem_delete_001?creator_id=ctr_test001")
         .await;
 
     response.assert_status_ok();
@@ -526,7 +526,7 @@ async fn memory_delete_pending_review_not_found() {
     let server = TestServer::new(app).unwrap();
 
     let response = server
-        .delete("/v1/local/memory/pending-review/nonexistent_id")
+        .delete("/v1/local/memory/pending-review/nonexistent_id?creator_id=ctr_test001")
         .await;
 
     response.assert_status(StatusCode::NOT_FOUND);
