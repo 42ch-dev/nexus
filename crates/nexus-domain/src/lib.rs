@@ -33,6 +33,7 @@ pub mod pairing;
 pub mod personality_sync;
 pub mod reference_source;
 pub mod review;
+pub mod review_quality;
 pub mod runtime_guard;
 pub mod runtime_mode;
 pub mod soul;

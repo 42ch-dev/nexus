@@ -13,9 +13,10 @@ use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
-
+use crate::review_quality::is_high_signal;
 use crate::{DomainError, LongTermMemory};
+
+use serde::{Deserialize, Serialize};
 
 /// Review action determined by classification algorithm.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,32 +154,33 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
 
     // Threshold constants
     const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
-    const CREATIVE_PROMOTE_THRESHOLD: usize = 100; // Creative tasks promote at this length
+    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // High-signal creative content can promote shorter
     const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // Unknown tasks promote at this length
 
-    // Rule 1: Creative tasks have lower thresholds
+    // Rule 1: Creative tasks use quality signal for promotion decisions
     if matches!(
         task_kind,
         TaskKind::Brainstorm | TaskKind::Outline | TaskKind::Chapter
     ) {
-        // Creative tasks never get dropped based solely on length (experience value)
-        if digest_len >= CREATIVE_PROMOTE_THRESHOLD {
+        // Creative tasks never get dropped based solely on length (experience value).
+        // Promotion requires both minimum length AND high quality signal.
+        if is_high_signal(&record.raw_digest) && digest_len >= HIGH_SIGNAL_MIN_LENGTH {
             return ReviewDecision {
                 pending_id: record.pending_id.clone(),
                 action: ReviewAction::PromoteToLongTerm,
                 reason: format!(
-                    "{} task with substantial digest ({} chars) — long-term value",
+                    "{} task with high-signal digest ({} chars) — long-term value",
                     task_kind.as_str(),
                     digest_len
                 ),
             };
         }
-        // Creative tasks with medium digest go to fragment
+        // Creative tasks with medium/low-signal digest go to fragment
         return ReviewDecision {
             pending_id: record.pending_id.clone(),
             action: ReviewAction::FragmentOnly,
             reason: format!(
-                "{} task with medium digest — fragment indexing",
+                "{} task with medium or low-signal digest — fragment indexing",
                 task_kind.as_str()
             ),
         };
@@ -978,5 +980,38 @@ mod tests {
             .contains("Summarizer unavailable"));
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // ── Quality signal tests (T1) ──────────────────────────────────────────
+
+    #[test]
+    fn classify_rejects_long_low_signal_noise() {
+        let input = PendingReviewInput {
+            pending_id: "p1".into(),
+            session_id: "s1".into(),
+            creator_id: "ctr_test".into(),
+            world_id: None,
+            task_kind: "brainstorm".into(),
+            raw_digest: "aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa ".repeat(40),
+            created_at: "2026-04-15T00:00:00Z".into(),
+        };
+        let decision = classify_pending_review(&input);
+        assert_ne!(decision.action, ReviewAction::PromoteToLongTerm);
+    }
+
+    #[test]
+    fn classify_promotes_medium_high_signal_digest() {
+        let input = PendingReviewInput {
+            pending_id: "p2".into(),
+            session_id: "s2".into(),
+            creator_id: "ctr_test".into(),
+            world_id: None,
+            task_kind: "brainstorm".into(),
+            raw_digest: "The chapter pivots from betrayal to alliance, with causal consequences for three factions."
+                .into(),
+            created_at: "2026-04-15T00:00:00Z".into(),
+        };
+        let decision = classify_pending_review(&input);
+        assert_eq!(decision.action, ReviewAction::PromoteToLongTerm);
     }
 }
