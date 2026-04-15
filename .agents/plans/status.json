@@ -204,61 +204,14 @@
     },
     {
       "id": "v1-tech-debt-cleanup",
-      "title": "V1 Tech Debt Cleanup (Long-term)",
-      "file": ".agents/plans/v1-tech-debt-cleanup.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.1",
-        "v1.2",
-        "tech-debt",
-        "quality",
-        "long-term"
-      ],
-      "created_at": "2026-04-09",
-      "updated_at": "2026-04-15",
-      "done_at": "2026-04-15",
-      "notes": "All batches A-E complete. Batch E (TD-11/TD-13) delivered: 6 CLI commands (clone, unlink, config, debug, doctor) + 70 integration tests. Deferred D follow-ups (daemon FSM, outbox merge, real OAuth) remain in knowledge docs for V1.3+.",
+      "file": ".agents/plans/v1-tech-debt-cleanup.md",
       "metadata": {
-        "phase": "done",
-        "priority": "low",
-        "description": "Long-term tech debt across V1.x (including V1.2). All batches A-E complete. Deferred D follow-ups documented in knowledge/.",
-        "residual_target": "none — all Batch E items delivered",
-        "effort": "L — complete",
-        "milestone_snapshot_cd": "archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json",
-        "batch_status": {
-          "batch_a": "completed",
-          "batch_b": "completed",
-          "batch_c": "completed — 2026-04-10",
-          "batch_d": "completed — 2026-04-10",
-          "batch_e": "completed — 2026-04-15 (TD-11: 6 CLI commands, TD-13: 70 integration tests)"
-        },
-        "gates": {
-          "tests": "pass — cargo test --all (1628 tests, 0 failures)",
-          "clippy": "pass — cargo clippy --all -- -D warnings",
-          "fmt": "pass",
-          "qc_self": "reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260415-batch-e.md"
-        },
-        "workstream": "WS5",
-        "milestone": "parallel (non-blocking for M3) — complete",
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "commits": [
-          "76dd924 feat(cli): add nexus42 clone command (E1)",
-          "f11c541 feat(cli): add nexus42 identity unlink command (E2)",
-          "3595c30 feat(cli): add nexus42 config command group (E3)",
-          "707ae5a feat(cli): add CliConfig get/set/unset/path methods (E4)",
-          "e03f43e feat(cli): add nexus42 debug command group (E5)",
-          "d521fb3 feat(cli): add nexus42 doctor diagnostic command (E6)",
-          "7d00303 test(sync+cli): E7/E8 integration tests",
-          "89db1f9 test: E9/E10 integration tests for daemon HTTP and ACP session lifecycle"
-        ]
+        "archived_record": "archived/plans/v1-tech-debt-cleanup.json"
       }
+      ,
+      "title": "V1 Tech Debt Cleanup (Long-term)",
+      "done_at": "2026-04-15"
     },
     {
       "id": "2026-04-08-local-db-refactor",
@@ -372,43 +325,14 @@
     },
     {
       "id": "2026-04-14-v1.2-reclassification-baseline",
-      "title": "V1.2 WS1: Version Reclassification Baseline",
-      "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@product-manager"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.2",
-        "planning",
-        "ws1",
-        "milestone-m1"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "done_at": "2026-04-14",
-      "notes": "WS1 done. Reclassification matrix (knowledge/v1.2-reclassification-matrix-v1.md) committed with version-tagging rules and blocking map. QC skipped — product-docs only.",
+      "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
       "metadata": {
-        "phase": "Done",
-        "priority": "high",
-        "workstream": "WS1",
-        "milestone": "M1",
-        "dependency": [],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Reclassification matrix, blocking/non-blocking map, version-tagging rules for future plan rows",
-        "deliverables": [
-          "knowledge/v1.2-reclassification-matrix-v1.md",
-          "knowledge/README.md updated",
-          "Plan Tasks section updated"
-        ],
-        "qc": "skipped — product-docs only",
-        "qa": "skipped — product-docs only",
-        "effort": "M — PM + product analysis; ~2 agent sessions",
-        "commits": "4a23c6d docs(plan): add V1.2 reclassification matrix — WS1 deliverable"
+        "archived_record": "archived/plans/2026-04-14-v1.2-reclassification-baseline.json"
       }
+      ,
+      "title": "V1.2 WS1: Version Reclassification Baseline",
+      "done_at": "2026-04-14"
     },
     {
       "id": "2026-04-14-v1.2-local-only-identity",
@@ -444,73 +368,15 @@
     },
     {
       "id": "2026-04-14-v1.2-local-memory-pipeline",
-      "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
-      "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.2",
-        "implementation",
-        "ws3",
-        "memory",
-        "kb",
-        "milestone-m2"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-14",
-      "done_at": "2026-04-14",
-      "notes": "QA approved. All 12 ACs verified. 9 residuals tracked for V1.3/V1.4.",
+      "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
-        "phase": "done",
-        "priority": "high",
-        "workstream": "WS3",
-        "milestone": "M2",
-        "dependency": [
-          "2026-04-14-v1.2-soul-lifecycle"
-        ],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Local long-term memory, KB load, output generation — completing the local truth chain from SOUL through to user-facing output",
-        "deliverables": [
-          "Long-term memory lifecycle implementation",
-          "KB load and query implementation",
-          "Output generation pipeline",
-          "Integration with SOUL lifecycle"
-        ],
-        "acceptance_evidence": [
-          "R3: local truth core chain regression (SOUL/memory/KB/output)",
-          "Scenario regression: create → accumulate → retrieve → output"
-        ],
-        "effort": "XL",
-        "working_branch": "feature/v1.2-ws3b-memory",
-        "merge_target": "feature/v1.2",
-        "branch_policy": "create feature/v1.2-ws3b-memory from feature/v1.2",
-        "batch_count": 6,
-        "gates": {
-          "tests": "pass — cargo test --all (593 tests, 0 failures)",
-          "clippy": "pass — cargo clippy --all -- -D warnings",
-          "fmt": "pass",
-          "qc_status": "approve-with-residuals",
-          "qc_fixes": "b2069f8,3bf75d6",
-          "qa_status": "approve",
-          "qa_report": "reports/2026-04-14-v1.2-local-memory-pipeline/2026-04-14-v1.2-local-memory-pipeline-qa.md"
-        },
-        "commits": [
-          "09ddc4b T5.1+T5.2+T5.13+T5.14 domain model + file I/O + context assembly",
-          "8763479 T5.3-T5.8 DB migration + CRUD + review pipeline",
-          "dd2b129 T5.11 personality push-down",
-          "020c450 T5.5-T5.10 session capture and promotion",
-          "175c8ba T5.12 experience aggregation",
-          "2c6380f T5.15-T5.16 memory CLI commands",
-          "3721e71 T5.17 E2E tests"
-        ],
         "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in metadata.residual_findings"
       }
+      ,
+      "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
+      "done_at": "2026-04-14"
     },
     {
       "id": "2026-04-14-v1.2-runtime-compatibility",
@@ -525,56 +391,12 @@
     },
     {
       "id": "2026-04-14-v1.2-regression-suite",
-      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
-      "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
       "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.2",
-        "testing",
-        "regression",
-        "milestone-m3",
-        "release-gate"
-      ],
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-15",
-      "notes": "R1-R5 regression tests implemented + verified. QC approved. CI integration complete.",
+      "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
       "metadata": {
-        "phase": "implement",
-        "priority": "high",
-        "workstream": "M3-gate",
-        "milestone": "M3",
-        "dependency": [
-          "2026-04-14-v1.2-local-memory-pipeline",
-          "2026-04-14-v1.2-runtime-compatibility"
-        ],
-        "v1.2_scope": true,
-        "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
-        "scope": "Minimum automated regression set",
-        "deliverables": [
-          "R1–R5 automated test implementations",
-          "CI integration",
-          "Regression gate documentation"
-        ],
-        "acceptance_evidence": [
-          "All R1–R5 pass",
-          "CI pipeline green"
-        ],
-        "effort": "L — 5 regression scenarios + CI + docs",
-        "working_branch": "feature/v1.2-m3-regression-suite",
-        "merge_target": "feature/v1.2",
-        "r4_status": "verified in T6 QA (commit 1e63679)",
-        "gates": {
-          "tests": "passing",
-          "clippy": "clean",
-          "qc_status": "approved",
-          "qa_status": "verified"
-        }
+        "archived_record": "archived/plans/2026-04-14-v1.2-regression-suite.json"
       },
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
       "done_at": "2026-04-15"
     },
     {
@@ -1090,61 +912,8 @@
         }
       ]
     },
-    "v1.2_program": {
-      "compass": "knowledge/v1.2-delivery-compass-v1.md",
-      "status": "done",
-      "workstreams": {
-        "WS1": "2026-04-14-v1.2-reclassification-baseline",
-        "WS2": [
-          "2026-04-14-v1.2-local-only-identity",
-          "2026-04-14-v1.2-local-only-runtime"
-        ],
-        "WS3": [
-          "2026-04-14-v1.2-soul-lifecycle",
-          "2026-04-14-v1.2-local-memory-pipeline"
-        ],
-        "WS4": "2026-04-14-v1.2-runtime-compatibility",
-        "WS5": "v1-tech-debt-cleanup (Batch E)"
-      },
-      "milestones": {
-        "M1": {
-          "label": "Reclassification + minimal local path runnable",
-          "plans": [
-            "2026-04-14-v1.2-reclassification-baseline",
-            "2026-04-14-v1.2-local-only-identity",
-            "2026-04-14-v1.2-local-only-runtime"
-          ],
-          "entry": "scope lock confirmed; version reclassification baseline drafted",
-          "exit": "legacy items mapped to V1.2~V1.4/Backlog; local_only dual identity minimal flow runnable"
-        },
-        "M2": {
-          "label": "Local truth pipeline complete",
-          "plans": [
-            "2026-04-14-v1.2-soul-lifecycle",
-            "2026-04-14-v1.2-local-memory-pipeline",
-            "2026-04-14-v1.2-runtime-compatibility"
-          ],
-          "entry": "M1 done",
-          "exit": "local SOUL/memory/KB/output path integrated; mode switch and degradation behavior at V1.2 target level"
-        },
-        "M3": {
-          "label": "Release pre-gate",
-          "plans": [
-            "2026-04-14-v1.2-regression-suite"
-          ],
-          "entry": "M2 done",
-          "exit": "minimum automated regression set (R1–R5) passes; Batch E tracked as parallel non-blocking lane"
-        }
-      },
-      "regression_gate": {
-        "R1": "local_only anonymous/temporary identity end-to-end",
-        "R2": "local_only local persistent identity end-to-end",
-        "R3": "local truth core chain regression (SOUL/memory/KB/output)",
-        "R4": "mode switch and degradation regression (local_first/cloud_enhanced fallback)",
-        "R5": "no-platform dependency guard for local_only path"
-      },
-      "created_at": "2026-04-14",
-      "updated_at": "2026-04-15"
+    "program_reviews": {
+      "v1.2": "archived/plans/v1.2-program-review.json"
     }
   }
 }

@@ -1,0 +1,40 @@
+{
+  "id": "2026-04-14-v1.2-reclassification-baseline",
+  "title": "V1.2 WS1: Version Reclassification Baseline",
+  "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@product-manager"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.2",
+    "planning",
+    "ws1",
+    "milestone-m1"
+  ],
+  "created_at": "2026-04-14",
+  "updated_at": "2026-04-14",
+  "done_at": "2026-04-14",
+  "notes": "WS1 done. Reclassification matrix (knowledge/v1.2-reclassification-matrix-v1.md) committed with version-tagging rules and blocking map. QC skipped — product-docs only.",
+  "metadata": {
+    "phase": "Done",
+    "priority": "high",
+    "workstream": "WS1",
+    "milestone": "M1",
+    "dependency": [],
+    "v1.2_scope": true,
+    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "scope": "Reclassification matrix, blocking/non-blocking map, version-tagging rules for future plan rows",
+    "deliverables": [
+      "knowledge/v1.2-reclassification-matrix-v1.md",
+      "knowledge/README.md updated",
+      "Plan Tasks section updated"
+    ],
+    "qc": "skipped — product-docs only",
+    "qa": "skipped — product-docs only",
+    "effort": "M — PM + product analysis; ~2 agent sessions",
+    "commits": "4a23c6d docs(plan): add V1.2 reclassification matrix — WS1 deliverable"
+  }
+}
