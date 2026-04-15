@@ -1,0 +1,56 @@
+{
+  "compass": "knowledge/v1.2-delivery-compass-v1.md",
+  "status": "done",
+  "workstreams": {
+    "WS1": "2026-04-14-v1.2-reclassification-baseline",
+    "WS2": [
+      "2026-04-14-v1.2-local-only-identity",
+      "2026-04-14-v1.2-local-only-runtime"
+    ],
+    "WS3": [
+      "2026-04-14-v1.2-soul-lifecycle",
+      "2026-04-14-v1.2-local-memory-pipeline"
+    ],
+    "WS4": "2026-04-14-v1.2-runtime-compatibility",
+    "WS5": "v1-tech-debt-cleanup (Batch E)"
+  },
+  "milestones": {
+    "M1": {
+      "label": "Reclassification + minimal local path runnable",
+      "plans": [
+        "2026-04-14-v1.2-reclassification-baseline",
+        "2026-04-14-v1.2-local-only-identity",
+        "2026-04-14-v1.2-local-only-runtime"
+      ],
+      "entry": "scope lock confirmed; version reclassification baseline drafted",
+      "exit": "legacy items mapped to V1.2~V1.4/Backlog; local_only dual identity minimal flow runnable"
+    },
+    "M2": {
+      "label": "Local truth pipeline complete",
+      "plans": [
+        "2026-04-14-v1.2-soul-lifecycle",
+        "2026-04-14-v1.2-local-memory-pipeline",
+        "2026-04-14-v1.2-runtime-compatibility"
+      ],
+      "entry": "M1 done",
+      "exit": "local SOUL/memory/KB/output path integrated; mode switch and degradation behavior at V1.2 target level"
+    },
+    "M3": {
+      "label": "Release pre-gate",
+      "plans": [
+        "2026-04-14-v1.2-regression-suite"
+      ],
+      "entry": "M2 done",
+      "exit": "minimum automated regression set (R1–R5) passes; Batch E tracked as parallel non-blocking lane"
+    }
+  },
+  "regression_gate": {
+    "R1": "local_only anonymous/temporary identity end-to-end",
+    "R2": "local_only local persistent identity end-to-end",
+    "R3": "local truth core chain regression (SOUL/memory/KB/output)",
+    "R4": "mode switch and degradation regression (local_first/cloud_enhanced fallback)",
+    "R5": "no-platform dependency guard for local_only path"
+  },
+  "created_at": "2026-04-14",
+  "updated_at": "2026-04-15"
+}

@@ -1,0 +1,54 @@
+{
+  "id": "2026-04-14-v1.2-regression-suite",
+  "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
+  "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "qa-engineer"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.2",
+    "testing",
+    "regression",
+    "milestone-m3",
+    "release-gate"
+  ],
+  "created_at": "2026-04-14",
+  "updated_at": "2026-04-15",
+  "notes": "R1-R5 regression tests implemented + verified. QC approved. CI integration complete.",
+  "metadata": {
+    "phase": "implement",
+    "priority": "high",
+    "workstream": "M3-gate",
+    "milestone": "M3",
+    "dependency": [
+      "2026-04-14-v1.2-local-memory-pipeline",
+      "2026-04-14-v1.2-runtime-compatibility"
+    ],
+    "v1.2_scope": true,
+    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "scope": "Minimum automated regression set",
+    "deliverables": [
+      "R1–R5 automated test implementations",
+      "CI integration",
+      "Regression gate documentation"
+    ],
+    "acceptance_evidence": [
+      "All R1–R5 pass",
+      "CI pipeline green"
+    ],
+    "effort": "L — 5 regression scenarios + CI + docs",
+    "working_branch": "feature/v1.2-m3-regression-suite",
+    "merge_target": "feature/v1.2",
+    "r4_status": "verified in T6 QA (commit 1e63679)",
+    "gates": {
+      "tests": "passing",
+      "clippy": "clean",
+      "qc_status": "approved",
+      "qa_status": "verified"
+    }
+  },
+  "done_at": "2026-04-15"
+}
