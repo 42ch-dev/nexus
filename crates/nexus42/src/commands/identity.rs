@@ -1,7 +1,7 @@
 //! Identity Command Module
 //!
 //! Local-only identity management for `local_only` mode.
-//! Subcommands: list, create, use, link.
+//! Subcommands: list, create, use, link, unlink.
 //!
 //! Anonymous identities (`ctr_anon*`) are ephemeral.
 //! Persistent identities (`ctr_local*`) are stored in SQLite.
@@ -12,7 +12,8 @@ use clap::Subcommand;
 use nexus_domain::local_identity::LocalIdentity;
 use nexus_domain::{is_valid_creator_id, DomainError};
 use nexus_local_db::{
-    create_local_identity, get_local_identity, link_to_platform, list_local_identities, RuntimeRole,
+    create_local_identity, get_local_identity, link_to_platform, list_local_identities,
+    unlink_from_platform, RuntimeRole,
 };
 use rusqlite::Connection;
 
@@ -46,6 +47,12 @@ pub enum IdentityCommand {
         #[arg(long)]
         platform_id: String,
     },
+
+    /// Unlink a local identity from its platform Creator
+    Unlink {
+        /// Local creator ID to unlink
+        creator_id: String,
+    },
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -64,6 +71,7 @@ pub async fn run(cmd: IdentityCommand, _config: &CliConfig) -> Result<()> {
             creator_id,
             platform_id,
         } => link_identity(creator_id, platform_id),
+        IdentityCommand::Unlink { creator_id } => unlink_identity(creator_id),
     }
 }
 
@@ -215,6 +223,15 @@ fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
     link_to_platform(&conn, &creator_id, &platform_id)?;
 
     println!("Linked {} to platform creator: {}", creator_id, platform_id);
+    Ok(())
+}
+
+/// Unlink a local identity from its platform Creator.
+fn unlink_identity(creator_id: String) -> Result<()> {
+    let conn = open_global_db()?;
+    unlink_from_platform(&conn, &creator_id)?;
+
+    println!("Unlinked {} from platform creator.", creator_id);
     Ok(())
 }
 

@@ -146,6 +146,44 @@ pub fn link_to_platform(
     Ok(())
 }
 
+/// Unlink a local identity from its platform Creator.
+///
+/// Sets `platform_linked = false` and clears `platform_creator_id`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the identity does not exist or is not currently linked.
+pub fn unlink_from_platform(conn: &Connection, creator_id: &str) -> Result<(), LocalDbError> {
+    let affected = conn.execute(
+        "UPDATE local_identities SET platform_linked = 0, platform_creator_id = NULL
+         WHERE creator_id = ?1 AND platform_linked = 1",
+        rusqlite::params![creator_id],
+    )?;
+
+    if affected == 0 {
+        let existing = get_local_identity(conn, creator_id)?;
+        match existing {
+            Some(row) if !row.platform_linked => {
+                return Err(LocalDbError::IdentityNotLinked {
+                    creator_id: creator_id.to_string(),
+                });
+            }
+            None => {
+                return Err(LocalDbError::IdentityNotFound {
+                    creator_id: creator_id.to_string(),
+                });
+            }
+            _ => {
+                return Err(LocalDbError::IdentityNotFound {
+                    creator_id: creator_id.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Delete a local identity by creator_id.
 ///
 /// # Errors
@@ -327,5 +365,61 @@ mod tests {
         let conn = setup_db();
         let deleted = delete_local_identity(&conn, "ctr_nonexistent").unwrap();
         assert!(!deleted);
+    }
+
+    #[test]
+    fn unlink_identity_from_platform() {
+        let conn = setup_db();
+        create_local_identity(
+            &conn,
+            "ctr_localUnlink",
+            "persistent",
+            Some("Test"),
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+        link_to_platform(&conn, "ctr_localUnlink", "ctr_Platform123").unwrap();
+
+        let row = get_local_identity(&conn, "ctr_localUnlink")
+            .unwrap()
+            .unwrap();
+        assert!(row.platform_linked);
+
+        unlink_from_platform(&conn, "ctr_localUnlink").unwrap();
+
+        let row = get_local_identity(&conn, "ctr_localUnlink")
+            .unwrap()
+            .unwrap();
+        assert!(!row.platform_linked);
+        assert!(row.platform_creator_id.is_none());
+    }
+
+    #[test]
+    fn unlink_nonexistent_identity() {
+        let conn = setup_db();
+        let result = unlink_from_platform(&conn, "ctr_nonexistent");
+        assert!(result.is_err());
+        assert!(matches!(result, Err(LocalDbError::IdentityNotFound { .. })));
+    }
+
+    #[test]
+    fn unlink_already_unlinked_identity() {
+        let conn = setup_db();
+        create_local_identity(
+            &conn,
+            "ctr_localNeverLinked",
+            "persistent",
+            Some("Test"),
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+        let result = unlink_from_platform(&conn, "ctr_localNeverLinked");
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(LocalDbError::IdentityNotLinked { .. })
+        ));
     }
 }
