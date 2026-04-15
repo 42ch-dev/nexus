@@ -234,7 +234,7 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 jq '.metadata.residual_findings | to_entries[] | {plan: .key, count: (.value | length)}' .agents/plans/status.json
 
 # Tech-debt rollup and branch-prefix conventions
-jq '.metadata.tech_debt_summary, .metadata.versioning' .agents/plans/status.json
+jq '.metadata.tech_debt_summary, .metadata.branch_naming' .agents/plans/status.json
 
 # Program timeline (legacy in status.json, or prefer notes.json when adopted)
 jq '.metadata.notes' .agents/plans/status.json
