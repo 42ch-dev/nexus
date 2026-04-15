@@ -75,7 +75,12 @@ async fn run_checks(config: &CliConfig) -> Result<()> {
     let mut fail_count = 0usize;
 
     for check in &checks {
-        println!("{:<30} {:>6}  {}", check.name, check.status.label(), check.detail);
+        println!(
+            "{:<30} {:>6}  {}",
+            check.name,
+            check.status.label(),
+            check.detail
+        );
         match check.status {
             HealthStatus::Ok => ok_count += 1,
             HealthStatus::Warning => warn_count += 1,
@@ -115,7 +120,10 @@ async fn daemon_check(config: &CliConfig) -> HealthCheck {
                 Ok(status) => HealthCheck {
                     name: "Daemon connectivity".to_string(),
                     status: HealthStatus::Ok,
-                    detail: format!("running (v{}, up {}s)", status.version, status.uptime_seconds),
+                    detail: format!(
+                        "running (v{}, up {}s)",
+                        status.version, status.uptime_seconds
+                    ),
                 },
                 Err(_) => HealthCheck {
                     name: "Daemon connectivity".to_string(),
@@ -194,15 +202,12 @@ fn database_check(config: &CliConfig) -> HealthCheck {
                         match crate::db::Schema::init(&conn) {
                             Ok(()) => {
                                 // Read schema version if available
-                                let version_info =
-                                    nexus_local_db::read_versions(&conn).ok().map(|v| {
-                                        format!("(schema v{})", v.schema_version)
-                                    });
+                                let version_info = nexus_local_db::read_versions(&conn)
+                                    .ok()
+                                    .map(|v| format!("(schema v{})", v.schema_version));
                                 let detail = version_info
                                     .map(|v| format!("found at {} {}", db_path.display(), v))
-                                    .unwrap_or_else(|| {
-                                        format!("found at {}", db_path.display())
-                                    });
+                                    .unwrap_or_else(|| format!("found at {}", db_path.display()));
                                 HealthCheck {
                                     name: "Database".to_string(),
                                     status: HealthStatus::Ok,
@@ -256,8 +261,9 @@ fn workspace_check(config: &CliConfig) -> HealthCheck {
                         HealthCheck {
                             name: "Workspace directory".to_string(),
                             status: HealthStatus::Warning,
-                            detail: "directory exists but not initialized (no .nexus42/ subdirectory)"
-                                .to_string(),
+                            detail:
+                                "directory exists but not initialized (no .nexus42/ subdirectory)"
+                                    .to_string(),
                         }
                     }
                 } else {
@@ -341,10 +347,7 @@ async fn version_check(config: &CliConfig) -> HealthCheck {
         Ok(false) => HealthCheck {
             name: "Version compatibility".to_string(),
             status: HealthStatus::Ok,
-            detail: format!(
-                "CLI v{} (daemon not running, cannot compare)",
-                cli_version
-            ),
+            detail: format!("CLI v{} (daemon not running, cannot compare)", cli_version),
         },
         Err(_) => HealthCheck {
             name: "Version compatibility".to_string(),
@@ -456,6 +459,10 @@ mod tests {
         let config = CliConfig::default();
         // Should not panic even with no daemon or workspace
         let result = run_checks(&config).await;
-        assert!(result.is_ok(), "run_checks should not error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "run_checks should not error: {:?}",
+            result.err()
+        );
     }
 }

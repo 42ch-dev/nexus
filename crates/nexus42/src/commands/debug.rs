@@ -132,9 +132,7 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
                 if let Ok(metadata) = std::fs::metadata(&db_path) {
                     db_state.insert(
                         "size_bytes".to_string(),
-                        serde_json::Value::Number(
-                            serde_json::Number::from(metadata.len()),
-                        ),
+                        serde_json::Value::Number(serde_json::Number::from(metadata.len())),
                     );
                 }
             }
@@ -157,10 +155,8 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
             toml::to_string_pretty(&cleaned)
                 .map_err(|e| anyhow::anyhow!("Failed to serialize to TOML: {}", e))?
         }
-        _ => {
-            serde_json::to_string_pretty(&serde_json::Value::Object(state))
-                .map_err(|e| anyhow::anyhow!("Failed to serialize to JSON: {}", e))?
-        }
+        _ => serde_json::to_string_pretty(&serde_json::Value::Object(state))
+            .map_err(|e| anyhow::anyhow!("Failed to serialize to JSON: {}", e))?,
     };
 
     println!("{}", output);
@@ -191,8 +187,7 @@ async fn replay_delta(config: &CliConfig, delta_id: &str) -> Result<()> {
             println!("Delta metadata:");
             println!(
                 "{}",
-                serde_json::to_string_pretty(&delta)
-                    .unwrap_or_else(|_| delta.to_string())
+                serde_json::to_string_pretty(&delta).unwrap_or_else(|_| delta.to_string())
             );
         }
         Err(e) => {
@@ -277,14 +272,22 @@ mod tests {
         let config = CliConfig::default();
         // Should not panic; may not have daemon or workspace
         let result = dump_workspace(&config, "json").await;
-        assert!(result.is_ok(), "dump_workspace should not error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "dump_workspace should not error: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]
     async fn dump_workspace_toml_format() {
         let config = CliConfig::default();
         let result = dump_workspace(&config, "toml").await;
-        assert!(result.is_ok(), "dump_workspace TOML should not error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "dump_workspace TOML should not error: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]
