@@ -91,6 +91,28 @@ pub enum DomainError {
     #[allow(dead_code)]
     #[error("invalid ID format: {0}")]
     InvalidIdFormat(String),
+
+    /// Unknown or invalid local identity type string.
+    #[error("invalid identity type: {0}")]
+    InvalidIdentityType(String),
+
+    // ── Runtime mode errors ───────────────────────────────────────────
+    /// Operation requires platform connectivity but current mode prohibits it.
+    #[error("operation '{operation}' is not available in {mode} mode")]
+    PlatformOperationProhibited { mode: String, operation: String },
+
+    // ── SOUL errors ─────────────────────────────────────────────────────
+    /// SOUL.md file not found at expected path.
+    #[error("SOUL.md not found for creator '{creator_id}' at {path}")]
+    SoulNotFound { creator_id: String, path: String },
+
+    /// SOUL.md is missing a required H2 section.
+    #[error("SOUL.md is missing required section '{section}'")]
+    SoulMissingSection { section: String },
+
+    /// SOUL.md frontmatter is invalid.
+    #[error("SOUL.md frontmatter error: {0}")]
+    SoulFrontmatterError(String),
 }
 
 #[cfg(test)]
@@ -263,5 +285,26 @@ mod tests {
         let err = DomainError::InvalidIdFormat("missing prefix".to_string());
         let msg = err.to_string();
         assert!(msg.contains("invalid ID format"), "msg: {msg}");
+    }
+
+    #[test]
+    fn test_display_invalid_identity_type() {
+        let err = DomainError::InvalidIdentityType("bogus_type".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("invalid identity type"), "msg: {msg}");
+        assert!(msg.contains("bogus_type"), "msg: {msg}");
+    }
+
+    #[test]
+    fn test_display_platform_operation_prohibited() {
+        let err = DomainError::PlatformOperationProhibited {
+            mode: "local_only".to_string(),
+            operation: "sync".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not available in local_only mode"),
+            "msg: {msg}"
+        );
     }
 }

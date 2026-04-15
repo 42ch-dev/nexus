@@ -1,5 +1,6 @@
 //! Read `~/.nexus42/config.json` for active creator / workspace slug (same shape as CLI `CliConfig` subset).
 
+use nexus_contracts::RuntimeMode;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,8 @@ pub struct CliConfigSnapshot {
     pub active_creator_id: Option<String>,
     #[serde(default)]
     pub active_workspace_slug_by_creator: HashMap<String, String>,
+    #[serde(default)]
+    pub runtime_mode: Option<RuntimeMode>,
 }
 
 impl CliConfigSnapshot {

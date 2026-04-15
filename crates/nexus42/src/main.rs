@@ -16,10 +16,12 @@ mod paths;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
-    daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, init::InitCommand,
-    manuscript::ManuscriptCommand, policy::PolicyCommand, publish::PublishCommand,
-    research::ResearchCommand, session::SessionCommand, sync::SyncCommand, world::WorldCommand,
+    agent::AgentCommand, auth::AuthCommand, clone::CloneArgs, config::ConfigCommand,
+    context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand, db::DbCommand,
+    debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand, identity::IdentityCommand,
+    init::InitCommand, manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
+    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
+    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -70,6 +72,18 @@ enum Commands {
         command: DbCommand,
     },
 
+    /// Internal debugging utilities
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommand,
+    },
+
+    /// Diagnostic health checks
+    Doctor {
+        #[command(subcommand)]
+        command: DoctorCommand,
+    },
+
     /// Synchronize workspace with platform
     Sync {
         #[command(subcommand)]
@@ -80,6 +94,18 @@ enum Commands {
     World {
         #[command(subcommand)]
         command: WorldCommand,
+    },
+
+    /// Clone a world from platform or local source
+    Clone {
+        #[command(flatten)]
+        args: CloneArgs,
+    },
+
+    /// Configuration file management
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
 
     /// Explore browse and search (read-only, platform via daemon)
@@ -135,6 +161,30 @@ enum Commands {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+
+    /// Local identity management (local_only mode)
+    Identity {
+        #[command(subcommand)]
+        command: IdentityCommand,
+    },
+
+    /// Runtime mode management (local_only / local_first / cloud_enhanced)
+    RuntimeMode {
+        #[command(subcommand)]
+        command: RuntimeModeCommand,
+    },
+
+    /// SOUL management (local personality and experience)
+    Soul {
+        #[command(subcommand)]
+        command: SoulCommand,
+    },
+
+    /// Long-term memory management
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
 }
 
 #[tokio::main]
@@ -153,8 +203,12 @@ async fn main() {
         Some(Commands::Auth { command }) => commands::auth::run(command, &config).await,
         Some(Commands::Daemon { command }) => commands::daemon::run(command, &config).await,
         Some(Commands::Db { command }) => commands::db::run(command, &config).await,
+        Some(Commands::Debug { command }) => commands::debug::run(command, &config).await,
+        Some(Commands::Doctor { command }) => commands::doctor::run(command, &config).await,
         Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
         Some(Commands::World { command }) => commands::world::run(command, &config).await,
+        Some(Commands::Clone { args }) => commands::clone::run(args, &config).await,
+        Some(Commands::Config { command }) => commands::config::run(command, &config).await,
         Some(Commands::Explore { command }) => {
             commands::explore::run(command, &config, &cli.output_format).await
         }
@@ -168,6 +222,12 @@ async fn main() {
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
+        Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
+        Some(Commands::RuntimeMode { command }) => {
+            commands::runtime_mode::run(command, &config).await
+        }
+        Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
+        Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

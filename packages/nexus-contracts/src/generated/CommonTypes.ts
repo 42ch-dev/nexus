@@ -110,7 +110,7 @@ export type ForkBranchStatus = 'active' | 'archived';
 export type VerificationStatus = 'unverified' | 'requested' | 'verified' | 'rejected';
 
 /** Memory content kind (data-model-v1.md §5.8, ADR-001) */
-export type MemoryKind = 'story_summary' | 'research_material' | 'review_note' | 'character_note' | 'world_building' | 'plot_outline' | 'theme_analysis' | 'custom';
+export type MemoryKind = 'story_summary' | 'research_material' | 'review_note' | 'character_note' | 'world_building' | 'plot_outline' | 'theme_analysis' | 'personality_core' | 'custom';
 
 /** Memory status (data-model-v1.md §5.8) */
 export type MemoryStatus = 'active' | 'superseded' | 'archived';

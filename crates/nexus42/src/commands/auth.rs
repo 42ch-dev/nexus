@@ -4,6 +4,7 @@ use crate::auth;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_domain::runtime_guard;
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
@@ -32,7 +33,10 @@ pub enum AuthCommand {
 /// Run auth command
 pub async fn run(cmd: AuthCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        AuthCommand::Login => auth::user_auth::login(config).await,
+        AuthCommand::Login => {
+            runtime_guard::require_platform(&config.runtime_mode(), "auth login")?;
+            auth::user_auth::login(config).await
+        }
         AuthCommand::Token {
             access_token,
             refresh_token,

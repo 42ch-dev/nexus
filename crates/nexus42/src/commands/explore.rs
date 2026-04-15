@@ -8,6 +8,7 @@ use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::{ExploreBrowseRequest, ExploreFeedResponse, ExploreSearchRequest};
+use nexus_domain::runtime_guard;
 use serde::Deserialize;
 
 const BROWSE_SCOPES: &[&str] = &["all", "worlds", "creators", "manuscripts"];
@@ -88,6 +89,7 @@ fn print_feed_text(feed: &ExploreFeedResponse) -> Result<()> {
 
 /// Run explore subcommands
 pub async fn run(cmd: ExploreCommand, config: &CliConfig, output_format: &str) -> Result<()> {
+    runtime_guard::require_platform(&config.runtime_mode(), "explore")?;
     let client = DaemonClient::from_config(config);
     let json_out = is_json_output(output_format);
 
