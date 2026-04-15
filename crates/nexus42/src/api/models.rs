@@ -33,6 +33,29 @@ pub struct AcpStatusInfo {
     pub total_tool_executions: u64,
 }
 
+/// Response from the daemon's memory review endpoint.
+///
+/// Returned after the daemon processes the pending review queue,
+/// summarizing how many memories were promoted, fragmented, or dropped.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReviewResponse {
+    /// Number of memories promoted to long-term storage
+    pub promoted: usize,
+    /// Number of memories broken into fragments
+    pub fragmented: usize,
+    /// Number of memories dropped (below quality threshold)
+    pub dropped: usize,
+}
+
+/// A single memory fragment row returned by the daemon's fragments endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FragmentRow {
+    /// Unique fragment identifier
+    pub fragment_id: String,
+    /// Short human-readable summary of the fragment content
+    pub summary: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +113,41 @@ mod tests {
         assert!(!acp.tool_execution_enabled);
         assert_eq!(acp.active_sessions, 0);
         assert_eq!(acp.total_tool_executions, 0);
+    }
+
+    #[test]
+    fn test_review_response_deserialize() {
+        let json = serde_json::json!({
+            "promoted": 3,
+            "fragmented": 1,
+            "dropped": 0
+        });
+        let resp: ReviewResponse = serde_json::from_value(json).expect("Failed to deserialize");
+        assert_eq!(resp.promoted, 3);
+        assert_eq!(resp.fragmented, 1);
+        assert_eq!(resp.dropped, 0);
+    }
+
+    #[test]
+    fn test_fragment_row_deserialize() {
+        let json = serde_json::json!({
+            "fragment_id": "frag-001",
+            "summary": "Key insight about world-building"
+        });
+        let row: FragmentRow = serde_json::from_value(json).expect("Failed to deserialize");
+        assert_eq!(row.fragment_id, "frag-001");
+        assert_eq!(row.summary, "Key insight about world-building");
+    }
+
+    #[test]
+    fn test_fragment_row_list_deserialize() {
+        let json = serde_json::json!([
+            { "fragment_id": "frag-001", "summary": "First" },
+            { "fragment_id": "frag-002", "summary": "Second" }
+        ]);
+        let rows: Vec<FragmentRow> = serde_json::from_value(json).expect("Failed to deserialize");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].fragment_id, "frag-001");
+        assert_eq!(rows[1].fragment_id, "frag-002");
     }
 }
