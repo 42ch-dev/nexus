@@ -2,34 +2,11 @@
 //!
 //! Provides `Display`, `as_str()`, and `FromStr` implementations for enum types
 //! generated from JSON Schema. This file extends generated types without modifying them.
-//!
-//! Also defines hand-maintained enums that have a JSON Schema but are pure enums
-//! not natively supported by the codegen pipeline (e.g. `RuntimeMode`).
 
 use crate::generated::common_types::*;
-use serde::{Deserialize, Serialize};
+use crate::generated::runtime_mode::RuntimeMode;
 use std::fmt;
 use std::str::FromStr;
-
-// ── Hand-maintained enums (JSON Schema truth source, codegen-incompatible) ──
-
-/// Creator runtime mode controlling platform dependency behavior.
-///
-/// See `schemas/domain/runtime-mode.schema.json` for authoritative definition.
-/// ADR-015 (local_first / cloud_enhanced), ADR-017 (local_only).
-///
-/// Codegen does not emit standalone enum types; this definition mirrors the
-/// JSON Schema `enum` values and is kept in sync manually.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeMode {
-    /// No platform HTTP dependency for Creator's end-to-end loop (ADR-017).
-    LocalOnly,
-    /// Optional platform structured services; no platform LLM (ADR-015).
-    LocalFirst,
-    /// Full platform capabilities including hosted LLM (ADR-015).
-    CloudEnhanced,
-}
 
 // ── Display implementations for tracing/logging ──────────────────────────
 

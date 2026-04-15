@@ -27,6 +27,7 @@ export * from './Memory';
 export * from './OutboxEntry';
 export * from './Pairing';
 export * from './ReferenceSource';
+export * from './RuntimeMode';
 export * from './StoryManifest';
 export * from './SyncCommand';
 export * from './TimelineEvent';
@@ -88,6 +89,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   OutboxEntry: 1,
   Pairing: 1,
   ReferenceSource: 1,
+  RuntimeMode: 1,
   StoryManifest: 1,
   SyncCommand: 1,
   TimelineEvent: 1,

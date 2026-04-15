@@ -13,6 +13,8 @@ export interface LoadedSchema {
   schemaContent: Record<string, unknown>;
   /** Whether this schema is definitions-only (no own top-level properties) */
   isDefinitionsOnly: boolean;
+  /** Whether this schema is a standalone enum (type: "string" + enum, no properties) */
+  isStandaloneEnum: boolean;
   /** Whether this schema is in an explicit skip list and should not generate any types */
   isExplicitlySkipped: boolean;
 }
@@ -89,10 +91,18 @@ export function loadAllSchemas(): LoadedSchema[] {
 
     // Determine if this schema should be skipped for struct generation
     const properties = schemaContent.properties as Record<string, unknown> | undefined;
+    const hasProperties = properties && Object.keys(properties).length > 0;
     const isExplicitlySkipped = SKIP_STRUCT_GENERATION.has(fileName)
       || SKIP_STRUCT_GENERATION_REL_PATHS.has(relPath);
-    const isDefinitionsOnly = !isExplicitlySkipped
-      && (!properties || Object.keys(properties).length === 0);
+
+    // Detect standalone enum schemas: type is "string" with an enum array, no properties
+    const isStandaloneEnum = !isExplicitlySkipped
+      && !hasProperties
+      && schemaContent.type === 'string'
+      && Array.isArray(schemaContent.enum)
+      && (schemaContent.enum as string[]).length > 0;
+
+    const isDefinitionsOnly = !isExplicitlySkipped && !hasProperties && !isStandaloneEnum;
 
     loadedSchemas.push({
       filePath,
@@ -101,10 +111,11 @@ export function loadAllSchemas(): LoadedSchema[] {
       schemaVersion,
       schemaContent,
       isDefinitionsOnly,
+      isStandaloneEnum,
       isExplicitlySkipped,
     });
 
-    logger.info(`  Loaded: ${fileName} -> ${typeName} (v${schemaVersion})${isDefinitionsOnly ? ' [definitions-only]' : ''}`);
+    logger.info(`  Loaded: ${fileName} -> ${typeName} (v${schemaVersion})${isDefinitionsOnly ? ' [definitions-only]' : ''}${isStandaloneEnum ? ' [standalone-enum]' : ''}`);
   }
 
   assertUniqueTypeNames(loadedSchemas);

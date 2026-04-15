@@ -101,15 +101,19 @@ export function generateRustTypes(schemas: LoadedSchema[]): void {
   for (const schema of schemas) {
     if (schema.isExplicitlySkipped) continue;
 
-    const hasTopLevel = !schema.isDefinitionsOnly;
+    const hasTopLevel = !schema.isDefinitionsOnly && !schema.isStandaloneEnum;
     const hasDefs = schemaHasObjectDefinitions(schema);
 
-    if (!hasTopLevel && !hasDefs) continue;
+    if (!hasTopLevel && !hasDefs && !schema.isStandaloneEnum) continue;
 
     schemasWithTypes.push(schema);
 
-    // Generate individual type files
-    generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs);
+    if (schema.isStandaloneEnum) {
+      generateRustEnumFile(schema, outputDir);
+    } else {
+      // Generate individual type files
+      generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs);
+    }
   }
 
   // Generate mod.rs with module declarations
@@ -158,6 +162,56 @@ pub const LATEST_SCHEMA_VERSION: u32 = ${maxSchemaVersion(schemas.map(s => s.sch
 `;
 
   writeFile(path.join(outputDir, 'mod.rs'), content);
+}
+
+/**
+ * Convert a snake_case enum variant value to PascalCase.
+ * e.g., "local_only" -> "LocalOnly"
+ */
+function snakeToPascal(snakeStr: string): string {
+  return snakeStr
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
+}
+
+/**
+ * Generate Rust enum file for a standalone enum schema.
+ *
+ * Produces a `#[derive(...)] pub enum X { A, B, C }` from a JSON Schema with
+ * `type: "string"` and `enum: [...]`.
+ */
+function generateRustEnumFile(schema: LoadedSchema, outputDir: string): void {
+  const values = schema.schemaContent.enum as string[];
+  const moduleName = toSnakeCase(schema.typeName);
+
+  const variants = values.map(v => {
+    const pascal = snakeToPascal(v);
+    // Build doc comment from enumDescriptions if available
+    const descriptions = schema.schemaContent.enumDescriptions as Record<string, string> | undefined;
+    const desc = descriptions?.[v];
+    const docComment = desc ? `    /// ${desc}\n` : '';
+    return `${docComment}    #[serde(rename = "${v}")]\n    ${pascal},`;
+  });
+
+  const content = `//! ${schema.schemaContent.title || schema.typeName}
+//!
+//! ${schema.schemaContent.description || 'Generated from JSON Schema'}
+//!
+//! @schema_version ${schema.schemaVersion}
+//! @source ${schema.fileName}
+
+use serde::{Deserialize, Serialize};
+
+/// ${schema.schemaContent.description || schema.typeName}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ${schema.typeName} {
+${variants.join('\n')}
+}
+`;
+
+  writeFile(path.join(outputDir, `${moduleName}.rs`), content);
 }
 
 /**
