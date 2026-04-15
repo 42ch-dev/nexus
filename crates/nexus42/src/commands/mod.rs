@@ -11,6 +11,10 @@ pub mod agent;
 #[deny(clippy::unwrap_used)]
 pub mod auth;
 #[deny(clippy::unwrap_used)]
+pub mod clone;
+#[deny(clippy::unwrap_used)]
+pub mod config;
+#[deny(clippy::unwrap_used)]
 pub mod context;
 #[deny(clippy::unwrap_used)]
 pub mod creator;

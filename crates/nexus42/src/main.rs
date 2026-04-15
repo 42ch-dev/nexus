@@ -16,9 +16,10 @@ mod paths;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    agent::AgentCommand, auth::AuthCommand, context::ContextCommand, creator::CreatorCommand,
-    daemon::DaemonCommand, db::DbCommand, explore::ExploreCommand, identity::IdentityCommand,
-    init::InitCommand, manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
+    agent::AgentCommand, auth::AuthCommand, clone::CloneArgs, config::ConfigCommand,
+    context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand, db::DbCommand,
+    explore::ExploreCommand, identity::IdentityCommand, init::InitCommand,
+    manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
     publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
     session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
@@ -81,6 +82,18 @@ enum Commands {
     World {
         #[command(subcommand)]
         command: WorldCommand,
+    },
+
+    /// Clone a world from platform or local source
+    Clone {
+        #[command(flatten)]
+        args: CloneArgs,
+    },
+
+    /// Configuration file management
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
 
     /// Explore browse and search (read-only, platform via daemon)
@@ -180,6 +193,8 @@ async fn main() {
         Some(Commands::Db { command }) => commands::db::run(command, &config).await,
         Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
         Some(Commands::World { command }) => commands::world::run(command, &config).await,
+        Some(Commands::Clone { args }) => commands::clone::run(args, &config).await,
+        Some(Commands::Config { command }) => commands::config::run(command, &config).await,
         Some(Commands::Explore { command }) => {
             commands::explore::run(command, &config, &cli.output_format).await
         }
