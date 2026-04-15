@@ -403,30 +403,30 @@
       "id": "2026-04-15-v1.3-preflight-implementation-plan",
       "title": "V1.3 Preflight Implementation Plan",
       "file": ".agents/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 25,
       "tags": [
         "v1.3",
         "preflight",
-        "planning",
         "quality"
       ],
       "created_at": "2026-04-15",
       "updated_at": "2026-04-15",
-      "notes": "Code-bearing deferred findings converted into executable task plan before v1.3 start.",
+      "notes": "T1 Done (review quality signal). Proceeding to T2/T3.",
       "metadata": {
-        "phase": "Todo",
+        "phase": "InProgress",
         "priority": "high",
         "scope": "Review-quality signal, memory review/fragments E2E, runtime_mode contract alignment, unignored integration/regression coverage",
         "dependency": [
           "2026-04-14-v1.2-regression-suite"
         ],
-        "plan_source": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md"
+        "plan_source": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md",
+        "working_branch": "feature/v1.3-preflight"
       },
       "done_at": null
     }
