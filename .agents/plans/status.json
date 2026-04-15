@@ -515,12 +515,12 @@
       "id": "2026-04-14-v1.2-regression-suite",
       "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
       "file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "qa-engineer"
       ],
-      "progress": 20,
+      "progress": 100,
       "tags": [
         "v1.2",
         "testing",
@@ -530,7 +530,7 @@
       ],
       "created_at": "2026-04-14",
       "updated_at": "2026-04-15",
-      "notes": "M3 gate started. R4 verified in T6 QA. Implementing R1-R3 + R5.",
+      "notes": "R1-R5 regression tests implemented + verified. QC approved. CI integration complete.",
       "metadata": {
         "phase": "implement",
         "priority": "high",
@@ -557,12 +557,13 @@
         "merge_target": "feature/v1.2",
         "r4_status": "verified in T6 QA (commit 1e63679)",
         "gates": {
-          "tests": "pending",
-          "clippy": "pending",
-          "qc_status": "pending",
-          "qa_status": "pending"
+          "tests": "passing",
+          "clippy": "clean",
+          "qc_status": "approved",
+          "qa_status": "verified"
         }
-      }
+      },
+      "done_at": "2026-04-15"
     }
   ],
   "metadata": {
