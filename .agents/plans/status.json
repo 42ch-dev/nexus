@@ -208,8 +208,7 @@
       "file": ".agents/plans/v1-tech-debt-cleanup.md",
       "metadata": {
         "archived_record": "archived/plans/v1-tech-debt-cleanup.json"
-      }
-      ,
+      },
       "title": "V1 Tech Debt Cleanup (Long-term)",
       "done_at": "2026-04-15"
     },
@@ -329,8 +328,7 @@
       "file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-reclassification-baseline.json"
-      }
-      ,
+      },
       "title": "V1.2 WS1: Version Reclassification Baseline",
       "done_at": "2026-04-14"
     },
@@ -373,8 +371,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
         "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in metadata.residual_findings"
-      }
-      ,
+      },
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "done_at": "2026-04-14"
     },
@@ -409,7 +406,7 @@
         "@fullstack-dev",
         "@qa-engineer"
       ],
-      "progress": 25,
+      "progress": 50,
       "tags": [
         "v1.3",
         "preflight",
@@ -417,7 +414,7 @@
       ],
       "created_at": "2026-04-15",
       "updated_at": "2026-04-15",
-      "notes": "T1 Done (review quality signal). Proceeding to T2/T3.",
+      "notes": "T1 done (merged), T2 done (review+fragments daemon-backed CLI), T3-T4 remaining",
       "metadata": {
         "phase": "InProgress",
         "priority": "high",
