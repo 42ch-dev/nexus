@@ -408,11 +408,9 @@
     }
   ],
   "metadata": {
-    "versioning": {
-      "branch_naming": {
-        "feature": "feature/{ver}-{name}",
-        "fix": "fix/{name}"
-      }
+    "branch_naming": {
+      "feature": "feature/{ver}-{name}",
+      "fix": "fix/{name}"
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-15",
