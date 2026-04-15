@@ -21,6 +21,8 @@ pub enum LocalDbError {
     IdentityNotFound { creator_id: String },
     /// Local identity is already linked to a platform creator
     IdentityAlreadyLinked { creator_id: String },
+    /// Local identity is not linked to any platform creator
+    IdentityNotLinked { creator_id: String },
     /// Rusqlite operation failed
     Rusqlite(rusqlite::Error),
 }
@@ -59,6 +61,13 @@ impl fmt::Display for LocalDbError {
                 write!(
                     f,
                     "local identity '{}' is already linked to a platform creator; cannot link again",
+                    creator_id
+                )
+            }
+            Self::IdentityNotLinked { creator_id } => {
+                write!(
+                    f,
+                    "local identity '{}' is not linked to any platform creator; nothing to unlink",
                     creator_id
                 )
             }

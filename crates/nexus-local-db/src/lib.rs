@@ -40,7 +40,7 @@ pub use schema::{
 // Re-export identity CRUD components
 pub use identity::{
     create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
-    list_local_identities, LocalIdentityRow,
+    list_local_identities, unlink_from_platform, LocalIdentityRow,
 };
 
 // Re-export soul_meta CRUD components
