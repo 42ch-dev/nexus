@@ -416,14 +416,20 @@
       "updated_at": "2026-04-15",
       "notes": "T1-T4 all done. ACP tool tests enabled, context assemble-local regression test added, clap -h fix applied.",
       "metadata": {
-        "phase": "InProgress",
+        "phase": "InReview",
         "priority": "high",
         "scope": "Review-quality signal, memory review/fragments E2E, runtime_mode contract alignment, unignored integration/regression coverage",
         "dependency": [
           "2026-04-14-v1.2-regression-suite"
         ],
         "plan_source": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md",
-        "working_branch": "feature/v1.3-preflight"
+        "working_branch": "feature/v1.3-preflight",
+        "gates": {
+          "all_tests_pass": true,
+          "clippy_clean": true,
+          "fmt_clean": true,
+          "codegen_drift_free": true
+        }
       },
       "done_at": null
     }
