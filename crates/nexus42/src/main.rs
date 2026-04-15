@@ -18,11 +18,10 @@ use clap::{Parser, Subcommand};
 use commands::{
     agent::AgentCommand, auth::AuthCommand, clone::CloneArgs, config::ConfigCommand,
     context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand, db::DbCommand,
-    debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
-    identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
-    memory::MemoryCommand, policy::PolicyCommand, publish::PublishCommand,
-    research::ResearchCommand, runtime_mode::RuntimeModeCommand, session::SessionCommand,
-    soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
+    debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand, identity::IdentityCommand,
+    init::InitCommand, manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
+    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
+    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
