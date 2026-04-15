@@ -27,6 +27,7 @@ export * from './Memory';
 export * from './OutboxEntry';
 export * from './Pairing';
 export * from './ReferenceSource';
+export * from './RuntimeMode';
 export * from './StoryManifest';
 export * from './SyncCommand';
 export * from './TimelineEvent';
@@ -36,6 +37,7 @@ export * from './WorldMembership';
 export * from './World';
 export * from './Meta';
 export * from './ContextAssemblyV1';
+export * from './CreatorRuntimePolicyResponse';
 export * from './ExploreAiAnswerRequest';
 export * from './ExploreAiAnswerResponse';
 export * from './ExploreAiSummaryRequest';
@@ -88,6 +90,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   OutboxEntry: 1,
   Pairing: 1,
   ReferenceSource: 1,
+  RuntimeMode: 1,
   StoryManifest: 1,
   SyncCommand: 1,
   TimelineEvent: 1,
@@ -97,6 +100,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   World: 1,
   Meta: 1,
   ContextAssemblyV1: 1,
+  CreatorRuntimePolicyResponse: 1,
   ExploreAiAnswerRequest: 1,
   ExploreAiAnswerResponse: 1,
   ExploreAiSummaryRequest: 1,

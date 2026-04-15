@@ -102,7 +102,7 @@ impl DaemonClient {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            return Err(Self::parse_error_response(status, resp).await);
+            return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
         let data: T = resp.json().await?;
@@ -117,7 +117,7 @@ impl DaemonClient {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            return Err(Self::parse_error_response(status, resp).await);
+            return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
         let data: T = resp.json().await?;
@@ -132,7 +132,7 @@ impl DaemonClient {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            return Err(Self::parse_error_response(status, resp).await);
+            return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
         let data: serde_json::Value = resp.json().await?;
@@ -141,7 +141,9 @@ impl DaemonClient {
 
     /// Parse an error response from the daemon, attempting structured parsing first
     /// and falling back to raw body text for backward compatibility.
-    async fn parse_error_response(status: u16, resp: reqwest::Response) -> CliError {
+    ///
+    /// Includes the requested URL and HTTP status code in the error for easier debugging.
+    async fn parse_error_response(url: &str, status: u16, resp: reqwest::Response) -> CliError {
         let body = resp.text().await.unwrap_or_default();
 
         // Try structured error parsing first
@@ -149,7 +151,7 @@ impl DaemonClient {
             if let Some(detail) = parsed.error {
                 return CliError::Api {
                     status,
-                    message: format!("[{}] {}", detail.code, detail.message),
+                    message: format!("GET {} → [{}] {}", url, detail.code, detail.message),
                 };
             }
         }
@@ -157,7 +159,7 @@ impl DaemonClient {
         // Fallback to raw body (backward compatible with old daemon versions)
         CliError::Api {
             status,
-            message: body,
+            message: format!("GET {} → HTTP {} — {}", url, status, body),
         }
     }
 
@@ -209,11 +211,86 @@ impl DaemonClient {
         }
 
         if !resp.status().is_success() {
-            return Err(Self::parse_error_response(status, resp).await);
+            return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
         let assemble_resp: AssembleResponse = resp.json().await?;
         Ok(Some(assemble_resp))
+    }
+
+    /// Trigger review of pending memories for a creator.
+    ///
+    /// Posts to the daemon's review endpoint, which processes the pending
+    /// review queue and returns a summary of actions taken.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::DaemonNotReachable` if the daemon is not running
+    /// (connection refused or timeout).
+    pub async fn review_pending_memories(
+        &self,
+        creator_id: &str,
+    ) -> Result<crate::api::models::ReviewResponse> {
+        let path = "/v1/local/memory/review";
+        let body = serde_json::json!({ "creator_id": creator_id });
+
+        let url = format!("{}{}", self.base_url, path);
+        let resp = match self.http.post(&url).json(&body).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                if e.is_connect() {
+                    return Err(CliError::daemon_not_reachable(
+                        "Start the daemon with `nexus42 daemon start` and retry.",
+                    ));
+                }
+                return Err(CliError::from(e));
+            }
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: crate::api::models::ReviewResponse = resp.json().await?;
+        Ok(data)
+    }
+
+    /// List memory fragments from the daemon.
+    ///
+    /// Retrieves stored memory fragments for the given creator, returning
+    /// their IDs and summaries.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::DaemonNotReachable` if the daemon is not running
+    /// (connection refused or timeout).
+    pub async fn list_memory_fragments(
+        &self,
+        creator_id: &str,
+    ) -> Result<Vec<crate::api::models::FragmentRow>> {
+        let path = "/v1/local/memory/fragments";
+
+        let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
+        let resp = match self.http.get(&url).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                if e.is_connect() {
+                    return Err(CliError::daemon_not_reachable(
+                        "Start the daemon with `nexus42 daemon start` and retry.",
+                    ));
+                }
+                return Err(CliError::from(e));
+            }
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: Vec<crate::api::models::FragmentRow> = resp.json().await?;
+        Ok(data)
     }
 }
 

@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "description": "Nexus Wire Contracts - TypeScript types generated from JSON Schema",
   "author": "42ch",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/42ch/nexus"
