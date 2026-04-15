@@ -409,8 +409,10 @@
   ],
   "metadata": {
     "versioning": {
-      "phase_1_branch_prefix": "feature/v1.0-",
-      "phase_2_branch_prefix": "feature/v2.0-"
+      "branch_naming": {
+        "feature": "feature/{ver}-{name}",
+        "fix": "fix/{name}"
+      }
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-15",
