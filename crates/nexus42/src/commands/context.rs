@@ -395,8 +395,17 @@ async fn try_platform_assemble(
     let creator_id = config.active_creator_id.as_deref().unwrap_or("ctr_unknown");
     let runtime_mode_str = config.runtime_mode().to_string();
 
+    // Resolve the workspace slug from config (R2: was hardcoded "wrk_default").
+    let workspace_slug = config.workspace_slug_for_creator(creator_id);
+    if workspace_slug == crate::config::DEFAULT_WORKSPACE_SLUG {
+        tracing::debug!(
+            creator_id = creator_id,
+            "No workspace slug configured for creator, using default"
+        );
+    }
+
     match client
-        .call_assemble(creator_id, "wrk_default", &runtime_mode_str, _hint)
+        .call_assemble(creator_id, workspace_slug, &runtime_mode_str, _hint)
         .await
     {
         Ok(Some(response)) => Some(response),
@@ -806,5 +815,36 @@ mod tests {
         let guard2 = create_degradation_guard(&config2);
         assert_eq!(guard2.degradation_state(), DegradationState::Normal);
         assert_eq!(guard2.failure_count(), 1);
+    }
+
+    // ── R2: Workspace slug resolution in try_platform_assemble ─────────
+
+    #[test]
+    fn workspace_slug_for_creator_returns_configured_slug() {
+        use std::collections::HashMap;
+        use crate::config::DEFAULT_WORKSPACE_SLUG;
+
+        let mut config = CliConfig::default();
+        config.active_creator_id = Some("ctr_alice".to_string());
+        config.active_workspace_slug_by_creator = HashMap::from([(
+            "ctr_alice".to_string(),
+            "wrk_novel".to_string(),
+        )]);
+
+        let slug = config.workspace_slug_for_creator("ctr_alice");
+        assert_eq!(slug, "wrk_novel");
+
+        // Unknown creator falls back to default
+        let slug = config.workspace_slug_for_creator("ctr_unknown");
+        assert_eq!(slug, DEFAULT_WORKSPACE_SLUG);
+    }
+
+    #[test]
+    fn workspace_slug_for_creator_defaults_when_empty() {
+        use crate::config::DEFAULT_WORKSPACE_SLUG;
+
+        let config = CliConfig::default();
+        let slug = config.workspace_slug_for_creator("ctr_anyone");
+        assert_eq!(slug, DEFAULT_WORKSPACE_SLUG);
     }
 }
