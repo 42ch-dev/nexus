@@ -219,8 +219,13 @@ impl Stage0Assembly {
 
 /// Estimate token count using the chars/4 heuristic.
 ///
-/// This is a rough approximation; actual tokenization depends on the
-/// tokenizer used by the LLM. Suitable for budget estimation.
+/// NOTE (S-004): Token estimation uses `chars/4` (byte-length divided by 4)
+/// as a rough approximation. Actual tokenization depends on the tokenizer used
+/// by the LLM (e.g., cl100k_base for GPT-4, sentencepiece for Gemini). The
+/// `chars/4` heuristic overestimates for ASCII-heavy text and underestimates
+/// for non-ASCII content. This is accepted for V1.3 — a more accurate
+/// tokenizer integration is deferred to a future release.
+/// Suitable for budget estimation and section truncation ordering.
 pub fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }

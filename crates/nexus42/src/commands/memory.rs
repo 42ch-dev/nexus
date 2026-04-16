@@ -10,6 +10,7 @@ use crate::errors::Result;
 use clap::Subcommand;
 use nexus_domain::memory_io;
 use nexus_domain::LongTermMemory;
+use std::io::Write;
 use std::str::FromStr;
 
 #[derive(Debug, Subcommand)]

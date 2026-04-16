@@ -112,6 +112,7 @@ fn list_identities() -> Result<()> {
 
     for identity in &identities {
         let active_mark = active_id
+            .as_deref()
             .map(|a| {
                 if a == identity.creator_id {
                     " (active)"
@@ -333,6 +334,7 @@ pub fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
 
 /// Resolved identity information for the active session.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Public API — fields/methods used by tests and future callers
 pub struct ResolvedIdentity {
     pub creator_id: String,
     pub identity_type: LocalIdentityType,
@@ -345,11 +347,13 @@ pub struct ResolvedIdentity {
 
 impl ResolvedIdentity {
     /// Check if this is an ephemeral (anonymous) identity.
+    #[allow(dead_code)]
     pub fn is_ephemeral(&self) -> bool {
         self.is_anonymous
     }
 
     /// Warning message for anonymous identities.
+    #[allow(dead_code)]
     pub fn ephemeral_warning(&self) -> Option<&'static str> {
         if self.is_anonymous {
             Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 identity create --persistent` for a saved identity.")
