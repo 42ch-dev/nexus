@@ -7,6 +7,7 @@ use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use crate::manuscript::manager::{sanitize_title, validate_world_id, ManuscriptManager};
 use clap::Subcommand;
+use std::io::Write;
 
 #[derive(Debug, Subcommand)]
 pub enum ManuscriptCommand {

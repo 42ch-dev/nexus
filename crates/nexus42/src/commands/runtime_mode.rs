@@ -77,6 +77,11 @@ fn show(config: &CliConfig) -> Result<()> {
 }
 
 fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
+    // NOTE (S-007): Not warning about the daemon when setting runtime mode is an
+    // intentional UX choice. Users who run `nexus42 runtime-mode set` are expected
+    // to manage the daemon lifecycle themselves — they either restart the daemon
+    // to pick up the new mode, or they understand that the daemon uses the mode
+    // from its own startup snapshot. A daemon notification mechanism is deferred.
     let new_mode = DomainRuntimeMode::parse(mode_str)
         .map_err(|e| crate::errors::CliError::Config(e.to_string()))?;
 
