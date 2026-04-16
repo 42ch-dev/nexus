@@ -80,53 +80,14 @@ pub async fn aggregate_experience(
     creator_id: &str,
     synthesizer: Option<&dyn ExperienceSynthesizer>,
 ) -> Result<AggregationResult, DomainError> {
-    // 1. List all memories
-    let slugs = memory_io::list_memories(home, creator_id)?;
+    let entries = collect_experience_entries(home, creator_id)?;
 
-    // 2. Load and filter to experience-kind
-    let mut experience_entries: Vec<ExperienceEntry> = Vec::new();
-    for slug in &slugs {
-        let memory = match memory_io::load_memory(home, creator_id, slug) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!(slug = %slug, error = %e, "Skipping unreadable memory during experience aggregation");
-                continue;
-            }
-        };
+    let count = entries.len();
 
-        if EXPERIENCE_MEMORY_KINDS.contains(&memory.frontmatter.memory_kind.as_str()) {
-            experience_entries.push(ExperienceEntry {
-                memory_kind: memory.frontmatter.memory_kind.clone(),
-                slug: memory.slug(),
-                body: memory.body.clone(),
-                updated_at: memory.frontmatter.updated_at.clone(),
-            });
-        }
-    }
+    let (experience_markdown, used_acp) =
+        generate_experience_markdown(&entries, synthesizer).await;
 
-    // 3. Sort by recency (most recent first)
-    experience_entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-
-    let count = experience_entries.len();
-
-    // 4. Generate markdown
-    let (experience_markdown, used_acp) = if let Some(synth) = synthesizer {
-        if !experience_entries.is_empty() {
-            match synth.synthesize(&experience_entries).await {
-                Ok(text) => (text, true),
-                Err(_) => {
-                    // ACP failed — fall back to deterministic
-                    (deterministic_concat(&experience_entries), false)
-                }
-            }
-        } else {
-            (String::new(), false)
-        }
-    } else {
-        (deterministic_concat(&experience_entries), false)
-    };
-
-    // 5. Update SOUL.md
+    // Update SOUL.md
     let mut soul = crate::soul_io::load(home, creator_id)?;
     soul.set_experience(experience_markdown.clone());
     crate::soul_io::save(home, creator_id, &soul)?;
@@ -147,6 +108,33 @@ pub async fn aggregate_experience_preview(
     creator_id: &str,
     synthesizer: Option<&dyn ExperienceSynthesizer>,
 ) -> Result<AggregationResult, DomainError> {
+    let entries = collect_experience_entries(home, creator_id)?;
+
+    let count = entries.len();
+
+    let (experience_markdown, used_acp) =
+        generate_experience_markdown(&entries, synthesizer).await;
+
+    Ok(AggregationResult {
+        experience_markdown,
+        memories_processed: count,
+        used_acp,
+    })
+}
+
+/// Collect and filter experience-kind memory entries for a creator.
+///
+/// Shared helper extracted to deduplicate between `aggregate_experience`
+/// and `aggregate_experience_preview` (R4 pipeline).
+///
+/// Steps:
+/// 1. List all long-term memories for the creator
+/// 2. Load and filter to experience-kind memories
+/// 3. Sort by recency (most recent first)
+fn collect_experience_entries(
+    home: &Path,
+    creator_id: &str,
+) -> Result<Vec<ExperienceEntry>, DomainError> {
     let slugs = memory_io::list_memories(home, creator_id)?;
 
     let mut experience_entries: Vec<ExperienceEntry> = Vec::new();
@@ -154,7 +142,7 @@ pub async fn aggregate_experience_preview(
         let memory = match memory_io::load_memory(home, creator_id, slug) {
             Ok(m) => m,
             Err(e) => {
-                tracing::warn!(slug = %slug, error = %e, "Skipping unreadable memory during experience aggregation preview");
+                tracing::warn!(slug = %slug, error = %e, "Skipping unreadable memory during experience aggregation");
                 continue;
             }
         };
@@ -169,28 +157,35 @@ pub async fn aggregate_experience_preview(
         }
     }
 
+    // Sort by recency (most recent first)
     experience_entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
-    let count = experience_entries.len();
+    Ok(experience_entries)
+}
 
-    let (experience_markdown, used_acp) = if let Some(synth) = synthesizer {
-        if !experience_entries.is_empty() {
-            match synth.synthesize(&experience_entries).await {
-                Ok(text) => (text, true),
-                Err(_) => (deterministic_concat(&experience_entries), false),
+/// Generate experience markdown from collected entries.
+///
+/// Shared helper extracted to deduplicate between `aggregate_experience`
+/// and `aggregate_experience_preview` (R4 pipeline).
+///
+/// If a synthesizer is provided, uses it to generate aggregated text;
+/// falls back to deterministic concatenation on failure.
+async fn generate_experience_markdown(
+    entries: &[ExperienceEntry],
+    synthesizer: Option<&dyn ExperienceSynthesizer>,
+) -> (String, bool) {
+    if let Some(synth) = synthesizer {
+        if !entries.is_empty() {
+            match synth.synthesize(entries).await {
+                Ok(text) => return (text, true),
+                Err(_) => {
+                    // ACP failed — fall back to deterministic
+                    return (deterministic_concat(entries), false);
+                }
             }
-        } else {
-            (String::new(), false)
         }
-    } else {
-        (deterministic_concat(&experience_entries), false)
-    };
-
-    Ok(AggregationResult {
-        experience_markdown,
-        memories_processed: count,
-        used_acp,
-    })
+    }
+    (deterministic_concat(entries), false)
 }
 
 /// Deterministic fallback: concatenate experience memories sorted by recency.
