@@ -226,6 +226,9 @@ impl Stage0Assembly {
 /// for non-ASCII content. This is accepted for V1.3 — a more accurate
 /// tokenizer integration is deferred to a future release.
 /// Suitable for budget estimation and section truncation ordering.
+///
+// V1.2 residual R15 (pipeline, nit): Token estimation chars/4 approximation
+// chars/4 is a rough approximation; accurate tokenization requires tiktoken
 pub fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }

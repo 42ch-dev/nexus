@@ -14,6 +14,8 @@ use crate::LongTermMemory;
 use std::path::Path;
 
 /// Memory kinds that contribute to the Experience section.
+// V1.2 residual R14 (pipeline, nit): EXPERIENCE_MEMORY_KINDS hardcoded not derived from enum
+// Hardcoded array intentional; derive-from-enum requires const generics or macro
 const EXPERIENCE_MEMORY_KINDS: &[&str] = &[
     "story_summary",
     "review_note",

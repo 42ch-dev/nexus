@@ -82,6 +82,8 @@ fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
     // to manage the daemon lifecycle themselves — they either restart the daemon
     // to pick up the new mode, or they understand that the daemon uses the mode
     // from its own startup snapshot. A daemon notification mechanism is deferred.
+    // V1.2 residual S-007 (program-review, nit): Runtime mode set no daemon warning
+    // UX choice: users who set runtime mode manage daemon themselves
     let new_mode = DomainRuntimeMode::parse(mode_str)
         .map_err(|e| crate::errors::CliError::Config(e.to_string()))?;
 
