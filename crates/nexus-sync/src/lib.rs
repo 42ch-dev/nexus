@@ -31,6 +31,7 @@ pub mod delta_bundle;
 pub mod errors;
 pub mod outbox;
 pub mod partial_apply;
+pub mod platform_client;
 pub mod pool;
 pub mod precheck;
 pub mod pull_apply;
