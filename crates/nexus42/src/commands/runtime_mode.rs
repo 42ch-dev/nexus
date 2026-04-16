@@ -124,6 +124,7 @@ mod tests {
                 is_healthy,
                 checked_at: "2026-04-15T10:30:00Z".to_string(),
             }),
+            last_upgrade_attempt: None,
         });
         c
     }
