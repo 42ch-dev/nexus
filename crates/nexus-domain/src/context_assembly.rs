@@ -83,28 +83,28 @@ impl Stage0Assembly {
 
         // 2. ## Personality
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
         }
 
         // 3. Long-term memories (sorted by kind, then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}", mem.body));
+            parts.push(format!("{title}\n\n{}\n", mem.body));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
-                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}\n",
                 keywords.join(", ")
             ));
         }
 
         // 5. ## Experience
         if !self.experience.is_empty() {
-            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
         // 6. User prompt
@@ -112,7 +112,7 @@ impl Stage0Assembly {
             parts.push(self.user_prompt.clone());
         }
 
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     /// Assemble with token budget truncation.
@@ -408,21 +408,21 @@ impl TwoStageAssembly {
 
         // 2. ## Personality
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
         }
 
         // 3. Long-term memories (local, sorted by kind then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}", mem.body));
+            parts.push(format!("{title}\n\n{}\n", mem.body));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
-                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}\n",
                 keywords.join(", ")
             ));
         }
@@ -446,7 +446,7 @@ impl TwoStageAssembly {
                     })
                     .collect();
                 parts.push(format!(
-                    "{PLATFORM_MEMORY_HEADING}\n\n{}",
+                    "{PLATFORM_MEMORY_HEADING}\n\n{}\n",
                     mem_lines.join("\n")
                 ));
             }
@@ -463,7 +463,7 @@ impl TwoStageAssembly {
                         )
                     })
                     .collect();
-                parts.push(format!("{KB_HEADING}\n\n{}", kb_lines.join("\n")));
+                parts.push(format!("{KB_HEADING}\n\n{}\n", kb_lines.join("\n")));
             }
 
             // 6b. Timeline events
@@ -478,13 +478,13 @@ impl TwoStageAssembly {
                         )
                     })
                     .collect();
-                parts.push(format!("{TIMELINE_HEADING}\n\n{}", tl_lines.join("\n")));
+                parts.push(format!("{TIMELINE_HEADING}\n\n{}\n", tl_lines.join("\n")));
             }
         }
 
         // 7. ## Experience
         if !self.experience.is_empty() {
-            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
         // 8. User prompt
@@ -492,7 +492,7 @@ impl TwoStageAssembly {
             parts.push(self.user_prompt.clone());
         }
 
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     /// Assemble with fallback to Stage0Assembly if Stage-1 failed.
@@ -520,28 +520,28 @@ impl TwoStageAssembly {
 
         // 2. ## Personality
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
         }
 
         // 3. Long-term memories (sorted by kind then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}", mem.body));
+            parts.push(format!("{title}\n\n{}\n", mem.body));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
-                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}\n",
                 keywords.join(", ")
             ));
         }
 
         // 5. ## Experience
         if !self.experience.is_empty() {
-            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
         // 6. User prompt
@@ -549,7 +549,7 @@ impl TwoStageAssembly {
             parts.push(self.user_prompt.clone());
         }
 
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     /// Dedup platform memory items against local memories (spec §9.1.1).

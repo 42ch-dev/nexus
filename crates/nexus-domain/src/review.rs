@@ -77,7 +77,14 @@ impl FromStr for TaskKind {
             "chapter" => Ok(Self::Chapter),
             "research" => Ok(Self::Research),
             "unknown" => Ok(Self::Unknown),
-            _ => Ok(Self::Unknown), // Fallback to Unknown for invalid values
+            other => {
+                // S-002: Log when an unrecognized task_kind is encountered
+                tracing::warn!(
+                    task_kind = other,
+                    "Unrecognized task_kind, falling back to Unknown"
+                );
+                Ok(Self::Unknown) // Fallback to Unknown for invalid values
+            }
         }
     }
 }
@@ -150,7 +157,18 @@ pub struct PendingReviewInput {
 /// ```
 pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
     let digest_len = record.raw_digest.len();
-    let task_kind: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
+    let task_kind: TaskKind = {
+        let parsed: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
+        if parsed == TaskKind::Unknown && record.task_kind.to_lowercase() != "unknown" {
+            // S-002: Already logged in FromStr, but ensure classification is aware
+            tracing::warn!(
+                task_kind = %record.task_kind,
+                pending_id = %record.pending_id,
+                "Classifying with Unknown task_kind due to unrecognized value"
+            );
+        }
+        parsed
+    };
 
     // Threshold constants
     const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
