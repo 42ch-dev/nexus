@@ -201,14 +201,20 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     memory_io::load_memory(&home, creator_id, slug)?;
 
     if !force {
-        // Confirm deletion
+        // S-005: Confirm deletion. Empty input (just pressing Enter) = cancel.
         println!(
             "Delete memory '{}' for creator '{}'? [y/N]",
             slug, creator_id
         );
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            // User pressed Enter without typing anything — treat as cancel
+            println!("Aborted (empty input).");
+            return Ok(());
+        }
+        if !trimmed.eq_ignore_ascii_case("y") && !trimmed.eq_ignore_ascii_case("yes") {
             println!("Aborted.");
             return Ok(());
         }
@@ -255,19 +261,30 @@ async fn fragments(config: &CliConfig, creator_id: &str) -> Result<()> {
 }
 
 /// Open a temporary file in the user's $EDITOR, return the edited content.
+///
+/// Uses `tempfile::NamedTempFile` for automatic cleanup on drop (W-004),
+/// preventing temp file leaks if the process crashes or the editor exits
+/// abnormally.
 fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
 
-    let temp_dir = std::env::temp_dir();
     let safe_prefix = prefix.to_lowercase().replace(' ', "-");
     let file_name = format!(
         "nexus42-{}-{}.md",
         safe_prefix,
         uuid::Uuid::new_v4().simple()
     );
-    let temp_path = temp_dir.join(&file_name);
 
-    std::fs::write(&temp_path, initial_content)?;
+    // Use tempfile::NamedTempFile for automatic cleanup on drop (W-004).
+    // The file persists long enough for the editor to read it, but is
+    // automatically deleted when the NamedTempFile goes out of scope.
+    let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
+        .map_err(|e| crate::errors::CliError::Other(format!("Failed to create temp file: {}", e)))?;
+    temp_file
+        .write_all(initial_content.as_bytes())
+        .map_err(|e| crate::errors::CliError::Other(format!("Failed to write temp file: {}", e)))?;
+
+    let temp_path = temp_file.path().to_path_buf();
 
     let status = std::process::Command::new(&editor)
         .arg(&temp_path)
@@ -277,7 +294,7 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         })?;
 
     if !status.success() {
-        let _ = std::fs::remove_file(&temp_path);
+        // NamedTempFile auto-deletes on drop — no manual cleanup needed
         return Err(crate::errors::CliError::Other(format!(
             "Editor {} exited with non-zero status.",
             editor
@@ -285,7 +302,7 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
     }
 
     let content = std::fs::read_to_string(&temp_path)?;
-    let _ = std::fs::remove_file(&temp_path);
+    // NamedTempFile auto-deletes on drop — no manual cleanup needed
     Ok(content)
 }
 

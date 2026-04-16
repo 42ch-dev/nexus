@@ -97,10 +97,21 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             let content = manager.read_content(&title)?;
             let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
-            // Write to a temp file for editing (title sanitized to prevent path traversal)
+            // Write to a temp file for editing (title sanitized to prevent path traversal).
+            // W-004: Use tempfile::NamedTempFile for automatic cleanup on drop/crash.
             let safe_title = sanitize_title(&title)?;
-            let tmp_path = std::env::temp_dir().join(format!(".nexus42-edit-{}", safe_title));
-            std::fs::write(&tmp_path, &content)?;
+            let file_name = format!(".nexus42-edit-{}", safe_title);
+            let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
+                .map_err(|e| {
+                    CliError::Other(format!("Failed to create temp file: {}", e))
+                })?;
+            temp_file
+                .write_all(content.as_bytes())
+                .map_err(|e| {
+                    CliError::Other(format!("Failed to write temp file: {}", e))
+                })?;
+
+            let tmp_path = temp_file.path().to_path_buf();
 
             // Open editor
             let status = std::process::Command::new(&editor)
@@ -114,11 +125,10 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
                 let edited = std::fs::read_to_string(&tmp_path)?;
                 manager.write_content(&title, &edited)?;
                 println!("Manuscript '{}' updated.", title);
-                // Clean up temp file
-                let _ = std::fs::remove_file(&tmp_path);
+                // NamedTempFile auto-deletes on drop
             } else {
                 println!("Editor exited with non-zero status. Changes not saved.");
-                let _ = std::fs::remove_file(&tmp_path);
+                // NamedTempFile auto-deletes on drop
             }
 
             Ok(())
