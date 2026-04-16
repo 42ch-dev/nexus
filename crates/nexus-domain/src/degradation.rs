@@ -191,6 +191,10 @@ pub struct DegradationSnapshot {
     pub failure_count: u32,
     /// Last health check result (if any).
     pub last_health_check: Option<HealthCheckSnapshot>,
+    /// ISO 8601 timestamp of last upgrade attempt (for cooldown persistence across restarts).
+    /// Old snapshots without this field deserialize as `None`.
+    #[serde(default)]
+    pub last_upgrade_attempt: Option<String>,
 }
 
 /// Serializable record of a platform health check for config persistence.
@@ -209,6 +213,21 @@ impl DegradationSnapshot {
             state,
             failure_count,
             last_health_check: None,
+            last_upgrade_attempt: None,
+        }
+    }
+
+    /// Create a new snapshot with an explicit last_upgrade_attempt.
+    pub fn with_upgrade_attempt(
+        state: DegradationState,
+        failure_count: u32,
+        last_upgrade_attempt: Option<String>,
+    ) -> Self {
+        Self {
+            state,
+            failure_count,
+            last_health_check: None,
+            last_upgrade_attempt,
         }
     }
 
@@ -221,6 +240,7 @@ impl DegradationSnapshot {
                 is_healthy: h.is_healthy,
                 checked_at: h.checked_at.to_rfc3339(),
             }),
+            last_upgrade_attempt: guard.last_upgrade_attempt().map(|dt| dt.to_rfc3339()),
         }
     }
 }
@@ -283,7 +303,11 @@ impl DegradationGuard {
             failure_count: snap.failure_count,
             last_failure_time: None,
             last_health_check: None,
-            last_upgrade_attempt: None,
+            last_upgrade_attempt: snap
+                .last_upgrade_attempt
+                .as_deref()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc)),
         }
     }
 
@@ -310,6 +334,11 @@ impl DegradationGuard {
     /// Access the last health check result (if any).
     pub fn last_health_check(&self) -> Option<&HealthCheckResult> {
         self.last_health_check.as_ref()
+    }
+
+    /// Access the last upgrade attempt timestamp (if any).
+    pub fn last_upgrade_attempt(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.last_upgrade_attempt
     }
 
     /// Access the current failure count.
@@ -969,5 +998,78 @@ mod tests {
         // Cannot degrade further (policy depth = 1)
         guard.record_platform_result(false, Some("err".into()));
         assert_ne!(guard.state(), DegradationState::DegradedLevel2); // stays at level 1
+    }
+
+    // ── R3: last_upgrade_attempt persistence tests ─────────────────────
+
+    #[test]
+    fn snapshot_from_guard_preserves_last_upgrade_attempt() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let policy = DegradationPolicy {
+            upgrade_cooldown_secs: 0,
+            ..Default::default()
+        };
+        let mut guard = DegradationGuard::new(policy, mode);
+
+        // Degrade and then upgrade to set last_upgrade_attempt
+        for _ in 0..3 {
+            guard.record_platform_result(false, Some("fail".into()));
+        }
+        guard.record_platform_result(true, None);
+        assert!(guard.try_upgrade());
+
+        // Verify the guard has a last_upgrade_attempt
+        assert!(guard.last_upgrade_attempt().is_some());
+
+        // Snapshot should capture it
+        let snap = DegradationSnapshot::from_guard(&guard);
+        assert!(snap.last_upgrade_attempt.is_some());
+    }
+
+    #[test]
+    fn restore_from_snapshot_restores_last_upgrade_attempt() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let iso_time = "2026-04-16T10:30:00+00:00";
+
+        let snap = DegradationSnapshot::with_upgrade_attempt(
+            DegradationState::DegradedLevel1,
+            2,
+            Some(iso_time.to_string()),
+        );
+
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        // last_upgrade_attempt should be restored
+        let restored = guard
+            .last_upgrade_attempt()
+            .expect("last_upgrade_attempt should be restored");
+        assert_eq!(restored.to_rfc3339(), iso_time);
+    }
+
+    #[test]
+    fn snapshot_without_last_upgrade_attempt_deserializes_as_none() {
+        // Old-format JSON without last_upgrade_attempt field
+        let json = r#"{"state":"DegradedLevel1","failure_count":2}"#;
+        let snap: DegradationSnapshot = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(snap.state, DegradationState::DegradedLevel1);
+        assert_eq!(snap.failure_count, 2);
+        assert!(snap.last_upgrade_attempt.is_none());
+    }
+
+    #[test]
+    fn snapshot_with_upgrade_attempt_serde_roundtrip() {
+        let snap = DegradationSnapshot::with_upgrade_attempt(
+            DegradationState::DegradedLevel1,
+            3,
+            Some("2026-04-16T10:30:00+00:00".to_string()),
+        );
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: DegradationSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap, back);
+        assert_eq!(
+            back.last_upgrade_attempt.as_deref(),
+            Some("2026-04-16T10:30:00+00:00")
+        );
     }
 }

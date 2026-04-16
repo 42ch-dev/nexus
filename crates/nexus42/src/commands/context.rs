@@ -779,6 +779,7 @@ mod tests {
             state: DegradationState::DegradedLevel1,
             failure_count: 2,
             last_health_check: None,
+            last_upgrade_attempt: None,
         });
 
         let guard = create_degradation_guard(&config);
@@ -799,6 +800,7 @@ mod tests {
             state: DegradationState::Normal,
             failure_count: 1,
             last_health_check: None,
+            last_upgrade_attempt: None,
         });
 
         let guard2 = create_degradation_guard(&config2);
