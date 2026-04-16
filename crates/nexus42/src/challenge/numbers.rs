@@ -67,9 +67,9 @@ pub fn convert_number_words(text: &str) -> String {
     while i < words.len() {
         if let Some(&val) = map.get(words[i]) {
             // Check if next word is a units digit that could form a compound number
-            if val >= 20 && val <= 90 && i + 1 < words.len() {
+            if (20..=90).contains(&val) && i + 1 < words.len() {
                 if let Some(&next_val) = map.get(words[i + 1]) {
-                    if next_val >= 1 && next_val <= 9 {
+                    if (1..=9).contains(&next_val) {
                         // Compound: "thirty five" → 35
                         result.push((val + next_val).to_string());
                         i += 2;

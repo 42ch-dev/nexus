@@ -45,7 +45,7 @@ pub fn evaluate(problem: &MathProblem) -> Result<u32, crate::challenge::Challeng
             if problem.n2 == 0 {
                 return Err(crate::challenge::ChallengeError::DivisionByZero);
             }
-            if problem.n1 % problem.n2 != 0 {
+            if !problem.n1.is_multiple_of(problem.n2) {
                 return Err(crate::challenge::ChallengeError::NonIntegerResult {
                     dividend: problem.n1,
                     divisor: problem.n2,
