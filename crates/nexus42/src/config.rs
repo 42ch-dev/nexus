@@ -307,6 +307,7 @@ mod tests {
                 is_healthy: false,
                 checked_at: "2026-04-15T10:30:00Z".to_string(),
             }),
+            last_upgrade_attempt: None,
         });
 
         let json = serde_json::to_string(&c).unwrap();
