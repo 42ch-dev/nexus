@@ -9,6 +9,7 @@
 //!
 //! See creator-memory-soul-lifecycle-v1.md §7.2, §7.3.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
@@ -463,7 +464,8 @@ fn extract_keywords(text: &str) -> Vec<String> {
         .map(|s| s.to_string())
         .collect();
 
-    // Filter stop words and dedupe
+    // Filter stop words and dedupe using HashSet for O(1) lookups (R13).
+    let mut seen: HashSet<String> = HashSet::new();
     let mut keywords: Vec<String> = Vec::new();
     for word in words {
         // Skip stop words
@@ -478,8 +480,8 @@ fn extract_keywords(text: &str) -> Vec<String> {
         if word.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        // Dedupe
-        if !keywords.contains(&word) {
+        // Dedupe via HashSet (O(1) instead of Vec::contains O(N))
+        if seen.insert(word.clone()) {
             keywords.push(word);
         }
     }
