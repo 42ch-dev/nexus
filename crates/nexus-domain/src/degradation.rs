@@ -246,6 +246,12 @@ impl DegradationSnapshot {
 }
 
 /// Guard that monitors platform health and triggers degradation.
+///
+/// S-003: DegradationGuard is Send + Sync because all its fields are
+/// thread-safe: DegradationPolicy (primitive types), DomainRuntimeMode (Copy),
+/// DegradationState (Copy enum), chrono::DateTime<chrono::Utc> (Send+Sync),
+/// and HealthCheckResult (Send+Sync). The guard is designed to be shared
+/// across async tasks (e.g., in a tokio runtime) via Arc<Mutex<DegradationGuard>>.
 pub struct DegradationGuard {
     policy: DegradationPolicy,
     current_mode: DomainRuntimeMode,
@@ -255,6 +261,13 @@ pub struct DegradationGuard {
     last_health_check: Option<HealthCheckResult>,
     last_upgrade_attempt: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+// S-003: Compile-time verification that DegradationGuard is Send + Sync.
+// This will fail to compile if the struct holds non-thread-safe types.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<DegradationGuard>();
+};
 
 impl DegradationGuard {
     /// Create a new guard with the given policy and initial runtime mode.
@@ -1170,5 +1183,19 @@ mod tests {
         // Need a full 3 new failures to trigger degradation
         guard.record_platform_result(false, Some("fail 3".into()));
         assert_eq!(guard.degradation_state(), DegradationState::Normal);
+    }
+
+    // ── S-003: Send + Sync verification tests ───────────────────────────
+
+    #[test]
+    fn degradation_guard_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<DegradationGuard>();
+    }
+
+    #[test]
+    fn degradation_guard_is_sync() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<DegradationGuard>();
     }
 }
