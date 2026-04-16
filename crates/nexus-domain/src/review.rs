@@ -306,6 +306,8 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
     };
 
     // Default TTL based on task kind
+    // V1.2 residual R9 (pipeline, nit): Fragment TTL has no cleanup mechanism
+    // Fragment TTL cleanup deferred to V1.4; expired fragments consume disk until manual cleanup
     let ttl = match record
         .task_kind
         .parse::<TaskKind>()
@@ -527,6 +529,9 @@ pub trait SessionDigestSummarizer: Send + Sync {
 /// duplicate long-term memories. This function scans all memories
 /// for the creator and checks their `source_session_ids` frontmatter field.
 ///
+// V1.2 residual R7 (pipeline, nit): O(N) idempotency check on promotion
+// O(N) file scan acceptable at current scale; optimize if review count exceeds ~1000
+///
 /// Returns `true` if the session is already present in any memory's
 /// `source_session_ids` list.
 ///
@@ -647,6 +652,8 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     memory.validate()?;
 
     // 6. Generate slug from memory_id (strip mem_ prefix)
+    // V1.2 residual R10 (pipeline, nit): Slug collision risk (truncation)
+    // Slug collision probability low at expected scale; add collision detection if needed
     let slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
 
     // 7. Save via memory_io

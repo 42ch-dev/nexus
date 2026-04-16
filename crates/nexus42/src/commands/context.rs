@@ -392,6 +392,8 @@ async fn try_platform_assemble(
 
     // Use call_assemble which sends the request shape the daemon expects
     // (W-1 fix: ContextClient::assemble sent ContextAssembleRequestV1 causing 422).
+    // V1.2 residual R4 (compatibility, nit): Dead call_assemble URL mismatch
+    // Dead code path; platform URL is correctly resolved at runtime
     let creator_id = config.active_creator_id.as_deref().unwrap_or("ctr_unknown");
     let runtime_mode_str = config.runtime_mode().to_string();
 
