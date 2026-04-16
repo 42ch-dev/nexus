@@ -73,6 +73,7 @@ impl AuthStore {
     /// is updated in place. Otherwise, a new entry is created with the API key
     /// and placeholder token fields (the token is populated separately during
     /// authentication).
+    #[allow(dead_code)]
     pub fn store_creator_api_key(
         &mut self,
         creator_id: &str,
@@ -102,6 +103,7 @@ impl AuthStore {
     /// If the creator entry is not found in memory, reloads from disk.
     /// Returns `Ok(None)` on any disk error (missing/corrupt auth file is
     /// treated as "key not found" rather than a hard error).
+    #[allow(dead_code)]
     pub fn get_creator_api_key(&self, creator_id: &str) -> Result<Option<String>> {
         // Check in-memory state
         if let Some(creators) = &self.creators {
