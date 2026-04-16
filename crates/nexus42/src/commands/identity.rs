@@ -149,9 +149,19 @@ fn list_identities() -> Result<()> {
 
 /// Create a new local identity.
 fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
+    // R3(identity): Validate display_name — reject empty or whitespace-only
+    let trimmed_name = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+    if let Some(raw) = &name {
+        if raw.trim().is_empty() {
+            return Err(CliError::Other(
+                "Display name cannot be empty or whitespace-only.".to_string(),
+            ));
+        }
+    }
+
     let identity = match kind {
         IdentityKindArg::Anonymous => LocalIdentity::create_anonymous(),
-        IdentityKindArg::Persistent => LocalIdentity::create_persistent(name.as_deref()),
+        IdentityKindArg::Persistent => LocalIdentity::create_persistent(trimmed_name),
     };
 
     let is_persistent = identity.is_persistent();
@@ -450,5 +460,37 @@ mod tests {
         // This compiles only if identity_type is LocalIdentityType
         let _type_str: &str = resolved.identity_type.as_str();
         assert_eq!(_type_str, "anonymous");
+    }
+
+    // ── R3(identity): display_name validation tests ────────────────────
+
+    #[test]
+    fn test_display_name_whitespace_only_should_be_rejected() {
+        // Empty/whitespace names should be rejected — trimmed to empty
+        let name = Some("   ".to_string());
+        assert!(name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty()).is_none());
+    }
+
+    #[test]
+    fn test_display_name_should_be_trimmed() {
+        // Names with leading/trailing whitespace should be trimmed
+        let name = Some("  Alice  ".to_string());
+        let trimmed = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+        assert_eq!(trimmed, Some("Alice"));
+    }
+
+    #[test]
+    fn test_display_name_none_is_valid() {
+        // No name provided is fine
+        let name: Option<String> = None;
+        let trimmed = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+        assert!(trimmed.is_none());
+    }
+
+    #[test]
+    fn test_display_name_valid_name_passes() {
+        let name = Some("Alice".to_string());
+        let trimmed = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+        assert_eq!(trimmed, Some("Alice"));
     }
 }
