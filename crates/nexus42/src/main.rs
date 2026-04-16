@@ -6,6 +6,7 @@
 mod acp;
 mod api;
 mod auth;
+mod challenge;
 mod commands;
 mod config;
 mod context;
