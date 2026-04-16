@@ -255,11 +255,11 @@ Create `crates/nexus-sync/src/platform_client.rs` (or a new small crate) for non
 | Unusual number words | Correct via LLM fallback | Edge case |
 | Empty input | Error | Validation |
 
-## 7) Open decisions
+## 7) Decisions
 
-| # | Decision | Options | Status |
-|---|----------|---------|--------|
-| D1 | Module placement (CLI vs domain) | `crates/nexus42/src/challenge/` (V1.3) vs `crates/nexus-domain/src/challenge/` | Tentative: CLI-only for V1.3 |
-| D2 | PlatformClient crate vs module | New file in nexus-sync vs new crate | Tentative: module in nexus-sync |
-| D3 | Credential storage location | Daemon DB vs CLI file | Tentative: daemon-first with CLI fallback |
-| D4 | Auto-retry on wrong answer | 0 or 1 auto-retry | Open (spec allows multiple attempts) |
+| # | Decision | Options | Status | Rationale |
+|---|----------|---------|--------|-----------|
+| D1 | Module placement (CLI vs domain) | `crates/nexus42/src/challenge/` (V1.3) vs `crates/nexus-domain/src/challenge/` | **Decided: CLI-only for V1.3** | Challenge solving is CLI-specific; migrate to domain only if daemon needs it |
+| D2 | PlatformClient crate vs module | New file in nexus-sync vs new crate | **Decided: module in nexus-sync** | Registration is semantically distinct from sync; new module shares reqwest + base URL from SyncClient |
+| D3 | Credential storage location | Daemon DB vs CLI file | **Decided: daemon-first with CLI fallback** | Check daemon health; if running, extend `auth_tokens` table; otherwise use `~/.nexus42/auth.json` |
+| D4 | Auto-retry on wrong answer | 0 or 1 auto-retry | **Decided: max 1 auto-retry** | CLI auto-retries once after wrong answer; if second attempt fails, display error and stop (user can manually retry with new registration) |
