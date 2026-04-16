@@ -169,7 +169,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-closure.json"
       },
-      "title": "V1.1 Architecture Alignment — Final Closure",
+      "title": "V1.1 Architecture Alignment \u2014 Final Closure",
       "done_at": "2026-04-09"
     },
     {
@@ -219,7 +219,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
       },
-      "title": "Local DB Refactor — Single Ownership Module",
+      "title": "Local DB Refactor \u2014 Single Ownership Module",
       "done_at": "2026-04-08"
     },
     {
@@ -249,7 +249,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
       },
-      "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
+      "title": "V1-Spec Wire Schema Sprint \u2014 Platform Contract Unblock",
       "done_at": "2026-04-10"
     },
     {
@@ -319,7 +319,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
       },
-      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
+      "title": "Local FS layout (ADR-014) \u2014 CLI/daemon paths & creator workspace",
       "done_at": "2026-04-10"
     },
     {
@@ -370,7 +370,7 @@
       "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
-        "residual_summary": "8 open residuals (1 medium, 4 low, 3 nit) — R11 (CLI stubs) resolved by v1.3-preflight T2"
+        "residual_summary": "8 open residuals (1 medium, 4 low, 3 nit) \u2014 R11 (CLI stubs) resolved by v1.3-preflight T2"
       },
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "done_at": "2026-04-14"
@@ -393,7 +393,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-regression-suite.json"
       },
-      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1\u2013R5)",
       "done_at": "2026-04-15"
     },
     {
@@ -412,18 +412,36 @@
       "status": "InProgress",
       "file": ".agents/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
       "owner": "fullstack-dev",
-      "agents": ["fullstack-dev", "qa-engineer"],
-      "progress": 0,
-      "tags": ["v1.3", "creator-register", "residual-governance"],
+      "agents": [
+        "fullstack-dev",
+        "qa-engineer"
+      ],
+      "progress": 4,
+      "tags": [
+        "v1.3",
+        "creator-register",
+        "residual-governance"
+      ],
       "created_at": "2026-04-16",
-      "updated_at": "2026-04-16",
+      "updated_at": "2026-04-17",
       "metadata": {
         "working_branch": "feature/v1.3-creator-register-and-residuals",
         "phase": "implement",
         "priority": "high",
-        "spec_refs": [".agents/plans/knowledge/v1.3-delivery-compass-v1.md", ".agents/plans/knowledge/challenge-solver-design-v1.md"],
-        "description": "V1.3 nexus-side: implement creator register CLI command with challenge-verify flow and govern all 35 V1.2 residual findings to zero open."
-      }
+        "spec_refs": [
+          ".agents/plans/knowledge/v1.3-delivery-compass-v1.md",
+          ".agents/plans/knowledge/challenge-solver-design-v1.md"
+        ],
+        "description": "V1.3 nexus-side: implement creator register CLI command with challenge-verify flow and govern all 35 V1.2 residual findings to zero open.",
+        "commits": [
+          "ab15dfe feat(challenge): T1",
+          "4ac5a82 docs(skill): T3",
+          "94c77ab feat(platform): T4",
+          "f7cd0d0 feat(auth): T5",
+          "f59ed13 style(clippy)"
+        ]
+      },
+      "notes": "Wave 1 batch 1 done: T1, T3, T4, T5 committed. T2, T6 blocked on platform M10."
     }
   ],
   "metadata": {
@@ -459,24 +477,24 @@
       "2026-04-14-v1.2-local-only-identity": [
         {
           "id": "R1",
-          "title": "CLI test coverage gap — only 1 trivial test for identity commands",
+          "title": "CLI test coverage gap \u2014 only 1 trivial test for identity commands",
           "severity": "medium",
           "source": "QC-#1 (W4), QC-#3 (S1)",
           "scope": "crates/nexus42/src/commands/identity.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "V1.2 M1 — supplement during WS2b integration or T3 QA",
+          "target": "V1.2 M1 \u2014 supplement during WS2b integration or T3 QA",
           "tracking": "T3 QA verification"
         },
         {
           "id": "R2",
-          "title": "resolve_active_identity is dead code — #[allow(dead_code)]",
+          "title": "resolve_active_identity is dead code \u2014 #[allow(dead_code)]",
           "severity": "low",
           "source": "QC-#1 (W3), QC-#2 (W4), QC-#3 (W1)",
           "scope": "crates/nexus42/src/commands/identity.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "T3 (WS2b runtime) — wire into runtime identity resolution",
+          "target": "T3 (WS2b runtime) \u2014 wire into runtime identity resolution",
           "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
         },
         {
@@ -487,7 +505,7 @@
           "scope": "schemas/domain/local-identity.schema.json, crates/nexus-domain/src/local_identity.rs",
           "decision": "accept",
           "owner": "@fullstack-dev",
-          "target": "Low priority — add minLength:1 to schema and domain validation",
+          "target": "Low priority \u2014 add minLength:1 to schema and domain validation",
           "tracking": null
         },
         {
@@ -498,12 +516,12 @@
           "scope": "crates/nexus42/src/commands/identity.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "T3 (WS2b runtime) — unify identity resolution paths",
+          "target": "T3 (WS2b runtime) \u2014 unify identity resolution paths",
           "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
         },
         {
           "id": "R5",
-          "title": "UUID v4 vs counter-based ID generation — no spec requirement for ordering",
+          "title": "UUID v4 vs counter-based ID generation \u2014 no spec requirement for ordering",
           "severity": "nit",
           "source": "QC-#3 (W3)",
           "scope": "crates/nexus-domain/src/local_identity.rs",
@@ -520,18 +538,18 @@
           "scope": "crates/nexus42/src/commands/identity.rs",
           "decision": "defer",
           "owner": "@fullstack-dev",
-          "target": "T3 (WS2b runtime) — refactor when wiring resolve_active_identity",
+          "target": "T3 (WS2b runtime) \u2014 refactor when wiring resolve_active_identity",
           "tracking": "plan 2026-04-14-v1.2-local-only-runtime"
         },
         {
           "id": "R7",
-          "title": "thiserror alignment — LocalDbError uses manual Display/Error vs domain thiserror",
+          "title": "thiserror alignment \u2014 LocalDbError uses manual Display/Error vs domain thiserror",
           "severity": "nit",
           "source": "QC-#1 (S1)",
           "scope": "crates/nexus-local-db/src/error.rs",
           "decision": "accept",
           "owner": null,
-          "target": "Style improvement — no functional impact",
+          "target": "Style improvement \u2014 no functional impact",
           "tracking": null
         }
       ],
