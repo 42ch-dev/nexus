@@ -2,9 +2,9 @@
 //!
 //! Uses an ephemeral engine (in-memory storage, no DB needed).
 
-use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
+use axum::Router;
 use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use serde_json::Value;
 use std::sync::Arc;
@@ -66,7 +66,10 @@ async fn get_capabilities_returns_list() {
     let caps = v["capabilities"].as_array().unwrap();
     assert!(!caps.is_empty(), "should have at least one capability");
     let names: Vec<&str> = caps.iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"sync.pull"), "expected sync.pull in capabilities");
+    assert!(
+        names.contains(&"sync.pull"),
+        "expected sync.pull in capabilities"
+    );
 }
 
 #[tokio::test]

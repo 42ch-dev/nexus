@@ -89,9 +89,7 @@ impl CapabilityRegistry {
             Box::new(builtins::CreatorInjectPrompt),
             Box::new(builtins::JudgeRule),
         ];
-        Self {
-            capabilities: caps,
-        }
+        Self { capabilities: caps }
     }
 
     /// Create an empty registry (for testing).

@@ -1,5 +1,6 @@
 //! Session handlers: list, get, signal.
 
+use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -10,7 +11,6 @@ use nexus_contracts::local::orchestration::http::{
     SignalSessionRequest,
 };
 use nexus_orchestration::engine::EngineSignal;
-use crate::workspace::WorkspaceState;
 
 /// `GET /v1/local/orchestration/sessions`
 pub async fn list_sessions(
@@ -57,7 +57,10 @@ pub async fn list_sessions(
         })
         .collect();
 
-    (StatusCode::OK, Json(ListSessionsResponse { sessions: mapped }))
+    (
+        StatusCode::OK,
+        Json(ListSessionsResponse { sessions: mapped }),
+    )
 }
 
 /// `GET /v1/local/orchestration/sessions/{session_id}`
@@ -65,9 +68,12 @@ pub async fn get_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
 ) -> Result<Json<GetSessionResponse>, (StatusCode, String)> {
-    let engine = state
-        .engine()
-        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "engine not available".into()))?;
+    let engine = state.engine().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "engine not available".into(),
+        )
+    })?;
 
     let sid = nexus_orchestration::engine::SessionId(session_id);
     let sessions = engine
@@ -97,9 +103,12 @@ pub async fn signal_session(
     Path(session_id): Path<String>,
     Json(body): Json<SignalSessionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
-    let engine = state
-        .engine()
-        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "engine not available".into()))?;
+    let engine = state.engine().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "engine not available".into(),
+        )
+    })?;
 
     let signal = match body.signal.as_str() {
         "pause" => EngineSignal::Pause,
@@ -115,15 +124,14 @@ pub async fn signal_session(
     };
 
     let sid = nexus_orchestration::engine::SessionId(session_id);
-    engine
-        .signal(&sid, signal)
-        .await
-        .map_err(|e: nexus_orchestration::engine::EngineError| match e {
+    engine.signal(&sid, signal).await.map_err(
+        |e: nexus_orchestration::engine::EngineError| match e {
             nexus_orchestration::engine::EngineError::SessionNotFound(_) => {
                 (StatusCode::NOT_FOUND, "session not found".into())
             }
             other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
-        })?;
+        },
+    )?;
 
     Ok((
         StatusCode::ACCEPTED,

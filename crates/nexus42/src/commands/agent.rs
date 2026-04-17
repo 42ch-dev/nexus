@@ -19,11 +19,11 @@
 
 use std::path::PathBuf;
 
-use nexus_acp_host::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
-use nexus_acp_host::transport::AgentSpawner;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_acp_host::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
+use nexus_acp_host::transport::AgentSpawner;
 
 // ── Output format selector ──────────────────────────────────────────
 

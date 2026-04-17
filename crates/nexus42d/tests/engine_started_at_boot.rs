@@ -6,9 +6,9 @@
 //! We don't boot the full daemon (which would bind ports) but instead replicate
 //! the startup wiring logic in a test harness.
 
-use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
+use axum::Router;
 use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use serde_json::Value;
 use std::sync::Arc;
@@ -24,9 +24,9 @@ async fn engine_started_with_system_preset_session_appears() {
     // Create engine with SQLite storage (same as main.rs).
     let db_pool: sqlx::SqlitePool = state.pool().clone();
     let storage = Arc::new(
-        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-            std::sync::Arc::new(db_pool),
-        ),
+        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(std::sync::Arc::new(
+            db_pool,
+        )),
     );
     let concrete_engine = GraphFlowEngine::new_with_storage(storage);
 
@@ -64,5 +64,8 @@ async fn engine_started_with_system_preset_session_appears() {
     let found = sessions
         .iter()
         .any(|s| s["presetId"] == "_system.maintenance");
-    assert!(found, "expected _system.maintenance in sessions: {sessions:?}");
+    assert!(
+        found,
+        "expected _system.maintenance in sessions: {sessions:?}"
+    );
 }

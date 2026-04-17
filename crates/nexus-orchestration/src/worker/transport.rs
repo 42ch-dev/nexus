@@ -45,10 +45,7 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     /// Create a new stdio transport from a child process's pipe halves.
-    pub fn new(
-        stdin: tokio::process::ChildStdin,
-        stdout: tokio::process::ChildStdout,
-    ) -> Self {
+    pub fn new(stdin: tokio::process::ChildStdin, stdout: tokio::process::ChildStdout) -> Self {
         // Use LinesCodec with a generous max-line-length (1 MiB).
         let codec = LinesCodec::new_with_max_length(1024 * 1024);
         Self {
@@ -84,8 +81,12 @@ impl RpcTransport for StdioTransport {
 /// Each half (`client` / `server`) can `recv` what the other `send`s.
 /// Used in tests to avoid spawning real child processes.
 pub struct DuplexTransport {
-    read_half: FramedRead<tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>, LinesCodec>,
-    write_half: FramedWrite<tokio::io::BufWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>, LinesCodec>,
+    read_half:
+        FramedRead<tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>, LinesCodec>,
+    write_half: FramedWrite<
+        tokio::io::BufWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        LinesCodec,
+    >,
 }
 
 impl DuplexTransport {
@@ -136,14 +137,14 @@ mod tests {
     async fn duplex_roundtrip() {
         let (mut client, mut server) = DuplexTransport::new_pair();
 
-        client.send(r#"{"hello":"world"}"#.to_string()).await.unwrap();
+        client
+            .send(r#"{"hello":"world"}"#.to_string())
+            .await
+            .unwrap();
         let msg = server.recv().await.expect("server receives message");
         assert_eq!(msg, r#"{"hello":"world"}"#);
 
-        server
-            .send(r#"{"reply":42}"#.to_string())
-            .await
-            .unwrap();
+        server.send(r#"{"reply":42}"#.to_string()).await.unwrap();
         let reply = client.recv().await.expect("client receives reply");
         assert_eq!(reply, r#"{"reply":42}"#);
     }

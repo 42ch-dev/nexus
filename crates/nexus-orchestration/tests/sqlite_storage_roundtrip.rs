@@ -15,7 +15,11 @@ async fn session_roundtrip() {
 
     let session = Session::new_from_task("sess-001".into(), "dummy-task");
     storage.save(session).await.unwrap();
-    let loaded = storage.get("sess-001").await.unwrap().expect("session present");
+    let loaded = storage
+        .get("sess-001")
+        .await
+        .unwrap()
+        .expect("session present");
     assert_eq!(loaded.id, "sess-001");
     storage.delete("sess-001").await.unwrap();
     assert!(storage.get("sess-001").await.unwrap().is_none());
@@ -28,7 +32,9 @@ async fn restart_resume_smoke() {
         let pool = nexus_local_db::open_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool).await.expect("run migrations (first)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (first)");
         let storage = SqliteSessionStorage::new(std::sync::Arc::new(pool));
         let session = Session::new_from_task("sess-restart".into(), "dummy-task");
         storage.save(session).await.unwrap();

@@ -1,8 +1,8 @@
 //! Capabilities listing handler.
 
+use crate::workspace::WorkspaceState;
 use axum::{extract::State, http::StatusCode, Json};
 use nexus_contracts::local::orchestration::http::{CapabilityInfo, ListCapabilitiesResponse};
-use crate::workspace::WorkspaceState;
 
 /// `GET /v1/local/orchestration/capabilities`
 pub async fn list_capabilities(
@@ -29,5 +29,8 @@ pub async fn list_capabilities(
         })
         .collect();
 
-    (StatusCode::OK, Json(ListCapabilitiesResponse { capabilities }))
+    (
+        StatusCode::OK,
+        Json(ListCapabilitiesResponse { capabilities }),
+    )
 }

@@ -8,10 +8,10 @@
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §9.1.
 
 use crate::capability::CapabilityRegistry;
-use graph_flow::{Graph, NextAction, Task, TaskResult};
-use std::sync::Arc;
 use async_trait::async_trait;
+use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // EndTask — terminal node returning NextAction::End
@@ -26,7 +26,10 @@ impl Task for EndTask {
         "end"
     }
 
-    async fn run(&self, _context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
+    async fn run(
+        &self,
+        _context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
         Ok(TaskResult::new(
             Some("_system.maintenance completed".to_string()),
             NextAction::End,
@@ -69,16 +72,16 @@ impl Task for PresetCapabilityTask {
         self.task_id
     }
 
-    async fn run(&self, context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
-        let cap = self
-            .registry
-            .get(self.name)
-            .ok_or_else(|| {
-                graph_flow::GraphError::TaskExecutionFailed(format!(
-                    "capability not found: {}",
-                    self.name
-                ))
-            })?;
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
+        let cap = self.registry.get(self.name).ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(format!(
+                "capability not found: {}",
+                self.name
+            ))
+        })?;
 
         match cap.run(Value::Null).await {
             Ok(_output) => {
@@ -118,7 +121,8 @@ pub fn build() -> Arc<Graph> {
 
     let sync_pull = PresetCapabilityTask::new("sync.pull", "sync_pull", registry.clone());
     let outbox_flush = PresetCapabilityTask::new("outbox.flush", "outbox_flush", registry.clone());
-    let registry_refresh = PresetCapabilityTask::new("registry.refresh", "registry_refresh", registry);
+    let registry_refresh =
+        PresetCapabilityTask::new("registry.refresh", "registry_refresh", registry);
     let end: Arc<dyn Task> = Arc::new(EndTask);
 
     let graph = Graph::new("_system.maintenance");
@@ -168,10 +172,7 @@ mod tests {
         let graph = build();
         // Verify all expected task IDs exist.
         for id in &["sync_pull", "outbox_flush", "registry_refresh", "end"] {
-            assert!(
-                graph.get_task(*id).is_some(),
-                "expected task '{id}'"
-            );
+            assert!(graph.get_task(*id).is_some(), "expected task '{id}'");
         }
         // Verify a nonexistent task returns None.
         assert!(graph.get_task("nonexistent").is_none());

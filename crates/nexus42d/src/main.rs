@@ -27,8 +27,7 @@ use nexus42d::api;
 use nexus42d::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
 use nexus42d::workspace::WorkspaceState;
 use nexus_orchestration::{
-    engine::OrchestrationEngine, CapabilityRegistry, GraphFlowEngine, WorkerManager,
-    system_preset,
+    engine::OrchestrationEngine, system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -134,16 +133,19 @@ async fn main() -> anyhow::Result<()> {
     // Re-use the same pool that WorkspaceState opened (nexus_local_db::open_pool).
     let db_pool: sqlx::SqlitePool = state.pool().clone();
     let storage = Arc::new(
-        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-            std::sync::Arc::new(db_pool),
-        ),
+        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(std::sync::Arc::new(
+            db_pool,
+        )),
     );
     let concrete_engine = GraphFlowEngine::new_with_storage(storage);
 
     // Kick off _system.maintenance session on the concrete engine
     // (start_session is a GraphFlowEngine method, not on the trait).
     let sys_graph = system_preset::build();
-    match concrete_engine.start_session("_system.maintenance", sys_graph).await {
+    match concrete_engine
+        .start_session("_system.maintenance", sys_graph)
+        .await
+    {
         Ok(sid) => {
             tracing::info!(session_id = sid.0, "started _system.maintenance session");
         }

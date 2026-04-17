@@ -56,17 +56,12 @@ impl SessionStorage for SqliteSessionStorage {
             .get("_preset_id")
             .await
             .unwrap_or_else(|| "default".to_string());
-        let preset_version: i64 = session
-            .context
-            .get("_preset_version")
-            .await
-            .unwrap_or(0);
+        let preset_version: i64 = session.context.get("_preset_version").await.unwrap_or(0);
         let parent_session_id: Option<String> = session.context.get("_parent_session_id").await;
 
         // Serialize the entire context (includes chat history).
-        let context_bytes = serde_json::to_vec(&session.context).map_err(|e| {
-            graph_flow::GraphError::StorageError(format!("serialize context: {e}"))
-        })?;
+        let context_bytes = serde_json::to_vec(&session.context)
+            .map_err(|e| graph_flow::GraphError::StorageError(format!("serialize context: {e}")))?;
 
         sqlx::query(
             r#"
@@ -106,9 +101,7 @@ impl SessionStorage for SqliteSessionStorage {
         .bind(id)
         .fetch_optional(&*self.pool)
         .await
-        .map_err(|e| {
-            graph_flow::GraphError::StorageError(format!("get session '{id}': {e}"))
-        })?;
+        .map_err(|e| graph_flow::GraphError::StorageError(format!("get session '{id}': {e}")))?;
 
         let Some(row) = row else {
             return Ok(None);
@@ -178,7 +171,11 @@ mod tests {
 
         let session = Session::new_from_task("sess-001".into(), "dummy-task");
         storage.save(session).await.unwrap();
-        let loaded = storage.get("sess-001").await.unwrap().expect("session present");
+        let loaded = storage
+            .get("sess-001")
+            .await
+            .unwrap()
+            .expect("session present");
         assert_eq!(loaded.id, "sess-001");
         storage.delete("sess-001").await.unwrap();
         assert!(storage.get("sess-001").await.unwrap().is_none());
@@ -191,7 +188,9 @@ mod tests {
             let pool = nexus_local_db::open_pool(db.path())
                 .await
                 .expect("open pool (first)");
-            nexus_local_db::run_migrations(&pool).await.expect("run migrations (first)");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("run migrations (first)");
             let storage = SqliteSessionStorage::new(std::sync::Arc::new(pool));
             let session = Session::new_from_task("sess-restart".into(), "dummy-task");
             storage.save(session).await.unwrap();

@@ -3,7 +3,9 @@ use nexus_orchestration::capability::CapabilityRegistry;
 #[tokio::test]
 async fn registry_lookup_builtin_workspace_open() {
     let reg = CapabilityRegistry::with_builtins();
-    let cap = reg.get("workspace.open").expect("workspace.open registered");
+    let cap = reg
+        .get("workspace.open")
+        .expect("workspace.open registered");
     assert_eq!(cap.name(), "workspace.open");
 }
 

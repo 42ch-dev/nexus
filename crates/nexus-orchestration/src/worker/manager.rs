@@ -97,18 +97,11 @@ impl WorkerSpec {
 #[derive(Debug, Clone)]
 pub enum WorkerEvent {
     /// Worker process exited unexpectedly.
-    Crashed {
-        pid: u32,
-        exit_status: Option<i32>,
-    },
+    Crashed { pid: u32, exit_status: Option<i32> },
     /// Worker started successfully.
-    Started {
-        pid: u32,
-    },
+    Started { pid: u32 },
     /// Worker was gracefully shut down.
-    Stopped {
-        pid: u32,
-    },
+    Stopped { pid: u32 },
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +155,10 @@ impl WorkerHandle {
             .ok_or_else(|| WorkerError::Internal("stdout already consumed".to_string()))?;
 
         let mut transport = StdioTransport::new(stdin, stdout);
-        let result = call_json_rpc_with_timeout(
-            &mut transport,
-            method,
-            params,
-            Duration::from_secs(30),
-        )
-        .await
-        .map_err(|e| WorkerError::Ipc(e.to_string()))?;
+        let result =
+            call_json_rpc_with_timeout(&mut transport, method, params, Duration::from_secs(30))
+                .await
+                .map_err(|e| WorkerError::Ipc(e.to_string()))?;
 
         Ok(result)
     }
@@ -182,16 +171,16 @@ impl WorkerHandle {
         self.shutdown_requested = true;
         self.cancel.cancel();
 
-        info!(pid = self.pid, "requesting worker shutdown via cancellation token");
+        info!(
+            pid = self.pid,
+            "requesting worker shutdown via cancellation token"
+        );
 
         // Try to send a shutdown RPC if we still have pipes.
         if self.stdin.is_some() && self.stdout.is_some() {
             let grace_ms = self.shutdown_grace.as_millis() as u32;
             match self
-                .call_json_rpc(
-                    "worker/shutdown",
-                    serde_json::json!({"grace_ms": grace_ms}),
-                )
+                .call_json_rpc("worker/shutdown", serde_json::json!({"grace_ms": grace_ms}))
                 .await
             {
                 Ok(_) => {
@@ -205,7 +194,10 @@ impl WorkerHandle {
         } else {
             // No pipes available. The cancellation token will cause the
             // supervisor to report the worker as stopped.
-            info!(pid = self.pid, "no pipes available — relying on cancellation token");
+            info!(
+                pid = self.pid,
+                "no pipes available — relying on cancellation token"
+            );
         }
 
         Ok(())

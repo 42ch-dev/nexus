@@ -76,9 +76,16 @@ impl SessionStatus {
 /// Outcome of a single engine step.
 #[derive(Debug, Clone)]
 pub enum StepOutcome {
-    Completed { response: Option<String> },
-    Paused { next_task_id: String, reason: String },
-    WaitingForInput { response: Option<String> },
+    Completed {
+        response: Option<String>,
+    },
+    Paused {
+        next_task_id: String,
+        reason: String,
+    },
+    WaitingForInput {
+        response: Option<String>,
+    },
     Error(String),
 }
 
@@ -126,7 +133,9 @@ pub enum EngineError {
     SessionNotFound(String),
     #[error("graph-flow error: {0}")]
     GraphFlow(#[from] graph_flow::GraphError),
-    #[error("no graph loaded — run_step requires a graph (set via start_session or system preset)")]
+    #[error(
+        "no graph loaded — run_step requires a graph (set via start_session or system preset)"
+    )]
     NoGraphLoaded,
 }
 
@@ -145,30 +154,17 @@ pub trait OrchestrationEngine: Send + Sync {
     async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError>;
 
     /// Create a new session identified by `key`, seeded with `ctx`.
-    async fn new_session(
-        &self,
-        key: SessionKey,
-        ctx: Context,
-    ) -> Result<SessionId, EngineError>;
+    async fn new_session(&self, key: SessionKey, ctx: Context) -> Result<SessionId, EngineError>;
 
     /// Query the current status of a session.
-    async fn get_status(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionStatus, EngineError>;
+    async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError>;
 
     /// Send a control signal (pause / resume / cancel / advance) to a session.
-    async fn signal(
-        &self,
-        session_id: &SessionId,
-        signal: EngineSignal,
-    ) -> Result<(), EngineError>;
+    async fn signal(&self, session_id: &SessionId, signal: EngineSignal)
+        -> Result<(), EngineError>;
 
     /// List sessions that are still active (running / paused / waiting).
-    async fn list_active(
-        &self,
-        filter: SessionFilter,
-    ) -> Result<Vec<SessionSummary>, EngineError>;
+    async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,9 +213,7 @@ impl GraphFlowEngine {
         let session_id = format!("{}:{}", preset_id, chrono::Utc::now().timestamp_millis());
 
         // Determine the start task from the graph.
-        let start_task_id = graph
-            .start_task_id()
-            .unwrap_or_default();
+        let start_task_id = graph.start_task_id().unwrap_or_default();
 
         // Create and persist the session.
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
@@ -281,16 +275,13 @@ impl OrchestrationEngine for GraphFlowEngine {
         };
 
         // Update our in-memory bookkeeping.
-        self.update_session_status(&session_id.0, &result.status).await;
+        self.update_session_status(&session_id.0, &result.status)
+            .await;
 
         Ok(outcome)
     }
 
-    async fn new_session(
-        &self,
-        key: SessionKey,
-        _ctx: Context,
-    ) -> Result<SessionId, EngineError> {
+    async fn new_session(&self, key: SessionKey, _ctx: Context) -> Result<SessionId, EngineError> {
         let session_id = format!("{}:{}", key.preset_id, key.instance_id);
 
         // Persist a session stub into the graph-flow storage.
@@ -310,10 +301,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         Ok(SessionId(session_id))
     }
 
-    async fn get_status(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionStatus, EngineError> {
+    async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
         let sessions = self.sessions.read().await;
         sessions
             .iter()
@@ -341,28 +329,20 @@ impl OrchestrationEngine for GraphFlowEngine {
         }
     }
 
-    async fn list_active(
-        &self,
-        filter: SessionFilter,
-    ) -> Result<Vec<SessionSummary>, EngineError> {
+    async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError> {
         let sessions = self.sessions.read().await;
         Ok(sessions
             .iter()
             .filter(|s| {
                 let status_ok = matches!(
                     s.status,
-                    SessionStatus::Running
-                        | SessionStatus::Paused
-                        | SessionStatus::WaitingForInput
+                    SessionStatus::Running | SessionStatus::Paused | SessionStatus::WaitingForInput
                 );
                 let creator_ok = filter
                     .creator_id
                     .as_ref()
                     .is_none_or(|c| c == &s.creator_id);
-                let preset_ok = filter
-                    .preset_id
-                    .as_ref()
-                    .is_none_or(|p| p == &s.preset_id);
+                let preset_ok = filter.preset_id.as_ref().is_none_or(|p| p == &s.preset_id);
                 status_ok && creator_ok && preset_ok
             })
             .cloned()
