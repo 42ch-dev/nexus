@@ -21,6 +21,7 @@ nexus-domain = { path = "../nexus-domain" }
 nexus-sync = { path = "../nexus-sync" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
+nexus-acp-host = { path = "../nexus-acp-host" }
 clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -38,12 +39,10 @@ thiserror = { workspace = true }
 url = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
-# ACP SDK — pinned to exact version per tech spec §1.2
-agent-client-protocol = "=0.10.4"
-tokio-util = { version = "0.7", features = ["compat"] }
-async-trait = "0.1"
-async-broadcast = "0.7" # re-exported by agent-client-protocol; used for empty StreamReceiver in subscribe()
-# Unix signal handling for graceful shutdown (only on Unix platforms)
+# ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
+# agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
+# tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
+# nix — also used directly by daemon.rs for process management
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"] }
 

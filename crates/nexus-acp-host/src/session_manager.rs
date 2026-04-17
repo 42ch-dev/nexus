@@ -154,10 +154,7 @@ impl SessionManager {
     /// Delete a session by its session ID.
     ///
     /// Returns the deleted session if it existed, or None if it didn't.
-    pub fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> crate::AcpResult<Option<SessionEntry>> {
+    pub fn delete_session(&self, session_id: &SessionId) -> crate::AcpResult<Option<SessionEntry>> {
         let sessions = self.load_sessions()?;
 
         // Find and remove the session
