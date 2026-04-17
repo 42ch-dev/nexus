@@ -146,21 +146,17 @@ impl ReferenceSource {
         }
 
         match self.source_type.as_str() {
-            "url" => {
-                if !self.uri.starts_with("http://") && !self.uri.starts_with("https://") {
-                    return Err(DomainError::InvalidUri {
-                        source_type: self.source_type.clone(),
-                        reason: "URL must start with http:// or https://".to_string(),
-                    });
-                }
+            "url" if !self.uri.starts_with("http://") && !self.uri.starts_with("https://") => {
+                return Err(DomainError::InvalidUri {
+                    source_type: self.source_type.clone(),
+                    reason: "URL must start with http:// or https://".to_string(),
+                });
             }
-            "file" | "pdf" => {
-                if !self.uri.starts_with("file://") && !self.uri.starts_with('/') {
-                    return Err(DomainError::InvalidUri {
-                        source_type: self.source_type.clone(),
-                        reason: "file/pdf URI must start with file:// or /".to_string(),
-                    });
-                }
+            "file" | "pdf" if !self.uri.starts_with("file://") && !self.uri.starts_with('/') => {
+                return Err(DomainError::InvalidUri {
+                    source_type: self.source_type.clone(),
+                    reason: "file/pdf URI must start with file:// or /".to_string(),
+                });
             }
             "note" => {
                 // Notes don't require URI format validation

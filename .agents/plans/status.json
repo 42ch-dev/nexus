@@ -440,7 +440,7 @@
           ".agents/plans/knowledge/challenge-solver-design-v1.md"
         ],
         "description": "V1.3 nexus-side: implement creator register CLI command with challenge-verify flow and govern all 35 V1.2 residual findings to zero open.",
-        "residual_summary": "All 35 V1.2 residuals archived; 3 new V1.3 low-priority residuals tracked"
+        "residual_summary": "All V1.3 residuals resolved; 0 open residuals"
       },
       "notes": "All dev work + QC + QA complete. T6 (e2e) tracked as separate backlog plan."
     },
@@ -471,64 +471,23 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-17",
-      "total_open": 3,
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 3,
+        "low": 0,
         "nit": 0
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
         "V1.2": 0,
-        "V1.3": 3
+        "V1.3": 0
       },
-      "by_plan": {
-        "2026-04-16-v1.3-creator-register-and-residuals": 3
-      }
+      "by_plan": {}
     },
-    "residual_findings": {
-      "2026-04-16-v1.3-creator-register-and-residuals": [
-        {
-          "id": "R1",
-          "title": "Challenge expiry not re-checked before verify submit",
-          "severity": "low",
-          "scope": "crates/nexus42/src/commands/creator.rs register_creator()",
-          "source": "QC3-R2/R4",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target": "V1.4",
-          "tracking_link": null,
-          "description": "Expiry is checked with 10s buffer before solve, but not re-checked before submit. If solve takes >10s, platform-side expiry error is less user-friendly."
-        },
-        {
-          "id": "R2",
-          "title": "Network errors during verify are not retried",
-          "severity": "low",
-          "scope": "crates/nexus42/src/commands/creator.rs submit_with_retry()",
-          "source": "QC3-R2/R5",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target": "V1.4",
-          "tracking_link": null,
-          "description": "submit_with_retry only retries on WrongAnswer, not on transient network errors. A 503 during verify returns immediately."
-        },
-        {
-          "id": "R3",
-          "title": "--summary CLI flag accepted but silently ignored by register_creator",
-          "severity": "low",
-          "scope": "crates/nexus42/src/commands/creator.rs Register variant",
-          "source": "QC2-R2/S-T2-4",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target": "V1.4",
-          "tracking_link": null,
-          "description": "Register variant accepts --summary but the value is never sent to the platform. Should either wire it into the API call or remove the flag."
-        }
-      ]
-    },
+    "residual_findings": {},
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
     }
