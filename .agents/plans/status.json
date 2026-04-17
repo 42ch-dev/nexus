@@ -234,7 +234,7 @@
     },
     {
       "id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
-      "status": "Todo",
+      "status": "InProgress",
       "file": ".agents/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md",
       "title": "V1.4 WS8 — nexus-local-db sqlx migration (unified DB engine)",
       "owner": "fullstack-dev",
