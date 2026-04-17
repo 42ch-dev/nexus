@@ -170,6 +170,29 @@ pub fn create_router(state: WorkspaceState) -> Router {
             axum::routing::delete(handlers::memory::delete_pending_review),
         );
 
+    // Orchestration engine-session routes (unguarded — local-only API)
+    let orchestration_routes = Router::new()
+        .route(
+            "/v1/local/orchestration/sessions",
+            get(handlers::orchestration::sessions::list_sessions),
+        )
+        .route(
+            "/v1/local/orchestration/sessions/{session_id}",
+            get(handlers::orchestration::sessions::get_session),
+        )
+        .route(
+            "/v1/local/orchestration/sessions/{session_id}/signal",
+            post(handlers::orchestration::sessions::signal_session),
+        )
+        .route(
+            "/v1/local/orchestration/capabilities",
+            get(handlers::orchestration::capabilities::list_capabilities),
+        )
+        .route(
+            "/v1/local/orchestration/presets",
+            get(handlers::orchestration::presets::list_presets),
+        );
+
     Router::new()
         .merge(runtime_routes)
         .merge(monitoring_routes)
@@ -186,6 +209,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(acp_routes)
         .merge(session_routes)
         .merge(memory_routes)
+        .merge(orchestration_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
