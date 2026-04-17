@@ -164,7 +164,7 @@ impl LocalSetBridge {
     ///
     /// Returns an error if the bridge has been shut down or the receiver was dropped.
     #[allow(dead_code)]
-    pub async fn execute<F, T>(&self, f: F) -> crate::acp::AcpResult<T>
+    pub async fn execute<F, T>(&self, f: F) -> crate::AcpResult<T>
     where
         F: FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'static>>
             + Send
@@ -187,11 +187,11 @@ impl LocalSetBridge {
         };
 
         self.request_tx.send(Some(wrapper)).await.map_err(|_| {
-            crate::acp::AcpError::connection_failed("LocalSet bridge channel closed")
+            crate::AcpError::connection_failed("LocalSet bridge channel closed")
         })?;
 
         response_rx.await.map_err(|_| {
-            crate::acp::AcpError::connection_failed("LocalSet bridge response channel closed")
+            crate::AcpError::connection_failed("LocalSet bridge response channel closed")
         })
     }
 
@@ -214,7 +214,7 @@ impl LocalSetBridge {
         f: F,
         timeout_duration: Duration,
         operation_name: &str,
-    ) -> crate::acp::AcpResult<T>
+    ) -> crate::AcpResult<T>
     where
         F: FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'static>>
             + Send
@@ -223,7 +223,7 @@ impl LocalSetBridge {
     {
         tokio::time::timeout(timeout_duration, self.execute(f))
             .await
-            .map_err(|_| crate::acp::AcpError::timeout(operation_name, timeout_duration))?
+            .map_err(|_| crate::AcpError::timeout(operation_name, timeout_duration))?
     }
 }
 
@@ -366,7 +366,7 @@ mod tests {
     async fn bridge_timeout_expires() {
         let bridge = LocalSetBridge::new();
 
-        let result: crate::acp::AcpResult<i32> = bridge
+        let result: crate::AcpResult<i32> = bridge
             .execute_with_timeout(
                 || {
                     Box::pin(async move {
@@ -382,7 +382,7 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, crate::acp::AcpError::Timeout { .. }));
+        assert!(matches!(err, crate::AcpError::Timeout { .. }));
 
         // Give the bridge time to clean up the pending task
         tokio::time::sleep(Duration::from_millis(100)).await;
