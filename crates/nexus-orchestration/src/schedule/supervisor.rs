@@ -289,6 +289,46 @@ impl ScheduleSupervisor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Boot/Shutdown helpers (WS7 T9)
+// ---------------------------------------------------------------------------
+
+impl ScheduleSupervisor {
+    /// Resume any Running schedules as Paused (daemon restart recovery).
+    ///
+    /// On daemon boot, Running schedules are paused with the given reason so
+    /// the user can explicitly resume them. This prevents stale sessions
+    /// from continuing after a daemon restart.
+    pub async fn resume_running_as_paused(&self, reason: &str) -> Result<usize, SupervisorError> {
+        let now = chrono::Utc::now().timestamp();
+
+        let rows = sqlx::query_as::<_, (String,)>(
+            "SELECT schedule_id FROM creator_schedules WHERE status = 'running'",
+        )
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let count = rows.len();
+        for (sid,) in rows {
+            sqlx::query(
+                "UPDATE creator_schedules SET status = 'paused', updated_at = ?1
+                 WHERE schedule_id = ?2 AND status = 'running'",
+            )
+            .bind(now)
+            .bind(&sid)
+            .execute(&*self.pool)
+            .await?;
+            tracing::info!("paused schedule {} (reason: {})", sid, reason);
+        }
+
+        if count > 0 {
+            tracing::info!("paused {} running schedule(s) (reason: {})", count, reason);
+        }
+
+        Ok(count)
+    }
+}
+
 /// Internal row mapping for reading `creator_schedules` from SQLite.
 #[derive(sqlx::FromRow)]
 struct ScheduleRow {
@@ -358,5 +398,84 @@ impl ScheduleRow {
             updated_at: self.updated_at.to_string(),
             terminated_at: self.terminated_at.map(|t| t.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_t9 {
+    use super::*;
+
+    async fn test_supervisor_with_db() -> Arc<ScheduleSupervisor> {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        std::mem::forget(dir);
+        Arc::new(ScheduleSupervisor::new(Arc::new(pool)))
+    }
+
+    async fn insert_schedule(sup: &ScheduleSupervisor, id: &str, status: &str) {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            r#"INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version,
+                created_at, updated_at)
+               VALUES (?1, 'test-creator', 'test-preset', 1, ?2,
+               'serial', 0, ?3, ?3)"#,
+        )
+        .bind(id)
+        .bind(status)
+        .bind(now)
+        .execute(&*sup.pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn daemon_restart_preserves_running_schedule_as_paused() {
+        let sup = test_supervisor_with_db().await;
+
+        // Insert a running schedule (simulating a pre-crash state).
+        insert_schedule(&sup, "S01", "running").await;
+
+        // Verify it's running.
+        assert_eq!(sup.status_of("S01").await, ScheduleStatus::Running);
+
+        // Simulate daemon boot: resume running as paused.
+        let count = sup
+            .resume_running_as_paused("daemon_restart")
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Verify it's now paused.
+        assert_eq!(sup.status_of("S01").await, ScheduleStatus::Paused);
+
+        // Calling again should be a no-op (no running schedules left).
+        let count2 = sup
+            .resume_running_as_paused("daemon_restart")
+            .await
+            .unwrap();
+        assert_eq!(count2, 0);
+    }
+
+    #[tokio::test]
+    async fn pending_schedules_unaffected_by_boot_resume() {
+        let sup = test_supervisor_with_db().await;
+
+        insert_schedule(&sup, "S01", "pending").await;
+        insert_schedule(&sup, "S02", "running").await;
+
+        let _ = sup.resume_running_as_paused("daemon_restart").await;
+
+        // Pending should still be pending.
+        assert_eq!(sup.status_of("S01").await, ScheduleStatus::Pending);
+        // Running should be paused.
+        assert_eq!(sup.status_of("S02").await, ScheduleStatus::Paused);
     }
 }
