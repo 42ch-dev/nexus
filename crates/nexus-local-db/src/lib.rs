@@ -11,6 +11,9 @@
 //! See `.agents/plans/knowledge/local-db-refactor-v1.md` for design baseline.
 
 pub mod identity;
+pub mod memory_fragment;
+pub mod pending_review;
+pub mod soul_meta;
 
 mod error;
 mod version;
@@ -28,6 +31,23 @@ pub use sqlx::SqlitePool;
 pub use identity::{
     create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
     list_local_identities, unlink_from_platform, LocalIdentityRow,
+};
+
+// Re-export soul_meta types
+pub use soul_meta::{
+    delete as delete_soul_meta, get as get_soul_meta, upsert as upsert_soul_meta, SoulMeta,
+};
+
+// Re-export pending_review types
+pub use pending_review::{
+    count_pending_reviews, create_pending_review, delete_pending_review, get_pending_review,
+    list_pending_reviews, PendingReviewRecord,
+};
+
+// Re-export memory_fragment types
+pub use memory_fragment::{
+    create_fragment, delete_fragment, get_all_keywords, list_fragments, list_fragments_by_session,
+    MemoryFragmentRecord,
 };
 
 /// Runtime role for database initialization
