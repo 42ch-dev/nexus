@@ -5,10 +5,11 @@
 //!
 //! Gated behind `#[cfg(any(test, feature = "test-support"))]`.
 
+use crate::api;
+use crate::workspace::WorkspaceState;
 use axum::Router;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
-use std::sync::Arc;use crate::api;
-use crate::workspace::WorkspaceState;
+use std::sync::Arc;
 
 /// Build an Axum app with an ephemeral in-memory orchestration engine.
 ///

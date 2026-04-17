@@ -44,18 +44,19 @@ impl Task for CapabilityTask {
         "capability_task"
     }
 
-    async fn run(&self, context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
         let name: String = context.get("_capability_name").await.unwrap_or_default();
-        let input: Value = context.get("_capability_input").await.unwrap_or(Value::Null);
+        let input: Value = context
+            .get("_capability_input")
+            .await
+            .unwrap_or(Value::Null);
 
-        let cap = self
-            .registry
-            .get(&name)
-            .ok_or_else(|| {
-                graph_flow::GraphError::TaskExecutionFailed(format!(
-                    "capability not found: {name}"
-                ))
-            })?;
+        let cap = self.registry.get(&name).ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
+        })?;
 
         match cap.run(input).await {
             Ok(output) => {
@@ -93,7 +94,10 @@ impl Task for RuleCheckTask {
         "rule_check_task"
     }
 
-    async fn run(&self, context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
         let rule: String = context.get("_rule").await.unwrap_or_default();
 
         let (passes, reason) = match rule.as_str() {
@@ -135,7 +139,10 @@ impl Task for ManualWaitTask {
         "manual_wait_task"
     }
 
-    async fn run(&self, _context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
+    async fn run(
+        &self,
+        _context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
         Ok(TaskResult::new(
             Some("waiting for manual input".to_string()),
             NextAction::WaitForInput,
@@ -159,7 +166,10 @@ impl Task for InnerGraphTask {
         "inner_graph_task"
     }
 
-    async fn run(&self, _context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
+    async fn run(
+        &self,
+        _context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
         Err(graph_flow::GraphError::TaskExecutionFailed(
             TaskExecError::WsUnwired {
                 feature: "inner_graph".to_string(),
@@ -184,21 +194,20 @@ impl Task for JudgeTask {
         "judge_task"
     }
 
-    async fn run(&self, context: graph_flow::Context) -> Result<TaskResult, graph_flow::GraphError> {
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
         let rule: String = context.get("_judge_rule").await.unwrap_or_default();
-        let _context_data: Value =
-            context.get("_judge_context_data").await.unwrap_or(Value::Null);
+        let _context_data: Value = context
+            .get("_judge_context_data")
+            .await
+            .unwrap_or(Value::Null);
 
         // Use a simple stub evaluator for now.
         let (result, reason) = match rule.as_str() {
-            "always_true" => (
-                true,
-                "judge.rule stub: always_true → go".to_string(),
-            ),
-            "always_false" => (
-                false,
-                "judge.rule stub: always_false → nogo".to_string(),
-            ),
+            "always_true" => (true, "judge.rule stub: always_true → go".to_string()),
+            "always_false" => (false, "judge.rule stub: always_false → nogo".to_string()),
             other => (false, format!("unsupported judge rule: '{other}'")),
         };
 

@@ -3,10 +3,10 @@
 //! Implements `nexus42 policy grant/deny/list` commands for managing
 //! permission policies (ACP-R7).
 
-use nexus_acp_host::{DefaultPolicy, PermissionPolicy};
 use crate::config::find_workspace_root;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_acp_host::{DefaultPolicy, PermissionPolicy};
 use std::path::PathBuf;
 
 /// Policy management commands

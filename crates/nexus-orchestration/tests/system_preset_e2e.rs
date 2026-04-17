@@ -4,8 +4,8 @@
 //! - `system_preset_runs_to_terminal_state`: runs the preset graph to completion.
 //! - `restart_durability_e2e`: verifies session survives engine restart.
 
-use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine, system_preset};
 use graph_flow::SessionStorage;
+use nexus_orchestration::{system_preset, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 /// Run the system preset graph and verify it reaches terminal state.
@@ -55,11 +55,9 @@ async fn restart_durability_e2e() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run_migrations");
-        let storage = Arc::new(
-            nexus_orchestration::storage::SqliteSessionStorage::new(
-                std::sync::Arc::new(pool),
-            ),
-        );
+        let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
+            std::sync::Arc::new(pool),
+        ));
         let engine = GraphFlowEngine::new_with_storage(storage);
         let graph = system_preset::build();
         let sid = engine
@@ -91,11 +89,9 @@ async fn restart_durability_e2e() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run_migrations v2");
-        let storage = Arc::new(
-            nexus_orchestration::storage::SqliteSessionStorage::new(
-                std::sync::Arc::new(pool),
-            ),
-        );
+        let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
+            std::sync::Arc::new(pool),
+        ));
 
         // Verify the session is still in the storage.
         let session = storage

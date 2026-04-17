@@ -136,9 +136,7 @@ pub fn enter_running(_ctx: Arc<ActionContext>) {
     // before the lifecycle transitions to Running. This action is a hook
     // for future resume logic (e.g. re-activating paused sessions after
     // daemon restart — WS7+).
-    tracing::info!(
-        "Running.entry: orchestration engine already active (started in main.rs)"
-    );
+    tracing::info!("Running.entry: orchestration engine already active (started in main.rs)");
 
     // Emit structured log event.
     tracing::info!(

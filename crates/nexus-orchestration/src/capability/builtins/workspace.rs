@@ -2,11 +2,11 @@
 //!
 //! Owner crate: `nexus-home-layout` (placeholder stubs).
 
+use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{WorkspaceCommitInput, WorkspaceCommitOutput};
 use nexus_contracts::local::orchestration::{WorkspaceOpenInput, WorkspaceOpenOutput};
 use serde_json::Value;
-use crate::capability::{Capability, CapabilityError};
 
 // ---------------------------------------------------------------------------
 // workspace.open
@@ -32,9 +32,8 @@ impl Capability for WorkspaceOpen {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: WorkspaceOpenInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("workspace.open input: {e}"))
-        })?;
+        let _input: WorkspaceOpenInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("workspace.open input: {e}")))?;
         let output = WorkspaceOpenOutput {
             workspace_path: "/tmp/nexus-workspace".to_string(),
             created: false,
@@ -68,9 +67,8 @@ impl Capability for WorkspaceCommit {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: WorkspaceCommitInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("workspace.commit input: {e}"))
-        })?;
+        let _input: WorkspaceCommitInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("workspace.commit input: {e}")))?;
         let output = WorkspaceCommitOutput {
             revision: "stub-revision".to_string(),
         };

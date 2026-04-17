@@ -2,11 +2,11 @@
 //!
 //! Owner crate: `nexus-sync` (placeholder stubs until integration is wired).
 
+use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{SyncPullInput, SyncPullOutput};
 use nexus_contracts::local::orchestration::{SyncPushInput, SyncPushOutput};
 use serde_json::Value;
-use crate::capability::{Capability, CapabilityError};
 
 // ---------------------------------------------------------------------------
 // sync.pull
@@ -33,9 +33,8 @@ impl Capability for SyncPull {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: SyncPullInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("sync.pull input: {e}"))
-        })?;
+        let _input: SyncPullInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("sync.pull input: {e}")))?;
         // Stub: no actual sync performed.
         let output = SyncPullOutput {
             deltas_pulled: 0,
@@ -70,12 +69,9 @@ impl Capability for SyncPush {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: SyncPushInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("sync.push input: {e}"))
-        })?;
-        let output = SyncPushOutput {
-            entries_pushed: 0,
-        };
+        let _input: SyncPushInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("sync.push input: {e}")))?;
+        let output = SyncPushOutput { entries_pushed: 0 };
         serde_json::to_value(output)
             .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
     }

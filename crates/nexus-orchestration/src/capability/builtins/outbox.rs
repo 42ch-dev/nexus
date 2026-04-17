@@ -2,11 +2,11 @@
 //!
 //! Owner crate: `nexus-sync` (flush), `nexus-local-db` (compact).
 
+use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{OutboxCompactInput, OutboxCompactOutput};
 use nexus_contracts::local::orchestration::{OutboxFlushInput, OutboxFlushOutput};
 use serde_json::Value;
-use crate::capability::{Capability, CapabilityError};
 
 // ---------------------------------------------------------------------------
 // outbox.flush
@@ -32,9 +32,8 @@ impl Capability for OutboxFlush {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: OutboxFlushInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("outbox.flush input: {e}"))
-        })?;
+        let _input: OutboxFlushInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("outbox.flush input: {e}")))?;
         let output = OutboxFlushOutput { flushed: 0 };
         serde_json::to_value(output)
             .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
@@ -65,9 +64,8 @@ impl Capability for OutboxCompact {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: OutboxCompactInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("outbox.compact input: {e}"))
-        })?;
+        let _input: OutboxCompactInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("outbox.compact input: {e}")))?;
         let output = OutboxCompactOutput {
             removed: 0,
             retained: 0,
@@ -91,7 +89,10 @@ mod tests {
     #[tokio::test]
     async fn outbox_compact_smoke() {
         let cap = OutboxCompact;
-        let out = cap.run(serde_json::json!({"retentionDays": 30})).await.unwrap();
+        let out = cap
+            .run(serde_json::json!({"retentionDays": 30}))
+            .await
+            .unwrap();
         assert_eq!(out["removed"], 0);
         assert_eq!(out["retained"], 0);
     }

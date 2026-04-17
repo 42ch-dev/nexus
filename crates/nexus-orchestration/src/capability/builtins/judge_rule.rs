@@ -2,10 +2,10 @@
 //!
 //! `judge.llm` is deferred to WS3.
 
+use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{JudgeRuleInput, JudgeRuleOutput};
 use serde_json::Value;
-use crate::capability::{Capability, CapabilityError};
 
 /// Evaluate a pure rule (AST over context data).
 ///
@@ -33,15 +33,11 @@ impl Capability for JudgeRule {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let input: JudgeRuleInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("judge.rule input: {e}"))
-        })?;
+        let input: JudgeRuleInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("judge.rule input: {e}")))?;
 
         let (result, reason) = match input.rule.as_str() {
-            "always_true" => (
-                true,
-                "stub rule: always_true evaluates to go".to_string(),
-            ),
+            "always_true" => (true, "stub rule: always_true evaluates to go".to_string()),
             "always_false" => (
                 false,
                 "stub rule: always_false evaluates to nogo".to_string(),

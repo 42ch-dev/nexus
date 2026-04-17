@@ -8,6 +8,6 @@ pub mod system_preset;
 pub mod tasks;
 pub mod worker;
 
-pub use capability::{Capability, CapabilityRegistry, CapabilityError};
+pub use capability::{Capability, CapabilityError, CapabilityRegistry};
 pub use engine::{EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use worker::WorkerManager;

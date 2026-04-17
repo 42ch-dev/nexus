@@ -14,7 +14,7 @@ use crate::db::pool::{DbPool, PoolConfig};
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_orchestration::{
-    engine::OrchestrationEngine, Capability, CapabilityRegistry, WorkerManager,
+    engine::OrchestrationEngine, CapabilityRegistry, WorkerManager,
 };
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;

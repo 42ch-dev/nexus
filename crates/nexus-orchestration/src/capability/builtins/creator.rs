@@ -4,13 +4,13 @@
 //!
 //! **Stubs**: return synthetic output until domain integration is wired.
 
+use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{
     CreatorInjectPromptInput, CreatorInjectPromptOutput, CreatorReadMemoryInput,
     CreatorReadMemoryOutput, CreatorWriteMemoryInput, CreatorWriteMemoryOutput,
 };
 use serde_json::Value;
-use crate::capability::{Capability, CapabilityError};
 
 // ---------------------------------------------------------------------------
 // creator.read_memory
@@ -114,7 +114,10 @@ mod tests {
     #[tokio::test]
     async fn read_memory_smoke() {
         let cap = CreatorReadMemory;
-        let out = cap.run(serde_json::json!({"keyword": "test"})).await.unwrap();
+        let out = cap
+            .run(serde_json::json!({"keyword": "test"}))
+            .await
+            .unwrap();
         assert_eq!(out["count"], 0);
     }
 

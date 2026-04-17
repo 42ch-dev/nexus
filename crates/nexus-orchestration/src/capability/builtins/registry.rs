@@ -5,10 +5,10 @@
 //! **Stub**: returns synthetic output. Real implementation needs network access
 //! to the ACP registry CDN.
 
+use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{RegistryRefreshInput, RegistryRefreshOutput};
 use serde_json::Value;
-use crate::capability::{Capability, CapabilityError};
 
 /// Refresh the ACP registry cache.
 pub struct RegistryRefresh;
@@ -28,9 +28,8 @@ impl Capability for RegistryRefresh {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: RegistryRefreshInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("registry.refresh input: {e}"))
-        })?;
+        let _input: RegistryRefreshInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("registry.refresh input: {e}")))?;
         // Stub: no actual network call.
         let output = RegistryRefreshOutput {
             cache_age_ms: 0,

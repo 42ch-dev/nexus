@@ -15,11 +15,11 @@
 //!     └─► delete ──► SessionManager::delete_session()
 //! ```
 
-use nexus_acp_host::{SessionEntry, SessionManager};
 use crate::config::CliConfig;
 use crate::errors::Result;
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
+use nexus_acp_host::{SessionEntry, SessionManager};
 
 // ── Command definitions ────────────────────────────────────────────
 
