@@ -4,19 +4,19 @@
 //! lifecycle-controlled startup/shutdown. Real implementations where possible,
 //! mock stubs for WS2 components (Engine, WorkerMgr) not yet available.
 
-mod http;
 mod db;
-mod sync;
 mod engine;
-mod worker_mgr;
+mod http;
 mod mock_all;
+mod sync;
+mod worker_mgr;
 
-pub use http::HttpSubsystem;
 pub use db::DbSubsystem;
-pub use sync::SyncSubsystem;
 pub use engine::EngineSubsystem;
-pub use worker_mgr::WorkerMgrSubsystem;
+pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
+pub use sync::SyncSubsystem;
+pub use worker_mgr::WorkerMgrSubsystem;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

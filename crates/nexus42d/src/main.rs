@@ -141,14 +141,10 @@ async fn main() -> anyhow::Result<()> {
     // Set up signal handlers
     let lifecycle_for_signals = Arc::clone(&lifecycle);
     tokio::spawn(async move {
-        let mut sigterm = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::terminate(),
-        )
-        .expect("Failed to register SIGTERM handler");
-        let mut sigint = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::interrupt(),
-        )
-        .expect("Failed to register SIGINT handler");
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to register SIGTERM handler");
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("Failed to register SIGINT handler");
 
         tokio::select! {
             _ = sigterm.recv() => {
@@ -295,10 +291,12 @@ async fn main() -> anyhow::Result<()> {
 ///
 /// Note: Engine and WorkerMgr are mock implementations until WS2 creates
 /// the nexus-orchestration crate with real implementations.
-fn create_subsystems(state: &WorkspaceState, port: u16) -> Vec<Arc<dyn nexus42d::lifecycle::SubsystemBootstrap>> {
+fn create_subsystems(
+    state: &WorkspaceState,
+    port: u16,
+) -> Vec<Arc<dyn nexus42d::lifecycle::SubsystemBootstrap>> {
     use nexus42d::lifecycle::{
-        HttpSubsystem, DbSubsystem, SyncSubsystem,
-        EngineSubsystem, WorkerMgrSubsystem,
+        DbSubsystem, EngineSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem,
     };
 
     vec![

@@ -9,8 +9,7 @@
 use std::time::Duration;
 
 use nexus42d::lifecycle::{
-    Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind,
-    MockAllSubsystems,
+    Event, Lifecycle, LifecycleState, MockAllSubsystems, StatigLifecycle, SubsystemKind,
 };
 
 /// Test: SubsystemBootstrap trait implementations.
@@ -77,7 +76,7 @@ async fn lifecycle_transitions_to_running_on_subsystem_ups() {
 
     // Simulate startup
     lifecycle.dispatch(Event::ProcessStarted);
-    
+
     // Dispatch all subsystem ups
     for kind in SubsystemKind::mandatory() {
         lifecycle.dispatch(Event::SubsystemUp(*kind));

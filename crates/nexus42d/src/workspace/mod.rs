@@ -178,7 +178,10 @@ impl WorkspaceState {
 
     /// Get exit code from lifecycle, if set.
     pub fn lifecycle_exit_code(&self) -> Option<i32> {
-        self.lifecycle.as_ref().as_ref().and_then(|lc| lc.exit_code())
+        self.lifecycle
+            .as_ref()
+            .as_ref()
+            .and_then(|lc| lc.exit_code())
     }
 
     /// Get a reference to the underlying sqlx pool.
