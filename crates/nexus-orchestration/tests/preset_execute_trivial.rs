@@ -68,6 +68,11 @@ async fn linear_two_state_preset_executes_to_terminal() {
     // - After resume, re-run `start` → Continue → moves to `end` (Paused)
     // - Next step runs `end` → End → Completed
     for _ in 0..16 {
+        let o = engine.run_step(&sid).await.expect("run_step loop");
+        if matches!(o, StepOutcome::Completed { .. }) {
+            break;
+        }
+    }
 
     let final_status = engine.get_status(&sid).await.expect("get_status");
     assert!(

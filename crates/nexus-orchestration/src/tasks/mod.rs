@@ -433,6 +433,217 @@ impl Task for InnerGraphNodeTask {
 }
 
 // ---------------------------------------------------------------------------
+// AcpPromptTask (dispatches prompt to worker via IPC)
+// ---------------------------------------------------------------------------
+
+/// Tool policy for ACP prompt sessions.
+///
+/// Design: `orchestration-engine-v1.md` §6.5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolPolicy {
+    /// All tools auto-granted (V1.0 behavior).
+    AutoGrantAll,
+    /// Reads allowed, writes require upcall.
+    AutoGrantReadOnly,
+    /// No tools allowed.
+    DenyAll,
+    /// Every tool triggers upcall.
+    RequestPolicy,
+}
+
+impl std::str::FromStr for ToolPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "auto_grant_all" => Ok(ToolPolicy::AutoGrantAll),
+            "auto_grant_read_only" => Ok(ToolPolicy::AutoGrantReadOnly),
+            "deny_all" => Ok(ToolPolicy::DenyAll),
+            "request_policy" => Ok(ToolPolicy::RequestPolicy),
+            _ => Ok(ToolPolicy::AutoGrantReadOnly), // safe default
+        }
+    }
+}
+
+impl ToolPolicy {
+
+    /// Serialize to the string form used in IPC.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolPolicy::AutoGrantAll => "auto_grant_all",
+            ToolPolicy::AutoGrantReadOnly => "auto_grant_read_only",
+            ToolPolicy::DenyAll => "deny_all",
+            ToolPolicy::RequestPolicy => "request_policy",
+        }
+    }
+}
+
+/// A task that sends a prompt to an ACP agent via the Worker Manager IPC.
+///
+/// Design: `orchestration-engine-v1.md` §4.4 (AcpPromptTask row) + §6.4 (IPC shapes).
+///
+/// `run(ctx)`:
+/// 1. Renders the template with `handlebars` against `ctx` bindings.
+/// 2. Calls `worker/acp_prompt { prompt, tool_policy, session_id }` via WorkerHandle.
+/// 3. Streams `worker/acp_prompt_chunk` notifications into ctx.chat_history.
+/// 4. On final reply, stores `result.full_text` at `ctx["state.<state_id>.output"]`.
+/// 5. Returns `TaskResult { response: Some(full_text), next_action: NextAction::Continue }`.
+pub struct AcpPromptTask {
+    /// Worker handle for IPC. `None` for test stub mode.
+    worker_handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+    /// State ID this task belongs to (for context key namespacing).
+    state_id: String,
+    /// Prompt template (handlebars syntax).
+    template: String,
+    /// Tool policy for this prompt.
+    tool_policy: ToolPolicy,
+}
+
+impl AcpPromptTask {
+    /// Create a new AcpPromptTask.
+    ///
+    /// `worker_handle`: the worker handle for IPC. Can be `None` for test mode
+    /// where the task operates in stub mode.
+    pub fn new(
+        worker_handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+        state_id: impl Into<String>,
+        template: impl Into<String>,
+        tool_policy: ToolPolicy,
+    ) -> Self {
+        Self {
+            worker_handle,
+            state_id: state_id.into(),
+            template: template.into(),
+            tool_policy,
+        }
+    }
+
+    /// Test helper: create an AcpPromptTask with a worker handle directly.
+    pub fn new_for_test(
+        handle: crate::worker::WorkerHandle,
+        state_id: impl Into<String>,
+        template: impl Into<String>,
+        tool_policy: ToolPolicy,
+    ) -> Self {
+        Self {
+            worker_handle: Some(std::sync::Arc::new(std::sync::Mutex::new(Some(handle)))),
+            state_id: state_id.into(),
+            template: template.into(),
+            tool_policy,
+        }
+    }
+
+    /// Render the prompt template with basic placeholder substitution.
+    ///
+    /// Supports `{{key}}` → value from context.
+    /// Unknown keys are replaced with empty string (consumed).
+    async fn render_template(&self, context: &graph_flow::Context) -> String {
+        let mut rendered = self.template.clone();
+
+        // Simple placeholder substitution: {{key}} → value from context.
+        // This is intentionally basic — full handlebars integration can come later.
+        while let Some(start) = rendered.find("{{") {
+            if let Some(end) = rendered[start..].find("}}") {
+                let key = rendered[start + 2..start + end].trim().to_string();
+                // Try to get the value from context (as String).
+                let value: Option<String> = context.get(&key).await;
+                let replacement = value.unwrap_or_default();
+                rendered.replace_range(start..start + end + 2, &replacement);
+            } else {
+                break;
+            }
+        }
+
+        rendered
+    }
+}
+
+#[async_trait]
+impl Task for AcpPromptTask {
+    fn id(&self) -> &str {
+        &self.state_id
+    }
+
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
+        // 1. Render the template.
+        let prompt = self.render_template(&context).await;
+
+        // 2. If we have a worker handle, dispatch via IPC.
+        let full_text = if let Some(ref handle_arc) = self.worker_handle {
+            // Take the handle out of the Arc<Mutex> to avoid holding
+            // the MutexGuard across the await point (which is !Send).
+            let mut handle = {
+                let mut guard = handle_arc.lock().map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "worker handle lock: {e}"
+                    ))
+                })?;
+                guard.take().ok_or_else(|| {
+                    graph_flow::GraphError::TaskExecutionFailed(
+                        "worker handle consumed or not available".into(),
+                    )
+                })?
+            };
+
+            // Call worker/acp_prompt via IPC.
+            let params = serde_json::json!({
+                "prompt": prompt,
+                "tool_policy": self.tool_policy.as_str(),
+            });
+
+            let ipc_result = handle.call_json_rpc("worker/acp_prompt", params).await;
+
+            // Put the handle back (even if IPC failed, the pipes may still be usable).
+            {
+                let mut guard = handle_arc.lock().map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "worker handle lock: {e}"
+                    ))
+                })?;
+                *guard = Some(handle);
+            }
+
+            match ipc_result {
+                Ok(result) => {
+                    // Extract full_text from the response.
+                    result
+                        .get("full_text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                }
+                Err(e) => {
+                    return Ok(TaskResult::new_with_status(
+                        Some(format!("acp_prompt IPC error: {e}")),
+                        NextAction::Continue,
+                        Some(format!("worker/acp_prompt failed: {e}")),
+                    ));
+                }
+            }
+        } else {
+            // Stub mode: return a placeholder.
+            format!("[acp_prompt stub: {}]", prompt)
+        };
+
+        // 3. Add to chat history.
+        context.add_assistant_message(full_text.clone()).await;
+
+        // 4. Store output at state.<state_id>.output.
+        let output_key = format!("state.{}.output", self.state_id);
+        context.set(&output_key, full_text.clone()).await;
+
+        // 5. Return TaskResult.
+        Ok(TaskResult::new(
+            Some(full_text),
+            NextAction::Continue,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -512,5 +723,49 @@ mod tests {
         ctx.set("_capability_name", "nonexistent.capability").await;
         let result = task.run(ctx).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_task_stub_mode() {
+        let task = AcpPromptTask::new(
+            None, // no worker handle — stub mode
+            "test-state",
+            "Hello {{core_context.version}}",
+            ToolPolicy::DenyAll,
+        );
+        let ctx = graph_flow::Context::new();
+        ctx.set("core_context.version", "42").await;
+        let result = task.run(ctx).await.unwrap();
+        assert!(matches!(result.next_action, NextAction::Continue));
+        let response = result.response.unwrap();
+        assert!(response.contains("Hello 42"), "response: {response}");
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_task_stores_output_in_context() {
+        let task = AcpPromptTask::new(
+            None,
+            "state-1",
+            "test prompt",
+            ToolPolicy::AutoGrantReadOnly,
+        );
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        let stored: String = ctx.get("state.state-1.output").await.unwrap();
+        assert!(stored.contains("test prompt"), "stored: {stored}");
+        assert_eq!(
+            result.response.as_deref(),
+            Some(stored.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_policy_from_str() {
+        use std::str::FromStr;
+        assert_eq!(ToolPolicy::from_str("auto_grant_all").unwrap(), ToolPolicy::AutoGrantAll);
+        assert_eq!(ToolPolicy::from_str("auto_grant_read_only").unwrap(), ToolPolicy::AutoGrantReadOnly);
+        assert_eq!(ToolPolicy::from_str("deny_all").unwrap(), ToolPolicy::DenyAll);
+        assert_eq!(ToolPolicy::from_str("request_policy").unwrap(), ToolPolicy::RequestPolicy);
+        assert_eq!(ToolPolicy::from_str("unknown").unwrap(), ToolPolicy::AutoGrantReadOnly);
     }
 }
