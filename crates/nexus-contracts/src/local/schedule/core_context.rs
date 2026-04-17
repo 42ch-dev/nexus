@@ -67,6 +67,19 @@ pub enum DerivationStep {
     PresetSeedExpansion { capability: String },
 }
 
+impl DerivationStep {
+    /// Construct a `LlmSummarize` variant.
+    ///
+    /// This is the only way to create this variant outside the defining crate
+    /// because the variant is `#[non_exhaustive]`.
+    pub fn llm_summarize(capability: String, prompt_hash: [u8; 32]) -> Self {
+        Self::LlmSummarize {
+            capability,
+            prompt_hash,
+        }
+    }
+}
+
 /// Edit operations for user-driven `core_context` changes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
