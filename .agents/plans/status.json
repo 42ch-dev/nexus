@@ -51,7 +51,7 @@
     },
     {
       "id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
-      "status": "InProgress",
+      "status": "InReview",
       "file": ".agents/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
       "title": "V1.4 WS2 — Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
       "owner": "fullstack-dev",
@@ -63,7 +63,7 @@
       ],
       "created_at": "2026-04-17",
       "updated_at": "2026-04-18",
-      "notes": "Batch ① done (T1 crate scaffold + T2 engine trait). Batch ② done (T3 SqliteSessionStorage + T4 Capability trait). Batch ③ done (T5 Worker Manager + IPC + T6 system preset E2E). Remaining: T7-T10 (HTTP endpoints, daemon wiring, compat shim removal, final gate).",
+      "notes": "All 10 tasks done (T1-T6 in Batches ①-③, T7-T10 in Batch ④). Full CI gate passed. Ready for QC triple-review + QA verification.",
       "metadata": {
         "priority": "high",
         "phase": "V1.4-M2",
@@ -88,8 +88,23 @@
           "7f2fe01 feat(orchestration): SqliteSessionStorage + orchestration_sessions migration (WS2 T3)",
           "43a8386 feat(orchestration): Capability trait + non-ACP built-ins + standard Task impls (WS2 T4)",
           "bbddcc6 feat(orchestration): Worker Manager + jsonrpsee-core stdio NDJSON IPC (WS2 T5)",
-          "16a93df feat(orchestration): _system.maintenance hardcoded graph + E2E smoke (WS2 T6)"
-        ]
+          "16a93df feat(orchestration): _system.maintenance hardcoded graph + E2E smoke (WS2 T6)",
+          "a0a82e6 feat(daemon): /v1/local/orchestration/* engine-session endpoints (WS2 T7)",
+          "754db03 feat(daemon): wire engine + worker manager + system preset at boot (WS2 T8)",
+          "aa628ed refactor(nexus42): remove WS1 ACP compat shim; import directly from nexus-acp-host (WS2 T9)",
+          "cb467e2 chore(ci): pass full CI gate — fmt + clippy + unused import cleanup (WS2 T10)"
+        ],
+        "gates": {
+          "cargo_build": "pass",
+          "cargo_test": "pass",
+          "cargo_fmt": "pass",
+          "cargo_clippy": "pass",
+          "validate_schemas": "pass",
+          "codegen_no_diff": "pass",
+          "linkage_gate": "pass",
+          "http_smoke_tests": "pass (4/4)",
+          "boot_integration_test": "pass (engine_started_at_boot)"
+        }
       }
     },
     {
@@ -316,23 +331,23 @@
           "decision": "accept",
           "owner": "qa-engineer / fullstack-dev-2",
           "target_date": "V1.5",
-        "tracking_link": null
-      }
-    ],
-    "2026-04-17-v1.4-ws5-schemas-boundary": [
-      {
-        "id": "R1",
-        "title": "Audit table header says 11 local but 10 were actually moved",
-        "severity": "nit",
-        "source": "qc3 S1",
-        "scope": "schemas-boundary-v1.md §5.2",
-        "decision": "accept",
-        "owner": "fullstack-dev",
-        "target_date": "V1.5",
-        "tracking_link": null
-      }
-    ]
-  },
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws5-schemas-boundary": [
+        {
+          "id": "R1",
+          "title": "Audit table header says 11 local but 10 were actually moved",
+          "severity": "nit",
+          "source": "qc3 S1",
+          "scope": "schemas-boundary-v1.md §5.2",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ]
+    },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
     }
