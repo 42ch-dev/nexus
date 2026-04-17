@@ -58,10 +58,14 @@ impl StdioTransport {
 #[async_trait]
 impl RpcTransport for StdioTransport {
     async fn recv(&mut self) -> Option<String> {
-        self.reader
-            .next()
-            .await
-            .map(|r| r.expect("LinesCodec error"))
+        match self.reader.next().await {
+            Some(Ok(line)) => Some(line),
+            Some(Err(e)) => {
+                tracing::warn!(error = %e, "LinesCodec read error; closing transport");
+                None
+            }
+            None => None,
+        }
     }
 
     async fn send(&mut self, line: String) -> io::Result<()> {
@@ -111,10 +115,14 @@ impl DuplexTransport {
 #[async_trait]
 impl RpcTransport for DuplexTransport {
     async fn recv(&mut self) -> Option<String> {
-        self.read_half
-            .next()
-            .await
-            .map(|r| r.expect("LinesCodec error"))
+        match self.read_half.next().await {
+            Some(Ok(line)) => Some(line),
+            Some(Err(e)) => {
+                tracing::warn!(error = %e, "LinesCodec read error; closing transport");
+                None
+            }
+            None => None,
+        }
     }
 
     async fn send(&mut self, line: String) -> io::Result<()> {

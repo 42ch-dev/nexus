@@ -27,7 +27,8 @@ use nexus42d::api;
 use nexus42d::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
 use nexus42d::workspace::WorkspaceState;
 use nexus_orchestration::{
-    engine::OrchestrationEngine, system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
+    engine::{EngineSignal, OrchestrationEngine},
+    system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -139,9 +140,12 @@ async fn main() -> anyhow::Result<()> {
     );
     let concrete_engine = GraphFlowEngine::new_with_storage(storage);
 
+    // Create shared capability registry — used by system_preset and worker manager.
+    let capabilities = Arc::new(CapabilityRegistry::with_builtins());
+
     // Kick off _system.maintenance session on the concrete engine
     // (start_session is a GraphFlowEngine method, not on the trait).
-    let sys_graph = system_preset::build();
+    let sys_graph = system_preset::build(capabilities.clone());
     match concrete_engine
         .start_session("_system.maintenance", sys_graph)
         .await
@@ -158,7 +162,6 @@ async fn main() -> anyhow::Result<()> {
     // Wrap in trait object for WorkspaceState.
     let engine: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine);
     let workers = Arc::new(WorkerManager::new());
-    let capabilities = Arc::new(CapabilityRegistry::with_builtins());
 
     state.set_engine(engine);
     state.set_worker_manager(workers);
@@ -178,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Set up signal handlers
     let lifecycle_for_signals = Arc::clone(&lifecycle);
+    let state_for_signals = state.clone();
     tokio::spawn(async move {
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("Failed to register SIGTERM handler");
@@ -190,12 +194,14 @@ async fn main() -> anyhow::Result<()> {
                 lifecycle_for_signals.dispatch(Event::ShutdownRequested {
                     source: "signal".into(),
                 });
+                state_for_signals.request_shutdown();
             }
             _ = sigint.recv() => {
                 tracing::info!("SIGINT received (Ctrl+C)");
                 lifecycle_for_signals.dispatch(Event::ShutdownRequested {
                     source: "signal".into(),
                 });
+                state_for_signals.request_shutdown();
             }
         }
     });
@@ -214,7 +220,42 @@ async fn main() -> anyhow::Result<()> {
         previous_hook(info);
     }));
 
+    // Spawn graceful shutdown watcher: drains engine sessions + terminates workers
+    // when shutdown_notify fires.
+    {
+        let state_for_shutdown = state.clone();
+        tokio::spawn(async move {
+            state_for_shutdown.shutdown_notify().notified().await;
+            tracing::info!("Shutdown notify received — draining engine sessions and workers");
+
+            // Cancel all active engine sessions.
+            if let Some(engine) = state_for_shutdown.engine() {
+                match engine.list_active(Default::default()).await {
+                    Ok(sessions) => {
+                        let count = sessions.len();
+                        for s in sessions {
+                            let _ =
+                                engine.signal(&s.session_id, EngineSignal::Cancel).await;
+                        }
+                        tracing::info!("cancelled {} active session(s)", count);
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to list active sessions for shutdown: {}", e);
+                    }
+                }
+            }
+
+            // Worker manager: each WorkerHandle cancels its child on Drop,
+            // and the supervisors send SIGTERM. The worker manager itself has
+            // no stateful workers list (they're owned by callers), so there's
+            // nothing extra to do here. Workers are cleaned up when their
+            // handles drop.
+            tracing::info!("engine + worker shutdown complete");
+        });
+    }
+
     // Build the router with lifecycle-enabled state
+    let shutdown_notify = state.shutdown_notify();
     let app = api::create_router(state);
 
     // Resolve transport
@@ -235,10 +276,9 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!("Press Ctrl+C to stop");
 
                 axum::serve(listener, app)
-                    .with_graceful_shutdown(async {
-                        // Wait for lifecycle to reach terminal state
-                        // The lifecycle handles graceful shutdown internally
-                        std::future::pending::<()>().await;
+                    .with_graceful_shutdown({
+                        let notify = Arc::clone(&shutdown_notify);
+                        async move { notify.notified().await; }
                     })
                     .await?;
             }
@@ -274,7 +314,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 }
                             }
-                            _ = std::future::pending::<()>() => {
+                            _ = shutdown_notify.notified() => {
                                 // Graceful shutdown triggered
                                 tracing::info!("Shutdown signal received");
                                 break;

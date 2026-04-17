@@ -19,6 +19,7 @@ use nexus_orchestration::{
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 /// Shared workspace state
 #[derive(Clone)]
@@ -53,6 +54,9 @@ pub struct WorkspaceState {
     worker_manager: Arc<Option<Arc<WorkerManager>>>,
     /// Capability registry (set at daemon startup when WS2 is wired).
     capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
+    /// Shutdown notification — fired when the daemon enters Stopping state.
+    /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
+    shutdown_notify: Arc<Notify>,
 }
 
 impl WorkspaceState {
@@ -82,6 +86,7 @@ impl WorkspaceState {
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
+            shutdown_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -119,6 +124,7 @@ impl WorkspaceState {
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
+            shutdown_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -172,6 +178,7 @@ impl WorkspaceState {
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
+            shutdown_notify: Arc::new(Notify::new()),
         })
     }
 
@@ -211,6 +218,20 @@ impl WorkspaceState {
     /// Get the capability registry, if set.
     pub fn capability_registry(&self) -> Option<Arc<CapabilityRegistry>> {
         self.capability_registry.as_ref().as_ref().cloned()
+    }
+
+    /// Get the shutdown notification handle.
+    ///
+    /// Callers await `.notified()` to block until the daemon enters Stopping state.
+    pub fn shutdown_notify(&self) -> Arc<Notify> {
+        Arc::clone(&self.shutdown_notify)
+    }
+
+    /// Request graceful shutdown — fires the shutdown notification.
+    ///
+    /// Called from lifecycle `Stopping` entry or signal handlers.
+    pub fn request_shutdown(&self) {
+        self.shutdown_notify.notify_one();
     }
 
     /// Get the lifecycle, if set.
