@@ -11,9 +11,7 @@ use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
 use nexus_contracts::Creator;
-use nexus_sync::platform_client::{
-    PlatformClient, VerifyStatus,
-};
+use nexus_sync::platform_client::{PlatformClient, VerifyStatus};
 use std::path::PathBuf;
 
 /// Default registration source for the CLI.
@@ -114,9 +112,11 @@ pub enum CredentialsAction {
 /// Run creator command
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        CreatorCommand::Register { name, summary, source } => {
-            register_creator(config, name, summary, source).await
-        }
+        CreatorCommand::Register {
+            name,
+            summary,
+            source,
+        } => register_creator(config, name, summary, source).await,
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref).await,
         CreatorCommand::List => list_creators(config).await,
@@ -270,10 +270,7 @@ async fn register_creator(
     println!("  Creator ID: {}", creator_id);
     println!(
         "  Verification code: {}",
-        &verification.verification_code[..verification
-            .verification_code
-            .len()
-            .min(16)]
+        &verification.verification_code[..verification.verification_code.len().min(16)]
     );
 
     // --- Step 3: Check challenge expiry (with buffer) ---
@@ -356,17 +353,15 @@ async fn register_creator(
         }),
         VerifyStatus::Locked => Err(CliError::CreatorVerificationFailed {
             status: "locked".to_string(),
-            message: "Account is permanently locked due to too many failed attempts."
-                .to_string(),
+            message: "Account is permanently locked due to too many failed attempts.".to_string(),
         }),
     }
 }
 
 /// Submit a verification answer with automatic retry on wrong answer.
 ///
-/// Retries up to `max_attempts` times. After the first wrong answer,
-/// re-solves the challenge and re-submits. On second failure, returns
-/// the last verification response.
+/// Retries the same answer once (D4). If both attempts fail, returns
+/// the error. Non-retryable statuses (Expired, Locked) return immediately.
 async fn submit_with_retry(
     client: &PlatformClient,
     verification_code: &str,
@@ -377,10 +372,16 @@ async fn submit_with_retry(
 
     for attempt in 1..=max_attempts {
         if attempt > 1 {
-            println!("  Retrying verification (attempt {}/{})...", attempt, max_attempts);
+            println!(
+                "  Retrying verification (attempt {}/{})...",
+                attempt, max_attempts
+            );
         }
 
-        let response = client.verify_creator(verification_code, answer).await?;
+        let response = client
+            .verify_creator(verification_code, answer)
+            .await
+            .map_err(CliError::verify_creator_error)?;
 
         match response.status {
             VerifyStatus::Verified => return Ok(response),
@@ -412,9 +413,10 @@ async fn submit_with_retry(
 /// Tries to extract a user access token from the auth store.
 /// If no token is found, returns an error suggesting the user authenticate.
 fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
-    // Look for any authenticated creator's token as a proxy for the user token.
-    // In a more complete implementation, we'd have a dedicated user token field.
-    // For V1.3, we check if any creator has an access token stored.
+    // V1.3 limitation: `obtain_auth_token` scans creator entries for
+    // non-empty access_token as a proxy for the user's auth token.
+    // A dedicated user token field (or platform session) would be more robust.
+    // This is sufficient for the current CLI-only registration flow.
     if let Some(creators) = &auth_store.creators {
         for state in creators.values() {
             if !state.access_token.is_empty() {
@@ -733,10 +735,7 @@ mod tests {
         let cli_err: CliError = sync_err.into();
         assert!(matches!(
             cli_err,
-            CliError::CreatorRegistrationFailed {
-                status: 502,
-                ..
-            }
+            CliError::CreatorRegistrationFailed { status: 502, .. }
         ));
     }
 
@@ -757,8 +756,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_test", "47", 2).await;
 
         assert!(result.is_ok());
@@ -780,8 +778,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_expired", "47", 2).await;
 
         assert!(result.is_ok());
@@ -803,8 +800,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_locked", "47", 2).await;
 
         assert!(result.is_ok());
@@ -839,8 +835,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_retry", "47", 2).await;
 
         assert!(result.is_ok());
@@ -867,8 +862,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_fail", "47", 2).await;
 
         assert!(result.is_ok());

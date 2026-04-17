@@ -79,6 +79,11 @@ impl AuthStore {
     /// is updated in place. Otherwise, a new entry is created with the API key
     /// and placeholder token fields (the token is populated separately during
     /// authentication).
+    ///
+    /// V1.3 residual: API key stored in plain-text JSON.
+    /// Acceptable for pre-1.0 — per AGENTS.md, local persistence
+    /// is not treated as a long-term migration contract.
+    /// Future: encrypt at rest or use platform-managed credentials.
     #[allow(dead_code)]
     pub fn store_creator_api_key(&mut self, creator_id: &str, api_key: &str) -> Result<()> {
         let creators = self
