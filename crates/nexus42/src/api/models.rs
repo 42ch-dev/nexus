@@ -1,6 +1,6 @@
 //! API response models for daemon communication
 
-use nexus_contracts::RuntimeMode;
+use nexus_contracts::local::domain::RuntimeMode;
 use serde::Deserialize;
 
 /// Runtime status response from daemon's `/v1/local/runtime/status` endpoint.
