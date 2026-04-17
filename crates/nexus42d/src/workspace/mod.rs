@@ -11,6 +11,7 @@
 pub mod manager;
 
 use crate::db::pool::{DbPool, PoolConfig};
+use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::RuntimeMode;
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
@@ -39,6 +40,9 @@ pub struct WorkspaceState {
     /// See R3(runtime) — a full file-watcher implementation is deferred.
     #[allow(dead_code)]
     cli_config_mtime: Option<std::time::SystemTime>,
+    /// Lifecycle HSM for daemon state management.
+    /// Set in T6 when main.rs wires up the lifecycle.
+    lifecycle: Arc<Option<Arc<StatigLifecycle>>>,
 }
 
 impl WorkspaceState {
@@ -64,6 +68,7 @@ impl WorkspaceState {
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
+            lifecycle: Arc::new(None),
         }
     }
 
@@ -97,6 +102,7 @@ impl WorkspaceState {
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
+            lifecycle: Arc::new(None),
         }
     }
 
@@ -146,7 +152,36 @@ impl WorkspaceState {
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
             runtime_mode,
             cli_config_mtime,
+            lifecycle: Arc::new(None),
         })
+    }
+
+    /// Set the lifecycle HSM for this workspace state.
+    /// Called from main.rs after constructing the lifecycle.
+    pub fn set_lifecycle(&mut self, lifecycle: Arc<StatigLifecycle>) {
+        self.lifecycle = Arc::new(Some(lifecycle));
+    }
+
+    /// Get the lifecycle, if set.
+    pub fn lifecycle(&self) -> Option<Arc<StatigLifecycle>> {
+        self.lifecycle.as_ref().as_ref().cloned()
+    }
+
+    /// Get the current lifecycle state.
+    /// Returns a default state if no lifecycle is set.
+    pub fn lifecycle_state(&self) -> LifecycleState {
+        match self.lifecycle.as_ref().as_ref() {
+            Some(lc) => lc.current_state(),
+            None => LifecycleState::Running, // Default to Running if no lifecycle
+        }
+    }
+
+    /// Get exit code from lifecycle, if set.
+    pub fn lifecycle_exit_code(&self) -> Option<i32> {
+        self.lifecycle
+            .as_ref()
+            .as_ref()
+            .and_then(|lc| lc.exit_code())
     }
 
     /// Get a reference to the underlying sqlx pool.

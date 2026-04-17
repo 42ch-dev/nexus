@@ -393,7 +393,9 @@ mod tests {
             .build()
             .expect("should build");
 
-        assert_eq!(bundle.schema_version, LATEST_SCHEMA_VERSION);
+        // Bundle uses schema_version=1 (sync wire contract, separate from local API schemas)
+        // LATEST_SCHEMA_VERSION may be higher due to local schemas like daemon-status-v2
+        assert_eq!(bundle.schema_version, 1);
         assert_eq!(bundle.workspace_id, "wrk_001");
         assert_eq!(bundle.world_id, "wld_001");
         assert_eq!(bundle.creator_id, "ctr_001");

@@ -9,6 +9,7 @@ pub mod api;
 pub mod auth;
 pub mod cli_config;
 pub mod db;
+pub mod lifecycle;
 pub mod workspace;
 
 /// Helpers for integration tests (also used by `tests/*.rs` in this crate).
