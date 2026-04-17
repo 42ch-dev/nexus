@@ -30,6 +30,15 @@ pub struct WorkspaceState {
     workspace_path: Arc<std::sync::Mutex<Option<String>>>,
     /// Runtime mode read from CLI config at startup.
     runtime_mode: RuntimeMode,
+    /// Staleness: file modification time of the CLI config at daemon startup.
+    /// Used to detect when CLI-side config changes may have occurred
+    /// (e.g., runtime mode, degradation state).
+    /// NOTE: This is a best-effort staleness check, not a real-time watcher.
+    /// The daemon reads config once at startup; changes made after that
+    /// are not reflected until the daemon is restarted.
+    /// See R3(runtime) — a full file-watcher implementation is deferred.
+    #[allow(dead_code)]
+    cli_config_mtime: Option<std::time::SystemTime>,
 }
 
 impl WorkspaceState {
@@ -53,6 +62,7 @@ impl WorkspaceState {
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
+            cli_config_mtime: None,
         }
     }
 
@@ -84,6 +94,7 @@ impl WorkspaceState {
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
+            cli_config_mtime: None,
         }
     }
 
@@ -99,6 +110,15 @@ impl WorkspaceState {
         // Read runtime mode from CLI config
         let cli_snapshot = crate::cli_config::CliConfigSnapshot::load(&nexus_home)?;
         let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
+
+        // R3(runtime): Record CLI config file modification time for staleness detection.
+        // This enables the daemon to detect when CLI-side config changes occurred
+        // (e.g., runtime mode switch). A full file-watcher is deferred; callers
+        // can compare this mtime against the current file mtime to detect drift.
+        let cli_config_path = nexus_home.join("config.json");
+        let cli_config_mtime = std::fs::metadata(&cli_config_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
 
         let db_path = crate::cli_config::resolve_state_db_path(&user_home, &nexus_home)?;
 
@@ -130,6 +150,7 @@ impl WorkspaceState {
             started_at: std::time::Instant::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
             runtime_mode,
+            cli_config_mtime,
         })
     }
 

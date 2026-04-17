@@ -171,6 +171,9 @@ impl From<LocalIdentity> for nexus_contracts::LocalIdentity {
 
 // ── ID generation helpers ──────────────────────────────────────────────
 
+// V1.2 residual R5 (identity, nit): UUID v4 vs counter-based ID generation
+// UUID v4 is collision-safe for expected scale; counter not required by spec
+
 /// Generate an anonymous identity ID: `ctr_anon` + 12 random hex chars.
 ///
 /// Format: `ctr_anonA1b2C3d4E5f6` (within CreatorId `^ctr_[a-zA-Z0-9]+$` pattern).

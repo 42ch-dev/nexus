@@ -9,6 +9,7 @@
 //!
 //! See creator-memory-soul-lifecycle-v1.md §7.2, §7.3.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
@@ -77,7 +78,14 @@ impl FromStr for TaskKind {
             "chapter" => Ok(Self::Chapter),
             "research" => Ok(Self::Research),
             "unknown" => Ok(Self::Unknown),
-            _ => Ok(Self::Unknown), // Fallback to Unknown for invalid values
+            other => {
+                // S-002: Log when an unrecognized task_kind is encountered
+                tracing::warn!(
+                    task_kind = other,
+                    "Unrecognized task_kind, falling back to Unknown"
+                );
+                Ok(Self::Unknown) // Fallback to Unknown for invalid values
+            }
         }
     }
 }
@@ -150,7 +158,18 @@ pub struct PendingReviewInput {
 /// ```
 pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
     let digest_len = record.raw_digest.len();
-    let task_kind: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
+    let task_kind: TaskKind = {
+        let parsed: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
+        if parsed == TaskKind::Unknown && record.task_kind.to_lowercase() != "unknown" {
+            // S-002: Already logged in FromStr, but ensure classification is aware
+            tracing::warn!(
+                task_kind = %record.task_kind,
+                pending_id = %record.pending_id,
+                "Classifying with Unknown task_kind due to unrecognized value"
+            );
+        }
+        parsed
+    };
 
     // Threshold constants
     const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
@@ -287,6 +306,8 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
     };
 
     // Default TTL based on task kind
+    // V1.2 residual R9 (pipeline, nit): Fragment TTL has no cleanup mechanism
+    // Fragment TTL cleanup deferred to V1.4; expired fragments consume disk until manual cleanup
     let ttl = match record
         .task_kind
         .parse::<TaskKind>()
@@ -445,7 +466,8 @@ fn extract_keywords(text: &str) -> Vec<String> {
         .map(|s| s.to_string())
         .collect();
 
-    // Filter stop words and dedupe
+    // Filter stop words and dedupe using HashSet for O(1) lookups (R13).
+    let mut seen: HashSet<String> = HashSet::new();
     let mut keywords: Vec<String> = Vec::new();
     for word in words {
         // Skip stop words
@@ -460,8 +482,8 @@ fn extract_keywords(text: &str) -> Vec<String> {
         if word.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        // Dedupe
-        if !keywords.contains(&word) {
+        // Dedupe via HashSet (O(1) instead of Vec::contains O(N))
+        if seen.insert(word.clone()) {
             keywords.push(word);
         }
     }
@@ -506,6 +528,9 @@ pub trait SessionDigestSummarizer: Send + Sync {
 /// Idempotency check (T5.10): The same `session_id` must not produce
 /// duplicate long-term memories. This function scans all memories
 /// for the creator and checks their `source_session_ids` frontmatter field.
+///
+// V1.2 residual R7 (pipeline, nit): O(N) idempotency check on promotion
+// O(N) file scan acceptable at current scale; optimize if review count exceeds ~1000
 ///
 /// Returns `true` if the session is already present in any memory's
 /// `source_session_ids` list.
@@ -627,6 +652,8 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     memory.validate()?;
 
     // 6. Generate slug from memory_id (strip mem_ prefix)
+    // V1.2 residual R10 (pipeline, nit): Slug collision risk (truncation)
+    // Slug collision probability low at expected scale; add collision detection if needed
     let slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
 
     // 7. Save via memory_io

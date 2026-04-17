@@ -1762,6 +1762,7 @@ dependencies = [
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",
+ "nexus-sync",
  "nix",
  "predicates",
  "reqwest 0.12.28",

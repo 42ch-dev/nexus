@@ -191,6 +191,10 @@ pub struct DegradationSnapshot {
     pub failure_count: u32,
     /// Last health check result (if any).
     pub last_health_check: Option<HealthCheckSnapshot>,
+    /// ISO 8601 timestamp of last upgrade attempt (for cooldown persistence across restarts).
+    /// Old snapshots without this field deserialize as `None`.
+    #[serde(default)]
+    pub last_upgrade_attempt: Option<String>,
 }
 
 /// Serializable record of a platform health check for config persistence.
@@ -209,6 +213,21 @@ impl DegradationSnapshot {
             state,
             failure_count,
             last_health_check: None,
+            last_upgrade_attempt: None,
+        }
+    }
+
+    /// Create a new snapshot with an explicit last_upgrade_attempt.
+    pub fn with_upgrade_attempt(
+        state: DegradationState,
+        failure_count: u32,
+        last_upgrade_attempt: Option<String>,
+    ) -> Self {
+        Self {
+            state,
+            failure_count,
+            last_health_check: None,
+            last_upgrade_attempt,
         }
     }
 
@@ -221,20 +240,34 @@ impl DegradationSnapshot {
                 is_healthy: h.is_healthy,
                 checked_at: h.checked_at.to_rfc3339(),
             }),
+            last_upgrade_attempt: guard.last_upgrade_attempt().map(|dt| dt.to_rfc3339()),
         }
     }
 }
 
 /// Guard that monitors platform health and triggers degradation.
+///
+/// S-003: DegradationGuard is Send + Sync because all its fields are
+/// thread-safe: DegradationPolicy (primitive types), DomainRuntimeMode (Copy),
+/// DegradationState (Copy enum), chrono::DateTime<chrono::Utc> (Send+Sync),
+/// and HealthCheckResult (Send+Sync). The guard is designed to be shared
+/// across async tasks (e.g., in a tokio runtime) via Arc<Mutex<DegradationGuard>>.
 pub struct DegradationGuard {
     policy: DegradationPolicy,
     current_mode: DomainRuntimeMode,
     degradation_state: DegradationState,
-    failure_count: u32,
-    last_failure_time: Option<chrono::DateTime<chrono::Utc>>,
+    /// Individual failure timestamps for correct window-based counting.
+    failure_timestamps: Vec<chrono::DateTime<chrono::Utc>>,
     last_health_check: Option<HealthCheckResult>,
     last_upgrade_attempt: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+// S-003: Compile-time verification that DegradationGuard is Send + Sync.
+// This will fail to compile if the struct holds non-thread-safe types.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<DegradationGuard>();
+};
 
 impl DegradationGuard {
     /// Create a new guard with the given policy and initial runtime mode.
@@ -243,8 +276,7 @@ impl DegradationGuard {
             policy,
             current_mode: initial_mode,
             degradation_state: DegradationState::Normal,
-            failure_count: 0,
-            last_failure_time: None,
+            failure_timestamps: Vec::new(),
             last_upgrade_attempt: None,
             last_health_check: None,
         }
@@ -276,14 +308,28 @@ impl DegradationGuard {
             }
         }
 
+        // Cap synthetic timestamps to failure_threshold - 1 so that restored
+        // failures alone can never trigger immediate re-degradation. Only NEW
+        // real failures should push past the threshold.
+        let capped_count = snap.failure_count.min(
+            DegradationPolicy::default()
+                .failure_threshold
+                .saturating_sub(1),
+        );
+
         Self {
             policy: DegradationPolicy::default(),
             current_mode: effective_mode,
             degradation_state: snap.state,
-            failure_count: snap.failure_count,
-            last_failure_time: None,
+            // Replicate failure_count as synthetic timestamps so window logic works.
+            // Place them at "now" so they'll expire naturally via the window.
+            failure_timestamps: (0..capped_count).map(|_| chrono::Utc::now()).collect(),
             last_health_check: None,
-            last_upgrade_attempt: None,
+            last_upgrade_attempt: snap
+                .last_upgrade_attempt
+                .as_deref()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc)),
         }
     }
 
@@ -312,9 +358,14 @@ impl DegradationGuard {
         self.last_health_check.as_ref()
     }
 
-    /// Access the current failure count.
+    /// Access the last upgrade attempt timestamp (if any).
+    pub fn last_upgrade_attempt(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.last_upgrade_attempt
+    }
+
+    /// Access the current failure count (number of timestamps in window).
     pub fn failure_count(&self) -> u32 {
-        self.failure_count
+        self.failure_timestamps.len() as u32
     }
 
     /// Check if operation requires platform and if degradation allows it.
@@ -328,15 +379,13 @@ impl DegradationGuard {
     }
 
     /// Record a platform operation result.
-    /// Updates failure count and potentially triggers degradation.
+    /// Updates failure timestamps and potentially triggers degradation.
     pub fn record_platform_result(&mut self, success: bool, error: Option<String>) {
         if success {
-            self.failure_count = 0;
-            self.last_failure_time = None;
+            self.failure_timestamps.clear();
             self.update_health_check(true, None, None);
         } else {
-            self.failure_count += 1;
-            self.last_failure_time = Some(chrono::Utc::now());
+            self.failure_timestamps.push(chrono::Utc::now());
             self.update_health_check(false, None, error);
 
             if self.should_degrade() {
@@ -351,28 +400,32 @@ impl DegradationGuard {
         let is_healthy = result.is_healthy;
         self.last_health_check = Some(result);
         if !is_healthy {
-            self.failure_count += 1;
-            self.last_failure_time = Some(chrono::Utc::now());
+            self.failure_timestamps.push(chrono::Utc::now());
             if self.should_degrade() {
                 self.degrade();
             }
         } else {
-            self.failure_count = 0;
-            self.last_failure_time = None;
+            self.failure_timestamps.clear();
         }
     }
 
-    /// Check if we should degrade based on failure threshold.
+    /// Check if we should degrade based on failure threshold within the window.
+    ///
+    /// Prunes timestamps older than `failure_window_secs`, then checks if
+    /// the remaining count meets or exceeds `failure_threshold`.
     fn should_degrade(&self) -> bool {
-        if self.failure_count >= self.policy.failure_threshold {
-            if let Some(last) = self.last_failure_time {
-                let elapsed = chrono::Utc::now().signed_duration_since(last).num_seconds();
-                if elapsed <= self.policy.failure_window_secs as i64 {
-                    return self
-                        .degradation_state
-                        .can_degrade_more(self.policy.max_degradation_depth);
-                }
-            }
+        let cutoff =
+            chrono::Utc::now() - chrono::Duration::seconds(self.policy.failure_window_secs as i64);
+        let within_window: Vec<_> = self
+            .failure_timestamps
+            .iter()
+            .filter(|ts| **ts >= cutoff)
+            .collect();
+
+        if within_window.len() as u32 >= self.policy.failure_threshold {
+            return self
+                .degradation_state
+                .can_degrade_more(self.policy.max_degradation_depth);
         }
         false
     }
@@ -402,7 +455,7 @@ impl DegradationGuard {
             if let Some(downgraded) = self.current_mode.downgrade() {
                 self.current_mode = downgraded;
             }
-            self.failure_count = 0; // Reset after degradation
+            self.failure_timestamps.clear(); // Reset after degradation
         }
     }
 
@@ -410,7 +463,7 @@ impl DegradationGuard {
     pub fn force_local_only(&mut self) {
         self.degradation_state = DegradationState::ForcedLocalOnly;
         self.current_mode = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
-        self.failure_count = 0;
+        self.failure_timestamps.clear();
     }
 
     /// Try to upgrade back to original mode.
@@ -463,8 +516,7 @@ impl DegradationGuard {
     pub fn reset(&mut self, mode: DomainRuntimeMode) {
         self.current_mode = mode;
         self.degradation_state = DegradationState::Normal;
-        self.failure_count = 0;
-        self.last_failure_time = None;
+        self.failure_timestamps.clear();
         self.last_upgrade_attempt = None;
     }
 
@@ -969,5 +1021,236 @@ mod tests {
         // Cannot degrade further (policy depth = 1)
         guard.record_platform_result(false, Some("err".into()));
         assert_ne!(guard.state(), DegradationState::DegradedLevel2); // stays at level 1
+    }
+
+    // ── R3: last_upgrade_attempt persistence tests ─────────────────────
+
+    #[test]
+    fn snapshot_from_guard_preserves_last_upgrade_attempt() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let policy = DegradationPolicy {
+            upgrade_cooldown_secs: 0,
+            ..Default::default()
+        };
+        let mut guard = DegradationGuard::new(policy, mode);
+
+        // Degrade and then upgrade to set last_upgrade_attempt
+        for _ in 0..3 {
+            guard.record_platform_result(false, Some("fail".into()));
+        }
+        guard.record_platform_result(true, None);
+        assert!(guard.try_upgrade());
+
+        // Verify the guard has a last_upgrade_attempt
+        assert!(guard.last_upgrade_attempt().is_some());
+
+        // Snapshot should capture it
+        let snap = DegradationSnapshot::from_guard(&guard);
+        assert!(snap.last_upgrade_attempt.is_some());
+    }
+
+    #[test]
+    fn restore_from_snapshot_restores_last_upgrade_attempt() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let iso_time = "2026-04-16T10:30:00+00:00";
+
+        let snap = DegradationSnapshot::with_upgrade_attempt(
+            DegradationState::DegradedLevel1,
+            2,
+            Some(iso_time.to_string()),
+        );
+
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        // last_upgrade_attempt should be restored
+        let restored = guard
+            .last_upgrade_attempt()
+            .expect("last_upgrade_attempt should be restored");
+        assert_eq!(restored.to_rfc3339(), iso_time);
+    }
+
+    #[test]
+    fn snapshot_without_last_upgrade_attempt_deserializes_as_none() {
+        // Old-format JSON without last_upgrade_attempt field
+        let json = r#"{"state":"DegradedLevel1","failure_count":2}"#;
+        let snap: DegradationSnapshot = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(snap.state, DegradationState::DegradedLevel1);
+        assert_eq!(snap.failure_count, 2);
+        assert!(snap.last_upgrade_attempt.is_none());
+    }
+
+    #[test]
+    fn snapshot_with_upgrade_attempt_serde_roundtrip() {
+        let snap = DegradationSnapshot::with_upgrade_attempt(
+            DegradationState::DegradedLevel1,
+            3,
+            Some("2026-04-16T10:30:00+00:00".to_string()),
+        );
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: DegradationSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap, back);
+        assert_eq!(
+            back.last_upgrade_attempt.as_deref(),
+            Some("2026-04-16T10:30:00+00:00")
+        );
+    }
+
+    // ── R1: Window-based failure timestamp tests ───────────────────────
+
+    #[test]
+    fn three_failures_within_window_triggers_degradation() {
+        let policy = DegradationPolicy {
+            failure_threshold: 3,
+            failure_window_secs: 5,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        guard.record_platform_result(false, Some("fail 1".into()));
+        assert_eq!(guard.degradation_state(), DegradationState::Normal);
+
+        guard.record_platform_result(false, Some("fail 2".into()));
+        assert_eq!(guard.degradation_state(), DegradationState::Normal);
+
+        guard.record_platform_result(false, Some("fail 3".into()));
+        // All 3 failures within 5s window → should degrade
+        assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
+    }
+
+    #[test]
+    fn failure_outside_window_does_not_count() {
+        // Use a very short window (2s) so we can reliably test time-based expiry
+        let policy = DegradationPolicy {
+            failure_threshold: 3,
+            failure_window_secs: 2,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        // Record 2 failures now
+        guard.record_platform_result(false, Some("fail 1".into()));
+        guard.record_platform_result(false, Some("fail 2".into()));
+        assert_eq!(guard.failure_count(), 2);
+        assert_eq!(guard.degradation_state(), DegradationState::Normal);
+
+        // Wait for the window to expire
+        std::thread::sleep(std::time::Duration::from_millis(2100));
+
+        // Record 1 more failure. The 2 old failures are now outside the window.
+        guard.record_platform_result(false, Some("fail 3".into()));
+
+        // Only 1 failure within the window → should NOT degrade
+        assert_eq!(
+            guard.degradation_state(),
+            DegradationState::Normal,
+            "should not degrade: only 1 failure within window"
+        );
+    }
+
+    #[test]
+    fn failure_just_at_window_boundary_counts() {
+        // Use a 1s window. 3 rapid failures should all be within window.
+        let policy = DegradationPolicy {
+            failure_threshold: 3,
+            failure_window_secs: 1,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        guard.record_platform_result(false, Some("fail 1".into()));
+        guard.record_platform_result(false, Some("fail 2".into()));
+        guard.record_platform_result(false, Some("fail 3".into()));
+
+        // All 3 within 1s window → degrades
+        assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
+    }
+
+    #[test]
+    fn success_clears_all_failure_timestamps() {
+        let policy = DegradationPolicy {
+            failure_threshold: 3,
+            failure_window_secs: 60,
+            ..Default::default()
+        };
+        let mut guard =
+            DegradationGuard::new(policy, DomainRuntimeMode::parse("cloud_enhanced").unwrap());
+
+        guard.record_platform_result(false, Some("fail 1".into()));
+        guard.record_platform_result(false, Some("fail 2".into()));
+        assert_eq!(guard.failure_count(), 2);
+
+        // Success clears all timestamps
+        guard.record_platform_result(true, None);
+        assert_eq!(guard.failure_count(), 0);
+
+        // Need a full 3 new failures to trigger degradation
+        guard.record_platform_result(false, Some("fail 3".into()));
+        assert_eq!(guard.degradation_state(), DegradationState::Normal);
+    }
+
+    // ── S-003: Send + Sync verification tests ───────────────────────────
+
+    #[test]
+    fn degradation_guard_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<DegradationGuard>();
+    }
+
+    #[test]
+    fn degradation_guard_is_sync() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<DegradationGuard>();
+    }
+
+    // ── QC1-W1: restored failures at threshold do not trigger immediate re-degradation ─
+
+    #[test]
+    fn restored_failures_at_threshold_do_not_trigger_immediate_degradation() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let threshold = DegradationPolicy::default().failure_threshold;
+
+        // Restore with exactly failure_threshold failures
+        let snap = DegradationSnapshot::new(DegradationState::Normal, threshold);
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        // The guard should NOT want to degrade immediately
+        assert!(
+            !guard.should_degrade(),
+            "restored guard with failure_threshold failures should not trigger immediate degradation"
+        );
+
+        // Verify the failure count is capped to threshold - 1
+        assert_eq!(
+            guard.failure_count(),
+            threshold - 1,
+            "restored synthetic timestamps should be capped to threshold - 1"
+        );
+    }
+
+    #[test]
+    fn restored_failures_below_threshold_preserved() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+
+        // Restore with fewer failures than threshold
+        let snap = DegradationSnapshot::new(DegradationState::Normal, 1);
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        assert_eq!(guard.failure_count(), 1);
+        assert!(!guard.should_degrade());
+    }
+
+    #[test]
+    fn restored_with_zero_failures_has_no_timestamps() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+
+        let snap = DegradationSnapshot::new(DegradationState::Normal, 0);
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        assert_eq!(guard.failure_count(), 0);
+        assert!(!guard.should_degrade());
     }
 }

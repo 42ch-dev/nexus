@@ -83,28 +83,28 @@ impl Stage0Assembly {
 
         // 2. ## Personality
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
         }
 
         // 3. Long-term memories (sorted by kind, then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}", mem.body));
+            parts.push(format!("{title}\n\n{}\n", mem.body));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
-                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}\n",
                 keywords.join(", ")
             ));
         }
 
         // 5. ## Experience
         if !self.experience.is_empty() {
-            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
         // 6. User prompt
@@ -112,7 +112,7 @@ impl Stage0Assembly {
             parts.push(self.user_prompt.clone());
         }
 
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     /// Assemble with token budget truncation.
@@ -219,8 +219,16 @@ impl Stage0Assembly {
 
 /// Estimate token count using the chars/4 heuristic.
 ///
-/// This is a rough approximation; actual tokenization depends on the
-/// tokenizer used by the LLM. Suitable for budget estimation.
+/// NOTE (S-004): Token estimation uses `chars/4` (byte-length divided by 4)
+/// as a rough approximation. Actual tokenization depends on the tokenizer used
+/// by the LLM (e.g., cl100k_base for GPT-4, sentencepiece for Gemini). The
+/// `chars/4` heuristic overestimates for ASCII-heavy text and underestimates
+/// for non-ASCII content. This is accepted for V1.3 — a more accurate
+/// tokenizer integration is deferred to a future release.
+/// Suitable for budget estimation and section truncation ordering.
+///
+// V1.2 residual R15 (pipeline, nit): Token estimation chars/4 approximation
+// chars/4 is a rough approximation; accurate tokenization requires tiktoken
 pub fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }
@@ -287,18 +295,23 @@ pub fn truncate_with_budget(
 }
 
 /// Truncate text to approximately `max_chars` characters at a word boundary.
+///
+/// Uses char-safe iteration to avoid panicking on multi-byte UTF-8 characters.
 fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
     }
-    if text.len() <= max_chars {
+    // Use char-safe counting to determine if truncation is needed
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
         return text.to_string();
     }
-    // Find the last space before max_chars to break at a word boundary
-    let truncate_at = text[..max_chars.min(text.len())].rfind(' ');
-    match truncate_at {
-        Some(pos) if pos > 0 => format!("{}…", &text[..pos]),
-        _ => format!("{}…", &text[..max_chars.min(text.len())]),
+    // Take first max_chars characters (char-safe, not byte-safe)
+    let truncated: String = text.chars().take(max_chars).collect();
+    // Find the last space to break at a word boundary
+    match truncated.rfind(' ') {
+        Some(pos) if pos > 0 => format!("{}…", &truncated[..pos]),
+        _ => format!("{}…", truncated),
     }
 }
 
@@ -408,21 +421,21 @@ impl TwoStageAssembly {
 
         // 2. ## Personality
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
         }
 
         // 3. Long-term memories (local, sorted by kind then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}", mem.body));
+            parts.push(format!("{title}\n\n{}\n", mem.body));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
-                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}\n",
                 keywords.join(", ")
             ));
         }
@@ -446,7 +459,7 @@ impl TwoStageAssembly {
                     })
                     .collect();
                 parts.push(format!(
-                    "{PLATFORM_MEMORY_HEADING}\n\n{}",
+                    "{PLATFORM_MEMORY_HEADING}\n\n{}\n",
                     mem_lines.join("\n")
                 ));
             }
@@ -463,7 +476,7 @@ impl TwoStageAssembly {
                         )
                     })
                     .collect();
-                parts.push(format!("{KB_HEADING}\n\n{}", kb_lines.join("\n")));
+                parts.push(format!("{KB_HEADING}\n\n{}\n", kb_lines.join("\n")));
             }
 
             // 6b. Timeline events
@@ -478,13 +491,13 @@ impl TwoStageAssembly {
                         )
                     })
                     .collect();
-                parts.push(format!("{TIMELINE_HEADING}\n\n{}", tl_lines.join("\n")));
+                parts.push(format!("{TIMELINE_HEADING}\n\n{}\n", tl_lines.join("\n")));
             }
         }
 
         // 7. ## Experience
         if !self.experience.is_empty() {
-            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
         // 8. User prompt
@@ -492,7 +505,7 @@ impl TwoStageAssembly {
             parts.push(self.user_prompt.clone());
         }
 
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     /// Assemble with fallback to Stage0Assembly if Stage-1 failed.
@@ -520,28 +533,28 @@ impl TwoStageAssembly {
 
         // 2. ## Personality
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}", self.personality));
+            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
         }
 
         // 3. Long-term memories (sorted by kind then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}", mem.body));
+            parts.push(format!("{title}\n\n{}\n", mem.body));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
-                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}",
+                "{FRAGMENT_KEYWORDS_HEADING}\n\n{}\n",
                 keywords.join(", ")
             ));
         }
 
         // 5. ## Experience
         if !self.experience.is_empty() {
-            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}", self.experience));
+            parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
         // 6. User prompt
@@ -549,7 +562,7 @@ impl TwoStageAssembly {
             parts.push(self.user_prompt.clone());
         }
 
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     /// Dedup platform memory items against local memories (spec §9.1.1).

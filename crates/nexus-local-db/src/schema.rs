@@ -210,6 +210,25 @@ CREATE TABLE IF NOT EXISTS memory_fragments (
 );
 "#;
 
+// ============================================================================
+// Indexes (N-003: creator_id lookup optimization)
+// ============================================================================
+
+/// Indexes on `creator_id` for shared tables.
+///
+/// Multiple tables are queried by `creator_id` (e.g. pending_review, soul_meta,
+/// memory_fragments, local_identities). Without indexes these are full-table scans.
+pub const CREATOR_ID_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_local_identities_creator_id ON local_identities (creator_id);
+"#;
+
+/// Indexes on `creator_id` for daemon-only tables.
+pub const DAEMON_CREATOR_ID_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_soul_meta_creator_id ON soul_meta (creator_id);
+CREATE INDEX IF NOT EXISTS idx_memory_pending_review_creator_id ON memory_pending_review (creator_id);
+CREATE INDEX IF NOT EXISTS idx_memory_fragments_creator_id ON memory_fragments (creator_id);
+"#;
+
 /// Initialize shared tables (used by both CLI and daemon).
 ///
 /// Creates the three shared tables with `IF NOT EXISTS` for idempotency.
@@ -219,6 +238,7 @@ pub fn init_shared_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
     conn.execute_batch(CREATORS_TABLE)?;
     conn.execute_batch(REFERENCE_SOURCES_TABLE)?;
     conn.execute_batch(LOCAL_IDENTITIES_TABLE)?;
+    conn.execute_batch(CREATOR_ID_INDEXES)?;
     Ok(())
 }
 
@@ -235,6 +255,7 @@ pub fn init_daemon_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
     conn.execute_batch(SOUL_META_TABLE)?;
     conn.execute_batch(MEMORY_PENDING_REVIEW_TABLE)?;
     conn.execute_batch(MEMORY_FRAGMENTS_TABLE)?;
+    conn.execute_batch(DAEMON_CREATOR_ID_INDEXES)?;
     Ok(())
 }
 
@@ -729,5 +750,53 @@ mod tests {
         assert_eq!(keywords, "[]");
         assert_eq!(summary, "");
         assert!(!created_at.is_empty());
+    }
+
+    #[test]
+    fn creator_id_indexes_created_on_shared_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_shared_tables(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .flatten()
+            .collect();
+
+        assert!(
+            indexes.contains(&"idx_local_identities_creator_id".to_string()),
+            "shared tables should have idx_local_identities_creator_id index, got: {:?}",
+            indexes
+        );
+    }
+
+    #[test]
+    fn creator_id_indexes_created_on_daemon_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_daemon_tables(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .flatten()
+            .collect();
+
+        assert!(
+            indexes.contains(&"idx_soul_meta_creator_id".to_string()),
+            "daemon tables should have idx_soul_meta_creator_id index, got: {:?}",
+            indexes
+        );
+        assert!(
+            indexes.contains(&"idx_memory_pending_review_creator_id".to_string()),
+            "daemon tables should have idx_memory_pending_review_creator_id index"
+        );
+        assert!(
+            indexes.contains(&"idx_memory_fragments_creator_id".to_string()),
+            "daemon tables should have idx_memory_fragments_creator_id index"
+        );
     }
 }

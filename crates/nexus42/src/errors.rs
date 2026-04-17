@@ -58,6 +58,34 @@ pub enum CliError {
         operation: String,
     },
 
+    /// Challenge solving failed during creator registration.
+    ChallengeFailed {
+        /// Human-readable reason for the failure.
+        reason: String,
+    },
+
+    /// Creator registration failed on the platform.
+    CreatorRegistrationFailed {
+        /// HTTP status code (if available).
+        status: u16,
+        /// Human-readable message.
+        message: String,
+    },
+
+    /// Creator verification failed.
+    CreatorVerificationFailed {
+        /// Verification status from the platform (e.g. "wrong_answer", "expired", "locked").
+        status: String,
+        /// Human-readable message with next steps.
+        message: String,
+    },
+
+    /// Challenge has expired before solving could complete.
+    ChallengeExpired {
+        /// Expiry timestamp.
+        expires_at: String,
+    },
+
     /// Agent not found with ID
     AgentNotFound {
         /// Agent ID that was requested
@@ -118,6 +146,44 @@ impl fmt::Display for CliError {
             Self::CreatorNotSelected => write!(f, "Creator not selected.\n\n  Suggestion: Run `nexus42 creator use <creator-ref>` first."),
 
             // Enhanced error variants with suggestions
+            Self::ChallengeFailed { reason } => {
+                write!(
+                    f,
+                    "Challenge solving failed: {}\n\n  Suggestion: \
+                     Try registering again with `nexus42 creator register <name>`. \
+                     If the problem persists, the challenge format may be unsupported.",
+                    reason
+                )
+            }
+            Self::CreatorRegistrationFailed { status, message } => {
+                write!(
+                    f,
+                    "Creator registration failed (HTTP {}): {}\n\n  Suggestion: \
+                     Check your authentication with `nexus42 auth status` and try again.",
+                    status, message
+                )
+            }
+            Self::CreatorVerificationFailed { status, message } => {
+                write!(
+                    f,
+                    "Creator verification failed ({}): {}\n\n  Suggestion: \
+                     {}",
+                    status, message,
+                    match status.as_str() {
+                        "wrong_answer" => "The auto-retry has been exhausted. Register again with `nexus42 creator register <name>`.",
+                        "expired" => "The challenge timed out. Register again with `nexus42 creator register <name>`.",
+                        "locked" => "Your account has been permanently locked due to too many failed attempts. Contact support.",
+                        _ => "Try registering again.",
+                    }
+                )
+            }
+            Self::ChallengeExpired { expires_at } => {
+                write!(
+                    f,
+                    "Challenge expired at {}. Register again with `nexus42 creator register <name>`.",
+                    expires_at
+                )
+            }
             Self::DaemonNotReachable { message, suggestion } => {
                 write!(f, "{}\n\n  Suggestion: {}", message, suggestion)
             }
@@ -260,6 +326,43 @@ impl From<nexus_local_db::LocalDbError> for CliError {
     }
 }
 
+impl From<nexus_sync::errors::SyncError> for CliError {
+    fn from(err: nexus_sync::errors::SyncError) -> Self {
+        match err {
+            nexus_sync::errors::SyncError::PlatformError { status, body } => {
+                CliError::CreatorRegistrationFailed {
+                    status,
+                    message: body,
+                }
+            }
+            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => CliError::Config(msg),
+            nexus_sync::errors::SyncError::HttpError(e) => CliError::Network(e),
+            other => CliError::Other(format!("sync error: {}", other)),
+        }
+    }
+}
+
+impl CliError {
+    /// Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
+    ///
+    /// Use this instead of `SyncError::into()` when the error occurs during
+    /// the verification step (as opposed to registration), so callers can
+    /// distinguish registration failures from verification failures.
+    pub fn verify_creator_error(err: nexus_sync::errors::SyncError) -> Self {
+        match err {
+            nexus_sync::errors::SyncError::PlatformError { status, body } => {
+                CliError::CreatorVerificationFailed {
+                    status: status.to_string(),
+                    message: body,
+                }
+            }
+            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => CliError::Config(msg),
+            nexus_sync::errors::SyncError::HttpError(e) => CliError::Network(e),
+            other => CliError::Other(format!("sync error: {}", other)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +500,30 @@ mod tests {
             }
             _ => panic!("Expected CliError::Other variant"),
         }
+    }
+
+    #[test]
+    fn verify_creator_error_maps_platform_error_to_verification_failed() {
+        let sync_err = nexus_sync::errors::SyncError::PlatformError {
+            status: 403,
+            body: "verification token invalid".to_string(),
+        };
+        let cli_err = CliError::verify_creator_error(sync_err);
+        match cli_err {
+            CliError::CreatorVerificationFailed { status, message } => {
+                assert_eq!(status, "403");
+                assert_eq!(message, "verification token invalid");
+            }
+            _ => panic!("Expected CreatorVerificationFailed variant"),
+        }
+    }
+
+    #[test]
+    fn verify_creator_error_maps_not_configured_to_config() {
+        let sync_err = nexus_sync::errors::SyncError::SyncNotConfigured(
+            "platform_base_url is required".to_string(),
+        );
+        let cli_err = CliError::verify_creator_error(sync_err);
+        assert!(matches!(cli_err, CliError::Config(_)));
     }
 }

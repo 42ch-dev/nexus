@@ -40,6 +40,8 @@ pub fn classify_operation(operation: &str) -> OperationCategory {
             OperationCategory::LocalWithPlatformEnhancement
         }
 
+        // V1.2 residual R4 (runtime, nit): fail-open default for unknown ops
+        // Unknown operations fail-open (allow) as conservative default; log warning
         _ => OperationCategory::LocalOnly,
     }
 }

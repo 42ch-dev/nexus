@@ -92,6 +92,19 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
 pub async fn run(args: CloneArgs, config: &CliConfig) -> Result<()> {
     let world_ref = validate_world_ref(&args.world_ref).map_err(CliError::Other)?;
 
+    // S-008: Runtime mode guard — warn if clone source requires platform
+    // but current mode prohibits it.
+    if matches!(args.source, CloneSourceArg::Platform) {
+        let mode = config.runtime_mode();
+        if mode.is_local_only() {
+            return Err(CliError::Other(format!(
+                "Clone from platform is not available in {} mode. \
+                 Use --source local for local clone, or switch runtime mode.",
+                mode
+            )));
+        }
+    }
+
     let body = serde_json::json!({
         "world_ref": world_ref,
         "source": match args.source {
@@ -191,5 +204,12 @@ mod tests {
     fn clone_source_arg_labels() {
         assert!(matches!(CloneSourceArg::Platform, CloneSourceArg::Platform));
         assert!(matches!(CloneSourceArg::Local, CloneSourceArg::Local));
+    }
+
+    #[test]
+    fn clone_source_platform_enum_debug() {
+        // Verify CloneSourceArg derives Debug (used in error messages)
+        let _ = format!("{:?}", CloneSourceArg::Platform);
+        let _ = format!("{:?}", CloneSourceArg::Local);
     }
 }

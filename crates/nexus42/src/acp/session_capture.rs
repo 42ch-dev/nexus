@@ -9,8 +9,9 @@
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::api::daemon_client::DaemonClient;
 
@@ -38,9 +39,10 @@ impl SessionDigest {
         tool_calls: usize,
         last_context: &str,
     ) -> Self {
-        // Truncate last_context to 200 chars
-        let last_context = if last_context.len() > 200 {
-            format!("{}...", &last_context[..197])
+        // Truncate last_context to 200 chars (char-safe for UTF-8)
+        let last_context = if last_context.chars().count() > 200 {
+            let truncated: String = last_context.chars().take(197).collect();
+            format!("{}...", truncated)
         } else {
             last_context.to_string()
         };
@@ -184,21 +186,29 @@ impl SessionCapture {
     /// log a warning and continue without blocking session shutdown.
     ///
     /// The timeout is intentionally short (5s) to avoid delaying shutdown.
+    ///
+    /// If `pending_id` is provided, it is used as-is; otherwise a new one is
+    /// generated internally. This allows callers to guarantee the same ID is
+    /// used for both daemon submission and local fallback.
     pub async fn submit_to_daemon(
         &self,
         daemon_client: &DaemonClient,
         digest: &SessionDigest,
-    ) -> bool {
-        let pending_id = format!(
-            "pending_{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")
-        );
+        pending_id: Option<&str>,
+    ) -> (bool, String) {
+        let pending_id = match pending_id {
+            Some(id) => id.to_string(),
+            None => format!(
+                "pending_{}",
+                uuid::Uuid::new_v4().to_string().replace('-', "")
+            ),
+        };
         let task_kind = self.detect_task_kind();
         let raw_digest = digest.to_json();
         let created_at = chrono::Utc::now().to_rfc3339();
 
         let request = CreatePendingReviewRequest {
-            pending_id,
+            pending_id: pending_id.clone(),
             session_id: self.session_id.clone(),
             creator_id: self.creator_id.clone(),
             world_id: self.world_id.clone(),
@@ -231,7 +241,7 @@ impl SessionCapture {
                     pending_id = %response.pending_id,
                     "Session-end capture submitted successfully"
                 );
-                true
+                (true, pending_id)
             }
             Err(e) => {
                 warn!(
@@ -239,7 +249,7 @@ impl SessionCapture {
                     error = %e,
                     "Failed to submit session-end capture — daemon unavailable, continuing"
                 );
-                false
+                (false, pending_id)
             }
         }
     }
@@ -255,17 +265,127 @@ impl SessionCapture {
     }
 }
 
+/// Serialized pending capture record for local file fallback.
+///
+/// When the daemon is unavailable, session capture data is persisted to
+/// `~/.nexus42/pending_captures/<pending_id>.json` for later processing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingCaptureFile {
+    /// Unique pending ID.
+    pub pending_id: String,
+    /// Session ID.
+    pub session_id: String,
+    /// Creator ID.
+    pub creator_id: String,
+    /// Optional world ID.
+    pub world_id: Option<String>,
+    /// Task kind heuristic.
+    pub task_kind: String,
+    /// The raw session digest JSON.
+    pub raw_digest: String,
+    /// ISO 8601 creation timestamp.
+    pub created_at: String,
+}
+
+/// Save a pending capture to a specified directory.
+///
+/// Creates the directory if it doesn't exist.
+/// Returns `Ok(path)` on success, `Err` if file I/O fails.
+pub fn save_capture_to_dir(
+    dir: &std::path::Path,
+    pending_id: &str,
+    capture: &SessionCapture,
+    digest: &SessionDigest,
+) -> std::result::Result<PathBuf, std::io::Error> {
+    std::fs::create_dir_all(dir)?;
+
+    let file = PendingCaptureFile {
+        pending_id: pending_id.to_string(),
+        session_id: capture.session_id.clone(),
+        creator_id: capture.creator_id.clone(),
+        world_id: capture.world_id.clone(),
+        task_kind: capture.detect_task_kind(),
+        raw_digest: digest.to_json(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let file_path = dir.join(format!("{pending_id}.json"));
+    let json = serde_json::to_string_pretty(&file)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
+    std::fs::write(&file_path, json)?;
+    Ok(file_path)
+}
+
+/// Save a pending capture to local file when daemon is unavailable.
+///
+/// Creates `~/.nexus42/pending_captures/` directory if it doesn't exist.
+/// Returns `Ok(path)` on success, `Err` if file I/O fails.
+pub fn save_capture_locally(
+    pending_id: &str,
+    capture: &SessionCapture,
+    digest: &SessionDigest,
+) -> std::result::Result<PathBuf, std::io::Error> {
+    let nexus_home = crate::config::nexus_home()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
+
+    let pending_dir = nexus_home.join("pending_captures");
+    save_capture_to_dir(&pending_dir, pending_id, capture, digest)
+}
+
+/// Resolve the pending captures directory path.
+///
+/// Returns `None` if nexus home cannot be determined.
+pub fn pending_captures_dir() -> Option<PathBuf> {
+    crate::config::nexus_home()
+        .ok()
+        .map(|home| home.join("pending_captures"))
+}
+
 /// Fire-and-forget session capture submitter.
 ///
 /// Spawns a background task to submit the capture without blocking.
-/// Use this when session shutdown must not wait for daemon response.
+/// If the daemon is unavailable, persists to a local file for later processing.
+///
+/// The `pending_id` is generated once and used for both daemon submission
+/// and local fallback, ensuring consistent identity.
 pub fn spawn_submit_capture(
     daemon_client: DaemonClient,
     capture: SessionCapture,
     digest: SessionDigest,
 ) {
     tokio::spawn(async move {
-        capture.submit_to_daemon(&daemon_client, &digest).await;
+        let pending_id = format!(
+            "pending_{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        );
+
+        let (success, returned_id) = capture
+            .submit_to_daemon(&daemon_client, &digest, Some(&pending_id))
+            .await;
+
+        if !success {
+            // Daemon unavailable — persist locally for later processing (R8)
+            // Use the same pending_id that was sent to the daemon
+            match save_capture_locally(&returned_id, &capture, &digest) {
+                Ok(path) => {
+                    info!(
+                        session_id = %capture.session_id(),
+                        pending_id = %returned_id,
+                        path = %path.display(),
+                        "Session capture persisted locally — daemon was unavailable"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        session_id = %capture.session_id(),
+                        pending_id = %returned_id,
+                        error = %e,
+                        "Failed to persist session capture locally — data may be lost"
+                    );
+                }
+            }
+        }
     });
 }
 
@@ -359,7 +479,71 @@ mod tests {
             Duration::from_millis(200),
         );
 
-        let result = capture.submit_to_daemon(&daemon_client, &digest).await;
-        assert!(!result);
+        let (success, _pending_id) = capture
+            .submit_to_daemon(&daemon_client, &digest, None)
+            .await;
+        assert!(!success);
+    }
+
+    #[test]
+    fn save_capture_to_dir_writes_valid_json() {
+        let capture = SessionCapture::new(
+            "sess_test".to_string(),
+            "brainstorm-agent".to_string(),
+            "ctr_test".to_string(),
+            Some("wld_testworld".to_string()),
+        );
+        let digest = SessionDigest::new(120, 15, 3, "Test context");
+
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
+        let pending_id = "pending_test123";
+
+        let path =
+            save_capture_to_dir(tmp.path(), pending_id, &capture, &digest).expect("save failed");
+
+        // File should exist
+        assert!(path.exists());
+
+        // File should end with pending_id.json
+        assert!(path
+            .file_name()
+            .expect("no file name")
+            .to_str()
+            .expect("non-utf8")
+            .starts_with(pending_id));
+
+        // Content should be valid JSON and deserialize back
+        let content = std::fs::read_to_string(&path).expect("failed to read file");
+        let parsed: PendingCaptureFile =
+            serde_json::from_str(&content).expect("file should contain valid JSON");
+
+        assert_eq!(parsed.session_id, "sess_test");
+        assert_eq!(parsed.creator_id, "ctr_test");
+        assert_eq!(parsed.world_id, Some("wld_testworld".to_string()));
+        assert_eq!(parsed.task_kind, "brainstorm");
+        assert!(!parsed.raw_digest.is_empty());
+        assert!(!parsed.created_at.is_empty());
+    }
+
+    #[test]
+    fn save_capture_to_dir_creates_directory() {
+        let capture = SessionCapture::new(
+            "sess_test".to_string(),
+            "agent".to_string(),
+            "ctr_test".to_string(),
+            None,
+        );
+        let digest = SessionDigest::new(60, 5, 2, "Context");
+
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
+        let nested = tmp.path().join("a").join("b").join("c");
+
+        let result = save_capture_to_dir(&nested, "pending_nested", &capture, &digest);
+
+        assert!(
+            result.is_ok(),
+            "should create nested directories: {result:?}"
+        );
+        assert!(result.unwrap().exists());
     }
 }
