@@ -1,0 +1,40 @@
+{
+  "id": "2026-04-16-v1.3-creator-register-and-residuals",
+  "title": "V1.3 Creator Register CLI + V1.2 Residual Governance",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
+  "owner": "fullstack-dev",
+  "agents": ["fullstack-dev", "qa-engineer"],
+  "progress": 100,
+  "tags": ["v1.3", "creator-register", "residual-governance"],
+  "created_at": "2026-04-16",
+  "updated_at": "2026-04-17",
+  "done_at": "2026-04-17",
+  "metadata": {
+    "working_branch": "feature/v1.3-creator-register-and-residuals",
+    "phase": "Done",
+    "priority": "high",
+    "gates": {
+      "qc_round1": "Request Changes (3 blocking) -> all fixed",
+      "qc_round2": "Request Changes (4 items) -> all fixed",
+      "qa_verification": "PASS - 1872 tests, clippy clean, fmt clean, 0 open V1.2 residuals"
+    },
+    "spec_refs": [
+      ".agents/plans/knowledge/v1.3-delivery-compass-v1.md",
+      ".agents/plans/knowledge/challenge-solver-design-v1.md"
+    ],
+    "description": "V1.3 nexus-side: implement creator register CLI command with challenge-verify flow and govern all 35 V1.2 residual findings to zero open.",
+    "commits": [
+      "ab15dfe feat(challenge): T1",
+      "4ac5a82 docs(skill): T3",
+      "94c77ab feat(platform): T4",
+      "f7cd0d0 feat(auth): T5",
+      "f59ed13 style(clippy)",
+      "bf7056d feat(creator): T2 register command orchestration",
+      "1e96cbc fix(creator): update doc comments and add verify error variant (QC R2 findings)",
+      "8e08a19 docs(creator): document V1.3 limitations for auth token and API key storage"
+    ],
+    "residual_summary": "All 35 V1.2 residuals archived; 3 new V1.3 low-priority residuals tracked"
+  },
+  "notes": "All dev work + QC + QA complete. T6 (e2e) tracked as separate backlog plan."
+}
