@@ -69,6 +69,8 @@ jobs:
     name: Rust fmt & clippy
     runs-on: ubuntu-latest
     needs: verify-codegen
+    env:
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -92,6 +94,24 @@ jobs:
         run: cargo +nightly fmt --all -- --check
       - name: Run clippy
         run: cargo clippy --all -- -D warnings
+
+  verify-sqlx-offline:
+    name: Verify sqlx offline metadata
+    runs-on: ubuntu-latest
+    needs: verify-codegen
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-types
+          path: .
+      - name: Install cargo-sqlx
+        run: cargo install sqlx-cli --no-default-features --features sqlite
+      - name: Verify sqlx offline metadata is up-to-date
+        run: cargo sqlx prepare --workspace --all -- --all-targets --check
 
   typescript-checks:
     name: TypeScript typecheck
@@ -143,6 +163,8 @@ jobs:
     name: Rust tests
     runs-on: ubuntu-latest
     needs: rust-checks
+    env:
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

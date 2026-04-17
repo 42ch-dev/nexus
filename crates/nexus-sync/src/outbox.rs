@@ -9,29 +9,12 @@
 //! - Retry with exponential backoff
 //! - Replay of pending entries
 //!
-//! # Connection Pooling (DEBT-X1)
+//! # Connection Pooling
 //!
-//! Uses `deadpool-sqlite` for async connection pooling with WAL mode for
-//! better concurrent read/write performance. Pool configuration:
+//! Uses `sqlx::SqlitePool` (via `nexus_local_db`) for async connection pooling
+//! with WAL mode for better concurrent read/write performance. Pool configuration:
 //! - Default pool size: 4 connections
 //! - WAL mode enabled for concurrent reads
-//!
-//! # Migration from v1.0
-//!
-//! In v1.0, `Outbox::new()` created a direct `rusqlite::Connection`.
-//! In v1.1, `Outbox::new()` creates a connection pool internally.
-//!
-//! **Breaking change**: All methods are now `async` and return `Result<T, SyncError>`.
-//!
-//! ```ignore
-//! // v1.0 (sync)
-//! let outbox = Outbox::new(&db_path)?;
-//! let entry_id = outbox.append(&cmd)?;
-//!
-//! // v1.1 (async with pool)
-//! let outbox = Outbox::new(&db_path).await?;
-//! let entry_id = outbox.append(&cmd).await?;
-//! ```
 //!
 //! ## Outbox schema and migrations
 //!
@@ -47,11 +30,10 @@ use std::sync::Arc;
 
 use nexus_contracts::generated::{Bundle, OutboxEntry, SyncCommand, LATEST_SCHEMA_VERSION};
 use nexus_contracts::DeliveryState;
-use rusqlite::params;
 use uuid::Uuid;
 
 use crate::errors::{SyncError, SyncResult};
-use crate::pool::{OutboxPool, PooledConn, DEFAULT_POOL_SIZE};
+use crate::pool::{OutboxPool, DEFAULT_POOL_SIZE};
 
 /// Maximum retry count before giving up.
 const MAX_RETRIES: u64 = 5;
@@ -111,15 +93,15 @@ impl Outbox {
     }
 
     async fn init_pool_with_schema(db_path: &Path, pool_size: usize) -> SyncResult<OutboxPool> {
-        let pool = OutboxPool::new(db_path, pool_size)?;
+        let pool = OutboxPool::new(db_path, pool_size).await?;
 
-        let conn = pool
-            .get()
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;").await?;
+        // WAL mode is already set by OutboxPool::new, but belt-and-suspenders:
+        sqlx::query("PRAGMA journal_mode=WAL")
+            .execute(pool.inner())
+            .await?;
 
-        conn.execute_batch(
+        // Create outbox tables
+        for ddl in &[
             "CREATE TABLE IF NOT EXISTS outbox_entries (
                 outbox_entry_id   TEXT PRIMARY KEY,
                 bundle_id         TEXT NOT NULL,
@@ -132,26 +114,23 @@ impl Outbox {
                 bundle_payload    TEXT,
                 created_at        TEXT NOT NULL,
                 updated_at        TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_outbox_delivery_state
-                ON outbox_entries(delivery_state);
-
-            CREATE INDEX IF NOT EXISTS idx_outbox_next_retry
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_delivery_state
+                ON outbox_entries(delivery_state)",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_next_retry
                 ON outbox_entries(next_retry_at)
-                WHERE delivery_state IN ('staged', 'failed');
-
-            CREATE INDEX IF NOT EXISTS idx_outbox_bundle_id
-                ON outbox_entries(bundle_id);
-
-            CREATE TABLE IF NOT EXISTS partial_apply_states (
+                WHERE delivery_state IN ('staged', 'failed')",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_bundle_id
+                ON outbox_entries(bundle_id)",
+            "CREATE TABLE IF NOT EXISTS partial_apply_states (
                 outbox_entry_id   TEXT PRIMARY KEY,
                 state_json        TEXT NOT NULL,
                 recorded_at       TEXT NOT NULL,
                 retry_count       INTEGER NOT NULL DEFAULT 0
-            );",
-        )
-        .await?;
+            )",
+        ] {
+            sqlx::query(ddl).execute(pool.inner()).await?;
+        }
 
         Ok(pool)
     }
@@ -163,13 +142,6 @@ impl Outbox {
     ///
     /// Note: Caller is responsible for ensuring the schema is initialized.
     pub async fn with_pool(pool: OutboxPool) -> SyncResult<Self> {
-        let conn = pool
-            .get()
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;").await?;
-        drop(conn);
-
         Ok(Self {
             pool,
             #[cfg(test)]
@@ -195,14 +167,6 @@ impl Outbox {
         })
     }
 
-    /// Get a pooled connection
-    async fn get_conn(&self) -> SyncResult<PooledConn> {
-        self.pool
-            .get()
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))
-    }
-
     /// Append a sync command to the outbox in `staged` state.
     ///
     /// Returns the generated outbox entry ID.
@@ -213,36 +177,29 @@ impl Outbox {
         let now = chrono::Utc::now().to_rfc3339();
         let command_payload = serde_json::to_string(command)?;
 
-        let conn = self.get_conn().await?;
-        let result = conn
-            .interact(move |conn| {
-                let txn = conn.unchecked_transaction()?;
-                txn.execute(
-                    "INSERT INTO outbox_entries
-                    (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-                     retry_count, command_payload, created_at)
-                 VALUES (?1, ?2, ?3, 'staged', 0, ?4, ?5)",
-                    params![
-                        outbox_entry_id,
-                        bundle_id,
-                        idempotency_key,
-                        command_payload,
-                        now,
-                    ],
-                )?;
-                txn.commit()?;
-                Ok::<_, SyncError>(outbox_entry_id)
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))??;
+        let mut tx = self.pool.inner().begin().await?;
+        sqlx::query(
+            "INSERT INTO outbox_entries
+                (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+                 retry_count, command_payload, created_at)
+             VALUES (?1, ?2, ?3, 'staged', 0, ?4, ?5)",
+        )
+        .bind(&outbox_entry_id)
+        .bind(&bundle_id)
+        .bind(&idempotency_key)
+        .bind(&command_payload)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
 
         tracing::debug!(
-            outbox_entry_id = %result,
+            outbox_entry_id = %outbox_entry_id,
             command_type = %command.command_type,
             "Command appended to outbox"
         );
 
-        Ok(result)
+        Ok(outbox_entry_id)
     }
 
     /// Stage an existing bundle ID into the outbox.
@@ -255,36 +212,29 @@ impl Outbox {
         let bundle_id = bundle.bundle_id.clone();
         let idempotency_key = bundle.idempotency_key.clone();
 
-        let conn = self.get_conn().await?;
-        let result = conn
-            .interact(move |conn| {
-                let txn = conn.unchecked_transaction()?;
-                txn.execute(
-                    "INSERT INTO outbox_entries
-                    (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-                     retry_count, bundle_payload, created_at)
-                 VALUES (?1, ?2, ?3, 'ready', 0, ?4, ?5)",
-                    params![
-                        outbox_entry_id,
-                        bundle_id,
-                        idempotency_key,
-                        bundle_payload,
-                        now,
-                    ],
-                )?;
-                txn.commit()?;
-                Ok::<_, SyncError>(outbox_entry_id)
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))??;
+        let mut tx = self.pool.inner().begin().await?;
+        sqlx::query(
+            "INSERT INTO outbox_entries
+                (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+                 retry_count, bundle_payload, created_at)
+             VALUES (?1, ?2, ?3, 'ready', 0, ?4, ?5)",
+        )
+        .bind(&outbox_entry_id)
+        .bind(&bundle_id)
+        .bind(&idempotency_key)
+        .bind(&bundle_payload)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
 
         tracing::debug!(
-            outbox_entry_id = %result,
+            outbox_entry_id = %outbox_entry_id,
             bundle_id = %bundle.bundle_id,
             "Bundle staged to outbox"
         );
 
-        Ok(result)
+        Ok(outbox_entry_id)
     }
 
     /// Stage a bundle only if no row exists with the same `bundle_id` (idempotent pull apply).
@@ -297,77 +247,66 @@ impl Outbox {
         let bundle_payload = serde_json::to_string(bundle)?;
         let bundle_id = bundle.bundle_id.clone();
         let idempotency_key = bundle.idempotency_key.clone();
-        let bundle_id_check = bundle_id.clone();
-        let outbox_entry_id = new_entry_id.clone();
 
-        let conn = self.get_conn().await?;
-        let result = conn
-            .interact(move |conn| {
-                let txn = conn.unchecked_transaction()?;
-                let exists: bool = txn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM outbox_entries WHERE bundle_id = ?1)",
-                    params![bundle_id_check],
-                    |row| row.get(0),
-                )?;
-                if exists {
-                    txn.rollback()?;
-                    return Ok::<_, SyncError>(None);
-                }
-                txn.execute(
-                    "INSERT INTO outbox_entries
-                    (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-                     retry_count, bundle_payload, created_at)
-                 VALUES (?1, ?2, ?3, 'ready', 0, ?4, ?5)",
-                    params![
-                        outbox_entry_id,
-                        bundle_id,
-                        idempotency_key,
-                        bundle_payload,
-                        now,
-                    ],
-                )?;
-                txn.commit()?;
-                Ok(Some(new_entry_id))
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))??;
+        let mut tx = self.pool.inner().begin().await?;
 
-        if let Some(ref id) = result {
-            tracing::debug!(
-                outbox_entry_id = %id,
-                bundle_id = %bundle.bundle_id,
-                "Bundle staged to outbox (pull idempotent)"
-            );
-        } else {
+        // Check existence
+        let exists: bool = sqlx::query_as::<_, (bool,)>(
+            "SELECT EXISTS(SELECT 1 FROM outbox_entries WHERE bundle_id = ?1)",
+        )
+        .bind(&bundle_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .0;
+
+        if exists {
+            tx.rollback().await?;
             tracing::debug!(
                 bundle_id = %bundle.bundle_id,
                 "Skipped staging pull bundle (bundle_id already in outbox)"
             );
+            return Ok(None);
         }
 
-        Ok(result)
+        sqlx::query(
+            "INSERT INTO outbox_entries
+                (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+                 retry_count, bundle_payload, created_at)
+             VALUES (?1, ?2, ?3, 'ready', 0, ?4, ?5)",
+        )
+        .bind(&new_entry_id)
+        .bind(&bundle_id)
+        .bind(&idempotency_key)
+        .bind(&bundle_payload)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        tracing::debug!(
+            outbox_entry_id = %new_entry_id,
+            bundle_id = %bundle.bundle_id,
+            "Bundle staged to outbox (pull idempotent)"
+        );
+
+        Ok(Some(new_entry_id))
     }
 
     /// Transition an outbox entry to `sent` state.
     pub async fn mark_sent(&self, outbox_entry_id: &str) -> SyncResult<()> {
         let now = chrono::Utc::now().to_rfc3339();
-        let entry_id = outbox_entry_id.to_string();
 
-        let conn = self.get_conn().await?;
-        let rows = conn
-            .interact(move |conn| {
-                conn.execute(
-                    "UPDATE outbox_entries
-                 SET delivery_state = 'sent', updated_at = ?1
-                 WHERE outbox_entry_id = ?2 AND delivery_state IN ('staged', 'ready')",
-                    params![now, entry_id],
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-            .map_err(SyncError::from)?;
+        let result = sqlx::query(
+            "UPDATE outbox_entries
+             SET delivery_state = 'sent', updated_at = ?1
+             WHERE outbox_entry_id = ?2 AND delivery_state IN ('staged', 'ready')",
+        )
+        .bind(&now)
+        .bind(outbox_entry_id)
+        .execute(self.pool.inner())
+        .await?;
 
-        if rows == 0 {
+        if result.rows_affected() == 0 {
             return Err(SyncError::OutboxEntryNotFound {
                 id: outbox_entry_id.to_string(),
             });
@@ -380,23 +319,18 @@ impl Outbox {
     /// Transition an outbox entry to `acked` state.
     pub async fn mark_acked(&self, outbox_entry_id: &str) -> SyncResult<()> {
         let now = chrono::Utc::now().to_rfc3339();
-        let entry_id = outbox_entry_id.to_string();
 
-        let conn = self.get_conn().await?;
-        let rows = conn
-            .interact(move |conn| {
-                conn.execute(
-                    "UPDATE outbox_entries
-                 SET delivery_state = 'acked', updated_at = ?1
-                 WHERE outbox_entry_id = ?2 AND delivery_state = 'sent'",
-                    params![now, entry_id],
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-            .map_err(SyncError::from)?;
+        let result = sqlx::query(
+            "UPDATE outbox_entries
+             SET delivery_state = 'acked', updated_at = ?1
+             WHERE outbox_entry_id = ?2 AND delivery_state = 'sent'",
+        )
+        .bind(&now)
+        .bind(outbox_entry_id)
+        .execute(self.pool.inner())
+        .await?;
 
-        if rows == 0 {
+        if result.rows_affected() == 0 {
             return Err(SyncError::OutboxEntryNotFound {
                 id: outbox_entry_id.to_string(),
             });
@@ -427,29 +361,24 @@ impl Outbox {
             RetryAfterPolicy::None => None,
         };
 
-        let entry_id = outbox_entry_id.to_string();
-        let error_str = error.to_string();
         let now_str = now.to_rfc3339();
-        let next_retry_at_clone = next_retry_at.clone();
 
-        let conn = self.get_conn().await?;
-        let rows = conn
-            .interact(move |conn| {
-                conn.execute(
-                    "UPDATE outbox_entries
-                 SET delivery_state = 'conflicted',
-                     last_error = ?1,
-                     next_retry_at = ?2,
-                     updated_at = ?3
-                 WHERE outbox_entry_id = ?4 AND delivery_state = 'sent'",
-                    params![error_str, next_retry_at, now_str, entry_id],
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-            .map_err(SyncError::from)?;
+        let result = sqlx::query(
+            "UPDATE outbox_entries
+             SET delivery_state = 'conflicted',
+                 last_error = ?1,
+                 next_retry_at = ?2,
+                 updated_at = ?3
+             WHERE outbox_entry_id = ?4 AND delivery_state = 'sent'",
+        )
+        .bind(error)
+        .bind(&next_retry_at)
+        .bind(&now_str)
+        .bind(outbox_entry_id)
+        .execute(self.pool.inner())
+        .await?;
 
-        if rows == 0 {
+        if result.rows_affected() == 0 {
             return Err(SyncError::OutboxEntryNotFound {
                 id: outbox_entry_id.to_string(),
             });
@@ -458,7 +387,7 @@ impl Outbox {
         tracing::warn!(
             outbox_entry_id = %outbox_entry_id,
             error = %error,
-            retry_after = ?next_retry_at_clone,
+            retry_after = ?next_retry_at,
             "Marked as conflicted with retry policy"
         );
         Ok(())
@@ -475,71 +404,71 @@ impl Outbox {
     /// Calculates the next retry time using exponential backoff.
     /// Returns an error if the max retry count has been exceeded.
     pub async fn mark_failed(&self, outbox_entry_id: &str, error: &str) -> SyncResult<()> {
-        let entry_id = outbox_entry_id.to_string();
-        let error_str = error.to_string();
+        let mut tx = self.pool.inner().begin().await?;
 
-        let conn = self.get_conn().await?;
-        let result = conn
-            .interact(move |conn| {
-                let txn = conn.unchecked_transaction()?;
+        let retry_count: i64 =
+            sqlx::query_as::<_, (i64,)>(
+                "SELECT retry_count FROM outbox_entries WHERE outbox_entry_id = ?1",
+            )
+            .bind(outbox_entry_id)
+            .fetch_one(&mut *tx)
+            .await?
+            .0;
 
-                let retry_count: u64 = txn
-                    .query_row(
-                        "SELECT retry_count FROM outbox_entries WHERE outbox_entry_id = ?1",
-                        params![entry_id],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .map(|v| v as u64)?;
+        let retry_count = retry_count as u64;
 
-                if retry_count >= MAX_RETRIES {
-                    // Permanently mark as failed without retry
-                    let now = chrono::Utc::now().to_rfc3339();
-                    txn.execute(
-                        "UPDATE outbox_entries
-                     SET delivery_state = 'failed', last_error = ?1, updated_at = ?2,
-                         next_retry_at = NULL
-                     WHERE outbox_entry_id = ?3",
-                        params![error_str, now, entry_id],
-                    )?;
-                    txn.commit()?;
-                    return Err(SyncError::OutboxMaxRetriesExceeded {
-                        id: entry_id,
-                        retries: retry_count,
-                    });
-                }
+        if retry_count >= MAX_RETRIES {
+            // Permanently mark as failed without retry
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query(
+                "UPDATE outbox_entries
+                 SET delivery_state = 'failed', last_error = ?1, updated_at = ?2,
+                     next_retry_at = NULL
+                 WHERE outbox_entry_id = ?3",
+            )
+            .bind(error)
+            .bind(&now)
+            .bind(outbox_entry_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Err(SyncError::OutboxMaxRetriesExceeded {
+                id: outbox_entry_id.to_string(),
+                retries: retry_count,
+            });
+        }
 
-                // Calculate exponential backoff
-                let delay_secs = BASE_RETRY_DELAY_SECS
-                    .saturating_mul(2u64.saturating_pow(retry_count.min(30) as u32));
-                let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64);
-                let now = chrono::Utc::now().to_rfc3339();
+        // Calculate exponential backoff
+        let delay_secs =
+            BASE_RETRY_DELAY_SECS.saturating_mul(2u64.saturating_pow(retry_count.min(30) as u32));
+        let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64);
+        let now = chrono::Utc::now().to_rfc3339();
 
-                txn.execute(
-                    "UPDATE outbox_entries
-                 SET delivery_state = 'failed',
-                     retry_count = retry_count + 1,
-                     last_error = ?1,
-                     next_retry_at = ?2,
-                     updated_at = ?3
-                 WHERE outbox_entry_id = ?4",
-                    params![error_str, next_retry.to_rfc3339(), now, entry_id],
-                )?;
+        sqlx::query(
+            "UPDATE outbox_entries
+             SET delivery_state = 'failed',
+                 retry_count = retry_count + 1,
+                 last_error = ?1,
+                 next_retry_at = ?2,
+                 updated_at = ?3
+             WHERE outbox_entry_id = ?4",
+        )
+        .bind(error)
+        .bind(next_retry.to_rfc3339())
+        .bind(&now)
+        .bind(outbox_entry_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
 
-                txn.commit()?;
+        tracing::warn!(
+            outbox_entry_id = %outbox_entry_id,
+            retry_count = retry_count + 1,
+            next_retry_in_secs = delay_secs,
+            "Marked as failed, scheduled for retry"
+        );
 
-                tracing::warn!(
-                    outbox_entry_id = %entry_id,
-                    retry_count = retry_count + 1,
-                    next_retry_in_secs = delay_secs,
-                    "Marked as failed, scheduled for retry"
-                );
-
-                Ok::<_, SyncError>(())
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?;
-
-        result
+        Ok(())
     }
 
     /// Replay all pending entries (staged, ready, failed-with-retry-due).
@@ -550,38 +479,37 @@ impl Outbox {
     pub async fn replay(&self) -> SyncResult<Vec<OutboxEntry>> {
         let now = chrono::Utc::now().to_rfc3339();
 
-        let conn = self.get_conn().await?;
-        let entries = conn.interact(move |conn: &mut rusqlite::Connection| {
-            let mut stmt = conn.prepare(
-                "SELECT outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-                        retry_count, last_error, next_retry_at, created_at, updated_at
-                 FROM outbox_entries
-                 WHERE delivery_state IN ('staged', 'ready')
-                    OR (delivery_state = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= ?1)
-                    OR (delivery_state = 'conflicted' AND next_retry_at IS NOT NULL AND next_retry_at <= ?1)
-                 ORDER BY created_at ASC",
-            )?;
+        let rows = sqlx::query_as::<_, (String, String, String, String, i64, Option<String>, Option<String>, String, Option<String>)>(
+            "SELECT outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+                    retry_count, last_error, next_retry_at, created_at, updated_at
+             FROM outbox_entries
+             WHERE delivery_state IN ('staged', 'ready')
+                OR (delivery_state = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= ?1)
+                OR (delivery_state = 'conflicted' AND next_retry_at IS NOT NULL AND next_retry_at <= ?1)
+             ORDER BY created_at ASC",
+        )
+        .bind(&now)
+        .bind(&now)
+        .fetch_all(self.pool.inner())
+        .await?;
 
-            let rows = stmt.query_map(params![now], |row: &rusqlite::Row<'_>| {
-                let delivery_state_str: String = row.get(3)?;
-                let delivery_state = DeliveryState::from_str(&delivery_state_str)
-                    .map_err(|_| rusqlite::types::FromSqlError::InvalidType)?;
-                Ok(OutboxEntry {
-                    schema_version: LATEST_SCHEMA_VERSION,
-                    outbox_entry_id: row.get(0)?,
-                    bundle_id: row.get(1)?,
-                    idempotency_key: row.get(2)?,
-                    delivery_state,
-                    retry_count: Some(row.get(4)?),
-                    last_error: row.get(5)?,
-                    next_retry_at: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                })
-            })?.collect::<Result<Vec<_>, _>>()?;
-
-            Ok::<_, SyncError>(rows)
-        }).await.map_err(|e: deadpool_sqlite::InteractError| SyncError::OutboxDatabase(e.to_string()))??;
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let delivery_state = DeliveryState::from_str(&row.3)
+                .map_err(|_| SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.3)))?;
+            entries.push(OutboxEntry {
+                schema_version: LATEST_SCHEMA_VERSION,
+                outbox_entry_id: row.0,
+                bundle_id: row.1,
+                idempotency_key: row.2,
+                delivery_state,
+                retry_count: Some(row.4 as u64),
+                last_error: row.5,
+                next_retry_at: row.6,
+                created_at: row.7,
+                updated_at: row.8,
+            });
+        }
 
         tracing::debug!(count = entries.len(), "Replayed pending outbox entries");
         Ok(entries)
@@ -589,81 +517,59 @@ impl Outbox {
 
     /// Get a specific outbox entry by ID.
     pub async fn get(&self, outbox_entry_id: &str) -> SyncResult<OutboxEntry> {
-        let entry_id = outbox_entry_id.to_string();
+        let row = sqlx::query_as::<_, (String, String, String, String, i64, Option<String>, Option<String>, String, Option<String>)>(
+            "SELECT outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+                    retry_count, last_error, next_retry_at, created_at, updated_at
+             FROM outbox_entries
+             WHERE outbox_entry_id = ?1",
+        )
+        .bind(outbox_entry_id)
+        .fetch_optional(self.pool.inner())
+        .await?
+        .ok_or_else(|| SyncError::OutboxEntryNotFound {
+            id: outbox_entry_id.to_string(),
+        })?;
 
-        let conn = self.get_conn().await?;
-        let entry = conn
-            .interact(move |conn| {
-                conn.query_row(
-                    "SELECT outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-                        retry_count, last_error, next_retry_at, created_at, updated_at
-                 FROM outbox_entries
-                 WHERE outbox_entry_id = ?1",
-                    params![entry_id],
-                    |row| {
-                        let delivery_state_str: String = row.get(3)?;
-                        let delivery_state = DeliveryState::from_str(&delivery_state_str)
-                            .map_err(|_| rusqlite::types::FromSqlError::InvalidType)?;
-                        Ok(OutboxEntry {
-                            schema_version: LATEST_SCHEMA_VERSION,
-                            outbox_entry_id: row.get(0)?,
-                            bundle_id: row.get(1)?,
-                            idempotency_key: row.get(2)?,
-                            delivery_state,
-                            retry_count: Some(row.get(4)?),
-                            last_error: row.get(5)?,
-                            next_retry_at: row.get(6)?,
-                            created_at: row.get(7)?,
-                            updated_at: row.get(8)?,
-                        })
-                    },
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-            .map_err(SyncError::from)?;
+        let delivery_state = DeliveryState::from_str(&row.3)
+            .map_err(|_| SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.3)))?;
 
-        Ok(entry)
+        Ok(OutboxEntry {
+            schema_version: LATEST_SCHEMA_VERSION,
+            outbox_entry_id: row.0,
+            bundle_id: row.1,
+            idempotency_key: row.2,
+            delivery_state,
+            retry_count: Some(row.4 as u64),
+            last_error: row.5,
+            next_retry_at: row.6,
+            created_at: row.7,
+            updated_at: row.8,
+        })
     }
 
     /// Remove acknowledged entries (cleanup).
     ///
     /// Returns the number of entries removed.
     pub async fn purge_acked(&self) -> SyncResult<usize> {
-        let conn = self.get_conn().await?;
-        let rows = conn
-            .interact(move |conn| {
-                conn.execute(
-                    "DELETE FROM outbox_entries WHERE delivery_state = 'acked'",
-                    [],
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-            .map_err(SyncError::from)?;
+        let result =
+            sqlx::query("DELETE FROM outbox_entries WHERE delivery_state = 'acked'")
+                .execute(self.pool.inner())
+                .await?;
 
-        tracing::info!(count = rows, "Purged acked outbox entries");
-        Ok(rows)
+        let count = result.rows_affected() as usize;
+        tracing::info!(count = count, "Purged acked outbox entries");
+        Ok(count)
     }
 
     /// Count entries by delivery state.
     pub async fn count_by_state(&self, state: &str) -> SyncResult<usize> {
-        let state_str = state.to_string();
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM outbox_entries WHERE delivery_state = ?1")
+                .bind(state)
+                .fetch_one(self.pool.inner())
+                .await?;
 
-        let conn = self.get_conn().await?;
-        let count = conn
-            .interact(move |conn| {
-                conn.query_row(
-                    "SELECT COUNT(*) FROM outbox_entries WHERE delivery_state = ?1",
-                    params![state_str],
-                    |row| row.get(0),
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-            .map_err(SyncError::from)?;
-
-        Ok(count)
+        Ok(count.0 as usize)
     }
 
     // ── Partial apply state persistence (SYNC-R12) ──────────────
@@ -680,21 +586,19 @@ impl Outbox {
     ) -> SyncResult<()> {
         let state_json = serde_json::to_string(state)?;
         let now = chrono::Utc::now().to_rfc3339();
-        let entry_id = outbox_entry_id.to_string();
         let retry_count = state.retry_count;
 
-        let conn = self.get_conn().await?;
-        conn.interact(move |conn| {
-            conn.execute(
-                "INSERT OR REPLACE INTO partial_apply_states
-                    (outbox_entry_id, state_json, recorded_at, retry_count)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![entry_id, state_json, now, retry_count],
-            )
-        })
-        .await
-        .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-        .map_err(SyncError::from)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO partial_apply_states
+                (outbox_entry_id, state_json, recorded_at, retry_count)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(outbox_entry_id)
+        .bind(&state_json)
+        .bind(&now)
+        .bind(retry_count)
+        .execute(self.pool.inner())
+        .await?;
 
         tracing::info!(
             outbox_entry_id = %outbox_entry_id,
@@ -712,31 +616,23 @@ impl Outbox {
         &self,
         outbox_entry_id: &str,
     ) -> SyncResult<Option<crate::partial_apply::PartialApplyState>> {
-        let entry_id = outbox_entry_id.to_string();
-
-        let conn = self.get_conn().await?;
-        let result = conn
-            .interact(move |conn| {
-                conn.query_row(
-                    "SELECT state_json FROM partial_apply_states WHERE outbox_entry_id = ?1",
-                    params![entry_id],
-                    |row| row.get::<_, String>(0),
-                )
-            })
-            .await
-            .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?;
+        let result = sqlx::query_as::<_, (String,)>(
+            "SELECT state_json FROM partial_apply_states WHERE outbox_entry_id = ?1",
+        )
+        .bind(outbox_entry_id)
+        .fetch_optional(self.pool.inner())
+        .await?;
 
         match result {
-            Ok(json) => {
-                let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&json)?;
+            Some(row) => {
+                let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&row.0)?;
                 tracing::debug!(
                     outbox_entry_id = %outbox_entry_id,
                     "Loaded persisted partial apply state"
                 );
                 Ok(Some(state))
             }
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(SyncError::from(e)),
+            None => Ok(None),
         }
     }
 
@@ -745,18 +641,10 @@ impl Outbox {
     /// Called after a partial apply has been fully resolved (all deltas succeeded
     /// or permanently failed).
     pub async fn remove_partial_apply_state(&self, outbox_entry_id: &str) -> SyncResult<()> {
-        let entry_id = outbox_entry_id.to_string();
-
-        let conn = self.get_conn().await?;
-        conn.interact(move |conn| {
-            conn.execute(
-                "DELETE FROM partial_apply_states WHERE outbox_entry_id = ?1",
-                params![entry_id],
-            )
-        })
-        .await
-        .map_err(|e| SyncError::OutboxDatabase(e.to_string()))?
-        .map_err(SyncError::from)?;
+        sqlx::query("DELETE FROM partial_apply_states WHERE outbox_entry_id = ?1")
+            .bind(outbox_entry_id)
+            .execute(self.pool.inner())
+            .await?;
 
         tracing::debug!(
             outbox_entry_id = %outbox_entry_id,
@@ -771,20 +659,13 @@ impl Outbox {
     pub async fn list_partial_apply_states(
         &self,
     ) -> SyncResult<Vec<(String, crate::partial_apply::PartialApplyState)>> {
-        let conn = self.get_conn().await?;
-        let rows = conn.interact(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT outbox_entry_id, state_json FROM partial_apply_states ORDER BY recorded_at ASC",
-            )?;
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT outbox_entry_id, state_json FROM partial_apply_states ORDER BY recorded_at ASC",
+        )
+        .fetch_all(self.pool.inner())
+        .await?;
 
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?.collect::<Result<Vec<_>, _>>()?;
-
-            Ok::<_, SyncError>(rows)
-        }).await.map_err(|e| SyncError::OutboxDatabase(e.to_string()))??;
-
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(rows.len());
         for (entry_id, json) in rows {
             let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&json)?;
             results.push((entry_id, state));
@@ -894,7 +775,10 @@ mod tests {
 
         // Fail MAX_RETRIES times
         for _ in 0..MAX_RETRIES {
-            outbox.mark_failed(&entry_id, "persistent error").await.ok();
+            outbox
+                .mark_failed(&entry_id, "persistent error")
+                .await
+                .ok();
         }
 
         // Next failure should error
@@ -1362,7 +1246,7 @@ mod tests {
         assert!(entries.iter().all(|e| e.outbox_entry_id != entry_id));
     }
 
-    // ── Pool lifecycle tests (DEBT-X1) ───────────────────────────
+    // ── Pool lifecycle tests ────────────────────────────────────
 
     #[tokio::test]
     async fn outbox_pool_lifecycle() {
@@ -1521,7 +1405,10 @@ mod tests {
         // Verify all fields persisted atomically
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
-        assert_eq!(entry.last_error, Some("transient conflict".to_string()));
+        assert_eq!(
+            entry.last_error,
+            Some("transient conflict".to_string())
+        );
         assert!(entry.next_retry_at.is_some());
         assert!(entry.updated_at.is_some());
 
