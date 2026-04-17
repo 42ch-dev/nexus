@@ -10,6 +10,7 @@
 export * from './CommonTypes';
 
 // Per-schema modules (stable order: sorted schema paths at load time)
+export * from './DaemonStatusV2';
 export * from './RegistryManifest';
 export * from './ConflictResponse';
 export * from './SyncPullRequest';
@@ -73,6 +74,7 @@ export * from './WorldSnapshotResponse';
 
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
+  DaemonStatusV2: 2,
   RegistryManifest: 1,
   ConflictResponse: 1,
   SyncPullRequest: 1,
@@ -136,4 +138,4 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
 };
 
 // Highest schema_version among emitted contract schemas
-export const LATEST_SCHEMA_VERSION = 1;
+export const LATEST_SCHEMA_VERSION = 2;

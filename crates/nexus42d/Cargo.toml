@@ -40,7 +40,9 @@ toml = "0.8"
 hyper = "1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
+statig = { version = "0.3", features = ["async"] }
 tempfile = "3"
+async-trait = "0.1"
 
 [dev-dependencies]
 axum-test = "15"
