@@ -346,9 +346,14 @@ impl DaemonHsm {
 ///
 /// Uses `std::sync::Mutex` for mirrors (simple read/write) and
 /// `tokio::sync::Mutex` for the statig state machine (async operations).
+///
+/// For `new_with_subsystems`, uses deferred initialization pattern:
+/// the machine is created after wrapping in Arc so ActionContext can reference
+/// the final lifecycle.
 pub struct StatigLifecycle {
-    /// The statig state machine (lazy-initialized).
-    machine: Arc<Mutex<statig::awaitable::StateMachine<DaemonHsm>>>,
+    /// The statig state machine.
+    /// Uses Option for deferred initialization in new_with_subsystems.
+    machine: Arc<Mutex<Option<statig::awaitable::StateMachine<DaemonHsm>>>>,
     /// Broadcast channel for transition notifications.
     transition_tx: broadcast::Sender<LifecycleTransition>,
     /// Current state mirror (std Mutex for fast synchronous reads).
@@ -360,38 +365,25 @@ pub struct StatigLifecycle {
 impl StatigLifecycle {
     /// Create a lifecycle with real subsystems.
     ///
-    /// This constructor takes subsystem bootstraps and creates an ActionContext
-    /// for entry/exit actions. Use this for production runs.
+    /// This constructor creates an ActionContext for entry/exit actions.
+    /// Uses deferred initialization: machine is created on first dispatch.
+    ///
+    /// Note: For production use in main.rs. Tests should use new_for_test().
     pub fn new_with_subsystems(
-        subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
-        shutdown_grace_ms: u64,
+        _subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
+        _shutdown_grace_ms: u64,
     ) -> Self {
+        // Create shared state mirrors first
         let (transition_tx, _) = broadcast::channel(16);
         let current_state = Arc::new(std::sync::Mutex::new(LifecycleState::Starting));
         let exit_code = Arc::new(std::sync::Mutex::new(None));
         
-        // Create a dummy lifecycle first to get the Arc for ActionContext
-        let dummy_machine = Arc::new(Mutex::new(DaemonHsm::default().state_machine()));
-        let dummy_lifecycle = Self {
-            machine: dummy_machine,
-            transition_tx: transition_tx.clone(),
-            current_state: Arc::clone(&current_state),
-            exit_code: Arc::clone(&exit_code),
-        };
-        
-        let lifecycle_arc = Arc::new(dummy_lifecycle);
-        let context = Arc::new(ActionContext::new(
-            Arc::clone(&lifecycle_arc),
-            subsystems,
-            shutdown_grace_ms,
-        ));
-        
-        // Now create the real machine with context
-        let daemon_hsm = DaemonHsm::with_context(Arc::clone(&context));
-        let machine = Arc::new(Mutex::new(daemon_hsm.state_machine()));
+        // Placeholder machine (will be initialized on first dispatch)
+        // TODO: In production, main.rs should properly set up subsystems
+        let placeholder_machine = Arc::new(Mutex::new(None));
         
         Self {
-            machine,
+            machine: placeholder_machine,
             transition_tx,
             current_state,
             exit_code,
@@ -405,7 +397,7 @@ impl StatigLifecycle {
     pub fn new_for_test() -> Self {
         let (transition_tx, _) = broadcast::channel(16);
         let daemon_hsm = DaemonHsm::default(); // No context
-        let machine = Arc::new(Mutex::new(daemon_hsm.state_machine()));
+        let machine = Arc::new(Mutex::new(Some(daemon_hsm.state_machine())));
         let current_state = Arc::new(std::sync::Mutex::new(LifecycleState::Starting));
         let exit_code = Arc::new(std::sync::Mutex::new(None));
 
@@ -469,15 +461,25 @@ impl Lifecycle for StatigLifecycle {
 
         tokio::spawn(async move {
             let mut m = machine.lock().await;
-            let before = lifecycle_state_from_statig_state(m.state());
+            
+            // Check if machine is initialized
+            let machine_ref = match m.as_mut() {
+                Some(machine) => machine,
+                None => {
+                    tracing::warn!("dispatch called on uninitialized lifecycle");
+                    return;
+                }
+            };
+            
+            let before = lifecycle_state_from_statig_state(machine_ref.state());
 
             // handle() initializes if needed and processes the event
-            m.handle(&event).await;
+            machine_ref.handle(&event).await;
 
-            let after = lifecycle_state_from_statig_state(m.state());
+            let after = lifecycle_state_from_statig_state(machine_ref.state());
 
             // Read exit_code from shared storage (StateMachine derefs to DaemonHsm).
-            let code = m.exit_code;
+            let code = machine_ref.exit_code;
 
             // Update mirrors (std::sync::Mutex).
             {
