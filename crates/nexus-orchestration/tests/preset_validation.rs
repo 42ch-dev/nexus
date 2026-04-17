@@ -97,9 +97,7 @@ inner_graphs:
 "#;
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
-        err.problems()
-            .iter()
-            .any(|p| p.error.contains("cycle")),
+        err.problems().iter().any(|p| p.error.contains("cycle")),
         "expected 'cycle' problem in inner_graphs: {:?}",
         err.problems()
     );

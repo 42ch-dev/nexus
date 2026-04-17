@@ -444,12 +444,18 @@ signals:
         assert_eq!(p.preset.requires_capabilities.len(), 3);
         assert_eq!(p.states.len(), 5);
         assert_eq!(p.states[0].enter.len(), 1);
-        assert_eq!(p.states[0].next.as_ref().unwrap(), &NextTarget::Linear("brainstorming".into()));
+        assert_eq!(
+            p.states[0].next.as_ref().unwrap(),
+            &NextTarget::Linear("brainstorming".into())
+        );
         assert!(p.inner_graphs.is_some());
         let ig = p.inner_graphs.as_ref().unwrap();
         assert_eq!(ig.len(), 2);
         assert_eq!(ig["brainstorm_graph"].nodes.len(), 3);
-        assert_eq!(ig["brainstorm_graph"].output_binding.as_deref(), Some("select.text"));
+        assert_eq!(
+            ig["brainstorm_graph"].output_binding.as_deref(),
+            Some("select.text")
+        );
         assert_eq!(p.signals.len(), 2);
     }
 
@@ -474,7 +480,10 @@ states:
     terminal: true
 "#;
         let err = serde_yaml::from_str::<PresetManifest>(yaml);
-        assert!(err.is_err(), "expected serde error for unknown exit_when.kind");
+        assert!(
+            err.is_err(),
+            "expected serde error for unknown exit_when.kind"
+        );
         let msg = format!("{:#}", err.unwrap_err());
         assert!(
             msg.contains("quantum_teleport"),

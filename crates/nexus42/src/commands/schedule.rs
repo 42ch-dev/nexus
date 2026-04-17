@@ -56,9 +56,7 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             seed,
         } => start_session(&client, &preset, &creator, seed.as_deref()).await,
         ScheduleCommand::Status { session_id } => show_status(&client, &session_id).await,
-        ScheduleCommand::Advance { session_id } => {
-            advance_session(&client, &session_id).await
-        }
+        ScheduleCommand::Advance { session_id } => advance_session(&client, &session_id).await,
     }
 }
 
@@ -77,8 +75,9 @@ async fn start_session(
         seed: seed.map(|s| s.to_string()),
     };
 
-    let resp: nexus_contracts::local::orchestration::http::CreateSessionResponse =
-        client.post("/v1/local/orchestration/sessions", &body).await?;
+    let resp: nexus_contracts::local::orchestration::http::CreateSessionResponse = client
+        .post("/v1/local/orchestration/sessions", &body)
+        .await?;
 
     println!("{}", resp.session_id);
     Ok(())
@@ -102,10 +101,7 @@ async fn show_status(client: &crate::api::DaemonClient, session_id: &str) -> Res
 }
 
 /// POST /v1/local/orchestration/sessions/{session_id}/signal → advance.
-async fn advance_session(
-    client: &crate::api::DaemonClient,
-    session_id: &str,
-) -> Result<()> {
+async fn advance_session(client: &crate::api::DaemonClient, session_id: &str) -> Result<()> {
     use nexus_contracts::local::orchestration::http::SignalSessionRequest;
 
     let path = format!("/v1/local/orchestration/sessions/{session_id}/signal");
@@ -155,12 +151,7 @@ mod tests {
 
     #[test]
     fn status_command_parses() {
-        let cmd = ScheduleCli::try_parse_from([
-            "schedule",
-            "status",
-            "sess_abc123",
-        ])
-        .unwrap();
+        let cmd = ScheduleCli::try_parse_from(["schedule", "status", "sess_abc123"]).unwrap();
 
         match cmd.command {
             ScheduleCommand::Status { session_id } => {
@@ -172,12 +163,7 @@ mod tests {
 
     #[test]
     fn advance_command_parses() {
-        let cmd = ScheduleCli::try_parse_from([
-            "schedule",
-            "advance",
-            "sess_abc123",
-        ])
-        .unwrap();
+        let cmd = ScheduleCli::try_parse_from(["schedule", "advance", "sess_abc123"]).unwrap();
 
         match cmd.command {
             ScheduleCommand::Advance { session_id } => {

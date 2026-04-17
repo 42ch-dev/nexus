@@ -20,7 +20,9 @@ fn setup_engine() -> (
     let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(storage));
+    let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
+        storage,
+    ));
     (engine, loaded)
 }
 
@@ -33,7 +35,10 @@ async fn run_until_wait_or_terminal(
 ) -> Vec<nexus_orchestration::engine::StepOutcome> {
     let mut outcomes = Vec::new();
     for _ in 0..max_steps {
-        let outcome = engine.run_step(session_id).await.expect("run_step should succeed");
+        let outcome = engine
+            .run_step(session_id)
+            .await
+            .expect("run_step should succeed");
         let is_done = matches!(
             outcome,
             nexus_orchestration::engine::StepOutcome::Completed { .. }
@@ -183,7 +188,10 @@ async fn e2e_restart_durability_context_persists() {
         .expect("status should be queryable");
 
     assert!(
-        !matches!(status_before, nexus_orchestration::engine::SessionStatus::Running),
+        !matches!(
+            status_before,
+            nexus_orchestration::engine::SessionStatus::Running
+        ),
         "session should have settled into a non-running state"
     );
 
@@ -205,7 +213,10 @@ async fn e2e_restart_durability_context_persists() {
             .await
             .expect("status after advance should be queryable");
 
-        assert_ne!(status_before, status_after, "status should change after advance");
+        assert_ne!(
+            status_before, status_after,
+            "status should change after advance"
+        );
     }
 }
 
@@ -247,8 +258,26 @@ fn e2e_novel_writing_has_five_states() {
     let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
-    assert_eq!(loaded.manifest.states.len(), 5, "novel-writing should have 5 states");
+    assert_eq!(
+        loaded.manifest.states.len(),
+        5,
+        "novel-writing should have 5 states"
+    );
 
-    let state_ids: Vec<&str> = loaded.manifest.states.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(state_ids, vec!["gathering", "brainstorming", "outlining", "drafting", "done"]);
+    let state_ids: Vec<&str> = loaded
+        .manifest
+        .states
+        .iter()
+        .map(|s| s.id.as_str())
+        .collect();
+    assert_eq!(
+        state_ids,
+        vec![
+            "gathering",
+            "brainstorming",
+            "outlining",
+            "drafting",
+            "done"
+        ]
+    );
 }

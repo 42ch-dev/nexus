@@ -14,7 +14,9 @@ use include_dir::Dir;
 pub mod loader;
 pub mod manifest;
 
-pub use loader::{load_preset, load_preset_from_str, LoadedPreset, PresetLoadError, ValidationProblem};
+pub use loader::{
+    load_preset, load_preset_from_str, LoadedPreset, PresetLoadError, ValidationProblem,
+};
 
 // ---------------------------------------------------------------------------
 // Embedded presets
@@ -183,8 +185,12 @@ mod tests {
         assert_eq!(loaded.manifest.states.len(), 5);
 
         // Verify state IDs.
-        let state_ids: Vec<&str> =
-            loaded.manifest.states.iter().map(|s| s.id.as_str()).collect();
+        let state_ids: Vec<&str> = loaded
+            .manifest
+            .states
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
         assert!(state_ids.contains(&"gathering"));
         assert!(state_ids.contains(&"brainstorming"));
         assert!(state_ids.contains(&"outlining"));
@@ -207,7 +213,12 @@ mod tests {
         }
 
         // Verify done is terminal.
-        let done = loaded.manifest.states.iter().find(|s| s.id == "done").unwrap();
+        let done = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "done")
+            .unwrap();
         assert!(done.terminal, "done state should be terminal");
     }
 
@@ -242,15 +253,21 @@ mod tests {
             }
         }
 
-        assert_eq!(prompt_files.len(), 7, "expected 7 prompt template references in enter + inner_graphs");
+        assert_eq!(
+            prompt_files.len(),
+            7,
+            "expected 7 prompt template references in enter + inner_graphs"
+        );
 
         // Verify the embedded directory has all 8 prompt files (includes
         // gathering-exit.md which is referenced from exit_when, not enter).
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
-        assert_eq!(prompts_dir.files().count(), 8, "expected 8 embedded prompt files");
+        assert_eq!(
+            prompts_dir.files().count(),
+            8,
+            "expected 8 embedded prompt files"
+        );
     }
 }
-
-

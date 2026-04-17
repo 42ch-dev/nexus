@@ -1,13 +1,7 @@
 //! Presets listing and reload handlers.
 
-use axum::{
-    extract::Path,
-    http::StatusCode,
-    Json,
-};
-use nexus_contracts::local::orchestration::http::{
-    ListPresetsResponse, ReloadPresetResponse,
-};
+use axum::{extract::Path, http::StatusCode, Json};
+use nexus_contracts::local::orchestration::http::{ListPresetsResponse, ReloadPresetResponse};
 
 /// `GET /v1/local/orchestration/presets`
 ///
@@ -18,10 +12,7 @@ pub async fn list_presets() -> (StatusCode, Json<ListPresetsResponse>) {
     if !presets.iter().any(|p| p == "_system.maintenance") {
         presets.push("_system.maintenance".to_string());
     }
-    (
-        StatusCode::OK,
-        Json(ListPresetsResponse { presets }),
-    )
+    (StatusCode::OK, Json(ListPresetsResponse { presets }))
 }
 
 /// `POST /v1/local/orchestration/presets/{id}:reload`
@@ -36,8 +27,8 @@ pub async fn reload_preset(
 ) -> Result<(StatusCode, Json<ReloadPresetResponse>), (StatusCode, String)> {
     // Validate the preset exists by attempting to load it.
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps)
-        .map_err(|e| {
+    let loaded =
+        nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps).map_err(|e| {
             (
                 StatusCode::NOT_FOUND,
                 format!("preset '{}' not found: {}", preset_id, e),
