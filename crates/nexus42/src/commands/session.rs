@@ -86,7 +86,7 @@ fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
 
     // Print sessions sorted by last_used_at (most recent first)
     let mut sorted_sessions = sessions;
-    sorted_sessions.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
+    sorted_sessions.sort_by_key(|b| std::cmp::Reverse(b.last_used_at));
 
     for session in sorted_sessions {
         let session_id_str = session.session_id.0.as_ref();
