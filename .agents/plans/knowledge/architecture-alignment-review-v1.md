@@ -112,7 +112,7 @@ At baseline, several **critical and high gaps** were recorded (verbatim historic
 
 **Summary**: 12 of 17 aggregates have domain implementations. 5 are missing domain logic (SyncCommand, DeltaBundle/Delta, OutboxEntry, WorkspaceBinding, AgentProfile). Of the 12 implemented, aggregate tables above are **Aligned** as of 2026-04-10 (historical enum gaps TD-2/TD-3 closed under arch-alignment blockers).
 
-*Table last refreshed: 2026-04-10 — see [v1.1-specs-align-review-v1.md](v1.1-specs-align-review-v1.md).*
+*Table last refreshed: 2026-04-10 — see [v1.1-specs-align-review-v1.md](../archived/knowledge/v1.1-specs-align-review-v1.md) (archived 2026-04-17 after remediation plan Done).*
 
 #### Enum Alignment (§7 of data-model-v1.md)
 

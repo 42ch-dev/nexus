@@ -33,7 +33,7 @@
       "description": "Implement AcpSdkAdapter with LocalSet bridge, complete prompt loop, event handling, and error integration",
       "dependency": "2026-04-06-foundation-hardening",
       "spec_refs": [
-        ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
+        ".agents/plans/archived/knowledge/acp-client-tech-spec-v1.md",
         ".agents/plans/archived/knowledge/phase2-architecture-plan-v1.md"
       ],
       "effort": "M-L — ~3-6 agent sessions",

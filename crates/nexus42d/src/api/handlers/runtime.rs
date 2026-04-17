@@ -54,8 +54,10 @@ pub struct DaemonStatusResponse {
 
 /// GET /v1/local/daemon/status — minimal lifecycle probe (TD-9 partial delivery).
 ///
-/// Exposes a stable JSON shape for automation. **Not** a full §10.1 state machine yet; see
-/// `.agents/plans/knowledge/daemon-lifecycle-api-v1.md`.
+/// Exposes a stable JSON shape for automation. **Not** a full §10.1 state machine yet; current
+/// authoritative design for the 6-state HSM lives in
+/// `.agents/plans/knowledge/daemon-lifecycle-api-v2.md` (the v1 gap analysis is archived at
+/// `.agents/plans/archived/knowledge/daemon-lifecycle-api-v1.md`).
 pub async fn daemon_status(State(_state): State<WorkspaceState>) -> Json<DaemonStatusResponse> {
     info!("Handling daemon lifecycle status request");
     Json(DaemonStatusResponse {

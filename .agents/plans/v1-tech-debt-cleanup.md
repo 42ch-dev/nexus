@@ -390,7 +390,7 @@
 
 **Target**: V1.1+
 
-**Evidence**: [fork-branch-contract-alignment-v1.md](knowledge/fork-branch-contract-alignment-v1.md); `test_fork_branch_parent_branch_and_event_ids_roundtrip` in `crates/nexus-domain/src/contract_assertions.rs`.
+**Evidence**: [fork-branch-contract-alignment-v1.md](archived/knowledge/fork-branch-contract-alignment-v1.md) (archived 2026-04-17); `test_fork_branch_parent_branch_and_event_ids_roundtrip` in `crates/nexus-domain/src/contract_assertions.rs`.
 
 ---
 
@@ -437,7 +437,7 @@
 
 **Target**: V1.1+
 
-**Evidence**: `GET /v1/local/daemon/status` in `crates/nexus42d` (handler `daemon_status`, tests in `api/middleware.rs`, `tests/integration.rs`). Gap vs full FSM: [daemon-lifecycle-api-v1.md](knowledge/daemon-lifecycle-api-v1.md).
+**Evidence**: `GET /v1/local/daemon/status` in `crates/nexus42d` (handler `daemon_status`, tests in `api/middleware.rs`, `tests/integration.rs`). Gap vs full FSM: [daemon-lifecycle-api-v1.md](archived/knowledge/daemon-lifecycle-api-v1.md) (archived 2026-04-17; full 6-state HSM design now in [knowledge/daemon-lifecycle-api-v2.md](knowledge/daemon-lifecycle-api-v2.md)).
 
 ---
 

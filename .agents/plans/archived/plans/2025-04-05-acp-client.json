@@ -33,7 +33,7 @@
       "working_branch": "feature/v1.0-acp-client",
       "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
       "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)",
-      "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v1.md",
+      "wave_0_spec": ".agents/plans/archived/knowledge/acp-client-tech-spec-v1.md",
       "qc_status": "APPROVE — ACP-C1, ACP-C2, ACP-H1 fixed and verified",
       "qc_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qc-consolidated.md",
       "qa_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qa.md",

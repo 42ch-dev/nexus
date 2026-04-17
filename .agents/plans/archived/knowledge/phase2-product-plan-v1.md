@@ -412,7 +412,7 @@ See §4 "Command-by-Command Status Plan" table above.
 |----------|----------|---------|
 | V1.0-phase1 Product Review | `.agents/plans/archived/knowledge/phase1-product-review-v1.md` | Feature completeness analysis, user journey mapping |
 | V1.0-phase1 Architecture Review | `.agents/plans/archived/knowledge/phase1-architecture-review-v1.md` | Technical findings, bug list, debt items |
-| ACP Client Tech Spec | `.agents/plans/knowledge/acp-client-tech-spec-v1.md` | ACP integration details |
+| ACP Client Tech Spec | `.agents/plans/archived/knowledge/acp-client-tech-spec-v1.md` (archived 2026-04-17) | ACP integration details |
 | status.json | `.agents/plans/status.json` | Residual findings, plan tracking |
 | AGENTS.md | Repository root | Development workflow, CI requirements |
 

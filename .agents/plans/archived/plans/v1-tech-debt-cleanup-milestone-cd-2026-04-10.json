@@ -29,9 +29,9 @@
         "batch_e": "deferred to V1.2 — TD-11, TD-13"
       },
       "spec_refs": [
-        ".agents/plans/knowledge/fork-branch-contract-alignment-v1.md",
+        ".agents/plans/archived/knowledge/fork-branch-contract-alignment-v1.md",
         ".agents/plans/knowledge/dual-outbox-architecture-v1.md",
-        ".agents/plans/knowledge/daemon-lifecycle-api-v1.md",
+        ".agents/plans/archived/knowledge/daemon-lifecycle-api-v1.md",
         ".agents/plans/knowledge/device-flow-oauth-scope-v1.md"
       ],
       "gates": {

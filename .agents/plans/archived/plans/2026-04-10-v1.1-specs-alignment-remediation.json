@@ -8,7 +8,7 @@
     "working_branch": "main",
     "merge_target": "main",
     "spec_refs": [
-      "knowledge/v1.1-specs-align-review-v1.md"
+      "archived/knowledge/v1.1-specs-align-review-v1.md"
     ],
     "gates": {
       "validate_schemas": "passed",
