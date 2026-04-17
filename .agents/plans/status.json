@@ -50,64 +50,6 @@
       }
     },
     {
-      "id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
-      "status": "InReview",
-      "file": ".agents/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
-      "title": "V1.4 WS2 — Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws2",
-        "orchestration",
-        "new-feature"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-18",
-      "notes": "All 10 tasks done (T1-T6 in Batches ①-③, T7-T10 in Batch ④). Full CI gate passed. Ready for QC triple-review + QA verification.",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M2",
-        "working_branch": "feature/v1.4-ws2-orch-skeleton",
-        "description": "New crate crates/nexus-orchestration. OrchestrationEngine trait + GraphFlowEngine adapter over graph-flow=0.2.3, SqliteSessionStorage (sqlx, sharing nexus-local-db's pool — WS8 prereq for Task 3), Capability trait + non-ACP built-ins (sync/outbox/workspace/registry/creator.{read,write,inject}/judge.rule), WorkerManager + stdin/stdout JSON-RPC IPC (jsonrpsee-core + RpcTransport trait + NDJSON via tokio_util::codec::LinesCodec — selection closed per crate-selection-best-practices-v1 §3.1), _system.maintenance hardcoded graph, /v1/local/orchestration/* HTTP. ACP-touching capabilities + preset file loader deferred to WS3.",
-        "wave_0_spec": ".agents/plans/knowledge/orchestration-engine-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-          ".agents/plans/knowledge/schemas-boundary-v1.md",
-          ".agents/plans/knowledge/crate-selection-best-practices-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "2026-04-17-v1.4-ws1-acp-host-extraction",
-        "blocking_dependencies": [
-          "2026-04-17-v1.4-ws8-local-db-sqlx-migration (Task 3 SqliteSessionStorage only; Tasks 1-2 + 4-10 may run in parallel with WS8)"
-        ],
-        "effort_agent_oriented": "L (2-3 agent sessions)",
-        "commits": [
-          "bc8a7e9 chore(orchestration): scaffold crate with graph-flow=0.2.3 (WS2 T1)",
-          "f8d225a feat(orchestration): OrchestrationEngine trait + GraphFlowEngine adapter (WS2 T2)",
-          "7f2fe01 feat(orchestration): SqliteSessionStorage + orchestration_sessions migration (WS2 T3)",
-          "43a8386 feat(orchestration): Capability trait + non-ACP built-ins + standard Task impls (WS2 T4)",
-          "bbddcc6 feat(orchestration): Worker Manager + jsonrpsee-core stdio NDJSON IPC (WS2 T5)",
-          "16a93df feat(orchestration): _system.maintenance hardcoded graph + E2E smoke (WS2 T6)",
-          "a0a82e6 feat(daemon): /v1/local/orchestration/* engine-session endpoints (WS2 T7)",
-          "754db03 feat(daemon): wire engine + worker manager + system preset at boot (WS2 T8)",
-          "aa628ed refactor(nexus42): remove WS1 ACP compat shim; import directly from nexus-acp-host (WS2 T9)",
-          "cb467e2 chore(ci): pass full CI gate — fmt + clippy + unused import cleanup (WS2 T10)"
-        ],
-        "gates": {
-          "cargo_build": "pass",
-          "cargo_test": "pass",
-          "cargo_fmt": "pass",
-          "cargo_clippy": "pass",
-          "validate_schemas": "pass",
-          "codegen_no_diff": "pass",
-          "linkage_gate": "pass",
-          "http_smoke_tests": "pass (4/4)",
-          "boot_integration_test": "pass (engine_started_at_boot)"
-        }
-      }
-    },
-    {
       "id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
       "status": "Todo",
       "file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
@@ -206,13 +148,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-18",
-      "total_open": 10,
+      "total_open": 18,
       "by_severity": {
         "critical": 0,
-        "high": 0,
-        "medium": 4,
-        "low": 3,
-        "nit": 3
+        "high": 1,
+        "medium": 7,
+        "low": 6,
+        "nit": 4
       },
       "by_target": {
         "V1.0": 0,
@@ -220,13 +162,15 @@
         "V1.2": 0,
         "V1.3": 0,
         "V1.4": 0,
-        "V1.5": 9,
-        "WS2": 1
+        "V1.5": 11,
+        "WS2": 1,
+        "WS3": 3
       },
       "by_plan": {
         "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 5,
         "2026-04-17-v1.4-ws4-statig-lifecycle": 4,
-        "2026-04-17-v1.4-ws5-schemas-boundary": 1
+        "2026-04-17-v1.4-ws5-schemas-boundary": 1,
+        "2026-04-17-v1.4-ws2-orchestration-skeleton": 8
       },
       "cross_cutting": []
     },
@@ -344,6 +288,96 @@
           "decision": "accept",
           "owner": "fullstack-dev",
           "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws2-orchestration-skeleton": [
+        {
+          "id": "R1",
+          "title": "Daemon restart does not repopulate in-memory session tracker from SQLite",
+          "severity": "medium",
+          "source": "qc",
+          "scope": "crates/nexus42d/src/main.rs — engine restart path",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "WS3",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "new_session creates orphan sessions with empty task ID (accepted: start_session is the real entry point)",
+          "severity": "high",
+          "source": "qc",
+          "scope": "crates/nexus42d/src/api/handlers/orchestration/sessions.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "FlowRunner clone-per-step correctness unverified",
+          "severity": "medium",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/src/engine.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "WS3",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Worker shutdown SIGTERM→SIGKILL path not implemented (uses start_kill directly)",
+          "severity": "medium",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/src/worker/manager.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "WS3",
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "Session ID collision risk with millisecond timestamps",
+          "severity": "low",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/src/storage/sqlite.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R6",
+          "title": "jsonrpsee dep unused in WS2 (pre-wired for WS3)",
+          "severity": "low",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/Cargo.toml",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        },
+        {
+          "id": "R7",
+          "title": "Sleep-based timing in worker IPC tests",
+          "severity": "low",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/tests/worker_ipc_roundtrip.rs",
+          "decision": "accept",
+          "owner": "qa-engineer",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R8",
+          "title": "Context wrapper zero-utility newtype",
+          "severity": "nit",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/src/engine.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
           "tracking_link": null
         }
       ]
