@@ -325,7 +325,10 @@ mod tests {
 
         let resp: VerifyResponse = serde_json::from_str(json).expect("parse");
         assert_eq!(resp.status, VerifyStatus::Verified);
-        assert_eq!(resp.creator_api_key, Some("nexus_live_active_key".to_string()));
+        assert_eq!(
+            resp.creator_api_key,
+            Some("nexus_live_active_key".to_string())
+        );
         assert!(resp.remaining_attempts.is_none());
     }
 
@@ -411,8 +414,8 @@ mod tests {
 
     #[tokio::test]
     async fn register_creator_success() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -444,8 +447,8 @@ mod tests {
 
     #[tokio::test]
     async fn register_creator_server_error() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -458,13 +461,16 @@ mod tests {
 
         let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
         let result = client.register_creator("Test", "cli").await;
-        assert!(matches!(result, Err(SyncError::PlatformError { status: 500, .. })));
+        assert!(matches!(
+            result,
+            Err(SyncError::PlatformError { status: 500, .. })
+        ));
     }
 
     #[tokio::test]
     async fn verify_creator_success() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -483,13 +489,16 @@ mod tests {
             .expect("verify");
 
         assert_eq!(resp.status, VerifyStatus::Verified);
-        assert_eq!(resp.creator_api_key, Some("nexus_live_active_key".to_string()));
+        assert_eq!(
+            resp.creator_api_key,
+            Some("nexus_live_active_key".to_string())
+        );
     }
 
     #[tokio::test]
     async fn verify_creator_wrong_answer() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))

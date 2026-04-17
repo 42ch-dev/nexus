@@ -292,8 +292,8 @@ pub fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
     match row {
         Some(db_row) => {
             let identity_type = db_row.identity_type.as_str();
-            let resolved_type = LocalIdentityType::from_str(identity_type)
-                .unwrap_or(LocalIdentityType::Persistent);
+            let resolved_type =
+                LocalIdentityType::from_str(identity_type).unwrap_or(LocalIdentityType::Persistent);
             Ok(Some(ResolvedIdentity {
                 creator_id,
                 identity_type: resolved_type,
@@ -472,7 +472,11 @@ mod tests {
     fn test_display_name_whitespace_only_should_be_rejected() {
         // Empty/whitespace names should be rejected — trimmed to empty
         let name = Some("   ".to_string());
-        assert!(name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty()).is_none());
+        assert!(name
+            .as_deref()
+            .map(|n| n.trim())
+            .filter(|n| !n.is_empty())
+            .is_none());
     }
 
     #[test]
