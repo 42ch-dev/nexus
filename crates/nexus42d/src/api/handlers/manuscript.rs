@@ -19,39 +19,28 @@ pub async fn status(
 ) -> Result<Json<ManuscriptStatusResponse>, NexusApiError> {
     info!("Handling manuscript status request");
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
-    })?;
+    let phase: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
+            .fetch_optional(state.pool())
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: e.to_string(),
+            })?;
 
-    let phase: Option<String> = conn
-        .query_row(
-            "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-            [],
-            |row| row.get(0),
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-
-    let active_manifest_id: Option<String> = conn
-        .query_row(
-            "SELECT value FROM workspace_meta WHERE key = 'active_manifest_id'",
-            [],
-            |row| row.get(0),
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
+    let active_manifest_id: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'active_manifest_id'")
+            .fetch_optional(state.pool())
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: e.to_string(),
+            })?;
 
     debug!(phase = ?phase, active_manifest_id = ?active_manifest_id, "Manuscript status retrieved");
     info!("Manuscript status completed");
     Ok(Json(ManuscriptStatusResponse {
-        phase,
-        active_manifest_id,
+        phase: phase.map(|p| p.0),
+        active_manifest_id: active_manifest_id.map(|a| a.0),
     }))
 }

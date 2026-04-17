@@ -14,10 +14,6 @@ pub struct PoolStatusResponse {
     pub max_size: usize,
     /// Current pool size (total connections)
     pub size: usize,
-    /// Number of available (idle) connections
-    pub available: usize,
-    /// Number of futures waiting for a connection
-    pub waiting: usize,
 }
 
 /// Get database pool status (QC-W3)
@@ -31,15 +27,11 @@ pub async fn pool_status(State(state): State<WorkspaceState>) -> Json<PoolStatus
     tracing::debug!(
         max_size = status.max_size,
         size = status.size,
-        available = status.available,
-        waiting = status.waiting,
         "Pool status query"
     );
 
     Json(PoolStatusResponse {
         max_size: status.max_size,
         size: status.size,
-        available: status.available,
-        waiting: status.waiting,
     })
 }

@@ -87,44 +87,33 @@ pub async fn device_authorization(
 
     debug!(user_code = %user_code, "Generated device code session");
 
-    // Store the device code session in SQLite
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("Failed to get database connection: {}", e),
-    })?;
-
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
     let verification_uri = "https://auth.42ch.com/activate".to_string();
 
-    // Clone values needed after the move into interact closure
-    let response_device_code = device_code.clone();
-    let response_user_code = user_code.clone();
-    let response_verification_uri = verification_uri.clone();
-
-    conn.interact(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO device_code_sessions (device_code, user_code, verification_uri, expires_at, status)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            [&device_code, &user_code, &verification_uri, &expires_at, "pending"],
-        )
-    })
+    // Store the device code session in SQLite
+    sqlx::query(
+        "INSERT OR REPLACE INTO device_code_sessions (device_code, user_code, verification_uri, expires_at, status)
+         VALUES (?1, ?2, ?3, ?4, ?5)"
+    )
+    .bind(&device_code)
+    .bind(&user_code)
+    .bind(&verification_uri)
+    .bind(&expires_at)
+    .bind("pending")
+    .execute(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
         message: format!("Failed to store device code session: {}", e),
-    })?
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: e.to_string(),
     })?;
 
     info!("Device authorization completed");
     Ok((
         StatusCode::OK,
         Json(DeviceAuthResponse {
-            device_code: response_device_code,
-            user_code: response_user_code,
-            verification_uri: response_verification_uri,
+            device_code,
+            user_code,
+            verification_uri,
             expires_in: 900,
             interval: 5,
         }),
@@ -141,35 +130,17 @@ pub async fn exchange_token(
 ) -> Result<Json<serde_json::Value>, NexusApiError> {
     info!("Handling token exchange request");
     debug!(device_code = %req.device_code, "Looking up device code session");
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("Failed to get database connection: {}", e),
-    })?;
 
     // Check the device code session status
-    let device_code_owned = req.device_code.clone();
-    let session: Option<(String, String)> = conn
-        .interact(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT status, user_code FROM device_code_sessions WHERE device_code = ?1",
-            )?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map([&device_code_owned], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            Ok::<Option<(String, String)>, rusqlite::Error>(rows.into_iter().next())
-        })
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("Failed to query device code session: {}", e),
-        })?
-        .map_err(|e: rusqlite::Error| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
+    let session: Option<(String, String)> =
+        sqlx::query_as("SELECT status, user_code FROM device_code_sessions WHERE device_code = ?1")
+            .bind(&req.device_code)
+            .fetch_optional(state.pool())
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("Failed to query device code session: {}", e),
+            })?;
 
     let (status, user_code) = match session {
         Some(s) => s,
@@ -208,14 +179,9 @@ pub async fn exchange_token(
         .await?;
 
     // Clean up device code session
-    let dc = req.device_code.clone();
-    let _ = conn
-        .interact(move |conn| {
-            conn.execute(
-                "DELETE FROM device_code_sessions WHERE device_code = ?1",
-                [&dc],
-            )
-        })
+    let _ = sqlx::query("DELETE FROM device_code_sessions WHERE device_code = ?1")
+        .bind(&req.device_code)
+        .execute(state.pool())
         .await;
 
     info!("Token exchange completed");

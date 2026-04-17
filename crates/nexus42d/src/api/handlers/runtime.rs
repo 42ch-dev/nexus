@@ -91,32 +91,22 @@ async fn gather_acp_status(state: &WorkspaceState) -> AcpStatusInfo {
         ..Default::default()
     };
 
-    // Count active sessions
-    if let Ok(conn) = state.db().await {
-        if let Ok(count) = conn
-            .interact(|conn| {
-                let count: Result<usize, _> =
-                    conn.query_row("SELECT COUNT(*) FROM acp_sessions", [], |row| row.get(0));
-                count
-            })
-            .await
-        {
-            status.active_sessions = count.unwrap_or(0);
-        }
+    let pool = state.pool();
 
-        // Count total tool executions
-        if let Ok(count) = conn
-            .interact(|conn| {
-                let count: Result<usize, _> =
-                    conn.query_row("SELECT COUNT(*) FROM acp_tool_audit_log", [], |row| {
-                        row.get(0)
-                    });
-                count
-            })
-            .await
-        {
-            status.total_tool_executions = count.unwrap_or(0) as u64;
-        }
+    // Count active sessions
+    if let Ok(count) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM acp_sessions")
+        .fetch_one(pool)
+        .await
+    {
+        status.active_sessions = count.0 as usize;
+    }
+
+    // Count total tool executions
+    if let Ok(count) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM acp_tool_audit_log")
+        .fetch_one(pool)
+        .await
+    {
+        status.total_tool_executions = count.0 as u64;
     }
 
     status

@@ -148,9 +148,9 @@ mod tests {
         }
     }
 
-    fn create_test_app() -> TestApp {
-        let (tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+    async fn create_test_app() -> TestApp {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state.clone());
         let server = TestServer::new(app).unwrap();
         TestApp {
@@ -234,7 +234,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_route_works_without_auth() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app.get("/v1/local/runtime/health").await;
         assert!(
             response.status_code().is_success(),
@@ -245,7 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_status_works_without_auth() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app.get("/v1/local/auth/status").await;
         assert!(
             response.status_code().is_success(),
@@ -256,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_device_works_without_auth() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app
             .post("/v1/local/auth/device")
             .json(&serde_json::json!({}))
@@ -272,7 +272,7 @@ mod tests {
 
     #[tokio::test]
     async fn creators_returns_401_without_token() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app.get("/v1/local/creators").await;
         assert_eq!(
             response.status_code(),
@@ -284,7 +284,7 @@ mod tests {
 
     #[tokio::test]
     async fn manuscript_returns_401_without_token() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app.get("/v1/local/manuscript").await;
         assert_eq!(
             response.status_code(),
@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn references_returns_401_without_token() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app.get("/v1/local/references").await;
         assert_eq!(
             response.status_code(),
@@ -310,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn creators_returns_401_with_invalid_token() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app
             .get("/v1/local/creators")
             .add_header("Authorization", "Bearer invalid-token")
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn creators_succeeds_with_valid_token() {
-        let app = create_test_app();
+        let app = create_test_app().await;
 
         // Seed a valid token in the database
         seed_valid_token(&app.state, "usr_test", "valid-access-token").await;
@@ -348,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_bearer_token_returns_401() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app
             .get("/v1/local/creators")
             .add_header("Authorization", "Bearer ")
@@ -362,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_auth_header_returns_401() {
-        let app = create_test_app();
+        let app = create_test_app().await;
         let response = app
             .get("/v1/local/creators")
             .add_header("Authorization", "Basic dXNlcjpwYXNz")
@@ -376,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn expired_token_returns_401() {
-        let app = create_test_app();
+        let app = create_test_app().await;
 
         // Seed an expired token
         seed_expired_token(&app.state, "usr_expired", "expired-token").await;
@@ -395,40 +395,38 @@ mod tests {
     // --- Helpers ---
 
     async fn seed_valid_token(state: &WorkspaceState, user_id: &str, access_token: &str) {
-        let conn = state.db().await.unwrap();
         let expires_at = (Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
         let created_at = Utc::now().to_rfc3339();
-        let user_id = user_id.to_string();
-        let access_token = access_token.to_string();
 
-        conn.interact(move |conn| {
-            conn.execute(
-                "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                [&user_id, &access_token, "rt_mock", &expires_at, &created_at],
-            )
-        })
+        sqlx::query(
+            "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)"
+        )
+        .bind(user_id)
+        .bind(access_token)
+        .bind("rt_mock")
+        .bind(&expires_at)
+        .bind(&created_at)
+        .execute(state.pool())
         .await
-        .unwrap()
         .unwrap();
     }
 
     async fn seed_expired_token(state: &WorkspaceState, user_id: &str, access_token: &str) {
-        let conn = state.db().await.unwrap();
         let expires_at = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
         let created_at = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
-        let user_id = user_id.to_string();
-        let access_token = access_token.to_string();
 
-        conn.interact(move |conn| {
-            conn.execute(
-                "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                [&user_id, &access_token, "rt_mock", &expires_at, &created_at],
-            )
-        })
+        sqlx::query(
+            "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)"
+        )
+        .bind(user_id)
+        .bind(access_token)
+        .bind("rt_mock")
+        .bind(&expires_at)
+        .bind(&created_at)
+        .execute(state.pool())
         .await
-        .unwrap()
         .unwrap();
     }
 

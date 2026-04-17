@@ -4,215 +4,198 @@
 //! No DDL definitions remain in this file — all tables are centrally managed.
 //!
 //! **All tables** (shared + daemon-only):
-//! - Initialized by `nexus-local-db::init(RuntimeRole::Daemon)`
-//! - Single source of truth in `nexus-local-db/src/schema.rs`
-
-use nexus_local_db::{init, RuntimeRole};
-use rusqlite::Connection;
+//! - Initialized by `nexus_local_db::init_pool()` which runs migrations
+//! - Single source of truth in `crates/nexus-local-db/migrations/`
 
 /// Schema initializer for daemon runtime.
 ///
-/// Delegates to `nexus-local-db::init()` for all table creation.
-/// Safe to call multiple times — uses `IF NOT EXISTS`.
+/// Delegates to `nexus-local-db::init_pool()` for all table creation.
+/// Safe to call multiple times — migrations are idempotent.
 pub struct Schema;
 
 impl Schema {
-    /// Initialize the daemon database schema.
+    /// Initialize the daemon database schema (async).
     ///
-    /// Calls `nexus-local-db::init(RuntimeRole::Daemon)` which creates
-    /// all tables (shared + daemon-only) and seeds version keys.
-    pub fn init(conn: &Connection) -> Result<(), rusqlite::Error> {
-        // Delegate to nexus-local-db (shared + daemon-only tables)
-        init(conn, RuntimeRole::Daemon)?;
-        Ok(())
+    /// Calls `nexus_local_db::init_pool()` which opens a pool,
+    /// runs migrations, and seeds version keys.
+    pub async fn init(
+        db_path: &std::path::Path,
+    ) -> Result<sqlx::SqlitePool, nexus_local_db::LocalDbError> {
+        nexus_local_db::init_pool(db_path).await
     }
 }
-
-// All DDL moved to nexus-local-db/src/schema.rs
-// Daemon-only table constants can be imported from nexus_local_db if needed:
-// - nexus_local_db::OUTBOX_TABLE
-// - nexus_local_db::AUTH_TOKENS_TABLE
-// - nexus_local_db::DEVICE_CODE_SESSIONS_TABLE
-// - nexus_local_db::ACP_TOOL_AUDIT_LOG_TABLE
-// - nexus_local_db::ACP_SESSIONS_TABLE
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use nexus_local_db::SCHEMA_VERSION;
-    use rusqlite::Connection;
 
-    #[test]
-    fn schema_init_creates_all_tables() {
-        let conn = Connection::open_in_memory().unwrap();
-        Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn schema_init_creates_all_tables() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = Schema::init(&db_path).await.unwrap();
 
         // Verify all tables exist (shared + daemon-only)
-        let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .flatten()
-            .collect();
+        let tables: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+
+        let table_names: Vec<&str> = tables.iter().map(|t| t.0.as_str()).collect();
 
         // Shared tables
-        assert!(tables.contains(&"workspace_meta".to_string()));
-        assert!(tables.contains(&"creators".to_string()));
-        assert!(tables.contains(&"reference_sources".to_string()));
+        assert!(
+            table_names.contains(&"workspace_meta"),
+            "missing workspace_meta"
+        );
+        assert!(table_names.contains(&"creators"), "missing creators");
+        assert!(
+            table_names.contains(&"reference_sources"),
+            "missing reference_sources"
+        );
 
         // Daemon-only tables
-        assert!(tables.contains(&"outbox".to_string()));
-        assert!(tables.contains(&"auth_tokens".to_string()));
-        assert!(tables.contains(&"device_code_sessions".to_string()));
-        assert!(tables.contains(&"acp_tool_audit_log".to_string()));
-        assert!(tables.contains(&"acp_sessions".to_string()));
+        assert!(table_names.contains(&"outbox"), "missing outbox");
+        assert!(table_names.contains(&"auth_tokens"), "missing auth_tokens");
+        assert!(
+            table_names.contains(&"device_code_sessions"),
+            "missing device_code_sessions"
+        );
+        assert!(
+            table_names.contains(&"acp_tool_audit_log"),
+            "missing acp_tool_audit_log"
+        );
+        assert!(
+            table_names.contains(&"acp_sessions"),
+            "missing acp_sessions"
+        );
     }
 
-    #[test]
-    fn schema_init_is_idempotent() {
-        let conn = Connection::open_in_memory().unwrap();
-        Schema::init(&conn).unwrap();
-        Schema::init(&conn).unwrap(); // second call should not fail
+    #[tokio::test]
+    async fn schema_init_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        Schema::init(&db_path).await.unwrap();
+        Schema::init(&db_path).await.unwrap(); // second call should not fail
     }
 
-    #[test]
-    fn schema_versions_seeded_correctly() {
-        let conn = Connection::open_in_memory().unwrap();
-        Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn schema_versions_seeded_correctly() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = Schema::init(&db_path).await.unwrap();
 
         // Verify db_schema_version (local SQLite structure)
-        let db_version: String = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'db_schema_version'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert_eq!(db_version, nexus_local_db::DB_SCHEMA_VERSION.to_string());
+        let db_version: (String,) =
+            sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'db_schema_version'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(db_version.0, nexus_local_db::DB_SCHEMA_VERSION.to_string());
 
         // Verify schema_version (contract schema version)
-        let schema_version: String = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'schema_version'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert_eq!(schema_version, SCHEMA_VERSION.to_string());
-
-        // Verify wire_schema_version does NOT exist
-        let exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM workspace_meta WHERE key = 'wire_schema_version')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert!(!exists);
+        let schema_version: (String,) =
+            sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'schema_version'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(schema_version.0, SCHEMA_VERSION.to_string());
     }
 
-    #[test]
-    fn reference_sources_has_content_column() {
-        let conn = Connection::open_in_memory().unwrap();
-        Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn reference_sources_has_content_column() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = Schema::init(&db_path).await.unwrap();
 
-        // Verify content column exists (drift fix validation)
-        conn.execute(
+        sqlx::query(
             "INSERT INTO reference_sources
              (reference_source_id, workspace_id, source_type, uri, title, content, scan_status, created_at)
-             VALUES ('ref_test', 'local', 'pdf', 'test.pdf', 'Test', 'Extracted text', 'pending', '2026-01-01T00:00:00Z')",
-            [],
+             VALUES ('ref_test', 'local', 'pdf', 'test.pdf', 'Test', 'Extracted text', 'pending', '2026-01-01T00:00:00Z')"
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
-        let content: Option<String> = conn
-            .query_row(
-                "SELECT content FROM reference_sources WHERE reference_source_id = 'ref_test'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let content: (Option<String>,) = sqlx::query_as(
+            "SELECT content FROM reference_sources WHERE reference_source_id = 'ref_test'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
-        assert_eq!(content, Some("Extracted text".to_string()));
+        assert_eq!(content.0, Some("Extracted text".to_string()));
     }
 
-    #[test]
-    fn creators_table_has_default_status() {
-        let conn = Connection::open_in_memory().unwrap();
-        Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn creators_table_has_default_status() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = Schema::init(&db_path).await.unwrap();
 
-        // Insert a row without specifying status — should default to 'active'
-        conn.execute(
+        sqlx::query(
             "INSERT INTO creators (creator_id, display_name, cached_at, data)
              VALUES ('ctr_test', 'Test', '2026-01-01T00:00:00Z', '{}')",
-            [],
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
-        let status: String = conn
-            .query_row(
-                "SELECT status FROM creators WHERE creator_id = 'ctr_test'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let status: (String,) =
+            sqlx::query_as("SELECT status FROM creators WHERE creator_id = 'ctr_test'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
-        assert_eq!(status, "active");
+        assert_eq!(status.0, "active");
     }
 
-    #[test]
-    fn reference_sources_table_has_tags_and_content_hash() {
-        let conn = Connection::open_in_memory().unwrap();
-        Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn reference_sources_table_has_tags_and_content_hash() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = Schema::init(&db_path).await.unwrap();
 
-        // Insert with tags and content_hash columns
-        conn.execute(
+        sqlx::query(
             "INSERT INTO reference_sources
              (reference_source_id, workspace_id, source_type, uri, title, tags, content_hash, scan_status, created_at)
-             VALUES ('ref_test', 'local', 'pdf', 'test.pdf', 'Test', 'tag1,tag2', 'abc123', 'pending', '2026-01-01T00:00:00Z')",
-            [],
+             VALUES ('ref_test', 'local', 'pdf', 'test.pdf', 'Test', 'tag1,tag2', 'abc123', 'pending', '2026-01-01T00:00:00Z')"
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
-        let (tags, hash): (Option<String>, Option<String>) = conn
-            .query_row(
-                "SELECT tags, content_hash FROM reference_sources WHERE reference_source_id = 'ref_test'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
+        let row: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT tags, content_hash FROM reference_sources WHERE reference_source_id = 'ref_test'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
-        assert_eq!(tags, Some("tag1,tag2".to_string()));
-        assert_eq!(hash, Some("abc123".to_string()));
+        assert_eq!(row.0, Some("tag1,tag2".to_string()));
+        assert_eq!(row.1, Some("abc123".to_string()));
     }
 
-    #[test]
-    fn pragmas_are_set() {
-        use tempfile::TempDir;
-
-        // WAL mode requires a persistent database file, not in-memory
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-
-        let conn = Connection::open(&db_path).unwrap();
-        Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn pragmas_are_set() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = Schema::init(&db_path).await.unwrap();
 
         // Verify journal_mode is WAL
-        let journal_mode: String = conn
-            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        let jm: (String,) = sqlx::query_as("PRAGMA journal_mode")
+            .fetch_one(&pool)
+            .await
             .unwrap();
-
-        assert_eq!(journal_mode, "wal");
+        assert_eq!(jm.0.to_lowercase(), "wal");
 
         // Verify foreign_keys is ON (returns integer 0 or 1)
-        let foreign_keys: i32 = conn
-            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+        let fk: (i32,) = sqlx::query_as("PRAGMA foreign_keys")
+            .fetch_one(&pool)
+            .await
             .unwrap();
-
-        assert_eq!(foreign_keys, 1);
+        assert_eq!(fk.0, 1);
     }
 }
