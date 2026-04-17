@@ -7,7 +7,7 @@ use axum::Json;
 use serde::Serialize;
 use tracing::{debug, info};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct CreatorInfo {
     pub creator_id: String,
     pub display_name: String,
@@ -26,29 +26,15 @@ pub async fn list(
 ) -> Result<Json<ListCreatorsResponse>, NexusApiError> {
     info!("Handling list creators request");
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
+    let creators = sqlx::query_as::<_, CreatorInfo>(
+        "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC",
+    )
+    .fetch_all(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: e.to_string(),
     })?;
-
-    let creators = conn
-        .query_map(
-            "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC",
-            [],
-            |row| {
-                Ok(CreatorInfo {
-                    creator_id: row.get(0)?,
-                    display_name: row.get(1)?,
-                    status: row.get(2)?,
-                    cached_at: row.get(3)?,
-                })
-            },
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
 
     debug!(count = creators.len(), "Creators retrieved");
     info!("List creators completed");

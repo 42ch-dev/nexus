@@ -105,8 +105,8 @@ mod tests {
     /// Test: assemble returns 403 Forbidden for local_only mode
     #[tokio::test]
     async fn assemble_blocked_for_local_only() {
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let req = AssembleRequest {
             creator_id: "test_creator".to_string(),
@@ -133,8 +133,8 @@ mod tests {
     /// Test: assemble returns mock response for local_first mode
     #[tokio::test]
     async fn assemble_returns_mock_for_local_first() {
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let req = AssembleRequest {
             creator_id: "test_creator".to_string(),
@@ -160,8 +160,8 @@ mod tests {
     /// Test: assemble returns mock response for cloud_enhanced mode
     #[tokio::test]
     async fn assemble_returns_mock_for_cloud_enhanced() {
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let req = AssembleRequest {
             creator_id: "test_creator".to_string(),
@@ -187,9 +187,9 @@ mod tests {
     /// Test: assemble accepts mismatched runtime_mode (V1.2 behavior)
     #[tokio::test]
     async fn assemble_accepts_mismatched_runtime_mode() {
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         // WorkspaceState defaults to LocalOnly runtime mode
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         // Request with cloud_enhanced (different from daemon's default LocalOnly)
         let req = AssembleRequest {

@@ -10,7 +10,7 @@
 
 pub mod manager;
 
-use crate::db::pool::{DbPool, PoolConfig, PooledConn};
+use crate::db::pool::{DbPool, PoolConfig};
 use nexus_contracts::RuntimeMode;
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
@@ -47,12 +47,13 @@ impl WorkspaceState {
     ///
     /// Creates a connection pool with a single connection for test isolation.
     /// Does NOT initialize the Outbox (sync operations will return NotConfigured).
-    pub fn new_for_testing(
+    pub async fn new_for_testing(
         nexus_home: PathBuf,
         db_path: PathBuf,
         workspace_path: Option<String>,
     ) -> Self {
-        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(1))
+        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+            .await
             .expect("Failed to create test database pool");
         Self {
             db,
@@ -75,7 +76,8 @@ impl WorkspaceState {
         db_path: PathBuf,
         workspace_path: Option<String>,
     ) -> Self {
-        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(1))
+        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+            .await
             .expect("Failed to create test database pool");
 
         // Create outbox at the standard sync directory
@@ -112,9 +114,6 @@ impl WorkspaceState {
         let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
 
         // R3(runtime): Record CLI config file modification time for staleness detection.
-        // This enables the daemon to detect when CLI-side config changes occurred
-        // (e.g., runtime mode switch). A full file-watcher is deferred; callers
-        // can compare this mtime against the current file mtime to detect drift.
         let cli_config_path = nexus_home.join("config.json");
         let cli_config_mtime = std::fs::metadata(&cli_config_path)
             .ok()
@@ -126,13 +125,9 @@ impl WorkspaceState {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Create the database file and initialize schema
-        let init_conn = rusqlite::Connection::open(&db_path)?;
-        crate::db::schema::Schema::init(&init_conn)?;
-        drop(init_conn);
-
-        // Create connection pool with environment-configurable settings
-        let db = DbPool::new(&db_path, PoolConfig::from_env())?;
+        // Initialize schema and create connection pool via nexus_local_db
+        crate::db::schema::Schema::init(&db_path).await?;
+        let db = DbPool::new(&db_path, PoolConfig::from_env()).await?;
 
         // Initialize nexus-sync outbox at {nexus_home}/sync/outbox.db
         let sync_dir = nexus_home.join("sync");
@@ -154,12 +149,9 @@ impl WorkspaceState {
         })
     }
 
-    /// Get database connection from the pool
-    ///
-    /// Returns a [`PooledConn`] that provides async-friendly methods for
-    /// executing SQL. The connection is returned to the pool when dropped.
-    pub async fn db(&self) -> Result<PooledConn, deadpool_sqlite::PoolError> {
-        self.db.get().await
+    /// Get a reference to the underlying sqlx pool.
+    pub fn pool(&self) -> &sqlx::SqlitePool {
+        self.db.pool()
     }
 
     /// Get the nexus-sync Outbox for sync operations.
@@ -232,15 +224,11 @@ impl WorkspaceState {
         std::fs::create_dir_all(workspace_dir.join("References"))?;
 
         // Store workspace path in the database
-        let path_owned = path.to_string();
-        let conn = self
-            .db()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get database connection: {}", e))?;
-        conn.execute(
+        sqlx::query(
             "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('workspace_path', ?1)",
-            [path_owned],
         )
+        .bind(path)
+        .execute(self.pool())
         .await
         .map_err(|e| anyhow::anyhow!("Database error: {}", e))?;
 
@@ -261,12 +249,13 @@ mod tests {
 
     #[tokio::test]
     async fn init_workspace_sets_is_initialized() {
-        let (tmp, nexus_home, db_path) = create_test_workspace();
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
         let workspace_dir = tmp.path().join("my-workspace");
 
         let state = WorkspaceState::new_for_testing(
             nexus_home, db_path, None, // no workspace path set initially
-        );
+        )
+        .await;
 
         // Before init: is_initialized should be false
         assert!(
