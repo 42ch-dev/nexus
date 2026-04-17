@@ -431,6 +431,8 @@ pub struct StateCompositeTask {
     inner_graphs: std::collections::HashMap<String, Arc<Graph>>,
     /// Output bindings for inner graphs: inner_graph_name → binding string.
     output_bindings: std::collections::HashMap<String, String>,
+    /// Shared capability registry (injected by the engine; falls back to builtins if None).
+    registry: Option<std::sync::Arc<CapabilityRegistry>>,
 }
 
 impl StateCompositeTask {
@@ -446,6 +448,7 @@ impl StateCompositeTask {
             engine: None,
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
+            registry: None,
         }
     }
 
@@ -470,6 +473,12 @@ impl StateCompositeTask {
         bindings: std::collections::HashMap<String, String>,
     ) -> Self {
         self.output_bindings = bindings;
+        self
+    }
+
+    /// Set the shared capability registry.
+    pub fn with_registry(mut self, registry: std::sync::Arc<CapabilityRegistry>) -> Self {
+        self.registry = Some(registry);
         self
     }
 }
@@ -508,9 +517,11 @@ impl Task for StateCompositeTask {
                     context
                         .set("_capability_input", args.clone().unwrap_or(Value::Null))
                         .await;
-                    let cap_task = CapabilityTask {
-                        registry: std::sync::Arc::new(CapabilityRegistry::with_builtins()),
-                    };
+                    let registry = self
+                        .registry
+                        .clone()
+                        .unwrap_or_else(|| std::sync::Arc::new(CapabilityRegistry::with_builtins()));
+                    let cap_task = CapabilityTask { registry };
                     let cap_result = cap_task.run(context.clone()).await?;
                     // If capability task errored, propagate but still continue
                     // so the state machine doesn't get stuck.
@@ -877,7 +888,10 @@ mod tests {
     #[tokio::test]
     async fn inner_graph_task_requires_session_id_in_context() {
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-        let engine = crate::GraphFlowEngine::new_with_storage(storage);
+        let engine = crate::GraphFlowEngine::new_with_storage(
+            storage,
+            std::sync::Arc::new(CapabilityRegistry::with_builtins()),
+        );
         let inner_graph = graph_flow::Graph::new("test_inner");
         inner_graph.add_task(std::sync::Arc::new(InnerGraphNodeTask::new("n1")));
 

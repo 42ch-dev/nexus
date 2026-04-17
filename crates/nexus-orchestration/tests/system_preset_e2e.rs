@@ -14,8 +14,8 @@ use std::sync::Arc;
 #[tokio::test]
 async fn system_preset_runs_to_terminal_state() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = GraphFlowEngine::new_with_storage(storage);
     let registry = Arc::new(CapabilityRegistry::with_builtins());
+    let engine = GraphFlowEngine::new_with_storage(storage, registry.clone());
     let graph = system_preset::build(registry);
     let sid = engine
         .start_session("_system.maintenance", graph)
@@ -61,8 +61,8 @@ async fn restart_durability_e2e() {
         let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
             std::sync::Arc::new(pool),
         ));
-        let engine = GraphFlowEngine::new_with_storage(storage);
         let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let engine = GraphFlowEngine::new_with_storage(storage, registry.clone());
         let graph = system_preset::build(registry);
         let sid = engine
             .start_session("_system.maintenance", graph)

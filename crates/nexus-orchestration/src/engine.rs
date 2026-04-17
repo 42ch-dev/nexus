@@ -7,6 +7,9 @@ use graph_flow::{ExecutionStatus, FlowRunner, Graph, SessionStorage};
 use std::sync::Arc;
 use thiserror::Error;
 
+// Re-export for internal use.
+use crate::capability::CapabilityRegistry;
+
 // ---------------------------------------------------------------------------
 // Helper types
 // ---------------------------------------------------------------------------
@@ -408,6 +411,8 @@ pub struct GraphFlowEngine {
     runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, FlowRunner>>>,
     /// In-memory bookkeeping of active sessions.
     sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
+    /// Shared capability registry (propagated to composite tasks at runtime).
+    caps: Arc<CapabilityRegistry>,
 }
 
 impl GraphFlowEngine {
@@ -416,11 +421,15 @@ impl GraphFlowEngine {
     /// The `storage` parameter accepts **any** [`SessionStorage`] implementation
     /// — `InMemorySessionStorage` for tests, `SqliteSessionStorage` for
     /// production.
-    pub fn new_with_storage(storage: Arc<dyn SessionStorage>) -> Self {
+    pub fn new_with_storage(
+        storage: Arc<dyn SessionStorage>,
+        caps: Arc<CapabilityRegistry>,
+    ) -> Self {
         Self {
             storage,
             runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            caps,
         }
     }
 
@@ -648,6 +657,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         let wired = crate::preset::loader::build_wired_outer_graph(
             loaded,
             proxy as Arc<dyn OrchestrationEngine>,
+            self.caps.clone(),
         );
         self.start_session(&loaded.id, Arc::new(wired)).await
     }
