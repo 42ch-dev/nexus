@@ -233,8 +233,13 @@ impl OrchestrationEngine for EngineProxy {
         };
         let result = runner.run(&session_id.0).await?;
         let outcome = match &result.status {
-            ExecutionStatus::Completed => StepOutcome::Completed { response: result.response },
-            ExecutionStatus::Paused { next_task_id, reason } => StepOutcome::Paused {
+            ExecutionStatus::Completed => StepOutcome::Completed {
+                response: result.response,
+            },
+            ExecutionStatus::Paused {
+                next_task_id,
+                reason,
+            } => StepOutcome::Paused {
                 next_task_id: next_task_id.clone(),
                 reason: reason.clone(),
             },
@@ -244,7 +249,13 @@ impl OrchestrationEngine for EngineProxy {
             ExecutionStatus::Error(msg) => StepOutcome::Error(msg.clone()),
         };
         // Update in-memory status.
-        if let Some(s) = self.sessions.write().await.iter_mut().find(|s| s.session_id == *session_id) {
+        if let Some(s) = self
+            .sessions
+            .write()
+            .await
+            .iter_mut()
+            .find(|s| s.session_id == *session_id)
+        {
             s.status = match &result.status {
                 ExecutionStatus::Completed => SessionStatus::Completed,
                 ExecutionStatus::Error(_) => SessionStatus::Failed,
@@ -259,14 +270,21 @@ impl OrchestrationEngine for EngineProxy {
         Err(EngineError::NoGraphLoaded)
     }
 
-    async fn start_session_with_graph(&self, id_prefix: &str, graph: Arc<Graph>) -> Result<SessionId, EngineError> {
+    async fn start_session_with_graph(
+        &self,
+        id_prefix: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
         let session_id = format!("{}:{}", id_prefix, chrono::Utc::now().timestamp_millis());
         let start_task_id = graph.start_task_id().unwrap_or_default();
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         session.context.set("_session_id", session_id.clone()).await;
         self.storage.save(session).await?;
         let runner = graph_flow::FlowRunner::new(graph, self.storage.clone());
-        self.runners.write().await.insert(session_id.clone(), runner);
+        self.runners
+            .write()
+            .await
+            .insert(session_id.clone(), runner);
         self.sessions.write().await.push(SessionSummary {
             session_id: SessionId(session_id.clone()),
             creator_id: String::new(),
@@ -286,7 +304,11 @@ impl OrchestrationEngine for EngineProxy {
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))
     }
 
-    async fn signal(&self, session_id: &SessionId, signal: EngineSignal) -> Result<(), EngineError> {
+    async fn signal(
+        &self,
+        session_id: &SessionId,
+        signal: EngineSignal,
+    ) -> Result<(), EngineError> {
         let mut sessions = self.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
             match signal {
@@ -303,22 +325,43 @@ impl OrchestrationEngine for EngineProxy {
 
     async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError> {
         let sessions = self.sessions.read().await;
-        Ok(sessions.iter().filter(|s| {
-            let status_ok = matches!(s.status, SessionStatus::Running | SessionStatus::Paused | SessionStatus::WaitingForInput);
-            let creator_ok = filter.creator_id.as_ref().is_none_or(|c| c == &s.creator_id);
-            let preset_ok = filter.preset_id.as_ref().is_none_or(|p| p == &s.preset_id);
-            status_ok && creator_ok && preset_ok
-        }).cloned().collect())
+        Ok(sessions
+            .iter()
+            .filter(|s| {
+                let status_ok = matches!(
+                    s.status,
+                    SessionStatus::Running | SessionStatus::Paused | SessionStatus::WaitingForInput
+                );
+                let creator_ok = filter
+                    .creator_id
+                    .as_ref()
+                    .is_none_or(|c| c == &s.creator_id);
+                let preset_ok = filter.preset_id.as_ref().is_none_or(|p| p == &s.preset_id);
+                status_ok && creator_ok && preset_ok
+            })
+            .cloned()
+            .collect())
     }
 
-    async fn spawn_child_session(&self, params: ChildSessionParams) -> Result<SessionId, EngineError> {
-        let child_session_id = format!("{}:child:{}", params.parent_session_id, chrono::Utc::now().timestamp_millis());
+    async fn spawn_child_session(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError> {
+        let child_session_id = format!(
+            "{}:child:{}",
+            params.parent_session_id,
+            chrono::Utc::now().timestamp_millis()
+        );
         let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
-        let mut session_mut = graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
+        let mut session_mut =
+            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
         self.storage.save(session_mut).await?;
         let runner = graph_flow::FlowRunner::new(params.inner_graph, self.storage.clone());
-        self.runners.write().await.insert(child_session_id.clone(), runner);
+        self.runners
+            .write()
+            .await
+            .insert(child_session_id.clone(), runner);
         self.sessions.write().await.push(SessionSummary {
             session_id: SessionId(child_session_id.clone()),
             creator_id: String::new(),
@@ -329,8 +372,14 @@ impl OrchestrationEngine for EngineProxy {
         Ok(SessionId(child_session_id))
     }
 
-    async fn get_context(&self, session_id: &SessionId) -> Result<graph_flow::Context, EngineError> {
-        let session = self.storage.get(&session_id.0).await
+    async fn get_context(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<graph_flow::Context, EngineError> {
+        let session = self
+            .storage
+            .get(&session_id.0)
+            .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         Ok(session.context)
@@ -394,10 +443,7 @@ impl GraphFlowEngine {
         // Create and persist the session.
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         // Store session ID in context so InnerGraphTask can find it.
-        session
-            .context
-            .set("_session_id", session_id.clone())
-            .await;
+        session.context.set("_session_id", session_id.clone()).await;
         self.storage.save(session).await?;
 
         // Create a FlowRunner for this session.
@@ -548,10 +594,7 @@ impl OrchestrationEngine for GraphFlowEngine {
             chrono::Utc::now().timestamp_millis()
         );
 
-        let start_task_id = params
-            .inner_graph
-            .start_task_id()
-            .unwrap_or_default();
+        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
 
         // Create a child session with the provided initial context.
         let mut session_mut =

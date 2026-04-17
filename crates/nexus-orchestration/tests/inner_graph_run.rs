@@ -49,16 +49,12 @@ inner_graphs:
 #[tokio::test]
 async fn inner_graph_runs_to_completion_and_exports_output() {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_orchestration::preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps)
-            .expect("load preset");
+    let loaded = nexus_orchestration::preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps)
+        .expect("load preset");
 
     assert_eq!(loaded.id, "inner-graph-test");
     assert!(loaded.inner_graphs.contains_key("my_graph"));
-    assert_eq!(
-        loaded.output_bindings.get("my_graph").unwrap(),
-        "n3.text"
-    );
+    assert_eq!(loaded.output_bindings.get("my_graph").unwrap(), "n3.text");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = Arc::new(GraphFlowEngine::new_with_storage(storage));
@@ -81,20 +77,14 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
             StepOutcome::WaitingForInput { .. } => {
                 // Inner graphs shouldn't wait for input; resume.
                 engine
-                    .signal(
-                        &sid,
-                        nexus_orchestration::engine::EngineSignal::Resume,
-                    )
+                    .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
                     .await
                     .expect("signal resume");
             }
             StepOutcome::Paused { .. } => {
                 // Resume paused sessions (shouldn't happen for rule-only inner graphs).
                 engine
-                    .signal(
-                        &sid,
-                        nexus_orchestration::engine::EngineSignal::Resume,
-                    )
+                    .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
                     .await
                     .expect("signal resume");
             }
@@ -161,14 +151,8 @@ async fn spawn_child_and_get_context() {
     }
 
     // Get child context.
-    let child_ctx = engine
-        .get_context(&child_sid)
-        .await
-        .expect("get_context");
-    let output: String = child_ctx
-        .get("nodes.x.output")
-        .await
-        .unwrap_or_default();
+    let child_ctx = engine.get_context(&child_sid).await.expect("get_context");
+    let output: String = child_ctx.get("nodes.x.output").await.unwrap_or_default();
     assert!(
         !output.is_empty(),
         "child should have produced output: {output}"
@@ -180,8 +164,7 @@ async fn spawn_child_and_get_context() {
 fn inner_graph_preset_structure() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded =
-        nexus_orchestration::preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps)
-            .unwrap();
+        nexus_orchestration::preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps).unwrap();
 
     assert!(loaded.inner_graphs.contains_key("my_graph"));
     let ig = &loaded.inner_graphs["my_graph"];

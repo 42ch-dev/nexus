@@ -205,5 +205,8 @@ states:
     terminal: true
 "#;
     let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(p.preset.kind, nexus_orchestration::preset::manifest::PresetKind::System);
+    assert_eq!(
+        p.preset.kind,
+        nexus_orchestration::preset::manifest::PresetKind::System
+    );
 }

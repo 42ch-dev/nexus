@@ -118,8 +118,14 @@ async fn run_ipc_loop(state: Arc<WorkerState>) -> Result<()> {
         // Check shutdown state before processing.
         if state.shutdown_requested.load(Ordering::Relaxed) {
             info!("shutdown already requested, skipping request: {}", method);
-            write_jsonrpc_error(&mut stdout, id.as_ref(), -32000, "Worker shutting down", &method)
-                .await?;
+            write_jsonrpc_error(
+                &mut stdout,
+                id.as_ref(),
+                -32000,
+                "Worker shutting down",
+                &method,
+            )
+            .await?;
             continue;
         }
 
@@ -202,17 +208,12 @@ async fn handle_acp_prompt(
         .await;
     }
 
-    let prompt = params
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let prompt = params.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
     let _tool_policy = params
         .get("tool_policy")
         .and_then(|v| v.as_str())
         .unwrap_or("auto_grant_read_only");
-    let _session_id = params
-        .get("session_id")
-        .and_then(|v| v.as_str());
+    let _session_id = params.get("session_id").and_then(|v| v.as_str());
 
     debug!(prompt_len = prompt.len(), "handling worker/acp_prompt");
 
@@ -262,9 +263,7 @@ async fn handle_session_load(
     id: Option<&Value>,
     params: &Value,
 ) -> Result<()> {
-    let _session_id = params
-        .get("session_id")
-        .and_then(|v| v.as_str());
+    let _session_id = params.get("session_id").and_then(|v| v.as_str());
 
     debug!("handling worker/acp_session_load");
 

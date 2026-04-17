@@ -6,9 +6,7 @@
 //! Design: `orchestration-engine-v1.md` §8.1.
 
 use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{
-    ExitWhen, InnerGraph, NextTarget, PresetManifest,
-};
+use crate::preset::manifest::{ExitWhen, InnerGraph, NextTarget, PresetManifest};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -46,7 +44,10 @@ impl std::fmt::Debug for LoadedPreset {
             .field("id", &self.id)
             .field("version", &self.version)
             .field("outer_graph_id", &self.outer_graph.id)
-            .field("inner_graphs_keys", &self.inner_graphs.keys().collect::<Vec<_>>())
+            .field(
+                "inner_graphs_keys",
+                &self.inner_graphs.keys().collect::<Vec<_>>(),
+            )
             .field("signals_len", &self.signals.len())
             .field("source_hash", &format!("{:02x?}", &self.source_hash[..4]))
             .field("output_bindings", &self.output_bindings)
@@ -308,10 +309,7 @@ fn validate_manifest(
                 if !node_ids.contains(node_id) {
                     problems.push(ValidationProblem {
                         path: format!("{}.output_binding", ig_path),
-                        error: format!(
-                            "output_binding references unknown node: '{}'",
-                            node_id
-                        ),
+                        error: format!("output_binding references unknown node: '{}'", node_id),
                     });
                 }
             }
@@ -347,7 +345,9 @@ fn detect_cycle(ig: &InnerGraph) -> Option<String> {
 
     for start in &node_ids {
         if white.contains(start) {
-            if let Some(cycle) = dfs_cycle2(start, &adj, &mut white, &mut gray, &mut black, &mut path) {
+            if let Some(cycle) =
+                dfs_cycle2(start, &adj, &mut white, &mut gray, &mut black, &mut path)
+            {
                 return Some(cycle);
             }
         }
@@ -376,7 +376,8 @@ fn dfs_cycle2<'a>(
             if gray.contains(next) {
                 // Found a cycle: path from next to node to next.
                 let cycle_start = path.iter().position(|&n| n == *next).unwrap_or(0);
-                let mut parts: Vec<String> = path[cycle_start..].iter().map(|s| s.to_string()).collect();
+                let mut parts: Vec<String> =
+                    path[cycle_start..].iter().map(|s| s.to_string()).collect();
                 parts.push(next.to_string());
                 return Some(parts.join(" → "));
             }
@@ -466,9 +467,7 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 /// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask` (stub in T3,
 /// full in T4).
 /// `inner_graphs.<name>.nodes[].depends_on` → `add_edge`.
-fn build_inner_graphs(
-    manifest: &PresetManifest,
-) -> HashMap<String, Arc<graph_flow::Graph>> {
+fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_flow::Graph>> {
     use crate::tasks::InnerGraphNodeTask;
 
     let mut result = HashMap::new();
@@ -561,7 +560,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.path.contains("next") && p.error.contains("unknown state")),
+            problems
+                .iter()
+                .any(|p| p.path.contains("next") && p.error.contains("unknown state")),
             "expected 'unknown state' problem on next: {problems:?}"
         );
     }
@@ -591,7 +592,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.error.contains("unknown capability")),
+            problems
+                .iter()
+                .any(|p| p.error.contains("unknown capability")),
             "expected 'unknown capability' problem: {problems:?}"
         );
     }
@@ -661,7 +664,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.error.contains("unknown capability")),
+            problems
+                .iter()
+                .any(|p| p.error.contains("unknown capability")),
             "expected 'unknown capability' for judge: {problems:?}"
         );
     }
@@ -698,7 +703,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.error.contains("ConditionalNotYetSupported")),
+            problems
+                .iter()
+                .any(|p| p.error.contains("ConditionalNotYetSupported")),
             "expected 'ConditionalNotYetSupported' problem: {problems:?}"
         );
     }
@@ -728,7 +735,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.error.contains("unknown inner_graph")),
+            problems
+                .iter()
+                .any(|p| p.error.contains("unknown inner_graph")),
             "expected 'unknown inner_graph' problem: {problems:?}"
         );
     }
@@ -757,7 +766,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.path.contains("terminal") && p.error.contains("next")),
+            problems
+                .iter()
+                .any(|p| p.path.contains("terminal") && p.error.contains("next")),
             "expected terminal state 'next' problem: {problems:?}"
         );
     }
@@ -869,7 +880,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.path.contains("initial") && p.error.contains("unknown state")),
+            problems
+                .iter()
+                .any(|p| p.path.contains("initial") && p.error.contains("unknown state")),
             "expected 'unknown state' on initial: {problems:?}"
         );
     }
@@ -897,7 +910,9 @@ states:
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.path.contains("terminal") && p.error.contains("unknown state")),
+            problems
+                .iter()
+                .any(|p| p.path.contains("terminal") && p.error.contains("unknown state")),
             "expected 'unknown state' on terminal: {problems:?}"
         );
     }
@@ -932,15 +947,21 @@ states:
     #[test]
     fn source_hash_is_deterministic() {
         let caps = test_capability_registry();
-        let h1 = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap().source_hash;
-        let h2 = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap().source_hash;
+        let h1 = load_preset_from_str(minimal_valid_yaml(), &caps)
+            .unwrap()
+            .source_hash;
+        let h2 = load_preset_from_str(minimal_valid_yaml(), &caps)
+            .unwrap()
+            .source_hash;
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn source_hash_differs_for_different_yaml() {
         let caps = test_capability_registry();
-        let h1 = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap().source_hash;
+        let h1 = load_preset_from_str(minimal_valid_yaml(), &caps)
+            .unwrap()
+            .source_hash;
         let yaml2 = r#"
 preset:
   id: other

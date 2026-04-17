@@ -45,9 +45,7 @@ impl Capability for AcpSessionLoad {
         let _session_id = input
             .get("session_id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                CapabilityError::InputInvalid("missing 'session_id' field".into())
-            })?;
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'session_id' field".into()))?;
 
         // Full implementation dispatches to Worker Manager.
         // For WS3 capability layer, return a stub success.

@@ -55,9 +55,7 @@ impl Capability for JudgeLlm {
         let prompt = input
             .get("prompt")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                CapabilityError::InputInvalid("missing 'prompt' field".into())
-            })?;
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
 
         // In the full implementation, this would call acp.prompt with deny_all
         // tool policy and parse the response. For the capability layer stub,
@@ -81,19 +79,13 @@ fn parse_judge_response(text: &str) -> (bool, String) {
 
     for word in GO_WORDS {
         if lower.contains(word) {
-            return (
-                true,
-                format!("judge.llm: go (matched '{}')", word),
-            );
+            return (true, format!("judge.llm: go (matched '{}')", word));
         }
     }
 
     for word in NOGO_WORDS {
         if lower.contains(word) {
-            return (
-                false,
-                format!("judge.llm: nogo (matched '{}')", word),
-            );
+            return (false, format!("judge.llm: nogo (matched '{}')", word));
         }
     }
 
@@ -114,7 +106,10 @@ mod tests {
 
     #[test]
     fn parse_go_response() {
-        assert_eq!(parse_judge_response("Yes, proceed with the next step").0, true);
+        assert_eq!(
+            parse_judge_response("Yes, proceed with the next step").0,
+            true
+        );
         assert_eq!(parse_judge_response("Go ahead!").0, true);
         assert_eq!(parse_judge_response("APPROVE").0, true);
     }

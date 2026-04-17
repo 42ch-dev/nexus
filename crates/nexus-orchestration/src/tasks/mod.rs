@@ -4,9 +4,7 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
-use crate::preset::manifest::{
-    EnterAction, ExitWhen, StateDefinition,
-};
+use crate::preset::manifest::{EnterAction, ExitWhen, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -253,26 +251,20 @@ impl Task for InnerGraphTask {
             initial_context: child_ctx,
         };
 
-        let child_sid = self
-            .engine
-            .spawn_child_session(params)
-            .await
-            .map_err(|e| graph_flow::GraphError::TaskExecutionFailed(format!(
+        let child_sid = self.engine.spawn_child_session(params).await.map_err(|e| {
+            graph_flow::GraphError::TaskExecutionFailed(format!(
                 "InnerGraphTask: failed to spawn child session: {e}"
-            )))?;
+            ))
+        })?;
 
         // 4. Poll child session to completion.
         let mut last_error = None;
         for _ in 0..256 {
-            let outcome = self
-                .engine
-                .run_step(&child_sid)
-                .await
-                .map_err(|e| {
-                    graph_flow::GraphError::TaskExecutionFailed(format!(
-                        "InnerGraphTask: run_step failed: {e}"
-                    ))
-                })?;
+            let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "InnerGraphTask: run_step failed: {e}"
+                ))
+            })?;
 
             match outcome {
                 crate::engine::StepOutcome::Completed { .. } => break,
@@ -284,10 +276,7 @@ impl Task for InnerGraphTask {
                     // rule-only inner graphs, but handle gracefully).
                     let _ = self
                         .engine
-                        .signal(
-                            &child_sid,
-                            crate::engine::EngineSignal::Resume,
-                        )
+                        .signal(&child_sid, crate::engine::EngineSignal::Resume)
                         .await;
                     tracing::debug!(
                         child_session = %child_sid.0,
@@ -300,10 +289,7 @@ impl Task for InnerGraphTask {
                     // Inner graphs shouldn't wait for input; resume.
                     let _ = self
                         .engine
-                        .signal(
-                            &child_sid,
-                            crate::engine::EngineSignal::Resume,
-                        )
+                        .signal(&child_sid, crate::engine::EngineSignal::Resume)
                         .await;
                 }
                 crate::engine::StepOutcome::Error(e) => {
@@ -315,13 +301,11 @@ impl Task for InnerGraphTask {
 
         // 5. Read output_binding from child final context.
         let output_value = if let Some(ref binding) = self.output_binding {
-            let child_ctx = self
-                .engine
-                .get_context(&child_sid)
-                .await
-                .map_err(|e| graph_flow::GraphError::TaskExecutionFailed(format!(
+            let child_ctx = self.engine.get_context(&child_sid).await.map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
                     "InnerGraphTask: failed to get child context: {e}"
-                )))?;
+                ))
+            })?;
 
             // Try to read as nodes.<node_id>.text first, then as-is.
             let node_key = format!("nodes.{}", binding);
@@ -520,17 +504,9 @@ impl Task for StateCompositeTask {
         for action in &self.enter_actions {
             match action {
                 EnterAction::Capability { name, args } => {
+                    context.set("_capability_name", name.clone()).await;
                     context
-                        .set(
-                            "_capability_name",
-                            name.clone(),
-                        )
-                        .await;
-                    context
-                        .set(
-                            "_capability_input",
-                            args.clone().unwrap_or(Value::Null),
-                        )
+                        .set("_capability_input", args.clone().unwrap_or(Value::Null))
                         .await;
                     let cap_task = CapabilityTask {
                         registry: std::sync::Arc::new(CapabilityRegistry::with_builtins()),
@@ -666,12 +642,13 @@ impl Task for InnerGraphNodeTask {
         // T4 will replace this stub with the full AcpPromptTask behavior.
         // For T3, we just store a placeholder output and continue.
         let output = format!("inner_node:{}:stub_output", self.id);
-        context.set(format!("nodes.{}.text", self.id), output.clone()).await;
-        context.set(format!("nodes.{}.output", self.id), output.clone()).await;
-        Ok(TaskResult::new(
-            Some(output),
-            NextAction::Continue,
-        ))
+        context
+            .set(format!("nodes.{}.text", self.id), output.clone())
+            .await;
+        context
+            .set(format!("nodes.{}.output", self.id), output.clone())
+            .await;
+        Ok(TaskResult::new(Some(output), NextAction::Continue))
     }
 }
 
@@ -709,7 +686,6 @@ impl std::str::FromStr for ToolPolicy {
 }
 
 impl ToolPolicy {
-
     /// Serialize to the string form used in IPC.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -748,7 +724,9 @@ impl AcpPromptTask {
     /// `worker_handle`: the worker handle for IPC. Can be `None` for test mode
     /// where the task operates in stub mode.
     pub fn new(
-        worker_handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+        worker_handle: Option<
+            std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>,
+        >,
         state_id: impl Into<String>,
         template: impl Into<String>,
         tool_policy: ToolPolicy,
@@ -820,9 +798,7 @@ impl Task for AcpPromptTask {
             // the MutexGuard across the await point (which is !Send).
             let mut handle = {
                 let mut guard = handle_arc.lock().map_err(|e| {
-                    graph_flow::GraphError::TaskExecutionFailed(format!(
-                        "worker handle lock: {e}"
-                    ))
+                    graph_flow::GraphError::TaskExecutionFailed(format!("worker handle lock: {e}"))
                 })?;
                 guard.take().ok_or_else(|| {
                     graph_flow::GraphError::TaskExecutionFailed(
@@ -842,9 +818,7 @@ impl Task for AcpPromptTask {
             // Put the handle back (even if IPC failed, the pipes may still be usable).
             {
                 let mut guard = handle_arc.lock().map_err(|e| {
-                    graph_flow::GraphError::TaskExecutionFailed(format!(
-                        "worker handle lock: {e}"
-                    ))
+                    graph_flow::GraphError::TaskExecutionFailed(format!("worker handle lock: {e}"))
                 })?;
                 *guard = Some(handle);
             }
@@ -879,10 +853,7 @@ impl Task for AcpPromptTask {
         context.set(&output_key, full_text.clone()).await;
 
         // 5. Return TaskResult.
-        Ok(TaskResult::new(
-            Some(full_text),
-            NextAction::Continue,
-        ))
+        Ok(TaskResult::new(Some(full_text), NextAction::Continue))
     }
 }
 
@@ -1004,19 +975,31 @@ mod tests {
         let result = task.run(ctx.clone()).await.unwrap();
         let stored: String = ctx.get("state.state-1.output").await.unwrap();
         assert!(stored.contains("test prompt"), "stored: {stored}");
-        assert_eq!(
-            result.response.as_deref(),
-            Some(stored.as_str())
-        );
+        assert_eq!(result.response.as_deref(), Some(stored.as_str()));
     }
 
     #[tokio::test]
     async fn tool_policy_from_str() {
         use std::str::FromStr;
-        assert_eq!(ToolPolicy::from_str("auto_grant_all").unwrap(), ToolPolicy::AutoGrantAll);
-        assert_eq!(ToolPolicy::from_str("auto_grant_read_only").unwrap(), ToolPolicy::AutoGrantReadOnly);
-        assert_eq!(ToolPolicy::from_str("deny_all").unwrap(), ToolPolicy::DenyAll);
-        assert_eq!(ToolPolicy::from_str("request_policy").unwrap(), ToolPolicy::RequestPolicy);
-        assert_eq!(ToolPolicy::from_str("unknown").unwrap(), ToolPolicy::AutoGrantReadOnly);
+        assert_eq!(
+            ToolPolicy::from_str("auto_grant_all").unwrap(),
+            ToolPolicy::AutoGrantAll
+        );
+        assert_eq!(
+            ToolPolicy::from_str("auto_grant_read_only").unwrap(),
+            ToolPolicy::AutoGrantReadOnly
+        );
+        assert_eq!(
+            ToolPolicy::from_str("deny_all").unwrap(),
+            ToolPolicy::DenyAll
+        );
+        assert_eq!(
+            ToolPolicy::from_str("request_policy").unwrap(),
+            ToolPolicy::RequestPolicy
+        );
+        assert_eq!(
+            ToolPolicy::from_str("unknown").unwrap(),
+            ToolPolicy::AutoGrantReadOnly
+        );
     }
 }
