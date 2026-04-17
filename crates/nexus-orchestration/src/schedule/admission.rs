@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use nexus_contracts::local::schedule::{Schedule, ScheduleConcurrency, ScheduleId};
+use nexus_contracts::local::schedule::{ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId};
 
 /// The set of currently-running [`Schedule`] IDs for a single creator.
 ///
@@ -119,7 +119,7 @@ fn check_concurrency(candidate: &Schedule, running: &RunningSet) -> bool {
         ScheduleConcurrency::ParallelWith(whitelist) => {
             // Every running schedule must be in the whitelist.
             // If nothing is running, the constraint is vacuously true.
-            running.ids.iter().all(|id| whitelist.contains(id))
+            running.ids.iter().all(|id| whitelist.schedule_ids.contains(id))
         }
         ScheduleConcurrency::ParallelAny => true, // ACP serialization at dispatch site
     }
@@ -173,7 +173,9 @@ mod tests {
     fn parallel_with_allows_empty_running() {
         let p = sched(
             "A",
-            ScheduleConcurrency::ParallelWith(vec![ScheduleId("B".to_string())]),
+            ScheduleConcurrency::ParallelWith(ParallelWithIds {
+                schedule_ids: vec![ScheduleId("B".to_string())],
+            }),
             vec![],
         );
         assert!(admit(&p, &RunningSet::empty(), &CompletedSet::empty()));

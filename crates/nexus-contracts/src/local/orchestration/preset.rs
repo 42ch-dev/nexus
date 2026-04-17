@@ -206,7 +206,7 @@ pub enum ExitWhen {
 ///   rules: [...]
 ///   default: outlining
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NextTarget {
     /// Linear transition to a single state ID.
@@ -216,7 +216,7 @@ pub enum NextTarget {
 }
 
 /// Conditional next form — V1.4 does NOT implement this; loader returns error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NextConditional {
     /// Must be `"conditional"`.
     pub kind: String,
@@ -228,7 +228,7 @@ pub struct NextConditional {
 }
 
 /// A single conditional rule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConditionalRule {
     /// Handlebars-style when-condition expression.
     pub when: String,
@@ -603,7 +603,7 @@ states:
                     id: "a".into(),
                     description: None,
                     enter: vec![],
-                    exit_when: ExitWhen::Manual,
+                    exit_when: Some(ExitWhen::Manual),
                     next: Some(NextTarget::Linear("b".into())),
                     terminal: false,
                 },
@@ -611,7 +611,7 @@ states:
                     id: "b".into(),
                     description: None,
                     enter: vec![],
-                    exit_when: ExitWhen::Rule,
+                    exit_when: Some(ExitWhen::Rule),
                     next: None,
                     terminal: true,
                 },

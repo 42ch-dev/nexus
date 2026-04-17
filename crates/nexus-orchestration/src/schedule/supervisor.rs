@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use nexus_contracts::local::schedule::{Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus};
+use nexus_contracts::local::schedule::{ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus};
 use nexus_local_db::SqlitePool;
 use tokio::sync::Mutex;
 
@@ -222,7 +222,7 @@ impl ScheduleSupervisor {
         let (concurrency_kind, concurrency_whitelist) = match &schedule.concurrency {
             ScheduleConcurrency::Serial => ("serial".to_string(), None),
             ScheduleConcurrency::ParallelWith(ids) => {
-                let json = serde_json::to_string(ids).unwrap_or_default();
+                let json = serde_json::to_string(&ids.schedule_ids).unwrap_or_default();
                 ("parallel_with".to_string(), Some(json))
             }
             ScheduleConcurrency::ParallelAny => ("parallel_any".to_string(), None),
@@ -322,7 +322,9 @@ impl ScheduleRow {
                     .as_deref()
                     .and_then(|json| serde_json::from_str(json).ok())
                     .unwrap_or_default();
-                ScheduleConcurrency::ParallelWith(ids)
+                ScheduleConcurrency::ParallelWith(ParallelWithIds {
+                    schedule_ids: ids,
+                })
             }
             "parallel_any" => ScheduleConcurrency::ParallelAny,
             _ => ScheduleConcurrency::Serial,

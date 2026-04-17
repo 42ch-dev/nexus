@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use nexus_contracts::local::schedule::{
-    CoreContextVersion, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    CoreContextVersion, ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
 use nexus_orchestration::schedule::admission::{admit, CompletedSet, RunningSet};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
@@ -49,7 +49,9 @@ fn parallel_with_admits_when_all_running_are_whitelisted() {
     let running_id = ScheduleId("01B".to_string());
     let pending = sched(
         "01A",
-        ScheduleConcurrency::ParallelWith(vec![running_id.clone()]),
+        ScheduleConcurrency::ParallelWith(ParallelWithIds {
+            schedule_ids: vec![running_id.clone()],
+        }),
         vec![],
     );
     let running = RunningSet::from(vec![sched("01B", ScheduleConcurrency::Serial, vec![])]);
@@ -61,7 +63,9 @@ fn parallel_with_blocks_when_running_not_in_whitelist() {
     // 01A can only run with 01B, but 01C is running (not whitelisted)
     let pending = sched(
         "01A",
-        ScheduleConcurrency::ParallelWith(vec![ScheduleId("01B".to_string())]),
+        ScheduleConcurrency::ParallelWith(ParallelWithIds {
+            schedule_ids: vec![ScheduleId("01B".to_string())],
+        }),
         vec![],
     );
     let running = RunningSet::from(vec![sched("01C", ScheduleConcurrency::Serial, vec![])]);
@@ -112,7 +116,9 @@ fn serial_admits_when_nothing_running_and_no_deps() {
 fn parallel_with_admits_when_nothing_running() {
     let pending = sched(
         "01A",
-        ScheduleConcurrency::ParallelWith(vec![ScheduleId("01B".to_string())]),
+        ScheduleConcurrency::ParallelWith(ParallelWithIds {
+            schedule_ids: vec![ScheduleId("01B".to_string())],
+        }),
         vec![],
     );
     // Nothing running → admission passes (whitelist constraint is vacuously true)
