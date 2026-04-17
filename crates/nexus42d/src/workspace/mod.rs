@@ -13,9 +13,7 @@ pub mod manager;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::local::domain::RuntimeMode;
-use nexus_orchestration::{
-    engine::OrchestrationEngine, CapabilityRegistry, WorkerManager,
-};
+use nexus_orchestration::{engine::OrchestrationEngine, CapabilityRegistry, WorkerManager};
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
