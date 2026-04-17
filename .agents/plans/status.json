@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
-      "status": "Todo",
+      "status": "InProgress",
       "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
       "title": "V1.4 WS1 — nexus-acp-host crate extraction",
       "owner": "fullstack-dev",
