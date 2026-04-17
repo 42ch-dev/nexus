@@ -3,7 +3,7 @@
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.2.
 
 use async_trait::async_trait;
-use graph_flow::SessionStorage;
+use graph_flow::{ExecutionStatus, FlowRunner, Graph, SessionStorage};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -59,6 +59,18 @@ pub enum SessionStatus {
     WaitingForInput,
     Completed,
     Failed,
+}
+
+impl SessionStatus {
+    /// Returns `true` if the session is in a terminal state.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, SessionStatus::Completed | SessionStatus::Failed)
+    }
+
+    /// Returns `true` if the session has completed successfully.
+    pub fn is_completed(&self) -> bool {
+        matches!(self, SessionStatus::Completed)
+    }
 }
 
 /// Outcome of a single engine step.
@@ -165,11 +177,13 @@ pub trait OrchestrationEngine: Send + Sync {
 
 /// Concrete [`OrchestrationEngine`] backed by [`graph_flow::FlowRunner`].
 ///
-/// T2 provides `new_with_storage` and the core trait methods.
-/// Later tasks wire a real [`graph_flow::FlowRunner`] (once a [`Graph`] is
-/// available via system preset or preset loader).
+/// The engine stores a `FlowRunner` per session (each session may use a
+/// different graph, e.g. `_system.maintenance` vs user presets). Sessions
+/// are persisted via the provided [`SessionStorage`].
 pub struct GraphFlowEngine {
     storage: Arc<dyn SessionStorage>,
+    /// Per-session FlowRunners (graph + storage combo for `run()` calls).
+    runners: tokio::sync::RwLock<std::collections::HashMap<String, FlowRunner>>,
     /// In-memory bookkeeping of active sessions.
     /// (graph-flow's `SessionStorage` has no `list` method, so we track here.)
     sessions: tokio::sync::RwLock<Vec<SessionSummary>>,
@@ -180,21 +194,96 @@ impl GraphFlowEngine {
     ///
     /// The `storage` parameter accepts **any** [`SessionStorage`] implementation
     /// — `InMemorySessionStorage` for tests, `SqliteSessionStorage` for
-    /// production (T3).
+    /// production.
     pub fn new_with_storage(storage: Arc<dyn SessionStorage>) -> Self {
         Self {
             storage,
+            runners: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             sessions: tokio::sync::RwLock::new(Vec::new()),
         }
+    }
+
+    /// Start a session on a specific graph.
+    ///
+    /// Creates a [`graph_flow::Session`] seeded at the graph's start task,
+    /// stores it, and registers a [`FlowRunner`] for future `run_step` calls.
+    ///
+    /// Returns the session ID.
+    pub async fn start_session(
+        &self,
+        preset_id: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        let session_id = format!("{}:{}", preset_id, chrono::Utc::now().timestamp_millis());
+
+        // Determine the start task from the graph.
+        let start_task_id = graph
+            .start_task_id()
+            .unwrap_or_default();
+
+        // Create and persist the session.
+        let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
+        self.storage.save(session).await?;
+
+        // Create a FlowRunner for this session.
+        let runner = FlowRunner::new(graph, self.storage.clone());
+        self.runners
+            .write()
+            .await
+            .insert(session_id.clone(), runner);
+
+        // Track in memory.
+        let summary = SessionSummary {
+            session_id: SessionId(session_id.clone()),
+            creator_id: String::new(),
+            preset_id: preset_id.to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        };
+
+        self.sessions.write().await.push(summary);
+
+        Ok(SessionId(session_id))
     }
 }
 
 #[async_trait]
 impl OrchestrationEngine for GraphFlowEngine {
-    async fn run_step(&self, _session_id: &SessionId) -> Result<StepOutcome, EngineError> {
-        // Placeholder — needs a FlowRunner + Graph.
-        // T6 wires `_system.maintenance` and makes this functional.
-        Err(EngineError::NoGraphLoaded)
+    async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
+        // Look up the FlowRunner for this session.
+        let runner = {
+            let runners = self.runners.read().await;
+            runners
+                .get(&session_id.0)
+                .cloned()
+                .ok_or(EngineError::NoGraphLoaded)?
+        };
+
+        // Execute one step.
+        let result = runner.run(&session_id.0).await?;
+
+        // Translate graph-flow ExecutionResult to our StepOutcome.
+        let outcome = match &result.status {
+            ExecutionStatus::Completed => StepOutcome::Completed {
+                response: result.response,
+            },
+            ExecutionStatus::Paused {
+                next_task_id,
+                reason,
+            } => StepOutcome::Paused {
+                next_task_id: next_task_id.clone(),
+                reason: reason.clone(),
+            },
+            ExecutionStatus::WaitingForInput => StepOutcome::WaitingForInput {
+                response: result.response,
+            },
+            ExecutionStatus::Error(msg) => StepOutcome::Error(msg.clone()),
+        };
+
+        // Update our in-memory bookkeeping.
+        self.update_session_status(&session_id.0, &result.status).await;
+
+        Ok(outcome)
     }
 
     async fn new_session(
@@ -204,8 +293,7 @@ impl OrchestrationEngine for GraphFlowEngine {
     ) -> Result<SessionId, EngineError> {
         let session_id = format!("{}:{}", key.preset_id, key.instance_id);
 
-        // Persist a session stub into the graph-flow storage so that
-        // future `run_step` calls can load it.
+        // Persist a session stub into the graph-flow storage.
         let session = graph_flow::Session::new_from_task(session_id.clone(), "");
         self.storage.save(session).await?;
 
@@ -279,5 +367,26 @@ impl OrchestrationEngine for GraphFlowEngine {
             })
             .cloned()
             .collect())
+    }
+}
+
+impl GraphFlowEngine {
+    /// Update in-memory session status after a step.
+    async fn update_session_status(&self, session_id: &str, exec_status: &ExecutionStatus) {
+        let status = match exec_status {
+            ExecutionStatus::Completed => SessionStatus::Completed,
+            ExecutionStatus::Error(_) => SessionStatus::Failed,
+            ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
+            ExecutionStatus::Paused { .. } => SessionStatus::Paused,
+        };
+        if let Some(s) = self
+            .sessions
+            .write()
+            .await
+            .iter_mut()
+            .find(|s| s.session_id.0 == session_id)
+        {
+            s.status = status;
+        }
     }
 }
