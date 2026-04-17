@@ -30,3 +30,6 @@ nix = { version = "0.28", features = ["signal", "process"] }
 
 [dev-dependencies]
 tokio = { workspace = true }
+wiremock = "0.5"
+assert_cmd = "2.0"
+predicates = "3.1"

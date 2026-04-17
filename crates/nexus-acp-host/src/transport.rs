@@ -37,7 +37,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use crate::acp::error::{AcpError, AcpResult};
+use crate::error::{AcpError, AcpResult};
 
 /// Platform identifier for binary agent distribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +181,7 @@ impl AgentSpawner {
     ///
     /// ```rust,no_run
     /// use std::path::PathBuf;
-    /// use nexus42::acp::transport::AgentSpawner;
+    /// use nexus_acp_host::transport::AgentSpawner;
     ///
     /// let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
     /// let result = spawner.spawn_mock("echo", &["test-response"]);

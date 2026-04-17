@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::acp::client::SessionId;
+use crate::client::SessionId;
 
 /// A persisted ACP session entry.
 ///
@@ -60,7 +60,7 @@ impl SessionManager {
     /// Load all sessions from the sessions file.
     ///
     /// Returns an empty vector if the file doesn't exist.
-    pub fn load_sessions(&self) -> crate::acp::AcpResult<Vec<SessionEntry>> {
+    pub fn load_sessions(&self) -> crate::AcpResult<Vec<SessionEntry>> {
         if !self.sessions_file.exists() {
             return Ok(Vec::new());
         }
@@ -75,7 +75,7 @@ impl SessionManager {
     /// If a session with the same session_id exists, it will be updated.
     /// Otherwise, the session is appended to the list.
     #[allow(dead_code)]
-    pub fn save_session(&self, entry: &SessionEntry) -> crate::acp::AcpResult<()> {
+    pub fn save_session(&self, entry: &SessionEntry) -> crate::AcpResult<()> {
         // Load existing sessions
         let mut sessions = self.load_sessions()?;
 
@@ -111,7 +111,7 @@ impl SessionManager {
         &self,
         agent_id: &str,
         workspace_hint: &PathBuf,
-    ) -> crate::acp::AcpResult<Option<SessionEntry>> {
+    ) -> crate::AcpResult<Option<SessionEntry>> {
         let sessions = self.load_sessions()?;
 
         // Filter by agent_id and workspace_hint, then find the most recent
@@ -127,7 +127,7 @@ impl SessionManager {
     ///
     /// Sessions with `last_used_at` older than 24 hours are removed from the
     /// sessions file. Returns the list of removed sessions.
-    pub fn cleanup_expired(&self) -> crate::acp::AcpResult<Vec<SessionEntry>> {
+    pub fn cleanup_expired(&self) -> crate::AcpResult<Vec<SessionEntry>> {
         let sessions = self.load_sessions()?;
 
         let now = Utc::now();
@@ -157,7 +157,7 @@ impl SessionManager {
     pub fn delete_session(
         &self,
         session_id: &SessionId,
-    ) -> crate::acp::AcpResult<Option<SessionEntry>> {
+    ) -> crate::AcpResult<Option<SessionEntry>> {
         let sessions = self.load_sessions()?;
 
         // Find and remove the session

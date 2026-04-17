@@ -8,8 +8,8 @@
 
 use std::path::PathBuf;
 
-use nexus42::acp::client::SessionId;
-use nexus42::acp::session_manager::{SessionEntry, SessionManager};
+use nexus_acp_host::client::SessionId;
+use nexus_acp_host::session_manager::{SessionEntry, SessionManager};
 
 use chrono::{Duration, Utc};
 use tempfile::TempDir;
@@ -331,7 +331,7 @@ fn session_cleanup_missing_file() {
 /// Test: build_v1_0_capabilities creates non-empty capability set
 #[test]
 fn capabilities_v1_0_builds_correct_set() {
-    use nexus42::acp::skills::build_v1_0_capabilities;
+    use nexus_acp_host::skills::build_v1_0_capabilities;
 
     let caps = build_v1_0_capabilities();
 
@@ -347,7 +347,7 @@ fn capabilities_v1_0_builds_correct_set() {
 /// Test: capability constants match expected values
 #[test]
 fn capabilities_constants_correct() {
-    use nexus42::acp::skills::capabilities;
+    use nexus_acp_host::skills::capabilities;
 
     assert_eq!(capabilities::FILE_SYSTEM_READ, "file_system.read");
     assert_eq!(capabilities::FILE_SYSTEM_WRITE, "file_system.write");
