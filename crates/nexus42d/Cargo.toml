@@ -21,6 +21,7 @@ nexus-contracts = { path = "../nexus-contracts" }
 nexus-domain = { path = "../nexus-domain" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-sync = { path = "../nexus-sync" }
+nexus-orchestration = { path = "../nexus-orchestration" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -46,3 +47,8 @@ async-trait = "0.1"
 
 [dev-dependencies]
 axum-test = "15"
+graph-flow = "=0.2.3"
+nexus-orchestration = { path = "../nexus-orchestration" }
+
+[features]
+test-support = []

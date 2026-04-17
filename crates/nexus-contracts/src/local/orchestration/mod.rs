@@ -5,6 +5,8 @@
 //!
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §5.3.
 
+pub mod http;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,9 @@ pub mod manager;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::local::domain::RuntimeMode;
+use nexus_orchestration::{
+    engine::OrchestrationEngine, Capability, CapabilityRegistry, WorkerManager,
+};
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,6 +46,13 @@ pub struct WorkspaceState {
     /// Lifecycle HSM for daemon state management.
     /// Set in T6 when main.rs wires up the lifecycle.
     lifecycle: Arc<Option<Arc<StatigLifecycle>>>,
+    /// Orchestration engine (set at daemon startup when WS2 is wired).
+    engine: Arc<Option<Arc<dyn OrchestrationEngine>>>,
+    /// Worker manager (set at daemon startup when WS2 is wired).
+    #[allow(dead_code)]
+    worker_manager: Arc<Option<Arc<WorkerManager>>>,
+    /// Capability registry (set at daemon startup when WS2 is wired).
+    capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
 }
 
 impl WorkspaceState {
@@ -69,6 +79,9 @@ impl WorkspaceState {
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
             lifecycle: Arc::new(None),
+            engine: Arc::new(None),
+            worker_manager: Arc::new(None),
+            capability_registry: Arc::new(None),
         }
     }
 
@@ -103,6 +116,9 @@ impl WorkspaceState {
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
             lifecycle: Arc::new(None),
+            engine: Arc::new(None),
+            worker_manager: Arc::new(None),
+            capability_registry: Arc::new(None),
         }
     }
 
@@ -153,6 +169,9 @@ impl WorkspaceState {
             runtime_mode,
             cli_config_mtime,
             lifecycle: Arc::new(None),
+            engine: Arc::new(None),
+            worker_manager: Arc::new(None),
+            capability_registry: Arc::new(None),
         })
     }
 
@@ -160,6 +179,38 @@ impl WorkspaceState {
     /// Called from main.rs after constructing the lifecycle.
     pub fn set_lifecycle(&mut self, lifecycle: Arc<StatigLifecycle>) {
         self.lifecycle = Arc::new(Some(lifecycle));
+    }
+
+    /// Set the orchestration engine.
+    /// Called from main.rs after constructing the engine.
+    pub fn set_engine(&mut self, engine: Arc<dyn OrchestrationEngine>) {
+        self.engine = Arc::new(Some(engine));
+    }
+
+    /// Set the worker manager.
+    pub fn set_worker_manager(&mut self, worker_manager: Arc<WorkerManager>) {
+        self.worker_manager = Arc::new(Some(worker_manager));
+    }
+
+    /// Set the capability registry.
+    pub fn set_capability_registry(&mut self, registry: Arc<CapabilityRegistry>) {
+        self.capability_registry = Arc::new(Some(registry));
+    }
+
+    /// Get the orchestration engine, if set.
+    pub fn engine(&self) -> Option<Arc<dyn OrchestrationEngine>> {
+        self.engine.as_ref().as_ref().cloned()
+    }
+
+    /// Get the worker manager, if set.
+    #[allow(dead_code)]
+    pub fn worker_manager(&self) -> Option<Arc<WorkerManager>> {
+        self.worker_manager.as_ref().as_ref().cloned()
+    }
+
+    /// Get the capability registry, if set.
+    pub fn capability_registry(&self) -> Option<Arc<CapabilityRegistry>> {
+        self.capability_registry.as_ref().as_ref().cloned()
     }
 
     /// Get the lifecycle, if set.
