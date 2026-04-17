@@ -26,6 +26,10 @@ use clap::Parser;
 use nexus42d::api;
 use nexus42d::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
 use nexus42d::workspace::WorkspaceState;
+use nexus_orchestration::{
+    engine::OrchestrationEngine, CapabilityRegistry, GraphFlowEngine, WorkerManager,
+    system_preset,
+};
 use tracing_subscriber::EnvFilter;
 
 /// Local API transport configuration
@@ -126,8 +130,40 @@ async fn main() -> anyhow::Result<()> {
     let mut state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
+    // --- WS2: Instantiate orchestration engine + worker manager ---
+    // Re-use the same pool that WorkspaceState opened (nexus_local_db::open_pool).
+    let db_pool: sqlx::SqlitePool = state.pool().clone();
+    let storage = Arc::new(
+        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            std::sync::Arc::new(db_pool),
+        ),
+    );
+    let concrete_engine = GraphFlowEngine::new_with_storage(storage);
+
+    // Kick off _system.maintenance session on the concrete engine
+    // (start_session is a GraphFlowEngine method, not on the trait).
+    let sys_graph = system_preset::build();
+    match concrete_engine.start_session("_system.maintenance", sys_graph).await {
+        Ok(sid) => {
+            tracing::info!(session_id = sid.0, "started _system.maintenance session");
+        }
+        Err(e) => {
+            tracing::warn!("failed to start _system.maintenance: {}", e);
+            // Non-fatal: the daemon can still operate without the system preset.
+        }
+    }
+
+    // Wrap in trait object for WorkspaceState.
+    let engine: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine);
+    let workers = Arc::new(WorkerManager::new());
+    let capabilities = Arc::new(CapabilityRegistry::with_builtins());
+
+    state.set_engine(engine);
+    state.set_worker_manager(workers);
+    state.set_capability_registry(capabilities);
+    tracing::info!("Orchestration engine wired");
+
     // Create lifecycle HSM with subsystems
-    // Note: Engine and WorkerMgr are mocks until WS2 creates nexus-orchestration
     let subsystems = create_subsystems(&state, args.port);
     let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
         subsystems,
@@ -289,8 +325,9 @@ async fn main() -> anyhow::Result<()> {
 
 /// Create subsystem bootstraps for lifecycle.
 ///
-/// Note: Engine and WorkerMgr are mock implementations until WS2 creates
-/// the nexus-orchestration crate with real implementations.
+/// Engine and WorkerMgr subsystems are mock implementations for lifecycle
+/// health reporting only. The real engine is instantiated directly in main()
+/// and wired via WorkspaceState (WS2).
 fn create_subsystems(
     state: &WorkspaceState,
     port: u16,

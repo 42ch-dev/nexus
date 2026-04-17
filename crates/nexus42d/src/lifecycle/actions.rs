@@ -126,16 +126,18 @@ pub fn exit_starting(_ctx: Arc<ActionContext>) {
 /// Entry action for `Running` state.
 ///
 /// Per spec §5.2:
-/// - Start `_system.maintenance` Session on the orchestration engine (stub)
-/// - Resume any paused sessions with `daemon_restart` reason (stub)
-/// - Emit `tracing` event `daemon_lifecycle.running`
+/// - `_system.maintenance` Session started in main.rs before lifecycle begins.
+/// - Resume any paused sessions with `daemon_restart` reason (stub).
+/// - Emit `tracing` event `daemon_lifecycle.running`.
 pub fn enter_running(_ctx: Arc<ActionContext>) {
     tracing::info!("entering Running state — daemon fully operational");
 
-    // Stub: _system.maintenance session would be started here.
-    // WS2 will implement actual engine session management.
+    // Engine sessions (including _system.maintenance) are started in main.rs
+    // before the lifecycle transitions to Running. This action is a hook
+    // for future resume logic (e.g. re-activating paused sessions after
+    // daemon restart — WS7+).
     tracing::info!(
-        "Running.entry stub: would start _system.maintenance session (engine not yet available)"
+        "Running.entry: orchestration engine already active (started in main.rs)"
     );
 
     // Emit structured log event.
