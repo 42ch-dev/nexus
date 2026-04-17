@@ -934,7 +934,7 @@ mod tests {
 
     fn make_two_stage_with_stage1() -> TwoStageAssembly {
         use crate::runtime_mode::DomainRuntimeMode;
-        use nexus_contracts::RuntimeMode;
+        use nexus_contracts::local::domain::RuntimeMode;
 
         TwoStageAssembly {
             stage1_response: Some(AssembleResponse {
@@ -1021,7 +1021,7 @@ mod tests {
     #[test]
     fn two_stage_fallback_when_stage1_none() {
         use crate::runtime_mode::DomainRuntimeMode;
-        use nexus_contracts::RuntimeMode;
+        use nexus_contracts::local::domain::RuntimeMode;
 
         let asm = TwoStageAssembly {
             stage1_response: None,
@@ -1058,7 +1058,7 @@ mod tests {
     #[test]
     fn memory_dedup_local_over_platform() {
         use crate::runtime_mode::DomainRuntimeMode;
-        use nexus_contracts::RuntimeMode;
+        use nexus_contracts::local::domain::RuntimeMode;
 
         // Local memory with ID that also appears in platform response
         let mut local_mem = make_memory(

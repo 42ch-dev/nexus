@@ -170,8 +170,8 @@ impl ReferenceSource {
 
 // ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
-impl From<nexus_contracts::ReferenceSource> for ReferenceSource {
-    fn from(c: nexus_contracts::ReferenceSource) -> Self {
+impl From<nexus_contracts::local::domain::ReferenceSource> for ReferenceSource {
+    fn from(c: nexus_contracts::local::domain::ReferenceSource) -> Self {
         Self {
             schema_version: c.schema_version,
             reference_source_id: c.reference_source_id,
@@ -188,18 +188,24 @@ impl From<nexus_contracts::ReferenceSource> for ReferenceSource {
     }
 }
 
-impl From<ReferenceSource> for nexus_contracts::ReferenceSource {
+impl From<ReferenceSource> for nexus_contracts::local::domain::ReferenceSource {
     fn from(d: ReferenceSource) -> Self {
         Self {
             schema_version: d.schema_version,
             reference_source_id: d.reference_source_id,
             workspace_id: d.workspace_id,
-            source_type: nexus_contracts::ReferenceSourceType::from_str(&d.source_type).unwrap(),
+            source_type: nexus_contracts::generated::common_types::ReferenceSourceType::from_str(
+                &d.source_type,
+            )
+            .unwrap(),
             uri: d.uri,
             title: d.title,
             tags: d.tags,
             content_hash: d.content_hash,
-            scan_status: nexus_contracts::ScanStatus::from_str(&d.scan_status).unwrap(),
+            scan_status: nexus_contracts::generated::common_types::ScanStatus::from_str(
+                &d.scan_status,
+            )
+            .unwrap(),
             created_at: d.created_at,
             updated_at: d.updated_at,
         }

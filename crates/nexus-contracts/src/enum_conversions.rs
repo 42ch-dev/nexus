@@ -4,7 +4,7 @@
 //! generated from JSON Schema. This file extends generated types without modifying them.
 
 use crate::generated::common_types::*;
-use crate::generated::runtime_mode::RuntimeMode;
+use crate::local::domain::runtime_mode::RuntimeMode;
 use std::fmt;
 use std::str::FromStr;
 
