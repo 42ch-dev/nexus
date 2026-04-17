@@ -16,7 +16,7 @@ pub struct DaemonStatusV2 {
     pub version: String,
     pub implementation_scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub uptime_seconds: Option<u64>,
+    pub uptime_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
