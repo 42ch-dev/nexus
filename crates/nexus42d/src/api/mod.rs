@@ -192,6 +192,10 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/orchestration/presets",
             get(handlers::orchestration::presets::list_presets),
+        )
+        .route(
+            "/v1/local/orchestration/presets/{id}:reload",
+            axum::routing::post(handlers::orchestration::presets::reload_preset),
         );
 
     Router::new()

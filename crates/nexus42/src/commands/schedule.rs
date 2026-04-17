@@ -9,7 +9,7 @@ use crate::errors::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Subcommand)]
-pub enum ScheduleSubcommand {
+pub enum ScheduleCommand {
     /// Start a new preset session
     Start {
         /// Preset ID to run (e.g. `novel-writing`)
@@ -37,25 +37,26 @@ pub enum ScheduleSubcommand {
     },
 }
 
+/// Wrapper for parsing `ScheduleCommand` in tests.
 #[derive(Debug, Parser)]
-#[command(subcommand_required = true)]
-pub struct ScheduleCommand {
+#[command(subcommand_required = true, name = "schedule")]
+struct ScheduleCli {
     #[command(subcommand)]
-    pub command: ScheduleSubcommand,
+    command: ScheduleCommand,
 }
 
 /// Run the schedule command.
 pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
-    match cmd.command {
-        ScheduleSubcommand::Start {
+    match cmd {
+        ScheduleCommand::Start {
             preset,
             creator,
             seed,
         } => start_session(&client, &preset, &creator, seed.as_deref()).await,
-        ScheduleSubcommand::Status { session_id } => show_status(&client, &session_id).await,
-        ScheduleSubcommand::Advance { session_id } => {
+        ScheduleCommand::Status { session_id } => show_status(&client, &session_id).await,
+        ScheduleCommand::Advance { session_id } => {
             advance_session(&client, &session_id).await
         }
     }
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn start_command_parses() {
-        let cmd = ScheduleCommand::try_parse_from([
+        let cmd = ScheduleCli::try_parse_from([
             "schedule",
             "start",
             "novel-writing",
@@ -139,7 +140,7 @@ mod tests {
         .unwrap();
 
         match cmd.command {
-            ScheduleSubcommand::Start {
+            ScheduleCommand::Start {
                 preset,
                 creator,
                 seed,
@@ -154,7 +155,7 @@ mod tests {
 
     #[test]
     fn status_command_parses() {
-        let cmd = ScheduleCommand::try_parse_from([
+        let cmd = ScheduleCli::try_parse_from([
             "schedule",
             "status",
             "sess_abc123",
@@ -162,7 +163,7 @@ mod tests {
         .unwrap();
 
         match cmd.command {
-            ScheduleSubcommand::Status { session_id } => {
+            ScheduleCommand::Status { session_id } => {
                 assert_eq!(session_id, "sess_abc123");
             }
             other => panic!("expected Status, got: {other:?}"),
@@ -171,7 +172,7 @@ mod tests {
 
     #[test]
     fn advance_command_parses() {
-        let cmd = ScheduleCommand::try_parse_from([
+        let cmd = ScheduleCli::try_parse_from([
             "schedule",
             "advance",
             "sess_abc123",
@@ -179,7 +180,7 @@ mod tests {
         .unwrap();
 
         match cmd.command {
-            ScheduleSubcommand::Advance { session_id } => {
+            ScheduleCommand::Advance { session_id } => {
                 assert_eq!(session_id, "sess_abc123");
             }
             other => panic!("expected Advance, got: {other:?}"),
@@ -189,11 +190,11 @@ mod tests {
     #[test]
     fn start_without_seed_parses() {
         let cmd =
-            ScheduleCommand::try_parse_from(["schedule", "start", "novel-writing", "--creator", "c1"])
+            ScheduleCli::try_parse_from(["schedule", "start", "novel-writing", "--creator", "c1"])
                 .unwrap();
 
         match cmd.command {
-            ScheduleSubcommand::Start { seed, .. } => {
+            ScheduleCommand::Start { seed, .. } => {
                 assert!(seed.is_none());
             }
             other => panic!("expected Start, got: {other:?}"),
