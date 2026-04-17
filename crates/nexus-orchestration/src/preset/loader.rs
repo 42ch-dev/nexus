@@ -1051,6 +1051,9 @@ states:
 "#;
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps);
-        assert!(loaded.is_ok(), "expected valid preset with known requires_capabilities: {loaded:?}");
+        assert!(
+            loaded.is_ok(),
+            "expected valid preset with known requires_capabilities: {loaded:?}"
+        );
     }
 }

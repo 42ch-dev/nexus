@@ -517,10 +517,9 @@ impl Task for StateCompositeTask {
                     context
                         .set("_capability_input", args.clone().unwrap_or(Value::Null))
                         .await;
-                    let registry = self
-                        .registry
-                        .clone()
-                        .unwrap_or_else(|| std::sync::Arc::new(CapabilityRegistry::with_builtins()));
+                    let registry = self.registry.clone().unwrap_or_else(|| {
+                        std::sync::Arc::new(CapabilityRegistry::with_builtins())
+                    });
                     let cap_task = CapabilityTask { registry };
                     let cap_result = cap_task.run(context.clone()).await?;
                     // If capability task errored, propagate but still continue

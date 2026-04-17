@@ -87,8 +87,13 @@ async fn get_presets_returns_system_maintenance() {
         .unwrap();
     let v: Value = serde_json::from_slice(&bytes).unwrap();
     let presets = v["presets"].as_array().unwrap();
-    assert_eq!(presets.len(), 1);
-    assert_eq!(presets[0].as_str().unwrap(), "_system.maintenance");
+    assert_eq!(presets.len(), 2);
+    assert!(presets
+        .iter()
+        .any(|p| p.as_str().unwrap() == "_system.maintenance"));
+    assert!(presets
+        .iter()
+        .any(|p| p.as_str().unwrap() == "novel-writing"));
 }
 
 #[tokio::test]
