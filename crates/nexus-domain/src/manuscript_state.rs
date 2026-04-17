@@ -114,12 +114,10 @@ impl ManuscriptState {
     /// or cleaned before entering finalize/published.
     pub fn validate_pre_gate_cleanup(&self, provisional_count: usize) -> Result<(), DomainError> {
         match &self.manuscript_phase {
-            ManuscriptPhase::Finalize | ManuscriptPhase::Published => {
-                if provisional_count > 0 {
-                    return Err(DomainError::ProvisionalRecordsExist {
-                        count: provisional_count,
-                    });
-                }
+            ManuscriptPhase::Finalize | ManuscriptPhase::Published if provisional_count > 0 => {
+                return Err(DomainError::ProvisionalRecordsExist {
+                    count: provisional_count,
+                });
             }
             _ => {}
         }

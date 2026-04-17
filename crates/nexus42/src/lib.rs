@@ -6,6 +6,7 @@
 pub mod acp;
 pub mod api;
 pub mod auth;
+pub mod challenge;
 pub mod commands;
 pub mod config;
 pub mod context;

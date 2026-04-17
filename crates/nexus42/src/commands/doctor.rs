@@ -346,14 +346,17 @@ async fn version_check(config: &CliConfig) -> HealthCheck {
         }
         Ok(false) => HealthCheck {
             name: "Version compatibility".to_string(),
-            status: HealthStatus::Ok,
-            detail: format!("CLI v{} (daemon not running, cannot compare)", cli_version),
+            status: HealthStatus::Warning,
+            detail: format!(
+                "CLI v{} (daemon not running, cannot compare — run `nexus42 daemon start`)",
+                cli_version
+            ),
         },
         Err(_) => HealthCheck {
             name: "Version compatibility".to_string(),
-            status: HealthStatus::Ok,
+            status: HealthStatus::Warning,
             detail: format!(
-                "CLI v{} (daemon not reachable, cannot compare)",
+                "CLI v{} (daemon not reachable, cannot compare — check daemon status)",
                 cli_version
             ),
         },
@@ -449,8 +452,8 @@ mod tests {
         let config = CliConfig::default();
         let result = version_check(&config).await;
         assert_eq!(result.name, "Version compatibility");
-        // Without daemon, should report CLI version with Ok status
-        assert_eq!(result.status, HealthStatus::Ok);
+        // Without daemon, should report CLI version with Warning status (N-002)
+        assert_eq!(result.status, HealthStatus::Warning);
         assert!(result.detail.contains("CLI v"));
     }
 

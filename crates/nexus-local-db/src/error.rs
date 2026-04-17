@@ -2,6 +2,9 @@
 //!
 //! Provides descriptive errors for validation and version reading operations.
 
+// V1.2 residual R7 (identity, nit): thiserror alignment — LocalDbError uses manual Display
+// Manual Display impl preserved for custom formatting; migration to thiserror deferred
+
 use std::fmt;
 
 /// Local database errors with actionable descriptions
