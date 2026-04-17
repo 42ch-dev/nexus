@@ -57,10 +57,7 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
     assert_eq!(loaded.output_bindings.get("my_graph").unwrap(), "n3.text");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(
-        storage,
-        Arc::new(caps),
-    ));
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, Arc::new(caps)));
 
     // Use start_session_with_preset which wires engine + inner graphs.
     let sid = engine
