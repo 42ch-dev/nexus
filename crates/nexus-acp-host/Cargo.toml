@@ -1,0 +1,35 @@
+[package]
+name = "nexus-acp-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ACP client host library (registry + transport + adapter) — worker-only linkage."
+
+[dependencies]
+agent-client-protocol = "=0.10.4"
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+tokio-util = { version = "0.7", features = ["compat"] }
+async-trait = "0.1"
+async-broadcast = "0.7"
+toml = "0.8"
+tempfile = "3"
+nexus-contracts = { path = "../nexus-contracts" }
+# Unix signal handling for graceful shutdown (only on Unix platforms)
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["signal", "process"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock = "0.5"
+assert_cmd = "2.0"
+predicates = "3.1"

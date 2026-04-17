@@ -44,9 +44,9 @@ use agent_client_protocol::{Error, StreamReceiver};
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::acp::error::AcpResult;
-use crate::acp::localset_bridge::LocalSetBridge;
-use crate::acp::policy::{PermissionDecision, PermissionPolicy};
+use crate::error::AcpResult;
+use crate::localset_bridge::LocalSetBridge;
+use crate::policy::{PermissionDecision, PermissionPolicy};
 
 // Re-export commonly used SDK types for convenience.
 #[allow(unused_imports)]
@@ -373,30 +373,29 @@ impl acp::Client for PolicyAwareClientHandler {
     }
 }
 
-/// Simple client handler for V1.0 — routes tools through daemon (ACP-R8).
+/// Simple client handler for V1.0 — auto-grants all tool requests.
 ///
-/// This implements the ACP `Client` trait with daemon-mediated tool access:
+/// This implements the ACP `Client` trait with a simple policy:
 /// - `request_permission`: Auto-grant with warning log
 /// - `session_notification`: Log updates for debugging
-/// - File operations: Route through daemon Local API
+/// - File operations: Return errors (not implemented in V1.0)
 /// - Terminal operations: Return errors (not implemented in V1.0)
+///
+/// NOTE: In V1.0, the daemon_client field was removed during crate extraction
+/// because no tool operations actually dispatch to the daemon yet.
+/// Future versions will add daemon-mediated tool routing (ACP-R8).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct SimpleClientHandler {
     /// Agent ID for logging context.
     agent_id: String,
-    /// Daemon client for tool execution.
-    daemon_client: crate::api::daemon_client::DaemonClient,
 }
 
 #[allow(dead_code)]
 impl SimpleClientHandler {
-    /// Create a new simple client handler with daemon client.
-    pub fn new(agent_id: String, daemon_client: crate::api::daemon_client::DaemonClient) -> Self {
-        Self {
-            agent_id,
-            daemon_client,
-        }
+    /// Create a new simple client handler.
+    pub fn new(agent_id: String) -> Self {
+        Self { agent_id }
     }
 }
 
@@ -545,12 +544,8 @@ impl AcpSdkAdapter {
     ///
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[allow(dead_code)]
-    pub fn new(
-        agent_id: String,
-        agent_path: PathBuf,
-        daemon_client: crate::api::daemon_client::DaemonClient,
-    ) -> Self {
-        let handler = SimpleClientHandler::new(agent_id.clone(), daemon_client);
+    pub fn new(agent_id: String, agent_path: PathBuf) -> Self {
+        let handler = SimpleClientHandler::new(agent_id.clone());
         Self {
             agent_path,
             agent_id: agent_id.clone(),
@@ -572,9 +567,8 @@ impl AcpSdkAdapter {
         agent_path: PathBuf,
         stdin: tokio::process::ChildStdin,
         stdout: tokio::process::ChildStdout,
-        daemon_client: crate::api::daemon_client::DaemonClient,
     ) -> Self {
-        let handler = SimpleClientHandler::new(agent_id.clone(), daemon_client);
+        let handler = SimpleClientHandler::new(agent_id.clone());
         let bridge = LocalSetBridge::new();
         let connection = Arc::new(RwLock::new(None));
 
@@ -634,7 +628,7 @@ impl AcpSdkAdapter {
                             stream_receiver,
                         });
 
-                        Ok::<(), crate::acp::AcpError>(())
+                        Ok::<(), crate::AcpError>(())
                     })
                 })
                 .await;
@@ -708,7 +702,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         let sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
-                                return Err(crate::acp::AcpError::connection_failed(
+                                return Err(crate::AcpError::connection_failed(
                                     "Connection not established",
                                 ))
                             }
@@ -718,7 +712,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                             .connection
                             .initialize(request)
                             .await
-                            .map_err(crate::acp::AcpError::sdk)?;
+                            .map_err(crate::AcpError::sdk)?;
 
                         Ok(InitializedSession::from_sdk_response(response))
                     })
@@ -745,7 +739,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         let sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
-                                return Err(crate::acp::AcpError::connection_failed(
+                                return Err(crate::AcpError::connection_failed(
                                     "Connection not established",
                                 ))
                             }
@@ -755,7 +749,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                             .connection
                             .new_session(request)
                             .await
-                            .map_err(crate::acp::AcpError::sdk)?;
+                            .map_err(crate::AcpError::sdk)?;
 
                         Ok(SessionCreated::from_sdk_response(response))
                     })
@@ -782,7 +776,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         let sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
-                                return Err(crate::acp::AcpError::connection_failed(
+                                return Err(crate::AcpError::connection_failed(
                                     "Connection not established",
                                 ))
                             }
@@ -792,7 +786,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                             .connection
                             .prompt(request)
                             .await
-                            .map_err(crate::acp::AcpError::sdk)?;
+                            .map_err(crate::AcpError::sdk)?;
 
                         Ok(PromptCompleted::from_sdk_response(response))
                     })
@@ -816,7 +810,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         let sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
-                                return Err(crate::acp::AcpError::connection_failed(
+                                return Err(crate::AcpError::connection_failed(
                                     "Connection not established",
                                 ))
                             }
@@ -825,7 +819,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         let cancel_notification = CancelNotification::new(session_id);
                         let result: Result<(), acp::Error> =
                             sdk_conn.connection.cancel(cancel_notification).await;
-                        result.map_err(crate::acp::AcpError::sdk)?;
+                        result.map_err(crate::AcpError::sdk)?;
 
                         Ok(())
                     })
@@ -885,11 +879,9 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_new_creates_bridge() {
-        let daemon_client = crate::api::daemon_client::DaemonClient::new("http://localhost:8420");
         let adapter = AcpSdkAdapter::new(
             "test-agent".to_string(),
             PathBuf::from("/usr/bin/test-agent"),
-            daemon_client,
         );
 
         assert_eq!(adapter.agent_id(), "test-agent");
@@ -902,11 +894,9 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_initialize_without_connection_fails() {
-        let daemon_client = crate::api::daemon_client::DaemonClient::new("http://localhost:8420");
         let adapter = AcpSdkAdapter::new(
             "test-agent".to_string(),
             PathBuf::from("/usr/bin/test-agent"),
-            daemon_client,
         );
 
         let request = InitializeRequest::new(ProtocolVersion::LATEST);
