@@ -19,9 +19,12 @@ use tokio::sync::{broadcast, Mutex};
 use statig::awaitable::IntoStateMachineExt;
 use statig::prelude::*;
 
-use super::{Event, Lifecycle, LifecycleState, LifecycleTransition, SubsystemKind};
 use super::subsystems::SubsystemBootstrap;
-use crate::lifecycle::actions::{ActionContext, enter_starting, exit_starting, enter_running, exit_running, enter_degraded, enter_stopping, enter_failed};
+use super::{Event, Lifecycle, LifecycleState, LifecycleTransition, SubsystemKind};
+use crate::lifecycle::actions::{
+    enter_degraded, enter_failed, enter_running, enter_starting, enter_stopping, exit_running,
+    exit_starting, ActionContext,
+};
 
 /// Shared storage for the daemon HSM.
 ///
@@ -78,7 +81,11 @@ impl DaemonHsm {
         match event {
             Event::SubsystemUp(kind) => {
                 self.up_subsystems.insert(*kind);
-                tracing::debug!("SubsystemUp {:?} — up_subsystems: {:?}", kind, self.up_subsystems);
+                tracing::debug!(
+                    "SubsystemUp {:?} — up_subsystems: {:?}",
+                    kind,
+                    self.up_subsystems
+                );
                 if self.all_mandatory_up() {
                     tracing::info!("all mandatory subsystems up → Running");
                     Transition(State::running())
@@ -299,18 +306,18 @@ impl DaemonHsm {
             self.exit_code.unwrap_or(1),
             self.last_error
         );
-        
+
         // Only call process::exit if we have a context (real run, not test)
         if self.context.is_some() {
             // Call the exit function (which will call std::process::exit after logging)
             let exit_code = self.exit_code.unwrap_or(1);
             let last_error = self.last_error.clone();
-            
+
             // Spawn a separate thread to handle exit (can't block in async context)
             std::thread::spawn(move || {
                 enter_failed(exit_code, last_error);
             });
-            
+
             // Give a small delay for the exit thread to run
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         } else {
@@ -377,11 +384,11 @@ impl StatigLifecycle {
         let (transition_tx, _) = broadcast::channel(16);
         let current_state = Arc::new(std::sync::Mutex::new(LifecycleState::Starting));
         let exit_code = Arc::new(std::sync::Mutex::new(None));
-        
+
         // Placeholder machine (will be initialized on first dispatch)
         // TODO: In production, main.rs should properly set up subsystems
         let placeholder_machine = Arc::new(Mutex::new(None));
-        
+
         Self {
             machine: placeholder_machine,
             transition_tx,
@@ -461,7 +468,7 @@ impl Lifecycle for StatigLifecycle {
 
         tokio::spawn(async move {
             let mut m = machine.lock().await;
-            
+
             // Check if machine is initialized
             let machine_ref = match m.as_mut() {
                 Some(machine) => machine,
@@ -470,7 +477,7 @@ impl Lifecycle for StatigLifecycle {
                     return;
                 }
             };
-            
+
             let before = lifecycle_state_from_statig_state(machine_ref.state());
 
             // handle() initializes if needed and processes the event
@@ -511,10 +518,7 @@ impl Lifecycle for StatigLifecycle {
     }
 
     fn exit_code(&self) -> Option<i32> {
-        *self
-            .exit_code
-            .lock()
-            .expect("exit_code mutex poisoned")
+        *self.exit_code.lock().expect("exit_code mutex poisoned")
     }
 }
 

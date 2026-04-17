@@ -9,9 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus42d::lifecycle::{
-    Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind,
-};
+use nexus42d::lifecycle::{Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind};
 
 /// Test: ShutdownRequested leads to Stopping → Failed (exit 0).
 ///
@@ -31,7 +29,7 @@ async fn shutdown_requested_leads_to_graceful_exit() {
     for kind in SubsystemKind::mandatory() {
         lifecycle.dispatch(Event::SubsystemUp(*kind));
     }
-    
+
     // Wait for Running
     tokio::time::sleep(Duration::from_millis(100)).await;
     let state = lifecycle.current_state();
@@ -45,15 +43,18 @@ async fn shutdown_requested_leads_to_graceful_exit() {
 
     // Wait for async dispatch to complete
     tokio::time::sleep(Duration::from_millis(100)).await;
-    
+
     // Should transition to Stopping
     let state_after_shutdown = lifecycle.current_state();
-    tracing::debug!("Current state after shutdown request: {:?}", state_after_shutdown);
+    tracing::debug!(
+        "Current state after shutdown request: {:?}",
+        state_after_shutdown
+    );
     assert_eq!(state_after_shutdown, LifecycleState::Stopping);
 
     // Manually dispatch ShutdownDrained (simulating subsystem shutdown completion)
     lifecycle.dispatch(Event::ShutdownDrained);
-    
+
     // Wait for transition
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -70,7 +71,7 @@ async fn shutdown_requested_leads_to_graceful_exit() {
 #[tokio::test]
 async fn shutdown_timeout_leads_to_forced_exit() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
-    
+
     // Force to Running state
     for kind in SubsystemKind::mandatory() {
         lifecycle.dispatch(Event::SubsystemUp(*kind));
@@ -102,7 +103,7 @@ async fn shutdown_timeout_leads_to_forced_exit() {
 #[tokio::test]
 async fn fatal_error_from_panic_transitions_to_failed() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
-    
+
     // Force to Running state
     for kind in SubsystemKind::mandatory() {
         lifecycle.dispatch(Event::SubsystemUp(*kind));
@@ -126,22 +127,23 @@ async fn fatal_error_from_panic_transitions_to_failed() {
 #[tokio::test]
 async fn wait_until_terminal_blocks_correctly() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
-    
+
     // Start in Starting, force to Failed
     lifecycle.dispatch(Event::SubsystemFailed {
         kind: SubsystemKind::Db,
         err: "test failure".into(),
         retryable: false,
     });
-    
+
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(lifecycle.current_state(), LifecycleState::Failed);
-    
+
     // wait_until_terminal should return immediately for Failed state
-    let wait_result = tokio::time::timeout(
-        Duration::from_millis(100),
-        lifecycle.wait_until_terminal(),
-    ).await;
-    
-    assert!(wait_result.is_ok(), "wait_until_terminal should return for Failed state");
+    let wait_result =
+        tokio::time::timeout(Duration::from_millis(100), lifecycle.wait_until_terminal()).await;
+
+    assert!(
+        wait_result.is_ok(),
+        "wait_until_terminal should return for Failed state"
+    );
 }

@@ -102,8 +102,14 @@ impl MockAllSubsystems {
             http: MockSubsystem::new(SubsystemKind::Http, failing_kind != SubsystemKind::Http),
             db: MockSubsystem::new(SubsystemKind::Db, failing_kind != SubsystemKind::Db),
             sync: MockSubsystem::new(SubsystemKind::Sync, failing_kind != SubsystemKind::Sync),
-            engine: MockSubsystem::new(SubsystemKind::Engine, failing_kind != SubsystemKind::Engine),
-            worker_mgr: MockSubsystem::new(SubsystemKind::WorkerMgr, failing_kind != SubsystemKind::WorkerMgr),
+            engine: MockSubsystem::new(
+                SubsystemKind::Engine,
+                failing_kind != SubsystemKind::Engine,
+            ),
+            worker_mgr: MockSubsystem::new(
+                SubsystemKind::WorkerMgr,
+                failing_kind != SubsystemKind::WorkerMgr,
+            ),
         }
     }
 

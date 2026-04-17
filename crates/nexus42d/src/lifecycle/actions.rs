@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use super::{Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind};
 use super::subsystems::SubsystemBootstrap;
+use super::{Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind};
 
 /// Context for entry/exit actions.
 ///
@@ -131,13 +131,13 @@ pub fn exit_starting(_ctx: Arc<ActionContext>) {
 /// - Emit `tracing` event `daemon_lifecycle.running`
 pub fn enter_running(_ctx: Arc<ActionContext>) {
     tracing::info!("entering Running state — daemon fully operational");
-    
+
     // Stub: _system.maintenance session would be started here.
     // WS2 will implement actual engine session management.
     tracing::info!(
         "Running.entry stub: would start _system.maintenance session (engine not yet available)"
     );
-    
+
     // Emit structured log event.
     tracing::info!(
         target: "daemon_lifecycle",
@@ -162,7 +162,7 @@ pub fn exit_running(_ctx: Arc<ActionContext>) {
 /// - Keep orchestration engine running
 pub fn enter_degraded(_ctx: Arc<ActionContext>) {
     tracing::info!("entering Degraded state — daemon partially operational");
-    
+
     tracing::info!(
         target: "daemon_lifecycle",
         event = "degraded",
@@ -196,10 +196,10 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
     // Order: Engine → WorkerMgr → Sync → Db → HTTP (reverse of startup).
     let subsystems = ctx.subsystems.clone();
     let lc = ctx.lifecycle();
-    
+
     // Clone for shutdown coordinator
     let lc_shutdown = Arc::clone(&lc);
-    
+
     // Spawn shutdown coordinator task.
     tokio::spawn(async move {
         // Reverse order shutdown.
@@ -245,7 +245,7 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
 
     // Clone for watchdog
     let lc_watchdog = Arc::clone(&lc);
-    
+
     // Spawn timeout watchdog.
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(grace_ms)).await;
