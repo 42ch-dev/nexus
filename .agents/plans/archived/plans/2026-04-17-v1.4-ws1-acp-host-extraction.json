@@ -1,0 +1,43 @@
+{
+  "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
+  "title": "V1.4 WS1 — nexus-acp-host crate extraction",
+  "owner": "fullstack-dev",
+  "tags": ["v1.4", "ws1", "orchestration", "refactor"],
+  "created_at": "2026-04-17",
+  "updated_at": "2026-04-17",
+  "done_at": "2026-04-17",
+  "metadata": {
+    "priority": "high",
+    "phase": "V1.4-M1",
+    "working_branch": "feature/v1.4-ws1-acp-host",
+    "merge_target": "main",
+    "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
+    "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
+    "spec_refs": [
+      ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
+      ".agents/plans/knowledge/orchestration-engine-v1.md",
+      ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
+    ],
+    "effort_agent_oriented": "M (1-2 agent sessions)",
+    "gates": {
+      "cargo_build": "pass",
+      "cargo_test": "pass",
+      "cargo_fmt": "pass",
+      "cargo_clippy": "pass",
+      "linkage_gate": "pass",
+      "acp_worker_stub": "pass"
+    },
+    "commits": [
+      "c41647d chore(acp-host): scaffold crate (WS1 T1)",
+      "e361b5a refactor(acp-host): move ACP modules to nexus-acp-host (WS1 T2-T5)",
+      "a2fcfe9 refactor(nexus42): consume nexus-acp-host via compat shim (WS1 T6)",
+      "7ffb013 feat(cli): hidden 'acp-worker' subcommand stub (WS1 T7)",
+      "ef36312 ci(verify-no-acp-in-daemon): enforce nexus42d linkage matrix (WS1 T9)",
+      "d95007a fix(acp-host): move tempfile to dev-dependencies (QC2-W01)"
+    ],
+    "qc_status": "approved",
+    "qa_status": "approved"
+  }
+}
