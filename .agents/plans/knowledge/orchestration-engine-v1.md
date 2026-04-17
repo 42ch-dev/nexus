@@ -851,7 +851,7 @@ Internal:
 - [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) — companion spec for ACP host split and worker-delegated hosting
 - [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md) — companion spec for the 6-state HSM (closes TD-9)
 - [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) — TD matrix; §2.6 TD-9 row updated to "Resolved via v2" after Phase 4 ships
-- [local-db-refactor-v1.md](local-db-refactor-v1.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table
+- [local-db-refactor-v2.md](local-db-refactor-v2.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See [local-db-refactor-v2.md §4](local-db-refactor-v2.md#4-modularization-plan) for pool sharing model.
 - [acp-client-tech-spec-v1.md](../archived/knowledge/acp-client-tech-spec-v1.md) — archived; do not rely on directly (see Superseded header)
 - [daemon-lifecycle-api-v1.md](../archived/knowledge/daemon-lifecycle-api-v1.md) — archived; do not rely on directly (see Superseded header)
 
