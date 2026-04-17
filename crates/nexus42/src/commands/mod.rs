@@ -47,6 +47,8 @@ pub mod research;
 #[deny(clippy::unwrap_used)]
 pub mod runtime_mode;
 #[deny(clippy::unwrap_used)]
+pub mod schedule;
+#[deny(clippy::unwrap_used)]
 pub mod session;
 #[deny(clippy::unwrap_used)]
 pub mod soul;

@@ -21,7 +21,7 @@ pub struct ListSessionsQuery {
 }
 
 /// Response body for `GET /v1/local/orchestration/sessions`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListSessionsResponse {
     /// Active engine sessions.
@@ -29,7 +29,7 @@ pub struct ListSessionsResponse {
 }
 
 /// A single session summary item.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     /// Opaque session identifier.
@@ -45,14 +45,49 @@ pub struct SessionSummary {
 }
 
 /// Response body for `GET /v1/local/orchestration/sessions/{id}`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSessionResponse {
     pub session: SessionSummary,
 }
 
-/// Request body for `POST /v1/local/orchestration/sessions/{id}/signal`.
+/// Request body for `POST /v1/local/orchestration/sessions` (schedule start).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSessionRequest {
+    /// Preset ID to run (e.g. `"novel-writing"`).
+    pub preset_id: String,
+    /// Creator ID that owns this session.
+    pub creator_id: String,
+    /// Optional seed text for `preset.input.*`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
+}
+
+/// Response body for `POST /v1/local/orchestration/sessions` (schedule start).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSessionResponse {
+    /// The created session ID.
+    pub session_id: String,
+}
+
+/// Request body for `POST /v1/local/orchestration/presets/{id}:reload`.
 #[derive(Debug, Clone, Deserialize)]
+pub struct ReloadPresetRequest {}
+
+/// Response body for `POST /v1/local/orchestration/presets/{id}:reload`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReloadPresetResponse {
+    /// Preset ID that was reloaded.
+    pub preset_id: String,
+    /// New source hash after reload.
+    pub source_hash: String,
+}
+
+/// Request body for `POST /v1/local/orchestration/sessions/{id}/signal`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalSessionRequest {
     /// One of `pause`, `resume`, `cancel`, `advance`.

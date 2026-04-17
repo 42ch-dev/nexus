@@ -22,8 +22,8 @@ use commands::{
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
     identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
     memory::MemoryCommand, policy::PolicyCommand, publish::PublishCommand,
-    research::ResearchCommand, runtime_mode::RuntimeModeCommand, session::SessionCommand,
-    soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
+    research::ResearchCommand, runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand,
+    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -191,6 +191,12 @@ enum Commands {
         #[command(subcommand)]
         command: MemoryCommand,
     },
+
+    /// Schedule preset sessions (minimal; WS3)
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleCommand,
+    },
 }
 
 #[tokio::main]
@@ -235,6 +241,7 @@ async fn main() {
         }
         Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
         Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
+        Some(Commands::Schedule { command }) => commands::schedule::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

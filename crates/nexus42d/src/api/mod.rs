@@ -174,7 +174,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
     let orchestration_routes = Router::new()
         .route(
             "/v1/local/orchestration/sessions",
-            get(handlers::orchestration::sessions::list_sessions),
+            get(handlers::orchestration::sessions::list_sessions)
+                .post(handlers::orchestration::sessions::create_session),
         )
         .route(
             "/v1/local/orchestration/sessions/{session_id}",
