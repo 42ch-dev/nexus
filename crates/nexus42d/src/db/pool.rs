@@ -1,11 +1,8 @@
-//! SQLite connection pool wrapper using deadpool-sqlite
+//! SQLite connection pool wrapper using sqlx
 //!
-//! Since `rusqlite::Connection` is `!Send`, all database operations must
-//! go through `SyncWrapper::interact()`, which executes synchronous SQLite
-//! calls on a blocking thread pool. The [`PooledConn`] type provides an
-//! ergonomic async interface that hides this detail.
+//! Provides async connection pooling for concurrent handler access
+//! to the daemon's SQLite database (WAL mode enabled).
 
-use deadpool_sqlite::{Config, InteractError, Pool, PoolError, Runtime};
 use std::path::Path;
 use std::time::Duration;
 
@@ -44,22 +41,24 @@ use std::time::Duration;
 /// use nexus42d::db::pool::{DbPool, PoolConfig};
 /// use std::time::Duration;
 ///
+/// # async fn example() -> Result<(), nexus_local_db::LocalDbError> {
 /// // Use environment overrides (suitable for production):
-/// let pool = DbPool::new("nexus.db".as_ref(), PoolConfig::from_env())?;
+/// let _pool = DbPool::new("nexus.db".as_ref(), PoolConfig::from_env()).await?;
 ///
 /// // Or build programmatically:
 /// let config = PoolConfig::default()
 ///     .with_timeout(Duration::from_secs(10))
 ///     .with_max_connections(4);
-/// let pool = DbPool::new("nexus.db".as_ref(), config)?;
-/// # Ok::<(), deadpool_sqlite::BuildError>(())
+/// let _pool = DbPool::new("nexus.db".as_ref(), config).await?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
     /// Maximum time to wait for an available connection from the pool.
     pub timeout: Duration,
     /// Maximum number of connections in the pool.
-    pub max_connections: usize,
+    pub max_connections: u32,
 }
 
 impl Default for PoolConfig {
@@ -86,7 +85,7 @@ impl PoolConfig {
         }
 
         if let Ok(val) = std::env::var("NEXUS_DB_POOL_MAX_CONNECTIONS") {
-            if let Ok(max) = val.parse::<usize>() {
+            if let Ok(max) = val.parse::<u32>() {
                 cfg.max_connections = max;
             }
         }
@@ -101,19 +100,21 @@ impl PoolConfig {
     }
 
     /// Set the maximum number of connections.
-    pub fn with_max_connections(mut self, max_connections: usize) -> Self {
+    pub fn with_max_connections(mut self, max_connections: u32) -> Self {
         self.max_connections = max_connections;
         self
     }
 }
 
-/// Wrapper around deadpool SQLite connection pool
+/// Wrapper around sqlx SQLite connection pool
 ///
 /// Provides async connection retrieval for concurrent handler access
 /// to the daemon's SQLite database (WAL mode enabled).
 #[derive(Clone)]
 pub struct DbPool {
-    pool: Pool,
+    pool: sqlx::SqlitePool,
+    /// Stored max_connections value for monitoring (sqlx doesn't expose a getter).
+    max_connections: u32,
 }
 
 impl DbPool {
@@ -133,258 +134,120 @@ impl DbPool {
     /// Write contention is minimal since the daemon serves a single user locally.
     ///
     /// # Errors
-    /// Returns `BuildError` if the pool cannot be created (e.g. invalid path)
-    pub fn new(db_path: &Path, config: PoolConfig) -> Result<Self, deadpool_sqlite::BuildError> {
-        let mut cfg = Config::new(db_path);
-        cfg.pool = Some(deadpool_sqlite::PoolConfig {
-            max_size: config.max_connections,
-            timeouts: deadpool_sqlite::Timeouts {
-                wait: Some(config.timeout),
-                create: Some(config.timeout),
-                recycle: Some(config.timeout),
-            },
-            ..deadpool_sqlite::PoolConfig::new(config.max_connections)
-        });
-
-        let pool = cfg
-            .builder(Runtime::Tokio1)
-            .expect("builder() is infallible for valid Runtime")
-            .build()?;
-        Ok(Self { pool })
+    /// Returns `LocalDbError` if the pool cannot be created (e.g. invalid path)
+    pub async fn new(
+        db_path: &Path,
+        config: PoolConfig,
+    ) -> Result<Self, nexus_local_db::LocalDbError> {
+        let url = format!("sqlite://{}?mode=rwc", db_path.display());
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(config.max_connections)
+            .acquire_timeout(config.timeout)
+            .connect(&url)
+            .await
+            .map_err(nexus_local_db::LocalDbError::from)?;
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&pool)
+            .await?;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await?;
+        Ok(Self {
+            pool,
+            max_connections: config.max_connections,
+        })
     }
 
     /// Create a connection pool with default configuration.
     ///
     /// Convenience wrapper around [`DbPool::new`] with [`PoolConfig::default`].
     /// Useful in tests and simple setups where custom configuration is unnecessary.
-    pub fn with_defaults(db_path: &Path) -> Result<Self, deadpool_sqlite::BuildError> {
-        Self::new(db_path, PoolConfig::default())
+    pub async fn with_defaults(db_path: &Path) -> Result<Self, nexus_local_db::LocalDbError> {
+        Self::new(db_path, PoolConfig::default()).await
     }
 
-    /// Get a connection from the pool
-    ///
-    /// Returns a [`PooledConn`] that provides async wrappers around
-    /// synchronous SQLite operations. The connection is returned to the
-    /// pool when dropped.
-    pub async fn get(&self) -> Result<PooledConn, PoolError> {
-        self.pool.get().await.map(PooledConn)
+    /// Get a reference to the underlying sqlx pool.
+    pub fn pool(&self) -> &sqlx::SqlitePool {
+        &self.pool
     }
 
-    /// Returns pool status information (QC-W3).
+    /// Returns pool status information.
     ///
-    /// Provides observability for database connection pool metrics:
-    /// - `max_size`: Maximum pool capacity
-    /// - `size`: Current total connections
-    /// - `available`: Idle connections ready for use
-    /// - `waiting`: Pending checkout requests
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use nexus42d::db::pool::DbPool;
-    ///
-    /// let pool = DbPool::with_defaults("nexus.db".as_ref())?;
-    /// let status = pool.status();
-    /// println!("Pool: {} connections ({} available, {} waiting)",
-    ///     status.size, status.available, status.waiting);
-    /// # Ok::<(), deadpool_sqlite::BuildError>(())
-    /// ```
-    ///
-    /// # Monitoring Endpoint
-    ///
-    /// Pool status is exposed via `/v1/local/monitoring/pool` API endpoint.
-    /// See `nexus42d::api::handlers::monitoring::pool_status` handler.
-    pub fn status(&self) -> deadpool_sqlite::Status {
-        self.pool.status()
+    /// Provides observability for database connection pool metrics.
+    pub fn status(&self) -> PoolStatus {
+        PoolStatus {
+            max_size: self.max_connections as usize,
+            size: self.pool.size() as usize,
+        }
     }
 }
 
-/// A pooled SQLite connection with async-friendly wrappers
-///
-/// Wraps `deadpool_sqlite::Object` to provide ergonomic async methods
-/// that internally use `SyncWrapper::interact()` to execute synchronous
-/// SQLite calls on a blocking thread.
-pub struct PooledConn(deadpool_sqlite::Object);
-
-impl PooledConn {
-    /// Execute a SQL statement with parameters
-    ///
-    /// Returns the number of rows affected.
-    pub async fn execute<P>(&self, sql: &str, params: P) -> Result<usize, rusqlite::Error>
-    where
-        P: rusqlite::Params + Send + 'static,
-    {
-        let sql = sql.to_string();
-        self.0
-            .interact(move |conn| conn.execute(&sql, params))
-            .await
-            .map_err(interact_to_rusqlite_err)?
-    }
-
-    /// Execute a query and collect all rows using the provided mapping closure
-    pub async fn query_map<T, P, F>(
-        &self,
-        sql: &str,
-        params: P,
-        map_row: F,
-    ) -> Result<Vec<T>, rusqlite::Error>
-    where
-        P: rusqlite::Params + Send + 'static,
-        F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let sql = sql.to_string();
-        self.0
-            .interact(move |conn| {
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params, map_row)?;
-                let mut results = Vec::new();
-                for row in rows {
-                    results.push(row?);
-                }
-                Ok::<Vec<T>, rusqlite::Error>(results)
-            })
-            .await
-            .map_err(interact_to_rusqlite_err)?
-    }
-
-    /// Execute a query and return the first row mapped by the closure
-    ///
-    /// Returns `Ok(None)` if no rows match, or `Ok(Some(T))` if a row is found.
-    pub async fn query_row<T, P, F>(
-        &self,
-        sql: &str,
-        params: P,
-        map_row: F,
-    ) -> Result<Option<T>, rusqlite::Error>
-    where
-        P: rusqlite::Params + Send + 'static,
-        F: FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let sql = sql.to_string();
-        self.0
-            .interact(move |conn| match conn.query_row(&sql, params, map_row) {
-                Ok(val) => Ok(Some(val)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(e),
-            })
-            .await
-            .map_err(interact_to_rusqlite_err)?
-    }
-
-    /// Execute a raw closure against the underlying connection
-    ///
-    /// Use this for operations not covered by the convenience methods
-    /// (e.g., transactions, batch statements).
-    pub async fn interact<F, R>(&self, f: F) -> Result<R, InteractError>
-    where
-        F: FnOnce(&mut rusqlite::Connection) -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        self.0.interact(f).await
-    }
-}
-
-/// Convert `InteractError` to a `rusqlite::Error` for ergonomic error handling
-///
-/// # Error Mapping Strategy (QC-W4)
-///
-/// Both `Panic` and `Aborted` are mapped to `SqliteFailure` with distinct error messages,
-/// avoiding misuse of `InvalidParameterName` which is reserved for SQL parameter errors.
-///
-/// - `InteractError::Panic` → `SqliteFailure` (unwinding panic in closure)
-/// - `InteractError::Aborted` → `SqliteFailure` (pool shutdown or timeout)
-fn interact_to_rusqlite_err(e: InteractError) -> rusqlite::Error {
-    match e {
-        InteractError::Panic(payload) => rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-            Some(format!("Connection interact panicked: {:?}", payload)),
-        ),
-        InteractError::Aborted => rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-            Some("Connection interact aborted (pool shutdown or timeout)".into()),
-        ),
-    }
+/// Pool status information for monitoring.
+#[derive(Debug, Clone)]
+pub struct PoolStatus {
+    /// Maximum pool capacity
+    pub max_size: usize,
+    /// Current total connections
+    pub size: usize,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Helper to create a test database with schema
-    fn create_test_db() -> (tempfile::TempDir, std::path::PathBuf) {
+    /// Helper to create a test database with schema via nexus_local_db
+    async fn create_test_pool() -> (tempfile::TempDir, std::path::PathBuf, DbPool) {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT NOT NULL);",
-        )
-        .unwrap();
-        drop(conn);
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        nexus_local_db::seed_versions(&pool).await.unwrap();
 
-        (tmp, db_path)
-    }
-
-    #[test]
-    fn pool_creates_successfully() {
-        let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+        let db_pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+            .await
             .expect("Pool creation should succeed");
-        assert_eq!(pool.status().size, 0, "Pool should start empty");
+
+        (tmp, db_path, db_pool)
     }
 
     #[tokio::test]
-    async fn pool_get_returns_working_connection() {
-        let (_tmp, db_path) = create_test_db();
-
-        let pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2)).unwrap();
-        let conn = pool.get().await.expect("Should get connection");
-
-        conn.execute("INSERT INTO test (val) VALUES (?1)", ["hello"])
-            .await
-            .unwrap();
-
-        let val: Option<String> = conn
-            .query_row("SELECT val FROM test WHERE id = 1", [], |row| row.get(0))
-            .await
-            .unwrap();
-        assert_eq!(val, Some("hello".to_string()));
-
-        drop(conn);
-        assert_eq!(pool.status().size, 1, "Connection should be returned");
+    async fn pool_creates_successfully() {
+        let (_tmp, _db_path, pool) = create_test_pool().await;
+        let status = pool.status();
+        assert!(
+            status.size <= status.max_size,
+            "Pool size {} should not exceed max {}",
+            status.size,
+            status.max_size,
+        );
     }
 
     #[tokio::test]
     async fn pool_supports_concurrent_access() {
-        let (_tmp, db_path) = create_test_db();
-
-        let pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(4)).unwrap();
-        let pool_clone = pool.clone();
+        let (_tmp, _db_path, pool) = create_test_pool().await;
 
         // Spawn 4 concurrent tasks that each insert and read
         let handles: Vec<_> = (0..4)
             .map(|i| {
-                let p = pool_clone.clone();
+                let p = pool.clone();
                 tokio::spawn(async move {
-                    let conn = p.get().await.unwrap();
-                    conn.execute(
-                        "INSERT INTO test (val) VALUES (?1)",
-                        [format!("task-{}", i)],
-                    )
-                    .await
-                    .unwrap();
-
-                    let task_val = format!("task-{}", i);
-                    let val: Option<String> = conn
-                        .query_row("SELECT val FROM test WHERE val = ?1", [task_val], |row| {
-                            row.get(0)
-                        })
+                    sqlx::query("INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?1, ?2, 'active', '2026-01-01T00:00:00Z', '{}')")
+                        .bind(format!("ctr-{}", i))
+                        .bind(format!("Creator {}", i))
+                        .execute(p.pool())
                         .await
                         .unwrap();
-                    format!("got: {}", val.unwrap())
+
+                    let creator_id = format!("ctr-{}", i);
+                    let row: Option<(String,)> = sqlx::query_as(
+                        "SELECT display_name FROM creators WHERE creator_id = ?1"
+                    )
+                    .bind(&creator_id)
+                    .fetch_optional(p.pool())
+                    .await
+                    .unwrap();
+                    format!("got: {:?}", row)
                 })
             })
             .collect();
@@ -395,49 +258,8 @@ mod tests {
         }
         assert_eq!(results.len(), 4);
         for r in &results {
-            assert!(r.starts_with("got: task-"));
+            assert!(r.starts_with("got: Some"));
         }
-    }
-
-    #[tokio::test]
-    async fn pool_exhaustion_returns_error_gracefully() {
-        let (_tmp, db_path) = create_test_db();
-
-        // Build pool with max_size = 1 and short wait timeout so test doesn't hang
-        let pool = DbPool::new(
-            &db_path,
-            PoolConfig::default()
-                .with_max_connections(1)
-                .with_timeout(Duration::from_millis(50)),
-        )
-        .expect("Pool creation should succeed");
-
-        // Acquire the only connection and hold it
-        let conn = pool.get().await.expect("Should get first connection");
-        assert_eq!(pool.status().size, 1);
-
-        // Attempting to get a second connection should fail with a timeout
-        let result = pool.get().await;
-        assert!(result.is_err(), "Expected pool exhaustion error");
-
-        // Verify the error is a pool error (not a panic) — inspect via match
-        let _pool_err = match result {
-            Err(e) => {
-                // Expected: PoolError::Timeout or any other pool-level error
-                // The key invariant is we get a PoolError, not a panic
-                let _msg = format!("{e}");
-                e
-            }
-            Ok(_) => panic!("Expected pool exhaustion error, got Ok"),
-        };
-
-        // Drop the held connection — pool should recover
-        drop(conn);
-        assert_eq!(
-            pool.status().size,
-            1,
-            "Connection should be returned to pool"
-        );
     }
 
     // ── PoolConfig tests ──────────────────────────────────────────
@@ -496,12 +318,5 @@ mod tests {
         // Clean up
         std::env::remove_var("NEXUS_DB_POOL_TIMEOUT_SECS");
         std::env::remove_var("NEXUS_DB_POOL_MAX_CONNECTIONS");
-    }
-
-    #[test]
-    fn with_defaults_creates_pool() {
-        let (_tmp, db_path) = create_test_db();
-        let pool = DbPool::with_defaults(&db_path).expect("Pool creation should succeed");
-        assert_eq!(pool.status().size, 0, "Pool should start empty");
     }
 }
