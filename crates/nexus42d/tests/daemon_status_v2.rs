@@ -51,7 +51,7 @@ async fn v1_client_still_sees_lifecycle_state_running() {
     assert_eq!(body["lifecycle_state"], "running");
     // They can ignore new fields
     assert!(body["schema_version"].is_number()); // v1 clients ignore this
-    assert!(body["uptime_seconds"].is_number()); // v1 clients ignore this
+    assert!(body["uptime_ms"].is_number()); // v1 clients ignore this
 }
 
 /// Test: Endpoint includes PID and uptime.
@@ -65,7 +65,7 @@ async fn status_endpoint_includes_pid_and_uptime() {
 
     let body = response.json::<serde_json::Value>();
     assert!(body["pid"].is_number());
-    assert!(body["uptime_seconds"].is_number());
+    assert!(body["uptime_ms"].is_number());
 }
 
 /// Test: Subsystems section has all 6 entries.

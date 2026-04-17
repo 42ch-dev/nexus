@@ -25,10 +25,10 @@
       "type": "string",
       "description": "Human-readable scope note: 'full-fsm (v2)' for this implementation."
     },
-    "uptime_seconds": {
+    "uptime_ms": {
       "type": "integer",
       "minimum": 0,
-      "description": "Daemon uptime in seconds since ProcessStarted."
+      "description": "Daemon uptime in milliseconds since ProcessStarted. Per spec §7.1."
     },
     "started_at": {
       "type": "string",

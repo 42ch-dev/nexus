@@ -24,7 +24,7 @@ pub async fn health(State(_state): State<WorkspaceState>) -> Json<HealthResponse
 #[derive(Serialize)]
 pub struct StatusResponse {
     pub version: String,
-    pub uptime_seconds: u64,
+    pub uptime_seconds: u64, // Internal endpoint uses seconds (not from schema)
     pub workspace_initialized: bool,
     /// ACP status information (V1.1)
     pub acp: AcpStatusInfo,
@@ -57,6 +57,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
 
     // Build the v2 response
     let uptime_seconds = state.uptime_seconds().await;
+    let uptime_ms = uptime_seconds * 1000; // Convert to ms per spec §7.1
     let pid = std::process::id() as i64;
 
     // Build subsystem health (stub for now - real subsystems will populate in T6)
@@ -87,7 +88,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         lifecycle_state: lifecycle_state_str,
         version: env!("CARGO_PKG_VERSION").to_string(),
         implementation_scope: "full-fsm (v2)".to_string(),
-        uptime_seconds: Some(uptime_seconds),
+        uptime_ms: Some(uptime_ms),
         started_at: None, // Could be set from lifecycle Running.entry timestamp
         pid: Some(pid),
         degraded: Some(degraded),

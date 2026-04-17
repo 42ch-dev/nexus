@@ -23,7 +23,7 @@ export interface DaemonStatusV2 {
   lifecycle_state: DaemonStatusV2LifecycleState;
   version: string;
   implementation_scope: string;
-  uptime_seconds?: number;
+  uptime_ms?: number;
   started_at?: string;
   pid?: number;
   degraded?: { subsystems?: DaemonStatusV2DegradedSubsystems[]; reasons?: string[] };
