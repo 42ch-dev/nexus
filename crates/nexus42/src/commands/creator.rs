@@ -29,9 +29,6 @@ pub enum CreatorCommand {
     Register {
         /// Display name for the Creator
         name: String,
-        /// Short description / persona summary
-        #[arg(long)]
-        summary: Option<String>,
         /// Registration source (default: cli)
         #[arg(long, default_value = DEFAULT_REGISTRATION_SOURCE)]
         source: String,
@@ -112,11 +109,7 @@ pub enum CredentialsAction {
 /// Run creator command
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        CreatorCommand::Register {
-            name,
-            summary,
-            source,
-        } => register_creator(config, name, summary, source).await,
+        CreatorCommand::Register { name, source } => register_creator(config, name, source).await,
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref).await,
         CreatorCommand::List => list_creators(config).await,
@@ -242,12 +235,7 @@ fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Re
 /// register → solve challenge → verify → store credentials.
 ///
 /// On wrong answer, auto-retries once (D4). On second failure, reports error.
-async fn register_creator(
-    config: &CliConfig,
-    name: String,
-    _summary: Option<String>,
-    source: String,
-) -> Result<()> {
+async fn register_creator(config: &CliConfig, name: String, source: String) -> Result<()> {
     // --- Step 1: Obtain auth token ---
     let auth_store = auth::AuthStore::load()?;
 
@@ -303,7 +291,17 @@ async fn register_creator(
         }
     };
 
-    // --- Step 5: Submit answer with auto-retry (D4: max 1 auto-retry) ---
+    // --- Step 5: Re-check challenge expiry before submit ---
+    // Solve may have taken time; re-check to give a clearer error than a
+    // generic platform-side expiry response.
+    let now_after_solve = chrono::Utc::now();
+    if now_after_solve > buffered_expiry {
+        return Err(CliError::ChallengeExpired {
+            expires_at: verification.expires_at.clone(),
+        });
+    }
+
+    // --- Step 6: Submit answer with auto-retry (D4: max 1 auto-retry) ---
     let verify_response = submit_with_retry(
         &client,
         &verification.verification_code,
@@ -312,7 +310,7 @@ async fn register_creator(
     )
     .await?;
 
-    // --- Step 6: Handle verification response ---
+    // --- Step 7: Handle verification response ---
     match verify_response.status {
         VerifyStatus::Verified => {
             let api_key = verify_response
@@ -378,10 +376,21 @@ async fn submit_with_retry(
             );
         }
 
-        let response = client
+        let response = match client
             .verify_creator(verification_code, answer)
             .await
-            .map_err(CliError::verify_creator_error)?;
+            .map_err(CliError::verify_creator_error)
+        {
+            Ok(resp) => resp,
+            Err(CliError::Network(_)) if attempt < max_attempts => {
+                eprintln!(
+                    "  Network error during verification (attempt {}/{}). Retrying...",
+                    attempt, max_attempts
+                );
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
 
         match response.status {
             VerifyStatus::Verified => return Ok(response),
