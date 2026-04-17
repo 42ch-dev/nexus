@@ -14,6 +14,7 @@ tokio = { workspace = true }
 # sqlx: workspace dep is declared + feature-gated by WS8 T1 (runtime-tokio, sqlite, macros, migrate, chrono, uuid).
 # This crate re-uses the workspace dep; do not add local features.
 sqlx = { workspace = true }
+chrono = { workspace = true }
 # jsonrpsee: deferred to WS2 Batch ③ (T5) when actually needed.
 # See crate-selection-best-practices-v1.md §3.1 for the canonical feature list.
 tokio-util = { version = "0.7", features = ["codec"] }
