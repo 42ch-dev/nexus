@@ -308,15 +308,22 @@ impl DegradationGuard {
             }
         }
 
+        // Cap synthetic timestamps to failure_threshold - 1 so that restored
+        // failures alone can never trigger immediate re-degradation. Only NEW
+        // real failures should push past the threshold.
+        let capped_count = snap.failure_count.min(
+            DegradationPolicy::default()
+                .failure_threshold
+                .saturating_sub(1),
+        );
+
         Self {
             policy: DegradationPolicy::default(),
             current_mode: effective_mode,
             degradation_state: snap.state,
             // Replicate failure_count as synthetic timestamps so window logic works.
             // Place them at "now" so they'll expire naturally via the window.
-            failure_timestamps: (0..snap.failure_count)
-                .map(|_| chrono::Utc::now())
-                .collect(),
+            failure_timestamps: (0..capped_count).map(|_| chrono::Utc::now()).collect(),
             last_health_check: None,
             last_upgrade_attempt: snap
                 .last_upgrade_attempt
@@ -1197,5 +1204,53 @@ mod tests {
     fn degradation_guard_is_sync() {
         fn assert_sync<T: Sync>() {}
         assert_sync::<DegradationGuard>();
+    }
+
+    // ── QC1-W1: restored failures at threshold do not trigger immediate re-degradation ─
+
+    #[test]
+    fn restored_failures_at_threshold_do_not_trigger_immediate_degradation() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+        let threshold = DegradationPolicy::default().failure_threshold;
+
+        // Restore with exactly failure_threshold failures
+        let snap = DegradationSnapshot::new(DegradationState::Normal, threshold);
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        // The guard should NOT want to degrade immediately
+        assert!(
+            !guard.should_degrade(),
+            "restored guard with failure_threshold failures should not trigger immediate degradation"
+        );
+
+        // Verify the failure count is capped to threshold - 1
+        assert_eq!(
+            guard.failure_count(),
+            threshold - 1,
+            "restored synthetic timestamps should be capped to threshold - 1"
+        );
+    }
+
+    #[test]
+    fn restored_failures_below_threshold_preserved() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+
+        // Restore with fewer failures than threshold
+        let snap = DegradationSnapshot::new(DegradationState::Normal, 1);
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        assert_eq!(guard.failure_count(), 1);
+        assert!(!guard.should_degrade());
+    }
+
+    #[test]
+    fn restored_with_zero_failures_has_no_timestamps() {
+        let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
+
+        let snap = DegradationSnapshot::new(DegradationState::Normal, 0);
+        let guard = DegradationGuard::restore_from_snapshot(&snap, mode);
+
+        assert_eq!(guard.failure_count(), 0);
+        assert!(!guard.should_degrade());
     }
 }
