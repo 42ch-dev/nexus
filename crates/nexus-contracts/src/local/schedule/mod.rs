@@ -38,6 +38,15 @@ pub enum ScheduleStatus {
     Failed,
 }
 
+/// Wrapper for the `schedule_ids` field in `ParallelWith`.
+///
+/// Serde internally-tagged enums cannot directly tag newtype variants
+/// that contain sequences, so we wrap the `Vec<ScheduleId>` in a struct.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParallelWithIds {
+    pub schedule_ids: Vec<ScheduleId>,
+}
+
 /// Concurrency declaration per Schedule.
 ///
 /// Governs how this Schedule may run alongside other Schedules of the
@@ -48,7 +57,7 @@ pub enum ScheduleConcurrency {
     /// Default — queued behind existing non-terminal Schedules
     Serial,
     /// May run concurrently with these specific Schedules
-    ParallelWith(Vec<ScheduleId>),
+    ParallelWith(ParallelWithIds),
     /// May run concurrently with any sibling Schedule of this creator (escape hatch)
     ParallelAny,
 }
@@ -140,9 +149,9 @@ mod tests {
         let back: ScheduleConcurrency = serde_json::from_str(&json).unwrap();
         assert_eq!(back, serial);
 
-        let parallel_with = ScheduleConcurrency::ParallelWith(vec![ScheduleId(
-            "01JMX00000000000000000001".to_string(),
-        )]);
+        let parallel_with = ScheduleConcurrency::ParallelWith(ParallelWithIds {
+            schedule_ids: vec![ScheduleId("01JMX00000000000000000001".to_string())],
+        });
         let json = serde_json::to_string(&parallel_with).unwrap();
         assert!(json.contains("\"kind\":\"parallel_with\""));
         let back: ScheduleConcurrency = serde_json::from_str(&json).unwrap();

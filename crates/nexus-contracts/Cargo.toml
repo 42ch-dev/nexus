@@ -12,4 +12,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# Will add test dependencies later
+serde_yaml.workspace = true
