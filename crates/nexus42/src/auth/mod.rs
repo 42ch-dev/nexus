@@ -10,6 +10,7 @@ pub mod user_auth;
 use crate::config::auth_store_path;
 use crate::errors::Result;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 /// Auth store — persisted to `$HOME/.nexus42/auth.json`
@@ -46,7 +47,7 @@ impl AuthStore {
         Ok(serde_json::from_str(&content)?)
     }
 
-    /// Save auth store to disk (owner-only: 0600)
+    /// Save auth store to disk (owner-only: 0600 on Unix).
     #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let path = auth_store_path()?;
@@ -55,7 +56,12 @@ impl AuthStore {
         }
         let content = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, &content)?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        #[cfg(unix)]
+        {
+            let mut perms = std::fs::metadata(&path)?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&path, perms)?;
+        }
         Ok(())
     }
 
@@ -101,8 +107,8 @@ impl AuthStore {
     /// Checks in-memory state first. If the creator entry exists in memory
     /// but has no API key set, returns `None` immediately (no disk fallback).
     /// If the creator entry is not found in memory, reloads from disk.
-    /// Returns `Ok(None)` on any disk error (missing/corrupt auth file is
-    /// treated as "key not found" rather than a hard error).
+    /// Distinguishes `NotFound` (legitimate `None`) from other I/O errors
+    /// (which propagate as errors).
     #[allow(dead_code)]
     pub fn get_creator_api_key(&self, creator_id: &str) -> Result<Option<String>> {
         // Check in-memory state
@@ -113,14 +119,20 @@ impl AuthStore {
             }
         }
 
-        // Entry not in memory — fall back to disk
+        // Entry not in memory — fall back to disk.
+        // Only treat NotFound as "key not found"; propagate other errors.
         match AuthStore::load() {
             Ok(store) => Ok(store
                 .creators
                 .as_ref()
                 .and_then(|m| m.get(creator_id))
                 .and_then(|c| c.creator_api_key.clone())),
-            Err(_) => Ok(None),
+            Err(crate::errors::CliError::Io(ref io_err))
+                if io_err.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(None)
+            }
+            Err(e) => Err(e),
         }
     }
 }
