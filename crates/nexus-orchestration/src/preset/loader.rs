@@ -183,6 +183,16 @@ fn validate_manifest(
 
     // --- Field type checks (serde already handles most, but we add semantic checks) ---
 
+    // Validate requires_capabilities
+    for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
+        if caps.get(req_cap).is_none() {
+            problems.push(ValidationProblem {
+                path: format!("preset.requires_capabilities[{}]", i),
+                error: format!("required capability not found in registry: '{}'", req_cap),
+            });
+        }
+    }
+
     // initial must exist
     if !state_ids.contains(manifest.preset.initial.as_str()) {
         problems.push(ValidationProblem {
@@ -426,6 +436,7 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: Arc<dyn crate::engine::OrchestrationEngine>,
+    caps: Arc<CapabilityRegistry>,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
@@ -435,7 +446,8 @@ pub fn build_wired_outer_graph(
         let task = StateCompositeTask::from_manifest(state)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
-            .with_output_bindings(loaded.output_bindings.clone());
+            .with_output_bindings(loaded.output_bindings.clone())
+            .with_registry(caps.clone());
         graph.add_task(std::sync::Arc::new(task));
     }
 
@@ -981,5 +993,64 @@ states:
 "#;
         let h2 = load_preset_from_str(yaml2, &caps).unwrap().source_hash;
         assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn reject_unknown_requires_capabilities() {
+        let yaml = r#"
+preset:
+  id: bad-req-caps
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities:
+    - workspace.open
+    - capability.does_not_exist
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems.iter().any(|p| {
+                p.path.contains("requires_capabilities")
+                    && p.error.contains("capability.does_not_exist")
+            }),
+            "expected 'required capability not found' for unknown requires_capabilities entry: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn known_requires_capabilities_passes() {
+        let yaml = r#"
+preset:
+  id: good-req-caps
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities:
+    - workspace.open
+    - sync.pull
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps);
+        assert!(loaded.is_ok(), "expected valid preset with known requires_capabilities: {loaded:?}");
     }
 }

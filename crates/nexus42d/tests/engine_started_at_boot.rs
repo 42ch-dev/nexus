@@ -8,7 +8,7 @@
 
 use axum::body::Body;
 use axum::http::Request;
-use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
+use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use serde_json::Value;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -27,10 +27,10 @@ async fn engine_started_with_system_preset_session_appears() {
             db_pool,
         )),
     );
-    let concrete_engine = GraphFlowEngine::new_with_storage(storage);
+    let registry = Arc::new(CapabilityRegistry::with_builtins());
+    let concrete_engine = GraphFlowEngine::new_with_storage(storage, registry.clone());
 
     // Start _system.maintenance session (same as main.rs).
-    let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
     let sys_graph = nexus_orchestration::system_preset::build(registry.clone());
     concrete_engine
         .start_session("_system.maintenance", sys_graph)

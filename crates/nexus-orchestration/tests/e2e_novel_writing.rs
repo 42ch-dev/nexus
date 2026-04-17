@@ -22,6 +22,7 @@ fn setup_engine() -> (
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
         storage,
+        Arc::new(caps),
     ));
     (engine, loaded)
 }

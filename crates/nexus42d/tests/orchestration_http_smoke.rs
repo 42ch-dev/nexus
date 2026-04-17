@@ -19,11 +19,11 @@ async fn axum_app_with_ephemeral_engine() -> Router {
 
     // Wire an ephemeral engine with in-memory storage.
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage));
+    let registry = Arc::new(CapabilityRegistry::with_builtins());
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
     state.set_engine(engine as Arc<dyn OrchestrationEngine>);
 
     // Wire a capability registry.
-    let registry = Arc::new(CapabilityRegistry::with_builtins());
     state.set_capability_registry(registry);
 
     // Keep tmp alive — leak is acceptable in tests.
