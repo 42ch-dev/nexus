@@ -212,7 +212,7 @@
 
 **Acceptance Criteria**:
 
-- Extract migration documentation to `docs/migrations/outbox-schema-v2.md`
+- Extract migration documentation to `.agents/plans/archived/knowledge/outbox-schema-v2.md`
 - Keep inline summary in outbox.rs comments
 - Add migration guide for developers
 
