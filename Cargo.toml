@@ -4,6 +4,7 @@ members = [
     "crates/nexus-contracts",
     "crates/nexus-domain",
     "crates/nexus-home-layout",
+    "crates/nexus-orchestration",
     "crates/nexus42",
     "crates/nexus42d",
     "crates/nexus-sync",
@@ -47,3 +48,5 @@ strum = { version = "0.26", features = ["derive"] }
 pulldown-cmark = "0.12"
 pulldown-cmark-frontmatter = "0.2"
 serde_yaml = "0.9"
+async-trait = "0.1"
+tempfile = "3"
