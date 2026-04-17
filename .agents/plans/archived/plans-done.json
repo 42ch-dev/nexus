@@ -295,6 +295,13 @@
       "done_at": "2026-04-17",
       "plan_file": ".agents/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
       "archived_record": "archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json"
+    },
+    {
+      "id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
+      "title": "V1.4 WS8 — nexus-local-db sqlx migration (unified DB engine)",
+      "done_at": "2026-04-18",
+      "plan_file": ".agents/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md",
+      "archived_record": "archived/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.json"
     }
   ]
 }
