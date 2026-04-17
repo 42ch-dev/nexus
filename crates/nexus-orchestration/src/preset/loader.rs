@@ -26,7 +26,7 @@ pub struct LoadedPreset {
     pub id: String,
     /// Preset schema version.
     pub version: u32,
-    /// The outer state-machine graph.
+    /// The outer state-machine graph (without engine wiring).
     pub outer_graph: Arc<graph_flow::Graph>,
     /// Named inner graphs (keyed by `inner_graphs.<name>`).
     pub inner_graphs: HashMap<String, Arc<graph_flow::Graph>>,
@@ -34,6 +34,10 @@ pub struct LoadedPreset {
     pub signals: Vec<crate::preset::manifest::SignalBinding>,
     /// blake3 hash of the source YAML (identity across restarts).
     pub source_hash: [u8; 32],
+    /// Output bindings per inner graph: name → binding string.
+    pub output_bindings: HashMap<String, String>,
+    /// The parsed manifest (retained for re-wiring outer graph with engine).
+    pub manifest: PresetManifest,
 }
 
 impl std::fmt::Debug for LoadedPreset {
@@ -45,6 +49,7 @@ impl std::fmt::Debug for LoadedPreset {
             .field("inner_graphs_keys", &self.inner_graphs.keys().collect::<Vec<_>>())
             .field("signals_len", &self.signals.len())
             .field("source_hash", &format!("{:02x?}", &self.source_hash[..4]))
+            .field("output_bindings", &self.output_bindings)
             .finish()
     }
 }
@@ -120,7 +125,10 @@ pub fn load_preset_from_str(
     // 4. Build inner graphs per §8.2 mapping table.
     let inner_graphs = build_inner_graphs(&manifest);
 
-    // 5. Compute source hash.
+    // 5. Extract output bindings from manifest.
+    let output_bindings = extract_output_bindings(&manifest);
+
+    // 6. Compute source hash.
     let hash = blake3::hash(yaml.as_bytes());
     let mut source_hash = [0u8; 32];
     source_hash.copy_from_slice(hash.as_bytes());
@@ -130,8 +138,10 @@ pub fn load_preset_from_str(
         version: manifest.preset.version,
         outer_graph: Arc::new(outer_graph),
         inner_graphs,
-        signals: manifest.signals,
+        signals: manifest.signals.clone(),
         source_hash,
+        output_bindings,
+        manifest,
     })
 }
 
@@ -408,6 +418,47 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     }
 
     graph
+}
+
+/// Build the outer graph with engine + inner graph references wired into
+/// composite tasks (for `start_session_with_preset`).
+pub fn build_wired_outer_graph(
+    loaded: &LoadedPreset,
+    engine: Arc<dyn crate::engine::OrchestrationEngine>,
+) -> graph_flow::Graph {
+    use crate::tasks::StateCompositeTask;
+
+    let graph = graph_flow::Graph::new(&loaded.id);
+
+    for state in &loaded.manifest.states {
+        let task = StateCompositeTask::from_manifest(state)
+            .with_engine(engine.clone())
+            .with_inner_graphs(loaded.inner_graphs.clone())
+            .with_output_bindings(loaded.output_bindings.clone());
+        graph.add_task(std::sync::Arc::new(task));
+    }
+
+    // Wire edges.
+    for state in &loaded.manifest.states {
+        if let Some(NextTarget::Linear(ref next_id)) = state.next {
+            graph.add_edge(&state.id, next_id);
+        }
+    }
+
+    graph
+}
+
+/// Extract output bindings from the manifest's inner_graphs.
+fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    if let Some(ref inner_graphs) = manifest.inner_graphs {
+        for (name, ig) in inner_graphs {
+            if let Some(ref binding) = ig.output_binding {
+                bindings.insert(name.clone(), binding.clone());
+            }
+        }
+    }
+    bindings
 }
 
 /// Build inner graphs per §8.2.

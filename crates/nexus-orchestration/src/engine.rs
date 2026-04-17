@@ -105,6 +105,16 @@ pub enum EngineSignal {
     Advance,
 }
 
+/// Parameters for spawning a child session (inner graph).
+pub struct ChildSessionParams {
+    /// ID of the parent session.
+    pub parent_session_id: String,
+    /// The inner graph to execute.
+    pub inner_graph: Arc<Graph>,
+    /// Initial context for the child (inherits `core_context.*` + `preset.input.*`).
+    pub initial_context: graph_flow::Context,
+}
+
 /// Thin wrapper around [`graph_flow::Context`].
 ///
 /// In future tasks this will carry engine-specific metadata alongside the
@@ -179,6 +189,19 @@ pub trait OrchestrationEngine: Send + Sync {
 
     /// List sessions that are still active (running / paused / waiting).
     async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError>;
+
+    /// Spawn a child session for inner graph execution (§3.4 graph-of-graphs).
+    ///
+    /// The child session runs on `inner_graph` with `initial_context`.
+    /// Returns the child session ID.
+    async fn spawn_child_session(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError>;
+
+    /// Retrieve the context for a session.
+    async fn get_context(&self, session_id: &SessionId)
+        -> Result<graph_flow::Context, EngineError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +254,11 @@ impl GraphFlowEngine {
 
         // Create and persist the session.
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
+        // Store session ID in context so InnerGraphTask can find it.
+        session
+            .context
+            .set("_session_id", session_id.clone())
+            .await;
         self.storage.save(session).await?;
 
         // Create a FlowRunner for this session.
@@ -369,6 +397,79 @@ impl OrchestrationEngine for GraphFlowEngine {
             })
             .cloned()
             .collect())
+    }
+
+    async fn spawn_child_session(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError> {
+        let child_session_id = format!(
+            "{}:child:{}",
+            params.parent_session_id,
+            chrono::Utc::now().timestamp_millis()
+        );
+
+        let start_task_id = params
+            .inner_graph
+            .start_task_id()
+            .unwrap_or_default();
+
+        // Create a child session with the provided initial context.
+        let mut session_mut =
+            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
+        session_mut.context = params.initial_context;
+        self.storage.save(session_mut).await?;
+
+        let runner = FlowRunner::new(params.inner_graph, self.storage.clone());
+        self.runners
+            .write()
+            .await
+            .insert(child_session_id.clone(), runner);
+
+        let summary = SessionSummary {
+            session_id: SessionId(child_session_id.clone()),
+            creator_id: String::new(),
+            preset_id: String::new(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        };
+
+        self.sessions.write().await.push(summary);
+
+        Ok(SessionId(child_session_id))
+    }
+
+    async fn get_context(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<graph_flow::Context, EngineError> {
+        let session = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+        Ok(session.context)
+    }
+}
+
+impl GraphFlowEngine {
+    /// Convenience: wire inner graphs + engine into composite tasks and
+    /// start a session on the resulting outer graph.
+    ///
+    /// This is the recommended entry point for preset-driven execution.
+    /// Requires `Arc<GraphFlowEngine>` so that composite tasks can hold
+    /// a reference to the engine for spawning child sessions.
+    pub async fn start_session_with_preset(
+        self: &Arc<Self>,
+        loaded: &crate::preset::LoadedPreset,
+    ) -> Result<SessionId, EngineError> {
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            loaded,
+            self.clone() as Arc<dyn OrchestrationEngine>,
+        );
+        self.start_session(&loaded.id, Arc::new(wired))
+            .await
     }
 }
 

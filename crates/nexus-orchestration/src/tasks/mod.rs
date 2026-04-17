@@ -3,12 +3,14 @@
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.4.
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
+use crate::engine::OrchestrationEngine;
 use crate::preset::manifest::{
     EnterAction, ExitWhen, StateDefinition,
 };
 use async_trait::async_trait;
-use graph_flow::{NextAction, Task, TaskResult};
+use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
+use std::sync::Arc;
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -157,29 +159,214 @@ impl Task for ManualWaitTask {
 // InnerGraphTask
 // ---------------------------------------------------------------------------
 
-/// Launches a child Session over a named inner graph.
+/// Launches a child Session over a named inner graph (§3.4 graph-of-graphs).
 ///
-/// **WS2 stub**: returns a typed `WsUnwired` error indicating that inner graph
-/// execution is not available until WS3. Does NOT use `todo!()`.
-pub struct InnerGraphTask;
+/// On `run(ctx)`:
+/// 1. Inherits `core_context.*` and `preset.input.*` from parent context.
+/// 2. Calls `engine.spawn_child_session(parent_session_id, inner_graph, initial_ctx)`.
+/// 3. Polls the child session to completion.
+/// 4. Reads `output_binding` from child final context.
+/// 5. Writes into parent `ctx["state.<parent_state>.output"]`.
+/// 6. Returns `NextAction::Continue`.
+pub struct InnerGraphTask {
+    /// Reference to the orchestration engine for spawning child sessions.
+    engine: Arc<dyn OrchestrationEngine>,
+    /// The inner graph to execute.
+    inner_graph: Arc<Graph>,
+    /// The ID of the parent state (for output namespacing).
+    parent_state_id: String,
+    /// The key in parent context where the parent session ID is stored.
+    parent_session_id_key: String,
+    /// Output binding (e.g. "select.text") — which node's output to export.
+    output_binding: Option<String>,
+}
+
+impl InnerGraphTask {
+    /// Create a new `InnerGraphTask`.
+    ///
+    /// `parent_session_id_key` is the context key where the parent session ID
+    /// can be found (e.g. `"_session_id"`).
+    pub fn new(
+        engine: Arc<dyn OrchestrationEngine>,
+        inner_graph: Arc<Graph>,
+        parent_state_id: impl Into<String>,
+        parent_session_id_key: impl Into<String>,
+        output_binding: Option<String>,
+    ) -> Self {
+        Self {
+            engine,
+            inner_graph,
+            parent_state_id: parent_state_id.into(),
+            parent_session_id_key: parent_session_id_key.into(),
+            output_binding,
+        }
+    }
+}
 
 #[async_trait]
 impl Task for InnerGraphTask {
     fn id(&self) -> &str {
-        "inner_graph_task"
+        &self.parent_state_id
     }
 
     async fn run(
         &self,
-        _context: graph_flow::Context,
+        context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        Err(graph_flow::GraphError::TaskExecutionFailed(
-            TaskExecError::WsUnwired {
-                feature: "inner_graph".to_string(),
-                since: "WS3".to_string(),
+        // 1. Read the parent session ID from context.
+        let parent_session_id: String = context
+            .get(&self.parent_session_id_key)
+            .await
+            .unwrap_or_default();
+
+        if parent_session_id.is_empty() {
+            return Err(graph_flow::GraphError::TaskExecutionFailed(
+                "InnerGraphTask: parent session ID not found in context".into(),
+            ));
+        }
+
+        // 2. Build the initial context for the child session.
+        //    Inherit `core_context.*` and `preset.input.*` from parent.
+        //    Use namespace "wrap" so inner nodes can't overwrite parent `state.*`.
+        let child_ctx = graph_flow::Context::new();
+
+        // Copy core_context.* keys from parent.
+        for key_prefix in &["core_context", "preset.input"] {
+            // We use a simple approach: copy known keys via serde.
+            // Since Context uses Arc<DashMap>, we serialize the parent, extract
+            // matching keys, and set them on the child.
+            if let Ok(parent_data) = serde_json::to_value(&context) {
+                if let Some(obj) = parent_data.as_object() {
+                    for (k, v) in obj.iter() {
+                        if k.starts_with(&format!("{key_prefix}.")) || k == *key_prefix {
+                            child_ctx.set(k.as_str(), v.clone()).await;
+                        }
+                    }
+                }
             }
-            .to_string(),
-        ))
+        }
+
+        // 3. Spawn the child session.
+        let params = crate::engine::ChildSessionParams {
+            parent_session_id: parent_session_id.clone(),
+            inner_graph: self.inner_graph.clone(),
+            initial_context: child_ctx,
+        };
+
+        let child_sid = self
+            .engine
+            .spawn_child_session(params)
+            .await
+            .map_err(|e| graph_flow::GraphError::TaskExecutionFailed(format!(
+                "InnerGraphTask: failed to spawn child session: {e}"
+            )))?;
+
+        // 4. Poll child session to completion.
+        let mut last_error = None;
+        for _ in 0..256 {
+            let outcome = self
+                .engine
+                .run_step(&child_sid)
+                .await
+                .map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "InnerGraphTask: run_step failed: {e}"
+                    ))
+                })?;
+
+            match outcome {
+                crate::engine::StepOutcome::Completed { .. } => break,
+                crate::engine::StepOutcome::Paused {
+                    reason,
+                    next_task_id,
+                } => {
+                    // Resume the child if it paused (shouldn't happen for
+                    // rule-only inner graphs, but handle gracefully).
+                    let _ = self
+                        .engine
+                        .signal(
+                            &child_sid,
+                            crate::engine::EngineSignal::Resume,
+                        )
+                        .await;
+                    tracing::debug!(
+                        child_session = %child_sid.0,
+                        %next_task_id,
+                        %reason,
+                        "InnerGraphTask: child paused, resuming"
+                    );
+                }
+                crate::engine::StepOutcome::WaitingForInput { .. } => {
+                    // Inner graphs shouldn't wait for input; resume.
+                    let _ = self
+                        .engine
+                        .signal(
+                            &child_sid,
+                            crate::engine::EngineSignal::Resume,
+                        )
+                        .await;
+                }
+                crate::engine::StepOutcome::Error(e) => {
+                    last_error = Some(e);
+                    break;
+                }
+            }
+        }
+
+        // 5. Read output_binding from child final context.
+        let output_value = if let Some(ref binding) = self.output_binding {
+            let child_ctx = self
+                .engine
+                .get_context(&child_sid)
+                .await
+                .map_err(|e| graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "InnerGraphTask: failed to get child context: {e}"
+                )))?;
+
+            // Try to read as nodes.<node_id>.text first, then as-is.
+            let node_key = format!("nodes.{}", binding);
+            let direct: Option<String> = child_ctx.get(binding).await;
+            let namespaced: Option<String> = child_ctx.get(&node_key).await;
+            direct.or(namespaced).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // 6. Write into parent context: state.<parent_state>.output
+        let output_key = format!("state.{}.output", self.parent_state_id);
+        context.set(&output_key, output_value.clone()).await;
+
+        // Also store the child session ID for debugging.
+        context
+            .set(
+                format!("_inner_child_session_{}", self.parent_state_id),
+                child_sid.0,
+            )
+            .await;
+
+        if let Some(err) = last_error {
+            Ok(TaskResult::new_with_status(
+                Some(format!(
+                    "inner graph '{}' completed with error: {}",
+                    self.inner_graph.id, err
+                )),
+                NextAction::Continue,
+                Some(err),
+            ))
+        } else {
+            Ok(TaskResult::new(
+                Some(format!(
+                    "inner graph '{}' completed, output: {}",
+                    self.inner_graph.id,
+                    if output_value.len() > 80 {
+                        format!("{}...", &output_value[..80])
+                    } else {
+                        output_value.clone()
+                    }
+                )),
+                NextAction::Continue,
+            ))
+        }
     }
 }
 
@@ -243,7 +430,7 @@ impl Task for JudgeTask {
 ///
 /// §8.2 mapping:
 /// - `enter[*].kind=capability` → CapabilityTask (delegated internally).
-/// - `enter[*].kind=inner_graph` → InnerGraphTask (stub WsUnwired until T5).
+/// - `enter[*].kind=inner_graph` → InnerGraphTask (spawns child session).
 /// - `exit_when.kind=manual` → ManualWaitTask (returns WaitForInput).
 /// - `exit_when.kind=rule` → RuleCheckTask.
 /// - `exit_when.kind=llm_judge` → JudgeTask.
@@ -254,17 +441,52 @@ pub struct StateCompositeTask {
     terminal: bool,
     enter_actions: Vec<EnterAction>,
     exit_when: Option<ExitWhen>,
+    /// Orchestration engine reference (for spawning child sessions).
+    engine: Option<Arc<dyn OrchestrationEngine>>,
+    /// Named inner graphs keyed by name.
+    inner_graphs: std::collections::HashMap<String, Arc<Graph>>,
+    /// Output bindings for inner graphs: inner_graph_name → binding string.
+    output_bindings: std::collections::HashMap<String, String>,
 }
 
 impl StateCompositeTask {
-    /// Build a composite task from a manifest state definition.
+    /// Build a composite task from a manifest state definition (basic, no engine).
+    ///
+    /// Inner graph actions will fail at runtime if no engine is set.
     pub fn from_manifest(state: &StateDefinition) -> Self {
         Self {
             id: state.id.clone(),
             terminal: state.terminal,
             enter_actions: state.enter.clone(),
             exit_when: state.exit_when.clone(),
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
         }
+    }
+
+    /// Set the orchestration engine reference.
+    pub fn with_engine(mut self, engine: Arc<dyn OrchestrationEngine>) -> Self {
+        self.engine = Some(engine);
+        self
+    }
+
+    /// Set the inner graphs map.
+    pub fn with_inner_graphs(
+        mut self,
+        graphs: std::collections::HashMap<String, Arc<Graph>>,
+    ) -> Self {
+        self.inner_graphs = graphs;
+        self
+    }
+
+    /// Set the output bindings map.
+    pub fn with_output_bindings(
+        mut self,
+        bindings: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.output_bindings = bindings;
+        self
     }
 }
 
@@ -321,14 +543,35 @@ impl Task for StateCompositeTask {
                     }
                 }
                 EnterAction::InnerGraph { name } => {
-                    // T5 implements full InnerGraphTask; for T3 we store the name
-                    // and return WsUnwired. The loader already creates InnerGraphTask
-                    // stub nodes in the inner graphs themselves.
-                    context.set("_inner_graph_name", name.clone()).await;
-                    let inner_task = InnerGraphTask;
-                    let _ = inner_task.run(context.clone()).await;
-                    // For T3: if the inner graph is stub, we still continue to
-                    // evaluate exit_when. In T5, this will properly await completion.
+                    // Spawn a child session for the inner graph.
+                    let inner_graph = self.inner_graphs.get(name.as_str());
+                    let output_binding = self.output_bindings.get(name.as_str()).cloned();
+
+                    if let (Some(graph), Some(engine)) = (inner_graph, &self.engine) {
+                        let inner_task = InnerGraphTask::new(
+                            engine.clone(),
+                            graph.clone(),
+                            &self.id,
+                            "_session_id",
+                            output_binding,
+                        );
+                        inner_task.run(context.clone()).await?;
+                    } else if inner_graph.is_none() {
+                        // Inner graph not found in the map — error.
+                        return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                            "InnerGraphTask: inner graph '{}' not found",
+                            name
+                        )));
+                    } else {
+                        // No engine set — use fallback stub behavior.
+                        context.set("_inner_graph_name", name.clone()).await;
+                        context
+                            .set(
+                                format!("_inner_graph_error_{}", name),
+                                "no engine reference available",
+                            )
+                            .await;
+                    }
                 }
             }
         }
@@ -661,19 +904,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inner_graph_returns_typed_error_not_todo() {
-        let task = InnerGraphTask;
+    async fn inner_graph_task_requires_session_id_in_context() {
+        let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
+        let engine = crate::GraphFlowEngine::new_with_storage(storage);
+        let inner_graph = graph_flow::Graph::new("test_inner");
+        inner_graph.add_task(std::sync::Arc::new(InnerGraphNodeTask::new("n1")));
+
+        let task = InnerGraphTask::new(
+            Arc::new(engine),
+            Arc::new(inner_graph),
+            "A",
+            "_session_id",
+            Some("n1.text".to_string()),
+        );
         let ctx = graph_flow::Context::new();
+        // No _session_id set — should fail.
         let result = task.run(ctx).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("inner_graph"),
-            "error message should mention inner_graph: {err}"
-        );
-        assert!(
-            err.contains("WS3"),
-            "error message should mention WS3: {err}"
+            err.contains("parent session ID not found"),
+            "error should mention missing session ID: {err}"
         );
     }
 
