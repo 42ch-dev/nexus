@@ -3,11 +3,12 @@
 
 pub mod capability;
 pub mod engine;
+pub mod preset;
 pub mod storage;
 pub mod system_preset;
 pub mod tasks;
 pub mod worker;
 
 pub use capability::{Capability, CapabilityError, CapabilityRegistry};
-pub use engine::{EngineError, GraphFlowEngine, OrchestrationEngine};
+pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use worker::WorkerManager;

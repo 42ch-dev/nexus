@@ -71,10 +71,7 @@ impl CapabilityRegistry {
     /// Built-ins: `sync.pull`, `sync.push`, `outbox.flush`, `outbox.compact`,
     /// `workspace.open`, `workspace.commit`, `registry.refresh`,
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
-    /// `judge.rule`.
-    ///
-    /// ACP-touching capabilities (`acp.prompt`, `acp.session_load`, `judge.llm`)
-    /// are deferred to WS3.
+    /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`.
     pub fn with_builtins() -> Self {
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
@@ -88,6 +85,9 @@ impl CapabilityRegistry {
             Box::new(builtins::CreatorWriteMemory),
             Box::new(builtins::CreatorInjectPrompt),
             Box::new(builtins::JudgeRule),
+            Box::new(builtins::AcpPrompt),
+            Box::new(builtins::AcpSessionLoad),
+            Box::new(builtins::JudgeLlm),
         ];
         Self { capabilities: caps }
     }
@@ -128,9 +128,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_eleven_builtins() {
+    fn registry_has_fourteen_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 11);
+        assert_eq!(reg.len(), 14);
     }
 
     #[test]
@@ -148,6 +148,9 @@ mod tests {
             "creator.write_memory",
             "creator.inject_prompt",
             "judge.rule",
+            "acp.prompt",
+            "acp.session_load",
+            "judge.llm",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -159,8 +162,6 @@ mod tests {
     #[test]
     fn registry_lookup_missing_returns_none() {
         let reg = CapabilityRegistry::with_builtins();
-        assert!(reg.get("acp.prompt").is_none());
-        assert!(reg.get("judge.llm").is_none());
         assert!(reg.get("nonexistent").is_none());
     }
 
@@ -168,8 +169,10 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(|c| c.name()).collect();
-        assert_eq!(names.len(), 11);
+        assert_eq!(names.len(), 14);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
+        assert!(names.contains(&"acp.prompt"));
+        assert!(names.contains(&"judge.llm"));
     }
 }

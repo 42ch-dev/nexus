@@ -58,3 +58,5 @@ http-body-util = "0.1"
 toml = "0.8"
 statig = { version = "0.3", features = ["async"] }
 futures-util = "0.3"
+blake3 = "1"
+handlebars = "6"

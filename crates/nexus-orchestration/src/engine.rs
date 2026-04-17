@@ -7,6 +7,9 @@ use graph_flow::{ExecutionStatus, FlowRunner, Graph, SessionStorage};
 use std::sync::Arc;
 use thiserror::Error;
 
+// Re-export for internal use.
+use crate::capability::CapabilityRegistry;
+
 // ---------------------------------------------------------------------------
 // Helper types
 // ---------------------------------------------------------------------------
@@ -89,6 +92,13 @@ pub enum StepOutcome {
     Error(String),
 }
 
+impl StepOutcome {
+    /// Returns `true` if the outcome requires user input.
+    pub fn is_waiting_for_input(&self) -> bool {
+        matches!(self, StepOutcome::WaitingForInput { .. })
+    }
+}
+
 /// Signals that external callers (HTTP, CLI) can send to the engine.
 #[derive(Debug, Clone)]
 pub enum EngineSignal {
@@ -96,6 +106,16 @@ pub enum EngineSignal {
     Resume,
     Cancel,
     Advance,
+}
+
+/// Parameters for spawning a child session (inner graph).
+pub struct ChildSessionParams {
+    /// ID of the parent session.
+    pub parent_session_id: String,
+    /// The inner graph to execute.
+    pub inner_graph: Arc<Graph>,
+    /// Initial context for the child (inherits `core_context.*` + `preset.input.*`).
+    pub initial_context: graph_flow::Context,
 }
 
 /// Thin wrapper around [`graph_flow::Context`].
@@ -156,6 +176,13 @@ pub trait OrchestrationEngine: Send + Sync {
     /// Create a new session identified by `key`, seeded with `ctx`.
     async fn new_session(&self, key: SessionKey, ctx: Context) -> Result<SessionId, EngineError>;
 
+    /// Start a session on a specific graph (for preset-driven execution).
+    async fn start_session_with_graph(
+        &self,
+        id_prefix: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError>;
+
     /// Query the current status of a session.
     async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError>;
 
@@ -165,6 +192,208 @@ pub trait OrchestrationEngine: Send + Sync {
 
     /// List sessions that are still active (running / paused / waiting).
     async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError>;
+
+    /// Spawn a child session for inner graph execution (§3.4 graph-of-graphs).
+    ///
+    /// The child session runs on `inner_graph` with `initial_context`.
+    /// Returns the child session ID.
+    async fn spawn_child_session(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError>;
+
+    /// Retrieve the context for a session.
+    async fn get_context(&self, session_id: &SessionId)
+        -> Result<graph_flow::Context, EngineError>;
+
+    /// Start a session using a loaded preset (outer graph + inner graphs wired).
+    async fn start_session_with_preset(
+        &self,
+        loaded: &crate::preset::LoadedPreset,
+    ) -> Result<SessionId, EngineError>;
+}
+
+/// Lightweight proxy engine that delegates to GraphFlowEngine internals.
+///
+/// Used by `start_session_with_preset` when we need `Arc<dyn OrchestrationEngine>`
+/// but can't clone the full `GraphFlowEngine` (contains !Clone RwLock).
+struct EngineProxy {
+    storage: Arc<dyn graph_flow::SessionStorage>,
+    runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, graph_flow::FlowRunner>>>,
+    sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
+}
+
+#[async_trait]
+impl OrchestrationEngine for EngineProxy {
+    async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
+        // Same logic as GraphFlowEngine::run_step.
+        let runner = {
+            let runners = self.runners.read().await;
+            runners
+                .get(&session_id.0)
+                .cloned()
+                .ok_or(EngineError::NoGraphLoaded)?
+        };
+        let result = runner.run(&session_id.0).await?;
+        let outcome = match &result.status {
+            ExecutionStatus::Completed => StepOutcome::Completed {
+                response: result.response,
+            },
+            ExecutionStatus::Paused {
+                next_task_id,
+                reason,
+            } => StepOutcome::Paused {
+                next_task_id: next_task_id.clone(),
+                reason: reason.clone(),
+            },
+            ExecutionStatus::WaitingForInput => StepOutcome::WaitingForInput {
+                response: result.response,
+            },
+            ExecutionStatus::Error(msg) => StepOutcome::Error(msg.clone()),
+        };
+        // Update in-memory status.
+        if let Some(s) = self
+            .sessions
+            .write()
+            .await
+            .iter_mut()
+            .find(|s| s.session_id == *session_id)
+        {
+            s.status = match &result.status {
+                ExecutionStatus::Completed => SessionStatus::Completed,
+                ExecutionStatus::Error(_) => SessionStatus::Failed,
+                ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
+                ExecutionStatus::Paused { .. } => SessionStatus::Paused,
+            };
+        }
+        Ok(outcome)
+    }
+
+    async fn new_session(&self, _key: SessionKey, _ctx: Context) -> Result<SessionId, EngineError> {
+        Err(EngineError::NoGraphLoaded)
+    }
+
+    async fn start_session_with_graph(
+        &self,
+        id_prefix: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        let session_id = format!("{}:{}", id_prefix, chrono::Utc::now().timestamp_millis());
+        let start_task_id = graph.start_task_id().unwrap_or_default();
+        let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
+        session.context.set("_session_id", session_id.clone()).await;
+        self.storage.save(session).await?;
+        let runner = graph_flow::FlowRunner::new(graph, self.storage.clone());
+        self.runners
+            .write()
+            .await
+            .insert(session_id.clone(), runner);
+        self.sessions.write().await.push(SessionSummary {
+            session_id: SessionId(session_id.clone()),
+            creator_id: String::new(),
+            preset_id: id_prefix.to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        });
+        Ok(SessionId(session_id))
+    }
+
+    async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .iter()
+            .find(|s| s.session_id == *session_id)
+            .map(|s| s.status.clone())
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))
+    }
+
+    async fn signal(
+        &self,
+        session_id: &SessionId,
+        signal: EngineSignal,
+    ) -> Result<(), EngineError> {
+        let mut sessions = self.sessions.write().await;
+        if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
+            match signal {
+                EngineSignal::Pause => s.status = SessionStatus::Paused,
+                EngineSignal::Resume => s.status = SessionStatus::Running,
+                EngineSignal::Cancel => s.status = SessionStatus::Failed,
+                EngineSignal::Advance => s.status = SessionStatus::Running,
+            }
+            Ok(())
+        } else {
+            Err(EngineError::SessionNotFound(session_id.0.clone()))
+        }
+    }
+
+    async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError> {
+        let sessions = self.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .filter(|s| {
+                let status_ok = matches!(
+                    s.status,
+                    SessionStatus::Running | SessionStatus::Paused | SessionStatus::WaitingForInput
+                );
+                let creator_ok = filter
+                    .creator_id
+                    .as_ref()
+                    .is_none_or(|c| c == &s.creator_id);
+                let preset_ok = filter.preset_id.as_ref().is_none_or(|p| p == &s.preset_id);
+                status_ok && creator_ok && preset_ok
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn spawn_child_session(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError> {
+        let child_session_id = format!(
+            "{}:child:{}",
+            params.parent_session_id,
+            chrono::Utc::now().timestamp_millis()
+        );
+        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
+        let mut session_mut =
+            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
+        session_mut.context = params.initial_context;
+        self.storage.save(session_mut).await?;
+        let runner = graph_flow::FlowRunner::new(params.inner_graph, self.storage.clone());
+        self.runners
+            .write()
+            .await
+            .insert(child_session_id.clone(), runner);
+        self.sessions.write().await.push(SessionSummary {
+            session_id: SessionId(child_session_id.clone()),
+            creator_id: String::new(),
+            preset_id: String::new(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        });
+        Ok(SessionId(child_session_id))
+    }
+
+    async fn get_context(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<graph_flow::Context, EngineError> {
+        let session = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+        Ok(session.context)
+    }
+
+    async fn start_session_with_preset(
+        &self,
+        _loaded: &crate::preset::LoadedPreset,
+    ) -> Result<SessionId, EngineError> {
+        Err(EngineError::NoGraphLoaded)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,10 +408,11 @@ pub trait OrchestrationEngine: Send + Sync {
 pub struct GraphFlowEngine {
     storage: Arc<dyn SessionStorage>,
     /// Per-session FlowRunners (graph + storage combo for `run()` calls).
-    runners: tokio::sync::RwLock<std::collections::HashMap<String, FlowRunner>>,
+    runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, FlowRunner>>>,
     /// In-memory bookkeeping of active sessions.
-    /// (graph-flow's `SessionStorage` has no `list` method, so we track here.)
-    sessions: tokio::sync::RwLock<Vec<SessionSummary>>,
+    sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
+    /// Shared capability registry (propagated to composite tasks at runtime).
+    caps: Arc<CapabilityRegistry>,
 }
 
 impl GraphFlowEngine {
@@ -191,11 +421,15 @@ impl GraphFlowEngine {
     /// The `storage` parameter accepts **any** [`SessionStorage`] implementation
     /// — `InMemorySessionStorage` for tests, `SqliteSessionStorage` for
     /// production.
-    pub fn new_with_storage(storage: Arc<dyn SessionStorage>) -> Self {
+    pub fn new_with_storage(
+        storage: Arc<dyn SessionStorage>,
+        caps: Arc<CapabilityRegistry>,
+    ) -> Self {
         Self {
             storage,
-            runners: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-            sessions: tokio::sync::RwLock::new(Vec::new()),
+            runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            caps,
         }
     }
 
@@ -217,6 +451,8 @@ impl GraphFlowEngine {
 
         // Create and persist the session.
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
+        // Store session ID in context so InnerGraphTask can find it.
+        session.context.set("_session_id", session_id.clone()).await;
         self.storage.save(session).await?;
 
         // Create a FlowRunner for this session.
@@ -301,6 +537,14 @@ impl OrchestrationEngine for GraphFlowEngine {
         Ok(SessionId(session_id))
     }
 
+    async fn start_session_with_graph(
+        &self,
+        id_prefix: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        self.start_session(id_prefix, graph).await
+    }
+
     async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
         let sessions = self.sessions.read().await;
         sessions
@@ -347,6 +591,75 @@ impl OrchestrationEngine for GraphFlowEngine {
             })
             .cloned()
             .collect())
+    }
+
+    async fn spawn_child_session(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError> {
+        let child_session_id = format!(
+            "{}:child:{}",
+            params.parent_session_id,
+            chrono::Utc::now().timestamp_millis()
+        );
+
+        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
+
+        // Create a child session with the provided initial context.
+        let mut session_mut =
+            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
+        session_mut.context = params.initial_context;
+        self.storage.save(session_mut).await?;
+
+        let runner = FlowRunner::new(params.inner_graph, self.storage.clone());
+        self.runners
+            .write()
+            .await
+            .insert(child_session_id.clone(), runner);
+
+        let summary = SessionSummary {
+            session_id: SessionId(child_session_id.clone()),
+            creator_id: String::new(),
+            preset_id: String::new(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        };
+
+        self.sessions.write().await.push(summary);
+
+        Ok(SessionId(child_session_id))
+    }
+
+    async fn get_context(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<graph_flow::Context, EngineError> {
+        let session = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+        Ok(session.context)
+    }
+
+    async fn start_session_with_preset(
+        &self,
+        loaded: &crate::preset::LoadedPreset,
+    ) -> Result<SessionId, EngineError> {
+        // Build the wired outer graph with engine proxy that shares
+        // the same storage, runners, and sessions maps.
+        let proxy = Arc::new(EngineProxy {
+            storage: self.storage.clone(),
+            runners: self.runners.clone(),
+            sessions: self.sessions.clone(),
+        });
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            loaded,
+            proxy as Arc<dyn OrchestrationEngine>,
+            self.caps.clone(),
+        );
+        self.start_session(&loaded.id, Arc::new(wired)).await
     }
 }
 

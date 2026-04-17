@@ -22,10 +22,13 @@ tokio-util = { workspace = true }
 futures-util = "0.3"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-local-db = { path = "../nexus-local-db" }
+blake3 = { workspace = true }
+include_dir = "0.7"
 
 [dev-dependencies]
 tempfile = { workspace = true }
