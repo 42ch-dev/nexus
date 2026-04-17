@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updated_at": "2026-04-17T21:17:28Z",
+  "updated_at": "2026-04-18T00:00:00Z",
   "plans": [
     {
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
       "status": "Done",
       "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
-      "title": "V1.4 WS1 \u2014 nexus-acp-host crate extraction",
+      "title": "V1.4 WS1 — nexus-acp-host crate extraction",
       "owner": "fullstack-dev",
       "tags": [
         "v1.4",
@@ -22,7 +22,7 @@
         "phase": "V1.4-M1",
         "working_branch": "feature/v1.4-ws1-acp-host",
         "merge_target": "main",
-        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md \u00a711.",
+        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
         "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
         "spec_refs": [
           ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
@@ -50,67 +50,10 @@
       }
     },
     {
-      "id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-      "status": "InReview",
-      "file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
-      "title": "V1.4 WS3 \u2014 Preset loader + novel-writing end-to-end",
-      "owner": "fullstack-dev",
-      "agents": [
-        "fullstack-dev"
-      ],
-      "tags": [
-        "v1.4",
-        "ws3",
-        "orchestration",
-        "new-feature",
-        "preset"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-18T06:30:00Z",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M3",
-        "working_branch": "create feature/v1.4-ws3-preset-loader from feature/v1.4",
-        "merge_target": "feature/v1.4",
-        "description": "YAML -> graph-flow::Graph loader + validation, ACP-touching capabilities (acp.prompt/acp.session_load/judge.llm), full AcpPromptTask + InnerGraphTask impls, embedded novel-writing preset (4 states + 2 inner graphs), mocked-agent E2E test across all states + daemon-restart durability. Minimal nexus42 schedule start/status/advance CLI (WS7 grows this).",
-        "wave_0_spec": ".agents/plans/knowledge/orchestration-engine-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "2026-04-17-v1.4-ws2-orchestration-skeleton",
-        "effort_agent_oriented": "M (1-2 agent sessions)",
-        "gates": {
-          "batch2_tests": "pass",
-          "batch2_clippy": "pass",
-          "batch3_tests": "pass",
-          "batch3_clippy": "pass",
-          "batch4_tests": "pass",
-          "batch4_clippy": "pass",
-          "batch4_fmt": "pass",
-          "batch4_no_rusqlite": "pass",
-          "batch4_schemas": "54_valid",
-          "batch4_codegen": "no_diff"
-        },
-        "commits": [
-          "cf6c21d feat(orchestration): ACP capabilities + AcpPromptTask + acp_worker JSON-RPC loop (WS3 T4)",
-          "f90bd39 feat(orchestration): preset YAML -> graph-flow::Graph mapping per §8.2 (WS3 T3)",
-          "8eb83b1 feat(orchestration): full InnerGraphTask (child session + output_binding export) (WS3 T5)",
-          "3f2ea0f feat(orchestration): embed novel-writing preset with 5 states and 2 inner graphs (WS3 T6)",
-          "48f3167 feat(cli): nexus42 schedule start/status/advance (minimal; WS3 T7)",
-          "36668ea test(orchestration): novel-writing E2E against mocked ACP worker (WS3 T8, compass R5)",
-          "03f0897 feat(daemon): POST /orchestration/presets/{id}:reload (WS3 T9)",
-          "54f03c3 style: apply nightly rustfmt (WS3 T10)"
-        ],
-        "notes": "All T1-T10 complete. Batch 4 (T7-T10) done. Full CI gate passed."
-      }
-    },
-    {
       "id": "2026-04-17-v1.4-ws6-creator-register-e2e-tests",
       "status": "Todo",
       "file": ".agents/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
-      "title": "V1.4 WS6 \u2014 V1.3 Creator Register E2E integration tests (backlog closure)",
+      "title": "V1.4 WS6 — V1.3 Creator Register E2E integration tests (backlog closure)",
       "owner": "fullstack-dev",
       "tags": [
         "v1.4",
@@ -139,7 +82,7 @@
       "id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
       "status": "Todo",
       "file": ".agents/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
-      "title": "V1.4 WS7 \u2014 Creator Schedule + immutable versioned core_context",
+      "title": "V1.4 WS7 — Creator Schedule + immutable versioned core_context",
       "owner": "fullstack-dev",
       "tags": [
         "v1.4",
@@ -155,7 +98,7 @@
         "priority": "high",
         "phase": "V1.4-M3b",
         "working_branch": "create feature/v1.4-ws7-schedule from feature/v1.4-ws3-preset-loader",
-        "description": "Multi-Schedule per creator (concurrency declared per-add; serial default), CRUD over prompts by ID, immutable versioned core_context (Seed + UserEdit + PresetHook + PresetSeedExpansion; LlmSummarize reserved for V1.5 zero-migration). 13 CLI subcommands under nexus42 schedule + 8 HTTP endpoints under /v1/local/orchestration/schedules/*. Answers OQ-1..OQ-6 from orchestration-engine-v1 \u00a711.",
+        "description": "Multi-Schedule per creator (concurrency declared per-add; serial default), CRUD over prompts by ID, immutable versioned core_context (Seed + UserEdit + PresetHook + PresetSeedExpansion; LlmSummarize reserved for V1.5 zero-migration). 13 CLI subcommands under nexus42 schedule + 8 HTTP endpoints under /v1/local/orchestration/schedules/*. Answers OQ-1..OQ-6 from orchestration-engine-v1 §11.",
         "wave_0_spec": ".agents/plans/knowledge/creator-schedule-and-core-context-v1.md",
         "spec_refs": [
           ".agents/plans/knowledge/creator-schedule-and-core-context-v1.md",
@@ -175,13 +118,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-18",
-      "total_open": 18,
+      "total_open": 23,
       "by_severity": {
         "critical": 0,
         "high": 1,
-        "medium": 7,
-        "low": 6,
-        "nit": 4
+        "medium": 8,
+        "low": 7,
+        "nit": 6
       },
       "by_target": {
         "V1.0": 0,
@@ -189,7 +132,7 @@
         "V1.2": 0,
         "V1.3": 0,
         "V1.4": 0,
-        "V1.5": 11,
+        "V1.5": 13,
         "WS2": 1,
         "WS3": 3
       },
@@ -197,7 +140,8 @@
         "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 5,
         "2026-04-17-v1.4-ws4-statig-lifecycle": 4,
         "2026-04-17-v1.4-ws5-schemas-boundary": 1,
-        "2026-04-17-v1.4-ws2-orchestration-skeleton": 8
+        "2026-04-17-v1.4-ws2-orchestration-skeleton": 8,
+        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 5
       },
       "cross_cutting": []
     },
@@ -262,7 +206,7 @@
       "2026-04-17-v1.4-ws4-statig-lifecycle": [
         {
           "id": "R1",
-          "title": "WS2 engine dependency \u2014 Running.entry engine session start is stubbed",
+          "title": "WS2 engine dependency — Running.entry engine session start is stubbed",
           "severity": "medium",
           "source": "qc2 W8",
           "scope": "crates/nexus42d/src/lifecycle/actions.rs",
@@ -273,7 +217,7 @@
         },
         {
           "id": "R2",
-          "title": "dispatch() spawns independent tokio tasks per event \u2014 documented FIFO-safe via Mutex",
+          "title": "dispatch() spawns independent tokio tasks per event — documented FIFO-safe via Mutex",
           "severity": "low",
           "source": "qc1 C2 (downgraded by consolidation)",
           "scope": "crates/nexus42d/src/lifecycle/state.rs",
@@ -295,7 +239,7 @@
         },
         {
           "id": "R4",
-          "title": "Hardcoded sleep values in tests (100ms-200ms) \u2014 flaky on slow CI",
+          "title": "Hardcoded sleep values in tests (100ms-200ms) — flaky on slow CI",
           "severity": "nit",
           "source": "qc2 W6 / qc3 Q3-4",
           "scope": "crates/nexus42d/tests/lifecycle_*.rs",
@@ -311,7 +255,7 @@
           "title": "Audit table header says 11 local but 10 were actually moved",
           "severity": "nit",
           "source": "qc3 S1",
-          "scope": "schemas-boundary-v1.md \u00a75.2",
+          "scope": "schemas-boundary-v1.md §5.2",
           "decision": "accept",
           "owner": "fullstack-dev",
           "target_date": "V1.5",
@@ -324,7 +268,7 @@
           "title": "Daemon restart does not repopulate in-memory session tracker from SQLite",
           "severity": "medium",
           "source": "qc",
-          "scope": "crates/nexus42d/src/main.rs \u2014 engine restart path",
+          "scope": "crates/nexus42d/src/main.rs — engine restart path",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "WS3",
@@ -354,7 +298,7 @@
         },
         {
           "id": "R4",
-          "title": "Worker shutdown SIGTERM\u2192SIGKILL path not implemented (uses start_kill directly)",
+          "title": "Worker shutdown SIGTERM→SIGKILL path not implemented (uses start_kill directly)",
           "severity": "medium",
           "source": "qc",
           "scope": "crates/nexus-orchestration/src/worker/manager.rs",
@@ -402,6 +346,63 @@
           "severity": "nit",
           "source": "qc",
           "scope": "crates/nexus-orchestration/src/engine.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws3-preset-loader-novel-writing": [
+        {
+          "id": "R1",
+          "title": "EngineProxy duplicates GraphFlowEngine logic",
+          "severity": "medium",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/src/engine.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "E2E weak assertions (let _ = ... patterns)",
+          "severity": "low",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
+          "decision": "defer",
+          "owner": "qa-engineer",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "InnerGraphTask 256-step polling truncation",
+          "severity": "low",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Test duplication between inline and integration tests",
+          "severity": "nit",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/tests/",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "load_preset() directory-based stub",
+          "severity": "nit",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/src/preset/loader.rs",
           "decision": "accept",
           "owner": "fullstack-dev",
           "target_date": null,
