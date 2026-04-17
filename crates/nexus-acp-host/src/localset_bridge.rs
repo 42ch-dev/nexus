@@ -186,9 +186,10 @@ impl LocalSetBridge {
             }),
         };
 
-        self.request_tx.send(Some(wrapper)).await.map_err(|_| {
-            crate::AcpError::connection_failed("LocalSet bridge channel closed")
-        })?;
+        self.request_tx
+            .send(Some(wrapper))
+            .await
+            .map_err(|_| crate::AcpError::connection_failed("LocalSet bridge channel closed"))?;
 
         response_rx.await.map_err(|_| {
             crate::AcpError::connection_failed("LocalSet bridge response channel closed")

@@ -1774,16 +1774,14 @@ dependencies = [
 name = "nexus42"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
  "anyhow",
  "assert_cmd",
- "async-broadcast",
- "async-trait",
  "chrono",
  "clap",
  "dialoguer",
  "dirs",
  "hex",
+ "nexus-acp-host",
  "nexus-contracts",
  "nexus-domain",
  "nexus-home-layout",
@@ -1799,7 +1797,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
  "toml",
  "tracing",
  "tracing-subscriber",
