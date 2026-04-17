@@ -46,6 +46,9 @@ states:
     exit_when:
       kind: manual
     next: drafting
+    context_update:
+      op: append
+      template_file: prompts/outlining-ctx-update.md
 
   - id: drafting
     description: "Draft the novel via intro + body pipeline"
