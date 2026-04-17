@@ -159,12 +159,75 @@ When V1.4 WS5 lands, the platform-side `{v1-spec}/schema/codegen-strategy-v1.md`
 ### 5.2 Audit table template
 
 ```markdown
-| File                                                     | $ref Consumers (in repo)                 | Platform TS Usage? | Decision | Move Target (if local)                                 | Notes                                   |
-| -------------------------------------------------------- | ----------------------------------------- | ------------------ | -------- | ------------------------------------------------------ | --------------------------------------- |
-| `schemas/platform/publish-story-request.schema.json`     | platform-api.md §6; Rust: `nexus-sync/*`  | Yes                | wire     | —                                                      | —                                       |
-| `schemas/acp-runtime/registry-manifest.schema.json`      | Rust: `nexus-acp-host/registry.rs`        | **No**             | local    | `crates/nexus-contracts/src/local/registry.rs`         | External CDN source, Rust-only parser   |
-| `schemas/domain/runtime-mode.schema.json`                | platform-api.md §?.?; Rust: `nexus-domain`| Check              | …        | …                                                      | Verify with `rg RuntimeMode` on platform |
+| File                                                     | $ref Consumers (in repo) | Platform TS Usage? | Decision | Move Target (if local)                                 | Notes                                   |
+| -------------------------------------------------------- | ------------------------- | ------------------ | -------- | ------------------------------------------------------ | --------------------------------------- |
+| `schemas/acp-runtime/daemon-status-v2.schema.json`       | ?                         | ?                  | ?        | ?                                                      | WS4 new; `/v1/local/daemon/status`     |
+| `schemas/acp-runtime/registry-manifest.schema.json`      | ?                         | ?                  | ?        | ?                                                      | External CDN source                    |
+| `schemas/cli-sync/bundle.schema.json`                    | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/cli-sync/conflict-response.schema.json`         | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/cli-sync/sync-pull-request.schema.json`         | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/cli-sync/sync-pull-response.schema.json`        | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/common/common.schema.json`                      | ?                         | ?                  | ?        | ?                                                      | Shared utility types                   |
+| `schemas/common/source-anchor.schema.json`               | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/common/version-ref.schema.json`                 | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/agent-profile.schema.json`               | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/bundle.schema.json`                      | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/creator.schema.json`                     | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/delta.schema.json`                       | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/fork-branch.schema.json`                 | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/key-block.schema.json`                   | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/local-identity.schema.json`              | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/manuscript-state.schema.json`            | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/memory.schema.json`                      | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/outbox-entry.schema.json`                | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/pairing.schema.json`                     | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/reference-source.schema.json`            | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/runtime-mode.schema.json`                | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/story-manifest.schema.json`              | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/sync-command.schema.json`                | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/timeline-event.schema.json`              | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/user.schema.json`                        | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/workspace-binding.schema.json`           | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/world-membership.schema.json`            | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/domain/world.schema.json`                       | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/meta/meta.schema.json`                          | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/context-assembly-v1.schema.json`       | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/creator-runtime-policy-response.schema.json` | ?                      | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-ai-answer-request.schema.json` | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-ai-answer-response.schema.json`| ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-ai-summary-request.schema.json`| ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-ai-summary-response.schema.json`| ?                        | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-browse-request.schema.json`    | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-creator-card.schema.json`      | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-feed-response.schema.json`     | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-hit.schema.json`               | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/explore-search-request.schema.json`    | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/me-entitlements-response.schema.json`  | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/memory-web-list-request.schema.json`   | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/memory-web-list-response.schema.json`  | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/notifications-inbox-item.schema.json`  | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/notifications-list-request.schema.json` | ?                        | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/notifications-list-response.schema.json`| ?                        | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/notifications-mark-read-request.schema.json` | ?                     | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/notifications-mark-read-response.schema.json` | ?                    | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/official-creator-quota-response.schema.json` | ?                   | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/publish-chapter-request.schema.json`   | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/publish-history-entry.schema.json`     | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/publish-history-request.schema.json`   | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/publish-history-response.schema.json`  | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/publish-story-request.schema.json`     | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/publish-story-response.schema.json`    | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/social-graph-feed-request.schema.json`  | ?                        | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/social-graph-feed-response.schema.json` | ?                       | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/social-graph-relationship-request.schema.json` | ?                   | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/social-graph-relationship-response.schema.json` | ?                  | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/world-fork-request.schema.json`        | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/world-fork-response.schema.json`       | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/world-snapshot-request.schema.json`    | ?                         | ?                  | ?        | ?                                                      |                                         |
+| `schemas/platform/world-snapshot-response.schema.json`   | ?                         | ?                  | ?        | ?                                                      |                                         |
 ```
+
+**Total: 64 files.** Decisions populated in WS5 T2.
 
 WS5 deliverable: populate the full table in a new section of this doc (or as a separate companion doc `schemas-boundary-audit-v1.md` if the table grows large enough to deserve its own file).
 
