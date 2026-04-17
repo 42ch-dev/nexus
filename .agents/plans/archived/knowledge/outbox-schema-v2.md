@@ -1,16 +1,16 @@
 # Outbox schema: `outbox_entries` and migrations
 
-This document describes the **sync outbox** (`outbox_entries` in `nexus-sync`) and how it relates to the **daemon** queue table, plus the planned **v1.1 → v1.2** schema evolution. It complements the module-level summary in `crates/nexus-sync/src/outbox.rs`.
+This document describes the **sync outbox** (`outbox_entries` in `nexus-sync`) and how it relates to the **daemon** queue table, plus the planned **v1.1 -> v1.2** schema evolution. It complements the module-level summary in `crates/nexus-sync/src/outbox.rs`.
 
 ## `outbox_entries` vs daemon `outbox`
 
-The `outbox_entries` table in `nexus-sync` is **intentionally different** from the daemon’s `outbox` table (`nexus42d` / `nexus-local-db` schema). The daemon `outbox` is a simple command queue; `outbox_entries` is a bundle-level sync outbox with idempotency keys, retry tracking, and delivery state management. They serve different purposes and must **not** be merged without an explicit consolidation design (see architecture alignment TD-8).
+The `outbox_entries` table in `nexus-sync` is **intentionally different** from the daemon's `outbox` table (`nexus42d` / `nexus-local-db` schema). The daemon `outbox` is a simple command queue; `outbox_entries` is a bundle-level sync outbox with idempotency keys, retry tracking, and delivery state management. They serve different purposes and must **not** be merged without an explicit consolidation design (see architecture alignment TD-8).
 
 ## Current schema (v1.0 / v1.1)
 
 The `outbox_entries` table currently has **no** `schema_version` column. The `OutboxEntry` contract uses `LATEST_SCHEMA_VERSION` at read time, so all rows are assumed to match the current schema version. This remains safe while the on-disk table structure matches that assumption across releases.
 
-## v1.1 → v1.2 migration plan
+## v1.1 -> v1.2 migration plan
 
 When the outbox schema evolves (for example new columns for bundle metadata or conflict tracking), add a `schema_version` column to distinguish rows written by different schema generations.
 

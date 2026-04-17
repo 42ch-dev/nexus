@@ -1,12 +1,12 @@
 # V1.2 Regression Gate
 
-**Status**: Active
-**Milestone**: M3
+**Status**: Active  
+**Milestone**: M3  
 **Plan**: `2026-04-14-v1.2-regression-suite`
 
 ## Purpose
 
-Minimum automated regression set (R1–R5) as V1.2 hard release gate. All 5 scenarios must pass before V1.2 release.
+Minimum automated regression set (R1-R5) as V1.2 hard release gate. All 5 scenarios must pass before V1.2 release.
 
 ## Regression Scenarios
 
@@ -14,7 +14,7 @@ Minimum automated regression set (R1–R5) as V1.2 hard release gate. All 5 scen
 |----|-------------|-----------|--------|
 | **R1** | `local_only` anonymous/temporary identity end-to-end | WS2a identity (anonymous mode) | ✅ Pass |
 | **R2** | `local_only` local persistent identity end-to-end | WS2a identity (persistent mode) | ✅ Pass |
-| **R3** | Local truth core chain (SOUL → memory → context assembly) | WS3a + WS3b pipeline | ✅ Pass |
+| **R3** | Local truth core chain (SOUL -> memory -> context assembly) | WS3a + WS3b pipeline | ✅ Pass |
 | **R4** | Mode switch and degradation regression | WS4 compatibility | ✅ Pass (verified in T6) |
 | **R5** | No-platform dependency guard for `local_only` path | WS2b runtime guards | ✅ Pass |
 
@@ -33,7 +33,7 @@ Regression tests run as part of the CI pipeline:
 
 ## Acceptance Evidence
 
-- All R1–R5 pass in automated run: ✅ (11 tests, 0 failures)
+- All R1-R5 pass in automated run: ✅ (11 tests, 0 failures)
 - CI pipeline green on regression suite: ✅ (verified locally)
 
 ## Execution
