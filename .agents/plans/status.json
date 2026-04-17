@@ -247,7 +247,7 @@
       ],
       "created_at": "2026-04-17",
       "updated_at": "2026-04-18",
-      "notes": "Batch 1 (T1-T3) + Batch 2 (T4-T6) done. nexus42d fully ported to async sqlx. nexus42 CLI consumer port (T7), sync port (T8), docs + legacy dep removal (T9), final gate (T10) remain.",
+      "notes": "Batch 1 (T1-T3) + Batch 2 (T4-T6) + Batch 3 (T7) done. nexus42d + nexus42 CLI fully ported to async sqlx. nexus-sync port (T8), docs + legacy dep removal (T9), final gate (T10) remain.",
       "metadata": {
         "priority": "high",
         "phase": "V1.4-M1",
@@ -283,6 +283,9 @@
           "f6761cb feat(local-db): identity CRUDs async sqlx (WS8 T4)",
           "a9129ab feat(local-db): soul_meta / pending_review / memory_fragment async sqlx (WS8 T5)",
           "67b74db feat(daemon): port nexus42d DB layer + handlers to async sqlx (WS8 T6)"
+        ],
+        "batch_3_commits": [
+          "428f967 feat(cli): port nexus42 CLI + manuscript manager to async sqlx (WS8 T7)"
         ],
         "dev_mode_note": "T2 adapted per PM directive: ONE migration file instead of 5 incremental files. Formal migration history added at T9."
       }

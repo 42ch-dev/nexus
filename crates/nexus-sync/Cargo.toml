@@ -8,16 +8,16 @@ repository.workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-local-db = { path = "../nexus-local-db" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
-rusqlite.workspace = true
+sqlx.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
-deadpool-sqlite = "0.8"
 hex = "0.4"
 sha2 = "0.10"
 
