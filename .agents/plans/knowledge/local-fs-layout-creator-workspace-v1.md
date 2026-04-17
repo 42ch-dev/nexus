@@ -12,4 +12,4 @@
 
 Do **not** treat this file as a second SSOT. For disk layout, commands, or invariants, edit **v1-spec** only; keep this stub as a **handoff pointer** for clone-only workflows.
 
-**Related (in-repo, module scope only):** [local-db-refactor-v1.md](local-db-refactor-v1.md)
+**Related (in-repo, module scope only):** [local-db-refactor-v2.md](local-db-refactor-v2.md)

@@ -40,7 +40,7 @@ pub struct ListPendingReviewsResponse {
 }
 
 /// Pending review info for API responses.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct PendingReviewInfo {
     pub pending_id: String,
     pub session_id: String,
@@ -81,11 +81,6 @@ pub async fn create_pending_review(
     // Validate input fields (includes creator_id format validation)
     validate_pending_review_input(&req)?;
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
-    })?;
-
     // Use defaults for optional fields
     let task_kind = req
         .task_kind
@@ -96,30 +91,23 @@ pub async fn create_pending_review(
         .clone()
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
-    // Clone values for the interact closure
-    let pending_id = req.pending_id.clone();
-    let session_id = req.session_id.clone();
-    let creator_id = req.creator_id.clone();
-    let world_id = req.world_id.clone();
-    let raw_digest = req.raw_digest.clone();
-
     // Use INSERT OR IGNORE for idempotent behavior on retries
-    // (handles both duplicate pending_id and duplicate session_id)
-    conn.interact(move |conn| {
-        conn.execute(
-            "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at],
-        )
-    })
+    sqlx::query(
+        "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+    )
+    .bind(&req.pending_id)
+    .bind(&req.session_id)
+    .bind(&req.creator_id)
+    .bind(&req.world_id)
+    .bind(&task_kind)
+    .bind(&req.raw_digest)
+    .bind(&created_at)
+    .execute(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
         message: format!("failed to create pending review: {}", e),
-    })?
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: e.to_string(),
     })?;
 
     debug!(pending_id = %req.pending_id, "Pending review entry created (or ignored on duplicate)");
@@ -224,48 +212,17 @@ pub async fn list_pending_reviews(
         });
     }
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
+    let pending_reviews = sqlx::query_as::<_, PendingReviewInfo>(
+        "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
+         FROM memory_pending_review WHERE creator_id = ?1 ORDER BY created_at DESC",
+    )
+    .bind(&params.creator_id)
+    .fetch_all(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to list pending reviews: {}", e),
     })?;
-
-    let creator_id = params.creator_id.clone();
-
-    let pending_reviews = conn
-        .interact(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
-                 FROM memory_pending_review WHERE creator_id = ?1 ORDER BY created_at DESC",
-            )?;
-
-            let rows = stmt.query_map(rusqlite::params![creator_id], |row| {
-                Ok(PendingReviewInfo {
-                    pending_id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    creator_id: row.get(2)?,
-                    world_id: row.get(3)?,
-                    task_kind: row.get(4)?,
-                    raw_digest: row.get(5)?,
-                    created_at: row.get(6)?,
-                })
-            })?;
-
-            let mut reviews = Vec::new();
-            for row in rows {
-                reviews.push(row?);
-            }
-
-            Ok::<Vec<PendingReviewInfo>, rusqlite::Error>(reviews)
-        })
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to list pending reviews: {}", e),
-        })?
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
 
     debug!(count = pending_reviews.len(), "Pending reviews retrieved");
 
@@ -295,33 +252,18 @@ pub async fn count_pending_reviews(
         });
     }
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
-    })?;
-
-    let creator_id = params.creator_id.clone();
-
-    let count = conn
-        .interact(move |conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM memory_pending_review WHERE creator_id = ?1",
-                rusqlite::params![creator_id],
-                |row| row.get::<_, i64>(0),
-            )
-        })
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to count pending reviews: {}", e),
-        })?
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review WHERE creator_id = ?1")
+            .bind(&params.creator_id)
+            .fetch_one(state.pool())
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to count pending reviews: {}", e),
+            })?;
 
     Ok(Json(CountPendingReviewsResponse {
-        count: count as usize,
+        count: count.0 as usize,
     }))
 }
 
@@ -359,46 +301,18 @@ pub async fn delete_pending_review(
         });
     }
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
-    })?;
-
     // Verify ownership before deletion
-    let pending_id_clone = pending_id.clone();
-    let creator_id_clone = params.creator_id.clone();
-    let review: Option<PendingReviewInfo> = conn
-        .interact(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
-                 FROM memory_pending_review WHERE pending_id = ?1",
-            )?;
-            let mut rows = stmt.query_map(rusqlite::params![pending_id_clone], |row| {
-                Ok(PendingReviewInfo {
-                    pending_id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    creator_id: row.get(2)?,
-                    world_id: row.get(3)?,
-                    task_kind: row.get(4)?,
-                    raw_digest: row.get(5)?,
-                    created_at: row.get(6)?,
-                })
-            })?;
-            match rows.next() {
-                Some(Ok(row)) => Ok(Some(row)),
-                Some(Err(e)) => Err(e),
-                None => Ok(None),
-            }
-        })
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to lookup pending review: {}", e),
-        })?
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
+    let review: Option<PendingReviewInfo> = sqlx::query_as(
+        "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
+         FROM memory_pending_review WHERE pending_id = ?1",
+    )
+    .bind(&pending_id)
+    .fetch_optional(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to lookup pending review: {}", e),
+    })?;
 
     match review {
         None => {
@@ -407,7 +321,7 @@ pub async fn delete_pending_review(
                 pending_id
             )));
         }
-        Some(ref r) if r.creator_id != creator_id_clone => {
+        Some(ref r) if r.creator_id != params.creator_id => {
             return Err(NexusApiError::Forbidden {
                 resource: "pending_review".into(),
                 reason: format!(
@@ -420,25 +334,19 @@ pub async fn delete_pending_review(
     }
 
     // Proceed with deletion
-    let pending_id_clone = pending_id.clone();
-    let affected = conn
-        .interact(move |conn| {
-            conn.execute(
-                "DELETE FROM memory_pending_review WHERE pending_id = ?1",
-                rusqlite::params![pending_id_clone],
-            )
-        })
+    let affected = sqlx::query("DELETE FROM memory_pending_review WHERE pending_id = ?1")
+        .bind(&pending_id)
+        .execute(state.pool())
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
             message: format!("failed to delete pending review: {}", e),
-        })?
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
         })?;
 
-    debug_assert!(affected > 0, "Expected 1 row deleted after ownership check");
+    debug_assert!(
+        affected.rows_affected() > 0,
+        "Expected 1 row deleted after ownership check"
+    );
 
     Ok(Json(DeletePendingReviewResponse {
         success: true,

@@ -169,8 +169,8 @@ impl From<anyhow::Error> for NexusApiError {
     }
 }
 
-impl From<rusqlite::Error> for NexusApiError {
-    fn from(err: rusqlite::Error) -> Self {
+impl From<sqlx::Error> for NexusApiError {
+    fn from(err: sqlx::Error) -> Self {
         NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
             message: err.to_string(),
@@ -254,15 +254,15 @@ mod tests {
     }
 
     #[test]
-    fn from_rusqlite_maps_to_internal() {
-        let db_err = rusqlite::Error::QueryReturnedNoRows;
+    fn from_sqlx_maps_to_internal() {
+        let db_err = sqlx::Error::RowNotFound;
         let display = db_err.to_string();
         let api_err: NexusApiError = db_err.into();
 
         match api_err {
             NexusApiError::Internal { code, message } => {
                 assert_eq!(code, "DATABASE_ERROR");
-                // The display message should contain the rusqlite error representation
+                // The display message should contain the sqlx error representation
                 assert!(!message.is_empty(), "Error message should not be empty");
                 assert_eq!(message, display);
             }
@@ -345,8 +345,8 @@ mod tests {
         use axum::extract::State;
         use axum::Json;
 
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let req = crate::api::handlers::workspace::InitWorkspaceRequest {
             path: "  ".to_string(), // whitespace-only = effectively empty
@@ -382,8 +382,8 @@ mod tests {
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
 
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let result = list(State(state)).await;
         assert!(
@@ -404,8 +404,8 @@ mod tests {
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
 
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let result = list(State(state)).await;
         assert!(
@@ -420,7 +420,7 @@ mod tests {
     ///
     /// Workspace initialization is enforced by middleware, not by the handler.
     /// Calling the handler directly (bypassing middleware) returns Ok with None fields
-    /// because PooledConn::query_row returns Ok(None) when no rows match.
+    /// because sqlx::query_as fetch_optional returns Ok(None) when no rows match.
     ///
     /// Middleware-level rejection is tested in api::middleware::tests.
     #[tokio::test]
@@ -430,8 +430,8 @@ mod tests {
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
 
-        let (_tmp, nexus_home, db_path) = create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let result = status(State(state)).await;
         assert!(

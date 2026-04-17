@@ -3,11 +3,9 @@
 //! Provides commands for inspecting database state and running migrations.
 
 use crate::config::CliConfig;
-use crate::db;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_local_db::{read_versions, validate};
-use rusqlite::Connection;
+use nexus_local_db::{read_versions, validate, RuntimeRole};
 
 #[derive(Debug, Subcommand)]
 pub enum DbCommand {
@@ -32,11 +30,8 @@ async fn status() -> Result<()> {
     // Get database path from config
     let db_path = crate::config::state_db_path()?;
 
-    // Open connection
-    let conn = Connection::open(&db_path)?;
-
-    // Initialize schema if needed
-    db::Schema::init(&conn)?;
+    // Initialize schema if needed (opens pool + runs migrations + seeds versions)
+    let pool = crate::db::Schema::init(&db_path).await?;
 
     println!("Database Status");
     println!("===============");
@@ -47,7 +42,7 @@ async fn status() -> Result<()> {
     println!();
 
     // Read and display versions
-    match read_versions(&conn) {
+    match read_versions(&pool).await {
         Ok(versions) => {
             println!("Schema Versions:");
             println!("  db_schema_version: {}", versions.db_schema_version);
@@ -66,7 +61,7 @@ async fn status() -> Result<()> {
     }
 
     // Run health check
-    match validate(&conn) {
+    match validate(&pool, RuntimeRole::Cli).await {
         Ok(()) => {
             println!("Health Check: OK");
             println!();
@@ -80,11 +75,10 @@ async fn status() -> Result<()> {
 
     // List existing tables
     println!("Tables:");
-    let tables: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")?
-        .query_map([], |row| row.get::<_, String>(0))?
-        .flatten()
-        .collect();
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(&pool)
+            .await?;
 
     if tables.is_empty() {
         println!("  (none)");
@@ -97,10 +91,14 @@ async fn status() -> Result<()> {
 
     // Show pragmas
     println!("Pragmas:");
-    let journal_mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+    let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&pool)
+        .await?;
     println!("  journal_mode: {}", journal_mode);
 
-    let foreign_keys: i32 = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    let foreign_keys: i32 = sqlx::query_scalar("PRAGMA foreign_keys")
+        .fetch_one(&pool)
+        .await?;
     println!(
         "  foreign_keys: {}",
         if foreign_keys == 1 { "ON" } else { "OFF" }
