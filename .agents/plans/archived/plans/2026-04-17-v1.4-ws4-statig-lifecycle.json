@@ -1,0 +1,60 @@
+{
+  "id": "2026-04-17-v1.4-ws4-statig-lifecycle",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
+  "title": "V1.4 WS4 — statig daemon lifecycle HSM (TD-9 closure)",
+  "owner": "fullstack-dev-2",
+  "tags": [
+    "v1.4",
+    "ws4",
+    "td-9",
+    "daemon",
+    "lifecycle"
+  ],
+  "created_at": "2026-04-17",
+  "updated_at": "2026-04-18",
+  "done_at": "2026-04-18",
+  "metadata": {
+    "priority": "high",
+    "phase": "V1.4-M1",
+    "working_branch": "feature/v1.4-ws4-statig-lifecycle",
+    "merge_target": "feature/v1.4",
+    "description": "Replace nexus42d's single-state 'running-probe' with the full 6-state statig HSM (Stopped/Starting/Running/Degraded/Stopping/Failed). Expose the v2 GET /v1/local/daemon/status superset response (schema_version: 2, subsystems{}, degraded{}) wire-compatible with the v1 probe. Closes TD-9.",
+    "wave_0_spec": ".agents/plans/knowledge/daemon-lifecycle-api-v2.md",
+    "spec_refs": [
+      ".agents/plans/knowledge/daemon-lifecycle-api-v2.md",
+      ".agents/plans/knowledge/v1.4-delivery-compass-v1.md",
+      ".agents/plans/knowledge/architecture-alignment-review-v1.md"
+    ],
+    "parallelism": "parallel with WS2 (no file overlap except crates/nexus42d/src/main.rs touch)",
+    "effort_agent_oriented": "S+ (1 agent session)",
+    "gates": {
+      "validate_schemas": "pass",
+      "codegen": "pass",
+      "cargo_fmt": "pass",
+      "cargo_clippy": "pass",
+      "cargo_test": "pass",
+      "qc_status": "approve_with_residuals",
+      "qa_status": "pass",
+      "qc_criticals_fixed": 4,
+      "qc_criticals_commit": "b66dd60"
+    },
+    "commits": [
+      "1594532 feat(daemon/lifecycle): statig HSM with Event enum and transitions (WS4 T1-T3)",
+      "c3edac4 feat(daemon/lifecycle): entry/exit actions + SubsystemBootstrap trait (WS4 T4)",
+      "3402ce8 feat(daemon): v2 /v1/local/daemon/status with schema_version=2 (WS4 T5)",
+      "da3d2f4 feat(daemon): main.rs uses statig lifecycle; SIGTERM/SIGINT/panic bridged (WS4 T6)",
+      "0f6e333 docs(knowledge): TD-9 row moves from Partial to Resolved (v2) (WS4 T7)",
+      "f4deeb6 chore(ws4): lint fixes for final CI gate (WS4 T8)",
+      "a59b0ec docs(qc): 2026-04-17-v1.4-ws4-statig-lifecycle qc1 report",
+      "7c3c29f docs(qc): 2026-04-17-v1.4-ws4-statig-lifecycle qc3 report",
+      "92cee28 docs(qc): 2026-04-17-v1.4-ws4-statig-lifecycle qc2 report",
+      "b66dd60 fix(daemon): address QC criticals — HSM init, exit race, uptime field (WS4 qc-rework)"
+    ],
+    "td_closed": "TD-9 (daemon state machine not implemented) -> Resolved (v2)",
+    "tests_added": 23,
+    "qc_status": "approve_with_residuals",
+    "qa_status": "pass",
+    "residual_summary": "R1(medium): WS2 engine stub; R2(low): dispatch task ordering; R3(low): started_at unset; R4(nit): hardcoded test sleeps"
+  }
+}
