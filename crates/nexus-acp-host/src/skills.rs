@@ -32,7 +32,7 @@
 //! These are documented in the tech spec (§5.2) and tracked as residual findings
 //! (ACP-R3 through ACP-R11) for future implementation.
 
-use crate::acp::client::ClientCapabilities;
+use crate::client::ClientCapabilities;
 use agent_client_protocol::FileSystemCapabilities;
 
 /// Frozen capability IDs for V1.0.
@@ -84,7 +84,7 @@ pub mod capabilities {
 /// # Example
 ///
 /// ```rust,ignore
-/// use nexus42::acp::skills::build_v1_0_capabilities;
+/// use nexus_acp_host::skills::build_v1_0_capabilities;
 ///
 /// let caps = build_v1_0_capabilities();
 /// // caps will include: file_system.read, file_system.write,

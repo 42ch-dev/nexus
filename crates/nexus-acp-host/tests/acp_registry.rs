@@ -3,7 +3,7 @@
 //! Tests that the CLI can fetch the ACP Registry from a CDN (mocked),
 //! parse the manifest JSON, and verify schema conformance.
 
-use nexus42::acp::registry::Registry;
+use nexus_acp_host::registry::Registry;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

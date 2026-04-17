@@ -17,12 +17,13 @@ mod paths;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    agent::AgentCommand, auth::AuthCommand, clone::CloneArgs, config::ConfigCommand,
-    context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand, db::DbCommand,
-    debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand, identity::IdentityCommand,
-    init::InitCommand, manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
-    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
+    acp_worker::AcpWorkerArgs, agent::AgentCommand, auth::AuthCommand, clone::CloneArgs,
+    config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
+    db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
+    identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
+    memory::MemoryCommand, policy::PolicyCommand, publish::PublishCommand,
+    research::ResearchCommand, runtime_mode::RuntimeModeCommand, session::SessionCommand,
+    soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -151,6 +152,10 @@ enum Commands {
         command: AgentCommand,
     },
 
+    /// Hidden: ACP worker subprocess entry point (daemon-managed)
+    #[command(hide = true)]
+    AcpWorker(AcpWorkerArgs),
+
     /// ACP session persistence management
     Session {
         #[command(subcommand)]
@@ -221,6 +226,7 @@ async fn main() {
         Some(Commands::Research { command }) => commands::research::run(command, &config).await,
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
+        Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
