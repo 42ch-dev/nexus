@@ -342,6 +342,27 @@ impl From<nexus_sync::errors::SyncError> for CliError {
     }
 }
 
+impl CliError {
+    /// Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
+    ///
+    /// Use this instead of `SyncError::into()` when the error occurs during
+    /// the verification step (as opposed to registration), so callers can
+    /// distinguish registration failures from verification failures.
+    pub fn verify_creator_error(err: nexus_sync::errors::SyncError) -> Self {
+        match err {
+            nexus_sync::errors::SyncError::PlatformError { status, body } => {
+                CliError::CreatorVerificationFailed {
+                    status: status.to_string(),
+                    message: body,
+                }
+            }
+            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => CliError::Config(msg),
+            nexus_sync::errors::SyncError::HttpError(e) => CliError::Network(e),
+            other => CliError::Other(format!("sync error: {}", other)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,5 +500,30 @@ mod tests {
             }
             _ => panic!("Expected CliError::Other variant"),
         }
+    }
+
+    #[test]
+    fn verify_creator_error_maps_platform_error_to_verification_failed() {
+        let sync_err = nexus_sync::errors::SyncError::PlatformError {
+            status: 403,
+            body: "verification token invalid".to_string(),
+        };
+        let cli_err = CliError::verify_creator_error(sync_err);
+        match cli_err {
+            CliError::CreatorVerificationFailed { status, message } => {
+                assert_eq!(status, "403");
+                assert_eq!(message, "verification token invalid");
+            }
+            _ => panic!("Expected CreatorVerificationFailed variant"),
+        }
+    }
+
+    #[test]
+    fn verify_creator_error_maps_not_configured_to_config() {
+        let sync_err = nexus_sync::errors::SyncError::SyncNotConfigured(
+            "platform_base_url is required".to_string(),
+        );
+        let cli_err = CliError::verify_creator_error(sync_err);
+        assert!(matches!(cli_err, CliError::Config(_)));
     }
 }
