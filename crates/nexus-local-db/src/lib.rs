@@ -82,7 +82,7 @@ pub async fn open_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, Lo
 
 /// Run all pending sqlx migrations from `./migrations/` directory.
 ///
-/// Uses `sqlx::migrate!()` to locate and apply timestamped `.sql` files.
+/// Embeds migration files at compile time via `sqlx::migrate!()`.
 /// Idempotent — already-applied migrations are skipped.
 ///
 /// # Example
@@ -102,4 +102,101 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
         .await
         .map_err(LocalDbError::from)?;
     Ok(())
+}
+
+/// Seed version keys into `workspace_meta` table.
+///
+/// Sets `db_schema_version` and `schema_version` (contract version) keys.
+/// Safe to call on already-seeded databases (uses INSERT OR REPLACE).
+pub async fn seed_versions(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('db_schema_version', ?1)",
+    )
+    .bind(DB_SCHEMA_VERSION.to_string())
+    .execute(pool)
+    .await?;
+    sqlx::query("INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('schema_version', ?1)")
+        .bind(SCHEMA_VERSION.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Read both version lines from the database.
+///
+/// Returns [`SchemaVersions`] containing `db_schema_version` and `schema_version`.
+pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, LocalDbError> {
+    let db_schema_version = sqlx::query_as::<_, (String,)>(
+        "SELECT value FROM workspace_meta WHERE key = 'db_schema_version'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| LocalDbError::MissingVersionKey {
+        key: "db_schema_version".to_string(),
+    })?
+    .0
+    .parse::<u32>()
+    .map_err(|e| LocalDbError::InvalidVersionValue {
+        key: "db_schema_version".to_string(),
+        value: "".to_string(),
+        reason: e.to_string(),
+    })?;
+
+    let schema_version = sqlx::query_as::<_, (String,)>(
+        "SELECT value FROM workspace_meta WHERE key = 'schema_version'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| LocalDbError::MissingVersionKey {
+        key: "schema_version".to_string(),
+    })?
+    .0
+    .parse::<u32>()
+    .map_err(|e| LocalDbError::InvalidVersionValue {
+        key: "schema_version".to_string(),
+        value: "".to_string(),
+        reason: e.to_string(),
+    })?;
+
+    Ok(SchemaVersions {
+        db_schema_version,
+        schema_version,
+    })
+}
+
+/// Validate database state for a given runtime role.
+///
+/// Checks that:
+/// - `workspace_meta` table exists
+/// - Both version keys are present and parseable
+/// - `db_schema_version` matches the current expected version
+///
+/// Returns `Ok(())` if all checks pass, or an error describing what's wrong.
+pub async fn validate(pool: &sqlx::SqlitePool, _role: RuntimeRole) -> Result<(), LocalDbError> {
+    // Check workspace_meta table exists by reading a version key
+    let versions = read_versions(pool).await?;
+
+    if versions.db_schema_version != DB_SCHEMA_VERSION {
+        return Err(LocalDbError::InvalidVersionValue {
+            key: "db_schema_version".to_string(),
+            value: versions.db_schema_version.to_string(),
+            reason: format!(
+                "expected {}, got {}",
+                DB_SCHEMA_VERSION, versions.db_schema_version
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+/// Convenience function: open pool, run migrations, and seed versions.
+///
+/// This is the recommended entry point for CLI and daemon initialization.
+/// Equivalent to calling `open_pool` + `run_migrations` + `seed_versions` in sequence.
+pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
+    let pool = open_pool(db_path).await?;
+    run_migrations(&pool).await?;
+    seed_versions(&pool).await?;
+    Ok(pool)
 }
