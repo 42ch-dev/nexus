@@ -114,56 +114,6 @@
       }
     },
     {
-      "id": "2026-04-17-v1.4-ws4-statig-lifecycle",
-      "status": "InReview",
-      "file": ".agents/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
-      "title": "V1.4 WS4 — statig daemon lifecycle HSM (TD-9 closure)",
-      "owner": "fullstack-dev-2",
-      "tags": [
-        "v1.4",
-        "ws4",
-        "td-9",
-        "daemon",
-        "lifecycle"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-18",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M1",
-        "working_branch": "feature/v1.4-ws4-statig-lifecycle",
-        "merge_target": "feature/v1.4",
-        "description": "Replace nexus42d's single-state 'running-probe' with the full 6-state statig HSM (Stopped/Starting/Running/Degraded/Stopping/Failed). Expose the v2 GET /v1/local/daemon/status superset response (schema_version: 2, subsystems{}, degraded{}) wire-compatible with the v1 probe. Closes TD-9.",
-        "wave_0_spec": ".agents/plans/knowledge/daemon-lifecycle-api-v2.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/daemon-lifecycle-api-v2.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md",
-          ".agents/plans/knowledge/architecture-alignment-review-v1.md"
-        ],
-        "parallelism": "parallel with WS2 (no file overlap except crates/nexus42d/src/main.rs touch)",
-        "effort_agent_oriented": "S+ (1 agent session)",
-        "gates": {
-          "validate_schemas": "pass",
-          "codegen": "pass",
-          "cargo_fmt": "pass",
-          "cargo_clippy": "pass",
-          "cargo_test": "pass"
-        },
-        "commits": [
-          "1594532 feat(daemon/lifecycle): statig HSM with Event enum and transitions (WS4 T1-T3)",
-          "c3edac4 feat(daemon/lifecycle): entry/exit actions + SubsystemBootstrap trait (WS4 T4)",
-          "3402ce8 feat(daemon): v2 /v1/local/daemon/status with schema_version=2 (WS4 T5)",
-          "da3d2f4 feat(daemon): main.rs uses statig lifecycle; SIGTERM/SIGINT/panic bridged (WS4 T6)",
-          "0f6e333 docs(knowledge): TD-9 row moves from Partial to Resolved (v2) (WS4 T7)",
-          "f4deeb6 chore(ws4): lint fixes for final CI gate (WS4 T8)"
-        ],
-        "td_closed": "TD-9 (daemon state machine not implemented) -> Resolved (v2)",
-        "tests_added": 23,
-        "qc_status": "pending",
-        "qa_status": "pending"
-      }
-    },
-    {
       "id": "2026-04-17-v1.4-ws5-schemas-boundary",
       "status": "Todo",
       "file": ".agents/plans/2026-04-17-v1.4-ws5-schemas-boundary.md",
@@ -261,13 +211,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-18",
-      "total_open": 5,
+      "total_open": 9,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 3,
-        "low": 1,
-        "nit": 1
+        "medium": 4,
+        "low": 3,
+        "nit": 2
       },
       "by_target": {
         "V1.0": 0,
@@ -275,10 +225,12 @@
         "V1.2": 0,
         "V1.3": 0,
         "V1.4": 0,
-        "V1.5": 5
+        "V1.5": 8,
+        "WS2": 1
       },
       "by_plan": {
-        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 5
+        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 5,
+        "2026-04-17-v1.4-ws4-statig-lifecycle": 4
       },
       "cross_cutting": []
     },
@@ -336,6 +288,52 @@
           "scope": "crates/nexus-local-db/src/soul_meta.rs",
           "decision": "accept",
           "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws4-statig-lifecycle": [
+        {
+          "id": "R1",
+          "title": "WS2 engine dependency — Running.entry engine session start is stubbed",
+          "severity": "medium",
+          "source": "qc2 W8",
+          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev-2",
+          "target_date": "WS2/V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "dispatch() spawns independent tokio tasks per event — documented FIFO-safe via Mutex",
+          "severity": "low",
+          "source": "qc1 C2 (downgraded by consolidation)",
+          "scope": "crates/nexus42d/src/lifecycle/state.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev-2",
+          "target_date": "WS2",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "started_at field not populated in v2 response",
+          "severity": "low",
+          "source": "qc2 W7",
+          "scope": "crates/nexus42d/src/api/handlers/runtime.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev-2",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Hardcoded sleep values in tests (100ms-200ms) — flaky on slow CI",
+          "severity": "nit",
+          "source": "qc2 W6 / qc3 Q3-4",
+          "scope": "crates/nexus42d/tests/lifecycle_*.rs",
+          "decision": "accept",
+          "owner": "qa-engineer / fullstack-dev-2",
           "target_date": "V1.5",
           "tracking_link": null
         }
