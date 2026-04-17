@@ -66,7 +66,7 @@
         "preset"
       ],
       "created_at": "2026-04-17",
-      "updated_at": "2026-04-17T21:17:28Z",
+      "updated_at": "2026-04-18T05:40:00Z",
       "metadata": {
         "priority": "high",
         "phase": "V1.4-M3",
@@ -83,13 +83,17 @@
         "effort_agent_oriented": "M (1-2 agent sessions)",
         "gates": {
           "batch2_tests": "pass",
-          "batch2_clippy": "pass"
+          "batch2_clippy": "pass",
+          "batch3_tests": "pass",
+          "batch3_clippy": "pass"
         },
         "commits": [
           "cf6c21d feat(orchestration): ACP capabilities + AcpPromptTask + acp_worker JSON-RPC loop (WS3 T4)",
-          "f90bd39 feat(orchestration): preset YAML -> graph-flow::Graph mapping per \u00a78.2 (WS3 T3)"
+          "f90bd39 feat(orchestration): preset YAML -> graph-flow::Graph mapping per \u00a78.2 (WS3 T3)",
+          "8eb83b1 feat(orchestration): full InnerGraphTask (child session + output_binding export) (WS3 T5)",
+          "3f2ea0f feat(orchestration): embed novel-writing preset with 5 states and 2 inner graphs (WS3 T6)"
         ],
-        "notes": "Batch 2 (T3+T4) complete. Remaining: T5-T9."
+        "notes": "Batch 3 (T5+T6) complete. Remaining: T7-T9."
       }
     },
     {
