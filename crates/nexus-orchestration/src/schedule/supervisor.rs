@@ -265,6 +265,19 @@ impl ScheduleSupervisor {
         Ok(())
     }
 
+    /// Create a [`CoreContextManager`] backed by the same pool.
+    ///
+    /// This avoids requiring callers to hold a reference to the supervisor's
+    /// internal pool. The returned manager is lightweight (just an Arc clone).
+    pub fn core_context_manager(&self) -> super::derivation::CoreContextManager {
+        super::derivation::CoreContextManager::new(self.pool.clone())
+    }
+
+    /// Get a reference to the underlying SQLite pool.
+    pub fn pool(&self) -> Arc<SqlitePool> {
+        self.pool.clone()
+    }
+
     /// Get the current status of a schedule by ID (for testing/inspection).
     pub async fn status_of(&self, schedule_id: &str) -> ScheduleStatus {
         let row = sqlx::query_as::<_, (String,)>(
