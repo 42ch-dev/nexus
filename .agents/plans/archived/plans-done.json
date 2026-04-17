@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-17T01:00:00Z",
+  "plans": [
+    {
+      "id": "2025-04-05-monorepo-structure",
+      "title": "Monorepo Structure Implementation",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-monorepo-structure.md",
+      "archived_record": "archived/plans/2025-04-05-monorepo-structure.json"
+    },
+    {
+      "id": "2025-04-05-json-schema-foundation",
+      "title": "JSON Schema Foundation",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-json-schema-foundation.md",
+      "archived_record": "archived/plans/2025-04-05-json-schema-foundation.json"
+    },
+    {
+      "id": "2025-04-05-codegen-pipeline",
+      "title": "Codegen Pipeline",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-codegen-pipeline.md",
+      "archived_record": "archived/plans/2025-04-05-codegen-pipeline.json"
+    },
+    {
+      "id": "2025-04-05-domain-models",
+      "title": "Domain Models Implementation",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-domain-models.md",
+      "archived_record": "archived/plans/2025-04-05-domain-models.json"
+    },
+    {
+      "id": "2025-04-05-cli-daemon-foundation",
+      "title": "CLI + Daemon Foundation",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
+      "archived_record": "archived/plans/2025-04-05-cli-daemon-foundation.json"
+    },
+    {
+      "id": "2025-04-05-sync-contract",
+      "title": "Sync Contract Implementation",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-sync-contract.md",
+      "archived_record": "archived/plans/2025-04-05-sync-contract.json"
+    },
+    {
+      "id": "2025-04-05-acp-client",
+      "title": "ACP Client Integration",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-acp-client.md",
+      "archived_record": "archived/plans/2025-04-05-acp-client.json"
+    },
+    {
+      "id": "2025-04-05-context-assembly",
+      "title": "Context Assembly Basic",
+      "done_at": "2026-04-06",
+      "plan_file": ".agents/plans/2025-04-05-context-assembly.md",
+      "archived_record": "archived/plans/2025-04-05-context-assembly.json"
+    },
+    {
+      "id": "2026-04-06-foundation-hardening",
+      "title": "Foundation Hardening",
+      "done_at": "2026-04-07",
+      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "archived_record": "archived/plans/2026-04-06-foundation-hardening.json"
+    },
+    {
+      "id": "2026-04-06-acp-sdk-bridge",
+      "title": "ACP SDK Bridge Implementation",
+      "done_at": "2026-04-07",
+      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "archived_record": "archived/plans/2026-04-06-acp-sdk-bridge.json"
+    },
+    {
+      "id": "2026-04-06-daemon-manuscript-ops",
+      "title": "Daemon + Manuscript Operations",
+      "done_at": "2026-04-07",
+      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "archived_record": "archived/plans/2026-04-06-daemon-manuscript-ops.json"
+    },
+    {
+      "id": "2026-04-06-auth-flow",
+      "title": "Auth Flow Completion",
+      "done_at": "2026-04-07",
+      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "archived_record": "archived/plans/2026-04-06-auth-flow.json"
+    },
+    {
+      "id": "2026-04-06-codegen-alignment",
+      "title": "Codegen & Contract Alignment",
+      "done_at": "2026-04-07",
+      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "archived_record": "archived/plans/2026-04-06-codegen-alignment.json"
+    },
+    {
+      "id": "2026-04-07-json-schema-update-phase2",
+      "title": "JSON Schema Update for V1.0-phase2 Alignment",
+      "done_at": "2026-04-08",
+      "plan_file": ".agents/plans/2026-04-07-json-schema-update-phase2.md",
+      "archived_record": "archived/plans/2026-04-07-json-schema-update-phase2.json"
+    },
+    {
+      "id": "2026-04-08-v1.1-tech-debt-mitigation",
+      "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
+      "done_at": "2026-04-09",
+      "plan_file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
+      "archived_record": "archived/plans/2026-04-08-v1.1-tech-debt-mitigation.json"
+    },
+    {
+      "id": "2026-04-09-v1.1-arch-alignment-blockers",
+      "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
+      "done_at": "2026-04-09",
+      "plan_file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json"
+    },
+    {
+      "id": "2026-04-09-v1.1-arch-alignment-closure",
+      "title": "V1.1 Architecture Alignment — Final Closure",
+      "done_at": "2026-04-09",
+      "plan_file": ".agents/plans/2026-04-09-v1.1-arch-alignment-closure.md",
+      "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-closure.json"
+    },
+    {
+      "id": "2026-04-09-v1.1-cli-daemon-hardening",
+      "title": "CLI/Daemon Reliability Hardening",
+      "done_at": "2026-04-08",
+      "plan_file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
+      "archived_record": "archived/plans/2026-04-09-v1.1-cli-daemon-hardening.json"
+    },
+    {
+      "id": "2026-04-09-v1.1-context-assembly-enhancement",
+      "title": "Context Assembly Enhancement (V1.1 Safety & Validation)",
+      "done_at": "2026-04-08",
+      "plan_file": ".agents/plans/2026-04-09-v1.1-context-assembly-enhancement.md",
+      "archived_record": "archived/plans/2026-04-09-v1.1-context-assembly-enhancement.json"
+    },
+    {
+      "id": "2026-04-09-v1.1-acp-ux-permissions",
+      "title": "ACP UX & Permission Policy",
+      "done_at": "2026-04-08",
+      "plan_file": ".agents/plans/2026-04-09-v1.1-acp-ux-permissions.md",
+      "archived_record": "archived/plans/2026-04-09-v1.1-acp-ux-permissions.json"
+    },
+    {
+      "id": "v1-tech-debt-cleanup",
+      "title": "V1 Tech Debt Cleanup (Long-term)",
+      "done_at": "2026-04-15",
+      "plan_file": ".agents/plans/v1-tech-debt-cleanup.md",
+      "archived_record": "archived/plans/v1-tech-debt-cleanup.json"
+    },
+    {
+      "id": "2026-04-08-local-db-refactor",
+      "title": "Local DB Refactor — Single Ownership Module",
+      "done_at": "2026-04-08",
+      "plan_file": ".agents/plans/2026-04-08-local-db-refactor.md",
+      "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
+    },
+    {
+      "id": "2026-04-10-cli-sync-bidirectional-parity",
+      "title": "CLI Bidirectional Sync Parity (platform sync)",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
+      "archived_record": "archived/plans/2026-04-10-cli-sync-bidirectional-parity.json"
+    },
+    {
+      "id": "2026-04-10-cli-fork-world-snapshot-parity",
+      "title": "CLI Fork & World Snapshot Parity",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
+      "archived_record": "archived/plans/2026-04-10-cli-fork-world-snapshot-parity.json"
+    },
+    {
+      "id": "2026-04-10-v1-spec-wire-schema-sprint",
+      "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
+      "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
+    },
+    {
+      "id": "2026-04-10-cli-explore-read-parity",
+      "title": "CLI Explore (Read) Parity",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
+      "archived_record": "archived/plans/2026-04-10-cli-explore-read-parity.json"
+    },
+    {
+      "id": "2026-04-10-cli-publish-workflow-parity",
+      "title": "CLI Publish Workflow Parity",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-cli-publish-workflow-parity.md",
+      "archived_record": "archived/plans/2026-04-10-cli-publish-workflow-parity.json"
+    },
+    {
+      "id": "2026-04-10-explore-creator-card-field-gap",
+      "title": "ExploreCreatorCard Schema Field Gap Fix",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-explore-creator-card-field-gap.md",
+      "archived_record": "archived/plans/2026-04-10-explore-creator-card-field-gap.json"
+    },
+    {
+      "id": "2026-04-11-codegen-ref-resolution",
+      "title": "Codegen $ref resolution (common IDs + whole-schema refs)",
+      "done_at": "2026-04-11",
+      "plan_file": ".agents/plans/2026-04-11-codegen-ref-resolution.md",
+      "archived_record": "archived/plans/2026-04-11-codegen-ref-resolution.json"
+    },
+    {
+      "id": "2026-04-10-v1.1-specs-alignment-remediation",
+      "title": "v1.1 Specs Alignment Remediation (entitlements wire + knowledge refresh)",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-v1.1-specs-alignment-remediation.md",
+      "archived_record": "archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json"
+    },
+    {
+      "id": "2026-04-10-platform-http-schema-alignment",
+      "title": "Platform HTTP request schema alignment (publish / fork / snapshot)",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-platform-http-schema-alignment.md",
+      "archived_record": "archived/plans/2026-04-10-platform-http-schema-alignment.json"
+    },
+    {
+      "id": "2026-04-10-local-fs-layout-ssot-and-implementation",
+      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
+      "done_at": "2026-04-10",
+      "plan_file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
+      "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-reclassification-baseline",
+      "title": "V1.2 WS1: Version Reclassification Baseline",
+      "done_at": "2026-04-14",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-reclassification-baseline.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-local-only-identity",
+      "title": "V1.2 WS2a: local_only Dual Identity Strategy",
+      "done_at": "2026-04-14",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-local-only-identity.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-local-only-runtime",
+      "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
+      "done_at": "2026-04-14",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-local-only-runtime.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-local-only-runtime.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-soul-lifecycle",
+      "title": "V1.2 WS3a: Local SOUL Lifecycle",
+      "done_at": "2026-04-14",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-soul-lifecycle.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-soul-lifecycle.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-local-memory-pipeline",
+      "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
+      "done_at": "2026-04-14",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-runtime-compatibility",
+      "title": "V1.2 WS4: Runtime Compatibility",
+      "done_at": "2026-04-15",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-runtime-compatibility.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-runtime-compatibility.json"
+    },
+    {
+      "id": "2026-04-14-v1.2-regression-suite",
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
+      "done_at": "2026-04-15",
+      "plan_file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
+      "archived_record": "archived/plans/2026-04-14-v1.2-regression-suite.json"
+    },
+    {
+      "id": "2026-04-15-v1.3-preflight-implementation-plan",
+      "title": "V1.3 Preflight Implementation Plan",
+      "done_at": "2026-04-15",
+      "plan_file": ".agents/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
+      "archived_record": "archived/plans/2026-04-15-v1.3-preflight-implementation-plan.json"
+    },
+    {
+      "id": "2026-04-16-v1.3-creator-register-and-residuals",
+      "title": "V1.3 Creator Register CLI + V1.2 Residual Governance",
+      "done_at": "2026-04-17",
+      "plan_file": ".agents/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
+      "archived_record": "archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json"
+    }
+  ]
+}

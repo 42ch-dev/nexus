@@ -273,48 +273,20 @@ Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, 
 - **Content:** Full `plans[]` element as it existed when the plan was marked `Done` (including rich `metadata`), for audit and agent handoff.
 - **Relationship to residuals:** `archived/residuals/<plan-id>.json` stores **closed finding rows**; `archived/plans/<plan-id>.json` stores the **plan row snapshot**. Do not treat the plan snapshot as a second copy of **open** `residual_findings`.
 
-**Ultra-compressed `Done` row in `status.json` (after the team adopts this):**
+**Unified compression rule (repo policy, adopted):**
 
-**Minimal field set** (per plan-convention.md §430-436):
+- **Done snapshot path:** `{PLAN_DIR}/archived/plans/<plan-id>.json` (full `plans[]` row snapshot for audit/handoff).
+- **Done catalog path:** `{PLAN_DIR}/archived/plans-done.json` (minimal index of all `Done` plans).
+- **Done catalog fields (minimal):** `id`, `title`, `done_at`, `plan_file`, `archived_record`.
+- **Hot `status.json` behavior:** `plans[]` keeps only non-`Done` rows (`Todo` / `InProgress` / `InReview` / `Blocked`). Once a plan is `Done`, remove its row from `status.json.plans`.
+- **Lifecycle requirement (same change set as marking `Done`):**
+  1) write/update `archived/plans/<plan-id>.json` (full snapshot),  
+  2) append/update `archived/plans-done.json` (minimal index row),  
+  3) remove `Done` row from `status.json.plans`.
+- **Read path rule:** use `status.json` for active execution + program metadata; use `archived/plans-done.json` + `archived/plans/` for historical `Done` discovery and details.
+- **Residual relation:** `archived/residuals/<plan-id>.json` stores closed findings; `archived/plans/<plan-id>.json` stores the plan row snapshot. Do not mix these concerns.
 
-- **Required fields** (machine navigation): `id`, `status` (`"Done"`), `file`, `metadata`
-- **Optional fields** (human-friendly): `title`, `done_at`
-
-**Removed fields** (available in `archived/plans/<plan-id>.json`):
-
-- `owner`, `agents`, `progress`, `tags`, `created_at`, `updated_at`, `notes`
-- Bulky metadata fields: `gates`, `qc_status`, `tests`, `commits`, `description`, `scope`, etc.
-
-**Metadata content**:
-
-- `**archived_record`**: path relative to `{PLAN_DIR}`, e.g. `archived/plans/<plan-id>.json`
-- Optional one-line `**residual_summary`** only while that plan id still has **open** rows under `metadata.residual_findings`.
-
-**Example ultra-compressed Done plan**:
-
-```json
-{
-  "id": "2025-04-05-domain-models",
-  "status": "Done",
-  "file": ".agents/plans/2025-04-05-domain-models.md",
-  "metadata": {
-    "archived_record": "archived/plans/2025-04-05-domain-models.json",
-    "residual_summary": "1 open residuals"
-  },
-  "title": "Domain Models Implementation",
-  "done_at": "2026-04-06"
-}
-```
-
-**Important**: Once the snapshot is written, the hot row **MUST NOT** carry `gates`, `qc_status`, `tests`, `commits`, long `description`/`scope`, or any other bulky fields. All complete information is available via `metadata.archived_record` pointer.
-
-**When to write the snapshot:** Same change set as marking the plan `Done` and completing the pre-merge `status.json` updates (or immediately after merge), once compaction is adopted.
-
-**Optional index:** `{PLAN_DIR}/archived/plans/_index.json` — map plan id → relative path for tools that do not glob.
-
-**Optional rolling retention:** To shrink `status.json` further, retain only a **window** of `Done` slim rows in `plans[]` and list older ids only in `_index.json` / snapshot files. If you do this, document it here and update any scripts that assume every historical id appears in `plans[]`.
-
-**Adoption:** Full `Done` rows without snapshots remain valid until the team opts in. Before relying on compaction, align with automation or docs that expect full `metadata` on every `Done` plan.
+**Legacy note:** repositories may still contain older ultra-compressed `Done` rows in `status.json` from previous policy stages. Treat those as transitional data and migrate to the unified rule when touched.
 
 ### Accessing Plan Information
 
@@ -337,8 +309,14 @@ jq '.metadata.tech_debt_summary' .agents/plans/status.json
 # View detailed QC report
 cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-consolidated.md
 
-# If optional compaction is in use: full archived plan row
+# Full archived plan row (Done snapshot)
 cat .agents/plans/archived/plans/2025-04-05-domain-models.json
+
+# List all Done plans from minimal catalog
+jq '.plans[]' .agents/plans/archived/plans-done.json
+
+# Locate one Done plan pointer row
+jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/archived/plans-done.json
 ```
 
 ## Development Workflow
