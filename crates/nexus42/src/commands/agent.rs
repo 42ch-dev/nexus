@@ -19,11 +19,11 @@
 
 use std::path::PathBuf;
 
-use crate::acp::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
-use crate::acp::transport::AgentSpawner;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_acp_host::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
+use nexus_acp_host::transport::AgentSpawner;
 
 // ── Output format selector ──────────────────────────────────────────
 
@@ -140,7 +140,7 @@ async fn cmd_list(format_str: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_list_table(registry: &crate::acp::registry::Registry) {
+fn print_list_table(registry: &nexus_acp_host::registry::Registry) {
     if registry.agents.is_empty() {
         println!("No agents available in the registry.");
         return;
@@ -216,13 +216,13 @@ fn print_list_table(registry: &crate::acp::registry::Registry) {
 }
 
 fn print_list_json(
-    registry: &crate::acp::registry::Registry,
+    registry: &nexus_acp_host::registry::Registry,
     client: &RegistryClient,
 ) -> Result<()> {
     let meta = client.cache_dir().join("cache_meta.json");
     let cached_at = std::fs::read_to_string(&meta)
         .ok()
-        .and_then(|data| serde_json::from_str::<crate::acp::registry::CacheMeta>(&data).ok())
+        .and_then(|data| serde_json::from_str::<nexus_acp_host::registry::CacheMeta>(&data).ok())
         .map(|m| m.fetched_at)
         .unwrap_or_default();
 
@@ -386,18 +386,18 @@ fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
         Ok(("npx".to_string(), args))
     } else if let Some(ref binary) = agent.distribution.binary {
         // For binary agents, we need to determine the platform-specific binary
-        let platform = crate::acp::transport::Platform::current().ok_or_else(|| {
+        let platform = nexus_acp_host::transport::Platform::current().ok_or_else(|| {
             crate::errors::CliError::Other(
                 "Current platform is not supported by ACP binary distribution.".to_string(),
             )
         })?;
 
         let platform_binary = match platform {
-            crate::acp::transport::Platform::DarwinAarch64 => &binary.darwin_aarch64,
-            crate::acp::transport::Platform::DarwinX86_64 => &binary.darwin_x86_64,
-            crate::acp::transport::Platform::LinuxAarch64 => &binary.linux_aarch64,
-            crate::acp::transport::Platform::LinuxX86_64 => &binary.linux_x86_64,
-            crate::acp::transport::Platform::WindowsX86_64 => &binary.windows_x86_64,
+            nexus_acp_host::transport::Platform::DarwinAarch64 => &binary.darwin_aarch64,
+            nexus_acp_host::transport::Platform::DarwinX86_64 => &binary.darwin_x86_64,
+            nexus_acp_host::transport::Platform::LinuxAarch64 => &binary.linux_aarch64,
+            nexus_acp_host::transport::Platform::LinuxX86_64 => &binary.linux_x86_64,
+            nexus_acp_host::transport::Platform::WindowsX86_64 => &binary.windows_x86_64,
         };
 
         let pb = platform_binary.as_ref().ok_or_else(|| {
@@ -677,21 +677,21 @@ fn describe_distribution(agent: &AgentEntry) -> String {
             .unwrap_or_else(|| "npx".to_string()),
         "binary" => {
             if let Some(ref binary) = agent.distribution.binary {
-                if let Some(platform) = crate::acp::transport::Platform::current() {
+                if let Some(platform) = nexus_acp_host::transport::Platform::current() {
                     let has_platform = match platform {
-                        crate::acp::transport::Platform::DarwinAarch64 => {
+                        nexus_acp_host::transport::Platform::DarwinAarch64 => {
                             binary.darwin_aarch64.is_some()
                         }
-                        crate::acp::transport::Platform::DarwinX86_64 => {
+                        nexus_acp_host::transport::Platform::DarwinX86_64 => {
                             binary.darwin_x86_64.is_some()
                         }
-                        crate::acp::transport::Platform::LinuxAarch64 => {
+                        nexus_acp_host::transport::Platform::LinuxAarch64 => {
                             binary.linux_aarch64.is_some()
                         }
-                        crate::acp::transport::Platform::LinuxX86_64 => {
+                        nexus_acp_host::transport::Platform::LinuxX86_64 => {
                             binary.linux_x86_64.is_some()
                         }
-                        crate::acp::transport::Platform::WindowsX86_64 => {
+                        nexus_acp_host::transport::Platform::WindowsX86_64 => {
                             binary.windows_x86_64.is_some()
                         }
                     };
@@ -887,9 +887,9 @@ mod tests {
     // Test list table rendering with sample data
     #[test]
     fn print_list_table_renders() {
-        let registry = crate::acp::registry::Registry {
+        let registry = nexus_acp_host::registry::Registry {
             version: "1.0.0".to_string(),
-            agents: vec![crate::acp::registry::AgentEntry {
+            agents: vec![nexus_acp_host::registry::AgentEntry {
                 id: "test-agent".to_string(),
                 name: "Test Agent".to_string(),
                 version: "1.0.0".to_string(),
@@ -898,8 +898,8 @@ mod tests {
                 authors: None,
                 license: None,
                 icon: None,
-                distribution: crate::acp::registry::Distribution {
-                    npx: Some(crate::acp::registry::NpxDistribution {
+                distribution: nexus_acp_host::registry::Distribution {
+                    npx: Some(nexus_acp_host::registry::NpxDistribution {
                         package: "@scope/test@1.0.0".to_string(),
                         args: None,
                         env: None,
@@ -915,7 +915,7 @@ mod tests {
 
     #[test]
     fn print_list_table_empty() {
-        let registry = crate::acp::registry::Registry {
+        let registry = nexus_acp_host::registry::Registry {
             version: "1.0.0".to_string(),
             agents: vec![],
             extensions: None,
@@ -925,7 +925,7 @@ mod tests {
 
     #[test]
     fn print_show_details_renders() {
-        let agent = crate::acp::registry::AgentEntry {
+        let agent = nexus_acp_host::registry::AgentEntry {
             id: "claude-acp".to_string(),
             name: "Claude Agent".to_string(),
             version: "0.18.0".to_string(),
@@ -934,8 +934,8 @@ mod tests {
             authors: Some(vec!["Anthropic".to_string()]),
             license: Some("proprietary".to_string()),
             icon: None,
-            distribution: crate::acp::registry::Distribution {
-                npx: Some(crate::acp::registry::NpxDistribution {
+            distribution: nexus_acp_host::registry::Distribution {
+                npx: Some(nexus_acp_host::registry::NpxDistribution {
                     package: "@scope/claude@0.18.0".to_string(),
                     args: None,
                     env: None,
@@ -948,7 +948,7 @@ mod tests {
 
     #[test]
     fn print_show_details_binary_agent() {
-        let agent = crate::acp::registry::AgentEntry {
+        let agent = nexus_acp_host::registry::AgentEntry {
             id: "codex-acp".to_string(),
             name: "Codex Agent".to_string(),
             version: "0.9.4".to_string(),
@@ -957,9 +957,9 @@ mod tests {
             authors: None,
             license: None,
             icon: None,
-            distribution: crate::acp::registry::Distribution {
+            distribution: nexus_acp_host::registry::Distribution {
                 npx: None,
-                binary: Some(crate::acp::registry::BinaryDistribution {
+                binary: Some(nexus_acp_host::registry::BinaryDistribution {
                     darwin_aarch64: None,
                     darwin_x86_64: None,
                     linux_aarch64: None,
@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn describe_distribution_npx() {
-        let agent = crate::acp::registry::AgentEntry {
+        let agent = nexus_acp_host::registry::AgentEntry {
             id: "test".to_string(),
             name: "Test".to_string(),
             version: "1.0.0".to_string(),
@@ -983,8 +983,8 @@ mod tests {
             authors: None,
             license: None,
             icon: None,
-            distribution: crate::acp::registry::Distribution {
-                npx: Some(crate::acp::registry::NpxDistribution {
+            distribution: nexus_acp_host::registry::Distribution {
+                npx: Some(nexus_acp_host::registry::NpxDistribution {
                     package: "@scope/pkg@1.0.0".to_string(),
                     args: None,
                     env: None,
@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn describe_distribution_binary() {
-        let agent = crate::acp::registry::AgentEntry {
+        let agent = nexus_acp_host::registry::AgentEntry {
             id: "test".to_string(),
             name: "Test".to_string(),
             version: "1.0.0".to_string(),
@@ -1008,9 +1008,9 @@ mod tests {
             authors: None,
             license: None,
             icon: None,
-            distribution: crate::acp::registry::Distribution {
+            distribution: nexus_acp_host::registry::Distribution {
                 npx: None,
-                binary: Some(crate::acp::registry::BinaryDistribution {
+                binary: Some(nexus_acp_host::registry::BinaryDistribution {
                     darwin_aarch64: None,
                     darwin_x86_64: None,
                     linux_aarch64: None,

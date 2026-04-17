@@ -3,7 +3,6 @@
 //! A command-line interface for managing creative worlds, manuscripts,
 //! and Creator entities through the Nexus platform.
 
-mod acp;
 mod api;
 mod auth;
 mod challenge;
@@ -14,6 +13,7 @@ mod db;
 mod errors;
 mod manuscript;
 mod paths;
+mod session_capture;
 
 use clap::{Parser, Subcommand};
 use commands::{

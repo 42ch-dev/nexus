@@ -1,9 +1,8 @@
 //! Nexus42 CLI Library
 //!
 //! This library provides the core functionality for the nexus42 CLI,
-//! including ACP integration, registry management, and agent transport.
+//! including registry management and agent transport.
 
-pub mod acp;
 pub mod api;
 pub mod auth;
 pub mod challenge;
@@ -14,6 +13,7 @@ pub mod db;
 pub mod errors;
 pub mod manuscript;
 pub mod paths;
+pub mod session_capture;
 
 // Re-export commonly used types for convenience
 pub use config::CliConfig;

@@ -4,6 +4,7 @@ members = [
     "crates/nexus-contracts",
     "crates/nexus-domain",
     "crates/nexus-home-layout",
+    "crates/nexus-orchestration",
     "crates/nexus42",
     "crates/nexus42d",
     "crates/nexus-sync",
@@ -47,3 +48,13 @@ strum = { version = "0.26", features = ["derive"] }
 pulldown-cmark = "0.12"
 pulldown-cmark-frontmatter = "0.2"
 serde_yaml = "0.9"
+async-trait = "0.1"
+tempfile = "3"
+jsonrpsee = { version = "0.26", default-features = false, features = ["server-core", "client-core", "macros"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+toml = "0.8"
+statig = { version = "0.3", features = ["async"] }
+futures-util = "0.3"
