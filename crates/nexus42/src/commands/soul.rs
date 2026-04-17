@@ -5,7 +5,9 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_domain::soul_io;
-use nexus_local_db::{upsert_soul_meta as db_upsert_soul_meta, get_soul_meta as db_get_soul_meta, SoulMeta};
+use nexus_local_db::{
+    get_soul_meta as db_get_soul_meta, upsert_soul_meta as db_upsert_soul_meta, SoulMeta,
+};
 
 #[derive(Debug, Subcommand)]
 pub enum SoulCommand {

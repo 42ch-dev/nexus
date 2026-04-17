@@ -35,7 +35,10 @@ impl OutboxPool {
     ///
     /// # Errors
     /// Returns `LocalDbError` if the pool cannot be created (e.g. invalid path)
-    pub async fn new(db_path: &Path, max_size: usize) -> Result<Self, nexus_local_db::LocalDbError> {
+    pub async fn new(
+        db_path: &Path,
+        max_size: usize,
+    ) -> Result<Self, nexus_local_db::LocalDbError> {
         let url = format!("sqlite://{}?mode=rwc", db_path.display());
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(max_size as u32)
@@ -78,7 +81,9 @@ mod tests {
     #[tokio::test]
     async fn pool_creates_successfully() {
         let (_tmp, db_path) = create_test_db();
-        let pool = OutboxPool::new(&db_path, 2).await.expect("Pool creation should succeed");
+        let pool = OutboxPool::new(&db_path, 2)
+            .await
+            .expect("Pool creation should succeed");
         // Pool is usable
         let _ = pool.inner();
     }
@@ -100,11 +105,10 @@ mod tests {
             .await
             .unwrap();
 
-        let row: (String,) =
-            sqlx::query_as("SELECT val FROM test WHERE id = 1")
-                .fetch_one(pool.inner())
-                .await
-                .unwrap();
+        let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE id = 1")
+            .fetch_one(pool.inner())
+            .await
+            .unwrap();
         assert_eq!(row.0, "hello");
     }
 
@@ -131,12 +135,11 @@ mod tests {
                         .await
                         .unwrap();
 
-                    let row: (String,) =
-                        sqlx::query_as("SELECT val FROM test WHERE val = ?1")
-                            .bind(&task_val)
-                            .fetch_one(pool.inner())
-                            .await
-                            .unwrap();
+                    let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE val = ?1")
+                        .bind(&task_val)
+                        .fetch_one(pool.inner())
+                        .await
+                        .unwrap();
                     format!("got: {}", row.0)
                 })
             })

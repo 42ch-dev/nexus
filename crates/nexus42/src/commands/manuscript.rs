@@ -226,12 +226,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("test.db");
         let pool = crate::db::Schema::init(&db_path).await.unwrap();
-        let result: Option<String> = sqlx::query_scalar(
-            "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-        )
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
+        let result: Option<String> =
+            sqlx::query_scalar("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
         assert!(result.is_none());
     }
 
@@ -241,19 +240,16 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = crate::db::Schema::init(&db_path).await.unwrap();
 
-        sqlx::query(
-            "INSERT INTO workspace_meta (key, value) VALUES ('manuscript_phase', 'draft')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('manuscript_phase', 'draft')")
+            .execute(&pool)
+            .await
+            .unwrap();
 
-        let result: Option<String> = sqlx::query_scalar(
-            "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-        )
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
+        let result: Option<String> =
+            sqlx::query_scalar("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
         assert_eq!(result, Some("draft".to_string()));
     }
 

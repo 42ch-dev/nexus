@@ -118,7 +118,9 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
 
     let pool = crate::db::Schema::init(&db_path).await?;
 
-    let rows: Vec<(String, String, String, String, String, String)> = if let Some(filter) = status_filter {
+    let rows: Vec<(String, String, String, String, String, String)> = if let Some(filter) =
+        status_filter
+    {
         println!("  Filter: status={}", filter);
         sqlx::query_as(
             "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ?1 ORDER BY created_at DESC",
@@ -238,12 +240,11 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
         .await
         .unwrap_or(0);
 
-        let with_content: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM reference_sources WHERE content IS NOT NULL",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap_or(0);
+        let with_content: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM reference_sources WHERE content IS NOT NULL")
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0);
 
         println!("Reference Sources Summary:");
         println!("  Total scanned: {}", count);

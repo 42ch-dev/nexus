@@ -75,11 +75,10 @@ async fn status() -> Result<()> {
 
     // List existing tables
     println!("Tables:");
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-    )
-    .fetch_all(&pool)
-    .await?;
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(&pool)
+            .await?;
 
     if tables.is_empty() {
         println!("  (none)");
