@@ -39,9 +39,10 @@ impl SessionDigest {
         tool_calls: usize,
         last_context: &str,
     ) -> Self {
-        // Truncate last_context to 200 chars
-        let last_context = if last_context.len() > 200 {
-            format!("{}...", &last_context[..197])
+        // Truncate last_context to 200 chars (char-safe for UTF-8)
+        let last_context = if last_context.chars().count() > 200 {
+            let truncated: String = last_context.chars().take(197).collect();
+            format!("{}...", truncated)
         } else {
             last_context.to_string()
         };
@@ -185,21 +186,29 @@ impl SessionCapture {
     /// log a warning and continue without blocking session shutdown.
     ///
     /// The timeout is intentionally short (5s) to avoid delaying shutdown.
+    ///
+    /// If `pending_id` is provided, it is used as-is; otherwise a new one is
+    /// generated internally. This allows callers to guarantee the same ID is
+    /// used for both daemon submission and local fallback.
     pub async fn submit_to_daemon(
         &self,
         daemon_client: &DaemonClient,
         digest: &SessionDigest,
-    ) -> bool {
-        let pending_id = format!(
-            "pending_{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")
-        );
+        pending_id: Option<&str>,
+    ) -> (bool, String) {
+        let pending_id = match pending_id {
+            Some(id) => id.to_string(),
+            None => format!(
+                "pending_{}",
+                uuid::Uuid::new_v4().to_string().replace('-', "")
+            ),
+        };
         let task_kind = self.detect_task_kind();
         let raw_digest = digest.to_json();
         let created_at = chrono::Utc::now().to_rfc3339();
 
         let request = CreatePendingReviewRequest {
-            pending_id,
+            pending_id: pending_id.clone(),
             session_id: self.session_id.clone(),
             creator_id: self.creator_id.clone(),
             world_id: self.world_id.clone(),
@@ -232,7 +241,7 @@ impl SessionCapture {
                     pending_id = %response.pending_id,
                     "Session-end capture submitted successfully"
                 );
-                true
+                (true, pending_id)
             }
             Err(e) => {
                 warn!(
@@ -240,7 +249,7 @@ impl SessionCapture {
                     error = %e,
                     "Failed to submit session-end capture — daemon unavailable, continuing"
                 );
-                false
+                (false, pending_id)
             }
         }
     }
@@ -337,6 +346,9 @@ pub fn pending_captures_dir() -> Option<PathBuf> {
 ///
 /// Spawns a background task to submit the capture without blocking.
 /// If the daemon is unavailable, persists to a local file for later processing.
+///
+/// The `pending_id` is generated once and used for both daemon submission
+/// and local fallback, ensuring consistent identity.
 pub fn spawn_submit_capture(
     daemon_client: DaemonClient,
     capture: SessionCapture,
@@ -348,15 +360,18 @@ pub fn spawn_submit_capture(
             uuid::Uuid::new_v4().to_string().replace('-', "")
         );
 
-        let success = capture.submit_to_daemon(&daemon_client, &digest).await;
+        let (success, returned_id) = capture
+            .submit_to_daemon(&daemon_client, &digest, Some(&pending_id))
+            .await;
 
         if !success {
             // Daemon unavailable — persist locally for later processing (R8)
-            match save_capture_locally(&pending_id, &capture, &digest) {
+            // Use the same pending_id that was sent to the daemon
+            match save_capture_locally(&returned_id, &capture, &digest) {
                 Ok(path) => {
                     info!(
                         session_id = %capture.session_id(),
-                        pending_id = %pending_id,
+                        pending_id = %returned_id,
                         path = %path.display(),
                         "Session capture persisted locally — daemon was unavailable"
                     );
@@ -364,7 +379,7 @@ pub fn spawn_submit_capture(
                 Err(e) => {
                     warn!(
                         session_id = %capture.session_id(),
-                        pending_id = %pending_id,
+                        pending_id = %returned_id,
                         error = %e,
                         "Failed to persist session capture locally — data may be lost"
                     );
@@ -464,8 +479,10 @@ mod tests {
             Duration::from_millis(200),
         );
 
-        let result = capture.submit_to_daemon(&daemon_client, &digest).await;
-        assert!(!result);
+        let (success, _pending_id) = capture
+            .submit_to_daemon(&daemon_client, &digest, None)
+            .await;
+        assert!(!success);
     }
 
     #[test]
@@ -523,7 +540,10 @@ mod tests {
 
         let result = save_capture_to_dir(&nested, "pending_nested", &capture, &digest);
 
-        assert!(result.is_ok(), "should create nested directories: {result:?}");
+        assert!(
+            result.is_ok(),
+            "should create nested directories: {result:?}"
+        );
         assert!(result.unwrap().exists());
     }
 }

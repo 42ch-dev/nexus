@@ -80,12 +80,10 @@ impl AuthStore {
     /// and placeholder token fields (the token is populated separately during
     /// authentication).
     #[allow(dead_code)]
-    pub fn store_creator_api_key(
-        &mut self,
-        creator_id: &str,
-        api_key: &str,
-    ) -> Result<()> {
-        let creators = self.creators.get_or_insert_with(std::collections::HashMap::new);
+    pub fn store_creator_api_key(&mut self, creator_id: &str, api_key: &str) -> Result<()> {
+        let creators = self
+            .creators
+            .get_or_insert_with(std::collections::HashMap::new);
 
         if let Some(existing) = creators.get_mut(creator_id) {
             existing.creator_api_key = Some(api_key.to_string());
@@ -180,9 +178,7 @@ mod tests {
             .expect("store");
 
         // In-memory retrieval
-        let key = store
-            .get_creator_api_key("crt_test")
-            .expect("get");
+        let key = store.get_creator_api_key("crt_test").expect("get");
         assert_eq!(key, Some("nexus_live_test_key".to_string()));
     }
 
@@ -195,7 +191,10 @@ mod tests {
 
         let creators = store.creators.as_ref().expect("creators map exists");
         let state = creators.get("crt_new").expect("entry exists");
-        assert_eq!(state.creator_api_key, Some("nexus_live_new_key".to_string()));
+        assert_eq!(
+            state.creator_api_key,
+            Some("nexus_live_new_key".to_string())
+        );
         assert_eq!(state.creator_id, "crt_new");
         assert!(state.access_token.is_empty());
     }
@@ -273,9 +272,7 @@ mod tests {
         let _ = store.store_creator_api_key("crt_file_test", "nexus_live_file_key");
 
         // In-memory retrieval should always work after store
-        let key = store
-            .get_creator_api_key("crt_file_test")
-            .expect("get");
+        let key = store.get_creator_api_key("crt_file_test").expect("get");
         assert_eq!(key, Some("nexus_live_file_key".to_string()));
     }
 }

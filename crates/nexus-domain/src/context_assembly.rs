@@ -295,18 +295,23 @@ pub fn truncate_with_budget(
 }
 
 /// Truncate text to approximately `max_chars` characters at a word boundary.
+///
+/// Uses char-safe iteration to avoid panicking on multi-byte UTF-8 characters.
 fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
     }
-    if text.len() <= max_chars {
+    // Use char-safe counting to determine if truncation is needed
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
         return text.to_string();
     }
-    // Find the last space before max_chars to break at a word boundary
-    let truncate_at = text[..max_chars.min(text.len())].rfind(' ');
-    match truncate_at {
-        Some(pos) if pos > 0 => format!("{}…", &text[..pos]),
-        _ => format!("{}…", &text[..max_chars.min(text.len())]),
+    // Take first max_chars characters (char-safe, not byte-safe)
+    let truncated: String = text.chars().take(max_chars).collect();
+    // Find the last space to break at a word boundary
+    match truncated.rfind(' ') {
+        Some(pos) if pos > 0 => format!("{}…", &truncated[..pos]),
+        _ => format!("{}…", truncated),
     }
 }
 

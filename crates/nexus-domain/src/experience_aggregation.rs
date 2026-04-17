@@ -86,8 +86,7 @@ pub async fn aggregate_experience(
 
     let count = entries.len();
 
-    let (experience_markdown, used_acp) =
-        generate_experience_markdown(&entries, synthesizer).await;
+    let (experience_markdown, used_acp) = generate_experience_markdown(&entries, synthesizer).await;
 
     // Update SOUL.md
     let mut soul = crate::soul_io::load(home, creator_id)?;
@@ -114,8 +113,7 @@ pub async fn aggregate_experience_preview(
 
     let count = entries.len();
 
-    let (experience_markdown, used_acp) =
-        generate_experience_markdown(&entries, synthesizer).await;
+    let (experience_markdown, used_acp) = generate_experience_markdown(&entries, synthesizer).await;
 
     Ok(AggregationResult {
         experience_markdown,
@@ -225,14 +223,17 @@ fn format_kind_label(kind: &str) -> String {
 }
 
 /// Truncate body text to approximately `max_chars` characters.
+///
+/// Uses char-safe iteration to avoid panicking on multi-byte UTF-8 characters.
 fn truncate_body(body: &str, max_chars: usize) -> String {
-    if body.len() <= max_chars {
+    if body.chars().count() <= max_chars {
         return body.to_string();
     }
-    let end = &body[..max_chars];
+    // Take first max_chars characters (char-safe, not byte-safe)
+    let end: String = body.chars().take(max_chars).collect();
     // Break at last space before limit
     if let Some(pos) = end.rfind(' ') {
-        format!("{}...", &body[..pos])
+        format!("{}...", &end[..pos])
     } else {
         format!("{}...", end)
     }
