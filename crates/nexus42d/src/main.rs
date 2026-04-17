@@ -234,8 +234,7 @@ async fn main() -> anyhow::Result<()> {
                     Ok(sessions) => {
                         let count = sessions.len();
                         for s in sessions {
-                            let _ =
-                                engine.signal(&s.session_id, EngineSignal::Cancel).await;
+                            let _ = engine.signal(&s.session_id, EngineSignal::Cancel).await;
                         }
                         tracing::info!("cancelled {} active session(s)", count);
                     }
@@ -278,7 +277,9 @@ async fn main() -> anyhow::Result<()> {
                 axum::serve(listener, app)
                     .with_graceful_shutdown({
                         let notify = Arc::clone(&shutdown_notify);
-                        async move { notify.notified().await; }
+                        async move {
+                            notify.notified().await;
+                        }
                     })
                     .await?;
             }

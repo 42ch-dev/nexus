@@ -5,7 +5,9 @@
 //! - `restart_durability_e2e`: verifies session survives engine restart.
 
 use graph_flow::SessionStorage;
-use nexus_orchestration::{system_preset, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_orchestration::{
+    system_preset, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine,
+};
 use std::sync::Arc;
 
 /// Run the system preset graph and verify it reaches terminal state.
