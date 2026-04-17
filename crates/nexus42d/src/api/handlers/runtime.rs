@@ -3,7 +3,8 @@
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use nexus_contracts::local::acp_runtime::daemon_status_v2::{
-    DaemonStatusV2, HealthStatus, LifecycleState, SubsystemHealth, SubsystemHealthEntry,
+    DaemonStatusV2, DegradedInfo, HealthStatus, LifecycleState, SubsystemHealth,
+    SubsystemHealthEntry,
 };
 use serde::Serialize;
 use tracing::info;
@@ -120,7 +121,10 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         uptime_ms: Some(uptime_ms),
         started_at: None, // Could be set from lifecycle Running.entry timestamp
         pid: Some(pid),
-        degraded: None,
+        degraded: Some(DegradedInfo {
+            subsystems: vec![],
+            reasons: vec![],
+        }),
         subsystems: Some(subsystems),
         exit_code: exit_code.map(|c| c as i64),
         last_error: None, // Could be set from lifecycle in Failed state
