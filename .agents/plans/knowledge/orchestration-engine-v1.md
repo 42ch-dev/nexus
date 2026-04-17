@@ -11,15 +11,15 @@
 - [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md) — full 6-state statig HSM closing TD-9
 - [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
 
-**Non-goals** (explicit — live in a future B-track spec):
+**Non-goals** (explicit):
 
-- Creator **Schedule** data model (multi-preset queueing, priority, concurrency, pause/resume across restarts **at Schedule level**)
-- CLI command family for Schedule injection (`nexus42 schedule add/update/inspect/remove`)
-- `seed prompt + user edits + iterated experience` → stable core-context derivation and versioning
-- Preset third-party registry / signing / publish
-- Full `schemas/` vs local-crate boundary refactor (planned as **WS5** in [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md); parallel to WS2 of that compass)
+- Creator **Schedule** (multi-Schedule queueing, priority, preemption, CRUD by ID, `core_context` derivation and versioning) — **now folded into V1.4 as WS7**, designed separately in [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md). This document defines the engine primitives that WS7 builds on.
+- LLM-driven `core_context` summarisation / auto-iteration — V1.4 reserves the data-model variant but does not implement the capability (see [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §11); V1.5+.
+- Schedule cron / wall-clock triggers — V1.5+ (schema ready in V1.4).
+- Preset third-party registry / signing / publish — V1.5+.
+- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in [schemas-boundary-v1.md](schemas-boundary-v1.md); parallel to WS2 of that compass.
 
-> This document is the **A-track** output of the 2026-04-17 brainstorming session (orchestration engine design only). The **B-track** (Schedules + stable core-context) is acknowledged but designed separately; open questions deferred to B are listed verbatim in §11. The `schemas/` boundary refactor — originally noted here as a "C-track parallel small plan" — has been formally folded into V1.4 as **WS5** of the [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) and is no longer described in detail in this spec.
+> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 ([schemas-boundary-v1.md](schemas-boundary-v1.md)); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
 
 ---
 
@@ -327,7 +327,7 @@ All capabilities below are registered at `nexus42d` startup. Adding a new capabi
 
 ### 5.3 Capability input/output schemas
 
-Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per the wire/local rule formalised in compass WS5) and do **not** live under `schemas/` — they are not wire contracts.
+Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per the wire/local rule in [schemas-boundary-v1.md](schemas-boundary-v1.md) §2) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
 ### 5.4 Capability errors
 
@@ -656,13 +656,27 @@ pub fn load_preset(
 
 ### 9.2 Creator Schedule
 
-- One `Session` per `(creator_id, preset_id, instance_id)`.
-- B-track owns: how many concurrent per creator, priority, queueing, auto-start on creator activation, etc.
-- A-track commits: engine APIs (`new_session`, `run_step`, `signal`, `list_active`) are sufficient for any Schedule policy B-track designs; no A-track lock-in on concurrency beyond §6.2 "one worker per creator" (which constrains ACP-kind steps, not engine sessions).
+A Creator Schedule is a persistent, user-addressable wrapper around zero or one active engine `Session`. It adds user-facing CRUD (`schedule add/edit/list/inspect/remove`), multi-Schedule per creator, dependency chains, and immutable `core_context` versioning that the engine reads at each state transition.
+
+- **Design SSOT**: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md).
+- **Session relationship**: a Schedule holds `current_session_id: Option<SessionId>` pointing at an active row in `orchestration_sessions` while `Schedule.status == Running`; terminal Schedules retain the Session row for history.
+- **Engine primitives consumed** — `new_session`, `run_step`, `signal`, `list_active` are sufficient for the supervisor module defined in WS7; this spec adds no new engine API.
+- **Concurrency contract** — multi-Schedule per creator is supported; at most one ACP-calling Schedule may touch the worker at any instant (§6.2 "one worker per creator" constraint). Capability-only Schedules may fully parallel.
+- **Supervisor module** — `crates/nexus-orchestration/src/schedule/` (new in WS7) owns the Pending → Running admission logic, dependency resolution, and signal propagation. It is driven by engine session-terminal events.
 
 ### 9.3 Relation between the two
 
-Both are **just Sessions** in SQLite `orchestration_sessions`. The distinction is a `kind` column (`system` | `creator`) kept for observability / CLI filters. Engine code paths are shared.
+Both execute through the same engine using the same `Session` primitive. Differences are administrative, not runtime:
+
+| Aspect                          | System Schedule                          | Creator Schedule                                         |
+| ------------------------------- | ---------------------------------------- | -------------------------------------------------------- |
+| Identity                        | Fixed ID `_system.maintenance`           | ULID per Schedule                                        |
+| Origin                          | Embedded preset in binary                | User or CLI invocation                                   |
+| Lifecycle owner                 | statig HSM (Running.entry starts it)     | `ScheduleSupervisor` (Pending → Running admission)       |
+| `creator_id` in `orchestration_sessions` row | NULL or reserved "system" value | Real `creator_id` FK                                     |
+| Observability row               | `kind: system`                           | `kind: creator`                                          |
+| User CRUD                       | Not user-editable                        | Full CRUD per `nexus42 schedule *`                       |
+| Holds `core_context`?           | No (the preset does not use per-Schedule core context) | Yes, versioned immutable series                 |
 
 ---
 
@@ -762,26 +776,25 @@ In the same change window as each phase:
 - Phase 2 → commit §4.3 (Local API additions) in the same spec.
 - Phase 4 → commit [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md).
 - Phase 3 → this document updated: move sections to "Delivered" once implemented.
+- **Phase 5b (new)** → WS7 lands [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) implementation; engine consumes the `ScheduleSupervisor` signal path added in that spec's §4.
 - [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) §2.6 row for TD-9 updated from "Partial" to "Resolved (v2)".
 
 ---
 
-## 11. Open Questions (deferred to B-track)
+## 11. Open Questions — Reconciliation Status (was "deferred to B-track")
 
-The following questions are *known* architectural inputs whose answers will constrain pieces of this document. Each carries a pointer to the A-track section that needs revisiting once answered.
+The following questions were originally parked as B-track in this document. After the 2026-04-17 scope decision that folds B-track into V1.4 as WS7, status is:
 
-| ID    | Question                                                                                               | Impacts                                                     |
-| ----- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| OQ-1  | How many concurrent Schedules can one creator have active at once?                                      | §6.2 (one-worker-per-creator), §9.2                         |
-| OQ-2  | Schedule priority and preemption semantics (can a high-priority Schedule pause an in-flight one?)       | §4.5 signals, §9.3                                          |
-| OQ-3  | What happens when all creator Schedules complete — does the creator sit idle, or enter a default loop? | §6.1 worker lazy-stop policy, §9.2                          |
-| OQ-4  | `seed_prompt + user_edits + iterated_experience` → *stable core-context* derivation and versioning      | §7.4 `preset.input` wiring; may need new capability family  |
-| OQ-5  | Semantics of `nexus42 schedule add/update/remove/inspect` — can users edit an in-flight Schedule's input | §7.4 `preset.input` immutability guarantees; §4.5 signals   |
-| OQ-6  | Timer / clock model — who owns wall-clock wake-up for `timer.wait_until` and `exit_when.timer`?         | §5.2 `timer.wait_until`, §4.4 `TimerWaitTask`               |
-| OQ-7  | Multi-agent per creator (worker hosts > 1 agent) — defer or anticipate                                  | §6.2 MVP lock; likely V1.5+                                 |
-| OQ-8  | User-authored capabilities (shell / WASM plugin) — policy and ABI                                       | §5 registry extensibility; V1.5+                            |
-
-These are listed **verbatim** so B-track authors can copy them into that wave-0 spec.
+| ID    | Question                                                                                               | V1.4 Resolution                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| OQ-1  | How many concurrent Schedules can one creator have active at once?                                      | **Answered in WS7** — multi-Schedule; concurrency declared per-add; ACP-calling Schedules serialised per-creator via worker mutex. See [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §5. |
+| OQ-2  | Schedule priority and preemption semantics                                                              | **Answered in WS7** — no priority / no preemption in V1.4; explicit `schedule pause/resume/cancel` only. See §2 decisions in the schedule spec. |
+| OQ-3  | What happens when all creator Schedules complete                                                        | **Answered in WS7** — creator returns to idle (no default loop). See §2 decisions.                    |
+| OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §6 + §11. |
+| OQ-5  | `nexus42 schedule add/update/remove/inspect` semantics — editing in-flight                              | **Answered in WS7** — full CRUD; in-flight edits accepted but take effect at next state transition ("core_context is stable during execution"). See §3.3 + §6.4. |
+| OQ-6  | Timer / clock model for wall-clock triggers                                                             | **Partially answered** — V1.4 on-demand only; `scheduled_at` column reserved; V1.5 adds clock poller zero-migration. See WS7 §2 + §10. |
+| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13).                                                            |
+| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13).                                                            |
 
 ---
 

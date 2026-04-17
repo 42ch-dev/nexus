@@ -136,7 +136,9 @@ Interactive CLI still uses direct stdio; no Local API additions for that path.
 
 ### 4.3 (new in v2) — Orchestration control endpoints
 
-The following endpoints are **added** by the V1.4 orchestration track ([orchestration-engine-v1.md](orchestration-engine-v1.md) §10.3). They live on `nexus42d` alongside existing `/v1/local/workspace`, `/v1/local/daemon/status`, `/v1/local/runtime/*`.
+The following endpoints are **added** by the V1.4 orchestration track ([orchestration-engine-v1.md](orchestration-engine-v1.md) §10.3) and by WS7 ([creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §9). They live on `nexus42d` alongside existing `/v1/local/workspace`, `/v1/local/daemon/status`, `/v1/local/runtime/*`.
+
+**Engine session endpoints (WS2):**
 
 | Method | Path                                                            | Purpose                                                                  |
 | ------ | --------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -147,7 +149,20 @@ The following endpoints are **added** by the V1.4 orchestration track ([orchestr
 | GET    | `/v1/local/orchestration/presets`                               | List loadable preset bundles (embedded + filesystem)                     |
 | POST   | `/v1/local/orchestration/presets/{id}:reload`                   | Force loader cache invalidation                                          |
 
-Schemas (new, wire): `schemas/acp-runtime/orchestration-session.schema.json` plus request/response schemas co-located under the same directory. These are wire contracts — subject to the full codegen + `verify-codegen` pipeline.
+**Creator Schedule endpoints (WS7):**
+
+| Method | Path                                                                         | Purpose                                                             |
+| ------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| GET    | `/v1/local/orchestration/schedules`                                          | List Schedules; filters `?creator_id=`, `?status=`                  |
+| GET    | `/v1/local/orchestration/schedules/{schedule_id}`                            | Schedule detail + current core_context preview                      |
+| POST   | `/v1/local/orchestration/schedules`                                          | Add Schedule (`nexus42 schedule add` backs this)                    |
+| PATCH  | `/v1/local/orchestration/schedules/{schedule_id}/core-context`               | Apply `EditOp` (user edit of core_context)                          |
+| POST   | `/v1/local/orchestration/schedules/{schedule_id}/signal`                     | `{"signal": "start" \| "pause" \| "resume" \| "cancel" \| "advance"}` |
+| GET    | `/v1/local/orchestration/schedules/{schedule_id}/core-context`               | Current core_context content                                        |
+| GET    | `/v1/local/orchestration/schedules/{schedule_id}/core-context-history`       | Full derivation trace (meta by default, content with flag)          |
+| DELETE | `/v1/local/orchestration/schedules/{schedule_id}`                            | Remove Schedule (only if terminal)                                  |
+
+**Wire classification (per [schemas-boundary-v1.md](schemas-boundary-v1.md)):** all endpoints above are **local-only HTTP** (CLI↔daemon, same machine; platform never observes them). Request / response Rust types live as hand-written code under `crates/nexus-contracts/src/local/orchestration/` and `crates/nexus-contracts/src/local/schedule/http.rs` — **not** codegen'd, **not** in `schemas/`.
 
 ### 4.4 (deferred, as v1) — ACP tool mediation endpoints
 
