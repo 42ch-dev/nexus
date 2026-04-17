@@ -131,7 +131,7 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             Ok(())
         }
         ManuscriptCommand::Status => {
-            let phase = ManuscriptManager::get_from_db(&workspace_root)?;
+            let phase = ManuscriptManager::get_from_db(&workspace_root).await?;
             match phase {
                 Some(p) => {
                     println!("Manuscript Status:");
@@ -147,14 +147,14 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             Ok(())
         }
         ManuscriptCommand::Phase { title, phase } => {
-            let conn = open_workspace_db(&workspace_root)?;
-            let target = manager.set_phase(&title, &phase, &conn)?;
+            let pool = open_workspace_db(&workspace_root).await?;
+            let target = manager.set_phase(&title, &phase, &pool).await?;
             println!("Manuscript '{}' phase set to: {:?}", title, target);
             Ok(())
         }
         ManuscriptCommand::Promote { title, strict } => {
-            let conn = open_workspace_db(&workspace_root)?;
-            let new_phase = manager.promote(&title, strict, &conn)?;
+            let pool = open_workspace_db(&workspace_root).await?;
+            let new_phase = manager.promote(&title, strict, &pool).await?;
             println!("Manuscript '{}' promoted to: {:?}", title, new_phase);
             if strict {
                 println!("  Strict mode: all validation checks passed");
@@ -165,8 +165,8 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             title,
             check_content,
         } => {
-            let conn = open_workspace_db(&workspace_root)?;
-            let checks = manager.verify(&title, check_content, &conn)?;
+            let pool = open_workspace_db(&workspace_root).await?;
+            let checks = manager.verify(&title, check_content, &pool).await?;
             println!("Verifying manuscript '{}'...", title);
             for check in &checks {
                 println!("  {}", check);
@@ -204,7 +204,7 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
 }
 
 /// Open the workspace SQLite database
-fn open_workspace_db(workspace_root: &std::path::Path) -> Result<rusqlite::Connection> {
+async fn open_workspace_db(workspace_root: &std::path::Path) -> Result<nexus_local_db::SqlitePool> {
     let nexus_dir = crate::config::workspace_nexus_dir(workspace_root);
     let db_path = nexus_dir.join("state.db");
 
@@ -213,47 +213,47 @@ fn open_workspace_db(workspace_root: &std::path::Path) -> Result<rusqlite::Conne
         return Err(CliError::WorkspaceNotInitialized);
     }
 
-    let conn = rusqlite::Connection::open(&db_path)?;
-    crate::db::Schema::init(&conn)?;
-    Ok(conn)
+    let pool = crate::db::Schema::init(&db_path).await?;
+    Ok(pool)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_get_phase_from_empty_db() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::db::Schema::init(&conn).unwrap();
-        let result: Option<String> = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
+    #[tokio::test]
+    async fn test_get_phase_from_empty_db() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = crate::db::Schema::init(&db_path).await.unwrap();
+        let result: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_get_phase_after_set() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::db::Schema::init(&conn).unwrap();
+    #[tokio::test]
+    async fn test_get_phase_after_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let pool = crate::db::Schema::init(&db_path).await.unwrap();
 
-        conn.execute(
+        sqlx::query(
             "INSERT INTO workspace_meta (key, value) VALUES ('manuscript_phase', 'draft')",
-            [],
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
-        let result: Option<String> = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
+        let result: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
         assert_eq!(result, Some("draft".to_string()));
     }
 

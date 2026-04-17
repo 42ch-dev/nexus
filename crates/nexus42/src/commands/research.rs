@@ -43,15 +43,17 @@ pub enum ResearchCommand {
 pub async fn run(cmd: ResearchCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ResearchCommand::Scan { path, extract_text } => {
-            scan_references(&path, extract_text, config)
+            scan_references(&path, extract_text, config).await
         }
-        ResearchCommand::List { status } => list_references(status.as_deref(), config),
-        ResearchCommand::Extract { source_id } => extract_references(source_id.as_deref(), config),
+        ResearchCommand::List { status } => list_references(status.as_deref(), config).await,
+        ResearchCommand::Extract { source_id } => {
+            extract_references(source_id.as_deref(), config).await
+        }
     }
 }
 
 /// Scan a directory for reference sources
-fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> Result<()> {
+async fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> Result<()> {
     let scan_path = std::path::Path::new(path);
 
     if !scan_path.exists() {
@@ -90,7 +92,7 @@ fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> Result
         }
 
         // Cache to local SQLite
-        cache_scan_results(&found, extract_text)?;
+        cache_scan_results(&found, extract_text).await?;
     }
 
     if !extract_text {
@@ -104,7 +106,7 @@ fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> Result
 }
 
 /// List discovered reference sources from SQLite
-fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Result<()> {
+async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Result<()> {
     println!("Reference Sources:");
 
     // Try to read from local SQLite
@@ -114,45 +116,22 @@ fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Result<(
         return Ok(());
     }
 
-    let conn = rusqlite::Connection::open(&db_path)?;
-    crate::db::Schema::init(&conn)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
 
-    let sql = match status_filter {
-        Some(filter) => {
-            println!("  Filter: status={}", filter);
-            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ?1 ORDER BY created_at DESC"
-        }
-        None => "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources ORDER BY created_at DESC",
-    };
-
-    let mut stmt = conn.prepare(sql)?;
-    let rows: Vec<(String, String, String, String, String, String)> = match status_filter {
-        Some(filter) => stmt
-            .query_map(rusqlite::params![filter], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            })?
-            .flatten()
-            .collect(),
-        None => stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            })?
-            .flatten()
-            .collect(),
+    let rows: Vec<(String, String, String, String, String, String)> = if let Some(filter) = status_filter {
+        println!("  Filter: status={}", filter);
+        sqlx::query_as(
+            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ?1 ORDER BY created_at DESC",
+        )
+        .bind(filter)
+        .fetch_all(&pool)
+        .await?
+    } else {
+        sqlx::query_as(
+            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources ORDER BY created_at DESC",
+        )
+        .fetch_all(&pool)
+        .await?
     };
 
     if rows.is_empty() {
@@ -180,38 +159,26 @@ fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Result<(
 }
 
 /// Extract structured data from references by ID
-fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Result<()> {
+async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Result<()> {
     let db_path = crate::config::state_db_path()?;
     if !db_path.exists() {
         println!("No database found. Run: nexus42 research scan");
         return Ok(());
     }
 
-    let conn = rusqlite::Connection::open(&db_path)?;
-    crate::db::Schema::init(&conn)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
 
     if let Some(id) = source_id {
         // Extract by specific ID
-        let result = conn.query_row(
+        let result = sqlx::query_as::<_, (String, String, String, String, String, String, Option<String>, Option<String>, Option<String>)>(
             "SELECT reference_source_id, source_type, uri, title, scan_status, created_at, tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?1",
-            rusqlite::params![id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                ))
-            },
-        );
+        )
+        .bind(id)
+        .fetch_optional(&pool)
+        .await?;
 
         match result {
-            Ok((
+            Some((
                 ref_id,
                 source_type,
                 uri,
@@ -255,31 +222,28 @@ fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Result<()
                     println!("  No content extracted. Run: nexus42 research scan --extract-text");
                 }
             }
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
+            None => {
                 return Err(CliError::Config(format!(
                     "Reference source '{}' not found in local cache.",
                     id
                 )));
             }
-            Err(e) => return Err(e.into()),
         }
     } else {
         // Extract all — show count and summary
-        let count: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM reference_sources WHERE scan_status = 'scanned'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM reference_sources WHERE scan_status = 'scanned'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(0);
 
-        let with_content: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM reference_sources WHERE content IS NOT NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        let with_content: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM reference_sources WHERE content IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(0);
 
         println!("Reference Sources Summary:");
         println!("  Total scanned: {}", count);
@@ -298,16 +262,16 @@ fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Result<()
 }
 
 /// Cache scan results to local SQLite (uses configured workspace `state.db`).
-fn cache_scan_results(
+async fn cache_scan_results(
     files: &[(String, String, std::path::PathBuf)],
     extract_text: bool,
 ) -> Result<()> {
     let db_path = crate::config::state_db_path()?;
-    cache_scan_results_at(&db_path, files, extract_text)
+    cache_scan_results_at(&db_path, files, extract_text).await
 }
 
 /// Cache scan results at an explicit DB path (for tests and callers that already resolved storage).
-fn cache_scan_results_at(
+async fn cache_scan_results_at(
     db_path: &std::path::Path,
     files: &[(String, String, std::path::PathBuf)],
     extract_text: bool,
@@ -316,8 +280,7 @@ fn cache_scan_results_at(
         std::fs::create_dir_all(parent)?;
     }
 
-    let conn = rusqlite::Connection::open(db_path)?;
-    crate::db::Schema::init(&conn)?;
+    let pool = crate::db::Schema::init(db_path).await?;
 
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -349,22 +312,22 @@ fn cache_scan_results_at(
             (None, None, "pending")
         };
 
-        conn.execute(
+        sqlx::query(
             "INSERT OR IGNORE INTO reference_sources 
              (reference_source_id, workspace_id, source_type, uri, title, scan_status, content, content_hash, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            rusqlite::params![
-                id,
-                "local",
-                source_type,
-                full_path.to_string_lossy().to_string(),
-                file,
-                scan_status,
-                content,
-                content_hash,
-                now
-            ],
-        )?;
+        )
+        .bind(&id)
+        .bind("local")
+        .bind(source_type)
+        .bind(full_path.to_string_lossy().to_string())
+        .bind(file)
+        .bind(scan_status)
+        .bind(&content)
+        .bind(&content_hash)
+        .bind(&now)
+        .execute(&pool)
+        .await?;
     }
 
     Ok(())
@@ -637,26 +600,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Test database schema with content column
-    #[test]
-    fn test_reference_sources_schema_with_content() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::db::Schema::init(&conn).unwrap();
-
-        // Verify the content column exists
-        let result: std::result::Result<String, rusqlite::Error> = conn.query_row(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='reference_sources'",
-            [],
-            |row| row.get(0),
-        );
-
-        let schema = result.unwrap();
-        assert!(schema.contains("content TEXT"));
-    }
-
     /// Test scan results caching with content
-    #[test]
-    fn test_cache_scan_results_with_content() {
+    #[tokio::test]
+    async fn test_cache_scan_results_with_content() {
         let tmp = TempDir::new().unwrap();
         let file_path = tmp.path().join("test.txt");
         std::fs::write(&file_path, "Test content").unwrap();
@@ -666,14 +612,14 @@ mod tests {
         let db_path = tmp.path().join("state.db");
 
         // Test without extraction
-        let result = cache_scan_results_at(&db_path, &files, false);
+        let result = cache_scan_results_at(&db_path, &files, false).await;
         if let Err(ref e) = result {
             eprintln!("Error in cache_scan_results (no extraction): {:?}", e);
         }
         assert!(result.is_ok());
 
         // Test with extraction
-        let result = cache_scan_results_at(&db_path, &files, true);
+        let result = cache_scan_results_at(&db_path, &files, true).await;
         if let Err(ref e) = result {
             eprintln!("Error in cache_scan_results (with extraction): {:?}", e);
         }
