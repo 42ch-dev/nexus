@@ -3,6 +3,9 @@
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.4.
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
+use crate::preset::manifest::{
+    EnterAction, ExitWhen, StateDefinition,
+};
 use async_trait::async_trait;
 use graph_flow::{NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -223,6 +226,208 @@ impl Task for JudgeTask {
         Ok(TaskResult::new(
             Some(format!("judge: {reason}")),
             next_action,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StateCompositeTask (outer graph — per §8.2)
+// ---------------------------------------------------------------------------
+
+/// Composite task for an outer-graph state node.
+///
+/// Encodes the full lifecycle of one state:
+/// 1. Run enter actions (capability calls, inner graph launch).
+/// 2. Evaluate exit_when condition.
+/// 3. Return appropriate NextAction.
+///
+/// §8.2 mapping:
+/// - `enter[*].kind=capability` → CapabilityTask (delegated internally).
+/// - `enter[*].kind=inner_graph` → InnerGraphTask (stub WsUnwired until T5).
+/// - `exit_when.kind=manual` → ManualWaitTask (returns WaitForInput).
+/// - `exit_when.kind=rule` → RuleCheckTask.
+/// - `exit_when.kind=llm_judge` → JudgeTask.
+/// - `exit_when.kind=graph_complete` → Continue (inner graph handles it).
+/// - `terminal: true` → End.
+pub struct StateCompositeTask {
+    id: String,
+    terminal: bool,
+    enter_actions: Vec<EnterAction>,
+    exit_when: Option<ExitWhen>,
+}
+
+impl StateCompositeTask {
+    /// Build a composite task from a manifest state definition.
+    pub fn from_manifest(state: &StateDefinition) -> Self {
+        Self {
+            id: state.id.clone(),
+            terminal: state.terminal,
+            enter_actions: state.enter.clone(),
+            exit_when: state.exit_when.clone(),
+        }
+    }
+}
+
+#[async_trait]
+impl Task for StateCompositeTask {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
+        // Check if this is a re-execution after resume.
+        // After ManualWait returns WaitForInput, the engine signals Resume
+        // and re-runs this task. On the second run, we should skip the wait
+        // and just Continue.
+        // Use a state-specific key to avoid leaking across state transitions.
+        let resume_key = format!("_state_{}_resumed", self.id);
+        let resumed: bool = context.get(&resume_key).await.unwrap_or(false);
+
+        if resumed {
+            // Already went through the full lifecycle before the wait.
+            // Just continue to the next state.
+            let response = Some(format!("state '{}': resumed, continuing", self.id));
+            tracing::debug!(state_id = %self.id, terminal = self.terminal, "state resumed");
+            return Ok(TaskResult::new(response, NextAction::Continue));
+        }
+
+        // 1. Process enter actions.
+        for action in &self.enter_actions {
+            match action {
+                EnterAction::Capability { name, args } => {
+                    context
+                        .set(
+                            "_capability_name",
+                            name.clone(),
+                        )
+                        .await;
+                    context
+                        .set(
+                            "_capability_input",
+                            args.clone().unwrap_or(Value::Null),
+                        )
+                        .await;
+                    let cap_task = CapabilityTask {
+                        registry: std::sync::Arc::new(CapabilityRegistry::with_builtins()),
+                    };
+                    let cap_result = cap_task.run(context.clone()).await?;
+                    // If capability task errored, propagate but still continue
+                    // so the state machine doesn't get stuck.
+                    if let Some(status_msg) = &cap_result.status_message {
+                        context.set("_enter_error", status_msg.clone()).await;
+                    }
+                }
+                EnterAction::InnerGraph { name } => {
+                    // T5 implements full InnerGraphTask; for T3 we store the name
+                    // and return WsUnwired. The loader already creates InnerGraphTask
+                    // stub nodes in the inner graphs themselves.
+                    context.set("_inner_graph_name", name.clone()).await;
+                    let inner_task = InnerGraphTask;
+                    let _ = inner_task.run(context.clone()).await;
+                    // For T3: if the inner graph is stub, we still continue to
+                    // evaluate exit_when. In T5, this will properly await completion.
+                }
+            }
+        }
+
+        // 2. Evaluate exit_when.
+        let next_action = match &self.exit_when {
+            None => {
+                // No exit condition — terminal state or just ends.
+                if self.terminal {
+                    NextAction::End
+                } else {
+                    NextAction::Continue
+                }
+            }
+            Some(ExitWhen::Manual) => {
+                // Mark that enter actions have been processed; next run after
+                // resume will skip straight to Continue.
+                context.set(resume_key, true).await;
+                NextAction::WaitForInput
+            }
+            Some(ExitWhen::Rule) => {
+                // Run rule check inline.
+                let rule_task = RuleCheckTask;
+                let result = rule_task.run(context.clone()).await?;
+                result.next_action
+            }
+            Some(ExitWhen::LlmJudge { .. }) => {
+                // Run judge task inline.
+                let judge_task = JudgeTask;
+                let result = judge_task.run(context.clone()).await?;
+                result.next_action
+            }
+            Some(ExitWhen::GraphComplete) => {
+                // Inner graph completion propagates Continue.
+                // (InnerGraphTask handles the actual child session; here we just
+                // continue since the inner graph ran as part of enter actions.)
+                NextAction::Continue
+            }
+            Some(ExitWhen::Timer { .. }) => {
+                // Timer not yet implemented for V1.4; treat as manual wait.
+                context.set(resume_key, true).await;
+                NextAction::WaitForInput
+            }
+        };
+
+        // 3. Terminal override — always End regardless of exit_when.
+        let final_action = if self.terminal {
+            NextAction::End
+        } else {
+            next_action
+        };
+
+        let response = if self.terminal {
+            Some(format!("state '{}' completed (terminal)", self.id))
+        } else {
+            Some(format!("state '{}': {:?}", self.id, final_action))
+        };
+
+        Ok(TaskResult::new(response, final_action))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InnerGraphNodeTask (inner graph nodes — per §8.2)
+// ---------------------------------------------------------------------------
+
+/// A task for a node within an inner graph.
+///
+/// §8.2 mapping:
+/// - `kind=acp_prompt` → AcpPromptTask (full in T4; T3 stub that stores a placeholder).
+pub struct InnerGraphNodeTask {
+    id: String,
+}
+
+impl InnerGraphNodeTask {
+    /// Create a new inner graph node task.
+    pub fn new(id: &str) -> Self {
+        Self { id: id.to_string() }
+    }
+}
+
+#[async_trait]
+impl Task for InnerGraphNodeTask {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
+        // T4 will replace this stub with the full AcpPromptTask behavior.
+        // For T3, we just store a placeholder output and continue.
+        let output = format!("inner_node:{}:stub_output", self.id);
+        context.set(format!("nodes.{}.text", self.id), output.clone()).await;
+        context.set(format!("nodes.{}.output", self.id), output.clone()).await;
+        Ok(TaskResult::new(
+            Some(output),
+            NextAction::Continue,
         ))
     }
 }

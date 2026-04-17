@@ -114,11 +114,11 @@ pub fn load_preset_from_str(
         });
     }
 
-    // 3. Build outer graph (T3 will fill in real task mapping).
-    let outer_graph = build_outer_graph_stub(&manifest);
+    // 3. Build outer graph per §8.2 mapping table.
+    let outer_graph = build_outer_graph(&manifest);
 
-    // 4. Build inner graphs (T3 will fill in real node mapping).
-    let inner_graphs = build_inner_graphs_stub(&manifest);
+    // 4. Build inner graphs per §8.2 mapping table.
+    let inner_graphs = build_inner_graphs(&manifest);
 
     // 5. Compute source hash.
     let hash = blake3::hash(yaml.as_bytes());
@@ -383,52 +383,24 @@ fn dfs_cycle2<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// Graph building stubs (T3 will replace with real mapping)
+// Graph building per §8.2 mapping table
 // ---------------------------------------------------------------------------
 
-/// Build a placeholder outer graph with one task per state.
+/// Build the outer state-machine graph per §8.2.
 ///
-/// T3 will replace this with the real §8.2 mapping table.
-fn build_outer_graph_stub(manifest: &PresetManifest) -> graph_flow::Graph {
-    use async_trait::async_trait;
-    use graph_flow::{NextAction, Task, TaskResult};
-
-    /// Stub task for a state node.
-    struct StateStubTask {
-        id: String,
-        terminal: bool,
-    }
-
-    #[async_trait]
-    impl Task for StateStubTask {
-        fn id(&self) -> &str {
-            &self.id
-        }
-
-        async fn run(
-            &self,
-            _context: graph_flow::Context,
-        ) -> Result<TaskResult, graph_flow::GraphError> {
-            let next = if self.terminal {
-                NextAction::End
-            } else {
-                NextAction::Continue
-            };
-            Ok(TaskResult::new(Some(format!("state: {}", self.id)), next))
-        }
-    }
+/// Each `states[].id` → a composite `Task` that encodes the enter actions,
+/// exit_when condition, and terminal semantics.
+fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
+    use crate::tasks::StateCompositeTask;
 
     let graph = graph_flow::Graph::new(&manifest.preset.id);
 
     for state in &manifest.states {
-        let task = StateStubTask {
-            id: state.id.clone(),
-            terminal: state.terminal,
-        };
+        let task = StateCompositeTask::from_manifest(state);
         graph.add_task(std::sync::Arc::new(task));
     }
 
-    // Wire edges from state.next
+    // Wire edges from state.next (linear only; conditional already rejected by validation).
     for state in &manifest.states {
         if let Some(NextTarget::Linear(ref next_id)) = state.next {
             graph.add_edge(&state.id, next_id);
@@ -438,35 +410,15 @@ fn build_outer_graph_stub(manifest: &PresetManifest) -> graph_flow::Graph {
     graph
 }
 
-/// Build placeholder inner graphs with one task per node.
+/// Build inner graphs per §8.2.
 ///
-/// T3 will replace this with the real §8.2 mapping table.
-fn build_inner_graphs_stub(
+/// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask` (stub in T3,
+/// full in T4).
+/// `inner_graphs.<name>.nodes[].depends_on` → `add_edge`.
+fn build_inner_graphs(
     manifest: &PresetManifest,
 ) -> HashMap<String, Arc<graph_flow::Graph>> {
-    use async_trait::async_trait;
-    use graph_flow::{NextAction, Task, TaskResult};
-
-    struct NodeStubTask {
-        id: String,
-    }
-
-    #[async_trait]
-    impl Task for NodeStubTask {
-        fn id(&self) -> &str {
-            &self.id
-        }
-
-        async fn run(
-            &self,
-            _context: graph_flow::Context,
-        ) -> Result<TaskResult, graph_flow::GraphError> {
-            Ok(TaskResult::new(
-                Some(format!("node: {}", self.id)),
-                NextAction::Continue,
-            ))
-        }
-    }
+    use crate::tasks::InnerGraphNodeTask;
 
     let mut result = HashMap::new();
 
@@ -475,7 +427,7 @@ fn build_inner_graphs_stub(
             let graph = graph_flow::Graph::new(name);
 
             for node in &ig.nodes {
-                let task = NodeStubTask { id: node.id.clone() };
+                let task = InnerGraphNodeTask::new(&node.id);
                 graph.add_task(std::sync::Arc::new(task));
             }
 
