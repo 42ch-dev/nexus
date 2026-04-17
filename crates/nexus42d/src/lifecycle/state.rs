@@ -2,6 +2,13 @@
 //!
 //! Implements the hierarchical state graph from spec §2 with transitions
 //! per spec §4.
+//!
+//! ## T4 Changes
+//!
+//! - `DaemonHsm` now stores an optional `ActionContext` for subsystem management.
+//! - Entry/exit actions use the context to spawn subsystem tasks.
+//! - `StatigLifecycle::new_with_subsystems()` for real runs.
+//! - `new_for_test()` for testing (no subsystem tasks spawned).
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -13,11 +20,13 @@ use statig::awaitable::IntoStateMachineExt;
 use statig::prelude::*;
 
 use super::{Event, Lifecycle, LifecycleState, LifecycleTransition, SubsystemKind};
-use crate::lifecycle::actions;
+use super::subsystems::SubsystemBootstrap;
+use crate::lifecycle::actions::{ActionContext, enter_starting, exit_starting, enter_running, exit_running, enter_degraded, enter_stopping, enter_failed};
 
 /// Shared storage for the daemon HSM.
 ///
 /// Contains state-local data like subsystem tracking and degraded status.
+/// In T4, also holds the ActionContext for entry/exit actions.
 #[derive(Debug, Default)]
 pub struct DaemonHsm {
     /// Subsystems that have reported `SubsystemUp`.
@@ -30,6 +39,18 @@ pub struct DaemonHsm {
     pub exit_code: Option<i32>,
     /// Last error message (set when entering `Failed`).
     pub last_error: Option<String>,
+    /// Action context for subsystem management (set in real runs, None in tests).
+    context: Option<Arc<ActionContext>>,
+}
+
+impl DaemonHsm {
+    /// Create a DaemonHsm with subsystem context for real runs.
+    pub fn with_context(context: Arc<ActionContext>) -> Self {
+        Self {
+            context: Some(context),
+            ..Default::default()
+        }
+    }
 }
 
 // The #[state_machine] macro generates:
@@ -57,6 +78,7 @@ impl DaemonHsm {
         match event {
             Event::SubsystemUp(kind) => {
                 self.up_subsystems.insert(*kind);
+                tracing::debug!("SubsystemUp {:?} — up_subsystems: {:?}", kind, self.up_subsystems);
                 if self.all_mandatory_up() {
                     tracing::info!("all mandatory subsystems up → Running");
                     Transition(State::running())
@@ -76,7 +98,7 @@ impl DaemonHsm {
                     Transition(State::failed())
                 } else {
                     tracing::warn!("retryable subsystem failure: {} ({:?})", err, kind);
-                    Handled // TODO: retry logic in T4
+                    Handled // TODO: retry logic beyond T4
                 }
             }
             Event::ShutdownRequested { source } => {
@@ -207,36 +229,52 @@ impl DaemonHsm {
         Super
     }
 
-    // --- Entry / Exit Actions (stubs for T1-T3, full impl in T4) ---
+    // --- Entry / Exit Actions ---
+    //
+    // These check if context is available. If so, they call the real action
+    // functions that spawn subsystem tasks. If no context (test mode), they
+    // just log.
 
     #[action]
-    async fn enter_starting() {
+    async fn enter_starting(&self) {
         tracing::info!("entering Starting state");
-        actions::enter_starting_stub();
+        if let Some(ctx) = &self.context {
+            enter_starting(Arc::clone(ctx));
+        } else {
+            tracing::debug!("Starting.entry: no context (test mode) — subsystems not spawned");
+        }
     }
 
     #[action]
-    async fn exit_starting() {
+    async fn exit_starting(&self) {
         tracing::info!("exiting Starting state");
-        actions::exit_starting_stub();
+        if let Some(ctx) = &self.context {
+            exit_starting(Arc::clone(ctx));
+        }
     }
 
     #[action]
-    async fn enter_running() {
+    async fn enter_running(&self) {
         tracing::info!("entering Running state");
-        actions::enter_running_stub();
+        if let Some(ctx) = &self.context {
+            enter_running(Arc::clone(ctx));
+        }
     }
 
     #[action]
-    async fn exit_running() {
+    async fn exit_running(&self) {
         tracing::info!("exiting Running state");
-        // No action: engine keeps running across Running ↔ Degraded.
+        if let Some(ctx) = &self.context {
+            exit_running(Arc::clone(ctx));
+        }
     }
 
     #[action]
-    async fn enter_degraded() {
+    async fn enter_degraded(&self) {
         tracing::info!("entering Degraded state");
-        actions::enter_degraded_stub();
+        if let Some(ctx) = &self.context {
+            enter_degraded(Arc::clone(ctx));
+        }
     }
 
     #[action]
@@ -247,19 +285,38 @@ impl DaemonHsm {
     }
 
     #[action]
-    async fn enter_stopping() {
+    async fn enter_stopping(&self) {
         tracing::info!("entering Stopping state");
-        actions::enter_stopping_stub();
+        if let Some(ctx) = &self.context {
+            enter_stopping(Arc::clone(ctx));
+        }
     }
 
     #[action]
-    async fn enter_failed(&mut self) {
+    async fn enter_failed(&self) {
         tracing::error!(
             "entering Failed state: exit_code={}, last_error={:?}",
             self.exit_code.unwrap_or(1),
             self.last_error
         );
-        actions::enter_failed_stub(self.exit_code.unwrap_or(1));
+        
+        // Only call process::exit if we have a context (real run, not test)
+        if self.context.is_some() {
+            // Call the exit function (which will call std::process::exit after logging)
+            let exit_code = self.exit_code.unwrap_or(1);
+            let last_error = self.last_error.clone();
+            
+            // Spawn a separate thread to handle exit (can't block in async context)
+            std::thread::spawn(move || {
+                enter_failed(exit_code, last_error);
+            });
+            
+            // Give a small delay for the exit thread to run
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        } else {
+            // Test mode: don't call process::exit
+            tracing::info!("Failed.entry: test mode — not calling process::exit");
+        }
     }
 
     // --- Introspection callbacks ---
@@ -301,15 +358,53 @@ pub struct StatigLifecycle {
 }
 
 impl StatigLifecycle {
-    /// Create a new lifecycle with real subsystems (T4 will flesh this out).
-    pub fn new() -> Self {
-        Self::new_for_test()
+    /// Create a lifecycle with real subsystems.
+    ///
+    /// This constructor takes subsystem bootstraps and creates an ActionContext
+    /// for entry/exit actions. Use this for production runs.
+    pub fn new_with_subsystems(
+        subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
+        shutdown_grace_ms: u64,
+    ) -> Self {
+        let (transition_tx, _) = broadcast::channel(16);
+        let current_state = Arc::new(std::sync::Mutex::new(LifecycleState::Starting));
+        let exit_code = Arc::new(std::sync::Mutex::new(None));
+        
+        // Create a dummy lifecycle first to get the Arc for ActionContext
+        let dummy_machine = Arc::new(Mutex::new(DaemonHsm::default().state_machine()));
+        let dummy_lifecycle = Self {
+            machine: dummy_machine,
+            transition_tx: transition_tx.clone(),
+            current_state: Arc::clone(&current_state),
+            exit_code: Arc::clone(&exit_code),
+        };
+        
+        let lifecycle_arc = Arc::new(dummy_lifecycle);
+        let context = Arc::new(ActionContext::new(
+            Arc::clone(&lifecycle_arc),
+            subsystems,
+            shutdown_grace_ms,
+        ));
+        
+        // Now create the real machine with context
+        let daemon_hsm = DaemonHsm::with_context(Arc::clone(&context));
+        let machine = Arc::new(Mutex::new(daemon_hsm.state_machine()));
+        
+        Self {
+            machine,
+            transition_tx,
+            current_state,
+            exit_code,
+        }
     }
 
-    /// Create a lifecycle for testing (all subsystems mocked as no-op).
+    /// Create a lifecycle for testing (no subsystem tasks spawned).
+    ///
+    /// Entry actions will log but not spawn subsystem tasks.
+    /// Tests dispatch SubsystemUp events manually.
     pub fn new_for_test() -> Self {
         let (transition_tx, _) = broadcast::channel(16);
-        let daemon_hsm = DaemonHsm::default();
+        let daemon_hsm = DaemonHsm::default(); // No context
         let machine = Arc::new(Mutex::new(daemon_hsm.state_machine()));
         let current_state = Arc::new(std::sync::Mutex::new(LifecycleState::Starting));
         let exit_code = Arc::new(std::sync::Mutex::new(None));
@@ -320,6 +415,11 @@ impl StatigLifecycle {
             current_state,
             exit_code,
         }
+    }
+
+    /// Create a new lifecycle with default settings (alias for new_for_test).
+    pub fn new() -> Self {
+        Self::new_for_test()
     }
 
     /// Force the state machine to a specific state for test setup.
@@ -418,7 +518,7 @@ impl Lifecycle for StatigLifecycle {
 
 /// Convert a statig `State` to our `LifecycleState`.
 ///
-/// This is a helper for the mirror sync; in T4 we'll make this cleaner.
+/// This is a helper for the mirror sync.
 fn lifecycle_state_from_statig_state(state: &State) -> LifecycleState {
     match state {
         State::Starting { .. } => LifecycleState::Starting,

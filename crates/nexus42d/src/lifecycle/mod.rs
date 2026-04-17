@@ -9,10 +9,15 @@
 mod actions;
 mod events;
 mod state;
+pub mod subsystems;
 
 pub use actions::*;
 pub use events::{Event, SubsystemKind};
 pub use state::{DaemonHsm, StatigLifecycle};
+pub use subsystems::{
+    HttpSubsystem, DbSubsystem, SyncSubsystem, EngineSubsystem,
+    WorkerMgrSubsystem, MockAllSubsystems, SubsystemBootstrap, SubsystemHealth,
+};
 
 use tokio::sync::broadcast;
 
