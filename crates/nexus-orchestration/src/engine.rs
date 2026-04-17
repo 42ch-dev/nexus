@@ -89,6 +89,13 @@ pub enum StepOutcome {
     Error(String),
 }
 
+impl StepOutcome {
+    /// Returns `true` if the outcome requires user input.
+    pub fn is_waiting_for_input(&self) -> bool {
+        matches!(self, StepOutcome::WaitingForInput { .. })
+    }
+}
+
 /// Signals that external callers (HTTP, CLI) can send to the engine.
 #[derive(Debug, Clone)]
 pub enum EngineSignal {
@@ -155,6 +162,13 @@ pub trait OrchestrationEngine: Send + Sync {
 
     /// Create a new session identified by `key`, seeded with `ctx`.
     async fn new_session(&self, key: SessionKey, ctx: Context) -> Result<SessionId, EngineError>;
+
+    /// Start a session on a specific graph (for preset-driven execution).
+    async fn start_session_with_graph(
+        &self,
+        id_prefix: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError>;
 
     /// Query the current status of a session.
     async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError>;
@@ -299,6 +313,14 @@ impl OrchestrationEngine for GraphFlowEngine {
         self.sessions.write().await.push(summary);
 
         Ok(SessionId(session_id))
+    }
+
+    async fn start_session_with_graph(
+        &self,
+        id_prefix: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        self.start_session(id_prefix, graph).await
     }
 
     async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
