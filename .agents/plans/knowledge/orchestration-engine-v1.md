@@ -186,6 +186,8 @@ Per [effort-estimation.md](https://github.com/btspoony/harness-opencode-team/blo
 
 ## 4. Orchestration Engine (graph-flow integration)
 
+> **Crate selection cross-reference**: `graph-flow = "=0.2.3"` pinning, `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
+
 ### 4.1 Library adoption decision
 
 Library: [`graph-flow` v0.2.3](https://github.com/a-agmon/rs-graph-llm) (aka `rs-graph-llm`).
@@ -219,7 +221,7 @@ New impl in `crates/nexus-orchestration/src/storage/sqlite.rs`:
 
 ```rust
 pub struct SqliteSessionStorage {
-    pool: sqlx::SqlitePool,           // reuses nexus-local-db pool (see cross-crate note)
+    pool: sqlx::SqlitePool,           // shares nexus-local-db's SqlitePool (post-WS8)
 }
 
 #[async_trait]
@@ -230,7 +232,9 @@ impl graph_flow::SessionStorage for SqliteSessionStorage {
 }
 ```
 
-Schema (new table in existing `state.db` owned by `nexus-local-db`; schema migration file added under `crates/nexus-local-db/migrations/`):
+**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
+
+Schema (new table in the unified `state.db` owned by `nexus-local-db`; schema migration file added under `crates/nexus-local-db/migrations/`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS orchestration_sessions (
@@ -280,6 +284,8 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 ---
 
 ## 5. Capability Registry
+
+> **Crate selection cross-reference**: Capability implementations MAY depend on third-party crates (e.g. `notify` for file-watch capabilities, `jsonwebtoken` for auth-related capabilities). Any new crate introduced here follows [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §1 (conventions) — in particular §1.5 (PM introduction gate) and §1.3 (feature flag whitelist).
 
 ### 5.1 `Capability` trait
 
@@ -353,6 +359,8 @@ Each capability ships its `input_schema` and `output_schema` as constants (JSON 
 ### 6.3 IPC transport
 
 Selected transport: **parent↔child stdin/stdout** with **JSON-RPC 2.0** framing.
+
+**Implementation crate selection (closed 2026-04-17)**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + newline-delimited framing via `tokio_util::codec::LinesCodec`. Decision SSOT: [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §2.1 + §3.1. The `RpcTransport` trait is the insurance layer if jsonrpsee-core ever needs replacement — callers depend on the trait, not on `jsonrpsee::*` directly.
 
 Rationale:
 
