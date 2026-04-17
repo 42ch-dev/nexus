@@ -406,14 +406,13 @@ impl Outbox {
     pub async fn mark_failed(&self, outbox_entry_id: &str, error: &str) -> SyncResult<()> {
         let mut tx = self.pool.inner().begin().await?;
 
-        let retry_count: i64 =
-            sqlx::query_as::<_, (i64,)>(
-                "SELECT retry_count FROM outbox_entries WHERE outbox_entry_id = ?1",
-            )
-            .bind(outbox_entry_id)
-            .fetch_one(&mut *tx)
-            .await?
-            .0;
+        let retry_count: i64 = sqlx::query_as::<_, (i64,)>(
+            "SELECT retry_count FROM outbox_entries WHERE outbox_entry_id = ?1",
+        )
+        .bind(outbox_entry_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .0;
 
         let retry_count = retry_count as u64;
 
@@ -495,8 +494,9 @@ impl Outbox {
 
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            let delivery_state = DeliveryState::from_str(&row.3)
-                .map_err(|_| SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.3)))?;
+            let delivery_state = DeliveryState::from_str(&row.3).map_err(|_| {
+                SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.3))
+            })?;
             entries.push(OutboxEntry {
                 schema_version: LATEST_SCHEMA_VERSION,
                 outbox_entry_id: row.0,
@@ -517,7 +517,20 @@ impl Outbox {
 
     /// Get a specific outbox entry by ID.
     pub async fn get(&self, outbox_entry_id: &str) -> SyncResult<OutboxEntry> {
-        let row = sqlx::query_as::<_, (String, String, String, String, i64, Option<String>, Option<String>, String, Option<String>)>(
+        let row = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                String,
+                i64,
+                Option<String>,
+                Option<String>,
+                String,
+                Option<String>,
+            ),
+        >(
             "SELECT outbox_entry_id, bundle_id, idempotency_key, delivery_state,
                     retry_count, last_error, next_retry_at, created_at, updated_at
              FROM outbox_entries
@@ -551,10 +564,9 @@ impl Outbox {
     ///
     /// Returns the number of entries removed.
     pub async fn purge_acked(&self) -> SyncResult<usize> {
-        let result =
-            sqlx::query("DELETE FROM outbox_entries WHERE delivery_state = 'acked'")
-                .execute(self.pool.inner())
-                .await?;
+        let result = sqlx::query("DELETE FROM outbox_entries WHERE delivery_state = 'acked'")
+            .execute(self.pool.inner())
+            .await?;
 
         let count = result.rows_affected() as usize;
         tracing::info!(count = count, "Purged acked outbox entries");
@@ -775,10 +787,7 @@ mod tests {
 
         // Fail MAX_RETRIES times
         for _ in 0..MAX_RETRIES {
-            outbox
-                .mark_failed(&entry_id, "persistent error")
-                .await
-                .ok();
+            outbox.mark_failed(&entry_id, "persistent error").await.ok();
         }
 
         // Next failure should error
@@ -1405,10 +1414,7 @@ mod tests {
         // Verify all fields persisted atomically
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
-        assert_eq!(
-            entry.last_error,
-            Some("transient conflict".to_string())
-        );
+        assert_eq!(entry.last_error, Some("transient conflict".to_string()));
         assert!(entry.next_retry_at.is_some());
         assert!(entry.updated_at.is_some());
 

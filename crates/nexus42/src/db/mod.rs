@@ -38,12 +38,11 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-        )
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+        let tables: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
 
         assert!(tables.contains(&"workspace_meta".to_string()));
         assert!(tables.contains(&"creators".to_string()));
@@ -69,12 +68,11 @@ mod tests {
         assert!(path.exists());
 
         // Verify schema initialized
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-        )
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+        let tables: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
 
         assert!(tables.contains(&"workspace_meta".to_string()));
     }
