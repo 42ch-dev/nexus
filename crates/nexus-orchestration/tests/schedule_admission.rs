@@ -23,7 +23,10 @@ fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
         preset_version: 1,
         status: ScheduleStatus::Pending,
         concurrency: c,
-        depends_on: deps.into_iter().map(|d| ScheduleId(d.to_string())).collect(),
+        depends_on: deps
+            .into_iter()
+            .map(|d| ScheduleId(d.to_string()))
+            .collect(),
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
@@ -39,8 +42,7 @@ fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
 #[test]
 fn serial_blocks_behind_any_running() {
     let pending = sched("01A", ScheduleConcurrency::Serial, vec![]);
-    let running =
-        RunningSet::from(vec![sched("01B", ScheduleConcurrency::Serial, vec![])]);
+    let running = RunningSet::from(vec![sched("01B", ScheduleConcurrency::Serial, vec![])]);
     assert!(!admit(&pending, &running, &CompletedSet::empty()));
 }
 
@@ -76,22 +78,14 @@ fn parallel_with_blocks_when_running_not_in_whitelist() {
 fn parallel_any_always_admits_subject_to_worker_cap() {
     let pending = sched("01A", ScheduleConcurrency::ParallelAny, vec![]);
     let running = RunningSet::from(vec![sched("01B", ScheduleConcurrency::Serial, vec![])]);
-    assert!(admit(
-        &pending,
-        &running,
-        &CompletedSet::empty()
-    )); // ACP-busy serialization is enforced at dispatch site, not here
+    assert!(admit(&pending, &running, &CompletedSet::empty())); // ACP-busy serialization is enforced at dispatch site, not here
 }
 
 #[test]
 fn dep_unsatisfied_blocks_start() {
     let pending = sched("01A", ScheduleConcurrency::Serial, vec!["01B"]);
     let running = RunningSet::empty(); // 01B not completed → blocked
-    assert!(!admit(
-        &pending,
-        &running,
-        &CompletedSet::empty()
-    )); // deps not satisfied
+    assert!(!admit(&pending, &running, &CompletedSet::empty())); // deps not satisfied
 }
 
 #[test]
@@ -156,14 +150,8 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
 
     // Tick: 01A should start, 01B stays Pending (serial blocks behind running)
     supervisor.tick().await.unwrap();
-    assert_eq!(
-        supervisor.status_of("01A").await,
-        ScheduleStatus::Running
-    );
-    assert_eq!(
-        supervisor.status_of("01B").await,
-        ScheduleStatus::Pending
-    );
+    assert_eq!(supervisor.status_of("01A").await, ScheduleStatus::Running);
+    assert_eq!(supervisor.status_of("01B").await, ScheduleStatus::Pending);
 
     // Simulate 01A completing (no real session engine — direct status flip)
     supervisor
@@ -173,10 +161,7 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
 
     // After terminal callback: tick is triggered internally.
     // 01B should now be Running since nothing else is.
-    assert_eq!(
-        supervisor.status_of("01B").await,
-        ScheduleStatus::Running
-    );
+    assert_eq!(supervisor.status_of("01B").await, ScheduleStatus::Running);
 }
 
 /// Helper: create a [`ScheduleSupervisor`] backed by a fresh temp SQLite DB

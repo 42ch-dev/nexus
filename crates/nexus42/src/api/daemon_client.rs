@@ -140,7 +140,11 @@ impl DaemonClient {
     }
 
     /// Send a PATCH request with JSON body
-    pub async fn patch<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+    pub async fn patch<T: DeserializeOwned, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.patch(&url).json(body).send().await?;
 

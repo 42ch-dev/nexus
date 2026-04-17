@@ -47,7 +47,8 @@ states:
       kind: manual
     next: drafting
     context_update:
-      op: append
+      op:
+        kind: append
       template_file: prompts/outlining-ctx-update.md
 
   - id: drafting

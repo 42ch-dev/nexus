@@ -5,9 +5,9 @@
 
 use std::collections::HashSet;
 
-use nexus_contracts::local::schedule::{Schedule, ScheduleConcurrency, ScheduleId};
 #[cfg(test)]
 use nexus_contracts::local::schedule::ParallelWithIds;
+use nexus_contracts::local::schedule::{Schedule, ScheduleConcurrency, ScheduleId};
 
 /// The set of currently-running [`Schedule`] IDs for a single creator.
 ///
@@ -95,11 +95,7 @@ impl CompletedSet {
 ///
 /// 3. No other constraints at this layer — spec §5.2 ACP single-worker
 ///    constraint is enforced at the `AcpPromptTask` dispatch site.
-pub fn admit(
-    candidate: &Schedule,
-    running: &RunningSet,
-    completed: &CompletedSet,
-) -> bool {
+pub fn admit(candidate: &Schedule, running: &RunningSet, completed: &CompletedSet) -> bool {
     // 1. Concurrency gate
     if !check_concurrency(candidate, running) {
         return false;
@@ -121,7 +117,10 @@ fn check_concurrency(candidate: &Schedule, running: &RunningSet) -> bool {
         ScheduleConcurrency::ParallelWith(whitelist) => {
             // Every running schedule must be in the whitelist.
             // If nothing is running, the constraint is vacuously true.
-            running.ids.iter().all(|id| whitelist.schedule_ids.contains(id))
+            running
+                .ids
+                .iter()
+                .all(|id| whitelist.schedule_ids.contains(id))
         }
         ScheduleConcurrency::ParallelAny => true, // ACP serialization at dispatch site
     }
@@ -140,7 +139,10 @@ mod tests {
             preset_version: 1,
             status: ScheduleStatus::Pending,
             concurrency: c,
-            depends_on: deps.into_iter().map(|d| ScheduleId(d.to_string())).collect(),
+            depends_on: deps
+                .into_iter()
+                .map(|d| ScheduleId(d.to_string()))
+                .collect(),
             current_core_context_version: CoreContextVersion(0),
             current_session_id: None,
             scheduled_at: None,

@@ -3,6 +3,8 @@
 //! Each subcommand is a thin clap::Args that calls the daemon HTTP endpoint.
 //! WS3 shipped `start/status/advance`; WS7 adds the remaining 10.
 
+#![allow(clippy::print_literal)]
+
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::{Parser, Subcommand};
@@ -168,17 +170,46 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             after,
             parallel_with,
             parallel_any,
-        } => add_schedule(&client, &preset, &creator, seed, label, after, parallel_with, parallel_any).await,
-        ScheduleCommand::Edit { id, append, replace, struct_merge_file, struct_remove } => {
-            edit_schedule(&client, &id, append, replace, struct_merge_file, struct_remove).await
+        } => {
+            add_schedule(
+                &client,
+                AddScheduleParams {
+                    preset: &preset,
+                    creator: &creator,
+                    seed,
+                    label,
+                    after,
+                    parallel_with,
+                    parallel_any,
+                },
+            )
+            .await
+        }
+        ScheduleCommand::Edit {
+            id,
+            append,
+            replace,
+            struct_merge_file,
+            struct_remove,
+        } => {
+            edit_schedule(
+                &client,
+                &id,
+                append,
+                replace,
+                struct_merge_file,
+                struct_remove,
+            )
+            .await
         }
         ScheduleCommand::Remove { id } => remove_schedule(&client, &id).await,
         ScheduleCommand::List { creator, status } => list_schedules(&client, creator, status).await,
         ScheduleCommand::Inspect { id } => inspect_schedule(&client, &id).await,
         ScheduleCommand::Context { id } => get_context(&client, &id).await,
-        ScheduleCommand::ContextHistory { id, show_content: _ } => {
-            get_context_history(&client, &id).await
-        }
+        ScheduleCommand::ContextHistory {
+            id,
+            show_content: _,
+        } => get_context_history(&client, &id).await,
         ScheduleCommand::Start { id } => signal_schedule_cmd(&client, &id, "start").await,
         ScheduleCommand::Pause { id } => signal_schedule_cmd(&client, &id, "pause").await,
         ScheduleCommand::Resume { id } => signal_schedule_cmd(&client, &id, "resume").await,
@@ -192,24 +223,38 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
 // Subcommand implementations (thin HTTP wrappers)
 // ---------------------------------------------------------------------------
 
-async fn add_schedule(
-    client: &crate::api::DaemonClient,
-    preset: &str,
-    creator: &str,
+/// Parameters for schedule add (grouped to stay under clippy arg limit).
+struct AddScheduleParams<'a> {
+    preset: &'a str,
+    creator: &'a str,
     seed: Option<String>,
     label: Option<String>,
     after: Option<String>,
     parallel_with: Option<String>,
     parallel_any: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn add_schedule(
+    client: &crate::api::DaemonClient,
+    params: AddScheduleParams<'_>,
 ) -> Result<()> {
+    let AddScheduleParams {
+        preset,
+        creator,
+        seed,
+        label,
+        after,
+        parallel_with,
+        parallel_any,
+    } = params;
+
     let concurrency = if parallel_any {
         Some(ScheduleConcurrencyRequest::ParallelAny)
-    } else if let Some(pw_id) = parallel_with {
-        Some(ScheduleConcurrencyRequest::ParallelWith {
+    } else {
+        parallel_with.map(|pw_id| ScheduleConcurrencyRequest::ParallelWith {
             schedule_ids: vec![pw_id],
         })
-    } else {
-        None
     };
 
     let body = AddScheduleRequest {
@@ -254,7 +299,12 @@ async fn edit_schedule(
         ));
     };
 
-    let body_req = EditCoreContextRequest { op, body, patch, path };
+    let body_req = EditCoreContextRequest {
+        op,
+        body,
+        patch,
+        path,
+    };
     let path = format!("{SCHEDULE_BASE}/{id}/core-context");
     let resp: EditCoreContextResponse = client.patch(&path, &body_req).await?;
 
@@ -279,7 +329,10 @@ async fn list_schedules(
     creator: Option<String>,
     status: Option<String>,
 ) -> Result<()> {
-    let query = ListSchedulesQuery { creator_id: creator, status };
+    let query = ListSchedulesQuery {
+        creator_id: creator,
+        status,
+    };
     // Build query string manually for GET
     let mut path = SCHEDULE_BASE.to_string();
     let mut params = Vec::new();
@@ -404,11 +457,7 @@ async fn signal_schedule_cmd(
     Ok(())
 }
 
-async fn timeline(
-    client: &crate::api::DaemonClient,
-    creator: &str,
-    days: u32,
-) -> Result<()> {
+async fn timeline(client: &crate::api::DaemonClient, creator: &str, days: u32) -> Result<()> {
     // Use list with creator filter
     let path = format!("{SCHEDULE_BASE}?creator_id={creator}");
     let resp: ListSchedulesResponse = client.get(&path).await?;
@@ -468,7 +517,12 @@ mod tests {
         .unwrap();
 
         match cmd.command {
-            ScheduleCommand::Add { preset, creator, seed, .. } => {
+            ScheduleCommand::Add {
+                preset,
+                creator,
+                seed,
+                ..
+            } => {
                 assert_eq!(preset, "novel-writing");
                 assert_eq!(creator, "c1");
                 assert_eq!(seed.as_deref(), Some("test-seed"));
@@ -522,14 +576,9 @@ mod tests {
 
     #[test]
     fn edit_append_parses() {
-        let cmd = ScheduleCli::try_parse_from([
-            "schedule",
-            "edit",
-            "SCH001",
-            "--append",
-            "more text",
-        ])
-        .unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "edit", "SCH001", "--append", "more text"])
+                .unwrap();
 
         match cmd.command {
             ScheduleCommand::Edit { id, append, .. } => {
@@ -542,14 +591,9 @@ mod tests {
 
     #[test]
     fn edit_replace_parses() {
-        let cmd = ScheduleCli::try_parse_from([
-            "schedule",
-            "edit",
-            "SCH001",
-            "--replace",
-            "new content",
-        ])
-        .unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "edit", "SCH001", "--replace", "new content"])
+                .unwrap();
 
         match cmd.command {
             ScheduleCommand::Edit { id, replace, .. } => {
@@ -607,9 +651,13 @@ mod tests {
 
     #[test]
     fn context_history_command_parses() {
-        let cmd =
-            ScheduleCli::try_parse_from(["schedule", "context-history", "SCH001", "--show-content"])
-                .unwrap();
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "context-history",
+            "SCH001",
+            "--show-content",
+        ])
+        .unwrap();
 
         match cmd.command {
             ScheduleCommand::ContextHistory { id, show_content } => {

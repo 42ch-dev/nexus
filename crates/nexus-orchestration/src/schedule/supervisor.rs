@@ -11,7 +11,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use nexus_contracts::local::schedule::{ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus};
+use nexus_contracts::local::schedule::{
+    ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+};
 use nexus_local_db::SqlitePool;
 use tokio::sync::Mutex;
 
@@ -185,7 +187,9 @@ impl ScheduleSupervisor {
         // Remove from running cache
         {
             let mut inner = self.inner.lock().await;
-            inner.running_ids.remove(&ScheduleId(schedule_id.to_string()));
+            inner
+                .running_ids
+                .remove(&ScheduleId(schedule_id.to_string()));
         }
 
         // Trigger tick to admit next eligible schedule
@@ -205,18 +209,12 @@ impl ScheduleSupervisor {
         let created_at: i64 = if schedule.created_at.is_empty() {
             now
         } else {
-            schedule
-                .created_at
-                .parse()
-                .unwrap_or(now)
+            schedule.created_at.parse().unwrap_or(now)
         };
         let updated_at: i64 = if schedule.updated_at.is_empty() {
             now
         } else {
-            schedule
-                .updated_at
-                .parse()
-                .unwrap_or(now)
+            schedule.updated_at.parse().unwrap_or(now)
         };
 
         let (concurrency_kind, concurrency_whitelist) = match &schedule.concurrency {
@@ -375,9 +373,7 @@ impl ScheduleRow {
                     .as_deref()
                     .and_then(|json| serde_json::from_str(json).ok())
                     .unwrap_or_default();
-                ScheduleConcurrency::ParallelWith(ParallelWithIds {
-                    schedule_ids: ids,
-                })
+                ScheduleConcurrency::ParallelWith(ParallelWithIds { schedule_ids: ids })
             }
             "parallel_any" => ScheduleConcurrency::ParallelAny,
             _ => ScheduleConcurrency::Serial,
