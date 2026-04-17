@@ -166,3 +166,6 @@ target
 
 # Git worktrees (isolation for parallel branch development)
 .worktrees/
+
+# Sqlx
+.sqlx/
