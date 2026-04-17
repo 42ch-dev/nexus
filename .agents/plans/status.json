@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
-      "status": "InReview",
+      "status": "Done",
       "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
       "title": "V1.4 WS1 — nexus-acp-host crate extraction",
       "owner": "fullstack-dev",
@@ -45,8 +45,8 @@
           "7ffb013 feat(cli): hidden 'acp-worker' subcommand stub (WS1 T7)",
           "ef36312 ci(verify-no-acp-in-daemon): enforce nexus42d linkage matrix (WS1 T9)"
         ],
-        "qc_status": "pending",
-        "qa_status": "pending"
+        "qc_status": "approved",
+        "qa_status": "approved"
       }
     },
     {
