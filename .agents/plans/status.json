@@ -114,51 +114,6 @@
       }
     },
     {
-      "id": "2026-04-17-v1.4-ws5-schemas-boundary",
-      "status": "InReview",
-      "file": ".agents/plans/2026-04-17-v1.4-ws5-schemas-boundary.md",
-      "title": "V1.4 WS5 — schemas/ boundary refactor (wire vs local)",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws5",
-        "schemas",
-        "refactor",
-        "codegen"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-18",
-      "metadata": {
-        "priority": "medium",
-        "phase": "V1.4-M2",
-        "working_branch": "feature/v1.4-ws5-schemas-boundary",
-        "description": "Audit every schemas/**/*.schema.json, classify as wire (kept) or local (moved to crates/nexus-contracts/src/local/ as hand-written Rust — no codegen). Regenerate contracts (deletions only), bump @42ch/nexus-contracts minor, post cross-repo handoff note. Per schemas-boundary-v1 §2 rule (platform HTTP observability).",
-        "wave_0_spec": ".agents/plans/knowledge/schemas-boundary-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/schemas-boundary-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "parallelism": "fully parallel with WS1/WS2/WS3/WS4/WS6/WS7",
-        "effort_agent_oriented": "S (1 agent session)",
-        "gates": {
-          "validate_schemas": "pass",
-          "codegen_diff": "pass (deletions only)",
-          "cargo_fmt": "pass",
-          "cargo_clippy": "pass",
-          "cargo_test": "pass",
-          "pnpm_typecheck": "pass"
-        },
-        "audit_result": "64 total: 53 wire, 11 local (2 reclassified from sketch: VersionRef→wire, KeyBlock→wire)",
-        "commits": [
-          "9d5fd57 docs(schemas-boundary): seed audit table with all 64 schemas/* files (WS5 T1)",
-          "f9c01fd docs(schemas-boundary): populate audit decisions (WS5 T2)",
-          "0c2cf00 refactor(nexus-contracts): move local-only schemas to src/local/ (WS5 T3)",
-          "bad8e19 chore(codegen): regenerate after WS5 local-type moves (WS5 T4)",
-          "9cd6c31 release(nexus-contracts): 0.4.0 — WS5 local-type relocation (WS5 T5)"
-        ]
-      }
-    },
-    {
       "id": "2026-04-17-v1.4-ws6-creator-register-e2e-tests",
       "status": "Todo",
       "file": ".agents/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
@@ -227,13 +182,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-18",
-      "total_open": 9,
+      "total_open": 10,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 4,
         "low": 3,
-        "nit": 2
+        "nit": 3
       },
       "by_target": {
         "V1.0": 0,
@@ -241,12 +196,13 @@
         "V1.2": 0,
         "V1.3": 0,
         "V1.4": 0,
-        "V1.5": 8,
+        "V1.5": 9,
         "WS2": 1
       },
       "by_plan": {
         "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 5,
-        "2026-04-17-v1.4-ws4-statig-lifecycle": 4
+        "2026-04-17-v1.4-ws4-statig-lifecycle": 4,
+        "2026-04-17-v1.4-ws5-schemas-boundary": 1
       },
       "cross_cutting": []
     },
@@ -351,10 +307,23 @@
           "decision": "accept",
           "owner": "qa-engineer / fullstack-dev-2",
           "target_date": "V1.5",
-          "tracking_link": null
-        }
-      ]
-    },
+        "tracking_link": null
+      }
+    ],
+    "2026-04-17-v1.4-ws5-schemas-boundary": [
+      {
+        "id": "R1",
+        "title": "Audit table header says 11 local but 10 were actually moved",
+        "severity": "nit",
+        "source": "qc3 S1",
+        "scope": "schemas-boundary-v1.md §5.2",
+        "decision": "accept",
+        "owner": "fullstack-dev",
+        "target_date": "V1.5",
+        "tracking_link": null
+      }
+    ]
+  },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
     }
