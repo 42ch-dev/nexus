@@ -35,7 +35,7 @@ pub enum CliError {
 
     Network(reqwest::Error),
 
-    Database(rusqlite::Error),
+    Database(sqlx::Error),
 
     Io(std::io::Error),
 
@@ -296,8 +296,8 @@ impl From<reqwest::Error> for CliError {
     }
 }
 
-impl From<rusqlite::Error> for CliError {
-    fn from(err: rusqlite::Error) -> Self {
+impl From<sqlx::Error> for CliError {
+    fn from(err: sqlx::Error) -> Self {
         CliError::Database(err)
     }
 }

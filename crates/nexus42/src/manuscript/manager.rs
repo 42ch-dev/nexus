@@ -8,7 +8,7 @@ use crate::manuscript::metadata::ManuscriptMetadata;
 use nexus_contracts::ManuscriptPhase;
 use nexus_domain::consistency;
 use nexus_domain::manuscript_state::ManuscriptState;
-use rusqlite::Connection;
+use nexus_local_db::SqlitePool;
 use std::path::{Path, PathBuf};
 
 /// Maximum allowed length for a manuscript title (filesystem limit)
@@ -269,11 +269,11 @@ impl ManuscriptManager {
     }
 
     /// Set the manuscript phase in SQLite
-    pub fn set_phase(
+    pub async fn set_phase(
         &self,
         title: &str,
         phase: &str,
-        conn: &Connection,
+        pool: &SqlitePool,
     ) -> Result<ManuscriptPhase> {
         let target_phase = parse_phase(phase)?;
 
@@ -281,13 +281,12 @@ impl ManuscriptManager {
         consistency::validate_manuscript_phase(phase)?;
 
         // Check current phase in DB
-        let current_phase: Option<String> = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = ?1",
-                ["manuscript_phase"],
-                |row| row.get(0),
-            )
-            .ok();
+        let current_phase: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM workspace_meta WHERE key = ?1",
+        )
+        .bind("manuscript_phase")
+        .fetch_optional(pool)
+        .await?;
 
         if let Some(ref current) = current_phase {
             let current_parsed = parse_phase(current)?;
@@ -309,10 +308,14 @@ impl ManuscriptManager {
 
         // Store in workspace_meta
         let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
+        sqlx::query(
             "INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params!["manuscript_phase", phase, now],
-        )?;
+        )
+        .bind("manuscript_phase")
+        .bind(phase)
+        .bind(&now)
+        .execute(pool)
+        .await?;
 
         // Also update metadata file
         if let Ok(mut metadata) = self.read_metadata(title) {
@@ -327,27 +330,24 @@ impl ManuscriptManager {
     }
 
     /// Get the current manuscript phase from SQLite
-    pub fn get_phase(conn: &Connection) -> Result<Option<String>> {
-        let phase: Option<String> = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
+    pub async fn get_phase(pool: &SqlitePool) -> Result<Option<String>> {
+        let phase: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
+        )
+        .fetch_optional(pool)
+        .await?;
         Ok(phase)
     }
 
     /// Get the current manuscript phase from the workspace database (convenience method)
-    pub fn get_from_db(workspace_root: &Path) -> Result<Option<String>> {
+    pub async fn get_from_db(workspace_root: &Path) -> Result<Option<String>> {
         let nexus_dir = crate::config::workspace_nexus_dir(workspace_root);
         let db_path = nexus_dir.join("state.db");
         if !db_path.exists() {
             return Ok(None);
         }
-        let conn = Connection::open(&db_path)?;
-        crate::db::Schema::init(&conn)?;
-        Self::get_phase(&conn)
+        let pool = crate::db::Schema::init(&db_path).await?;
+        Self::get_phase(&pool).await
     }
 
     /// Promote manuscript to the next phase
@@ -356,8 +356,8 @@ impl ManuscriptManager {
     /// - Manuscript phase is appropriate for promotion
     /// - StoryManifest status is valid
     /// - Sync state is clean (no pending conflicts)
-    pub fn promote(&self, title: &str, strict: bool, conn: &Connection) -> Result<ManuscriptPhase> {
-        let current = Self::get_phase(conn)?;
+    pub async fn promote(&self, title: &str, strict: bool, pool: &SqlitePool) -> Result<ManuscriptPhase> {
+        let current = Self::get_phase(pool).await?;
 
         let current_phase = match current {
             Some(ref p) => parse_phase(p)?,
@@ -371,7 +371,7 @@ impl ManuscriptManager {
 
         // Strict mode validation (V1.1 CLI-R6)
         if strict {
-            self.validate_strict_promotion(title, &current_phase, conn)?;
+            self.validate_strict_promotion(title, &current_phase, pool).await?;
         }
 
         // Use domain ManuscriptState to perform the promotion with validation
@@ -387,10 +387,14 @@ impl ManuscriptManager {
 
         // Persist to SQLite
         let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
+        sqlx::query(
             "INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params!["manuscript_phase", phase_str, now],
-        )?;
+        )
+        .bind("manuscript_phase")
+        .bind(phase_str)
+        .bind(&now)
+        .execute(pool)
+        .await?;
 
         // Update metadata file
         if let Ok(mut metadata) = self.read_metadata(title) {
@@ -405,11 +409,11 @@ impl ManuscriptManager {
     }
 
     /// Validate strict mode promotion requirements (CLI-R6)
-    fn validate_strict_promotion(
+    async fn validate_strict_promotion(
         &self,
         title: &str,
         current_phase: &ManuscriptPhase,
-        conn: &Connection,
+        pool: &SqlitePool,
     ) -> Result<()> {
         // 1. Check if phase is appropriate for promotion
         // (already validated by ManuscriptState, but we can add more checks here)
@@ -427,7 +431,7 @@ impl ManuscriptManager {
                 // For promotion from review→finalize, manifest should be staged_for_publish
                 if matches!(current_phase, ManuscriptPhase::Review) {
                     // Check for pending conflicts in sync state
-                    let has_conflicts = self.check_sync_conflicts(conn)?;
+                    let has_conflicts = self.check_sync_conflicts(pool).await?;
                     if has_conflicts {
                         return Err(CliError::Config(
                             "Cannot promote: sync conflicts detected. Resolve conflicts first."
@@ -440,7 +444,7 @@ impl ManuscriptManager {
 
         // 3. Check sync state for pending conflicts
         if matches!(current_phase, ManuscriptPhase::Finalize) {
-            let has_conflicts = self.check_sync_conflicts(conn)?;
+            let has_conflicts = self.check_sync_conflicts(pool).await?;
             if has_conflicts {
                 return Err(CliError::Config(
                     "Cannot promote to published: sync conflicts detected. Resolve conflicts first."
@@ -453,16 +457,15 @@ impl ManuscriptManager {
     }
 
     /// Check for pending sync conflicts in outbox
-    fn check_sync_conflicts(&self, conn: &Connection) -> Result<bool> {
+    async fn check_sync_conflicts(&self, pool: &SqlitePool) -> Result<bool> {
         // Check if there are any conflicted outbox entries
         // For V1.1, we check the local sync state
-        let count: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM outbox_entries WHERE delivery_state = 'conflicted'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM outbox_entries WHERE delivery_state = 'conflicted'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
 
         Ok(count > 0)
     }
@@ -470,11 +473,11 @@ impl ManuscriptManager {
     /// Verify manuscript consistency using domain rules
     ///
     /// In content check mode (V1.1), also verifies file integrity using SHA256.
-    pub fn verify(
+    pub async fn verify(
         &self,
         title: &str,
         check_content: bool,
-        conn: &Connection,
+        pool: &SqlitePool,
     ) -> Result<Vec<String>> {
         let mut checks = Vec::new();
 
@@ -526,7 +529,7 @@ impl ManuscriptManager {
         }
 
         // 3. Phase consistency from SQLite
-        if let Ok(Some(phase)) = Self::get_phase(conn) {
+        if let Ok(Some(phase)) = Self::get_phase(pool).await {
             if consistency::validate_manuscript_phase(&phase).is_ok() {
                 checks.push(format!("✓ Phase consistency: OK ({})", phase));
             } else {
@@ -668,10 +671,10 @@ mod tests {
         (tmp, manager)
     }
 
-    fn setup_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        crate::db::Schema::init(&conn).unwrap();
-        conn
+    async fn setup_pool() -> SqlitePool {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        crate::db::Schema::init(&db_path).await.unwrap()
     }
 
     // ── World ID validation (CTX-R4) ──
@@ -847,36 +850,36 @@ mod tests {
 
     // ── Phase management ──
 
-    #[test]
-    fn test_set_phase_brainstorm() {
+    #[tokio::test]
+    async fn test_set_phase_brainstorm() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        let result = manager.set_phase("Test", "brainstorm", &conn);
+        let result = manager.set_phase("Test", "brainstorm", &pool).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ManuscriptPhase::Brainstorm);
     }
 
-    #[test]
-    fn test_phase_progression() {
+    #[tokio::test]
+    async fn test_phase_progression() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        manager.set_phase("Test", "brainstorm", &conn).unwrap();
-        manager.set_phase("Test", "draft", &conn).unwrap();
-        manager.set_phase("Test", "review", &conn).unwrap();
+        manager.set_phase("Test", "brainstorm", &pool).await.unwrap();
+        manager.set_phase("Test", "draft", &pool).await.unwrap();
+        manager.set_phase("Test", "review", &pool).await.unwrap();
 
-        let phase = ManuscriptManager::get_phase(&conn).unwrap();
+        let phase = ManuscriptManager::get_phase(&pool).await.unwrap();
         assert_eq!(phase, Some("review".to_string()));
     }
 
-    #[test]
-    fn test_invalid_phase_transition() {
+    #[tokio::test]
+    async fn test_invalid_phase_transition() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        manager.set_phase("Test", "brainstorm", &conn).unwrap();
-        let result = manager.set_phase("Test", "published", &conn);
+        manager.set_phase("Test", "brainstorm", &pool).await.unwrap();
+        let result = manager.set_phase("Test", "published", &pool).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -884,88 +887,90 @@ mod tests {
             .contains("Invalid phase transition"));
     }
 
-    #[test]
-    fn test_promote() {
+    #[tokio::test]
+    async fn test_promote() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        manager.set_phase("Test", "brainstorm", &conn).unwrap();
-        let result = manager.promote("Test", false, &conn);
+        manager.set_phase("Test", "brainstorm", &pool).await.unwrap();
+        let result = manager.promote("Test", false, &pool).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ManuscriptPhase::Draft);
 
-        let phase = ManuscriptManager::get_phase(&conn).unwrap();
+        let phase = ManuscriptManager::get_phase(&pool).await.unwrap();
         assert_eq!(phase, Some("draft".to_string()));
     }
 
-    #[test]
-    fn test_promote_strict_mode_no_conflicts() {
+    #[tokio::test]
+    async fn test_promote_strict_mode_no_conflicts() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        manager.set_phase("Test", "brainstorm", &conn).unwrap();
+        manager.set_phase("Test", "brainstorm", &pool).await.unwrap();
         // Promote with strict mode should succeed when no conflicts
-        let result = manager.promote("Test", true, &conn);
+        let result = manager.promote("Test", true, &pool).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ManuscriptPhase::Draft);
     }
 
-    #[test]
-    fn test_promote_strict_mode_with_conflicts() {
+    #[tokio::test]
+    async fn test_promote_strict_mode_with_conflicts() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
         // Create the manuscript first
         manager.create("Test", Some("wld_test")).unwrap();
 
         // Create outbox table and add a conflicted entry
-        conn.execute(
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS outbox_entries (
                 outbox_entry_id TEXT PRIMARY KEY,
                 delivery_state TEXT NOT NULL
             )",
-            [],
         )
+        .execute(&pool)
+        .await
         .unwrap();
-        conn.execute(
+        sqlx::query(
             "INSERT INTO outbox_entries (outbox_entry_id, delivery_state) VALUES ('test', 'conflicted')",
-            [],
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         // Progress to review phase
-        manager.set_phase("Test", "brainstorm", &conn).unwrap();
-        manager.promote("Test", false, &conn).unwrap(); // draft
-        manager.promote("Test", false, &conn).unwrap(); // review
+        manager.set_phase("Test", "brainstorm", &pool).await.unwrap();
+        manager.promote("Test", false, &pool).await.unwrap(); // draft
+        manager.promote("Test", false, &pool).await.unwrap(); // review
 
         // Try to promote from review with strict mode and conflicts
-        let result = manager.promote("Test", true, &conn);
+        let result = manager.promote("Test", true, &pool).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("sync conflicts"));
     }
 
-    #[test]
-    fn test_promote_from_published_fails() {
+    #[tokio::test]
+    async fn test_promote_from_published_fails() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
         // Cycle through to published
-        manager.set_phase("Test", "brainstorm", &conn).unwrap();
-        manager.promote("Test", false, &conn).unwrap(); // draft
-        manager.promote("Test", false, &conn).unwrap(); // review
-        manager.promote("Test", false, &conn).unwrap(); // finalize
-        manager.promote("Test", false, &conn).unwrap(); // published
+        manager.set_phase("Test", "brainstorm", &pool).await.unwrap();
+        manager.promote("Test", false, &pool).await.unwrap(); // draft
+        manager.promote("Test", false, &pool).await.unwrap(); // review
+        manager.promote("Test", false, &pool).await.unwrap(); // finalize
+        manager.promote("Test", false, &pool).await.unwrap(); // published
 
-        let result = manager.promote("Test", false, &conn);
+        let result = manager.promote("Test", false, &pool).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_promote_without_phase_set_fails() {
+    #[tokio::test]
+    async fn test_promote_without_phase_set_fails() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        let result = manager.promote("Test", false, &conn);
+        let result = manager.promote("Test", false, &pool).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -975,15 +980,15 @@ mod tests {
 
     // ── Verify ──
 
-    #[test]
-    fn test_verify_valid_manuscript() {
+    #[tokio::test]
+    async fn test_verify_valid_manuscript() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
         manager.create("Valid", Some("wld_test")).unwrap();
-        manager.set_phase("Valid", "draft", &conn).unwrap();
+        manager.set_phase("Valid", "draft", &pool).await.unwrap();
 
-        let checks = manager.verify("Valid", false, &conn).unwrap();
+        let checks = manager.verify("Valid", false, &pool).await.unwrap();
         assert!(!checks.is_empty());
         // All checks should pass
         for check in &checks {
@@ -995,23 +1000,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_verify_with_content_check_no_hash() {
+    #[tokio::test]
+    async fn test_verify_with_content_check_no_hash() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
         manager.create("Test", Some("wld_test")).unwrap();
-        manager.set_phase("Test", "draft", &conn).unwrap();
+        manager.set_phase("Test", "draft", &pool).await.unwrap();
 
-        let checks = manager.verify("Test", true, &conn).unwrap();
+        let checks = manager.verify("Test", true, &pool).await.unwrap();
         // Should have a warning about no stored hash
         assert!(checks.iter().any(|c| c.contains("No stored hash")));
     }
 
-    #[test]
-    fn test_verify_with_content_check_hash_mismatch() {
+    #[tokio::test]
+    async fn test_verify_with_content_check_hash_mismatch() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
         manager.create("Test", Some("wld_test")).unwrap();
 
@@ -1021,20 +1026,20 @@ mod tests {
         let json = serde_json::to_string_pretty(&metadata).unwrap();
         std::fs::write(manager.metadata_file("Test").unwrap(), json).unwrap();
 
-        manager.set_phase("Test", "draft", &conn).unwrap();
+        manager.set_phase("Test", "draft", &pool).await.unwrap();
 
-        let checks = manager.verify("Test", true, &conn).unwrap();
+        let checks = manager.verify("Test", true, &pool).await.unwrap();
         // Should detect hash mismatch
         assert!(checks.iter().any(|c| c.contains("MISMATCH")));
     }
 
-    #[test]
-    fn test_verify_with_content_check_hash_match() {
+    #[tokio::test]
+    async fn test_verify_with_content_check_hash_match() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
         manager.create("Test", Some("wld_test")).unwrap();
-        manager.set_phase("Test", "draft", &conn).unwrap();
+        manager.set_phase("Test", "draft", &pool).await.unwrap();
 
         // Compute the actual hash
         let content = manager.read_content("Test").unwrap();
@@ -1052,17 +1057,17 @@ mod tests {
         let json = serde_json::to_string_pretty(&metadata).unwrap();
         std::fs::write(manager.metadata_file("Test").unwrap(), json).unwrap();
 
-        let checks = manager.verify("Test", true, &conn).unwrap();
+        let checks = manager.verify("Test", true, &pool).await.unwrap();
         // Should pass content integrity check
         assert!(checks.iter().any(|c| c.contains("Content integrity: OK")));
     }
 
-    #[test]
-    fn test_verify_nonexistent_manuscript() {
+    #[tokio::test]
+    async fn test_verify_nonexistent_manuscript() {
         let (_tmp, manager) = setup_manager();
-        let conn = setup_db();
+        let pool = setup_pool().await;
 
-        let checks = manager.verify("Ghost", false, &conn).unwrap();
+        let checks = manager.verify("Ghost", false, &pool).await.unwrap();
         // Should have a failure for missing file
         assert!(checks.iter().any(|c| c.starts_with('✗')));
     }
