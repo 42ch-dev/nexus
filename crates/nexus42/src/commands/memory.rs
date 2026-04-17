@@ -279,8 +279,9 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
     // Use tempfile::NamedTempFile for automatic cleanup on drop (W-004).
     // The file persists long enough for the editor to read it, but is
     // automatically deleted when the NamedTempFile goes out of scope.
-    let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
-        .map_err(|e| crate::errors::CliError::Other(format!("Failed to create temp file: {}", e)))?;
+    let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name).map_err(|e| {
+        crate::errors::CliError::Other(format!("Failed to create temp file: {}", e))
+    })?;
     temp_file
         .write_all(initial_content.as_bytes())
         .map_err(|e| crate::errors::CliError::Other(format!("Failed to write temp file: {}", e)))?;

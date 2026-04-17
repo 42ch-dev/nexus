@@ -103,14 +103,10 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             let safe_title = sanitize_title(&title)?;
             let file_name = format!(".nexus42-edit-{}", safe_title);
             let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
-                .map_err(|e| {
-                    CliError::Other(format!("Failed to create temp file: {}", e))
-                })?;
+                .map_err(|e| CliError::Other(format!("Failed to create temp file: {}", e)))?;
             temp_file
                 .write_all(content.as_bytes())
-                .map_err(|e| {
-                    CliError::Other(format!("Failed to write temp file: {}", e))
-                })?;
+                .map_err(|e| CliError::Other(format!("Failed to write temp file: {}", e)))?;
 
             let tmp_path = temp_file.path().to_path_buf();
 

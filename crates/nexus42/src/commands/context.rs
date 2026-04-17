@@ -823,15 +823,13 @@ mod tests {
 
     #[test]
     fn workspace_slug_for_creator_returns_configured_slug() {
-        use std::collections::HashMap;
         use crate::config::DEFAULT_WORKSPACE_SLUG;
+        use std::collections::HashMap;
 
         let mut config = CliConfig::default();
         config.active_creator_id = Some("ctr_alice".to_string());
-        config.active_workspace_slug_by_creator = HashMap::from([(
-            "ctr_alice".to_string(),
-            "wrk_novel".to_string(),
-        )]);
+        config.active_workspace_slug_by_creator =
+            HashMap::from([("ctr_alice".to_string(), "wrk_novel".to_string())]);
 
         let slug = config.workspace_slug_for_creator("ctr_alice");
         assert_eq!(slug, "wrk_novel");
