@@ -2,9 +2,6 @@
 //!
 //! Provides descriptive errors for validation and version reading operations.
 
-// V1.2 residual R7 (identity, nit): thiserror alignment — LocalDbError uses manual Display
-// Manual Display impl preserved for custom formatting; migration to thiserror deferred
-
 use std::fmt;
 
 /// Local database errors with actionable descriptions
@@ -26,8 +23,10 @@ pub enum LocalDbError {
     IdentityAlreadyLinked { creator_id: String },
     /// Local identity is not linked to any platform creator
     IdentityNotLinked { creator_id: String },
-    /// Rusqlite operation failed
-    Rusqlite(rusqlite::Error),
+    /// sqlx operation failed
+    Sqlx(sqlx::Error),
+    /// sqlx migration failed
+    Migrate(sqlx::migrate::MigrateError),
 }
 
 impl fmt::Display for LocalDbError {
@@ -36,13 +35,13 @@ impl fmt::Display for LocalDbError {
             Self::MissingWorkspaceMetaTable => {
                 write!(
                     f,
-                    "workspace_meta table does not exist - database may not be initialized; call init() first"
+                    "workspace_meta table does not exist - database may not be initialized; call open_pool() and run_migrations() first"
                 )
             }
             Self::MissingVersionKey { key } => {
                 write!(
                     f,
-                    "required key '{}' is missing from workspace_meta - database schema may be incomplete or corrupted; call init() to seed version keys",
+                    "required key '{}' is missing from workspace_meta - database schema may be incomplete or corrupted; call seed_versions() to seed version keys",
                     key
                 )
             }
@@ -74,8 +73,11 @@ impl fmt::Display for LocalDbError {
                     creator_id
                 )
             }
-            Self::Rusqlite(err) => {
+            Self::Sqlx(err) => {
                 write!(f, "database operation failed: {}", err)
+            }
+            Self::Migrate(err) => {
+                write!(f, "database migration failed: {}", err)
             }
         }
     }
@@ -84,14 +86,21 @@ impl fmt::Display for LocalDbError {
 impl std::error::Error for LocalDbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Rusqlite(err) => Some(err),
+            Self::Sqlx(err) => Some(err),
+            Self::Migrate(err) => Some(err),
             _ => None,
         }
     }
 }
 
-impl From<rusqlite::Error> for LocalDbError {
-    fn from(err: rusqlite::Error) -> Self {
-        Self::Rusqlite(err)
+impl From<sqlx::Error> for LocalDbError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Sqlx(err)
+    }
+}
+
+impl From<sqlx::migrate::MigrateError> for LocalDbError {
+    fn from(err: sqlx::migrate::MigrateError) -> Self {
+        Self::Migrate(err)
     }
 }
