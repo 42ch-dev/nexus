@@ -169,7 +169,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-closure.json"
       },
-      "title": "V1.1 Architecture Alignment \u2014 Final Closure",
+      "title": "V1.1 Architecture Alignment — Final Closure",
       "done_at": "2026-04-09"
     },
     {
@@ -219,7 +219,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
       },
-      "title": "Local DB Refactor \u2014 Single Ownership Module",
+      "title": "Local DB Refactor — Single Ownership Module",
       "done_at": "2026-04-08"
     },
     {
@@ -249,7 +249,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
       },
-      "title": "V1-Spec Wire Schema Sprint \u2014 Platform Contract Unblock",
+      "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
       "done_at": "2026-04-10"
     },
     {
@@ -319,7 +319,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
       },
-      "title": "Local FS layout (ADR-014) \u2014 CLI/daemon paths & creator workspace",
+      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
       "done_at": "2026-04-10"
     },
     {
@@ -370,7 +370,7 @@
       "file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json",
-        "residual_summary": "8 open residuals (1 medium, 4 low, 3 nit) \u2014 R11 (CLI stubs) resolved by v1.3-preflight T2"
+        "residual_summary": "8 open residuals (1 medium, 4 low, 3 nit) — R11 (CLI stubs) resolved by v1.3-preflight T2"
       },
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "done_at": "2026-04-14"
@@ -393,7 +393,7 @@
       "metadata": {
         "archived_record": "archived/plans/2026-04-14-v1.2-regression-suite.json"
       },
-      "title": "V1.2 M3: Minimum Automated Regression Suite (R1\u2013R5)",
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
       "done_at": "2026-04-15"
     },
     {
@@ -438,9 +438,10 @@
           "4ac5a82 docs(skill): T3",
           "94c77ab feat(platform): T4",
           "f7cd0d0 feat(auth): T5",
-          "f59ed13 style(clippy)"
+          "f59ed13 style(clippy)",
+          "bf7056d feat(creator): T2 register command orchestration"
         ],
-        "residual_summary": "All 35 V1.2 residuals archived \u2014 0 open"
+        "residual_summary": "All 35 V1.2 residuals archived — 0 open"
       },
       "notes": "Wave 1 batch 1 done: T1, T3, T4, T5 committed. T2, T6 blocked on platform M10."
     }
