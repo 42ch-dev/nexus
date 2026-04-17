@@ -1,16 +1,23 @@
-//! Built-in capability implementations (non-ACP subset).
+//! Built-in capability implementations.
 //!
-//! One module per built-in. ACP-touching capabilities (`acp.prompt`,
-//! `acp.session_load`, `judge.llm`) are deferred to WS3.
+//! One module per built-in. Includes both non-ACP capabilities (sync,
+//! workspace, etc.) and ACP-touching capabilities (acp.prompt, acp.session_load,
+//! judge.llm) added in WS3.
 
+mod acp_prompt;
+mod acp_session_load;
 mod creator;
+mod judge_llm;
 mod judge_rule;
 mod outbox;
-mod registry;
+pub mod registry;
 mod sync;
 mod workspace;
 
+pub use acp_prompt::AcpPrompt;
+pub use acp_session_load::AcpSessionLoad;
 pub use creator::{CreatorInjectPrompt, CreatorReadMemory, CreatorWriteMemory};
+pub use judge_llm::JudgeLlm;
 pub use judge_rule::JudgeRule;
 pub use outbox::{OutboxCompact, OutboxFlush};
 pub use registry::RegistryRefresh;

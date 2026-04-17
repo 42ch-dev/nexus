@@ -19,11 +19,11 @@ async fn axum_app_with_ephemeral_engine() -> Router {
 
     // Wire an ephemeral engine with in-memory storage.
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage));
+    let registry = Arc::new(CapabilityRegistry::with_builtins());
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
     state.set_engine(engine as Arc<dyn OrchestrationEngine>);
 
     // Wire a capability registry.
-    let registry = Arc::new(CapabilityRegistry::with_builtins());
     state.set_capability_registry(registry);
 
     // Keep tmp alive — leak is acceptable in tests.
@@ -87,8 +87,13 @@ async fn get_presets_returns_system_maintenance() {
         .unwrap();
     let v: Value = serde_json::from_slice(&bytes).unwrap();
     let presets = v["presets"].as_array().unwrap();
-    assert_eq!(presets.len(), 1);
-    assert_eq!(presets[0].as_str().unwrap(), "_system.maintenance");
+    assert_eq!(presets.len(), 2);
+    assert!(presets
+        .iter()
+        .any(|p| p.as_str().unwrap() == "_system.maintenance"));
+    assert!(presets
+        .iter()
+        .any(|p| p.as_str().unwrap() == "novel-writing"));
 }
 
 #[tokio::test]

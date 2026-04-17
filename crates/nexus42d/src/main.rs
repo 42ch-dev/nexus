@@ -138,10 +138,11 @@ async fn main() -> anyhow::Result<()> {
             db_pool,
         )),
     );
-    let concrete_engine = GraphFlowEngine::new_with_storage(storage);
 
-    // Create shared capability registry — used by system_preset and worker manager.
+    // Create shared capability registry — used by engine, system_preset, and worker manager.
     let capabilities = Arc::new(CapabilityRegistry::with_builtins());
+
+    let concrete_engine = GraphFlowEngine::new_with_storage(storage, capabilities.clone());
 
     // Kick off _system.maintenance session on the concrete engine
     // (start_session is a GraphFlowEngine method, not on the trait).

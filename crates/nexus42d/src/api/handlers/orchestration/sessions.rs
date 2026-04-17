@@ -1,4 +1,4 @@
-//! Session handlers: list, get, signal.
+//! Session handlers: list, get, signal, create.
 
 use crate::workspace::WorkspaceState;
 use axum::{
@@ -7,10 +7,46 @@ use axum::{
     Json,
 };
 use nexus_contracts::local::orchestration::http::{
-    GetSessionResponse, ListSessionsQuery, ListSessionsResponse, SessionSummary,
-    SignalSessionRequest,
+    CreateSessionRequest, CreateSessionResponse, GetSessionResponse, ListSessionsQuery,
+    ListSessionsResponse, SessionSummary, SignalSessionRequest,
 };
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
+
+/// `POST /v1/local/orchestration/sessions` — create a new session from a preset.
+pub async fn create_session(
+    State(state): State<WorkspaceState>,
+    Json(body): Json<CreateSessionRequest>,
+) -> Result<(StatusCode, Json<CreateSessionResponse>), (StatusCode, String)> {
+    let engine = state.engine().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "engine not available".into(),
+        )
+    })?;
+
+    // Load the preset by ID.
+    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded = nexus_orchestration::preset::load_embedded_preset(&body.preset_id, &caps)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("failed to load preset '{}': {}", body.preset_id, e),
+            )
+        })?;
+
+    // Start session with the loaded preset.
+    let session_id = engine
+        .start_session_with_preset(&loaded)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateSessionResponse {
+            session_id: session_id.0,
+        }),
+    ))
+}
 
 /// `GET /v1/local/orchestration/sessions`
 pub async fn list_sessions(

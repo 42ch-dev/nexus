@@ -174,7 +174,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
     let orchestration_routes = Router::new()
         .route(
             "/v1/local/orchestration/sessions",
-            get(handlers::orchestration::sessions::list_sessions),
+            get(handlers::orchestration::sessions::list_sessions)
+                .post(handlers::orchestration::sessions::create_session),
         )
         .route(
             "/v1/local/orchestration/sessions/{session_id}",
@@ -191,6 +192,10 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/orchestration/presets",
             get(handlers::orchestration::presets::list_presets),
+        )
+        .route(
+            "/v1/local/orchestration/presets/{id}:reload",
+            axum::routing::post(handlers::orchestration::presets::reload_preset),
         );
 
     Router::new()
