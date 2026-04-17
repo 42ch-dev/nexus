@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/acp-runtime/daemon-status-v2.schema.json",
+  "schema_version": 2,
+  "title": "Daemon Status v2",
+  "description": "Response shape for GET /v1/local/daemon/status. Superset of v1 running-probe, wire-compatible. Per daemon-lifecycle-api-v2.md §7.1.",
+  "type": "object",
+  "required": ["schema_version", "lifecycle_state", "version", "implementation_scope"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Wire format version indicator. v1 responses omit this or use 1."
+    },
+    "lifecycle_state": {
+      "type": "string",
+      "enum": ["starting", "running", "degraded", "stopping", "failed"],
+      "description": "Current daemon lifecycle state. 'stopped' is never emitted (pseudo-state)."
+    },
+    "version": {
+      "type": "string",
+      "description": "Daemon version string (CARGO_PKG_VERSION)."
+    },
+    "implementation_scope": {
+      "type": "string",
+      "description": "Human-readable scope note: 'full-fsm (v2)' for this implementation."
+    },
+    "uptime_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Daemon uptime in seconds since ProcessStarted."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when daemon entered Running state."
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Process ID of the daemon."
+    },
+    "degraded": {
+      "type": "object",
+      "description": "Degraded subsystems information (populated when lifecycle_state='degraded').",
+      "properties": {
+        "subsystems": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["http", "db", "sync", "engine", "worker_mgr", "acp_registry"]
+          },
+          "description": "List of degraded subsystem names."
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Reason strings for each degraded subsystem."
+        }
+      },
+      "default": {"subsystems": [], "reasons": []}
+    },
+    "subsystems": {
+      "type": "object",
+      "description": "Health status for each subsystem.",
+      "properties": {
+        "http": {
+          "$ref": "#/definitions/SubsystemHealthEntry"
+        },
+        "db": {
+          "$ref": "#/definitions/SubsystemHealthEntry"
+        },
+        "sync": {
+          "$ref": "#/definitions/SubsystemHealthEntry"
+        },
+        "engine": {
+          "$ref": "#/definitions/SubsystemHealthEntry"
+        },
+        "worker_mgr": {
+          "$ref": "#/definitions/SubsystemHealthEntry"
+        },
+        "acp_registry": {
+          "$ref": "#/definitions/SubsystemHealthEntry"
+        }
+      },
+      "additionalProperties": false
+    },
+    "exit_code": {
+      "type": "integer",
+      "description": "Exit code (only set when lifecycle_state='failed', briefly visible before process exits)."
+    },
+    "last_error": {
+      "type": "string",
+      "description": "Last error message (only set when lifecycle_state='failed')."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "SubsystemHealthEntry": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["up", "degraded", "down"],
+          "description": "Subsystem health status."
+        },
+        "last_check_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Milliseconds since last health check."
+        },
+        "active_sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For engine: number of active orchestration sessions."
+        },
+        "active_workers": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For worker_mgr: number of active worker processes."
+        },
+        "cache_age_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For acp_registry: age of cached registry in milliseconds."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
