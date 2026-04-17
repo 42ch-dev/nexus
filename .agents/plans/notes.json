@@ -149,6 +149,18 @@
     {
       "updated_at": "2026-04-14",
       "message": "Carried-over note (from former metadata.tech_debt_summary.archival_note): hot status compactions include 2026-04-10 CLI/platform done-row archival set, 2026-04-11 codegen-ref-resolution row compaction, and 2026-04-14 local-fs-layout row compaction to archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json."
+    },
+    {
+      "updated_at": "2026-04-17",
+      "message": "V1.4 wave-0 specs landed (orchestration-engine-v1, daemon-lifecycle-api-v2, acp-client-tech-spec-v2) + V1.4 delivery compass. Scope covers orchestration foundation + TD-9 closure + ACP worker-delegated hosting amendment."
+    },
+    {
+      "updated_at": "2026-04-17",
+      "message": "V1.4 compass scope extended: (a) schemas/ boundary refactor tightened to 'platform HTTP observability only' — local types move to crates/nexus-contracts/src/local/ (schemas-boundary-v1.md); (b) B-track folded in as WS7 — Creator Schedule + immutable versioned core_context (creator-schedule-and-core-context-v1.md) with V1.5 LlmSummarize forward-compat; (c) §10 SSOT allocation matrix formalised."
+    },
+    {
+      "updated_at": "2026-04-17",
+      "message": "V1.4 plans registered: 7 plan rows (WS1-WS7) replacing the single legacy V1.3 E2E backlog Todo. The prior 2026-04-17-v1.3-creator-register-e2e-tests row is superseded by 2026-04-17-v1.4-ws6-creator-register-e2e-tests (same work, promoted into V1.4 scope). Each plan file committed at .agents/plans/2026-04-17-v1.4-wsN-*.md; plan-convention.md metadata fields populated (wave_0_spec, spec_refs, dependency/parallelism, effort_agent_oriented). Execution ordering: WS1 -> {WS2 || WS4 || WS5 || WS6} -> WS3 -> WS7; M1 through M4 + M3b per compass §5."
     }
   ]
 }
