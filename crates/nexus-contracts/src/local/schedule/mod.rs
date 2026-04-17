@@ -6,6 +6,7 @@
 //! Design: `.agents/plans/knowledge/creator-schedule-and-core-context-v1.md`
 
 pub mod core_context;
+pub mod http;
 
 use serde::{Deserialize, Serialize};
 

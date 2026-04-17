@@ -5,7 +5,9 @@
 
 use std::collections::HashSet;
 
-use nexus_contracts::local::schedule::{ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId};
+use nexus_contracts::local::schedule::{Schedule, ScheduleConcurrency, ScheduleId};
+#[cfg(test)]
+use nexus_contracts::local::schedule::ParallelWithIds;
 
 /// The set of currently-running [`Schedule`] IDs for a single creator.
 ///
