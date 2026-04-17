@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/nexus-acp-host",
     "crates/nexus-contracts",
     "crates/nexus-domain",
     "crates/nexus-home-layout",
