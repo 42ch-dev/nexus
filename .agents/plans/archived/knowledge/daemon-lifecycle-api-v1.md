@@ -1,7 +1,10 @@
 # Daemon lifecycle API vs cli-spec §10.1 (TD-9)
 
+> **⚠ Superseded by [daemon-lifecycle-api-v2.md](../../knowledge/daemon-lifecycle-api-v2.md) (2026-04-17; archived here the same day).**
+> v2 is the authoritative design for the full 6-state `statig` HSM (TD-9 closure). This v1 document is preserved only to keep historical plan references reachable — do not cite this file in new work.
+
 **Source plan:** `v1-tech-debt-cleanup` (Batch D, Task 15 / TD-9)  
-**Status:** Active — partial delivery record
+**Status:** Superseded by v2 — retained for historical reachability
 
 ## Spec expectation (summary)
 

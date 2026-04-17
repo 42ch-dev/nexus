@@ -1,9 +1,12 @@
 # ACP Client Integration — Technical Specification v1
 
+> **⚠ Superseded by [acp-client-tech-spec-v2.md](../../knowledge/acp-client-tech-spec-v2.md) (2026-04-17; archived here the same day).**
+> v2 amends §2.3 (worker-delegated orchestration hosting), §4 (Local API additions for orchestration control), §5 (V1.4 capability additions), and Appendix B (residual statuses). It also defines the new `crates/nexus-acp-host` crate extraction in its §11. Sections not touched by v2 remain valid as originally written below, but **cite v2, not this file,** in new work.
+
 **Source Plan**: `2025-04-05-acp-client`
 **Author**: @architect
 **Date**: 2026-04-06
-**Status**: Active — authoritative input for Plan 12 (`2026-04-09-v1.1-acp-ux-permissions.md`)
+**Status**: Superseded by v2 — retained for historical reachability
 **Supersedes**: Sections 3.3 of V1.0-phase1 Architecture Review
 
 ---

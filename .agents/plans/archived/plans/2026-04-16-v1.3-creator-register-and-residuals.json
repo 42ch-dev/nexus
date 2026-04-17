@@ -21,7 +21,7 @@
     },
     "spec_refs": [
       ".agents/plans/knowledge/v1.3-delivery-compass-v1.md",
-      ".agents/plans/knowledge/challenge-solver-design-v1.md"
+      ".agents/plans/archived/knowledge/challenge-solver-design-v1.md"
     ],
     "description": "V1.3 nexus-side: implement creator register CLI command with challenge-verify flow and govern all 35 V1.2 residual findings to zero open.",
     "commits": [
