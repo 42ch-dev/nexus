@@ -10,6 +10,8 @@
 //!
 //! See `.agents/plans/knowledge/local-db-refactor-v1.md` for design baseline.
 
+pub mod identity;
+
 mod error;
 mod version;
 
@@ -21,6 +23,12 @@ pub use error::LocalDbError;
 
 // Re-export sqlx pool type for consumers
 pub use sqlx::SqlitePool;
+
+// Re-export identity types
+pub use identity::{
+    create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
+    list_local_identities, unlink_from_platform, LocalIdentityRow,
+};
 
 /// Runtime role for database initialization
 ///
