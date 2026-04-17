@@ -40,8 +40,10 @@ fn core_context_versions_llm_summarize_roundtrip() {
 
     // Both should be LlmSummarize.
     match (&v, &back) {
-        (DerivationStep::LlmSummarize { capability: c1, .. },
-         DerivationStep::LlmSummarize { capability: c2, .. }) => {
+        (
+            DerivationStep::LlmSummarize { capability: c1, .. },
+            DerivationStep::LlmSummarize { capability: c2, .. },
+        ) => {
             assert_eq!(c1, c2, "capability should survive roundtrip");
         }
         _ => panic!("expected LlmSummarize for both variants"),

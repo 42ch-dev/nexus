@@ -251,10 +251,7 @@ impl CoreContextManager {
         source_user: Option<String>,
     ) -> Result<CoreContextRecord, CoreContextError> {
         let author_id = source_user.clone().unwrap_or_default();
-        let step = DerivationStep::UserEdit {
-            op,
-            source_user,
-        };
+        let step = DerivationStep::UserEdit { op, source_user };
         let author = CoreContextAuthor::User { id: author_id };
         self.apply(schedule_id, step, author).await
     }
@@ -295,10 +292,7 @@ impl CoreContextManager {
         .bind(version.0 as i64)
         .fetch_optional(&*self.pool)
         .await?
-
-        .ok_or_else(|| {
-            CoreContextError::VersionNotFound(schedule_id.0.clone(), version.0)
-        })?;
+        .ok_or_else(|| CoreContextError::VersionNotFound(schedule_id.0.clone(), version.0))?;
 
         row.into_record()
     }
@@ -330,8 +324,8 @@ struct CoreContextVersionRow {
 
 impl CoreContextVersionRow {
     fn into_record(self) -> Result<CoreContextRecord, CoreContextError> {
-        let content: CoreContextPayload = serde_json::from_slice(&self.content)
-            .map_err(CoreContextError::Serde)?;
+        let content: CoreContextPayload =
+            serde_json::from_slice(&self.content).map_err(CoreContextError::Serde)?;
 
         let derivation = reconstruct_derivation(&self.derivation_kind, &self.derivation_detail)?;
 
@@ -363,9 +357,7 @@ fn reconstruct_derivation(
             if let Some(bytes) = detail {
                 serde_json::from_slice(bytes).map_err(CoreContextError::Serde)
             } else {
-                Ok(DerivationStep::Seed {
-                    raw: String::new(),
-                })
+                Ok(DerivationStep::Seed { raw: String::new() })
             }
         }
         "user_edit" => {
@@ -424,35 +416,27 @@ fn apply_step(
     _author: &CoreContextAuthor,
 ) -> Result<CoreContextPayload, CoreContextError> {
     match step {
-        DerivationStep::Seed { raw } => Ok(CoreContextPayload::Text {
-            body: raw.clone(),
-        }),
+        DerivationStep::Seed { raw } => Ok(CoreContextPayload::Text { body: raw.clone() }),
         DerivationStep::UserEdit { op, .. } => apply_edit_op(previous, op),
         DerivationStep::PresetHook { .. } => {
             // PresetHook via apply() uses the op stored in derivation_detail
             // This path is used when apply() is called directly with a PresetHook step.
             // For the correct behavior, use apply_preset_hook() instead.
-            Ok(previous
-                .clone()
-                .unwrap_or(CoreContextPayload::Text {
-                    body: String::new(),
-                }))
+            Ok(previous.clone().unwrap_or(CoreContextPayload::Text {
+                body: String::new(),
+            }))
         }
         DerivationStep::LlmSummarize { .. } => {
             // V1.5+; not emitted by V1.4 code
-            Ok(previous
-                .clone()
-                .unwrap_or(CoreContextPayload::Text {
-                    body: String::new(),
-                }))
+            Ok(previous.clone().unwrap_or(CoreContextPayload::Text {
+                body: String::new(),
+            }))
         }
         DerivationStep::PresetSeedExpansion { .. } => {
             // V1.4 plumbing only; no actual expansion yet
-            Ok(previous
-                .clone()
-                .unwrap_or(CoreContextPayload::Text {
-                    body: String::new(),
-                }))
+            Ok(previous.clone().unwrap_or(CoreContextPayload::Text {
+                body: String::new(),
+            }))
         }
     }
 }
@@ -463,9 +447,7 @@ fn apply_edit_op(
     op: &EditOp,
 ) -> Result<CoreContextPayload, CoreContextError> {
     match op {
-        EditOp::Replace { body } => Ok(CoreContextPayload::Text {
-            body: body.clone(),
-        }),
+        EditOp::Replace { body } => Ok(CoreContextPayload::Text { body: body.clone() }),
         EditOp::Append { body } => {
             let prev_text = match previous {
                 Some(CoreContextPayload::Text { body: prev }) => prev.as_str(),
@@ -490,9 +472,11 @@ fn apply_edit_op(
             };
             let mut map = match prev_value {
                 serde_json::Value::Object(m) => m,
-                other => return Err(CoreContextError::Serde(serde_json::Error::custom(format!(
-                    "StructRemove requires struct payload, got: {other}"
-                )))),
+                other => {
+                    return Err(CoreContextError::Serde(serde_json::Error::custom(format!(
+                        "StructRemove requires struct payload, got: {other}"
+                    ))))
+                }
             };
             map.remove(path);
             Ok(CoreContextPayload::Struct {
@@ -535,7 +519,8 @@ fn derivation_kind_str(step: &DerivationStep) -> &'static str {
 mod tests {
     use super::*;
     use nexus_contracts::local::schedule::{
-        CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp, ScheduleId,
+        CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp,
+        ScheduleId,
     };
 
     /// Helper: create a fresh test DB with migrations and return the pool.
@@ -612,10 +597,7 @@ mod tests {
         );
 
         // Read v2 content — should contain both parts
-        let content = mgr
-            .read(&sid, CoreContextVersion(2))
-            .await
-            .unwrap();
+        let content = mgr.read(&sid, CoreContextVersion(2)).await.unwrap();
         match &content.content {
             CoreContextPayload::Text { body } => {
                 assert!(body.contains("topic=bees"));

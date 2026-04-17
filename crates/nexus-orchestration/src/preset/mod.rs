@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn novel_writing_has_eight_prompt_references() {
+    fn novel_writing_has_nine_prompt_references() {
         let caps = CapabilityRegistry::with_builtins();
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
@@ -242,6 +242,13 @@ mod tests {
             })
             .collect();
 
+        // Collect template_file references from context_update hooks.
+        for s in &loaded.manifest.states {
+            if let Some(ref hook) = s.context_update {
+                prompt_files.push(&hook.template_file);
+            }
+        }
+
         // Collect template_file references from inner graph nodes.
         if let Some(ref igs) = loaded.manifest.inner_graphs {
             for ig in igs.values() {
@@ -255,19 +262,20 @@ mod tests {
 
         assert_eq!(
             prompt_files.len(),
-            7,
-            "expected 7 prompt template references in enter + inner_graphs"
+            8,
+            "expected 8 prompt template references in enter + context_update + inner_graphs"
         );
 
-        // Verify the embedded directory has all 8 prompt files (includes
-        // gathering-exit.md which is referenced from exit_when, not enter).
+        // Verify the embedded directory has all 9 prompt files (includes
+        // gathering-exit.md which is referenced from exit_when, not enter,
+        // and outlining-ctx-update.md from the context_update hook).
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
         assert_eq!(
             prompts_dir.files().count(),
-            8,
-            "expected 8 embedded prompt files"
+            9,
+            "expected 9 embedded prompt files"
         );
     }
 }

@@ -6,8 +6,8 @@
 //! R14: dependency chain auto-advance (A completes → B auto-starts)
 
 use nexus_contracts::local::schedule::{
-    CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp,
-    Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp, Schedule,
+    ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
 use nexus_local_db::SqlitePool;
 use nexus_orchestration::schedule::derivation::CoreContextManager;
@@ -46,7 +46,10 @@ fn make_schedule(
         preset_version: 1,
         status,
         concurrency,
-        depends_on: depends_on.into_iter().map(|d| ScheduleId(d.to_string())).collect(),
+        depends_on: depends_on
+            .into_iter()
+            .map(|d| ScheduleId(d.to_string()))
+            .collect(),
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
@@ -71,15 +74,26 @@ async fn r11_schedule_add_inspect_roundtrip() {
     let seed = "topic=bees vibe=literary";
 
     // Insert schedule
-    let schedule = make_schedule(sid, "creator-1", "novel-writing", ScheduleStatus::Pending, ScheduleConcurrency::Serial, vec![]);
+    let schedule = make_schedule(
+        sid,
+        "creator-1",
+        "novel-writing",
+        ScheduleStatus::Pending,
+        ScheduleConcurrency::Serial,
+        vec![],
+    );
     sup.insert_pending(schedule).await.unwrap();
 
     // Seed core_context v0
     let record = mgr
         .apply(
             &ScheduleId(sid.to_string()),
-            DerivationStep::Seed { raw: seed.to_string() },
-            CoreContextAuthor::User { id: "creator-1".to_string() },
+            DerivationStep::Seed {
+                raw: seed.to_string(),
+            },
+            CoreContextAuthor::User {
+                id: "creator-1".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -87,7 +101,10 @@ async fn r11_schedule_add_inspect_roundtrip() {
     assert_eq!(record.version, CoreContextVersion(1));
 
     // Inspect: v0 should match seed
-    let snapshot = mgr.current_snapshot(&ScheduleId(sid.to_string())).await.unwrap();
+    let snapshot = mgr
+        .current_snapshot(&ScheduleId(sid.to_string()))
+        .await
+        .unwrap();
     match &snapshot.content {
         CoreContextPayload::Text { body } => {
             assert_eq!(body, seed, "v0 content must equal seed");
@@ -113,27 +130,43 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     let seed = "initial context for state 1";
 
     // Insert and seed
-    let schedule = make_schedule(sid, "creator-1", "test-preset", ScheduleStatus::Running, ScheduleConcurrency::Serial, vec![]);
+    let schedule = make_schedule(
+        sid,
+        "creator-1",
+        "test-preset",
+        ScheduleStatus::Running,
+        ScheduleConcurrency::Serial,
+        vec![],
+    );
     sup.insert_pending(schedule).await.unwrap();
 
     // Set to Running (simulate engine has started)
     let now = chrono::Utc::now().timestamp();
-    sqlx::query("UPDATE creator_schedules SET status = 'running', updated_at = ?1 WHERE schedule_id = ?2")
-        .bind(now)
-        .bind(sid)
-        .execute(&*pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE creator_schedules SET status = 'running', updated_at = ?1 WHERE schedule_id = ?2",
+    )
+    .bind(now)
+    .bind(sid)
+    .execute(&*pool)
+    .await
+    .unwrap();
 
     // Seed v0
     mgr.apply(
         &ScheduleId(sid.to_string()),
-        DerivationStep::Seed { raw: seed.to_string() },
+        DerivationStep::Seed {
+            raw: seed.to_string(),
+        },
         CoreContextAuthor::System,
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // Verify v0 content
-    let v0 = mgr.read(&ScheduleId(sid.to_string()), CoreContextVersion(1)).await.unwrap();
+    let v0 = mgr
+        .read(&ScheduleId(sid.to_string()), CoreContextVersion(1))
+        .await
+        .unwrap();
     match &v0.content {
         CoreContextPayload::Text { body } => assert_eq!(body, seed),
         _ => panic!("expected text payload"),
@@ -144,7 +177,9 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     let v1 = mgr
         .apply_user_edit(
             &ScheduleId(sid.to_string()),
-            EditOp::Append { body: edit_text.to_string() },
+            EditOp::Append {
+                body: edit_text.to_string(),
+            },
             Some("creator-1".to_string()),
         )
         .await
@@ -153,14 +188,20 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     assert_eq!(v1.version, CoreContextVersion(2), "edit should create v1");
 
     // v0 should still be readable (running state finishes on v0)
-    let v0_still = mgr.read(&ScheduleId(sid.to_string()), CoreContextVersion(1)).await.unwrap();
+    let v0_still = mgr
+        .read(&ScheduleId(sid.to_string()), CoreContextVersion(1))
+        .await
+        .unwrap();
     match &v0_still.content {
         CoreContextPayload::Text { body } => assert_eq!(body, seed, "v0 should be immutable"),
         _ => panic!("expected text payload"),
     }
 
     // v1 should have the appended content (next state reads v1)
-    let v1_content = mgr.read(&ScheduleId(sid.to_string()), CoreContextVersion(2)).await.unwrap();
+    let v1_content = mgr
+        .read(&ScheduleId(sid.to_string()), CoreContextVersion(2))
+        .await
+        .unwrap();
     match &v1_content.content {
         CoreContextPayload::Text { body } => {
             assert!(body.contains(seed), "v1 should still contain original seed");
@@ -183,15 +224,26 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
     let sid = "R13-A";
 
     // Insert and seed
-    let schedule = make_schedule(sid, "creator-1", "novel-writing", ScheduleStatus::Pending, ScheduleConcurrency::Serial, vec![]);
+    let schedule = make_schedule(
+        sid,
+        "creator-1",
+        "novel-writing",
+        ScheduleStatus::Pending,
+        ScheduleConcurrency::Serial,
+        vec![],
+    );
     sup.insert_pending(schedule).await.unwrap();
 
     // Seed v0
     mgr.apply(
         &ScheduleId(sid.to_string()),
-        DerivationStep::Seed { raw: "topic=bees".to_string() },
+        DerivationStep::Seed {
+            raw: "topic=bees".to_string(),
+        },
         CoreContextAuthor::System,
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // Simulate outlining state exit → preset hook fires
     let hook_result = mgr
@@ -199,14 +251,19 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
             &ScheduleId(sid.to_string()),
             "outlining",
             "context_update",
-            EditOp::Append { body: "\n[Outline — v2]\nChapter 1: The Bees".to_string() },
+            EditOp::Append {
+                body: "\n[Outline — v2]\nChapter 1: The Bees".to_string(),
+            },
         )
         .await
         .unwrap();
 
     // Verify the derivation step is PresetHook
     match &hook_result.derivation {
-        DerivationStep::PresetHook { state_id, hook_name } => {
+        DerivationStep::PresetHook {
+            state_id,
+            hook_name,
+        } => {
             assert_eq!(state_id, "outlining");
             assert_eq!(hook_name, "context_update");
         }
@@ -214,11 +271,17 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
     }
 
     // Verify the history contains the PresetHook entry
-    let current = mgr.current_snapshot(&ScheduleId(sid.to_string())).await.unwrap();
+    let current = mgr
+        .current_snapshot(&ScheduleId(sid.to_string()))
+        .await
+        .unwrap();
     match &current.content {
         CoreContextPayload::Text { body } => {
             assert!(body.contains("topic=bees"), "should still contain seed");
-            assert!(body.contains("[Outline"), "should contain appended outline hook content");
+            assert!(
+                body.contains("[Outline"),
+                "should contain appended outline hook content"
+            );
         }
         _ => panic!("expected text payload"),
     }
@@ -238,7 +301,14 @@ async fn r14_dependency_chain_auto_advances() {
     let sid_b = "R14-B";
 
     // Insert A (no deps)
-    let schedule_a = make_schedule(sid_a, "creator-1", "test-preset", ScheduleStatus::Pending, ScheduleConcurrency::Serial, vec![]);
+    let schedule_a = make_schedule(
+        sid_a,
+        "creator-1",
+        "test-preset",
+        ScheduleStatus::Pending,
+        ScheduleConcurrency::Serial,
+        vec![],
+    );
     sup.insert_pending(schedule_a).await.unwrap();
 
     // Insert B (depends on A)
@@ -256,20 +326,34 @@ async fn r14_dependency_chain_auto_advances() {
     for sid in [sid_a, sid_b] {
         mgr.apply(
             &ScheduleId(sid.to_string()),
-            DerivationStep::Seed { raw: format!("seed for {sid}") },
+            DerivationStep::Seed {
+                raw: format!("seed for {sid}"),
+            },
             CoreContextAuthor::System,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
     }
 
     // Tick: A should start (no deps, running set empty)
     sup.tick().await.unwrap();
     assert_eq!(sup.status_of(sid_a).await, ScheduleStatus::Running);
-    assert_eq!(sup.status_of(sid_b).await, ScheduleStatus::Pending, "B should not start — depends on A");
+    assert_eq!(
+        sup.status_of(sid_b).await,
+        ScheduleStatus::Pending,
+        "B should not start — depends on A"
+    );
 
     // Simulate A completing
-    sup.on_schedule_terminal(sid_a, ScheduleStatus::Completed).await.unwrap();
+    sup.on_schedule_terminal(sid_a, ScheduleStatus::Completed)
+        .await
+        .unwrap();
     assert_eq!(sup.status_of(sid_a).await, ScheduleStatus::Completed);
 
     // After A completes, tick should auto-start B (deps satisfied)
-    assert_eq!(sup.status_of(sid_b).await, ScheduleStatus::Running, "B should auto-start after A completes");
+    assert_eq!(
+        sup.status_of(sid_b).await,
+        ScheduleStatus::Running,
+        "B should auto-start after A completes"
+    );
 }

@@ -171,21 +171,26 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Orchestration engine wired");
 
     // --- WS7: Schedule supervisor + core context manager ---
-    let schedule_pool: sqlx::SqlitePool = nexus_local_db::open_pool(
-        std::path::Path::new(&state.database_path()),
-    )
-    .await
-    .expect("open pool for schedule supervisor");
+    let schedule_pool: sqlx::SqlitePool =
+        nexus_local_db::open_pool(std::path::Path::new(&state.database_path()))
+            .await
+            .expect("open pool for schedule supervisor");
     let schedule_supervisor = Arc::new(ScheduleSupervisor::new(Arc::new(schedule_pool)));
     state.set_schedule_supervisor(schedule_supervisor.clone());
 
     // On boot, resume any Running schedules as Paused (daemon_restart recovery).
     // This ensures that schedules interrupted by a daemon restart can be
     // explicitly resumed by the user (spec §5).
-    match schedule_supervisor.resume_running_as_paused("daemon_restart").await {
+    match schedule_supervisor
+        .resume_running_as_paused("daemon_restart")
+        .await
+    {
         Ok(count) => {
             if count > 0 {
-                tracing::info!("resumed {} running schedule(s) as paused after daemon restart", count);
+                tracing::info!(
+                    "resumed {} running schedule(s) as paused after daemon restart",
+                    count
+                );
             }
         }
         Err(e) => {
@@ -259,7 +264,10 @@ async fn main() -> anyhow::Result<()> {
                 match supervisor.resume_running_as_paused("daemon_shutdown").await {
                     Ok(count) => {
                         if count > 0 {
-                            tracing::info!("paused {} running schedule(s) for graceful shutdown", count);
+                            tracing::info!(
+                                "paused {} running schedule(s) for graceful shutdown",
+                                count
+                            );
                         }
                     }
                     Err(e) => {

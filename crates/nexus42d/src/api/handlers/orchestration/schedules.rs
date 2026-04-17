@@ -30,9 +30,12 @@ fn require_supervisor(
     state: &WorkspaceState,
 ) -> Result<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>, (StatusCode, String)>
 {
-    state
-        .schedule_supervisor()
-        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "schedule supervisor not configured".to_string()))
+    state.schedule_supervisor().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "schedule supervisor not configured".to_string(),
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -53,9 +56,11 @@ pub async fn add_schedule(
         Some(c) => match c {
             ScheduleConcurrencyRequest::Serial => ScheduleConcurrency::Serial,
             ScheduleConcurrencyRequest::ParallelWith { schedule_ids } => {
-                ScheduleConcurrency::ParallelWith(nexus_contracts::local::schedule::ParallelWithIds {
-                    schedule_ids: schedule_ids.iter().map(|s| ScheduleId(s.clone())).collect(),
-                })
+                ScheduleConcurrency::ParallelWith(
+                    nexus_contracts::local::schedule::ParallelWithIds {
+                        schedule_ids: schedule_ids.iter().map(|s| ScheduleId(s.clone())).collect(),
+                    },
+                )
             }
             ScheduleConcurrencyRequest::ParallelAny => ScheduleConcurrency::ParallelAny,
         },
@@ -89,10 +94,12 @@ pub async fn add_schedule(
     };
 
     // Insert the schedule row
-    supervisor
-        .insert_pending(schedule)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create schedule: {e}")))?;
+    supervisor.insert_pending(schedule).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create schedule: {e}"),
+        )
+    })?;
 
     // Seed core context v0 if seed is provided
     let mut core_version: u32 = 0;
@@ -102,20 +109,19 @@ pub async fn add_schedule(
         let _record = mgr
             .apply(
                 &sid,
-                nexus_contracts::local::schedule::DerivationStep::Seed {
-                    raw: seed.clone(),
-                },
+                nexus_contracts::local::schedule::DerivationStep::Seed { raw: seed.clone() },
                 CoreContextAuthor::User {
                     id: body.creator_id.clone(),
                 },
             )
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to seed core context: {e}")))?;
-        core_version = mgr
-            .current_version(&sid)
-            .await
-            .map(|v| v.0)
-            .unwrap_or(1);
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to seed core context: {e}"),
+                )
+            })?;
+        core_version = mgr.current_version(&sid).await.map(|v| v.0).unwrap_or(1);
     }
 
     Ok((
@@ -162,10 +168,12 @@ pub async fn list_schedules(
         q = q.bind(st);
     }
 
-    let rows: Vec<ListRow> = q
-        .fetch_all(&*pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+    let rows: Vec<ListRow> = q.fetch_all(&*pool).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("database error: {e}"),
+        )
+    })?;
 
     let schedules = rows.into_iter().map(|r| r.into_summary()).collect();
 
@@ -193,9 +201,19 @@ pub async fn inspect_schedule(
     .bind(&schedule_id)
     .fetch_optional(&*pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("database error: {e}"),
+        )
+    })?;
 
-    let row = row.ok_or_else(|| (StatusCode::NOT_FOUND, format!("schedule {schedule_id} not found")))?;
+    let row = row.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("schedule {schedule_id} not found"),
+        )
+    })?;
 
     // Load dependencies
     let deps: Vec<String> = sqlx::query_as::<_, (String,)>(
@@ -204,7 +222,12 @@ pub async fn inspect_schedule(
     .bind(&schedule_id)
     .fetch_all(&*pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("database error: {e}"),
+        )
+    })?
     .into_iter()
     .map(|(d,)| d)
     .collect();
@@ -237,7 +260,9 @@ pub async fn edit_core_context(
         ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {
             return Err((
                 StatusCode::CONFLICT,
-                format!("schedule {schedule_id} is in terminal status {status:?}; edits not allowed"),
+                format!(
+                    "schedule {schedule_id} is in terminal status {status:?}; edits not allowed"
+                ),
             ));
         }
         _ => {}
@@ -246,10 +271,12 @@ pub async fn edit_core_context(
     let mgr = supervisor.core_context_manager();
 
     let op = parse_edit_op(&body)?;
-    let record = mgr
-        .apply_user_edit(&sid, op, None)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to edit core context: {e}")))?;
+    let record = mgr.apply_user_edit(&sid, op, None).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to edit core context: {e}"),
+        )
+    })?;
 
     Ok((
         StatusCode::OK,
@@ -272,16 +299,19 @@ pub async fn get_core_context(
     let mgr = supervisor.core_context_manager();
     let sid = ScheduleId(schedule_id.clone());
 
-    let snapshot = mgr
-        .current_snapshot(&sid)
-        .await
-        .map_err(|e| {
-            if e.to_string().contains("not found") {
-                (StatusCode::NOT_FOUND, format!("schedule {schedule_id} not found"))
-            } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}"))
-            }
-        })?;
+    let snapshot = mgr.current_snapshot(&sid).await.map_err(|e| {
+        if e.to_string().contains("not found") {
+            (
+                StatusCode::NOT_FOUND,
+                format!("schedule {schedule_id} not found"),
+            )
+        } else {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("database error: {e}"),
+            )
+        }
+    })?;
 
     let (payload_kind, content) = match &snapshot.content {
         nexus_contracts::local::schedule::CoreContextPayload::Text { body } => {
@@ -334,7 +364,12 @@ pub async fn get_core_context_history(
     .bind(&schedule_id)
     .fetch_all(&*pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("database error: {e}"),
+        )
+    })?;
 
     if rows.is_empty() {
         return Err((
@@ -379,38 +414,43 @@ pub async fn signal_schedule(
     .bind(&schedule_id)
     .fetch_optional(&*pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("database error: {e}"),
+        )
+    })?;
 
-    let (current_status_str,) = current_status_str
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("schedule {schedule_id} not found")))?;
+    let (current_status_str,) = current_status_str.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("schedule {schedule_id} not found"),
+        )
+    })?;
 
     let new_status = match body.signal.as_str() {
-        "start" => {
-            match current_status_str.as_str() {
-                "pending" => "running",
-                _ => {
-                    return Err((
+        "start" => match current_status_str.as_str() {
+            "pending" => "running",
+            _ => {
+                return Err((
                         StatusCode::CONFLICT,
                         format!(
                             "cannot start schedule {schedule_id}: current status is {current_status_str}"
                         ),
                     ));
-                }
             }
-        }
-        "pause" => {
-            match current_status_str.as_str() {
-                "running" | "pending" => "paused",
-                _ => {
-                    return Err((
+        },
+        "pause" => match current_status_str.as_str() {
+            "running" | "pending" => "paused",
+            _ => {
+                return Err((
                         StatusCode::CONFLICT,
                         format!(
                             "cannot pause schedule {schedule_id}: current status is {current_status_str}"
                         ),
                     ));
-                }
             }
-        }
+        },
         "resume" => {
             match current_status_str.as_str() {
                 "paused" => "pending", // Resume to pending; user can start or auto-admit
@@ -424,10 +464,9 @@ pub async fn signal_schedule(
                 }
             }
         }
-        "cancel" => {
-            match current_status_str.as_str() {
-                "pending" | "running" | "paused" => {
-                    sqlx::query(
+        "cancel" => match current_status_str.as_str() {
+            "pending" | "running" | "paused" => {
+                sqlx::query(
                         "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?1, updated_at = ?1
                          WHERE schedule_id = ?2",
                     )
@@ -437,24 +476,23 @@ pub async fn signal_schedule(
                     .await
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
 
-                    return Ok((
-                        StatusCode::OK,
-                        Json(SignalScheduleResponse {
-                            schedule_id,
-                            status: "cancelled".to_string(),
-                        }),
-                    ));
-                }
-                _ => {
-                    return Err((
+                return Ok((
+                    StatusCode::OK,
+                    Json(SignalScheduleResponse {
+                        schedule_id,
+                        status: "cancelled".to_string(),
+                    }),
+                ));
+            }
+            _ => {
+                return Err((
                         StatusCode::CONFLICT,
                         format!(
                             "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
                         ),
                     ));
-                }
             }
-        }
+        },
         "advance" => {
             // Advance is a pass-through signal for the session engine;
             // for now just confirm the schedule is running.
@@ -481,7 +519,10 @@ pub async fn signal_schedule(
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                format!("unknown signal '{}'; expected start|pause|resume|cancel|advance", body.signal),
+                format!(
+                    "unknown signal '{}'; expected start|pause|resume|cancel|advance",
+                    body.signal
+                ),
             ));
         }
     };
@@ -491,12 +532,17 @@ pub async fn signal_schedule(
         "UPDATE creator_schedules SET status = ?1, updated_at = ?2
          WHERE schedule_id = ?3",
     )
-    .bind(&new_status)
+    .bind(new_status)
     .bind(now)
     .bind(&schedule_id)
     .execute(&*pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("database error: {e}"),
+        )
+    })?;
 
     // After starting or resuming, trigger a supervisor tick to potentially
     // start dependent schedules.
@@ -544,7 +590,12 @@ pub async fn delete_schedule(
         .bind(&schedule_id)
         .execute(&*pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("database error: {e}"),
+            )
+        })?;
 
     Ok((
         StatusCode::OK,
@@ -561,19 +612,28 @@ fn parse_edit_op(body: &EditCoreContextRequest) -> Result<EditOp, (StatusCode, S
     match body.op.as_str() {
         "append" => {
             let text = body.body.as_ref().ok_or_else(|| {
-                (StatusCode::BAD_REQUEST, "append requires 'body' field".to_string())
+                (
+                    StatusCode::BAD_REQUEST,
+                    "append requires 'body' field".to_string(),
+                )
             })?;
             Ok(EditOp::Append { body: text.clone() })
         }
         "replace" => {
             let text = body.body.as_ref().ok_or_else(|| {
-                (StatusCode::BAD_REQUEST, "replace requires 'body' field".to_string())
+                (
+                    StatusCode::BAD_REQUEST,
+                    "replace requires 'body' field".to_string(),
+                )
             })?;
             Ok(EditOp::Replace { body: text.clone() })
         }
         "struct_merge" => {
             let patch = body.patch.as_ref().ok_or_else(|| {
-                (StatusCode::BAD_REQUEST, "struct_merge requires 'patch' field".to_string())
+                (
+                    StatusCode::BAD_REQUEST,
+                    "struct_merge requires 'patch' field".to_string(),
+                )
             })?;
             Ok(EditOp::StructMerge {
                 patch: patch.clone(),
@@ -581,7 +641,10 @@ fn parse_edit_op(body: &EditCoreContextRequest) -> Result<EditOp, (StatusCode, S
         }
         "struct_remove" => {
             let path = body.path.as_ref().ok_or_else(|| {
-                (StatusCode::BAD_REQUEST, "struct_remove requires 'path' field".to_string())
+                (
+                    StatusCode::BAD_REQUEST,
+                    "struct_remove requires 'path' field".to_string(),
+                )
             })?;
             Ok(EditOp::StructRemove { path: path.clone() })
         }
