@@ -50,3 +50,5 @@ pulldown-cmark-frontmatter = "0.2"
 serde_yaml = "0.9"
 async-trait = "0.1"
 tempfile = "3"
+jsonrpsee = { version = "0.26", default-features = false, features = ["server-core", "client-core", "macros"] }
+tokio-util = { version = "0.7", features = ["codec"] }
