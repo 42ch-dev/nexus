@@ -51,7 +51,7 @@
     },
     {
       "id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-      "status": "InProgress",
+      "status": "InReview",
       "file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
       "title": "V1.4 WS3 \u2014 Preset loader + novel-writing end-to-end",
       "owner": "fullstack-dev",
@@ -66,7 +66,7 @@
         "preset"
       ],
       "created_at": "2026-04-17",
-      "updated_at": "2026-04-18T05:40:00Z",
+      "updated_at": "2026-04-18T06:30:00Z",
       "metadata": {
         "priority": "high",
         "phase": "V1.4-M3",
@@ -85,15 +85,25 @@
           "batch2_tests": "pass",
           "batch2_clippy": "pass",
           "batch3_tests": "pass",
-          "batch3_clippy": "pass"
+          "batch3_clippy": "pass",
+          "batch4_tests": "pass",
+          "batch4_clippy": "pass",
+          "batch4_fmt": "pass",
+          "batch4_no_rusqlite": "pass",
+          "batch4_schemas": "54_valid",
+          "batch4_codegen": "no_diff"
         },
         "commits": [
           "cf6c21d feat(orchestration): ACP capabilities + AcpPromptTask + acp_worker JSON-RPC loop (WS3 T4)",
-          "f90bd39 feat(orchestration): preset YAML -> graph-flow::Graph mapping per \u00a78.2 (WS3 T3)",
+          "f90bd39 feat(orchestration): preset YAML -> graph-flow::Graph mapping per §8.2 (WS3 T3)",
           "8eb83b1 feat(orchestration): full InnerGraphTask (child session + output_binding export) (WS3 T5)",
-          "3f2ea0f feat(orchestration): embed novel-writing preset with 5 states and 2 inner graphs (WS3 T6)"
+          "3f2ea0f feat(orchestration): embed novel-writing preset with 5 states and 2 inner graphs (WS3 T6)",
+          "48f3167 feat(cli): nexus42 schedule start/status/advance (minimal; WS3 T7)",
+          "36668ea test(orchestration): novel-writing E2E against mocked ACP worker (WS3 T8, compass R5)",
+          "03f0897 feat(daemon): POST /orchestration/presets/{id}:reload (WS3 T9)",
+          "54f03c3 style: apply nightly rustfmt (WS3 T10)"
         ],
-        "notes": "Batch 3 (T5+T6) complete. Remaining: T7-T9."
+        "notes": "All T1-T10 complete. Batch 4 (T7-T10) done. Full CI gate passed."
       }
     },
     {
