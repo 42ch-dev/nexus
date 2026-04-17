@@ -127,8 +127,8 @@ impl ManuscriptState {
 
 // ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
-impl From<nexus_contracts::ManuscriptState> for ManuscriptState {
-    fn from(c: nexus_contracts::ManuscriptState) -> Self {
+impl From<nexus_contracts::local::domain::ManuscriptState> for ManuscriptState {
+    fn from(c: nexus_contracts::local::domain::ManuscriptState) -> Self {
         Self {
             schema_version: c.schema_version,
             manuscript_state_id: c.manuscript_state_id,
@@ -143,7 +143,7 @@ impl From<nexus_contracts::ManuscriptState> for ManuscriptState {
     }
 }
 
-impl From<ManuscriptState> for nexus_contracts::ManuscriptState {
+impl From<ManuscriptState> for nexus_contracts::local::domain::ManuscriptState {
     fn from(d: ManuscriptState) -> Self {
         Self {
             schema_version: d.schema_version,

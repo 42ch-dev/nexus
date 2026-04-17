@@ -28,7 +28,8 @@ use std::str::FromStr;
 #[cfg(test)]
 use std::sync::Arc;
 
-use nexus_contracts::generated::{Bundle, OutboxEntry, SyncCommand, LATEST_SCHEMA_VERSION};
+use nexus_contracts::generated::{Bundle, SyncCommand, LATEST_SCHEMA_VERSION};
+use nexus_contracts::local::domain::OutboxEntry;
 use nexus_contracts::DeliveryState;
 use uuid::Uuid;
 

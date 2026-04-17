@@ -2,7 +2,9 @@
 
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
-use nexus_contracts::DaemonStatusV2;
+use nexus_contracts::local::acp_runtime::daemon_status_v2::{
+    DaemonStatusV2, HealthStatus, LifecycleState, SubsystemHealth, SubsystemHealthEntry,
+};
 use serde::Serialize;
 use tracing::info;
 
@@ -53,28 +55,55 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
 
     // Get current lifecycle state
     let lifecycle_state = state.lifecycle_state();
-    let lifecycle_state_str = lifecycle_state.to_string();
-
     // Build the v2 response
     let uptime_seconds = state.uptime_seconds().await;
     let uptime_ms = uptime_seconds * 1000; // Convert to ms per spec §7.1
     let pid = std::process::id() as i64;
 
-    // Build subsystem health (stub for now - real subsystems will populate in T6)
-    let subsystems = serde_json::json!({
-        "http": {"status": "up", "last_check_ms": 0},
-        "db": {"status": "up", "last_check_ms": 0},
-        "sync": {"status": "up", "last_check_ms": 0},
-        "engine": {"status": "up", "active_sessions": 0},
-        "worker_mgr": {"status": "up", "active_workers": 0},
-        "acp_registry": {"status": "up", "cache_age_ms": 0}
-    });
+    let lifecycle_state_str = lifecycle_state.to_string();
+    let lifecycle_state_enum = match lifecycle_state_str.as_str() {
+        "starting" => LifecycleState::Starting,
+        "running" => LifecycleState::Running,
+        "degraded" => LifecycleState::Degraded,
+        "stopping" => LifecycleState::Stopping,
+        "failed" => LifecycleState::Failed,
+        _ => LifecycleState::Failed, // fallback
+    };
 
-    // Build degraded info (empty for healthy state)
-    let degraded = serde_json::json!({
-        "subsystems": [],
-        "reasons": []
-    });
+    // Build subsystem health (stub for now - real subsystems will populate in T6)
+    let make_entry = |status: HealthStatus| SubsystemHealthEntry {
+        status,
+        last_check_ms: Some(0),
+        active_sessions: None,
+        active_workers: None,
+        cache_age_ms: None,
+    };
+    let subsystems = SubsystemHealth {
+        http: Some(make_entry(HealthStatus::Up)),
+        db: Some(make_entry(HealthStatus::Up)),
+        sync: Some(make_entry(HealthStatus::Up)),
+        engine: Some(SubsystemHealthEntry {
+            status: HealthStatus::Up,
+            last_check_ms: Some(0),
+            active_sessions: Some(0),
+            active_workers: None,
+            cache_age_ms: None,
+        }),
+        worker_mgr: Some(SubsystemHealthEntry {
+            status: HealthStatus::Up,
+            last_check_ms: Some(0),
+            active_sessions: None,
+            active_workers: Some(0),
+            cache_age_ms: None,
+        }),
+        acp_registry: Some(SubsystemHealthEntry {
+            status: HealthStatus::Up,
+            last_check_ms: Some(0),
+            active_sessions: None,
+            active_workers: None,
+            cache_age_ms: Some(0),
+        }),
+    };
 
     // Exit code and last error (only set in Failed state)
     let exit_code = if lifecycle_state == crate::lifecycle::LifecycleState::Failed {
@@ -85,13 +114,13 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
 
     Json(DaemonStatusV2 {
         schema_version: 2,
-        lifecycle_state: lifecycle_state_str,
+        lifecycle_state: lifecycle_state_enum,
         version: env!("CARGO_PKG_VERSION").to_string(),
         implementation_scope: "full-fsm (v2)".to_string(),
         uptime_ms: Some(uptime_ms),
         started_at: None, // Could be set from lifecycle Running.entry timestamp
         pid: Some(pid),
-        degraded: Some(degraded),
+        degraded: None,
         subsystems: Some(subsystems),
         exit_code: exit_code.map(|c| c as i64),
         last_error: None, // Could be set from lifecycle in Failed state

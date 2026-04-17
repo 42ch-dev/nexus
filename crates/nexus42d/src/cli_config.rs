@@ -1,6 +1,6 @@
 //! Read `~/.nexus42/config.json` for active creator / workspace slug (same shape as CLI `CliConfig` subset).
 
-use nexus_contracts::RuntimeMode;
+use nexus_contracts::local::domain::RuntimeMode;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

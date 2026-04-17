@@ -7,7 +7,7 @@ use crate::context::types::ContextAssembleRequestV1;
 use crate::context::types::{error_code, error_message, is_error, MemoryKind};
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_contracts::RuntimeMode;
+use nexus_contracts::local::domain::RuntimeMode;
 use nexus_domain::runtime_guard;
 use nexus_domain::{
     context_assembly::AssembleResponse, DegradationGuard, DomainRuntimeMode, Stage0Assembly,

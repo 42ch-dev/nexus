@@ -39,7 +39,8 @@ pub mod sync_client;
 
 // Re-export common types from nexus-contracts
 pub use nexus_contracts::{
-    generated::{Bundle, OutboxEntry, SyncCommand},
+    generated::{Bundle, SyncCommand},
+    local::domain::OutboxEntry,
     BundleType, CreatorId, ManuscriptPhase, WorldId,
 };
 

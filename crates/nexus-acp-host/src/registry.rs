@@ -41,8 +41,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-// Import generated registry manifest types
-use nexus_contracts::generated::registry_manifest::{
+// Import local registry manifest types (moved from generated per WS5)
+use nexus_contracts::local::acp_runtime::registry_manifest::{
     AgentEntry as GeneratedAgentEntry, BinaryDistribution as GeneratedBinaryDistribution,
     Distribution as GeneratedDistribution, NpxDistribution as GeneratedNpxDistribution,
     PlatformBinary as GeneratedPlatformBinary, RegistryManifest,
