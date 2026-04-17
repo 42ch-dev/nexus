@@ -4,7 +4,7 @@
 //! with domain-level convenience methods for mode-aware operation checks.
 
 use crate::DomainError;
-use nexus_contracts::RuntimeMode;
+use nexus_contracts::local::domain::RuntimeMode;
 use std::fmt;
 use std::str::FromStr as _;
 
