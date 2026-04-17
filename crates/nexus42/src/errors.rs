@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::acp::AcpError;
+use nexus_acp_host::AcpError;
 
 /// Nexus CLI result type
 pub type Result<T> = std::result::Result<T, CliError>;

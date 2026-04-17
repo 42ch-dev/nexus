@@ -15,7 +15,7 @@
 //!     └─► delete ──► SessionManager::delete_session()
 //! ```
 
-use crate::acp::{SessionEntry, SessionManager};
+use nexus_acp_host::{SessionEntry, SessionManager};
 use crate::config::CliConfig;
 use crate::errors::Result;
 use chrono::{DateTime, Utc};
