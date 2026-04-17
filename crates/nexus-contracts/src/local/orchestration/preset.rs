@@ -67,6 +67,10 @@ pub struct PresetHeader {
     /// Optional license identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// Optional initial action for schedule creation (WS7 §7).
+    /// Controls how core_context v0 is seeded when a schedule is created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_action: Option<InitialAction>,
 }
 
 /// Preset kind discriminator.
@@ -106,6 +110,9 @@ pub struct StateDefinition {
     /// Whether this state is terminal (no outgoing transitions).
     #[serde(default, skip_serializing_if = "is_false")]
     pub terminal: bool,
+    /// Optional context update hook that fires on state exit (WS7 §7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_update: Option<ContextUpdateHook>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -274,6 +281,80 @@ pub struct GraphNode {
 pub enum GraphNodeKind {
     /// Send a prompt to the ACP agent.
     AcpPrompt,
+}
+
+// ---------------------------------------------------------------------------
+// InitialAction (WS7 §7)
+// ---------------------------------------------------------------------------
+
+/// What action to take when a schedule starts using this preset.
+///
+/// Declared at `preset.initial_action` level in the YAML manifest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InitialAction {
+    /// Use the seed text directly as core_context v0.
+    SeedDirect,
+    /// Expand the seed using a registered capability (V1.5+).
+    SeedExpansion {
+        /// Capability to call for expansion (e.g. `context.summarize`).
+        capability: String,
+        /// Handlebars template file for the expansion prompt.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        template_file: Option<String>,
+        /// Expected payload kind after expansion.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        payload_kind: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// ContextUpdateHook (WS7 §7)
+// ---------------------------------------------------------------------------
+
+/// A hook that fires on state exit to update the schedule's core_context.
+///
+/// Declared per-state as `states[].context_update` in the YAML manifest.
+/// Only `Append` and `StructMerge` operations are allowed; `Replace` is
+/// rejected during validation (spec §6.2 — preset hooks are strictly additive).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextUpdateHook {
+    /// The edit operation to apply.
+    /// Only `append` and `struct_merge` kinds are valid for preset hooks.
+    pub op: ContextUpdateOp,
+    /// Handlebars template file to render the edit content.
+    pub template_file: String,
+}
+
+/// Edit operation shape for context_update hooks.
+///
+/// A simplified subset of [`nexus_contracts::local::schedule::EditOp`] that
+/// is used at the YAML parsing level (before converting to the full `EditOp`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ContextUpdateOp {
+    /// Append text to existing content.
+    Append {
+        /// Body content (empty by default; filled at runtime from template).
+        #[serde(default)]
+        body: String,
+    },
+    /// JSON-merge into struct payload.
+    StructMerge {
+        /// Patch JSON (empty by default; filled at runtime from template).
+        #[serde(default)]
+        patch: serde_json::Value,
+    },
+    /// Replace is NOT allowed for preset hooks — will be rejected by the loader.
+    Replace {
+        #[serde(default)]
+        body: String,
+    },
+    /// StructRemove is NOT allowed for preset hooks — will be rejected by the loader.
+    StructRemove {
+        #[serde(default)]
+        path: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +678,7 @@ states:
                 author: None,
                 homepage: None,
                 license: None,
+                initial_action: None,
             },
             states: vec![
                 StateDefinition {
@@ -606,6 +688,7 @@ states:
                     exit_when: Some(ExitWhen::Manual),
                     next: Some(NextTarget::Linear("b".into())),
                     terminal: false,
+                    context_update: None,
                 },
                 StateDefinition {
                     id: "b".into(),
@@ -614,6 +697,7 @@ states:
                     exit_when: Some(ExitWhen::Rule),
                     next: None,
                     terminal: true,
+                    context_update: None,
                 },
             ],
             inner_graphs: None,
