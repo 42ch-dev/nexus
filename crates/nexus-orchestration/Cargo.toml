@@ -26,7 +26,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-local-db = { path = "../nexus-local-db" }
-nexus-domain = { path = "../nexus-domain" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+nexus-domain = { path = "../nexus-domain" }

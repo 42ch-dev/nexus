@@ -109,6 +109,9 @@ impl Task for PresetCapabilityTask {
 
 /// Build the hardcoded `_system.maintenance` graph.
 ///
+/// Accepts a shared [`CapabilityRegistry`] so that the daemon can pass its
+/// own instance (avoids duplicate registries with diverging state).
+///
 /// Returns an `Arc<Graph>` with the linear chain:
 /// ```text
 /// sync_pull → outbox_flush → registry_refresh → End
@@ -116,9 +119,7 @@ impl Task for PresetCapabilityTask {
 ///
 /// Each node is a [`PresetCapabilityTask`] wrapping the corresponding
 /// built-in capability. The terminal `End` node returns `NextAction::End`.
-pub fn build() -> Arc<Graph> {
-    let registry = Arc::new(CapabilityRegistry::with_builtins());
-
+pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
     let sync_pull = PresetCapabilityTask::new("sync.pull", "sync_pull", registry.clone());
     let outbox_flush = PresetCapabilityTask::new("outbox.flush", "outbox_flush", registry.clone());
     let registry_refresh =
@@ -151,7 +152,8 @@ mod tests {
 
     #[test]
     fn build_returns_graph_with_four_nodes() {
-        let graph = build();
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let graph = build(registry);
         assert_eq!(graph.id, "_system.maintenance");
         // Verify the graph has nodes.
         assert!(graph.get_task("sync_pull").is_some());
@@ -163,13 +165,15 @@ mod tests {
 
     #[test]
     fn start_task_is_sync_pull() {
-        let graph = build();
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let graph = build(registry);
         assert_eq!(graph.start_task_id().as_deref(), Some("sync_pull"));
     }
 
     #[test]
     fn graph_has_four_tasks() {
-        let graph = build();
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let graph = build(registry);
         // Verify all expected task IDs exist.
         for id in &["sync_pull", "outbox_flush", "registry_refresh", "end"] {
             assert!(graph.get_task(*id).is_some(), "expected task '{id}'");

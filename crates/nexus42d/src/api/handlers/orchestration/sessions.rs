@@ -10,7 +10,7 @@ use nexus_contracts::local::orchestration::http::{
     GetSessionResponse, ListSessionsQuery, ListSessionsResponse, SessionSummary,
     SignalSessionRequest,
 };
-use nexus_orchestration::engine::EngineSignal;
+use nexus_orchestration::engine::{EngineSignal, SessionStatus};
 
 /// `GET /v1/local/orchestration/sessions`
 pub async fn list_sessions(
@@ -52,7 +52,7 @@ pub async fn list_sessions(
             session_id: s.session_id.0,
             creator_id: s.creator_id,
             preset_id: s.preset_id,
-            status: format!("{:?}", s.status).to_lowercase(),
+            status: session_status_to_str(s.status),
             current_task_id: s.current_task_id,
         })
         .collect();
@@ -91,7 +91,7 @@ pub async fn get_session(
             session_id: session.session_id.0,
             creator_id: session.creator_id,
             preset_id: session.preset_id,
-            status: format!("{:?}", session.status).to_lowercase(),
+            status: session_status_to_str(session.status),
             current_task_id: session.current_task_id,
         },
     }))
@@ -137,4 +137,18 @@ pub async fn signal_session(
         StatusCode::ACCEPTED,
         Json(serde_json::json!({"signal": body.signal, "status": "accepted"})),
     ))
+}
+
+/// Convert [`SessionStatus`] to the snake_case string expected by the API contract.
+///
+/// `Debug` formatting produces `WaitingForInput` → `waitingforinput` (no separator).
+/// This function maps each variant explicitly to the correct `snake_case` form.
+fn session_status_to_str(status: SessionStatus) -> String {
+    match status {
+        SessionStatus::Running => "running".to_string(),
+        SessionStatus::Paused => "paused".to_string(),
+        SessionStatus::WaitingForInput => "waiting_for_input".to_string(),
+        SessionStatus::Completed => "completed".to_string(),
+        SessionStatus::Failed => "failed".to_string(),
+    }
 }
