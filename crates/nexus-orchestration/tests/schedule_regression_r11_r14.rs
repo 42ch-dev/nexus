@@ -340,7 +340,10 @@ async fn r14_dependency_chain_auto_advances() {
     sup.on_schedule_terminal(sid_a, ScheduleStatus::Completed)
         .await
         .unwrap();
-    assert_eq!(sup.status_of(sid_a).await.unwrap(), ScheduleStatus::Completed);
+    assert_eq!(
+        sup.status_of(sid_a).await.unwrap(),
+        ScheduleStatus::Completed
+    );
 
     // After A completes, tick should auto-start B (deps satisfied)
     assert_eq!(
