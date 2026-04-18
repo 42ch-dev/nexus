@@ -380,6 +380,44 @@ pnpm run typecheck
 - Daemon is `nexus42d`, started via `nexus42 daemon start`
 - **Formatting:** use `cargo +nightly fmt --all` before commit. The workspace `.rustfmt.toml` ignores `crates/nexus-contracts/src/generated/` (stable `cargo fmt` cannot apply `ignore`, and formatting generated Rust would desync CI `verify-codegen` from `pnpm run codegen`). Install once: `rustup toolchain install nightly --component rustfmt`
 
+## sqlx Compile-Time Macros (Mandatory)
+
+### Default: use compile-time macros
+
+All new sqlx queries **MUST** use compile-time checked macros:
+
+- Use `sqlx::query!("SQL", params...)` for execute-only statements.
+- Use `sqlx::query_as!(Type, "SQL", params...)` for queries returning typed rows.
+- Use `sqlx::query_scalar!("SQL", params...)` for single-value returns.
+
+**Do NOT** use runtime `sqlx::query()` or `sqlx::query_as::<T>()` for static SQL.
+
+### When runtime `sqlx::query()` is acceptable
+
+Runtime queries are **only** acceptable for:
+
+1. **DDL statements** (`CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE`) — sqlx macros cannot validate DDL.
+2. **PRAGMA statements** — no table schema to validate.
+3. **Truly dynamic SQL** — where the query string is constructed at runtime based on user input or configuration. Each such usage MUST include a `// SAFETY: dynamic SQL — compile-time macro not applicable.` comment explaining why a macro cannot be used.
+
+If in doubt, use the macro.
+
+### Adding new queries or migrations
+
+When adding or modifying SQL queries:
+
+1. Write the query using `sqlx::query!()` / `sqlx::query_as!()`.
+2. Run `cargo sqlx prepare --workspace --all -- --all-targets` to update `.sqlx/` metadata.
+3. Commit the updated `.sqlx/` files alongside your code changes.
+
+When adding new migrations under `crates/nexus-local-db/migrations/`:
+
+1. Write the migration SQL file.
+2. Run `export DATABASE_URL="sqlite:.sqlx/state.db?mode=rwc" && cargo sqlx database reset && cargo sqlx prepare --workspace --all -- --all-targets`.
+3. Commit `crates/nexus-local-db/migrations/` **and** `.sqlx/` in the same commit.
+
+CI will reject PRs where `.sqlx/` is out of sync with the committed macro invocations.
+
 **TypeScript contract package:**
 
 - `nexus-platform` (private repo) consumes `@42ch/nexus-contracts` via npm semver lock
