@@ -358,8 +358,10 @@ impl WorkspaceState {
         std::fs::create_dir_all(workspace_dir.join("References"))?;
 
         // Store workspace path in the database
+        // SAFETY: single static INSERT into workspace_meta key-value table.
+        // Uses unnamed ? for a single bind parameter.
         sqlx::query(
-            "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('workspace_path', ?1)",
+            "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('workspace_path', ?)",
         )
         .bind(path)
         .execute(self.pool())

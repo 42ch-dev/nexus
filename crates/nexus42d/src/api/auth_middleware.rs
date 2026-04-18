@@ -402,7 +402,7 @@ mod tests {
 
         sqlx::query(
             "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)"
+             VALUES (?, ?, ?, ?, ?)"
         )
         .bind(user_id)
         .bind(access_token)
@@ -422,7 +422,7 @@ mod tests {
 
         sqlx::query(
             "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)"
+             VALUES (?, ?, ?, ?, ?)"
         )
         .bind(user_id)
         .bind(access_token)

@@ -195,14 +195,16 @@ pub async fn inspect_schedule(
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
-    // SAFETY: inspected via `schedule_supervisor` pool reference — cannot use compile-time
-    // macro because the pool is obtained from `supervisor.pool()` which returns `&SqlitePool`.
-    // This could be converted in a future pass.
+    // SAFETY: runtime `sqlx::query_as` — pool obtained via `supervisor.pool()` which returns
+    // `Arc<SqlitePool>` (dereferenced to `&SqlitePool`). Compile-time macros require a
+    // `&SqlitePool` at the call site but `supervisor.pool()` does not expose the inner
+    // reference with sufficient lifetime for the macro expansion. Could be converted in a
+    // future pass by inlining the pool reference.
     let row = sqlx::query_as::<_, InspectRow>(
         "SELECT schedule_id, creator_id, preset_id, status, label,
                 current_core_context_version, created_at, updated_at,
                 concurrency_kind, concurrency_whitelist
-         FROM creator_schedules WHERE schedule_id = ?1",
+         FROM creator_schedules WHERE schedule_id = ?",
     )
     .bind(&schedule_id)
     .fetch_optional(&*pool)
@@ -222,9 +224,9 @@ pub async fn inspect_schedule(
     })?;
 
     // Load dependencies
-    // SAFETY: same pool reference constraint as inspect_schedule query above.
+    // SAFETY: runtime `sqlx::query_as` — same pool lifetime constraint as inspect_schedule above.
     let deps: Vec<String> = sqlx::query_as::<_, (String,)>(
-        "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?1",
+        "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?",
     )
     .bind(&schedule_id)
     .fetch_all(&*pool)
@@ -366,13 +368,13 @@ pub async fn get_core_context_history(
     let pool = supervisor.pool();
 
     // Query all versions for this schedule, ordered by version DESC
-    // SAFETY: same pool reference constraint as inspect_schedule query above.
+    // SAFETY: runtime `sqlx::query_as` — same pool lifetime constraint as inspect_schedule above.
     let rows = sqlx::query_as::<_, HistoryRow>(
         "SELECT version, payload_kind, content, derivation_kind,
                 created_at
          FROM core_context_versions
-         WHERE schedule_id = ?1
-         ORDER BY version DESC",
+         WHERE schedule_id = ?
+          ORDER BY version DESC",
     )
     .bind(&schedule_id)
     .fetch_all(&*pool)
@@ -421,9 +423,9 @@ pub async fn signal_schedule(
     let pool = supervisor.pool();
     let now = chrono::Utc::now().timestamp();
 
-    // SAFETY: same pool reference constraint as inspect_schedule query above.
+    // SAFETY: runtime `sqlx::query_as` — same pool lifetime constraint as inspect_schedule above.
     let current_status_str = sqlx::query_as::<_, (String,)>(
-        "SELECT status FROM creator_schedules WHERE schedule_id = ?1",
+        "SELECT status FROM creator_schedules WHERE schedule_id = ?",
     )
     .bind(&schedule_id)
     .fetch_optional(&*pool)
@@ -490,10 +492,10 @@ pub async fn signal_schedule(
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
-                // SAFETY: same pool reference constraint as inspect_schedule query above.
+                // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
                 sqlx::query(
-                        "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?1, updated_at = ?1
-                         WHERE schedule_id = ?2",
+                        "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?, updated_at = ?
+                         WHERE schedule_id = ?",
                     )
                     .bind(now)
                     .bind(&schedule_id)
@@ -552,10 +554,10 @@ pub async fn signal_schedule(
         }
     };
 
-    // SAFETY: same pool reference constraint as inspect_schedule query above.
+    // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
     sqlx::query(
-        "UPDATE creator_schedules SET status = ?1, updated_at = ?2
-         WHERE schedule_id = ?3",
+        "UPDATE creator_schedules SET status = ?, updated_at = ?
+         WHERE schedule_id = ?",
     )
     .bind(new_status)
     .bind(now)
@@ -615,8 +617,8 @@ pub async fn delete_schedule(
         }
     }
 
-    // SAFETY: same pool reference constraint as inspect_schedule query above.
-    sqlx::query("DELETE FROM creator_schedules WHERE schedule_id = ?1")
+    // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
+    sqlx::query("DELETE FROM creator_schedules WHERE schedule_id = ?")
         .bind(&schedule_id)
         .execute(&*pool)
         .await

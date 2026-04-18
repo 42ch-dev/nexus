@@ -494,6 +494,8 @@ impl ScheduleRow {
                 self.current_core_context_version as u32,
             ),
             current_session_id: self.current_session_id.clone(),
+            // scheduled_at is stored as i64 (Unix timestamp) in SQLite but exposed
+            // as Option<String> in the domain type. Conversion via .to_string() is safe.
             scheduled_at: self.scheduled_at.map(|t| t.to_string()),
             label: self.label.clone(),
             created_at: self.created_at.to_string(),
@@ -537,12 +539,13 @@ mod tests_t9 {
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
                 created_at, updated_at)
-               VALUES (?1, ?2, 'test-preset', 1, ?3,
-               'serial', 0, ?4, ?4)"#,
+               VALUES (?, ?, 'test-preset', 1, ?,
+               'serial', 0, ?, ?)"#,
         )
         .bind(id)
         .bind(creator_id)
         .bind(status)
+        .bind(now)
         .bind(now)
         .execute(&*sup.pool)
         .await
@@ -604,7 +607,7 @@ mod tests_t9 {
 
         // Insert dependency: B depends on A
         // SAFETY: test-only — DML helper for dependency setup.
-        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)")
+        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)")
             .bind("DEP-B")
             .bind("DEP-A")
             .execute(&*pool)
@@ -647,7 +650,7 @@ mod tests_t9 {
         insert_schedule(&sup, "DEP-B-FAIL", "pending").await;
 
         // SAFETY: test-only — DML helper for dependency setup.
-        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)")
+        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)")
             .bind("DEP-B-FAIL")
             .bind("DEP-A-FAIL")
             .execute(&*pool)

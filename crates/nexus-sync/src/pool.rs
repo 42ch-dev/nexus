@@ -99,17 +99,20 @@ mod tests {
 
         let pool = OutboxPool::new(&db_path, 2).await.unwrap();
 
+        // SAFETY: test-only DDL — creates a temporary test table; no production schema dependency.
         sqlx::query("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT NOT NULL)")
             .execute(pool.inner())
             .await
             .unwrap();
 
-        sqlx::query("INSERT INTO test (val) VALUES (?1)")
+        // SAFETY: test-only DML — inserts test data into temporary test table.
+        sqlx::query("INSERT INTO test (val) VALUES (?)")
             .bind("hello")
             .execute(pool.inner())
             .await
             .unwrap();
 
+        // SAFETY: test-only read — verifies inserted test data in temporary test table.
         let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE id = 1")
             .fetch_one(pool.inner())
             .await
@@ -123,6 +126,7 @@ mod tests {
 
         let pool = OutboxPool::new(&db_path, 4).await.unwrap();
 
+        // SAFETY: test-only DDL — creates a temporary test table; no production schema dependency.
         sqlx::query("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT NOT NULL)")
             .execute(pool.inner())
             .await
@@ -134,13 +138,15 @@ mod tests {
                 let pool = pool.clone();
                 tokio::spawn(async move {
                     let task_val = format!("task-{}", i);
-                    sqlx::query("INSERT INTO test (val) VALUES (?1)")
+                    // SAFETY: test-only DML — inserts test data into temporary test table.
+                    sqlx::query("INSERT INTO test (val) VALUES (?)")
                         .bind(&task_val)
                         .execute(pool.inner())
                         .await
                         .unwrap();
 
-                    let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE val = ?1")
+                    // SAFETY: test-only read — verifies inserted test data in temporary test table.
+                    let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE val = ?")
                         .bind(&task_val)
                         .fetch_one(pool.inner())
                         .await

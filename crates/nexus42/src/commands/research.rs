@@ -124,7 +124,7 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
         println!("  Filter: status={}", filter);
         // SAFETY: dynamic WHERE clause built from user-provided filter set.
         sqlx::query_as(
-            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ?1 ORDER BY created_at DESC",
+            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ? ORDER BY created_at DESC",
         )
         .bind(filter)
         .fetch_all(&pool)
