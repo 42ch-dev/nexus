@@ -78,24 +78,18 @@ async fn creator_register_happy_path() {
     // Mock POST /api/v1/creators/register → solvable challenge (5 + 3 = 8)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/register_response.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/register_response.json"
+        )))
         .mount(&mock)
         .await;
 
     // Mock POST /api/v1/creators/verify → verified with api_key
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/verify_response_success.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/verify_response_success.json"
+        )))
         .mount(&mock)
         .await;
 
@@ -150,12 +144,9 @@ async fn creator_register_challenge_unsolvable_falls_back_or_errors() {
     // Mock register with an unsolvable challenge
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/register_response_bad.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/register_response_bad.json"
+        )))
         .mount(&mock)
         .await;
 
@@ -190,12 +181,9 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
     // Mock register → solvable challenge (5 + 3 = 8)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/register_response.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/register_response.json"
+        )))
         .mount(&mock)
         .await;
 
@@ -203,12 +191,9 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
     // Both auto-retry attempts will get wrong_answer back
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/verify_response_rejected.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/verify_response_rejected.json"
+        )))
         .mount(&mock)
         .await;
 
@@ -236,8 +221,7 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
     let creds_path = home.path().join(".nexus42/auth.json");
     if creds_path.exists() {
         let creds = std::fs::read_to_string(&creds_path).expect("read auth.json");
-        let creds_json: serde_json::Value =
-            serde_json::from_str(&creds).expect("parse auth.json");
+        let creds_json: serde_json::Value = serde_json::from_str(&creds).expect("parse auth.json");
         // The only creator in auth.json should be our seed token, NOT the registered one
         let creators = creds_json["creators"].as_object().expect("creators object");
         assert!(
@@ -260,24 +244,18 @@ async fn creator_register_twice_does_not_double_write_credentials() {
     // Mock register → solvable challenge (5 + 3 = 8)
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/register"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/register_response.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/register_response.json"
+        )))
         .mount(&mock)
         .await;
 
     // Mock verify → verified
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!(
-                    "fixtures/creator_register/verify_response_success.json"
-                )),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
+            "fixtures/creator_register/verify_response_success.json"
+        )))
         .mount(&mock)
         .await;
 
@@ -287,9 +265,6 @@ async fn creator_register_twice_does_not_double_write_credentials() {
         .output()
         .expect("first run");
     assert!(output1.status.success(), "first register should succeed");
-
-    let creds_after_first = std::fs::read_to_string(home.path().join(".nexus42/auth.json"))
-        .expect("read auth.json after first run");
 
     // --- Second run (same mock, same name) ---
     let output2 = cli_cmd(home.path())
@@ -312,22 +287,28 @@ async fn creator_register_twice_does_not_double_write_credentials() {
     let creds_json: serde_json::Value =
         serde_json::from_str(&creds_after_second).expect("parse auth.json after second run");
     let creators = creds_json["creators"].as_object().expect("creators object");
-    if creators.contains_key("crt_e2e_test_12345") {
-        let api_key = creators["crt_e2e_test_12345"]["creator_api_key"]
-            .as_str()
-            .unwrap_or("");
-        assert!(
-            !api_key.is_empty(),
-            "api_key must not be empty after second run; got: {creds_after_second}"
-        );
-    }
+    assert!(
+        creators.contains_key("crt_e2e_test_12345"),
+        "creator entry must still exist after second run"
+    );
+    let api_key = creators["crt_e2e_test_12345"]["creator_api_key"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        !api_key.is_empty(),
+        "api_key must not be empty after second run; got: {creds_after_second}"
+    );
 
-    // If first run succeeded and second also succeeds, credential content should
-    // be stable (no double-write corruption).
-    if output2.status.success() {
-        assert_eq!(
-            creds_after_first, creds_after_second,
-            "credentials should remain stable across two successful registrations"
-        );
-    }
+    // Verify the api_key value is still correct (not overwritten with garbage).
+    assert_eq!(
+        api_key, "nexus_live_active_e2e_key",
+        "api_key should retain its correct value after second run"
+    );
+
+    // Regression guard: seed token must still be intact (no data loss for
+    // other creator entries in the auth store).
+    assert!(
+        creators.contains_key("crt_seed_token"),
+        "seed token entry must not be lost after second run"
+    );
 }
