@@ -1,7 +1,125 @@
 {
   "version": 1,
-  "updated_at": "2026-04-18T22:00:00Z",
-  "plans": [],
+  "updated_at": "2026-04-18T23:30:00Z",
+  "plans": [
+    {
+      "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
+      "title": "V1.5 WS-A — Schedule FSM hardening",
+      "file": "2026-04-18-v1.5-ws-a-schedule-fsm.md",
+      "status": "Todo",
+      "owner": "fullstack-dev",
+      "agents": ["fullstack-dev", "qa-engineer"],
+      "progress": 0,
+      "tags": ["v1.5", "residual", "schedule", "fsm", "M1"],
+      "created_at": "2026-04-18T23:30:00Z",
+      "updated_at": "2026-04-18T23:30:00Z",
+      "notes": "First priority. 7 medium residuals (WS7 R1–R7). Blocks WS-C and WS-D.",
+      "metadata": {
+        "description": "Resolve all 7 schedule-related residuals to deliver robust Schedule state machine with correct persistence, transitions, and UX.",
+        "milestone": "M1",
+        "working_branch": "feature/v1.5-stabilization",
+        "dependency": [],
+        "blocks": ["2026-04-18-v1.5-ws-c-context-summarize", "2026-04-18-v1.5-ws-d-cron-triggers"],
+        "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+        "residual_coverage": {
+          "plan_id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
+          "residual_ids": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
+        }
+      }
+    },
+    {
+      "id": "2026-04-18-v1.5-ws-b-orch-db-residuals",
+      "title": "V1.5 WS-B — Orchestration + DB residual cleanup",
+      "file": "2026-04-18-v1.5-ws-b-orch-db-residuals.md",
+      "status": "Todo",
+      "owner": "fullstack-dev",
+      "agents": ["fullstack-dev", "qa-engineer"],
+      "progress": 0,
+      "tags": ["v1.5", "residual", "orchestration", "db", "sqlx", "M1"],
+      "created_at": "2026-04-18T23:30:00Z",
+      "updated_at": "2026-04-18T23:30:00Z",
+      "notes": "Parallel with WS-A. 12 residuals across WS2/WS3/WS8/sqlx (7 medium + 3 low + 2 nit).",
+      "metadata": {
+        "description": "Resolve remaining 12 residuals across orchestration, preset loader, local DB, and sqlx compile-time migration.",
+        "milestone": "M1",
+        "working_branch": "feature/v1.5-stabilization",
+        "dependency": [],
+        "blocks": [],
+        "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+        "residual_coverage": {
+          "plans": {
+            "2026-04-17-v1.4-ws2-orchestration-skeleton": ["R1", "R3", "R4"],
+            "2026-04-17-v1.4-ws3-preset-loader-novel-writing": ["R1", "R2"],
+            "2026-04-17-v1.4-ws8-local-db-sqlx-migration": ["R1", "R4"],
+            "2026-04-18-sqlx-compile-time-migration": ["R1", "R2", "R3", "R4", "R5"]
+          }
+        }
+      }
+    },
+    {
+      "id": "2026-04-18-v1.5-ws-c-context-summarize",
+      "title": "V1.5 WS-C — context.summarize capability",
+      "file": "2026-04-18-v1.5-ws-c-context-summarize.md",
+      "status": "Todo",
+      "owner": "fullstack-dev",
+      "agents": ["fullstack-dev", "qa-engineer"],
+      "progress": 0,
+      "tags": ["v1.5", "capability", "context-summarize", "M2"],
+      "created_at": "2026-04-18T23:30:00Z",
+      "updated_at": "2026-04-18T23:30:00Z",
+      "notes": "Depends on WS-A. LLM-driven core_context summarization. Zero schema migration.",
+      "metadata": {
+        "description": "Implement LLM-driven core_context summarization capability with preset YAML extension context_update.kind: llm_summarize.",
+        "milestone": "M2",
+        "working_branch": "feature/v1.5-stabilization",
+        "dependency": ["2026-04-18-v1.5-ws-a-schedule-fsm"],
+        "blocks": [],
+        "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md"
+      }
+    },
+    {
+      "id": "2026-04-18-v1.5-ws-d-cron-triggers",
+      "title": "V1.5 WS-D — Cron / wall-clock triggers",
+      "file": "2026-04-18-v1.5-ws-d-cron-triggers.md",
+      "status": "Todo",
+      "owner": "fullstack-dev",
+      "agents": ["fullstack-dev", "qa-engineer"],
+      "progress": 0,
+      "tags": ["v1.5", "cron", "scheduler", "M2"],
+      "created_at": "2026-04-18T23:30:00Z",
+      "updated_at": "2026-04-18T23:30:00Z",
+      "notes": "Depends on WS-A. Clock poller for scheduled_at. Crate selection deferred to implementation.",
+      "metadata": {
+        "description": "Implement clock poller that moves Pending Schedules to Running when now() >= scheduled_at.",
+        "milestone": "M2",
+        "working_branch": "feature/v1.5-stabilization",
+        "dependency": ["2026-04-18-v1.5-ws-a-schedule-fsm"],
+        "blocks": [],
+        "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md"
+      }
+    },
+    {
+      "id": "2026-04-18-v1.5-ws-e-platform-coordination",
+      "title": "V1.5 WS-E — Platform coordination",
+      "file": "2026-04-18-v1.5-ws-e-platform-coordination.md",
+      "status": "Todo",
+      "owner": "fullstack-dev",
+      "agents": ["fullstack-dev", "architect"],
+      "progress": 0,
+      "tags": ["v1.5", "platform", "schemas", "M3"],
+      "created_at": "2026-04-18T23:30:00Z",
+      "updated_at": "2026-04-18T23:30:00Z",
+      "notes": "Parallel with WS-A/B. Nexus-side schema changes for platform plans 36–43. Plan 40 as_of highest priority.",
+      "metadata": {
+        "description": "Deliver nexus-side schema/contract changes for platform V1.5 plans 36–43.",
+        "milestone": "M3",
+        "working_branch": "feature/v1.5-stabilization",
+        "dependency": [],
+        "blocks": [],
+        "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md"
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
