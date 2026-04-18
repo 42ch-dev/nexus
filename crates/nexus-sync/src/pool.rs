@@ -45,9 +45,11 @@ impl OutboxPool {
             .connect(&url)
             .await
             .map_err(nexus_local_db::LocalDbError::from)?;
+        // SAFETY: PRAGMA statement — no table schema to validate against.
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
             .await?;
+        // SAFETY: PRAGMA statement — no table schema to validate against.
         sqlx::query("PRAGMA foreign_keys = ON")
             .execute(&pool)
             .await?;
