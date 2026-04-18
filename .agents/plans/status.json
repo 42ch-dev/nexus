@@ -4,13 +4,19 @@
   "plans": [
     {
       "id": "2026-04-18-sqlx-compile-time-migration",
-      "status": "InReview",
+      "status": "Done",
       "file": ".agents/plans/2026-04-18-sqlx-compile-time-migration.md",
       "title": "V1.4 — sqlx compile-time macro migration + .sqlx/ workflow",
       "owner": "fullstack-dev",
-      "tags": ["v1.4", "sqlx", "refactor", "tech-debt"],
+      "tags": [
+        "v1.4",
+        "sqlx",
+        "refactor",
+        "tech-debt"
+      ],
       "created_at": "2026-04-18",
-      "updated_at": "2026-04-18T20:00:00Z",
+      "updated_at": "2026-04-18T21:30:00Z",
+      "done_at": "2026-04-18",
       "metadata": {
         "priority": "high",
         "phase": "V1.4",
@@ -18,27 +24,39 @@
         "merge_target": "main",
         "description": "Migrate all ~79 runtime sqlx::query() calls to compile-time checked macros (query!/query_as!/query_scalar!), establish .sqlx/ offline workflow, codify AGENTS.md convention. Spec: knowledge/sqlx-compile-time-migration-v1.md",
         "wave_0_spec": ".agents/plans/knowledge/sqlx-compile-time-migration-v1.md",
-        "spec_refs": [".agents/plans/knowledge/sqlx-compile-time-migration-v1.md"],
+        "spec_refs": [
+          ".agents/plans/knowledge/sqlx-compile-time-migration-v1.md"
+        ],
         "effort_agent_oriented": "M (5 agent sessions, 5 tasks)",
         "commits": [
           "df6a293 chore(sqlx): initialize .sqlx offline workflow and reference database setup",
           "8067f9c refactor(sqlx): migrate nexus-local-db to compile-time checked macros",
           "2fc819c refactor(sqlx): migrate nexus-sync to compile-time checked macros",
-          "131f345 refactor(sqlx): migrate nexus-orchestration to compile-time checked macros"
+          "131f345 refactor(sqlx): migrate nexus-orchestration to compile-time checked macros",
+          "e85fb94 refactor(sqlx): migrate nexus42 and nexus42d to compile-time checked macros",
+          "6f217b4 chore(ci,docs): re-enable verify-sqlx-offline and codify sqlx compile-time macro convention",
+          "35f62f9 fix(sqlx): address all blocking QC findings from sqlx migration review"
         ],
         "gates": {
           "cargo_build": "pass",
-          "cargo_test": "pass (nexus-orchestration: 171 tests all green)",
-          "cargo_clippy": "pass (lib clean; 7 pre-existing test-only warnings in unrelated files)"
+          "cargo_test": "pass (385/386; 1 pre-existing auth test failure out of scope)",
+          "cargo_clippy": "pass",
+          "qa_status": "pass",
+          "qc_status": "approved (after fix round)",
+          "sqlx_offline_check": "pass",
+          "tests": "385/386 pass",
+          "fmt": "pass",
+          "sqlx_metadata": "97 query JSON files committed"
         },
-        "notes": "Batch 3 of 5 complete: nexus-orchestration migrated (~18 production queries → compile-time macros). 60 .sqlx metadata files total (21 new). Test DML helpers kept runtime with // SAFETY: comments. Key pattern: all bind params pre-owned into let bindings before macro call to satisfy borrow checker."
+        "notes": "All 5 batches complete. 97 .sqlx/ metadata files. All runtime queries have SAFETY comments. QC3+suggestions registered as residuals. QA pass on all 9 acceptance criteria.",
+        "residual_summary": "5 low/nit items (QC3 suggestions + QA nits) — deferred, no blocking issues"
       }
     },
     {
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
       "status": "Done",
       "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
-      "title": "V1.4 WS1 \u2014 nexus-acp-host crate extraction",
+      "title": "V1.4 WS1 — nexus-acp-host crate extraction",
       "owner": "fullstack-dev",
       "tags": [
         "v1.4",
@@ -54,7 +72,7 @@
         "phase": "V1.4-M1",
         "working_branch": "feature/v1.4-ws1-acp-host",
         "merge_target": "main",
-        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md \u00a711.",
+        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
         "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
         "spec_refs": [
           ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
@@ -118,7 +136,7 @@
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
           "severity": "low",
           "target_date": "V1.5 or wiremock upstream fix",
           "note": "Dependabot bumped rand to 0.8.6 in workspace, but wiremock transitively depends on rand 0.7.3 which cannot be removed without upstream http-types migration."
@@ -151,7 +169,7 @@
         },
         {
           "id": "R3",
-          "title": "No paused\u2192running status transition in FSM",
+          "title": "No paused→running status transition in FSM",
           "severity": "medium",
           "source": "QC1 medium",
           "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
@@ -195,7 +213,7 @@
         },
         {
           "id": "R7",
-          "title": "paused\u2192running requires 2-step UX",
+          "title": "paused→running requires 2-step UX",
           "severity": "medium",
           "source": "QC2 medium",
           "scope": "CLI UX / daemon signal handler",
@@ -235,7 +253,7 @@
           "title": "Daemon restart does not repopulate in-memory session tracker from SQLite",
           "severity": "medium",
           "source": "qc",
-          "scope": "crates/nexus42d/src/main.rs \u2014 engine restart path",
+          "scope": "crates/nexus42d/src/main.rs — engine restart path",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "WS3",
@@ -254,7 +272,7 @@
         },
         {
           "id": "R4",
-          "title": "Worker shutdown SIGTERM\u2192SIGKILL path not implemented (uses start_kill directly)",
+          "title": "Worker shutdown SIGTERM→SIGKILL path not implemented (uses start_kill directly)",
           "severity": "medium",
           "source": "qc",
           "scope": "crates/nexus-orchestration/src/worker/manager.rs",
