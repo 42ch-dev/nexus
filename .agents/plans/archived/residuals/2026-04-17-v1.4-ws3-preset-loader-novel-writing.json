@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
+  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "entries": [
+    {
+      "id": "R5",
+      "title": "load_preset() directory-based stub",
+      "severity": "nit",
+      "source": "qc1+qc2+qc3 consolidation",
+      "scope": "crates/nexus-orchestration/src/preset/loader.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 load_preset() directory-based stub"
+    },
+    {
+      "id": "R3",
+      "title": "InnerGraphTask 256-step polling truncation",
+      "severity": "low",
+      "source": "qc1+qc2+qc3 consolidation",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 InnerGraphTask 256-step polling truncation"
+    },
+    {
+      "id": "R4",
+      "title": "Test duplication between inline and integration tests",
+      "severity": "nit",
+      "source": "qc1+qc2+qc3 consolidation",
+      "scope": "crates/nexus-orchestration/tests/",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 Test duplication between inline and integration tests"
+    }
+  ]
+}

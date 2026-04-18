@@ -6,7 +6,7 @@
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
       "status": "Done",
       "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
-      "title": "V1.4 WS1 — nexus-acp-host crate extraction",
+      "title": "V1.4 WS1 \u2014 nexus-acp-host crate extraction",
       "owner": "fullstack-dev",
       "tags": [
         "v1.4",
@@ -22,7 +22,7 @@
         "phase": "V1.4-M1",
         "working_branch": "feature/v1.4-ws1-acp-host",
         "merge_target": "main",
-        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
+        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md \u00a711.",
         "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
         "spec_refs": [
           ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
@@ -56,14 +56,14 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-18",
-      "total_open": 35,
+      "updated_at": "2026-04-18T07:45:39.992187+00:00",
+      "total_open": 14,
       "by_severity": {
         "critical": 0,
-        "high": 1,
-        "medium": 17,
-        "low": 7,
-        "nit": 9
+        "high": 0,
+        "medium": 13,
+        "low": 1,
+        "nit": 0
       },
       "by_target": {
         "V1.0": 0,
@@ -86,7 +86,7 @@
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
           "severity": "low",
           "target_date": "V1.5 or wiremock upstream fix",
           "note": "Dependabot bumped rand to 0.8.6 in workspace, but wiremock transitively depends on rand 0.7.3 which cannot be removed without upstream http-types migration."
@@ -94,108 +94,6 @@
       ]
     },
     "residual_findings": {
-      "2026-04-17-v1.4-ws6-creator-register-e2e-tests": [
-        {
-          "id": "QC1-L1",
-          "title": "Wiremock version 0.5 vs plan-suggested 0.6",
-          "severity": "low",
-          "source": "QC1 Low",
-          "scope": "crates/nexus42/Cargo.toml (wiremock dep)",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC1-N1",
-          "title": "Idempotency test lacks second-run exit assertion",
-          "severity": "nit",
-          "source": "QC1 Nit",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs (T4)",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC1-N2",
-          "title": "Plan-suggested common/ module not created",
-          "severity": "nit",
-          "source": "QC1 Nit",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC1-N3",
-          "title": "Verify rejection uses HTTP 200 (correct behavior, nit noted)",
-          "severity": "nit",
-          "source": "QC1 Nit",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC2-L1",
-          "title": "Idempotency test lacks exit-code assertion (duplicate of QC1-N1)",
-          "severity": "low",
-          "source": "QC2 Low",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs (T4)",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC2-L2",
-          "title": "Wiremock version drift (same as QC1-L1)",
-          "severity": "low",
-          "source": "QC2 Low",
-          "scope": "crates/nexus42/Cargo.toml (wiremock dep)",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC2-L3",
-          "title": "Windows portability not verified",
-          "severity": "low",
-          "source": "QC2 Low",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC2-N1",
-          "title": "Fixture files lack header comments",
-          "severity": "nit",
-          "source": "QC2 Nit",
-          "scope": "crates/nexus42/tests/fixtures/creator_register/*.json",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC2-N2",
-          "title": "Mocks don't verify request body content",
-          "severity": "nit",
-          "source": "QC2 Nit",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        },
-        {
-          "id": "QC3-N1",
-          "title": "Idempotency test clarity could be improved",
-          "severity": "nit",
-          "source": "QC3 Nit",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs (T4)",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null
-        }
-      ],
       "2026-04-17-v1.4-ws7-creator-schedule-core-context": [
         {
           "id": "R1",
@@ -221,7 +119,7 @@
         },
         {
           "id": "R3",
-          "title": "No paused→running status transition in FSM",
+          "title": "No paused\u2192running status transition in FSM",
           "severity": "medium",
           "source": "QC1 medium",
           "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
@@ -265,59 +163,13 @@
         },
         {
           "id": "R7",
-          "title": "paused→running requires 2-step UX",
+          "title": "paused\u2192running requires 2-step UX",
           "severity": "medium",
           "source": "QC2 medium",
           "scope": "CLI UX / daemon signal handler",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R8",
-          "title": "TOCTOU in edit_core_context",
-          "severity": "medium",
-          "source": "QC2 medium",
-          "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
-          "tracking_link": null,
-          "acceptance_rationale": "single-user daemon"
-        },
-        {
-          "id": "R9",
-          "title": "Auth middleware missing",
-          "severity": "medium",
-          "source": "QC3 medium",
-          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
-          "tracking_link": null,
-          "acceptance_rationale": "V1.4 local-only"
-        },
-        {
-          "id": "R10",
-          "title": "tempfile in prod deps",
-          "severity": "nit",
-          "source": "QC3 nit",
-          "scope": "crates/nexus-orchestration/Cargo.toml",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
-          "tracking_link": null
-        },
-        {
-          "id": "R11",
-          "title": "async-trait hardcoded pin",
-          "severity": "nit",
-          "source": "QC3 nit",
-          "scope": "crates/nexus-orchestration/Cargo.toml",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
           "tracking_link": null
         }
       ],
@@ -334,104 +186,12 @@
           "tracking_link": null
         },
         {
-          "id": "R2",
-          "title": "OutboxPool omits PRAGMA foreign_keys = ON",
-          "severity": "medium",
-          "source": "qc1 W-02",
-          "scope": "crates/nexus-sync/src/pool.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R3",
-          "title": "mark_failed commit-before-return pattern needs clarifying comment",
-          "severity": "low",
-          "source": "qc2 C2",
-          "scope": "crates/nexus-sync/src/outbox.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
           "id": "R4",
           "title": "Outbox schema DDL hardcoded inline rather than using sqlx::migrate",
           "severity": "medium",
           "source": "qc3 W1",
           "scope": "crates/nexus-sync/src/outbox.rs",
           "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R5",
-          "title": "SoulMeta schema_version u32->i64 type change undocumented",
-          "severity": "nit",
-          "source": "qc3 W3",
-          "scope": "crates/nexus-local-db/src/soul_meta.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-17-v1.4-ws4-statig-lifecycle": [
-        {
-          "id": "R1",
-          "title": "WS2 engine dependency — Running.entry engine session start is stubbed",
-          "severity": "medium",
-          "source": "qc2 W8",
-          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev-2",
-          "target_date": "WS2/V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R2",
-          "title": "dispatch() spawns independent tokio tasks per event — documented FIFO-safe via Mutex",
-          "severity": "low",
-          "source": "qc1 C2 (downgraded by consolidation)",
-          "scope": "crates/nexus42d/src/lifecycle/state.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev-2",
-          "target_date": "WS2",
-          "tracking_link": null
-        },
-        {
-          "id": "R3",
-          "title": "started_at field not populated in v2 response",
-          "severity": "low",
-          "source": "qc2 W7",
-          "scope": "crates/nexus42d/src/api/handlers/runtime.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev-2",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R4",
-          "title": "Hardcoded sleep values in tests (100ms-200ms) — flaky on slow CI",
-          "severity": "nit",
-          "source": "qc2 W6 / qc3 Q3-4",
-          "scope": "crates/nexus42d/tests/lifecycle_*.rs",
-          "decision": "accept",
-          "owner": "qa-engineer / fullstack-dev-2",
-          "target_date": "V1.5",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-17-v1.4-ws5-schemas-boundary": [
-        {
-          "id": "R1",
-          "title": "Audit table header says 11 local but 10 were actually moved",
-          "severity": "nit",
-          "source": "qc3 S1",
-          "scope": "schemas-boundary-v1.md §5.2",
-          "decision": "accept",
           "owner": "fullstack-dev",
           "target_date": "V1.5",
           "tracking_link": null
@@ -443,21 +203,10 @@
           "title": "Daemon restart does not repopulate in-memory session tracker from SQLite",
           "severity": "medium",
           "source": "qc",
-          "scope": "crates/nexus42d/src/main.rs — engine restart path",
+          "scope": "crates/nexus42d/src/main.rs \u2014 engine restart path",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "WS3",
-          "tracking_link": null
-        },
-        {
-          "id": "R2",
-          "title": "new_session creates orphan sessions with empty task ID (accepted: start_session is the real entry point)",
-          "severity": "high",
-          "source": "qc",
-          "scope": "crates/nexus42d/src/api/handlers/orchestration/sessions.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
           "tracking_link": null
         },
         {
@@ -473,57 +222,13 @@
         },
         {
           "id": "R4",
-          "title": "Worker shutdown SIGTERM→SIGKILL path not implemented (uses start_kill directly)",
+          "title": "Worker shutdown SIGTERM\u2192SIGKILL path not implemented (uses start_kill directly)",
           "severity": "medium",
           "source": "qc",
           "scope": "crates/nexus-orchestration/src/worker/manager.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "WS3",
-          "tracking_link": null
-        },
-        {
-          "id": "R5",
-          "title": "Session ID collision risk with millisecond timestamps",
-          "severity": "low",
-          "source": "qc",
-          "scope": "crates/nexus-orchestration/src/storage/sqlite.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R6",
-          "title": "jsonrpsee dep unused in WS2 (pre-wired for WS3)",
-          "severity": "low",
-          "source": "qc",
-          "scope": "crates/nexus-orchestration/Cargo.toml",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
-          "tracking_link": null
-        },
-        {
-          "id": "R7",
-          "title": "Sleep-based timing in worker IPC tests",
-          "severity": "low",
-          "source": "qc",
-          "scope": "crates/nexus-orchestration/tests/worker_ipc_roundtrip.rs",
-          "decision": "accept",
-          "owner": "qa-engineer",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R8",
-          "title": "Context wrapper zero-utility newtype",
-          "severity": "nit",
-          "source": "qc",
-          "scope": "crates/nexus-orchestration/src/engine.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
           "tracking_link": null
         }
       ],
@@ -548,39 +253,6 @@
           "decision": "defer",
           "owner": "qa-engineer",
           "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R3",
-          "title": "InnerGraphTask 256-step polling truncation",
-          "severity": "low",
-          "source": "qc1+qc2+qc3 consolidation",
-          "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
-          "tracking_link": null
-        },
-        {
-          "id": "R4",
-          "title": "Test duplication between inline and integration tests",
-          "severity": "nit",
-          "source": "qc1+qc2+qc3 consolidation",
-          "scope": "crates/nexus-orchestration/tests/",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
-          "tracking_link": null
-        },
-        {
-          "id": "R5",
-          "title": "load_preset() directory-based stub",
-          "severity": "nit",
-          "source": "qc1+qc2+qc3 consolidation",
-          "scope": "crates/nexus-orchestration/src/preset/loader.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": null,
           "tracking_link": null
         }
       ]

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-17-v1.4-ws5-schemas-boundary",
+  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "entries": [
+    {
+      "id": "R1",
+      "title": "Audit table header says 11 local but 10 were actually moved",
+      "severity": "nit",
+      "source": "qc3 S1",
+      "scope": "schemas-boundary-v1.md \u00a75.2",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "fixed \u2014 audit table header corrected 11 to 10",
+      "closure_evidence": "commit 17320ec"
+    }
+  ]
+}
