@@ -5,6 +5,7 @@
 //!
 //! Design: `.agents/plans/knowledge/creator-schedule-and-core-context-v1.md` §6.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use nexus_contracts::local::schedule::{
@@ -37,14 +38,17 @@ pub enum CoreContextError {
 /// Each `apply()` call appends a new row to `core_context_versions` and
 /// bumps `creator_schedules.current_core_context_version`.
 ///
-/// **Write guard (H2)**: The `apply()` and `apply_seed()` methods hold a
-/// `tokio::sync::Mutex` to prevent concurrent writes from corrupting the
-/// version chain (two concurrent calls could both read version N and both
-/// write version N+1, overwriting one another).
+/// **Write guard (R6 — per-schedule locking)**: The `apply()`, `apply_seed()`,
+/// and `apply_preset_hook()` methods use per-schedule locks to prevent
+/// concurrent writes on the *same* schedule from corrupting the version
+/// chain. Different schedules can write concurrently without blocking
+/// each other.
 pub struct CoreContextManager {
     pool: Arc<SqlitePool>,
-    /// Serializes the version check + insert in `apply()` and `apply_seed()`.
-    write_guard: Mutex<()>,
+    /// Per-schedule write guards. Each schedule gets its own Mutex<()> entry.
+    /// This allows concurrent writes to *different* schedules while
+    /// maintaining per-schedule safety (R6).
+    schedule_guards: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl CoreContextManager {
@@ -52,8 +56,21 @@ impl CoreContextManager {
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
             pool,
-            write_guard: Mutex::new(()),
+            schedule_guards: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Get or create a per-schedule write guard.
+    ///
+    /// Returns an `Arc<Mutex<()>>` for the given schedule. The Arc allows
+    /// cloning so the lock can be held while the HashMap is not locked.
+    async fn schedule_guard(&self, schedule_id: &ScheduleId) -> Arc<tokio::sync::Mutex<()>> {
+        let key = schedule_id.0.clone();
+        let mut guards = self.schedule_guards.lock().await;
+        guards
+            .entry(key)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     /// Apply the seed step to create version 0 of `core_context`.
@@ -68,8 +85,9 @@ impl CoreContextManager {
         raw: &str,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // H2: Serialize writes to prevent version chain corruption.
-        let _guard = self.write_guard.lock().await;
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
         let new_version = CoreContextVersion(0);
@@ -151,8 +169,9 @@ impl CoreContextManager {
         step: DerivationStep,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // H2: Serialize writes to prevent version chain corruption.
-        let _guard = self.write_guard.lock().await;
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
 
@@ -265,8 +284,9 @@ impl CoreContextManager {
 
         // We need to apply the edit op but record it as a PresetHook derivation.
         // Let's do a direct implementation:
-        // H2: Serialize writes to prevent version chain corruption.
-        let _guard = self.write_guard.lock().await;
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
         let now = chrono::Utc::now().timestamp();
 
         let current_version = self.current_version(schedule_id).await?;
@@ -896,5 +916,123 @@ mod tests {
         assert_eq!(merged["a"], 1);
         assert_eq!(merged["b"], 3);
         assert_eq!(merged["c"], 4);
+    }
+
+    // ---------- R6: Per-schedule version bump race ----------
+
+    #[tokio::test]
+    async fn r6_concurrent_apply_same_schedule_produces_sequential_versions() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = Arc::new(CoreContextManager::new(pool));
+        let sid = ScheduleId("R6-CONC".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Spawn 10 concurrent apply calls on the same schedule
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let mgr_clone = Arc::clone(&mgr);
+            let sid_clone = sid.clone();
+            handles.push(tokio::spawn(async move {
+                mgr_clone
+                    .apply_user_edit(
+                        &sid_clone,
+                        EditOp::Append {
+                            body: format!(" chunk-{i}"),
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                    .version
+                    .0
+            }));
+        }
+
+        // Collect all version numbers
+        let mut versions: Vec<u32> = Vec::new();
+        for h in handles {
+            versions.push(h.await.unwrap());
+        }
+        versions.sort();
+
+        // All versions should be unique and sequential: [1, 2, 3, ..., 10]
+        // No duplicates (which would indicate a race)
+        assert_eq!(
+            versions,
+            (1..=10).collect::<Vec<_>>(),
+            "R6: concurrent applies should produce sequential versions without gaps or duplicates"
+        );
+
+        // Verify final version is 10
+        assert_eq!(
+            mgr.current_version(&sid).await.unwrap(),
+            CoreContextVersion(10)
+        );
+    }
+
+    #[tokio::test]
+    async fn r6_different_schedules_write_concurrently() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = Arc::new(CoreContextManager::new(pool));
+
+        // Create two schedules
+        let sid_a = ScheduleId("R6-A".to_string());
+        let sid_b = ScheduleId("R6-B".to_string());
+        insert_test_schedule(&mgr.pool, &sid_a.0).await;
+        insert_test_schedule(&mgr.pool, &sid_b.0).await;
+
+        // Seed both
+        mgr.apply_seed(&sid_a, "A-initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+        mgr.apply_seed(&sid_b, "B-initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Concurrently apply to both schedules
+        let mgr_clone = Arc::clone(&mgr);
+        let sid_a_clone = sid_a.clone();
+        let sid_b_clone = sid_b.clone();
+
+        let h1 = tokio::spawn(async move {
+            mgr_clone
+                .apply_user_edit(
+                    &sid_a_clone,
+                    EditOp::Append {
+                        body: " append-a".to_string(),
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .version
+        });
+
+        let mgr_clone2 = Arc::clone(&mgr);
+        let h2 = tokio::spawn(async move {
+            mgr_clone2
+                .apply_user_edit(
+                    &sid_b_clone,
+                    EditOp::Append {
+                        body: " append-b".to_string(),
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .version
+        });
+
+        let v_a = h1.await.unwrap();
+        let v_b = h2.await.unwrap();
+
+        // Both should succeed with version 1
+        assert_eq!(v_a, CoreContextVersion(1));
+        assert_eq!(v_b, CoreContextVersion(1));
     }
 }
