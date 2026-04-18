@@ -8,7 +8,8 @@
 //! Uses `tokio::sync::Mutex<Inner>` for interior mutability so that `tick()`
 //! and `on_session_terminal()` can be called concurrently.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use nexus_contracts::local::schedule::{
@@ -39,11 +40,13 @@ pub enum SupervisorError {
 pub struct ScheduleSupervisor {
     pool: Arc<SqlitePool>,
     inner: Mutex<Inner>,
+    /// Re-entrancy guard: prevents concurrent `tick()` execution.
+    tick_in_progress: AtomicBool,
 }
 
 struct Inner {
-    /// Cache of running schedule IDs for quick admission checks.
-    running_ids: HashSet<ScheduleId>,
+    /// Cache of running schedule IDs keyed by creator for quick admission checks.
+    running_by_creator: HashMap<String, HashSet<ScheduleId>>,
 }
 
 impl ScheduleSupervisor {
@@ -55,8 +58,9 @@ impl ScheduleSupervisor {
         Self {
             pool,
             inner: Mutex::new(Inner {
-                running_ids: HashSet::new(),
+                running_by_creator: HashMap::new(),
             }),
+            tick_in_progress: AtomicBool::new(false),
         }
     }
 
@@ -66,7 +70,33 @@ impl ScheduleSupervisor {
     /// - Update `creator_schedules.status` to `Running`
     /// - Set `updated_at` to current timestamp
     /// - Add to the running set
+    ///
+    /// **Idempotency guard (H4)**: If `tick()` is already in progress, this call
+    /// returns immediately without doing anything.
+    ///
+    /// **Per-creator scoping (H1)**: Concurrency checks (Serial, ParallelWith) only
+    /// consider schedules belonging to the same creator. Cross-creator dependencies
+    /// (`depends_on`) are still checked against the global completed set.
     pub async fn tick(&self) -> Result<(), SupervisorError> {
+        // H4: Re-entrancy guard — if a tick is already in progress, skip.
+        if self
+            .tick_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Ok(());
+        }
+
+        let result = self.tick_inner().await;
+
+        // Always release the guard, even on error.
+        self.tick_in_progress.store(false, Ordering::Release);
+
+        result
+    }
+
+    /// Inner implementation of tick (no re-entrancy guard).
+    async fn tick_inner(&self) -> Result<(), SupervisorError> {
         let now = chrono::Utc::now().timestamp();
         let pool = &*self.pool;
 
@@ -81,8 +111,8 @@ impl ScheduleSupervisor {
         .fetch_all(pool)
         .await?;
 
-        // Classify into running, completed/cancelled, and pending
-        let mut running_ids: HashSet<ScheduleId> = HashSet::new();
+        // Classify into running (by creator), completed/cancelled, and pending
+        let mut running_by_creator: HashMap<String, HashSet<ScheduleId>> = HashMap::new();
         let mut completed_ids: Vec<ScheduleId> = Vec::new();
         let mut pending: Vec<Schedule> = Vec::new();
 
@@ -90,7 +120,10 @@ impl ScheduleSupervisor {
             let schedule = row.to_schedule();
             match schedule.status {
                 ScheduleStatus::Running => {
-                    running_ids.insert(schedule.id.clone());
+                    running_by_creator
+                        .entry(schedule.creator_id.clone())
+                        .or_default()
+                        .insert(schedule.id.clone());
                 }
                 ScheduleStatus::Completed | ScheduleStatus::Cancelled => {
                     completed_ids.push(schedule.id.clone());
@@ -125,22 +158,30 @@ impl ScheduleSupervisor {
 
         // Evaluate admission one at a time, updating the running set after
         // each admission so that Serial schedules don't all get admitted
-        // in the same tick.
+        // in the same tick. Concurrency checks are scoped per-creator (H1).
         let mut started = Vec::new();
-        let mut running_ids_so_far: HashSet<ScheduleId> = running_ids;
+        let mut running_by_creator_so_far = running_by_creator;
 
         for candidate in &pending_with_deps {
-            let running_set = RunningSet::from_ids(running_ids_so_far.clone());
+            let running_set = RunningSet::from_entries(
+                running_by_creator_so_far
+                    .iter()
+                    .flat_map(|(c, ids)| ids.iter().map(|id| (c.clone(), id.clone())))
+                    .collect(),
+            );
             if admit(candidate, &running_set, &completed_set) {
-                started.push(candidate.id.0.clone());
+                started.push((candidate.creator_id.clone(), candidate.id.0.clone()));
                 // Immediately update the running set so subsequent candidates
                 // see this one as running (important for Serial).
-                running_ids_so_far.insert(candidate.id.clone());
+                running_by_creator_so_far
+                    .entry(candidate.creator_id.clone())
+                    .or_default()
+                    .insert(candidate.id.clone());
             }
         }
 
         // Update admitted schedules to Running in DB
-        for sid in &started {
+        for (_creator_id, sid) in &started {
             sqlx::query(
                 "UPDATE creator_schedules SET status = 'running', updated_at = ?1
                  WHERE schedule_id = ?2",
@@ -153,8 +194,12 @@ impl ScheduleSupervisor {
 
         // Update inner cache
         let mut inner = self.inner.lock().await;
-        for sid in &started {
-            inner.running_ids.insert(ScheduleId(sid.clone()));
+        for (creator_id, sid) in &started {
+            inner
+                .running_by_creator
+                .entry(creator_id.clone())
+                .or_default()
+                .insert(ScheduleId(sid.clone()));
         }
 
         Ok(())
@@ -189,6 +234,14 @@ impl ScheduleSupervisor {
             _ => unreachable!(),
         };
 
+        // Fetch creator_id for the schedule before removing from running set
+        let row = sqlx::query_as::<_, (String,)>(
+            "SELECT creator_id FROM creator_schedules WHERE schedule_id = ?1",
+        )
+        .bind(schedule_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+
         sqlx::query(
             "UPDATE creator_schedules
              SET status = ?1, terminated_at = ?2, updated_at = ?2
@@ -201,11 +254,11 @@ impl ScheduleSupervisor {
         .await?;
 
         // Remove from running cache
-        {
+        if let Some((creator_id,)) = row {
             let mut inner = self.inner.lock().await;
-            inner
-                .running_ids
-                .remove(&ScheduleId(schedule_id.to_string()));
+            if let Some(ids) = inner.running_by_creator.get_mut(&creator_id) {
+                ids.remove(&ScheduleId(schedule_id.to_string()));
+            }
         }
 
         // Trigger tick to admit next eligible schedule
@@ -451,16 +504,26 @@ mod tests_t9 {
     }
 
     async fn insert_schedule(sup: &ScheduleSupervisor, id: &str, status: &str) {
+        insert_schedule_with_creator(sup, id, "test-creator", status).await;
+    }
+
+    async fn insert_schedule_with_creator(
+        sup: &ScheduleSupervisor,
+        id: &str,
+        creator_id: &str,
+        status: &str,
+    ) {
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
             r#"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
                 created_at, updated_at)
-               VALUES (?1, 'test-creator', 'test-preset', 1, ?2,
-               'serial', 0, ?3, ?3)"#,
+               VALUES (?1, ?2, 'test-preset', 1, ?3,
+               'serial', 0, ?4, ?4)"#,
         )
         .bind(id)
+        .bind(creator_id)
         .bind(status)
         .bind(now)
         .execute(&*sup.pool)
@@ -581,6 +644,82 @@ mod tests_t9 {
             sup.status_of("DEP-B-FAIL").await.unwrap(),
             ScheduleStatus::Pending,
             "B should not start — A is failed, not completed"
+        );
+    }
+
+    // ---------- H1: Per-creator scoping ----------
+
+    #[tokio::test]
+    async fn different_creators_serial_schedules_run_concurrently() {
+        let sup = test_supervisor_with_db().await;
+
+        // Insert serial schedules for two different creators
+        insert_schedule_with_creator(&sup, "H1-A1", "creator-alpha", "pending").await;
+        insert_schedule_with_creator(&sup, "H1-A2", "creator-alpha", "pending").await;
+        insert_schedule_with_creator(&sup, "H1-B1", "creator-beta", "pending").await;
+        insert_schedule_with_creator(&sup, "H1-B2", "creator-beta", "pending").await;
+
+        // Tick: both A1 and B1 should start (different creators)
+        sup.tick().await.unwrap();
+        assert_eq!(
+            sup.status_of("H1-A1").await.unwrap(),
+            ScheduleStatus::Running,
+            "A1 should start (first serial for creator-alpha)"
+        );
+        assert_eq!(
+            sup.status_of("H1-B1").await.unwrap(),
+            ScheduleStatus::Running,
+            "B1 should start (first serial for creator-beta)"
+        );
+        // Second serial for each creator should remain pending
+        assert_eq!(
+            sup.status_of("H1-A2").await.unwrap(),
+            ScheduleStatus::Pending,
+            "A2 should be blocked by A1 (same creator)"
+        );
+        assert_eq!(
+            sup.status_of("H1-B2").await.unwrap(),
+            ScheduleStatus::Pending,
+            "B2 should be blocked by B1 (same creator)"
+        );
+
+        // Complete A1 → A2 should start, B2 still blocked
+        sup.on_schedule_terminal("H1-A1", ScheduleStatus::Completed)
+            .await
+            .unwrap();
+        assert_eq!(
+            sup.status_of("H1-A2").await.unwrap(),
+            ScheduleStatus::Running,
+            "A2 should start after A1 completes"
+        );
+        assert_eq!(
+            sup.status_of("H1-B2").await.unwrap(),
+            ScheduleStatus::Pending,
+            "B2 should still be blocked (B1 still running)"
+        );
+    }
+
+    // ---------- H4: Tick idempotency ----------
+
+    #[tokio::test]
+    async fn double_tick_does_not_duplicate_admission() {
+        let sup = test_supervisor_with_db().await;
+
+        insert_schedule(&sup, "DT-A", "pending").await;
+
+        // First tick starts DT-A
+        sup.tick().await.unwrap();
+        assert_eq!(
+            sup.status_of("DT-A").await.unwrap(),
+            ScheduleStatus::Running
+        );
+
+        // Second tick should be a no-op — DT-A is already running
+        sup.tick().await.unwrap();
+        assert_eq!(
+            sup.status_of("DT-A").await.unwrap(),
+            ScheduleStatus::Running,
+            "schedule should still be running after double tick"
         );
     }
 }
