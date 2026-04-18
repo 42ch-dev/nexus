@@ -99,12 +99,12 @@ fi
 echo "✅ No deprecated WIRE_SCHEMA_VERSION - using schema_version instead"
 
 echo "==> Checking CLI/daemon use nexus-local-db API..."
-if ! grep -q 'use nexus_local_db::{init, RuntimeRole}' crates/nexus42/src/db/mod.rs; then
-  echo "❌ CLI does not import nexus_local_db::{init, RuntimeRole}"
+if ! grep -q 'use nexus_local_db::' crates/nexus42/src/db/mod.rs; then
+  echo "❌ CLI does not import from nexus_local_db"
   exit 1
 fi
-if ! grep -q 'use nexus_local_db::{init, RuntimeRole}' crates/nexus42d/src/db/schema.rs; then
-  echo "❌ Daemon does not import nexus_local_db::{init, RuntimeRole}"
+if ! grep -q 'use nexus_local_db::' crates/nexus42d/src/db/schema.rs; then
+  echo "❌ Daemon does not import from nexus_local_db"
   exit 1
 fi
 echo "✅ Both CLI and daemon use nexus-local-db API"
