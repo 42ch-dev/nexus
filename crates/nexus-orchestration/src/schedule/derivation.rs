@@ -13,6 +13,7 @@ use nexus_contracts::local::schedule::{
 };
 use nexus_local_db::SqlitePool;
 use serde::de::Error as _;
+use tokio::sync::Mutex;
 
 /// Error type for core context operations.
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +24,8 @@ pub enum CoreContextError {
     NotFound(String),
     #[error("preset hook: {0}")]
     PresetHookValidation(String),
+    #[error("user edit validation: {0}")]
+    UserEditValidation(String),
     #[error("version {1} not found for schedule {0}")]
     VersionNotFound(String, u32),
     #[error("serde error: {0}")]
@@ -33,14 +36,24 @@ pub enum CoreContextError {
 ///
 /// Each `apply()` call appends a new row to `core_context_versions` and
 /// bumps `creator_schedules.current_core_context_version`.
+///
+/// **Write guard (H2)**: The `apply()` and `apply_seed()` methods hold a
+/// `tokio::sync::Mutex` to prevent concurrent writes from corrupting the
+/// version chain (two concurrent calls could both read version N and both
+/// write version N+1, overwriting one another).
 pub struct CoreContextManager {
     pool: Arc<SqlitePool>,
+    /// Serializes the version check + insert in `apply()` and `apply_seed()`.
+    write_guard: Mutex<()>,
 }
 
 impl CoreContextManager {
     /// Create a new manager backed by the given shared SQLite pool.
     pub fn new(pool: Arc<SqlitePool>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            write_guard: Mutex::new(()),
+        }
     }
 
     /// Apply the seed step to create version 0 of `core_context`.
@@ -55,6 +68,9 @@ impl CoreContextManager {
         raw: &str,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
+        // H2: Serialize writes to prevent version chain corruption.
+        let _guard = self.write_guard.lock().await;
+
         let now = chrono::Utc::now().timestamp();
         let schedule_id_str = &schedule_id.0;
         let new_version = CoreContextVersion(0);
@@ -132,6 +148,9 @@ impl CoreContextManager {
         step: DerivationStep,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
+        // H2: Serialize writes to prevent version chain corruption.
+        let _guard = self.write_guard.lock().await;
+
         let now = chrono::Utc::now().timestamp();
         let schedule_id_str = &schedule_id.0;
 
@@ -240,6 +259,8 @@ impl CoreContextManager {
 
         // We need to apply the edit op but record it as a PresetHook derivation.
         // Let's do a direct implementation:
+        // H2: Serialize writes to prevent version chain corruption.
+        let _guard = self.write_guard.lock().await;
         let now = chrono::Utc::now().timestamp();
         let schedule_id_str = &schedule_id.0;
 
@@ -313,14 +334,23 @@ impl CoreContextManager {
 
     /// Apply a user edit derivation step.
     ///
-    /// Unlike preset hooks, user edits allow all `EditOp` variants including
-    /// `Replace` and `StructRemove`.
+    /// **H3**: `EditOp::Replace` is rejected to prevent overwriting
+    /// system-managed fields (seed data, LLM summaries). Only `Append`,
+    /// `StructMerge`, and `StructRemove` are allowed for user edits.
     pub async fn apply_user_edit(
         &self,
         schedule_id: &ScheduleId,
         op: EditOp,
         source_user: Option<String>,
     ) -> Result<CoreContextRecord, CoreContextError> {
+        // H3: Reject Replace to protect system-managed fields.
+        if matches!(op, EditOp::Replace { .. }) {
+            return Err(CoreContextError::UserEditValidation(
+                "EditOp::Replace is not allowed for user edits; use Append or StructMerge instead"
+                    .to_string(),
+            ));
+        }
+
         let author_id = source_user.clone().unwrap_or_default();
         let step = DerivationStep::UserEdit { op, source_user };
         let author = CoreContextAuthor::User { id: author_id };
@@ -774,11 +804,11 @@ mod tests {
         .await
         .unwrap();
 
-        // Replace v2
+        // Append v2 (using Append instead of Replace, which is now rejected for user edits)
         mgr.apply_user_edit(
             &sid,
-            EditOp::Replace {
-                body: "replaced".to_string(),
+            EditOp::Append {
+                body: " third".to_string(),
             },
             None,
         )
@@ -788,9 +818,79 @@ mod tests {
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
         assert_eq!(snapshot.version, CoreContextVersion(2));
         match &snapshot.content {
-            CoreContextPayload::Text { body } => assert_eq!(body, "replaced"),
+            CoreContextPayload::Text { body } => assert_eq!(body, "first second third"),
             _ => panic!("expected text payload"),
         }
+    }
+
+    // ---------- H3: Replace rejected in user edit ----------
+
+    #[tokio::test]
+    async fn user_edit_rejects_replace() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("01A".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(
+            &sid,
+            "initial seed",
+            CoreContextAuthor::System,
+        )
+        .await
+        .unwrap();
+
+        // User edit with Replace should be rejected
+        let err = mgr
+            .apply_user_edit(
+                &sid,
+                EditOp::Replace {
+                    body: "overwritten".to_string(),
+                },
+                Some("u1".to_string()),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Replace"));
+        assert!(err.to_string().contains("not allowed"));
+
+        // Version should still be 0
+        assert_eq!(
+            mgr.current_version(&sid).await.unwrap(),
+            CoreContextVersion(0),
+            "version should remain at 0 after rejected Replace"
+        );
+    }
+
+    #[tokio::test]
+    async fn user_edit_allows_append_and_struct_merge() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("01A".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0 with struct
+        mgr.apply_seed(
+            &sid,
+            "{}",
+            CoreContextAuthor::System,
+        )
+        .await
+        .unwrap();
+
+        // User edit with StructMerge should succeed
+        let record = mgr
+            .apply_user_edit(
+                &sid,
+                EditOp::StructMerge {
+                    patch: serde_json::json!({"key": "value"}),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(record.version, CoreContextVersion(1));
     }
 
     #[test]
