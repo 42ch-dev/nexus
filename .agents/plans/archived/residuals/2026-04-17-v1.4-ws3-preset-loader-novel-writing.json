@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "plan_id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "archived_at": "2026-04-19T18:00:00Z",
   "entries": [
     {
       "id": "R5",
@@ -44,6 +44,34 @@
       "lifecycle": "accepted",
       "closed_at": "2026-04-18T07:45:39.992187+00:00",
       "closure_note": "Accepted at V1.4 residual review \u2014 Test duplication between inline and integration tests"
+    },
+    {
+      "id": "R1",
+      "title": "EngineProxy duplication",
+      "severity": "medium",
+      "source": "WS3",
+      "scope": "crates/nexus-orchestration/src/engine.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 EngineProxy duplication"
+    },
+    {
+      "id": "R2",
+      "title": "E2E weak assertions",
+      "severity": "medium",
+      "source": "WS3",
+      "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 E2E weak assertions"
     }
   ]
 }
