@@ -10,7 +10,7 @@
       "owner": "fullstack-dev",
       "tags": ["v1.4", "sqlx", "refactor", "tech-debt"],
       "created_at": "2026-04-18",
-      "updated_at": "2026-04-18",
+      "updated_at": "2026-04-18T18:45:00Z",
       "metadata": {
         "priority": "high",
         "phase": "V1.4",
@@ -23,14 +23,15 @@
         "commits": [
           "df6a293 chore(sqlx): initialize .sqlx offline workflow and reference database setup",
           "8067f9c refactor(sqlx): migrate nexus-local-db to compile-time checked macros",
-          "2fc819c refactor(sqlx): migrate nexus-sync to compile-time checked macros"
+          "2fc819c refactor(sqlx): migrate nexus-sync to compile-time checked macros",
+          "131f345 refactor(sqlx): migrate nexus-orchestration to compile-time checked macros"
         ],
         "gates": {
           "cargo_build": "pass",
-          "cargo_test": "pass (nexus-sync: 153 unit + 23 integration tests)",
-          "cargo_clippy": "pass"
+          "cargo_test": "pass (nexus-orchestration: 171 tests all green)",
+          "cargo_clippy": "pass (lib clean; 7 pre-existing test-only warnings in unrelated files)"
         },
-        "notes": "Batch 2 of 5 complete: nexus-sync migrated. 40 .sqlx metadata files total (17 new for nexus-sync). DDL + PRAGMAs kept runtime with // SAFETY: comments."
+        "notes": "Batch 3 of 5 complete: nexus-orchestration migrated (~18 production queries → compile-time macros). 60 .sqlx metadata files total (21 new). Test DML helpers kept runtime with // SAFETY: comments. Key pattern: all bind params pre-owned into let bindings before macro call to satisfy borrow checker."
       }
     },
     {
