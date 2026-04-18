@@ -617,7 +617,8 @@ pub async fn delete_schedule(
         }
     }
 
-    // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
+    // NOTE: static query — could use compile-time macro in future refactor.
+    // Currently uses runtime `query` for consistency with dynamic pattern elsewhere in this module.
     sqlx::query("DELETE FROM creator_schedules WHERE schedule_id = ?")
         .bind(&schedule_id)
         .execute(&*pool)

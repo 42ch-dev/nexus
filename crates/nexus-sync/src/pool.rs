@@ -97,26 +97,28 @@ mod tests {
     async fn pool_get_returns_working_connection() {
         let (_tmp, db_path) = create_test_db();
 
-        let pool = OutboxPool::new(&db_path, 2).await.unwrap();
+        let pool = OutboxPool::new(&db_path, 2)
+            .await
+            .expect("pool creation failed");
 
-        // SAFETY: test-only DDL — creates a temporary test table; no production schema dependency.
+        // SAFETY: test-only DDL — compile-time macro not applicable. Creates temporary test table.
         sqlx::query("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT NOT NULL)")
             .execute(pool.inner())
             .await
-            .unwrap();
+            .expect("test table creation failed");
 
-        // SAFETY: test-only DML — inserts test data into temporary test table.
+        // SAFETY: test-only DML — compile-time macro not applicable. Inserts test data.
         sqlx::query("INSERT INTO test (val) VALUES (?)")
             .bind("hello")
             .execute(pool.inner())
             .await
-            .unwrap();
+            .expect("test insert failed");
 
-        // SAFETY: test-only read — verifies inserted test data in temporary test table.
+        // SAFETY: test-only read — compile-time macro not applicable. Reads test data.
         let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE id = 1")
             .fetch_one(pool.inner())
             .await
-            .unwrap();
+            .expect("test read failed");
         assert_eq!(row.0, "hello");
     }
 
@@ -124,13 +126,15 @@ mod tests {
     async fn pool_supports_concurrent_access() {
         let (_tmp, db_path) = create_test_db();
 
-        let pool = OutboxPool::new(&db_path, 4).await.unwrap();
+        let pool = OutboxPool::new(&db_path, 4)
+            .await
+            .expect("pool creation failed");
 
-        // SAFETY: test-only DDL — creates a temporary test table; no production schema dependency.
+        // SAFETY: test-only DDL — compile-time macro not applicable. Creates temporary test table.
         sqlx::query("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT NOT NULL)")
             .execute(pool.inner())
             .await
-            .unwrap();
+            .expect("test table creation failed");
 
         // Spawn 4 concurrent tasks that each insert and read
         let handles: Vec<_> = (0..4)
@@ -138,19 +142,19 @@ mod tests {
                 let pool = pool.clone();
                 tokio::spawn(async move {
                     let task_val = format!("task-{}", i);
-                    // SAFETY: test-only DML — inserts test data into temporary test table.
+                    // SAFETY: test-only DML — compile-time macro not applicable. Inserts test data.
                     sqlx::query("INSERT INTO test (val) VALUES (?)")
                         .bind(&task_val)
                         .execute(pool.inner())
                         .await
-                        .unwrap();
+                        .expect("concurrent insert failed");
 
-                    // SAFETY: test-only read — verifies inserted test data in temporary test table.
+                    // SAFETY: test-only read — compile-time macro not applicable. Reads test data.
                     let row: (String,) = sqlx::query_as("SELECT val FROM test WHERE val = ?")
                         .bind(&task_val)
                         .fetch_one(pool.inner())
                         .await
-                        .unwrap();
+                        .expect("concurrent read failed");
                     format!("got: {}", row.0)
                 })
             })
@@ -158,7 +162,7 @@ mod tests {
 
         let mut results = Vec::new();
         for handle in handles {
-            results.push(handle.await.unwrap());
+            results.push(handle.await.expect("task join failed"));
         }
         assert_eq!(results.len(), 4);
         for r in &results {
