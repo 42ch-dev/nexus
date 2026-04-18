@@ -658,10 +658,11 @@ mod tests {
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
                 created_at, updated_at)
-               VALUES (?1, 'test-creator', 'test-preset', 1, 'pending',
-               'serial', 0, ?2, ?2)"#,
+               VALUES (?, 'test-creator', 'test-preset', 1, 'pending',
+               'serial', 0, ?, ?)"#,
         )
         .bind(schedule_id)
+        .bind(now)
         .bind(now)
         .execute(pool)
         .await

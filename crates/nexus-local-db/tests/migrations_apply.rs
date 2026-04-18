@@ -19,8 +19,9 @@ async fn all_migrations_apply_to_fresh_db() {
         "memory_pending_review",
         "memory_fragments",
     ] {
+        // SAFETY: test-only — queries sqlite_master to verify migration table existence.
         let found: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1")
+            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
                 .bind(table)
                 .fetch_one(&pool)
                 .await
@@ -29,6 +30,7 @@ async fn all_migrations_apply_to_fresh_db() {
     }
 
     // Assert db_schema_version is seeded.
+    // SAFETY: test-only — read-back verification of seeded version metadata.
     let v: (String,) =
         sqlx::query_as("SELECT value FROM workspace_meta WHERE key='db_schema_version'")
             .fetch_one(&pool)

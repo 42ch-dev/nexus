@@ -106,12 +106,14 @@ pub async fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, Path
     let pool = nexus_local_db::open_pool(&db_path)
         .await
         .expect("failed to open database");
+    // SAFETY: test-only — DML helper that seeds workspace_meta for test setup.
     sqlx::query(
         "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('manuscript_phase', 'brainstorm')",
     )
     .execute(&pool)
     .await
     .expect("failed to seed manuscript_phase");
+    // SAFETY: test-only — DML helper that seeds workspace_meta for test setup.
     sqlx::query(
         "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('active_manifest_id', 'manifest-test-1')",
     )
@@ -150,6 +152,7 @@ mod tests {
         assert!(workspace_dir.exists(), "workspace_dir should exist");
 
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        // SAFETY: test-only — read-back verification of seeded test data.
         let phase: (String,) =
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
                 .fetch_one(&pool)
