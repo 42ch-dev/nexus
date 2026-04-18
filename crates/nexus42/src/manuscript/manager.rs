@@ -675,10 +675,11 @@ mod tests {
         (tmp, manager)
     }
 
-    async fn setup_pool() -> SqlitePool {
+    async fn setup_pool() -> (TempDir, SqlitePool) {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("test.db");
-        crate::db::Schema::init(&db_path).await.unwrap()
+        let pool = crate::db::Schema::init(&db_path).await.unwrap();
+        (tmp, pool)
     }
 
     // ── World ID validation (CTX-R4) ──
@@ -857,7 +858,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_phase_brainstorm() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         let result = manager.set_phase("Test", "brainstorm", &pool).await;
         assert!(result.is_ok());
@@ -867,7 +868,7 @@ mod tests {
     #[tokio::test]
     async fn test_phase_progression() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager
             .set_phase("Test", "brainstorm", &pool)
@@ -883,7 +884,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_phase_transition() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager
             .set_phase("Test", "brainstorm", &pool)
@@ -900,7 +901,7 @@ mod tests {
     #[tokio::test]
     async fn test_promote() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager
             .set_phase("Test", "brainstorm", &pool)
@@ -917,7 +918,7 @@ mod tests {
     #[tokio::test]
     async fn test_promote_strict_mode_no_conflicts() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager
             .set_phase("Test", "brainstorm", &pool)
@@ -932,7 +933,7 @@ mod tests {
     #[tokio::test]
     async fn test_promote_strict_mode_with_conflicts() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         // Create the manuscript first
         manager.create("Test", Some("wld_test")).unwrap();
@@ -971,7 +972,7 @@ mod tests {
     #[tokio::test]
     async fn test_promote_from_published_fails() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         // Cycle through to published
         manager
@@ -990,7 +991,7 @@ mod tests {
     #[tokio::test]
     async fn test_promote_without_phase_set_fails() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         let result = manager.promote("Test", false, &pool).await;
         assert!(result.is_err());
@@ -1005,7 +1006,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_valid_manuscript() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager.create("Valid", Some("wld_test")).unwrap();
         manager.set_phase("Valid", "draft", &pool).await.unwrap();
@@ -1025,7 +1026,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_with_content_check_no_hash() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager.create("Test", Some("wld_test")).unwrap();
         manager.set_phase("Test", "draft", &pool).await.unwrap();
@@ -1038,7 +1039,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_with_content_check_hash_mismatch() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager.create("Test", Some("wld_test")).unwrap();
 
@@ -1058,7 +1059,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_with_content_check_hash_match() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         manager.create("Test", Some("wld_test")).unwrap();
         manager.set_phase("Test", "draft", &pool).await.unwrap();
@@ -1087,7 +1088,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_nonexistent_manuscript() {
         let (_tmp, manager) = setup_manager();
-        let pool = setup_pool().await;
+        let (_tmp, pool) = setup_pool().await;
 
         let checks = manager.verify("Ghost", false, &pool).await.unwrap();
         // Should have a failure for missing file
