@@ -330,6 +330,13 @@
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.json"
+    },
+    {
+      "id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
+      "title": "V1.4 WS7 — Creator Schedule + immutable versioned core_context",
+      "done_at": "2026-04-18",
+      "plan_file": ".agents/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
+      "archived_record": "archived/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.json"
     }
   ]
 }
