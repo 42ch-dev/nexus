@@ -13,7 +13,10 @@ pub mod manager;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::local::domain::RuntimeMode;
-use nexus_orchestration::{engine::OrchestrationEngine, CapabilityRegistry, WorkerManager};
+use nexus_orchestration::{
+    engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
+    WorkerManager,
+};
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,6 +55,8 @@ pub struct WorkspaceState {
     worker_manager: Arc<Option<Arc<WorkerManager>>>,
     /// Capability registry (set at daemon startup when WS2 is wired).
     capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
+    /// Schedule supervisor for WS7 schedule management (set at daemon startup).
+    schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
@@ -84,6 +89,7 @@ impl WorkspaceState {
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
+            schedule_supervisor: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
         }
     }
@@ -122,6 +128,7 @@ impl WorkspaceState {
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
+            schedule_supervisor: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
         }
     }
@@ -176,6 +183,7 @@ impl WorkspaceState {
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
+            schedule_supervisor: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
         })
     }
@@ -202,9 +210,19 @@ impl WorkspaceState {
         self.capability_registry = Arc::new(Some(registry));
     }
 
+    /// Set the schedule supervisor (WS7).
+    pub fn set_schedule_supervisor(&mut self, supervisor: Arc<ScheduleSupervisor>) {
+        self.schedule_supervisor = Arc::new(Some(supervisor));
+    }
+
     /// Get the orchestration engine, if set.
     pub fn engine(&self) -> Option<Arc<dyn OrchestrationEngine>> {
         self.engine.as_ref().as_ref().cloned()
+    }
+
+    /// Get the schedule supervisor, if set (WS7).
+    pub fn schedule_supervisor(&self) -> Option<Arc<ScheduleSupervisor>> {
+        self.schedule_supervisor.as_ref().as_ref().cloned()
     }
 
     /// Get the worker manager, if set.

@@ -28,6 +28,7 @@ use nexus42d::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
 use nexus42d::workspace::WorkspaceState;
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
+    schedule::supervisor::ScheduleSupervisor,
     system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
@@ -169,6 +170,35 @@ async fn main() -> anyhow::Result<()> {
     state.set_capability_registry(capabilities);
     tracing::info!("Orchestration engine wired");
 
+    // --- WS7: Schedule supervisor + core context manager ---
+    let schedule_pool: sqlx::SqlitePool =
+        nexus_local_db::open_pool(std::path::Path::new(&state.database_path()))
+            .await
+            .expect("open pool for schedule supervisor");
+    let schedule_supervisor = Arc::new(ScheduleSupervisor::new(Arc::new(schedule_pool)));
+    state.set_schedule_supervisor(schedule_supervisor.clone());
+
+    // On boot, resume any Running schedules as Paused (daemon_restart recovery).
+    // This ensures that schedules interrupted by a daemon restart can be
+    // explicitly resumed by the user (spec §5).
+    match schedule_supervisor
+        .resume_running_as_paused("daemon_restart")
+        .await
+    {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    "resumed {} running schedule(s) as paused after daemon restart",
+                    count
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!("failed to resume running schedules on boot: {}", e);
+        }
+    }
+    tracing::info!("Schedule supervisor wired");
+
     // Create lifecycle HSM with subsystems
     let subsystems = create_subsystems(&state, args.port);
     let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
@@ -228,6 +258,23 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             state_for_shutdown.shutdown_notify().notified().await;
             tracing::info!("Shutdown notify received — draining engine sessions and workers");
+
+            // --- WS7 T9: Pause running schedules before engine shutdown ---
+            if let Some(supervisor) = state_for_shutdown.schedule_supervisor() {
+                match supervisor.resume_running_as_paused("daemon_shutdown").await {
+                    Ok(count) => {
+                        if count > 0 {
+                            tracing::info!(
+                                "paused {} running schedule(s) for graceful shutdown",
+                                count
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to pause running schedules on shutdown: {}", e);
+                    }
+                }
+            }
 
             // Cancel all active engine sessions.
             if let Some(engine) = state_for_shutdown.engine() {
