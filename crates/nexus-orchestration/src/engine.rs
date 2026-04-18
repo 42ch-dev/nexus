@@ -1,5 +1,17 @@
 //! OrchestrationEngine trait + GraphFlowEngine adapter over `graph-flow`.
 //!
+//! ## WS2 R3: Arc<FlowRunner> per session
+//!
+//! The engine stores `Arc<FlowRunner>` instead of cloning FlowRunner on every
+//! step, avoiding unnecessary clone overhead while ensuring internal state is
+//! shared correctly.
+//!
+//! ## WS3 R1: EngineSharedState extraction
+//!
+//! Shared state (`storage`, `runners`, `sessions`) is extracted into
+//! `EngineSharedState`, eliminating duplication between `GraphFlowEngine` and
+//! `EngineProxy`. Both hold an `Arc<EngineSharedState>`.
+//!
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.2.
 
 use async_trait::async_trait;
@@ -213,20 +225,58 @@ pub trait OrchestrationEngine: Send + Sync {
     ) -> Result<SessionId, EngineError>;
 }
 
-/// Lightweight proxy engine that delegates to GraphFlowEngine internals.
+// ---------------------------------------------------------------------------
+// EngineSharedState — extracted shared state (WS3 R1)
+// ---------------------------------------------------------------------------
+
+/// Shared state extracted from GraphFlowEngine for reuse by EngineProxy (WS3 R1).
 ///
-/// Used by `start_session_with_preset` when we need `Arc<dyn OrchestrationEngine>`
-/// but can't clone the full `GraphFlowEngine` (contains !Clone RwLock).
-struct EngineProxy {
-    storage: Arc<dyn graph_flow::SessionStorage>,
-    runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, graph_flow::FlowRunner>>>,
-    sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
+/// Eliminates duplication between `GraphFlowEngine` and `EngineProxy` by
+/// placing storage, runners, and sessions in a single Arc-wrapped struct.
+pub struct EngineSharedState {
+    /// Session persistence backend.
+    pub storage: Arc<dyn SessionStorage>,
+    /// Per-session FlowRunners wrapped in Arc (WS2 R3: avoids clone overhead).
+    pub runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<FlowRunner>>>>,
+    /// In-memory bookkeeping of active sessions.
+    pub sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
 }
 
-#[async_trait]
-impl OrchestrationEngine for EngineProxy {
-    async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
-        // Same logic as GraphFlowEngine::run_step.
+impl EngineSharedState {
+    /// Create empty shared state with the given storage.
+    pub fn new(storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            storage,
+            runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Recover persisted non-terminal sessions into in-memory tracker (WS2 R1).
+    ///
+    /// Called on daemon restart to repopulate the session tracker from
+    /// persisted sessions with status `running`, `paused`, or `waiting_for_input`.
+    /// The recovered sessions are added to the in-memory sessions map but
+    /// **not** to the runners map (runners are created lazily when `run_step`
+    /// is called on a recovered session).
+    pub async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        let mut sessions = self.sessions.write().await;
+        for summary in summaries {
+            // Only add if not already present (idempotent).
+            if !sessions.iter().any(|s| s.session_id == summary.session_id) {
+                sessions.push(summary);
+            }
+        }
+    }
+
+    /// Run a single step for a session, updating status after execution.
+    ///
+    /// Common logic shared between `GraphFlowEngine` and `EngineProxy`.
+    pub async fn run_step_internal(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<graph_flow::ExecutionResult, EngineError> {
+        // Get Arc<FlowRunner> without cloning (WS2 R3).
         let runner = {
             let runners = self.runners.read().await;
             runners
@@ -234,7 +284,51 @@ impl OrchestrationEngine for EngineProxy {
                 .cloned()
                 .ok_or(EngineError::NoGraphLoaded)?
         };
+
+        // Execute one step using the Arc<FlowRunner>.
         let result = runner.run(&session_id.0).await?;
+
+        // Update in-memory status.
+        let status = match &result.status {
+            ExecutionStatus::Completed => SessionStatus::Completed,
+            ExecutionStatus::Error(_) => SessionStatus::Failed,
+            ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
+            ExecutionStatus::Paused { .. } => SessionStatus::Paused,
+        };
+        if let Some(s) = self
+            .sessions
+            .write()
+            .await
+            .iter_mut()
+            .find(|s| s.session_id == *session_id)
+        {
+            s.status = status;
+        }
+
+        Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EngineProxy — lightweight wrapper over EngineSharedState (WS3 R1)
+// ---------------------------------------------------------------------------
+
+/// Lightweight proxy engine that wraps `EngineSharedState`.
+///
+/// Used by `start_session_with_preset` when we need `Arc<dyn OrchestrationEngine>`
+/// to pass to preset loader. The proxy delegates all operations to the shared
+/// state, eliminating code duplication.
+struct EngineProxy {
+    state: Arc<EngineSharedState>,
+}
+
+#[async_trait]
+impl OrchestrationEngine for EngineProxy {
+    async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
+        // Delegate to shared state (WS3 R1: eliminates duplication).
+        let result = self.state.run_step_internal(session_id).await?;
+
+        // Translate graph-flow ExecutionResult to our StepOutcome.
         let outcome = match &result.status {
             ExecutionStatus::Completed => StepOutcome::Completed {
                 response: result.response,
@@ -251,21 +345,7 @@ impl OrchestrationEngine for EngineProxy {
             },
             ExecutionStatus::Error(msg) => StepOutcome::Error(msg.clone()),
         };
-        // Update in-memory status.
-        if let Some(s) = self
-            .sessions
-            .write()
-            .await
-            .iter_mut()
-            .find(|s| s.session_id == *session_id)
-        {
-            s.status = match &result.status {
-                ExecutionStatus::Completed => SessionStatus::Completed,
-                ExecutionStatus::Error(_) => SessionStatus::Failed,
-                ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
-                ExecutionStatus::Paused { .. } => SessionStatus::Paused,
-            };
-        }
+
         Ok(outcome)
     }
 
@@ -282,13 +362,18 @@ impl OrchestrationEngine for EngineProxy {
         let start_task_id = graph.start_task_id().unwrap_or_default();
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         session.context.set("_session_id", session_id.clone()).await;
-        self.storage.save(session).await?;
-        let runner = graph_flow::FlowRunner::new(graph, self.storage.clone());
-        self.runners
+        self.state.storage.save(session).await?;
+        // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
+        let runner = Arc::new(graph_flow::FlowRunner::new(
+            graph,
+            self.state.storage.clone(),
+        ));
+        self.state
+            .runners
             .write()
             .await
             .insert(session_id.clone(), runner);
-        self.sessions.write().await.push(SessionSummary {
+        self.state.sessions.write().await.push(SessionSummary {
             session_id: SessionId(session_id.clone()),
             creator_id: String::new(),
             preset_id: id_prefix.to_string(),
@@ -299,7 +384,7 @@ impl OrchestrationEngine for EngineProxy {
     }
 
     async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
-        let sessions = self.sessions.read().await;
+        let sessions = self.state.sessions.read().await;
         sessions
             .iter()
             .find(|s| s.session_id == *session_id)
@@ -312,7 +397,7 @@ impl OrchestrationEngine for EngineProxy {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
-        let mut sessions = self.sessions.write().await;
+        let mut sessions = self.state.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
             match signal {
                 EngineSignal::Pause => s.status = SessionStatus::Paused,
@@ -327,7 +412,7 @@ impl OrchestrationEngine for EngineProxy {
     }
 
     async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError> {
-        let sessions = self.sessions.read().await;
+        let sessions = self.state.sessions.read().await;
         Ok(sessions
             .iter()
             .filter(|s| {
@@ -359,13 +444,18 @@ impl OrchestrationEngine for EngineProxy {
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
-        self.storage.save(session_mut).await?;
-        let runner = graph_flow::FlowRunner::new(params.inner_graph, self.storage.clone());
-        self.runners
+        self.state.storage.save(session_mut).await?;
+        // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
+        let runner = Arc::new(graph_flow::FlowRunner::new(
+            params.inner_graph,
+            self.state.storage.clone(),
+        ));
+        self.state
+            .runners
             .write()
             .await
             .insert(child_session_id.clone(), runner);
-        self.sessions.write().await.push(SessionSummary {
+        self.state.sessions.write().await.push(SessionSummary {
             session_id: SessionId(child_session_id.clone()),
             creator_id: String::new(),
             preset_id: String::new(),
@@ -380,6 +470,7 @@ impl OrchestrationEngine for EngineProxy {
         session_id: &SessionId,
     ) -> Result<graph_flow::Context, EngineError> {
         let session = self
+            .state
             .storage
             .get(&session_id.0)
             .await
@@ -402,15 +493,14 @@ impl OrchestrationEngine for EngineProxy {
 
 /// Concrete [`OrchestrationEngine`] backed by [`graph_flow::FlowRunner`].
 ///
-/// The engine stores a `FlowRunner` per session (each session may use a
-/// different graph, e.g. `_system.maintenance` vs user presets). Sessions
-/// are persisted via the provided [`SessionStorage`].
+/// The engine stores an `Arc<FlowRunner>` per session (WS2 R3), avoiding clone
+/// overhead. Sessions are persisted via the provided [`SessionStorage`].
+///
+/// WS3 R1: Uses `EngineSharedState` for shared state, eliminating duplication
+/// with `EngineProxy`.
 pub struct GraphFlowEngine {
-    storage: Arc<dyn SessionStorage>,
-    /// Per-session FlowRunners (graph + storage combo for `run()` calls).
-    runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, FlowRunner>>>,
-    /// In-memory bookkeeping of active sessions.
-    sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
+    /// Shared state (storage, runners, sessions) — WS3 R1 extraction.
+    state: Arc<EngineSharedState>,
     /// Shared capability registry (propagated to composite tasks at runtime).
     caps: Arc<CapabilityRegistry>,
 }
@@ -426,17 +516,29 @@ impl GraphFlowEngine {
         caps: Arc<CapabilityRegistry>,
     ) -> Self {
         Self {
-            storage,
-            runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-            sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            state: Arc::new(EngineSharedState::new(storage)),
             caps,
         }
+    }
+
+    /// Recover persisted sessions into the in-memory tracker (WS2 R1).
+    ///
+    /// Called after engine construction on daemon restart. Queries
+    /// `SqliteSessionStorage.list_non_terminal_sessions()` and repopulates
+    /// the in-memory tracker.
+    pub async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        self.state.recover_sessions(summaries).await;
+    }
+
+    /// Get a reference to the shared state for use in preset loader (WS3 R1).
+    pub fn shared_state(&self) -> Arc<EngineSharedState> {
+        self.state.clone()
     }
 
     /// Start a session on a specific graph.
     ///
     /// Creates a [`graph_flow::Session`] seeded at the graph's start task,
-    /// stores it, and registers a [`FlowRunner`] for future `run_step` calls.
+    /// stores it, and registers an `Arc<FlowRunner>` for future `run_step` calls.
     ///
     /// Returns the session ID.
     pub async fn start_session(
@@ -453,11 +555,12 @@ impl GraphFlowEngine {
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         // Store session ID in context so InnerGraphTask can find it.
         session.context.set("_session_id", session_id.clone()).await;
-        self.storage.save(session).await?;
+        self.state.storage.save(session).await?;
 
-        // Create a FlowRunner for this session.
-        let runner = FlowRunner::new(graph, self.storage.clone());
-        self.runners
+        // WS2 R3: Create and store Arc<FlowRunner>.
+        let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
+        self.state
+            .runners
             .write()
             .await
             .insert(session_id.clone(), runner);
@@ -471,7 +574,7 @@ impl GraphFlowEngine {
             current_task_id: Some(start_task_id),
         };
 
-        self.sessions.write().await.push(summary);
+        self.state.sessions.write().await.push(summary);
 
         Ok(SessionId(session_id))
     }
@@ -480,17 +583,8 @@ impl GraphFlowEngine {
 #[async_trait]
 impl OrchestrationEngine for GraphFlowEngine {
     async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
-        // Look up the FlowRunner for this session.
-        let runner = {
-            let runners = self.runners.read().await;
-            runners
-                .get(&session_id.0)
-                .cloned()
-                .ok_or(EngineError::NoGraphLoaded)?
-        };
-
-        // Execute one step.
-        let result = runner.run(&session_id.0).await?;
+        // Delegate to shared state (WS3 R1: uses Arc<FlowRunner> internally).
+        let result = self.state.run_step_internal(session_id).await?;
 
         // Translate graph-flow ExecutionResult to our StepOutcome.
         let outcome = match &result.status {
@@ -510,10 +604,6 @@ impl OrchestrationEngine for GraphFlowEngine {
             ExecutionStatus::Error(msg) => StepOutcome::Error(msg.clone()),
         };
 
-        // Update our in-memory bookkeeping.
-        self.update_session_status(&session_id.0, &result.status)
-            .await;
-
         Ok(outcome)
     }
 
@@ -522,7 +612,7 @@ impl OrchestrationEngine for GraphFlowEngine {
 
         // Persist a session stub into the graph-flow storage.
         let session = graph_flow::Session::new_from_task(session_id.clone(), "");
-        self.storage.save(session).await?;
+        self.state.storage.save(session).await?;
 
         let summary = SessionSummary {
             session_id: SessionId(session_id.clone()),
@@ -532,7 +622,7 @@ impl OrchestrationEngine for GraphFlowEngine {
             current_task_id: None,
         };
 
-        self.sessions.write().await.push(summary);
+        self.state.sessions.write().await.push(summary);
 
         Ok(SessionId(session_id))
     }
@@ -546,7 +636,7 @@ impl OrchestrationEngine for GraphFlowEngine {
     }
 
     async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
-        let sessions = self.sessions.read().await;
+        let sessions = self.state.sessions.read().await;
         sessions
             .iter()
             .find(|s| s.session_id == *session_id)
@@ -559,7 +649,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
-        let mut sessions = self.sessions.write().await;
+        let mut sessions = self.state.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
             match signal {
                 EngineSignal::Pause => s.status = SessionStatus::Paused,
@@ -574,7 +664,7 @@ impl OrchestrationEngine for GraphFlowEngine {
     }
 
     async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError> {
-        let sessions = self.sessions.read().await;
+        let sessions = self.state.sessions.read().await;
         Ok(sessions
             .iter()
             .filter(|s| {
@@ -609,10 +699,15 @@ impl OrchestrationEngine for GraphFlowEngine {
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
-        self.storage.save(session_mut).await?;
+        self.state.storage.save(session_mut).await?;
 
-        let runner = FlowRunner::new(params.inner_graph, self.storage.clone());
-        self.runners
+        // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
+        let runner = Arc::new(FlowRunner::new(
+            params.inner_graph,
+            self.state.storage.clone(),
+        ));
+        self.state
+            .runners
             .write()
             .await
             .insert(child_session_id.clone(), runner);
@@ -625,7 +720,7 @@ impl OrchestrationEngine for GraphFlowEngine {
             current_task_id: Some(start_task_id),
         };
 
-        self.sessions.write().await.push(summary);
+        self.state.sessions.write().await.push(summary);
 
         Ok(SessionId(child_session_id))
     }
@@ -635,6 +730,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         session_id: &SessionId,
     ) -> Result<graph_flow::Context, EngineError> {
         let session = self
+            .state
             .storage
             .get(&session_id.0)
             .await
@@ -647,12 +743,9 @@ impl OrchestrationEngine for GraphFlowEngine {
         &self,
         loaded: &crate::preset::LoadedPreset,
     ) -> Result<SessionId, EngineError> {
-        // Build the wired outer graph with engine proxy that shares
-        // the same storage, runners, and sessions maps.
+        // WS3 R1: Use EngineProxy wrapping EngineSharedState.
         let proxy = Arc::new(EngineProxy {
-            storage: self.storage.clone(),
-            runners: self.runners.clone(),
-            sessions: self.sessions.clone(),
+            state: self.state.clone(),
         });
         let wired = crate::preset::loader::build_wired_outer_graph(
             loaded,
@@ -663,23 +756,5 @@ impl OrchestrationEngine for GraphFlowEngine {
     }
 }
 
-impl GraphFlowEngine {
-    /// Update in-memory session status after a step.
-    async fn update_session_status(&self, session_id: &str, exec_status: &ExecutionStatus) {
-        let status = match exec_status {
-            ExecutionStatus::Completed => SessionStatus::Completed,
-            ExecutionStatus::Error(_) => SessionStatus::Failed,
-            ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
-            ExecutionStatus::Paused { .. } => SessionStatus::Paused,
-        };
-        if let Some(s) = self
-            .sessions
-            .write()
-            .await
-            .iter_mut()
-            .find(|s| s.session_id.0 == session_id)
-        {
-            s.status = status;
-        }
-    }
-}
+// Re-export EngineSharedState for consumers (e.g., preset loader).
+pub use EngineSharedState as SharedState;

@@ -29,6 +29,7 @@ use nexus42d::workspace::WorkspaceState;
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     schedule::supervisor::ScheduleSupervisor,
+    storage::sqlite::SqliteSessionStorage,
     system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
@@ -134,16 +135,32 @@ async fn main() -> anyhow::Result<()> {
     // --- WS2: Instantiate orchestration engine + worker manager ---
     // Re-use the same pool that WorkspaceState opened (nexus_local_db::open_pool).
     let db_pool: sqlx::SqlitePool = state.pool().clone();
-    let storage = Arc::new(
-        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(std::sync::Arc::new(
-            db_pool,
-        )),
-    );
+    // WS2 R1: Keep concrete storage reference for session recovery before wrapping.
+    let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(db_pool)));
 
     // Create shared capability registry — used by engine, system_preset, and worker manager.
     let capabilities = Arc::new(CapabilityRegistry::with_builtins());
 
-    let concrete_engine = GraphFlowEngine::new_with_storage(storage, capabilities.clone());
+    let concrete_engine =
+        GraphFlowEngine::new_with_storage(sqlite_storage.clone(), capabilities.clone());
+
+    // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
+    // This ensures sessions interrupted by daemon restart are visible to
+    // the engine and can be resumed or cancelled.
+    match sqlite_storage.list_non_terminal_sessions().await {
+        Ok(summaries) => {
+            if !summaries.is_empty() {
+                tracing::info!(
+                    "recovering {} persisted session(s) into in-memory tracker",
+                    summaries.len()
+                );
+                concrete_engine.recover_sessions(summaries).await;
+            }
+        }
+        Err(e) => {
+            tracing::warn!("failed to recover persisted sessions: {}", e);
+        }
+    }
 
     // Kick off _system.maintenance session on the concrete engine
     // (start_session is a GraphFlowEngine method, not on the trait).
