@@ -6,6 +6,7 @@
 
 mod acp_prompt;
 mod acp_session_load;
+mod context_summarize;
 mod creator;
 mod judge_llm;
 mod judge_rule;
@@ -16,6 +17,7 @@ mod workspace;
 
 pub use acp_prompt::AcpPrompt;
 pub use acp_session_load::AcpSessionLoad;
+pub use context_summarize::ContextSummarize;
 pub use creator::{CreatorInjectPrompt, CreatorReadMemory, CreatorWriteMemory};
 pub use judge_llm::JudgeLlm;
 pub use judge_rule::JudgeRule;
