@@ -51,6 +51,7 @@ At baseline, several **critical and high gaps** were recorded (verbatim historic
 | TD-4 | High — String enums in contracts | **Resolved** — schema/codegen alignment delivered under blocker plan (no open row under this plan for TD-4). | — |
 | TD-5 | High — `canonical_hash` | **Partial** — in-repo computation exists; **cross-stack preimage**, golden vectors, and platform parity **not** closed. | `2026-04-09-v1.1-arch-alignment-blockers` → **ALIGN-HASH-01** (medium, open) |
 | TD-6 | High — User aggregate | **Resolved** — closed under blocker plan (no open row). | — |
+| TD-9 | Medium — Daemon state machine | **Resolved (v2)** — WS4 implemented full statig-based HSM with 6 states, entry/exit actions, subsystem bootstrap trait, v2 HTTP endpoint, signal handlers, panic bridge. See [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md). | — |
 | TD-7…TD-13 | Medium / Low / N/A | **Treated as in-scope for** `2026-04-08-v1.1-tech-debt-mitigation` **per blocker plan text**; **TD-12** was “no issue” at baseline. Other program debt (e.g. QC warnings on that plan) may still appear under **different** `residual_findings` keys — see SSOT file. | See `status.json` keys `2026-04-08-v1.1-tech-debt-mitigation`, `2025-04-05-domain-models`, etc. |
 
 **Counting helper**
@@ -321,7 +322,7 @@ Full enum-by-enum comparison:
 | Priority | ID    | Action                                                                                                     | Effort |
 | -------- | ----- | ---------------------------------------------------------------------------------------------------------- | ------ |
 | **P2**   | TD-8  | Consolidate dual outbox: migrate daemon's `outbox` table to use or delegate to `nexus-sync::Outbox` schema | M      |
-| **P2**   | TD-9  | Implement daemon lifecycle state machine (Stopped→Starting→Running→Degraded→Stopping→Failed)               | M      |
+| **P2**   | TD-9  | **Done (WS4)** — Implement daemon lifecycle state machine — see daemon-lifecycle-api-v2.md               | —      |
 | **P2**   | TD-10 | Implement real device flow OAuth (replace mock tokens with platform auth endpoints)                        | M      |
 | **P2**   | TD-7  | Verify ForkBranch field naming consistency across all three layers (spec, domain, contracts)               | XS     |
 

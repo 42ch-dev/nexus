@@ -3,6 +3,14 @@
 //! Local supervisor service managing workspace, auth, and sync operations.
 //! Provides the Local API (HTTP JSON on port 8420) for CLI communication.
 //!
+//! # Lifecycle HSM (WS4 T6)
+//!
+//! The daemon uses a `statig`-based HSM for lifecycle management:
+//! - States: `Stopped → Starting → Running ⇄ Degraded → Stopping → Failed`
+//! - Signal handlers dispatch `ShutdownRequested` on SIGTERM/SIGINT
+//! - Panic hook dispatches `FatalError` on panics
+//! - Entry/exit actions manage subsystem lifecycle
+//!
 //! # Transport Options
 //!
 //! The daemon supports two transport mechanisms:
@@ -12,10 +20,17 @@
 //! Switch via `NEXUS_DAEMON_SOCKET_PATH` environment variable or CLI flags.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
 use nexus42d::api;
+use nexus42d::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
 use nexus42d::workspace::WorkspaceState;
+use nexus_orchestration::{
+    engine::{EngineSignal, OrchestrationEngine},
+    schedule::supervisor::ScheduleSupervisor,
+    system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
+};
 use tracing_subscriber::EnvFilter;
 
 /// Local API transport configuration
@@ -89,6 +104,10 @@ pub struct DaemonArgs {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
+
+    /// Shutdown grace period in milliseconds (default: 20000)
+    #[arg(long, default_value_t = 20000)]
+    shutdown_grace_ms: u64,
 }
 
 #[tokio::main]
@@ -109,115 +128,312 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting nexus42d v{}", env!("CARGO_PKG_VERSION"));
 
     // Initialize workspace state (async: initializes sync outbox)
-    let state = WorkspaceState::initialize().await?;
+    let mut state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
-    // Build the router
+    // --- WS2: Instantiate orchestration engine + worker manager ---
+    // Re-use the same pool that WorkspaceState opened (nexus_local_db::open_pool).
+    let db_pool: sqlx::SqlitePool = state.pool().clone();
+    let storage = Arc::new(
+        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(std::sync::Arc::new(
+            db_pool,
+        )),
+    );
+
+    // Create shared capability registry — used by engine, system_preset, and worker manager.
+    let capabilities = Arc::new(CapabilityRegistry::with_builtins());
+
+    let concrete_engine = GraphFlowEngine::new_with_storage(storage, capabilities.clone());
+
+    // Kick off _system.maintenance session on the concrete engine
+    // (start_session is a GraphFlowEngine method, not on the trait).
+    let sys_graph = system_preset::build(capabilities.clone());
+    match concrete_engine
+        .start_session("_system.maintenance", sys_graph)
+        .await
+    {
+        Ok(sid) => {
+            tracing::info!(session_id = sid.0, "started _system.maintenance session");
+        }
+        Err(e) => {
+            tracing::warn!("failed to start _system.maintenance: {}", e);
+            // Non-fatal: the daemon can still operate without the system preset.
+        }
+    }
+
+    // Wrap in trait object for WorkspaceState.
+    let engine: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine);
+    let workers = Arc::new(WorkerManager::new());
+
+    state.set_engine(engine);
+    state.set_worker_manager(workers);
+    state.set_capability_registry(capabilities);
+    tracing::info!("Orchestration engine wired");
+
+    // --- WS7: Schedule supervisor + core context manager ---
+    let schedule_pool: sqlx::SqlitePool =
+        nexus_local_db::open_pool(std::path::Path::new(&state.database_path()))
+            .await
+            .expect("open pool for schedule supervisor");
+    let schedule_supervisor = Arc::new(ScheduleSupervisor::new(Arc::new(schedule_pool)));
+    state.set_schedule_supervisor(schedule_supervisor.clone());
+
+    // On boot, resume any Running schedules as Paused (daemon_restart recovery).
+    // This ensures that schedules interrupted by a daemon restart can be
+    // explicitly resumed by the user (spec §5).
+    match schedule_supervisor
+        .resume_running_as_paused("daemon_restart")
+        .await
+    {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    "resumed {} running schedule(s) as paused after daemon restart",
+                    count
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!("failed to resume running schedules on boot: {}", e);
+        }
+    }
+    tracing::info!("Schedule supervisor wired");
+
+    // Create lifecycle HSM with subsystems
+    let subsystems = create_subsystems(&state, args.port);
+    let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
+        subsystems,
+        args.shutdown_grace_ms,
+    ));
+
+    // Attach lifecycle to workspace state
+    state.set_lifecycle(Arc::clone(&lifecycle));
+    tracing::info!("Lifecycle HSM initialized");
+
+    // Set up signal handlers
+    let lifecycle_for_signals = Arc::clone(&lifecycle);
+    let state_for_signals = state.clone();
+    tokio::spawn(async move {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to register SIGTERM handler");
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("Failed to register SIGINT handler");
+
+        tokio::select! {
+            _ = sigterm.recv() => {
+                tracing::info!("SIGTERM received");
+                lifecycle_for_signals.dispatch(Event::ShutdownRequested {
+                    source: "signal".into(),
+                });
+                state_for_signals.request_shutdown();
+            }
+            _ = sigint.recv() => {
+                tracing::info!("SIGINT received (Ctrl+C)");
+                lifecycle_for_signals.dispatch(Event::ShutdownRequested {
+                    source: "signal".into(),
+                });
+                state_for_signals.request_shutdown();
+            }
+        }
+    });
+
+    // Set up panic hook
+    let lifecycle_for_panic = Arc::clone(&lifecycle);
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("Panic occurred: {}", info);
+        // Dispatch FatalError to lifecycle
+        lifecycle_for_panic.dispatch(Event::FatalError {
+            kind: SubsystemKind::Engine, // Generic subsystem
+            err: info.to_string(),
+        });
+        // Call previous hook if any (default will print panic message)
+        previous_hook(info);
+    }));
+
+    // Spawn graceful shutdown watcher: drains engine sessions + terminates workers
+    // when shutdown_notify fires.
+    {
+        let state_for_shutdown = state.clone();
+        tokio::spawn(async move {
+            state_for_shutdown.shutdown_notify().notified().await;
+            tracing::info!("Shutdown notify received — draining engine sessions and workers");
+
+            // --- WS7 T9: Pause running schedules before engine shutdown ---
+            if let Some(supervisor) = state_for_shutdown.schedule_supervisor() {
+                match supervisor.resume_running_as_paused("daemon_shutdown").await {
+                    Ok(count) => {
+                        if count > 0 {
+                            tracing::info!(
+                                "paused {} running schedule(s) for graceful shutdown",
+                                count
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to pause running schedules on shutdown: {}", e);
+                    }
+                }
+            }
+
+            // Cancel all active engine sessions.
+            if let Some(engine) = state_for_shutdown.engine() {
+                match engine.list_active(Default::default()).await {
+                    Ok(sessions) => {
+                        let count = sessions.len();
+                        for s in sessions {
+                            let _ = engine.signal(&s.session_id, EngineSignal::Cancel).await;
+                        }
+                        tracing::info!("cancelled {} active session(s)", count);
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to list active sessions for shutdown: {}", e);
+                    }
+                }
+            }
+
+            // Worker manager: each WorkerHandle cancels its child on Drop,
+            // and the supervisors send SIGTERM. The worker manager itself has
+            // no stateful workers list (they're owned by callers), so there's
+            // nothing extra to do here. Workers are cleaned up when their
+            // handles drop.
+            tracing::info!("engine + worker shutdown complete");
+        });
+    }
+
+    // Build the router with lifecycle-enabled state
+    let shutdown_notify = state.shutdown_notify();
     let app = api::create_router(state);
 
     // Resolve transport
     let transport = Transport::from_args(&args);
 
-    // Start the server with the appropriate transport
-    match transport {
-        Transport::Http { port, host } => {
-            let addr = format!("{}:{}", host, port);
-            let listener = tokio::net::TcpListener::bind(&addr).await?;
+    // Start the lifecycle
+    lifecycle.dispatch(Event::ProcessStarted);
+    tracing::info!("Lifecycle started");
 
-            tracing::info!("Local API listening on http://{}", addr);
-            tracing::info!("Press Ctrl+C to stop");
+    // Spawn HTTP server (runs independently of lifecycle state machine)
+    let _server_result = tokio::spawn(async move {
+        match transport {
+            Transport::Http { port, host } => {
+                let addr = format!("{}:{}", host, port);
+                let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-            axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown_signal())
-                .await?;
-        }
-        Transport::UnixSocket { path } => {
-            // Remove existing socket file if present
-            if path.exists() {
-                std::fs::remove_file(&path)?;
-                tracing::info!(?path, "Removed stale socket file");
-            }
-
-            // Ensure parent directory exists
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-
-            #[cfg(unix)]
-            {
-                use tokio::net::UnixListener;
-
-                let listener = UnixListener::bind(&path)?;
-
-                tracing::info!(?path, "Local API listening on Unix socket");
+                tracing::info!("Local API listening on http://{}", addr);
                 tracing::info!("Press Ctrl+C to stop");
 
-                // axum 0.7's serve() only accepts TcpListener. For Unix sockets,
-                // we replicate axum's serve loop manually but for Unix streams.
-                // The key transformation is: Router → TowerToHyperService → hyper::serve_connection.
-                loop {
-                    let (unix_stream, _addr) = tokio::select! {
-                        result = listener.accept() => {
-                            match result {
-                                Ok(stream) => stream,
-                                Err(e) => {
-                                    tracing::error!("Unix socket accept error: {}", e);
-                                    continue;
-                                }
-                            }
+                axum::serve(listener, app)
+                    .with_graceful_shutdown({
+                        let notify = Arc::clone(&shutdown_notify);
+                        async move {
+                            notify.notified().await;
                         }
-                        _ = shutdown_signal() => {
-                            tracing::info!("Shutdown signal received");
-                            break;
-                        }
-                    };
-
-                    let app_clone = app.clone();
-
-                    tokio::spawn(async move {
-                        let io = hyper_util::rt::TokioIo::new(unix_stream);
-
-                        // Convert the axum Router into a hyper-compatible HTTP service.
-                        // axum 0.7 uses `hyper::body::Incoming` internally when serving,
-                        // but the Router itself is `Service<Request<Body>>`. The
-                        // TowerToHyperService handles the Incoming ↔ Body conversion
-                        // automatically when used with hyper's serve_connection.
-                        let hyper_service =
-                            hyper_util::service::TowerToHyperService::new(app_clone);
-
-                        let builder = hyper::server::conn::http1::Builder::new();
-                        let conn = builder.serve_connection(io, hyper_service);
-
-                        if let Err(e) = conn.await {
-                            tracing::warn!("Unix socket connection error: {}", e);
-                        }
-                    });
+                    })
+                    .await?;
+            }
+            Transport::UnixSocket { path } => {
+                // Remove existing socket file if present
+                if path.exists() {
+                    std::fs::remove_file(&path)?;
+                    tracing::info!(?path, "Removed stale socket file");
                 }
 
-                // Clean up socket file on shutdown
-                let _ = std::fs::remove_file(&path);
-            }
+                // Ensure parent directory exists
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
 
-            #[cfg(not(unix))]
-            {
-                anyhow::bail!(
-                    "Unix socket transport is not supported on this platform. \
-                     Use HTTP transport instead (default)."
-                );
+                #[cfg(unix)]
+                {
+                    use tokio::net::UnixListener;
+
+                    let listener = UnixListener::bind(&path)?;
+
+                    tracing::info!(?path, "Local API listening on Unix socket");
+                    tracing::info!("Press Ctrl+C to stop");
+
+                    loop {
+                        let (unix_stream, _addr) = tokio::select! {
+                            result = listener.accept() => {
+                                match result {
+                                    Ok(stream) => stream,
+                                    Err(e) => {
+                                        tracing::error!("Unix socket accept error: {}", e);
+                                        continue;
+                                    }
+                                }
+                            }
+                            _ = shutdown_notify.notified() => {
+                                // Graceful shutdown triggered
+                                tracing::info!("Shutdown signal received");
+                                break;
+                            }
+                        };
+
+                        let app_clone = app.clone();
+
+                        tokio::spawn(async move {
+                            let io = hyper_util::rt::TokioIo::new(unix_stream);
+
+                            let hyper_service =
+                                hyper_util::service::TowerToHyperService::new(app_clone);
+
+                            let builder = hyper::server::conn::http1::Builder::new();
+                            let conn = builder.serve_connection(io, hyper_service);
+
+                            if let Err(e) = conn.await {
+                                tracing::warn!("Unix socket connection error: {}", e);
+                            }
+                        });
+                    }
+
+                    // Clean up socket file on shutdown
+                    let _ = std::fs::remove_file(&path);
+                }
+
+                #[cfg(not(unix))]
+                {
+                    anyhow::bail!(
+                        "Unix socket transport is not supported on this platform. \
+                         Use HTTP transport instead (default)."
+                    );
+                }
             }
         }
-    }
+        Ok::<(), anyhow::Error>(())
+    });
 
-    tracing::info!("Daemon stopped.");
+    // Wait for lifecycle to reach terminal state (Failed)
+    lifecycle.wait_until_terminal().await;
+
+    // Server will stop when lifecycle exits (via Failed.entry calling process::exit)
+    tracing::info!("Lifecycle reached terminal state");
+
+    // Note: The daemon will exit via enter_failed() calling std::process::exit
+    // This return is only reached in test mode where we don't call process::exit
     Ok(())
 }
 
-/// Graceful shutdown signal handler
-async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to listen for Ctrl+C");
-    tracing::info!("Shutdown signal received");
+/// Create subsystem bootstraps for lifecycle.
+///
+/// Engine and WorkerMgr subsystems are mock implementations for lifecycle
+/// health reporting only. The real engine is instantiated directly in main()
+/// and wired via WorkspaceState (WS2).
+fn create_subsystems(
+    state: &WorkspaceState,
+    port: u16,
+) -> Vec<Arc<dyn nexus42d::lifecycle::SubsystemBootstrap>> {
+    use nexus42d::lifecycle::{
+        DbSubsystem, EngineSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem,
+    };
+
+    vec![
+        Arc::new(HttpSubsystem::new(port)),
+        Arc::new(DbSubsystem::new(Some(state.database_path()))),
+        Arc::new(SyncSubsystem::new()),
+        Arc::new(EngineSubsystem::new()), // Mock - WS2 will provide real impl
+        Arc::new(WorkerMgrSubsystem::new()), // Mock - WS2 will provide real impl
+    ]
 }
 
 #[cfg(test)]
@@ -231,6 +447,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             socket_path: None,
             verbose: false,
+            shutdown_grace_ms: 20000,
         };
 
         // Clear env var for test
@@ -253,6 +470,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             socket_path: Some(PathBuf::from("/tmp/test.sock")),
             verbose: false,
+            shutdown_grace_ms: 20000,
         };
 
         let transport = Transport::from_args(&args);
@@ -271,6 +489,7 @@ mod tests {
             host: "0.0.0.0".to_string(),
             socket_path: None,
             verbose: false,
+            shutdown_grace_ms: 20000,
         };
 
         std::env::remove_var("NEXUS_DAEMON_SOCKET_PATH");
@@ -283,5 +502,11 @@ mod tests {
             }
             Transport::UnixSocket { .. } => panic!("Expected HTTP transport"),
         }
+    }
+
+    #[test]
+    fn shutdown_grace_default() {
+        let args = DaemonArgs::parse_from(["nexus42d"]);
+        assert_eq!(args.shutdown_grace_ms, 20000);
     }
 }

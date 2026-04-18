@@ -34,11 +34,11 @@ const TEST_WORKSPACE_SLUG: &str = "default";
 /// # Example
 ///
 /// ```rust,ignore
-/// let (tmp, nexus_home, db_path) = create_test_workspace();
-/// let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+/// let (tmp, nexus_home, db_path) = create_test_workspace().await;
+/// let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 /// // `tmp` must stay in scope for the duration of the test
 /// ```
-pub fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
+pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     let tmp = TestTempRoot(tempfile::TempDir::new().expect("failed to create temp dir"));
     let user_home = tmp.path();
     let nexus_home = user_home.join(".nexus42");
@@ -76,9 +76,16 @@ pub fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     let db_path =
         nexus_home_layout::workspace_state_db_path(user_home, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG);
 
-    let conn = rusqlite::Connection::open(&db_path).expect("failed to open database");
-    crate::db::schema::Schema::init(&conn).expect("failed to initialize schema");
-    drop(conn);
+    // Initialize schema via nexus_local_db
+    let pool = nexus_local_db::open_pool(&db_path)
+        .await
+        .expect("failed to open database");
+    nexus_local_db::run_migrations(&pool)
+        .await
+        .expect("failed to run migrations");
+    nexus_local_db::seed_versions(&pool)
+        .await
+        .expect("failed to seed versions");
 
     (tmp, nexus_home, db_path)
 }
@@ -89,25 +96,30 @@ pub fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
 /// Returns a tuple of `(temp_dir, nexus_home, db_path, workspace_dir)` where:
 /// - `temp_dir`, `nexus_home`, `db_path` are as in [`create_test_workspace`].
 /// - `workspace_dir` is the path to a created workspace directory.
-pub fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, PathBuf, PathBuf) {
-    let (tmp, nexus_home, db_path) = create_test_workspace();
+pub async fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, PathBuf, PathBuf) {
+    let (tmp, nexus_home, db_path) = create_test_workspace().await;
 
     let workspace_dir = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace_dir).expect("failed to create workspace dir");
 
     // Seed workspace_meta so middleware recognizes the workspace as initialized
-    let conn = rusqlite::Connection::open(&db_path).expect("failed to open database");
-    conn.execute(
+    let pool = nexus_local_db::open_pool(&db_path)
+        .await
+        .expect("failed to open database");
+    // SAFETY: test-only — DML helper that seeds workspace_meta for test setup.
+    sqlx::query(
         "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('manuscript_phase', 'brainstorm')",
-        [],
     )
+    .execute(&pool)
+    .await
     .expect("failed to seed manuscript_phase");
-    conn.execute(
+    // SAFETY: test-only — DML helper that seeds workspace_meta for test setup.
+    sqlx::query(
         "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('active_manifest_id', 'manifest-test-1')",
-        [],
     )
+    .execute(&pool)
+    .await
     .expect("failed to seed active_manifest_id");
-    drop(conn);
 
     (tmp, nexus_home, db_path, workspace_dir)
 }
@@ -116,9 +128,9 @@ pub fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, PathBuf, P
 mod tests {
     use super::*;
 
-    #[test]
-    fn create_test_workspace_returns_valid_paths() {
-        let (tmp, nexus_home, db_path) = create_test_workspace();
+    #[tokio::test]
+    async fn create_test_workspace_returns_valid_paths() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
 
         assert!(nexus_home.exists(), "nexus_home should exist");
         assert!(db_path.exists(), "db_path should exist after schema init");
@@ -133,20 +145,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_initialized_test_workspace_seeds_metadata() {
-        let (_tmp, _nexus_home, db_path, workspace_dir) = create_initialized_test_workspace();
+    #[tokio::test]
+    async fn create_initialized_test_workspace_seeds_metadata() {
+        let (_tmp, _nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
 
         assert!(workspace_dir.exists(), "workspace_dir should exist");
 
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        let phase: String = conn
-            .query_row(
-                "SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(phase, "brainstorm");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        // SAFETY: test-only — read-back verification of seeded test data.
+        let phase: (String,) =
+            sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(phase.0, "brainstorm");
     }
 }

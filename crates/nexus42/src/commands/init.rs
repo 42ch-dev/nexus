@@ -6,8 +6,6 @@ use crate::config::{
 };
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_local_db::{init as db_init, RuntimeRole};
-use rusqlite::Connection;
 use std::path::PathBuf;
 
 #[derive(Debug, Subcommand)]
@@ -75,7 +73,7 @@ pub(crate) fn validate_slug(label: &str, value: &str) -> Result<()> {
 }
 
 /// Writes creative tree, `meta.json`, and initializes workspace `state.db` (ADR-014).
-pub(crate) fn materialize_adr014_workspace(
+pub(crate) async fn materialize_adr014_workspace(
     user_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
@@ -126,9 +124,9 @@ pub(crate) fn materialize_adr014_workspace(
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(&db_path)?;
-    db_init(&conn, RuntimeRole::Cli)?;
-    drop(conn);
+    // Use async sqlx pool for DB initialization
+    crate::db::Schema::init(&db_path).await?;
+    // Pool is dropped here (short-lived for CLI)
 
     Ok(db_path)
 }
@@ -203,7 +201,8 @@ async fn init_workspace(
         &workspace_slug,
         &creative_root,
         &workspace_name,
-    )?;
+    )
+    .await?;
 
     persist_cli_workspace_selection(
         creative_root.clone(),

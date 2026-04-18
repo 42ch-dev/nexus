@@ -185,20 +185,14 @@ impl From<serde_json::Error> for SyncError {
     }
 }
 
-impl From<rusqlite::Error> for SyncError {
-    fn from(err: rusqlite::Error) -> Self {
+impl From<sqlx::Error> for SyncError {
+    fn from(err: sqlx::Error) -> Self {
         SyncError::OutboxDatabase(err.to_string())
     }
 }
 
-impl From<deadpool_sqlite::BuildError> for SyncError {
-    fn from(err: deadpool_sqlite::BuildError) -> Self {
-        SyncError::OutboxDatabase(err.to_string())
-    }
-}
-
-impl From<deadpool_sqlite::PoolError> for SyncError {
-    fn from(err: deadpool_sqlite::PoolError) -> Self {
+impl From<nexus_local_db::LocalDbError> for SyncError {
+    fn from(err: nexus_local_db::LocalDbError) -> Self {
         SyncError::OutboxDatabase(err.to_string())
     }
 }

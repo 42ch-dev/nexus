@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::acp::AcpError;
+use nexus_acp_host::AcpError;
 
 /// Nexus CLI result type
 pub type Result<T> = std::result::Result<T, CliError>;
@@ -35,7 +35,7 @@ pub enum CliError {
 
     Network(reqwest::Error),
 
-    Database(rusqlite::Error),
+    Database(sqlx::Error),
 
     Io(std::io::Error),
 
@@ -296,8 +296,8 @@ impl From<reqwest::Error> for CliError {
     }
 }
 
-impl From<rusqlite::Error> for CliError {
-    fn from(err: rusqlite::Error) -> Self {
+impl From<sqlx::Error> for CliError {
+    fn from(err: sqlx::Error) -> Self {
         CliError::Database(err)
     }
 }

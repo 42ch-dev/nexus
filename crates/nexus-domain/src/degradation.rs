@@ -15,7 +15,7 @@
 //! degradation when consecutive failures exceed the configured threshold.
 
 use crate::{DomainError, DomainRuntimeMode};
-use nexus_contracts::RuntimeMode;
+use nexus_contracts::local::domain::RuntimeMode;
 
 /// Degradation policy for runtime mode fallback behavior.
 ///

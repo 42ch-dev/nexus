@@ -19,8 +19,8 @@ use serde_json::json;
 use tower::ServiceExt;
 
 /// Helper to create a test workspace state (ADR-014 layout).
-fn create_test_workspace_state() -> (WorkspaceState, nexus42d::test_utils::TestTempRoot) {
-    let (tmp, nexus_home, db_path) = create_test_workspace();
+async fn create_test_workspace_state() -> (WorkspaceState, nexus42d::test_utils::TestTempRoot) {
+    let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let workspace_path = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace_path).expect("Failed to create workspace dir");
 
@@ -28,7 +28,8 @@ fn create_test_workspace_state() -> (WorkspaceState, nexus42d::test_utils::TestT
         nexus_home,
         db_path,
         Some(workspace_path.display().to_string()),
-    );
+    )
+    .await;
 
     (state, tmp)
 }
@@ -36,7 +37,7 @@ fn create_test_workspace_state() -> (WorkspaceState, nexus42d::test_utils::TestT
 // RED: Test 1 - Endpoint exists and accepts tool requests
 #[tokio::test]
 async fn test_tool_execute_endpoint_exists() {
-    let (workspace, _tmp) = create_test_workspace_state();
+    let (workspace, _tmp) = create_test_workspace_state().await;
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace.clone());
@@ -81,7 +82,7 @@ async fn test_tool_execute_endpoint_exists() {
 // RED: Test 2 - Workspace path validation rejects paths outside workspace
 #[tokio::test]
 async fn test_tool_execute_rejects_path_outside_workspace() {
-    let (workspace, _tmp) = create_test_workspace_state();
+    let (workspace, _tmp) = create_test_workspace_state().await;
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace);
@@ -111,7 +112,7 @@ async fn test_tool_execute_rejects_path_outside_workspace() {
 // RED: Test 3 - Tool execution succeeds for valid workspace path
 #[tokio::test]
 async fn test_tool_execute_success_for_valid_path() {
-    let (workspace, _tmp) = create_test_workspace_state();
+    let (workspace, _tmp) = create_test_workspace_state().await;
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace.clone());
@@ -148,7 +149,7 @@ async fn test_tool_execute_success_for_valid_path() {
 // RED: Test 4 - Audit log entry created for tool execution
 #[tokio::test]
 async fn test_tool_execute_creates_audit_log_entry() {
-    let (workspace, _tmp) = create_test_workspace_state();
+    let (workspace, _tmp) = create_test_workspace_state().await;
     let app = Router::new()
         .route("/v1/local/acp/tool/execute", post(tool_execute))
         .with_state(workspace.clone());
@@ -179,20 +180,12 @@ async fn test_tool_execute_creates_audit_log_entry() {
     let _response = app.oneshot(request).await.unwrap();
 
     // Check audit log in database
-    let db = workspace.db_pool();
-    let conn = db.get().await.unwrap();
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM acp_tool_audit_log WHERE tool_name = 'fs/read_text_file'",
+    )
+    .fetch_one(workspace.pool())
+    .await
+    .unwrap();
 
-    let count: i64 = conn
-        .interact(|conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM acp_tool_audit_log WHERE tool_name = 'fs/read_text_file'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap()
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(count, 1, "Audit log entry should be created");
+    assert_eq!(count.0, 1, "Audit log entry should be created");
 }

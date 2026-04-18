@@ -58,7 +58,7 @@ async fn run_checks(config: &CliConfig) -> Result<()> {
     checks.push(config_check());
 
     // 3. Database
-    checks.push(database_check(config));
+    checks.push(database_check(config).await);
 
     // 4. Workspace directory structure
     checks.push(workspace_check(config));
@@ -192,39 +192,31 @@ fn config_check() -> HealthCheck {
 }
 
 /// Check SQLite database file.
-fn database_check(config: &CliConfig) -> HealthCheck {
+async fn database_check(config: &CliConfig) -> HealthCheck {
     match crate::config::resolve_state_db_path(config) {
         Ok(db_path) => {
             if db_path.exists() {
                 // Try to open and validate
-                match rusqlite::Connection::open(&db_path) {
-                    Ok(conn) => {
-                        match crate::db::Schema::init(&conn) {
-                            Ok(()) => {
-                                // Read schema version if available
-                                let version_info = nexus_local_db::read_versions(&conn)
-                                    .ok()
-                                    .map(|v| format!("(schema v{})", v.schema_version));
-                                let detail = version_info
-                                    .map(|v| format!("found at {} {}", db_path.display(), v))
-                                    .unwrap_or_else(|| format!("found at {}", db_path.display()));
-                                HealthCheck {
-                                    name: "Database".to_string(),
-                                    status: HealthStatus::Ok,
-                                    detail,
-                                }
-                            }
-                            Err(e) => HealthCheck {
-                                name: "Database".to_string(),
-                                status: HealthStatus::Error,
-                                detail: format!("schema init failed: {}", e),
-                            },
+                match crate::db::Schema::init(&db_path).await {
+                    Ok(pool) => {
+                        // Read schema version if available
+                        let version_info = nexus_local_db::read_versions(&pool)
+                            .await
+                            .ok()
+                            .map(|v| format!("(schema v{})", v.schema_version));
+                        let detail = version_info
+                            .map(|v| format!("found at {} {}", db_path.display(), v))
+                            .unwrap_or_else(|| format!("found at {}", db_path.display()));
+                        HealthCheck {
+                            name: "Database".to_string(),
+                            status: HealthStatus::Ok,
+                            detail,
                         }
                     }
                     Err(e) => HealthCheck {
                         name: "Database".to_string(),
                         status: HealthStatus::Error,
-                        detail: format!("cannot open: {}", e),
+                        detail: format!("schema init failed: {}", e),
                     },
                 }
             } else {

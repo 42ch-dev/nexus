@@ -7,7 +7,7 @@ use axum::Json;
 use serde::Serialize;
 use tracing::{debug, info};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ReferenceInfo {
     pub reference_source_id: String,
     pub source_type: String,
@@ -27,31 +27,17 @@ pub async fn list(
 ) -> Result<Json<ListReferencesResponse>, NexusApiError> {
     info!("Handling list references request");
 
-    let conn = state.db().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_UNAVAILABLE".into(),
-        message: format!("Database connection error: {}", e),
+    let references = sqlx::query_as!(
+        ReferenceInfo,
+        r#"SELECT reference_source_id as "reference_source_id!", source_type, title, scan_status, created_at
+         FROM reference_sources ORDER BY created_at DESC"#,
+    )
+    .fetch_all(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: e.to_string(),
     })?;
-
-    let references = conn
-        .query_map(
-            "SELECT reference_source_id, source_type, title, scan_status, created_at
-             FROM reference_sources ORDER BY created_at DESC",
-            [],
-            |row| {
-                Ok(ReferenceInfo {
-                    reference_source_id: row.get(0)?,
-                    source_type: row.get(1)?,
-                    title: row.get(2)?,
-                    scan_status: row.get(3)?,
-                    created_at: row.get(4)?,
-                })
-            },
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
 
     debug!(count = references.len(), "References retrieved");
     info!("List references completed");

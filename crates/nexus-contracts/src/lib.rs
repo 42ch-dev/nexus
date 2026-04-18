@@ -2,9 +2,12 @@
 //!
 //! This crate contains type definitions generated from `schemas/` JSON Schema files.
 //! All wire types are auto-generated - do not modify manually.
+//!
+//! Hand-written local types live in `local/` — see `schemas-boundary-v1.md` §3.
 
 pub mod enum_conversions;
 pub mod generated;
+pub mod local;
 
-// Re-export all generated types at crate root (includes RuntimeMode from runtime-mode.schema.json)
+// Re-export all generated types at crate root (includes wire types only)
 pub use generated::*;

@@ -294,12 +294,6 @@ async fn log_tool_execution(
     result: &serde_json::Value,
     state: &WorkspaceState,
 ) -> Result<(), NexusApiError> {
-    let db = state.db_pool();
-    let conn = db.get().await.map_err(|e| NexusApiError::Internal {
-        code: "DB_POOL_ERROR".into(),
-        message: format!("failed to get database connection: {}", e),
-    })?;
-
     let path = req.parameters["path"].as_str().unwrap_or("").to_string();
     let outcome = if result.is_object() {
         "success"
@@ -309,18 +303,15 @@ async fn log_tool_execution(
     .to_string();
     let tool_name = req.tool_name.clone();
 
-    conn.interact(move |conn| {
-        conn.execute(
-            "INSERT INTO acp_tool_audit_log (tool_name, path, outcome, agent_id, session_id)
-             VALUES (?1, ?2, ?3, NULL, NULL)",
-            rusqlite::params![tool_name, path, outcome],
-        )
-    })
+    sqlx::query!(
+        "INSERT INTO acp_tool_audit_log (tool_name, path, outcome, agent_id, session_id)
+         VALUES (?1, ?2, ?3, NULL, NULL)",
+        tool_name,
+        path,
+        outcome
+    )
+    .execute(state.pool())
     .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "AUDIT_LOG_FAILED".into(),
-        message: format!("failed to write audit log: {}", e),
-    })?
     .map_err(|e| NexusApiError::Internal {
         code: "AUDIT_LOG_FAILED".into(),
         message: format!("failed to write audit log: {}", e),

@@ -5,6 +5,32 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-18
+
+### Changed
+
+- Narrowed `@42ch/nexus-contracts` to wire contracts only. Types that `nexus-platform` does not consume have been removed from this package; they now live as hand-written Rust in `crates/nexus-contracts/src/local/`.
+- See `.agents/plans/knowledge/schemas-boundary-v1.md` §2 for the boundary rule.
+
+### Removed
+
+The following TypeScript types are no longer emitted (platform confirmed zero usage):
+
+- `AgentProfile`
+- `DaemonStatusV2`
+- `LocalIdentity`
+- `ManuscriptState`
+- `Meta`
+- `OutboxEntry`
+- `ReferenceSource`
+- `RegistryManifest`
+- `RuntimeMode`
+- `WorkspaceBinding`
+
+### Platform Impact
+
+**None** — none of these types were imported in `nexus-platform` (pre-merge `rg` in WS5 Task 2 confirmed zero uses).
+
 ## [0.2.0] - 2026-04-08
 
 ### Changed

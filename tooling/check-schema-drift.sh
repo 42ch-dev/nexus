@@ -64,7 +64,7 @@ echo "==> Checking no duplicated shared table DDL..."
 for table in workspace_meta creators reference_sources; do
   CLI_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
   DAEMON_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42d/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
-  LOCALDB_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-local-db/src/ 2>/dev/null | wc -l | tr -d ' ')
+  LOCALDB_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-local-db/migrations/ 2>/dev/null | wc -l | tr -d ' ')
   if [ "$CLI_DDL" != "0" ]; then
     echo "❌ CLI has duplicated DDL for $table table (should use nexus-local-db)"
     exit 1
@@ -99,12 +99,12 @@ fi
 echo "✅ No deprecated WIRE_SCHEMA_VERSION - using schema_version instead"
 
 echo "==> Checking CLI/daemon use nexus-local-db API..."
-if ! grep -q 'use nexus_local_db::{init, RuntimeRole}' crates/nexus42/src/db/mod.rs; then
-  echo "❌ CLI does not import nexus_local_db::{init, RuntimeRole}"
+if ! grep -q 'use nexus_local_db::' crates/nexus42/src/db/mod.rs; then
+  echo "❌ CLI does not import from nexus_local_db"
   exit 1
 fi
-if ! grep -q 'use nexus_local_db::{init, RuntimeRole}' crates/nexus42d/src/db/schema.rs; then
-  echo "❌ Daemon does not import nexus_local_db::{init, RuntimeRole}"
+if ! grep -q 'use nexus_local_db::' crates/nexus42d/src/db/schema.rs; then
+  echo "❌ Daemon does not import from nexus_local_db"
   exit 1
 fi
 echo "✅ Both CLI and daemon use nexus-local-db API"

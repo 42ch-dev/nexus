@@ -3,7 +3,6 @@
 //! A command-line interface for managing creative worlds, manuscripts,
 //! and Creator entities through the Nexus platform.
 
-mod acp;
 mod api;
 mod auth;
 mod challenge;
@@ -14,14 +13,16 @@ mod db;
 mod errors;
 mod manuscript;
 mod paths;
+mod session_capture;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    agent::AgentCommand, auth::AuthCommand, clone::CloneArgs, config::ConfigCommand,
-    context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand, db::DbCommand,
-    debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand, identity::IdentityCommand,
-    init::InitCommand, manuscript::ManuscriptCommand, memory::MemoryCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
+    acp_worker::AcpWorkerArgs, agent::AgentCommand, auth::AuthCommand, clone::CloneArgs,
+    config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
+    db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
+    identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
+    memory::MemoryCommand, policy::PolicyCommand, publish::PublishCommand,
+    research::ResearchCommand, runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand,
     session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
 };
 
@@ -151,6 +152,10 @@ enum Commands {
         command: AgentCommand,
     },
 
+    /// Hidden: ACP worker subprocess entry point (daemon-managed)
+    #[command(hide = true)]
+    AcpWorker(AcpWorkerArgs),
+
     /// ACP session persistence management
     Session {
         #[command(subcommand)]
@@ -185,6 +190,12 @@ enum Commands {
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
+    },
+
+    /// Schedule preset sessions (minimal; WS3)
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleCommand,
     },
 }
 
@@ -221,6 +232,7 @@ async fn main() {
         Some(Commands::Research { command }) => commands::research::run(command, &config).await,
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
+        Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
@@ -229,6 +241,7 @@ async fn main() {
         }
         Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
         Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
+        Some(Commands::Schedule { command }) => commands::schedule::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

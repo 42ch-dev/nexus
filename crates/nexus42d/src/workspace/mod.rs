@@ -10,11 +10,17 @@
 
 pub mod manager;
 
-use crate::db::pool::{DbPool, PoolConfig, PooledConn};
-use nexus_contracts::RuntimeMode;
+use crate::db::pool::{DbPool, PoolConfig};
+use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
+use nexus_contracts::local::domain::RuntimeMode;
+use nexus_orchestration::{
+    engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
+    WorkerManager,
+};
 use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 /// Shared workspace state
 #[derive(Clone)]
@@ -27,6 +33,9 @@ pub struct WorkspaceState {
     nexus_home: PathBuf,
     db_path: PathBuf,
     started_at: std::time::Instant,
+    /// Wall-clock timestamp of when the workspace state was created (daemon start).
+    /// Used for reporting `started_at` in the daemon status API.
+    started_at_wall: chrono::DateTime<chrono::Utc>,
     workspace_path: Arc<std::sync::Mutex<Option<String>>>,
     /// Runtime mode read from CLI config at startup.
     runtime_mode: RuntimeMode,
@@ -39,6 +48,21 @@ pub struct WorkspaceState {
     /// See R3(runtime) — a full file-watcher implementation is deferred.
     #[allow(dead_code)]
     cli_config_mtime: Option<std::time::SystemTime>,
+    /// Lifecycle HSM for daemon state management.
+    /// Set in T6 when main.rs wires up the lifecycle.
+    lifecycle: Arc<Option<Arc<StatigLifecycle>>>,
+    /// Orchestration engine (set at daemon startup when WS2 is wired).
+    engine: Arc<Option<Arc<dyn OrchestrationEngine>>>,
+    /// Worker manager (set at daemon startup when WS2 is wired).
+    #[allow(dead_code)]
+    worker_manager: Arc<Option<Arc<WorkerManager>>>,
+    /// Capability registry (set at daemon startup when WS2 is wired).
+    capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
+    /// Schedule supervisor for WS7 schedule management (set at daemon startup).
+    schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
+    /// Shutdown notification — fired when the daemon enters Stopping state.
+    /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
+    shutdown_notify: Arc<Notify>,
 }
 
 impl WorkspaceState {
@@ -47,12 +71,13 @@ impl WorkspaceState {
     ///
     /// Creates a connection pool with a single connection for test isolation.
     /// Does NOT initialize the Outbox (sync operations will return NotConfigured).
-    pub fn new_for_testing(
+    pub async fn new_for_testing(
         nexus_home: PathBuf,
         db_path: PathBuf,
         workspace_path: Option<String>,
     ) -> Self {
-        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(1))
+        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+            .await
             .expect("Failed to create test database pool");
         Self {
             db,
@@ -60,9 +85,16 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
+            started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
+            lifecycle: Arc::new(None),
+            engine: Arc::new(None),
+            worker_manager: Arc::new(None),
+            capability_registry: Arc::new(None),
+            schedule_supervisor: Arc::new(None),
+            shutdown_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -75,7 +107,8 @@ impl WorkspaceState {
         db_path: PathBuf,
         workspace_path: Option<String>,
     ) -> Self {
-        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(1))
+        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
+            .await
             .expect("Failed to create test database pool");
 
         // Create outbox at the standard sync directory
@@ -92,9 +125,16 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
+            started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
+            lifecycle: Arc::new(None),
+            engine: Arc::new(None),
+            worker_manager: Arc::new(None),
+            capability_registry: Arc::new(None),
+            schedule_supervisor: Arc::new(None),
+            shutdown_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -112,9 +152,6 @@ impl WorkspaceState {
         let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
 
         // R3(runtime): Record CLI config file modification time for staleness detection.
-        // This enables the daemon to detect when CLI-side config changes occurred
-        // (e.g., runtime mode switch). A full file-watcher is deferred; callers
-        // can compare this mtime against the current file mtime to detect drift.
         let cli_config_path = nexus_home.join("config.json");
         let cli_config_mtime = std::fs::metadata(&cli_config_path)
             .ok()
@@ -126,13 +163,9 @@ impl WorkspaceState {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Create the database file and initialize schema
-        let init_conn = rusqlite::Connection::open(&db_path)?;
-        crate::db::schema::Schema::init(&init_conn)?;
-        drop(init_conn);
-
-        // Create connection pool with environment-configurable settings
-        let db = DbPool::new(&db_path, PoolConfig::from_env())?;
+        // Initialize schema and create connection pool via nexus_local_db
+        crate::db::schema::Schema::init(&db_path).await?;
+        let db = DbPool::new(&db_path, PoolConfig::from_env()).await?;
 
         // Initialize nexus-sync outbox at {nexus_home}/sync/outbox.db
         let sync_dir = nexus_home.join("sync");
@@ -148,18 +181,106 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
+            started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
             runtime_mode,
             cli_config_mtime,
+            lifecycle: Arc::new(None),
+            engine: Arc::new(None),
+            worker_manager: Arc::new(None),
+            capability_registry: Arc::new(None),
+            schedule_supervisor: Arc::new(None),
+            shutdown_notify: Arc::new(Notify::new()),
         })
     }
 
-    /// Get database connection from the pool
+    /// Set the lifecycle HSM for this workspace state.
+    /// Called from main.rs after constructing the lifecycle.
+    pub fn set_lifecycle(&mut self, lifecycle: Arc<StatigLifecycle>) {
+        self.lifecycle = Arc::new(Some(lifecycle));
+    }
+
+    /// Set the orchestration engine.
+    /// Called from main.rs after constructing the engine.
+    pub fn set_engine(&mut self, engine: Arc<dyn OrchestrationEngine>) {
+        self.engine = Arc::new(Some(engine));
+    }
+
+    /// Set the worker manager.
+    pub fn set_worker_manager(&mut self, worker_manager: Arc<WorkerManager>) {
+        self.worker_manager = Arc::new(Some(worker_manager));
+    }
+
+    /// Set the capability registry.
+    pub fn set_capability_registry(&mut self, registry: Arc<CapabilityRegistry>) {
+        self.capability_registry = Arc::new(Some(registry));
+    }
+
+    /// Set the schedule supervisor (WS7).
+    pub fn set_schedule_supervisor(&mut self, supervisor: Arc<ScheduleSupervisor>) {
+        self.schedule_supervisor = Arc::new(Some(supervisor));
+    }
+
+    /// Get the orchestration engine, if set.
+    pub fn engine(&self) -> Option<Arc<dyn OrchestrationEngine>> {
+        self.engine.as_ref().as_ref().cloned()
+    }
+
+    /// Get the schedule supervisor, if set (WS7).
+    pub fn schedule_supervisor(&self) -> Option<Arc<ScheduleSupervisor>> {
+        self.schedule_supervisor.as_ref().as_ref().cloned()
+    }
+
+    /// Get the worker manager, if set.
+    #[allow(dead_code)]
+    pub fn worker_manager(&self) -> Option<Arc<WorkerManager>> {
+        self.worker_manager.as_ref().as_ref().cloned()
+    }
+
+    /// Get the capability registry, if set.
+    pub fn capability_registry(&self) -> Option<Arc<CapabilityRegistry>> {
+        self.capability_registry.as_ref().as_ref().cloned()
+    }
+
+    /// Get the shutdown notification handle.
     ///
-    /// Returns a [`PooledConn`] that provides async-friendly methods for
-    /// executing SQL. The connection is returned to the pool when dropped.
-    pub async fn db(&self) -> Result<PooledConn, deadpool_sqlite::PoolError> {
-        self.db.get().await
+    /// Callers await `.notified()` to block until the daemon enters Stopping state.
+    pub fn shutdown_notify(&self) -> Arc<Notify> {
+        Arc::clone(&self.shutdown_notify)
+    }
+
+    /// Request graceful shutdown — fires the shutdown notification.
+    ///
+    /// Called from lifecycle `Stopping` entry or signal handlers.
+    pub fn request_shutdown(&self) {
+        self.shutdown_notify.notify_one();
+    }
+
+    /// Get the lifecycle, if set.
+    pub fn lifecycle(&self) -> Option<Arc<StatigLifecycle>> {
+        self.lifecycle.as_ref().as_ref().cloned()
+    }
+
+    /// Get the current lifecycle state.
+    /// Returns a default state if no lifecycle is set.
+    pub fn lifecycle_state(&self) -> LifecycleState {
+        match self.lifecycle.as_ref().as_ref() {
+            Some(lc) => lc.current_state(),
+            None => LifecycleState::Running, // Default to Running if no lifecycle
+        }
+    }
+
+    /// Get exit code from lifecycle, if set.
+    pub fn lifecycle_exit_code(&self) -> Option<i32> {
+        self.lifecycle
+            .as_ref()
+            .as_ref()
+            .and_then(|lc| lc.exit_code())
+    }
+
+    /// Get a reference to the underlying sqlx pool.
+    pub fn pool(&self) -> &sqlx::SqlitePool {
+        self.db.pool()
     }
 
     /// Get the nexus-sync Outbox for sync operations.
@@ -212,6 +333,11 @@ impl WorkspaceState {
         self.started_at.elapsed().as_secs()
     }
 
+    /// Wall-clock timestamp when the daemon started (RFC 3339).
+    pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.started_at_wall
+    }
+
     /// Current runtime mode (from CLI config at startup).
     pub fn runtime_mode(&self) -> &RuntimeMode {
         &self.runtime_mode
@@ -232,15 +358,13 @@ impl WorkspaceState {
         std::fs::create_dir_all(workspace_dir.join("References"))?;
 
         // Store workspace path in the database
-        let path_owned = path.to_string();
-        let conn = self
-            .db()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get database connection: {}", e))?;
-        conn.execute(
-            "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('workspace_path', ?1)",
-            [path_owned],
+        // SAFETY: single static INSERT into workspace_meta key-value table.
+        // Uses unnamed ? for a single bind parameter.
+        sqlx::query(
+            "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('workspace_path', ?)",
         )
+        .bind(path)
+        .execute(self.pool())
         .await
         .map_err(|e| anyhow::anyhow!("Database error: {}", e))?;
 
@@ -261,12 +385,13 @@ mod tests {
 
     #[tokio::test]
     async fn init_workspace_sets_is_initialized() {
-        let (tmp, nexus_home, db_path) = create_test_workspace();
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
         let workspace_dir = tmp.path().join("my-workspace");
 
         let state = WorkspaceState::new_for_testing(
             nexus_home, db_path, None, // no workspace path set initially
-        );
+        )
+        .await;
 
         // Before init: is_initialized should be false
         assert!(
