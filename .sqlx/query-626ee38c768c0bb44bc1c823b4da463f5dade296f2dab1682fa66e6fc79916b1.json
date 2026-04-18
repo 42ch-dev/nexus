@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id as \"session_id!\", current_task_id, context_json\n             FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_task_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "context_json",
+        "ordinal": 2,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "626ee38c768c0bb44bc1c823b4da463f5dade296f2dab1682fa66e6fc79916b1"
+}

@@ -140,6 +140,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
 
     // Set to Running (simulate engine has started)
     let now = chrono::Utc::now().timestamp();
+    // SAFETY: test-only — DML helper for test state setup.
     sqlx::query(
         "UPDATE creator_schedules SET status = 'running', updated_at = ?1 WHERE schedule_id = ?2",
     )

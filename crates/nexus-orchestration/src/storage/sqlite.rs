@@ -63,42 +63,49 @@ impl SessionStorage for SqliteSessionStorage {
         let context_bytes = serde_json::to_vec(&session.context)
             .map_err(|e| graph_flow::GraphError::StorageError(format!("serialize context: {e}")))?;
 
-        sqlx::query(
+        // Pre-own all bind params before the macro call (borrow lifetimes).
+        let session_id = session.id;
+        let current_task_id = session.current_task_id;
+
+        sqlx::query!(
             r#"
             INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version,
                  parent_session_id, current_task_id, status,
                  context_json, chat_history_json, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', ?7, NULL, ?8, ?8)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 current_task_id = excluded.current_task_id,
                 context_json     = excluded.context_json,
                 updated_at       = excluded.updated_at
             "#,
+            session_id,
+            creator_id,
+            preset_id,
+            preset_version,
+            parent_session_id,
+            current_task_id,
+            context_bytes,
+            now,
+            now
         )
-        .bind(&session.id)
-        .bind(&creator_id)
-        .bind(&preset_id)
-        .bind(preset_version)
-        .bind(&parent_session_id)
-        .bind(&session.current_task_id)
-        .bind(&context_bytes)
-        .bind(now)
         .execute(&*self.pool)
         .await
         .map_err(|e| {
-            graph_flow::GraphError::StorageError(format!("save session '{}': {e}", session.id))
+            graph_flow::GraphError::StorageError(format!("save session '{}': {e}", session_id))
         })?;
 
         Ok(())
     }
 
     async fn get(&self, id: &str) -> graph_flow::Result<Option<Session>> {
-        let row = sqlx::query_as::<_, SessionRow>(
-            "SELECT session_id, current_task_id, context_json
-             FROM orchestration_sessions WHERE session_id = ?1",
+        let id_owned = id.to_owned();
+        let row = sqlx::query_as!(
+            SessionRow,
+            "SELECT session_id as \"session_id!\", current_task_id, context_json
+             FROM orchestration_sessions WHERE session_id = ?",
+            id_owned
         )
-        .bind(id)
         .fetch_optional(&*self.pool)
         .await
         .map_err(|e| graph_flow::GraphError::StorageError(format!("get session '{id}': {e}")))?;
@@ -124,13 +131,16 @@ impl SessionStorage for SqliteSessionStorage {
     }
 
     async fn delete(&self, id: &str) -> graph_flow::Result<()> {
-        let result = sqlx::query("DELETE FROM orchestration_sessions WHERE session_id = ?1")
-            .bind(id)
-            .execute(&*self.pool)
-            .await
-            .map_err(|e| {
-                graph_flow::GraphError::StorageError(format!("delete session '{id}': {e}"))
-            })?;
+        let id_owned = id.to_owned();
+        let result = sqlx::query!(
+            "DELETE FROM orchestration_sessions WHERE session_id = ?",
+            id_owned
+        )
+        .execute(&*self.pool)
+        .await
+        .map_err(|e| {
+            graph_flow::GraphError::StorageError(format!("delete session '{id}': {e}"))
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(graph_flow::GraphError::SessionNotFound(id.to_string()));

@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT schedule_id as \"schedule_id!\", creator_id, preset_id, preset_version,\n                    status, concurrency_kind, concurrency_whitelist,\n                    current_core_context_version, current_session_id,\n                    scheduled_at, label, created_at, updated_at, terminated_at\n             FROM creator_schedules",
+  "describe": {
+    "columns": [
+      {
+        "name": "schedule_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "preset_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "preset_version",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "status",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "concurrency_kind",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "concurrency_whitelist",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_core_context_version",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "current_session_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "scheduled_at",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "label",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "terminated_at",
+        "ordinal": 13,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "bb02b5254391ccab3ade637360817b146d7b2e5795101f23c4146c1a63464074"
+}
