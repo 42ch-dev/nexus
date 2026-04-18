@@ -361,6 +361,80 @@ impl CoreContextManager {
         })
     }
 
+    /// Apply an LLM summarization derivation step (V1.5).
+    ///
+    /// Takes the LLM-produced summary text and the prompt hash, writes a new
+    /// `core_context_versions` row with `derivation_kind = 'llm_summarize'`.
+    /// The previous content is replaced by the summary (LLM produces a full
+    /// new version, not an append).
+    pub async fn apply_llm_summarize(
+        &self,
+        schedule_id: &ScheduleId,
+        summary: &str,
+        prompt_hash: [u8; 32],
+        capability_name: &str,
+    ) -> Result<CoreContextRecord, CoreContextError> {
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
+        let now = chrono::Utc::now().timestamp();
+
+        let current_version = self.current_version(schedule_id).await?;
+        let new_version = CoreContextVersion(current_version.0 + 1);
+
+        let new_payload = CoreContextPayload::Text {
+            body: summary.to_string(),
+        };
+
+        let payload_kind = "text";
+        let content_bytes = serde_json::to_vec(&new_payload)?;
+
+        let step = DerivationStep::llm_summarize(capability_name.to_string(), prompt_hash);
+        let derivation_json = serde_json::to_string(&step)?;
+
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let version_i64 = new_version.0 as i64;
+
+        sqlx::query!(
+            r#"INSERT INTO core_context_versions
+               (schedule_id, version, payload_kind, content,
+                derivation_kind, derivation_detail,
+                created_at, created_by_kind, created_by_user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'system', NULL)"#,
+            schedule_id_owned,
+            version_i64,
+            payload_kind,
+            content_bytes,
+            "llm_summarize",
+            derivation_json,
+            now
+        )
+        .execute(&*self.pool)
+        .await?;
+
+        // Bump the schedule's current_core_context_version
+        sqlx::query!(
+            "UPDATE creator_schedules
+             SET current_core_context_version = ?, updated_at = ?
+             WHERE schedule_id = ?",
+            version_i64,
+            now,
+            schedule_id_owned
+        )
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(CoreContextRecord {
+            schedule_id: schedule_id.0.clone(),
+            version: new_version,
+            content: new_payload,
+            derivation: step,
+            created_at: now.to_string(),
+            created_by: CoreContextAuthor::System,
+        })
+    }
+
     /// Apply a user edit derivation step.
     ///
     /// **H3**: `EditOp::Replace` is rejected to prevent overwriting
@@ -654,7 +728,8 @@ fn derivation_kind_str(step: &DerivationStep) -> &'static str {
 mod tests {
     use super::*;
     use nexus_contracts::local::schedule::{
-        CoreContextAuthor, CoreContextPayload, CoreContextVersion, EditOp, ScheduleId,
+        CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp,
+        ScheduleId,
     };
 
     /// Helper: create a fresh test DB with migrations and return the pool.
@@ -1034,5 +1109,148 @@ mod tests {
         // Both should succeed with version 1
         assert_eq!(v_a, CoreContextVersion(1));
         assert_eq!(v_b, CoreContextVersion(1));
+    }
+
+    // ---------- V1.5: LLM Summarize derivation ----------
+
+    #[tokio::test]
+    async fn llm_summarize_writes_version_with_correct_derivation_kind() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("LLM-SUM1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(
+            &sid,
+            "initial context about bees",
+            CoreContextAuthor::System,
+        )
+        .await
+        .unwrap();
+
+        // Apply LLM summarize
+        let prompt_hash = [0xABu8; 32];
+        let record = mgr
+            .apply_llm_summarize(
+                &sid,
+                "Summarized: a story about bees and honey.",
+                prompt_hash,
+                "context.summarize",
+            )
+            .await
+            .unwrap();
+
+        // Should be version 1
+        assert_eq!(record.version, CoreContextVersion(1));
+
+        // Content should be the summary
+        match &record.content {
+            CoreContextPayload::Text { body } => {
+                assert_eq!(body, "Summarized: a story about bees and honey.");
+            }
+            _ => panic!("expected text payload"),
+        }
+
+        // Derivation should be LlmSummarize
+        match &record.derivation {
+            DerivationStep::LlmSummarize {
+                capability,
+                prompt_hash: hash,
+                ..
+            } => {
+                assert_eq!(capability, "context.summarize");
+                assert_eq!(*hash, [0xABu8; 32]);
+            }
+            other => panic!("expected LlmSummarize derivation, got: {other:?}"),
+        }
+
+        // Verify current version bumped to 1
+        assert_eq!(
+            mgr.current_version(&sid).await.unwrap(),
+            CoreContextVersion(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn llm_summarize_roundtrip_via_read() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("LLM-RT1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(&sid, "seed data", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Apply LLM summarize
+        let prompt_hash = [0x42u8; 32];
+        mgr.apply_llm_summarize(&sid, "LLM summary v1", prompt_hash, "context.summarize")
+            .await
+            .unwrap();
+
+        // Read back v1 and verify derivation_kind is 'llm_summarize'
+        let record = mgr.read(&sid, CoreContextVersion(1)).await.unwrap();
+        match &record.derivation {
+            DerivationStep::LlmSummarize { capability, .. } => {
+                assert_eq!(capability, "context.summarize");
+            }
+            other => panic!("expected LlmSummarize, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn llm_summarize_can_follow_other_operations() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("LLM-MIX1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // v1: user edit
+        mgr.apply_user_edit(
+            &sid,
+            EditOp::Append {
+                body: " + user addition".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        // v2: preset hook
+        mgr.apply_preset_hook(
+            &sid,
+            "st1",
+            "h1",
+            EditOp::Append {
+                body: " + hook addition".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        // v3: LLM summarize
+        let record = mgr
+            .apply_llm_summarize(&sid, "Final summary", [0u8; 32], "context.summarize")
+            .await
+            .unwrap();
+
+        assert_eq!(record.version, CoreContextVersion(3));
+        match &record.content {
+            CoreContextPayload::Text { body } => {
+                assert_eq!(body, "Final summary");
+            }
+            _ => panic!("expected text payload"),
+        }
+
+        // Verify current snapshot is the LLM summary
+        let snapshot = mgr.current_snapshot(&sid).await.unwrap();
+        assert_eq!(snapshot.version, CoreContextVersion(3));
     }
 }

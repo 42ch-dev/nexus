@@ -355,6 +355,12 @@ pub enum ContextUpdateOp {
         #[serde(default)]
         path: String,
     },
+    /// V1.5+ only. Invoke `context.summarize` capability to produce an
+    /// LLM-driven summary of the current core_context.
+    LlmSummarize {
+        /// Capability name to invoke (e.g. `context.summarize`).
+        capability: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

@@ -10,9 +10,9 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_fourteen_builtins() {
+async fn registry_has_fifteen_builtins() {
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 14);
+    assert_eq!(reg.len(), 15);
 }
 
 #[tokio::test]
@@ -21,6 +21,7 @@ async fn registry_lookup_acp_capabilities() {
     assert!(reg.get("acp.prompt").is_some());
     assert!(reg.get("acp.session_load").is_some());
     assert!(reg.get("judge.llm").is_some());
+    assert!(reg.get("context.summarize").is_some());
 }
 
 #[test]

@@ -71,7 +71,8 @@ impl CapabilityRegistry {
     /// Built-ins: `sync.pull`, `sync.push`, `outbox.flush`, `outbox.compact`,
     /// `workspace.open`, `workspace.commit`, `registry.refresh`,
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
-    /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`.
+    /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`,
+    /// `context.summarize`.
     pub fn with_builtins() -> Self {
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
@@ -88,6 +89,7 @@ impl CapabilityRegistry {
             Box::new(builtins::AcpPrompt),
             Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm),
+            Box::new(builtins::ContextSummarize),
         ];
         Self { capabilities: caps }
     }
@@ -128,9 +130,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_fourteen_builtins() {
+    fn registry_has_fifteen_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 14);
+        assert_eq!(reg.len(), 15);
     }
 
     #[test]
@@ -151,6 +153,7 @@ mod tests {
             "acp.prompt",
             "acp.session_load",
             "judge.llm",
+            "context.summarize",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -169,10 +172,11 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(|c| c.name()).collect();
-        assert_eq!(names.len(), 14);
+        assert_eq!(names.len(), 15);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
         assert!(names.contains(&"judge.llm"));
+        assert!(names.contains(&"context.summarize"));
     }
 }
