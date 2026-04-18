@@ -1,0 +1,29 @@
+{
+  "id": "2026-04-18-v1.5-ws-c-context-summarize",
+  "title": "V1.5 WS-C — context.summarize capability",
+  "file": "2026-04-18-v1.5-ws-c-context-summarize.md",
+  "status": "Done",
+  "owner": "fullstack-dev",
+  "agents": ["fullstack-dev", "qc-specialist", "qc-specialist-2", "qc-specialist-3"],
+  "progress": 100,
+  "tags": ["v1.5", "capability", "context-summarize", "M2"],
+  "created_at": "2026-04-18T23:30:00Z",
+  "updated_at": "2026-04-19T18:00:00Z",
+  "done_at": "2026-04-19T18:00:00Z",
+  "notes": "LLM summarization capability implemented. Stub/mock pattern. QC reviewed. Merged to integration.",
+  "metadata": {
+    "description": "Implement LLM-driven core_context summarization capability with preset YAML extension context_update.kind: llm_summarize.",
+    "milestone": "M2",
+    "working_branch": "feature/v1.5-stabilization",
+    "dependency": ["2026-04-18-v1.5-ws-a-schedule-fsm"],
+    "blocks": [],
+    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "gates": {
+      "tests": "passed",
+      "clippy": "clean",
+      "fmt": "clean",
+      "qc_status": "Approve"
+    },
+    "commits": ["a7b71ef", "04cb6b4"]
+  }
+}

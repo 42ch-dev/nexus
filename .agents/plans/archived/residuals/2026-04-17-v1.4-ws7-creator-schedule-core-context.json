@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "plan_id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
-  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "archived_at": "2026-04-19T18:00:00Z",
   "entries": [
     {
       "id": "R10",
@@ -60,6 +60,104 @@
       "lifecycle": "accepted",
       "closed_at": "2026-04-18T07:45:39.992187+00:00",
       "closure_note": "Accepted at V1.4 residual review \u2014 TOCTOU in edit_core_context"
+    },
+    {
+      "id": "R1",
+      "title": "RunningSet/CompletedSet not persisted across restart",
+      "severity": "medium",
+      "source": "QC1 medium",
+      "scope": "crates/nexus-orchestration/src/schedule/admission.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 RunningSet/CompletedSet not persisted across restart"
+    },
+    {
+      "id": "R2",
+      "title": "No duplicate schedule_id detection",
+      "severity": "medium",
+      "source": "QC1 medium",
+      "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 No duplicate schedule_id detection"
+    },
+    {
+      "id": "R3",
+      "title": "No paused\u2192running status transition in FSM",
+      "severity": "medium",
+      "source": "QC1 medium",
+      "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 No paused\u2192running status transition in FSM"
+    },
+    {
+      "id": "R4",
+      "title": "No pause signal in FSM",
+      "severity": "medium",
+      "source": "QC1 medium",
+      "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 No pause signal in FSM"
+    },
+    {
+      "id": "R5",
+      "title": "No delete cascade for schedules",
+      "severity": "medium",
+      "source": "QC1 medium",
+      "scope": "SQLite migration / supervisor.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 No delete cascade for schedules"
+    },
+    {
+      "id": "R6",
+      "title": "CoreContextManager version bump race",
+      "severity": "medium",
+      "source": "QC2 medium",
+      "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 CoreContextManager version bump race"
+    },
+    {
+      "id": "R7",
+      "title": "paused\u2192running requires 2-step UX",
+      "severity": "medium",
+      "source": "QC2 medium",
+      "scope": "CLI UX / daemon signal handler",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 paused\u2192running requires 2-step UX"
     }
   ]
 }

@@ -186,7 +186,7 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
     if let Some(id) = source_id {
         // Extract by specific ID
         let row = sqlx::query!(
-            r#"SELECT reference_source_id as "reference_source_id!", source_type as "source_type!", uri as "uri!", title as "title!", scan_status as "scan_status!", created_at as "created_at!", tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?1"#,
+            r#"SELECT reference_source_id as "reference_source_id!", source_type as "source_type!", uri as "uri!", title as "title!", scan_status as "scan_status!", created_at as "created_at!", tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?"#,
             id
         )
         .fetch_optional(&pool)

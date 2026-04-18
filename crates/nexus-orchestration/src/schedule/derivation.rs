@@ -5,6 +5,7 @@
 //!
 //! Design: `.agents/plans/knowledge/creator-schedule-and-core-context-v1.md` §6.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use nexus_contracts::local::schedule::{
@@ -37,14 +38,17 @@ pub enum CoreContextError {
 /// Each `apply()` call appends a new row to `core_context_versions` and
 /// bumps `creator_schedules.current_core_context_version`.
 ///
-/// **Write guard (H2)**: The `apply()` and `apply_seed()` methods hold a
-/// `tokio::sync::Mutex` to prevent concurrent writes from corrupting the
-/// version chain (two concurrent calls could both read version N and both
-/// write version N+1, overwriting one another).
+/// **Write guard (R6 — per-schedule locking)**: The `apply()`, `apply_seed()`,
+/// and `apply_preset_hook()` methods use per-schedule locks to prevent
+/// concurrent writes on the *same* schedule from corrupting the version
+/// chain. Different schedules can write concurrently without blocking
+/// each other.
 pub struct CoreContextManager {
     pool: Arc<SqlitePool>,
-    /// Serializes the version check + insert in `apply()` and `apply_seed()`.
-    write_guard: Mutex<()>,
+    /// Per-schedule write guards. Each schedule gets its own Mutex<()> entry.
+    /// This allows concurrent writes to *different* schedules while
+    /// maintaining per-schedule safety (R6).
+    schedule_guards: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl CoreContextManager {
@@ -52,8 +56,21 @@ impl CoreContextManager {
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
             pool,
-            write_guard: Mutex::new(()),
+            schedule_guards: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Get or create a per-schedule write guard.
+    ///
+    /// Returns an `Arc<Mutex<()>>` for the given schedule. The Arc allows
+    /// cloning so the lock can be held while the HashMap is not locked.
+    async fn schedule_guard(&self, schedule_id: &ScheduleId) -> Arc<tokio::sync::Mutex<()>> {
+        let key = schedule_id.0.clone();
+        let mut guards = self.schedule_guards.lock().await;
+        guards
+            .entry(key)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     /// Apply the seed step to create version 0 of `core_context`.
@@ -68,8 +85,9 @@ impl CoreContextManager {
         raw: &str,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // H2: Serialize writes to prevent version chain corruption.
-        let _guard = self.write_guard.lock().await;
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
         let new_version = CoreContextVersion(0);
@@ -151,8 +169,9 @@ impl CoreContextManager {
         step: DerivationStep,
         author: CoreContextAuthor,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        // H2: Serialize writes to prevent version chain corruption.
-        let _guard = self.write_guard.lock().await;
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
 
@@ -265,8 +284,9 @@ impl CoreContextManager {
 
         // We need to apply the edit op but record it as a PresetHook derivation.
         // Let's do a direct implementation:
-        // H2: Serialize writes to prevent version chain corruption.
-        let _guard = self.write_guard.lock().await;
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
         let now = chrono::Utc::now().timestamp();
 
         let current_version = self.current_version(schedule_id).await?;
@@ -330,6 +350,80 @@ impl CoreContextManager {
             state_id: state_id.to_string(),
             hook_name: hook_name.to_string(),
         };
+
+        Ok(CoreContextRecord {
+            schedule_id: schedule_id.0.clone(),
+            version: new_version,
+            content: new_payload,
+            derivation: step,
+            created_at: now.to_string(),
+            created_by: CoreContextAuthor::System,
+        })
+    }
+
+    /// Apply an LLM summarization derivation step (V1.5).
+    ///
+    /// Takes the LLM-produced summary text and the prompt hash, writes a new
+    /// `core_context_versions` row with `derivation_kind = 'llm_summarize'`.
+    /// The previous content is replaced by the summary (LLM produces a full
+    /// new version, not an append).
+    pub async fn apply_llm_summarize(
+        &self,
+        schedule_id: &ScheduleId,
+        summary: &str,
+        prompt_hash: [u8; 32],
+        capability_name: &str,
+    ) -> Result<CoreContextRecord, CoreContextError> {
+        // R6: Per-schedule lock to prevent version chain corruption.
+        let guard = self.schedule_guard(schedule_id).await;
+        let _lock = guard.lock().await;
+        let now = chrono::Utc::now().timestamp();
+
+        let current_version = self.current_version(schedule_id).await?;
+        let new_version = CoreContextVersion(current_version.0 + 1);
+
+        let new_payload = CoreContextPayload::Text {
+            body: summary.to_string(),
+        };
+
+        let payload_kind = "text";
+        let content_bytes = serde_json::to_vec(&new_payload)?;
+
+        let step = DerivationStep::llm_summarize(capability_name.to_string(), prompt_hash);
+        let derivation_json = serde_json::to_string(&step)?;
+
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let version_i64 = new_version.0 as i64;
+
+        sqlx::query!(
+            r#"INSERT INTO core_context_versions
+               (schedule_id, version, payload_kind, content,
+                derivation_kind, derivation_detail,
+                created_at, created_by_kind, created_by_user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'system', NULL)"#,
+            schedule_id_owned,
+            version_i64,
+            payload_kind,
+            content_bytes,
+            "llm_summarize",
+            derivation_json,
+            now
+        )
+        .execute(&*self.pool)
+        .await?;
+
+        // Bump the schedule's current_core_context_version
+        sqlx::query!(
+            "UPDATE creator_schedules
+             SET current_core_context_version = ?, updated_at = ?
+             WHERE schedule_id = ?",
+            version_i64,
+            now,
+            schedule_id_owned
+        )
+        .execute(&*self.pool)
+        .await?;
 
         Ok(CoreContextRecord {
             schedule_id: schedule_id.0.clone(),
@@ -634,7 +728,8 @@ fn derivation_kind_str(step: &DerivationStep) -> &'static str {
 mod tests {
     use super::*;
     use nexus_contracts::local::schedule::{
-        CoreContextAuthor, CoreContextPayload, CoreContextVersion, EditOp, ScheduleId,
+        CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp,
+        ScheduleId,
     };
 
     /// Helper: create a fresh test DB with migrations and return the pool.
@@ -896,5 +991,266 @@ mod tests {
         assert_eq!(merged["a"], 1);
         assert_eq!(merged["b"], 3);
         assert_eq!(merged["c"], 4);
+    }
+
+    // ---------- R6: Per-schedule version bump race ----------
+
+    #[tokio::test]
+    async fn r6_concurrent_apply_same_schedule_produces_sequential_versions() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = Arc::new(CoreContextManager::new(pool));
+        let sid = ScheduleId("R6-CONC".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Spawn 10 concurrent apply calls on the same schedule
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let mgr_clone = Arc::clone(&mgr);
+            let sid_clone = sid.clone();
+            handles.push(tokio::spawn(async move {
+                mgr_clone
+                    .apply_user_edit(
+                        &sid_clone,
+                        EditOp::Append {
+                            body: format!(" chunk-{i}"),
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                    .version
+                    .0
+            }));
+        }
+
+        // Collect all version numbers
+        let mut versions: Vec<u32> = Vec::new();
+        for h in handles {
+            versions.push(h.await.unwrap());
+        }
+        versions.sort();
+
+        // All versions should be unique and sequential: [1, 2, 3, ..., 10]
+        // No duplicates (which would indicate a race)
+        assert_eq!(
+            versions,
+            (1..=10).collect::<Vec<_>>(),
+            "R6: concurrent applies should produce sequential versions without gaps or duplicates"
+        );
+
+        // Verify final version is 10
+        assert_eq!(
+            mgr.current_version(&sid).await.unwrap(),
+            CoreContextVersion(10)
+        );
+    }
+
+    #[tokio::test]
+    async fn r6_different_schedules_write_concurrently() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = Arc::new(CoreContextManager::new(pool));
+
+        // Create two schedules
+        let sid_a = ScheduleId("R6-A".to_string());
+        let sid_b = ScheduleId("R6-B".to_string());
+        insert_test_schedule(&mgr.pool, &sid_a.0).await;
+        insert_test_schedule(&mgr.pool, &sid_b.0).await;
+
+        // Seed both
+        mgr.apply_seed(&sid_a, "A-initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+        mgr.apply_seed(&sid_b, "B-initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Concurrently apply to both schedules
+        let mgr_clone = Arc::clone(&mgr);
+        let sid_a_clone = sid_a.clone();
+        let sid_b_clone = sid_b.clone();
+
+        let h1 = tokio::spawn(async move {
+            mgr_clone
+                .apply_user_edit(
+                    &sid_a_clone,
+                    EditOp::Append {
+                        body: " append-a".to_string(),
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .version
+        });
+
+        let mgr_clone2 = Arc::clone(&mgr);
+        let h2 = tokio::spawn(async move {
+            mgr_clone2
+                .apply_user_edit(
+                    &sid_b_clone,
+                    EditOp::Append {
+                        body: " append-b".to_string(),
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .version
+        });
+
+        let v_a = h1.await.unwrap();
+        let v_b = h2.await.unwrap();
+
+        // Both should succeed with version 1
+        assert_eq!(v_a, CoreContextVersion(1));
+        assert_eq!(v_b, CoreContextVersion(1));
+    }
+
+    // ---------- V1.5: LLM Summarize derivation ----------
+
+    #[tokio::test]
+    async fn llm_summarize_writes_version_with_correct_derivation_kind() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("LLM-SUM1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(
+            &sid,
+            "initial context about bees",
+            CoreContextAuthor::System,
+        )
+        .await
+        .unwrap();
+
+        // Apply LLM summarize
+        let prompt_hash = [0xABu8; 32];
+        let record = mgr
+            .apply_llm_summarize(
+                &sid,
+                "Summarized: a story about bees and honey.",
+                prompt_hash,
+                "context.summarize",
+            )
+            .await
+            .unwrap();
+
+        // Should be version 1
+        assert_eq!(record.version, CoreContextVersion(1));
+
+        // Content should be the summary
+        match &record.content {
+            CoreContextPayload::Text { body } => {
+                assert_eq!(body, "Summarized: a story about bees and honey.");
+            }
+            _ => panic!("expected text payload"),
+        }
+
+        // Derivation should be LlmSummarize
+        match &record.derivation {
+            DerivationStep::LlmSummarize {
+                capability,
+                prompt_hash: hash,
+                ..
+            } => {
+                assert_eq!(capability, "context.summarize");
+                assert_eq!(*hash, [0xABu8; 32]);
+            }
+            other => panic!("expected LlmSummarize derivation, got: {other:?}"),
+        }
+
+        // Verify current version bumped to 1
+        assert_eq!(
+            mgr.current_version(&sid).await.unwrap(),
+            CoreContextVersion(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn llm_summarize_roundtrip_via_read() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("LLM-RT1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(&sid, "seed data", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Apply LLM summarize
+        let prompt_hash = [0x42u8; 32];
+        mgr.apply_llm_summarize(&sid, "LLM summary v1", prompt_hash, "context.summarize")
+            .await
+            .unwrap();
+
+        // Read back v1 and verify derivation_kind is 'llm_summarize'
+        let record = mgr.read(&sid, CoreContextVersion(1)).await.unwrap();
+        match &record.derivation {
+            DerivationStep::LlmSummarize { capability, .. } => {
+                assert_eq!(capability, "context.summarize");
+            }
+            other => panic!("expected LlmSummarize, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn llm_summarize_can_follow_other_operations() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("LLM-MIX1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0
+        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // v1: user edit
+        mgr.apply_user_edit(
+            &sid,
+            EditOp::Append {
+                body: " + user addition".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        // v2: preset hook
+        mgr.apply_preset_hook(
+            &sid,
+            "st1",
+            "h1",
+            EditOp::Append {
+                body: " + hook addition".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        // v3: LLM summarize
+        let record = mgr
+            .apply_llm_summarize(&sid, "Final summary", [0u8; 32], "context.summarize")
+            .await
+            .unwrap();
+
+        assert_eq!(record.version, CoreContextVersion(3));
+        match &record.content {
+            CoreContextPayload::Text { body } => {
+                assert_eq!(body, "Final summary");
+            }
+            _ => panic!("expected text payload"),
+        }
+
+        // Verify current snapshot is the LLM summary
+        let snapshot = mgr.current_snapshot(&sid).await.unwrap();
+        assert_eq!(snapshot.version, CoreContextVersion(3));
     }
 }

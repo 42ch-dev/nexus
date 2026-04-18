@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT reference_source_id as \"reference_source_id!\", source_type as \"source_type!\", uri as \"uri!\", title as \"title!\", scan_status as \"scan_status!\", created_at as \"created_at!\", tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?1",
+  "query": "SELECT reference_source_id as \"reference_source_id!\", source_type as \"source_type!\", uri as \"uri!\", title as \"title!\", scan_status as \"scan_status!\", created_at as \"created_at!\", tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?",
   "describe": {
     "columns": [
       {
@@ -64,5 +64,5 @@
       true
     ]
   },
-  "hash": "73d6e5f0d8d3a4fffae5b7e023670d2185a3663d2efe5d75f857f150bfcef115"
+  "hash": "06cfdbe244986a18b48565926ce2b005258c4f676cda7b68bf3d27a6f4abb8ac"
 }

@@ -23,6 +23,7 @@ export interface ContextAssembleRequestV1 {
   memory_kinds?: ContextAssembleRequestV1MemoryKinds[];
   max_timeline_events?: number | null;
   max_story_summaries?: number | null;
+  as_of?: string | null;
 }
 /** Response shape for POST /v1/local/context/assemble. Platform returns a stable read-only context snapshot. */
 export interface ContextAssembleResponseV1 {

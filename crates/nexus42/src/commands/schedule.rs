@@ -44,6 +44,11 @@ pub enum ScheduleCommand {
         /// Allow parallel with any sibling schedule
         #[arg(long, conflicts_with = "parallel_with")]
         parallel_any: bool,
+
+        /// V1.5 WS-D: schedule at specific wall-clock time (ISO-8601 datetime).
+        /// Example: `2099-01-01T00:00:00Z` or `2099-01-01T00:00:00+08:00`.
+        #[arg(long)]
+        scheduled_at: Option<String>,
     },
 
     /// Edit core_context of a schedule
@@ -170,6 +175,7 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             after,
             parallel_with,
             parallel_any,
+            scheduled_at,
         } => {
             add_schedule(
                 &client,
@@ -181,6 +187,7 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
                     after,
                     parallel_with,
                     parallel_any,
+                    scheduled_at,
                 },
             )
             .await
@@ -232,6 +239,7 @@ struct AddScheduleParams<'a> {
     after: Option<String>,
     parallel_with: Option<String>,
     parallel_any: bool,
+    scheduled_at: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -247,6 +255,7 @@ async fn add_schedule(
         after,
         parallel_with,
         parallel_any,
+        scheduled_at,
     } = params;
 
     let concurrency = if parallel_any {
@@ -257,6 +266,22 @@ async fn add_schedule(
         })
     };
 
+    // Convert ISO-8601 datetime to Unix timestamp if provided
+    let scheduled_at_ts = if let Some(dt_str) = scheduled_at {
+        // Parse ISO-8601 datetime and convert to Unix timestamp
+        chrono::DateTime::parse_from_rfc3339(&dt_str)
+            .map(|dt| dt.timestamp().to_string())
+            .map_err(|e| {
+                crate::errors::CliError::Other(format!(
+                    "invalid ISO-8601 datetime '{}': {}",
+                    dt_str, e
+                ))
+            })?
+            .into()
+    } else {
+        None
+    };
+
     let body = AddScheduleRequest {
         creator_id: creator.to_string(),
         preset_id: preset.to_string(),
@@ -264,6 +289,7 @@ async fn add_schedule(
         label,
         depends_on: after.map(|id| vec![id]),
         concurrency,
+        scheduled_at: scheduled_at_ts,
     };
 
     let resp: AddScheduleResponse = client.post(SCHEDULE_BASE, &body).await?;
@@ -569,6 +595,50 @@ mod tests {
         match cmd.command {
             ScheduleCommand::Add { parallel_any, .. } => {
                 assert!(parallel_any);
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_scheduled_at_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--scheduled-at",
+            "2099-01-01T00:00:00Z",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { scheduled_at, .. } => {
+                assert_eq!(scheduled_at, Some("2099-01-01T00:00:00Z".to_string()));
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_scheduled_at_timezone_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--scheduled-at",
+            "2099-01-01T00:00:00+08:00",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { scheduled_at, .. } => {
+                assert_eq!(scheduled_at, Some("2099-01-01T00:00:00+08:00".to_string()));
             }
             other => panic!("expected Add, got: {other:?}"),
         }

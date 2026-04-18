@@ -1,0 +1,40 @@
+{
+  "id": "2026-04-18-v1.5-ws-e-platform-coordination",
+  "title": "V1.5 WS-E — Platform coordination",
+  "file": "2026-04-18-v1.5-ws-e-platform-coordination.md",
+  "status": "Done",
+  "owner": "architect",
+  "agents": ["architect", "fullstack-dev", "qc-specialist", "qc-specialist-2", "qc-specialist-3"],
+  "progress": 100,
+  "tags": ["v1.5", "platform", "schemas", "M3"],
+  "created_at": "2026-04-18T23:30:00Z",
+  "updated_at": "2026-04-19T18:00:00Z",
+  "done_at": "2026-04-19T18:00:00Z",
+  "notes": "Only Plan 40 (as_of) needed nexus schema change. All 6 plans evaluated. QC reviewed. Merged to integration.",
+  "metadata": {
+    "description": "Deliver nexus-side schema/contract changes for platform V1.5 plans 36–43.",
+    "milestone": "M3",
+    "working_branch": "feature/v1.5-stabilization",
+    "dependency": [],
+    "blocks": [],
+    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "gates": {
+      "tests": "passed",
+      "clippy": "clean",
+      "fmt": "clean",
+      "validate_schemas": "54/54",
+      "codegen": "clean",
+      "typecheck": "clean",
+      "qc_status": "Approve"
+    },
+    "commits": ["1780f28", "866fe2a"],
+    "evaluation_results": {
+      "plan_38": "no nexus change needed",
+      "plan_39": "no nexus change needed",
+      "plan_40": "as_of field added to ContextAssembleRequestV1",
+      "plan_41": "no nexus change needed",
+      "plan_42": "no nexus change needed",
+      "plan_43": "no nexus change needed (platform-side descriptor types)"
+    }
+  }
+}

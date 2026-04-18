@@ -1,0 +1,33 @@
+{
+  "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
+  "title": "V1.5 WS-A — Schedule FSM hardening",
+  "file": "2026-04-18-v1.5-ws-a-schedule-fsm.md",
+  "status": "Done",
+  "owner": "fullstack-dev",
+  "agents": ["fullstack-dev", "qc-specialist", "qc-specialist-2", "qc-specialist-3"],
+  "progress": 100,
+  "tags": ["v1.5", "residual", "schedule", "fsm", "M1"],
+  "created_at": "2026-04-18T23:30:00Z",
+  "updated_at": "2026-04-19T18:00:00Z",
+  "done_at": "2026-04-19T18:00:00Z",
+  "notes": "All 7 residuals (R1-R7) resolved. QC reviewed. Merged to integration.",
+  "metadata": {
+    "description": "Resolve all 7 schedule-related residuals to deliver robust Schedule state machine with correct persistence, transitions, and UX.",
+    "milestone": "M1",
+    "working_branch": "feature/v1.5-stabilization",
+    "dependency": [],
+    "blocks": ["2026-04-18-v1.5-ws-c-context-summarize", "2026-04-18-v1.5-ws-d-cron-triggers"],
+    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "residual_coverage": {
+      "plan_id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
+      "residual_ids": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
+    },
+    "gates": {
+      "tests": "passed",
+      "clippy": "clean",
+      "fmt": "clean",
+      "qc_status": "Approve with residuals (QC1 W1-W4 tracked as V1.5 residuals)"
+    },
+    "commits": ["ccdebc2", "c1ad895", "6dd6d5e"]
+  }
+}

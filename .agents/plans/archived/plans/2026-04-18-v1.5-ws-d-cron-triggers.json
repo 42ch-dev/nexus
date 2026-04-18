@@ -1,0 +1,30 @@
+{
+  "id": "2026-04-18-v1.5-ws-d-cron-triggers",
+  "title": "V1.5 WS-D — Cron / wall-clock triggers",
+  "file": "2026-04-18-v1.5-ws-d-cron-triggers.md",
+  "status": "Done",
+  "owner": "fullstack-dev-2",
+  "agents": ["fullstack-dev-2", "qc-specialist", "qc-specialist-2", "qc-specialist-3"],
+  "progress": 100,
+  "tags": ["v1.5", "cron", "scheduler", "M2"],
+  "created_at": "2026-04-18T23:30:00Z",
+  "updated_at": "2026-04-19T18:00:00Z",
+  "done_at": "2026-04-19T18:00:00Z",
+  "notes": "Hand-rolled scheduler satisfies all four hard constraints. QC reviewed. Merged to integration.",
+  "metadata": {
+    "description": "Implement clock poller that moves Pending Schedules to Running when now() >= scheduled_at.",
+    "milestone": "M2",
+    "working_branch": "feature/v1.5-stabilization",
+    "dependency": ["2026-04-18-v1.5-ws-a-schedule-fsm"],
+    "blocks": [],
+    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "gates": {
+      "tests": "passed",
+      "clippy": "clean",
+      "fmt": "clean",
+      "qc_status": "Approve with residuals"
+    },
+    "commits": ["8b09668", "581836e", "526d834", "628e65a"],
+    "crate_selection": "hand-rolled (no tokio-cron-scheduler)"
+  }
+}
