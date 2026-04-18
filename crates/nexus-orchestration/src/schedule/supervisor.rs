@@ -585,14 +585,12 @@ mod tests_t9 {
         insert_schedule(&sup, "DEP-B", "pending").await;
 
         // Insert dependency: B depends on A
-        sqlx::query(
-            "INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)",
-        )
-        .bind("DEP-B")
-        .bind("DEP-A")
-        .execute(&*pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)")
+            .bind("DEP-B")
+            .bind("DEP-A")
+            .execute(&*pool)
+            .await
+            .unwrap();
 
         // Tick: A should start (no deps), B should remain pending (depends on A)
         sup.tick().await.unwrap();
@@ -629,14 +627,12 @@ mod tests_t9 {
         insert_schedule(&sup, "DEP-A-FAIL", "failed").await;
         insert_schedule(&sup, "DEP-B-FAIL", "pending").await;
 
-        sqlx::query(
-            "INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)",
-        )
-        .bind("DEP-B-FAIL")
-        .bind("DEP-A-FAIL")
-        .execute(&*pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)")
+            .bind("DEP-B-FAIL")
+            .bind("DEP-A-FAIL")
+            .execute(&*pool)
+            .await
+            .unwrap();
 
         // Tick: B should remain pending — failed dep does not satisfy
         sup.tick().await.unwrap();

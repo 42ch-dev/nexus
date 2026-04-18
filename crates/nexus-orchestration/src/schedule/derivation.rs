@@ -620,8 +620,7 @@ fn derivation_kind_str(step: &DerivationStep) -> &'static str {
 mod tests {
     use super::*;
     use nexus_contracts::local::schedule::{
-        CoreContextAuthor, CoreContextPayload, CoreContextVersion, EditOp,
-        ScheduleId,
+        CoreContextAuthor, CoreContextPayload, CoreContextVersion, EditOp, ScheduleId,
     };
 
     /// Helper: create a fresh test DB with migrations and return the pool.
@@ -714,13 +713,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply_seed(
-            &sid,
-            "v0",
-            CoreContextAuthor::System,
-        )
-        .await
-        .unwrap();
+        mgr.apply_seed(&sid, "v0", CoreContextAuthor::System)
+            .await
+            .unwrap();
 
         // PresetHook with EditOp::Replace should be rejected:
         let err = mgr
@@ -745,13 +740,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply_seed(
-            &sid,
-            "initial",
-            CoreContextAuthor::System,
-        )
-        .await
-        .unwrap();
+        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
 
         // PresetHook with Append should succeed
         let record = mgr
@@ -785,13 +776,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply_seed(
-            &sid,
-            "first",
-            CoreContextAuthor::System,
-        )
-        .await
-        .unwrap();
+        mgr.apply_seed(&sid, "first", CoreContextAuthor::System)
+            .await
+            .unwrap();
 
         // Append v1
         mgr.apply_user_edit(
@@ -833,13 +820,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply_seed(
-            &sid,
-            "initial seed",
-            CoreContextAuthor::System,
-        )
-        .await
-        .unwrap();
+        mgr.apply_seed(&sid, "initial seed", CoreContextAuthor::System)
+            .await
+            .unwrap();
 
         // User edit with Replace should be rejected
         let err = mgr
@@ -871,13 +854,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0 with struct
-        mgr.apply_seed(
-            &sid,
-            "{}",
-            CoreContextAuthor::System,
-        )
-        .await
-        .unwrap();
+        mgr.apply_seed(&sid, "{}", CoreContextAuthor::System)
+            .await
+            .unwrap();
 
         // User edit with StructMerge should succeed
         let record = mgr
