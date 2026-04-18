@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE local_identities SET platform_linked = 1, platform_creator_id = ?\n         WHERE creator_id = ? AND platform_linked = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "09e6b4c65c40e236f3b34c69afb7c640c3c5080e3928ff21aa16a3aea008e5ec"
+}

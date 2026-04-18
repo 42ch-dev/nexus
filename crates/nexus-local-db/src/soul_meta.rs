@@ -22,23 +22,23 @@ pub struct SoulMeta {
 
 /// Upsert SOUL metadata (insert or update).
 pub async fn upsert(pool: &SqlitePool, meta: &SoulMeta) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO soul_meta (creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(creator_id) DO UPDATE SET
            file_path = excluded.file_path,
            schema_version = excluded.schema_version,
            personality_hash = excluded.personality_hash,
            experience_hash = excluded.experience_hash,
            updated_at = excluded.updated_at",
+        meta.creator_id,
+        meta.file_path,
+        meta.schema_version,
+        meta.personality_hash,
+        meta.experience_hash,
+        meta.created_at,
+        meta.updated_at
     )
-    .bind(&meta.creator_id)
-    .bind(&meta.file_path)
-    .bind(meta.schema_version)
-    .bind(&meta.personality_hash)
-    .bind(&meta.experience_hash)
-    .bind(&meta.created_at)
-    .bind(&meta.updated_at)
     .execute(pool)
     .await?;
     Ok(())
@@ -46,11 +46,15 @@ pub async fn upsert(pool: &SqlitePool, meta: &SoulMeta) -> Result<(), LocalDbErr
 
 /// Get SOUL metadata for a creator.
 pub async fn get(pool: &SqlitePool, creator_id: &str) -> Result<Option<SoulMeta>, LocalDbError> {
-    let row: Option<SoulMeta> = sqlx::query_as(
-        "SELECT creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at
-         FROM soul_meta WHERE creator_id = ?1",
+    let row = sqlx::query_as!(
+        SoulMeta,
+        "SELECT creator_id as \"creator_id!\", file_path as \"file_path!\",
+                schema_version as \"schema_version!\",
+                personality_hash, experience_hash,
+                created_at as \"created_at!\", updated_at as \"updated_at!\"
+         FROM soul_meta WHERE creator_id = ?",
+        creator_id
     )
-    .bind(creator_id)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -58,8 +62,7 @@ pub async fn get(pool: &SqlitePool, creator_id: &str) -> Result<Option<SoulMeta>
 
 /// Delete SOUL metadata for a creator.
 pub async fn delete(pool: &SqlitePool, creator_id: &str) -> Result<bool, LocalDbError> {
-    let result = sqlx::query("DELETE FROM soul_meta WHERE creator_id = ?1")
-        .bind(creator_id)
+    let result = sqlx::query!("DELETE FROM soul_meta WHERE creator_id = ?", creator_id)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)

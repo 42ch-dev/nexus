@@ -99,9 +99,11 @@ pub async fn open_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, Lo
         .connect(&url)
         .await
         .map_err(LocalDbError::from)?;
+    // SAFETY: PRAGMA statement — no table schema to validate against.
     sqlx::query("PRAGMA journal_mode = WAL")
         .execute(&pool)
         .await?;
+    // SAFETY: PRAGMA statement — no table schema to validate against.
     sqlx::query("PRAGMA foreign_keys = ON")
         .execute(&pool)
         .await?;
@@ -137,50 +139,59 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
 /// Sets `db_schema_version` and `schema_version` (contract version) keys.
 /// Safe to call on already-seeded databases (uses INSERT OR REPLACE).
 pub async fn seed_versions(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError> {
-    sqlx::query(
-        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('db_schema_version', ?1)",
+    let db_ver = DB_SCHEMA_VERSION.to_string();
+    sqlx::query!(
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('db_schema_version', ?)",
+        db_ver
     )
-    .bind(DB_SCHEMA_VERSION.to_string())
     .execute(pool)
     .await?;
-    sqlx::query("INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('schema_version', ?1)")
-        .bind(SCHEMA_VERSION.to_string())
-        .execute(pool)
-        .await?;
+    let schema_ver = SCHEMA_VERSION.to_string();
+    sqlx::query!(
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('schema_version', ?)",
+        schema_ver
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 /// Read both version lines from the database.
 ///
 /// Returns [`SchemaVersions`] containing `db_schema_version` and `schema_version`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct WorkspaceMetaRow {
+    value: String,
+}
+
 pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, LocalDbError> {
-    let db_schema_version = sqlx::query_as::<_, (String,)>(
-        "SELECT value FROM workspace_meta WHERE key = 'db_schema_version'",
+    let row = sqlx::query_as!(
+        WorkspaceMetaRow,
+        "SELECT value FROM workspace_meta WHERE key = 'db_schema_version'"
     )
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| LocalDbError::MissingVersionKey {
         key: "db_schema_version".to_string(),
-    })?
-    .0
-    .parse::<u32>()
-    .map_err(|e| LocalDbError::InvalidVersionValue {
+    })?;
+
+    let db_schema_version = row.value.parse::<u32>().map_err(|e| LocalDbError::InvalidVersionValue {
         key: "db_schema_version".to_string(),
         value: "".to_string(),
         reason: e.to_string(),
     })?;
 
-    let schema_version = sqlx::query_as::<_, (String,)>(
-        "SELECT value FROM workspace_meta WHERE key = 'schema_version'",
+    let row = sqlx::query_as!(
+        WorkspaceMetaRow,
+        "SELECT value FROM workspace_meta WHERE key = 'schema_version'"
     )
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| LocalDbError::MissingVersionKey {
         key: "schema_version".to_string(),
-    })?
-    .0
-    .parse::<u32>()
-    .map_err(|e| LocalDbError::InvalidVersionValue {
+    })?;
+
+    let schema_version = row.value.parse::<u32>().map_err(|e| LocalDbError::InvalidVersionValue {
         key: "schema_version".to_string(),
         value: "".to_string(),
         reason: e.to_string(),

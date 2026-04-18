@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM memory_fragments WHERE fragment_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "597b7607cd8b024baf7e39c7f10478231e93cc1ba24b36d581efe8b0b369d3c6"
+}
