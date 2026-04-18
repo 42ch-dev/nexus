@@ -42,6 +42,31 @@ const MAX_RETRIES: u64 = 5;
 /// Base delay for exponential backoff in seconds.
 const BASE_RETRY_DELAY_SECS: u64 = 2;
 
+// ---------------------------------------------------------------------------
+// Module-level FromRow structs (sqlx R2: avoid duplication)
+// ---------------------------------------------------------------------------
+
+/// Row mapping for outbox_entries queries (sqlx R2: module-level struct).
+#[derive(sqlx::FromRow)]
+struct OutboxRow {
+    outbox_entry_id: String,
+    bundle_id: String,
+    idempotency_key: String,
+    delivery_state: String,
+    retry_count: i64,
+    last_error: Option<String>,
+    next_retry_at: Option<String>,
+    created_at: String,
+    updated_at: Option<String>,
+}
+
+/// Row mapping for partial_apply_states queries (sqlx R2: module-level struct).
+#[derive(sqlx::FromRow)]
+struct PartialApplyRow {
+    outbox_entry_id: String,
+    state_json: String,
+}
+
 /// A parsed retry-after timestamp, either as an absolute time or relative seconds.
 #[derive(Debug, Clone)]
 pub enum RetryAfterPolicy {
@@ -101,37 +126,11 @@ impl Outbox {
             .execute(pool.inner())
             .await?;
 
-        // SAFETY: DDL statements — sqlx macros cannot validate CREATE TABLE / CREATE INDEX.
-        for ddl in &[
-            "CREATE TABLE IF NOT EXISTS outbox_entries (
-                outbox_entry_id   TEXT PRIMARY KEY,
-                bundle_id         TEXT NOT NULL,
-                idempotency_key   TEXT NOT NULL,
-                delivery_state    TEXT NOT NULL DEFAULT 'staged',
-                retry_count       INTEGER NOT NULL DEFAULT 0,
-                last_error        TEXT,
-                next_retry_at     TEXT,
-                command_payload   TEXT NOT NULL DEFAULT '{}',
-                bundle_payload    TEXT,
-                created_at        TEXT NOT NULL,
-                updated_at        TEXT
-            )",
-            "CREATE INDEX IF NOT EXISTS idx_outbox_delivery_state
-                ON outbox_entries(delivery_state)",
-            "CREATE INDEX IF NOT EXISTS idx_outbox_next_retry
-                ON outbox_entries(next_retry_at)
-                WHERE delivery_state IN ('staged', 'failed')",
-            "CREATE INDEX IF NOT EXISTS idx_outbox_bundle_id
-                ON outbox_entries(bundle_id)",
-            "CREATE TABLE IF NOT EXISTS partial_apply_states (
-                outbox_entry_id   TEXT PRIMARY KEY,
-                state_json        TEXT NOT NULL,
-                recorded_at       TEXT NOT NULL,
-                retry_count       INTEGER NOT NULL DEFAULT 0
-            )",
-        ] {
-            sqlx::query(ddl).execute(pool.inner()).await?;
-        }
+        // WS8 R4: Tables are created via nexus-local-db migrations.
+        // The migration runner creates all tables including outbox_entries.
+        nexus_local_db::run_migrations(pool.inner())
+            .await
+            .map_err(|e| SyncError::OutboxDatabase(format!("migration failed: {}", e)))?;
 
         Ok(pool)
     }
@@ -482,19 +481,7 @@ impl Outbox {
     pub async fn replay(&self) -> SyncResult<Vec<OutboxEntry>> {
         let now = chrono::Utc::now().to_rfc3339();
 
-        #[derive(sqlx::FromRow)]
-        struct OutboxRow {
-            outbox_entry_id: String,
-            bundle_id: String,
-            idempotency_key: String,
-            delivery_state: String,
-            retry_count: i64,
-            last_error: Option<String>,
-            next_retry_at: Option<String>,
-            created_at: String,
-            updated_at: Option<String>,
-        }
-
+        // sqlx R2: Uses module-level OutboxRow struct.
         let rows = sqlx::query_as!(
             OutboxRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
@@ -537,19 +524,7 @@ impl Outbox {
 
     /// Get a specific outbox entry by ID.
     pub async fn get(&self, outbox_entry_id: &str) -> SyncResult<OutboxEntry> {
-        #[derive(sqlx::FromRow)]
-        struct OutboxRow {
-            outbox_entry_id: String,
-            bundle_id: String,
-            idempotency_key: String,
-            delivery_state: String,
-            retry_count: i64,
-            last_error: Option<String>,
-            next_retry_at: Option<String>,
-            created_at: String,
-            updated_at: Option<String>,
-        }
-
+        // sqlx R2: Uses module-level OutboxRow struct.
         let row = sqlx::query_as!(
             OutboxRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
@@ -699,12 +674,7 @@ impl Outbox {
     pub async fn list_partial_apply_states(
         &self,
     ) -> SyncResult<Vec<(String, crate::partial_apply::PartialApplyState)>> {
-        #[derive(sqlx::FromRow)]
-        struct PartialApplyRow {
-            outbox_entry_id: String,
-            state_json: String,
-        }
-
+        // sqlx R2: Uses module-level PartialApplyRow struct.
         let rows = sqlx::query_as!(
             PartialApplyRow,
             "SELECT outbox_entry_id as \"outbox_entry_id!\", state_json as \"state_json!\"

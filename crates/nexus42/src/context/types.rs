@@ -54,6 +54,7 @@ mod tests {
             memory_kinds: None,
             max_timeline_events: None,
             max_story_summaries: None,
+            as_of: None,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should be valid");

@@ -30,7 +30,9 @@ fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
-        label: None,
+        // Use the schedule ID as the label so each schedule has a unique
+        // identity for R2 duplicate detection (creator_id + preset_id + label).
+        label: Some(id.to_string()),
         created_at: String::new(),
         updated_at: String::new(),
         terminated_at: None,
