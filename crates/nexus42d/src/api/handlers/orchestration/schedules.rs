@@ -93,12 +93,22 @@ pub async fn add_schedule(
         terminated_at: None,
     };
 
-    // Insert the schedule row
+    // Insert the schedule row (R2: duplicate detection)
     supervisor.insert_pending(schedule).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to create schedule: {e}"),
-        )
+        if matches!(
+            e,
+            nexus_orchestration::schedule::supervisor::SupervisorError::DuplicateSchedule { .. }
+        ) {
+            (
+                StatusCode::CONFLICT,
+                format!("schedule already exists: {e}"),
+            )
+        } else {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create schedule: {e}"),
+            )
+        }
     })?;
 
     // Seed core context v0 if seed is provided
@@ -466,32 +476,74 @@ pub async fn signal_schedule(
                     ));
             }
         },
-        "pause" => match current_status_str.as_str() {
-            "running" | "pending" => "paused",
-            _ => {
-                return Err((
-                        StatusCode::CONFLICT,
-                        format!(
-                            "cannot pause schedule {schedule_id}: current status is {current_status_str}"
-                        ),
-                    ));
-            }
-        },
-        "resume" => {
-            match current_status_str.as_str() {
-                "paused" => "pending", // Resume to pending; user can start or auto-admit
-                _ => {
-                    return Err((
-                        StatusCode::CONFLICT,
-                        format!(
-                            "cannot resume schedule {schedule_id}: current status is {current_status_str}"
-                        ),
-                    ));
+        "pause" => {
+            // R1+R4: Use supervisor method for consistent DB + cache update
+            let paused = supervisor.pause_schedule(&schedule_id).await.map_err(|e| {
+                if matches!(
+                    e,
+                    nexus_orchestration::schedule::supervisor::SupervisorError::NotFound(_)
+                ) {
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!("schedule {schedule_id} not found"),
+                    )
+                } else {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("database error: {e}"),
+                    )
                 }
+            })?;
+            if !paused {
+                return Err((
+                    StatusCode::CONFLICT,
+                    format!(
+                        "cannot pause schedule {schedule_id}: current status is {current_status_str}"
+                    ),
+                ));
             }
+
+            return Ok((
+                StatusCode::OK,
+                Json(SignalScheduleResponse {
+                    schedule_id,
+                    status: "paused".to_string(),
+                }),
+            ));
+        }
+        "resume" => {
+            // R3+R7: Smart resume — direct to Running if admitted, else Pending
+            let new_status = supervisor.resume_schedule(&schedule_id).await.map_err(|e| {
+                if matches!(
+                    e,
+                    nexus_orchestration::schedule::supervisor::SupervisorError::NotFound(_)
+                ) {
+                    (StatusCode::NOT_FOUND, format!("schedule {schedule_id} not found"))
+                } else if matches!(
+                    e,
+                    nexus_orchestration::schedule::supervisor::SupervisorError::InvalidTransition(..)
+                ) {
+                    (StatusCode::CONFLICT, format!("cannot resume schedule {schedule_id}: current status is {current_status_str}"))
+                } else {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}"))
+                }
+            })?;
+
+            return Ok((
+                StatusCode::OK,
+                Json(SignalScheduleResponse {
+                    schedule_id,
+                    status: new_status,
+                }),
+            ));
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
+                // Use supervisor for consistent DB + running cache update
+                if current_status_str == "running" {
+                    let _ = supervisor.pause_schedule(&schedule_id).await;
+                }
+
                 // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
                 sqlx::query(
                         "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?, updated_at = ?
@@ -591,6 +643,10 @@ pub async fn signal_schedule(
 // ---------------------------------------------------------------------------
 
 /// `DELETE /v1/local/orchestration/schedules/{schedule_id}` — remove terminal schedule.
+///
+/// **R5 — Delete cascade**: For non-terminal schedules, cancels the active
+/// session (if any), NULLs out `current_session_id`, then cancels the schedule
+/// before deletion. Terminal schedules are deleted directly.
 pub async fn delete_schedule(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -598,25 +654,94 @@ pub async fn delete_schedule(
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
-    // Check if terminal
+    // Check if the schedule exists
     let current_status = supervisor.status_of(&schedule_id).await.map_err(|e| {
         (
             StatusCode::NOT_FOUND,
             format!("schedule {schedule_id} not found: {e}"),
         )
     })?;
+
     match current_status {
-        ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {}
+        ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {
+            // Terminal: delete directly. FK CASCADE handles dependencies and core_context_versions.
+        }
         _ => {
-            return Err((
-                StatusCode::CONFLICT,
-                format!(
-                    "cannot delete schedule {schedule_id}: current status is {current_status:?}; cancel first"
-                ),
-            ));
+            // Non-terminal: must cancel first.
+            // R5: Cancel active session if current_session_id is set, then NULL it out.
+            // SAFETY: runtime `sqlx::query_as` — pool lifetime constraint.
+            let session_row: Option<(Option<String>,)> = sqlx::query_as(
+                "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(&schedule_id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("database error: {e}"),
+                )
+            })?;
+
+            if let Some((Some(sid),)) = session_row {
+                // Cancel the active session by updating its status
+                let now = chrono::Utc::now().timestamp();
+                // SAFETY: runtime `sqlx::query` — DML for session cancellation.
+                sqlx::query(
+                    "UPDATE orchestration_sessions SET status = 'cancelled', updated_at = ?
+                         WHERE session_id = ? AND status = 'running'",
+                )
+                .bind(now)
+                .bind(&sid)
+                .execute(&*pool)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("failed to cancel session: {e}"),
+                    )
+                })?;
+            }
+
+            // NULL out current_session_id on the schedule
+            // SAFETY: runtime `sqlx::query` — pool lifetime constraint.
+            sqlx::query(
+                "UPDATE creator_schedules SET current_session_id = NULL, updated_at = ?
+                 WHERE schedule_id = ?",
+            )
+            .bind(chrono::Utc::now().timestamp())
+            .bind(&schedule_id)
+            .execute(&*pool)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("database error: {e}"),
+                )
+            })?;
+
+            // Cancel the schedule
+            let now = chrono::Utc::now().timestamp();
+            // SAFETY: runtime `sqlx::query` — pool lifetime constraint.
+            sqlx::query(
+                "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?, updated_at = ?
+                 WHERE schedule_id = ?",
+            )
+            .bind(now)
+            .bind(now)
+            .bind(&schedule_id)
+            .execute(&*pool)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("database error: {e}"),
+                )
+            })?;
         }
     }
 
+    // Delete the schedule row (FK CASCADE handles schedule_dependencies and core_context_versions)
     // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
     sqlx::query("DELETE FROM creator_schedules WHERE schedule_id = ?")
         .bind(&schedule_id)
