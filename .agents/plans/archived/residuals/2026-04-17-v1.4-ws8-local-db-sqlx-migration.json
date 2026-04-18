@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "plan_id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
-  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "archived_at": "2026-04-19T18:00:00Z",
   "entries": [
     {
       "id": "R2",
@@ -47,6 +47,34 @@
       "closed_at": "2026-04-18T07:45:39.992187+00:00",
       "closure_note": "fixed \u2014 documented u32->i64 type change rationale",
       "closure_evidence": "commit 17320ec"
+    },
+    {
+      "id": "R1",
+      "title": "read_versions empty value in error",
+      "severity": "low",
+      "source": "WS8",
+      "scope": "crates/nexus-local-db/src/lib.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 read_versions empty value in error"
+    },
+    {
+      "id": "R4",
+      "title": "Outbox inline DDL bypasses sqlx::migrate",
+      "severity": "medium",
+      "source": "WS8",
+      "scope": "crates/nexus-sync/src/outbox.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 Outbox inline DDL bypasses sqlx::migrate"
     }
   ]
 }
