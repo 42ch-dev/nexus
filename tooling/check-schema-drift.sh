@@ -64,7 +64,7 @@ echo "==> Checking no duplicated shared table DDL..."
 for table in workspace_meta creators reference_sources; do
   CLI_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
   DAEMON_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus42d/src/db/ 2>/dev/null | grep -v test | wc -l | tr -d ' ')
-  LOCALDB_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-local-db/src/ 2>/dev/null | wc -l | tr -d ' ')
+  LOCALDB_DDL=$(grep -r "CREATE TABLE IF NOT EXISTS $table" crates/nexus-local-db/migrations/ 2>/dev/null | wc -l | tr -d ' ')
   if [ "$CLI_DDL" != "0" ]; then
     echo "❌ CLI has duplicated DDL for $table table (should use nexus-local-db)"
     exit 1

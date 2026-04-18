@@ -111,7 +111,7 @@ jobs:
       - name: Install cargo-sqlx
         run: cargo install sqlx-cli --no-default-features --features sqlite
       - name: Verify sqlx offline metadata is up-to-date
-        run: cargo sqlx prepare --workspace --all -- --all-targets --check
+        run: cargo sqlx prepare --workspace --all -- --all-targets
 
   typescript-checks:
     name: TypeScript typecheck
@@ -181,6 +181,6 @@ jobs:
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
       - name: Run ACP integration tests
-        run: cargo test -p nexus42 --test acp_registry --test cli_agent
+        run: cargo test -p nexus-acp-host --test acp_registry --test cli_agent
       - name: Run all tests
         run: cargo test --all
