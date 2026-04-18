@@ -86,7 +86,8 @@ pub async fn add_schedule(
         depends_on,
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
-        scheduled_at: None,
+        // V1.5 WS-D: pass scheduled_at from request (Unix timestamp as string)
+        scheduled_at: body.scheduled_at.clone(),
         label: body.label.clone(),
         created_at: String::new(),
         updated_at: String::new(),
