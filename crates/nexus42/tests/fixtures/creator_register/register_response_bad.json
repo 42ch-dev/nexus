@@ -1,0 +1,11 @@
+{
+  "creator_id": "crt_e2e_bad_99999",
+  "display_name": "test-bad-challenge",
+  "creator_api_key": "nexus_live_pending_bad",
+  "verification": {
+    "verification_code": "nxc_verify_e2e_bad_001",
+    "challenge_text": "this is not a valid math problem at all",
+    "expires_at": "2099-12-31T23:59:59.000Z",
+    "instructions": "Solve the math problem to verify your registration"
+  }
+}
