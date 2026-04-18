@@ -305,6 +305,18 @@ fn validate_manifest(
         if let Some(ref hook) = state.context_update {
             match &hook.op {
                 ContextUpdateOp::Append { .. } | ContextUpdateOp::StructMerge { .. } => {}
+                ContextUpdateOp::LlmSummarize { capability } => {
+                    // Validate that the referenced capability exists
+                    if caps.get(capability).is_none() {
+                        problems.push(ValidationProblem {
+                            path: format!("{}.context_update.op.capability", state_path),
+                            error: format!(
+                                "unknown capability for llm_summarize: '{}'",
+                                capability
+                            ),
+                        });
+                    }
+                }
                 ContextUpdateOp::Replace { .. } => {
                     problems.push(ValidationProblem {
                         path: format!("{}.context_update.op", state_path),
@@ -1279,5 +1291,74 @@ states:
         let loaded = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap();
         assert!(loaded.initial_action.is_none());
         assert!(loaded.context_update_hooks.is_empty());
+    }
+
+    #[test]
+    fn context_update_llm_summarize_validates_known_capability() {
+        let yaml = r#"
+preset:
+  id: llm-sum-test
+  version: 1
+  kind: creator
+  description: test llm_summarize context_update
+  requires_capabilities:
+    - context.summarize
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op:
+        kind: llm_summarize
+        capability: context.summarize
+      template_file: prompts/summarize.md
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps).unwrap();
+        let hook = loaded.context_update_hooks.get("a").unwrap();
+        assert!(matches!(hook.op, ContextUpdateOp::LlmSummarize { .. }));
+        if let ContextUpdateOp::LlmSummarize { capability } = &hook.op {
+            assert_eq!(capability, "context.summarize");
+        }
+    }
+
+    #[test]
+    fn context_update_llm_summarize_rejects_unknown_capability() {
+        let yaml = r#"
+preset:
+  id: llm-sum-bad
+  version: 1
+  kind: creator
+  description: test llm_summarize with unknown capability
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op:
+        kind: llm_summarize
+        capability: capability.does_not_exist
+      template_file: prompts/summarize.md
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems.iter().any(|p| {
+                p.path.contains("context_update")
+                    && p.error.contains("unknown capability for llm_summarize")
+            }),
+            "expected validation error for unknown llm_summarize capability: {problems:?}"
+        );
     }
 }
