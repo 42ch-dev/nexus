@@ -36,7 +36,7 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
-        // Verify all tables exist (shared + daemon-only)
+        // SAFETY: test-only DDL verification — queries sqlite_master metadata table.
         let tables: Vec<(String,)> =
             sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&pool)
@@ -87,7 +87,7 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
-        // Verify db_schema_version (local SQLite structure)
+        // SAFETY: test-only DDL verification — reads seeded version from workspace_meta.
         let db_version: (String,) =
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'db_schema_version'")
                 .fetch_one(&pool)
@@ -95,7 +95,7 @@ mod tests {
                 .unwrap();
         assert_eq!(db_version.0, nexus_local_db::DB_SCHEMA_VERSION.to_string());
 
-        // Verify schema_version (contract schema version)
+        // SAFETY: test-only DDL verification — reads seeded version from workspace_meta.
         let schema_version: (String,) =
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'schema_version'")
                 .fetch_one(&pool)
@@ -110,6 +110,7 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
+        // SAFETY: test-only DDL verification — inserts and reads back reference_sources row.
         sqlx::query(
             "INSERT INTO reference_sources
              (reference_source_id, workspace_id, source_type, uri, title, content, scan_status, created_at)
@@ -135,6 +136,7 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
+        // SAFETY: test-only DDL verification — inserts and reads back creators row.
         sqlx::query(
             "INSERT INTO creators (creator_id, display_name, cached_at, data)
              VALUES ('ctr_test', 'Test', '2026-01-01T00:00:00Z', '{}')",
@@ -158,6 +160,8 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
+        // SAFETY: test-only DDL verification — inserts and reads back reference_sources row
+        // with nullable columns (tags, content_hash).
         sqlx::query(
             "INSERT INTO reference_sources
              (reference_source_id, workspace_id, source_type, uri, title, tags, content_hash, scan_status, created_at)
@@ -184,14 +188,14 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
-        // Verify journal_mode is WAL
+        // SAFETY: PRAGMA statement — not supported by compile-time checked macros.
         let jm: (String,) = sqlx::query_as("PRAGMA journal_mode")
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(jm.0.to_lowercase(), "wal");
 
-        // Verify foreign_keys is ON (returns integer 0 or 1)
+        // SAFETY: PRAGMA statement — not supported by compile-time checked macros.
         let fk: (i32,) = sqlx::query_as("PRAGMA foreign_keys")
             .fetch_one(&pool)
             .await

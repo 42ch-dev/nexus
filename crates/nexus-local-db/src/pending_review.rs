@@ -117,10 +117,12 @@ pub async fn delete_pending_review(
     pool: &SqlitePool,
     pending_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let result =
-        sqlx::query!("DELETE FROM memory_pending_review WHERE pending_id = ?", pending_id)
-            .execute(pool)
-            .await?;
+    let result = sqlx::query!(
+        "DELETE FROM memory_pending_review WHERE pending_id = ?",
+        pending_id
+    )
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 

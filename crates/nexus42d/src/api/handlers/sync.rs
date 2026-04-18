@@ -162,8 +162,8 @@ pub(crate) async fn optional_sync_push_binding(
 ) -> Result<Option<(String, String, String)>, NexusApiError> {
     let pool = state.pool();
 
-    let workspace_id: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'sync_workspace_id'")
+    let workspace_id: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'sync_workspace_id'")
             .fetch_optional(pool)
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -171,8 +171,8 @@ pub(crate) async fn optional_sync_push_binding(
                 message: format!("Database error: {}", e),
             })?;
 
-    let world_id: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'sync_world_id'")
+    let world_id: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'sync_world_id'")
             .fetch_optional(pool)
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -180,8 +180,8 @@ pub(crate) async fn optional_sync_push_binding(
                 message: format!("Database error: {}", e),
             })?;
 
-    let creator_id: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'sync_creator_id'")
+    let creator_id: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'sync_creator_id'")
             .fetch_optional(pool)
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -191,7 +191,7 @@ pub(crate) async fn optional_sync_push_binding(
 
     match (workspace_id, world_id, creator_id) {
         (None, None, None) => Ok(None),
-        (Some(w), Some(wl), Some(c)) => Ok(Some((w.0, wl.0, c.0))),
+        (Some(w), Some(wl), Some(c)) => Ok(Some((w, wl, c))),
         _ => Err(NexusApiError::InvalidInput {
             field: "sync_binding".into(),
             reason: "Set all workspace_meta keys sync_workspace_id, sync_world_id, and sync_creator_id, or none — partial binding is invalid".into(),
@@ -317,10 +317,10 @@ pub async fn pull(
         .map_err(map_sync_client_error)?;
 
     let ts = chrono::Utc::now().to_rfc3339();
-    if let Err(e) = sqlx::query(
+    if let Err(e) = sqlx::query!(
         "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('last_sync_at', ?1)",
+        ts
     )
-    .bind(&ts)
     .execute(state.pool())
     .await
     {
@@ -357,13 +357,13 @@ pub async fn status(
             let failed_count = outbox.count_by_state("failed").await.unwrap_or(0) as u64;
 
             // Get last sync timestamp from workspace_meta
-            let last_sync_at: Option<String> =
-                sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'last_sync_at'")
+            let last_sync_row =
+                sqlx::query!("SELECT value FROM workspace_meta WHERE key = 'last_sync_at'")
                     .fetch_optional(state.pool())
                     .await
                     .ok()
-                    .flatten()
-                    .map(|r: (String,)| r.0);
+                    .flatten();
+            let last_sync_at = last_sync_row.map(|r| r.value);
 
             debug!(
                 staged_count,

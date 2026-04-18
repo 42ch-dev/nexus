@@ -549,15 +549,18 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
 
     let pool = crate::db::Schema::init(&db_path).await?;
 
-    sqlx::query(
+    let cached_at = chrono::Utc::now().to_rfc3339();
+    let data = serde_json::to_string(creator)?;
+    let status_str = creator.status.as_str();
+    sqlx::query!(
         "INSERT OR REPLACE INTO creators (creator_id, display_name, status, cached_at, data)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         VALUES (?, ?, ?, ?, ?)",
+        creator.creator_id,
+        creator.display_name,
+        status_str,
+        cached_at,
+        data
     )
-    .bind(&creator.creator_id)
-    .bind(&creator.display_name)
-    .bind(creator.status.as_str())
-    .bind(chrono::Utc::now().to_rfc3339())
-    .bind(serde_json::to_string(creator)?)
     .execute(&pool)
     .await?;
 

@@ -75,10 +75,11 @@ async fn status() -> Result<()> {
 
     // List existing tables
     println!("Tables:");
-    let tables: Vec<String> =
-        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    let tables_raw: Vec<Option<String>> =
+        sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             .fetch_all(&pool)
             .await?;
+    let tables: Vec<String> = tables_raw.into_iter().flatten().collect();
 
     if tables.is_empty() {
         println!("  (none)");
@@ -91,11 +92,13 @@ async fn status() -> Result<()> {
 
     // Show pragmas
     println!("Pragmas:");
+    // SAFETY: PRAGMA statement — no table schema to validate against.
     let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
         .fetch_one(&pool)
         .await?;
     println!("  journal_mode: {}", journal_mode);
 
+    // SAFETY: PRAGMA statement — no table schema to validate against.
     let foreign_keys: i32 = sqlx::query_scalar("PRAGMA foreign_keys")
         .fetch_one(&pool)
         .await?;

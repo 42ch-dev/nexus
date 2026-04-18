@@ -157,19 +157,19 @@ async fn gather_acp_status(state: &WorkspaceState) -> AcpStatusInfo {
     let pool = state.pool();
 
     // Count active sessions
-    if let Ok(count) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM acp_sessions")
+    if let Ok(row) = sqlx::query_scalar!("SELECT COUNT(*) as \"count!\" FROM acp_sessions")
         .fetch_one(pool)
         .await
     {
-        status.active_sessions = count.0 as usize;
+        status.active_sessions = row as usize;
     }
 
     // Count total tool executions
-    if let Ok(count) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM acp_tool_audit_log")
+    if let Ok(row) = sqlx::query_scalar!("SELECT COUNT(*) as \"count!\" FROM acp_tool_audit_log")
         .fetch_one(pool)
         .await
     {
-        status.total_tool_executions = count.0 as u64;
+        status.total_tool_executions = row as u64;
     }
 
     status

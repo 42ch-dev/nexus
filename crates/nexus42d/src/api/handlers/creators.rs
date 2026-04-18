@@ -26,8 +26,9 @@ pub async fn list(
 ) -> Result<Json<ListCreatorsResponse>, NexusApiError> {
     info!("Handling list creators request");
 
-    let creators = sqlx::query_as::<_, CreatorInfo>(
-        "SELECT creator_id, display_name, status, cached_at FROM creators ORDER BY cached_at DESC",
+    let creators = sqlx::query_as!(
+        CreatorInfo,
+        r#"SELECT creator_id as "creator_id!", display_name, status, cached_at FROM creators ORDER BY cached_at DESC"#
     )
     .fetch_all(state.pool())
     .await

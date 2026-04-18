@@ -566,8 +566,9 @@ impl Outbox {
             id: outbox_entry_id.to_string(),
         })?;
 
-        let delivery_state = DeliveryState::from_str(&row.delivery_state)
-            .map_err(|_| SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.delivery_state)))?;
+        let delivery_state = DeliveryState::from_str(&row.delivery_state).map_err(|_| {
+            SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.delivery_state))
+        })?;
 
         Ok(OutboxEntry {
             schema_version: LATEST_SCHEMA_VERSION,
@@ -661,7 +662,8 @@ impl Outbox {
 
         match result {
             Some(state_json) => {
-                let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&state_json)?;
+                let state: crate::partial_apply::PartialApplyState =
+                    serde_json::from_str(&state_json)?;
                 tracing::debug!(
                     outbox_entry_id = %outbox_entry_id,
                     "Loaded persisted partial apply state"
@@ -677,7 +679,8 @@ impl Outbox {
     /// Called after a partial apply has been fully resolved (all deltas succeeded
     /// or permanently failed).
     pub async fn remove_partial_apply_state(&self, outbox_entry_id: &str) -> SyncResult<()> {
-        sqlx::query!("DELETE FROM partial_apply_states WHERE outbox_entry_id = ?",
+        sqlx::query!(
+            "DELETE FROM partial_apply_states WHERE outbox_entry_id = ?",
             outbox_entry_id
         )
         .execute(self.pool.inner())
@@ -712,7 +715,8 @@ impl Outbox {
 
         let mut results = Vec::with_capacity(rows.len());
         for row in rows {
-            let state: crate::partial_apply::PartialApplyState = serde_json::from_str(&row.state_json)?;
+            let state: crate::partial_apply::PartialApplyState =
+                serde_json::from_str(&row.state_json)?;
             results.push((row.outbox_entry_id, state));
         }
 

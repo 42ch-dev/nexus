@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reference_source_id as \"reference_source_id!\", source_type as \"source_type!\", uri as \"uri!\", title as \"title!\", scan_status as \"scan_status!\", created_at as \"created_at!\", tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference_source_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_type!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "uri!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "scan_status!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "tags",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_hash",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "content",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "73d6e5f0d8d3a4fffae5b7e023670d2185a3663d2efe5d75f857f150bfcef115"
+}

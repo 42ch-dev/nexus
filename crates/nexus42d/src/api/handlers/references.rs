@@ -27,9 +27,10 @@ pub async fn list(
 ) -> Result<Json<ListReferencesResponse>, NexusApiError> {
     info!("Handling list references request");
 
-    let references = sqlx::query_as::<_, ReferenceInfo>(
-        "SELECT reference_source_id, source_type, title, scan_status, created_at
-         FROM reference_sources ORDER BY created_at DESC",
+    let references = sqlx::query_as!(
+        ReferenceInfo,
+        r#"SELECT reference_source_id as "reference_source_id!", source_type, title, scan_status, created_at
+         FROM reference_sources ORDER BY created_at DESC"#,
     )
     .fetch_all(state.pool())
     .await

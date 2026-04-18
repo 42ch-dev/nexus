@@ -37,10 +37,11 @@ pub async fn list_sessions(
 ) -> Result<Json<ListSessionsResponse>, NexusApiError> {
     tracing::info!("Handling list ACP sessions request");
 
-    let sessions = sqlx::query_as::<_, SessionInfo>(
-        "SELECT session_id, agent_id, created_at, last_active, workspace_hint
+    let sessions = sqlx::query_as!(
+        SessionInfo,
+        r#"SELECT session_id as "session_id!", agent_id, created_at, last_active, workspace_hint
          FROM acp_sessions
-         ORDER BY last_active DESC",
+         ORDER BY last_active DESC"#,
     )
     .fetch_all(state.pool())
     .await
@@ -72,8 +73,8 @@ pub async fn delete_session(
         "Handling delete ACP session request"
     );
 
-    let result = sqlx::query("DELETE FROM acp_sessions WHERE session_id = ?1")
-        .bind(&session_id)
+    let sid = session_id.clone();
+    let result = sqlx::query!("DELETE FROM acp_sessions WHERE session_id = ?", sid)
         .execute(state.pool())
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -91,9 +92,9 @@ pub async fn delete_session(
 ///
 /// This can be called periodically by the daemon or on-demand.
 pub async fn cleanup_expired_sessions(state: &WorkspaceState) -> Result<u64, NexusApiError> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "DELETE FROM acp_sessions
-         WHERE datetime(last_active) < datetime('now', '-24 hours')",
+         WHERE datetime(last_active) < datetime('now', '-24 hours')"
     )
     .execute(state.pool())
     .await
@@ -114,6 +115,7 @@ mod tests {
     use axum::extract::State;
 
     async fn setup_sessions_db(pool: &sqlx::SqlitePool) {
+        // SAFETY: test-only data setup helper — multi-row INSERT for test seeding
         sqlx::query(
             "INSERT INTO acp_sessions (session_id, agent_id, created_at, last_active, workspace_hint)
              VALUES ('sess-001', 'claude-acp', '2026-04-08T10:00:00Z', '2026-04-08T15:00:00Z', '/tmp/workspace');
@@ -186,6 +188,7 @@ mod tests {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
 
         // Insert a session that's clearly expired
+        // SAFETY: test-only data setup helper
         sqlx::query(
             "INSERT INTO acp_sessions (session_id, agent_id, created_at, last_active, workspace_hint)
              VALUES ('sess-old', 'claude-acp', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z', '/tmp/old')"

@@ -67,15 +67,15 @@ impl TokenManager {
         let expires_at_str = expires_at.to_rfc3339();
         let created_at = Utc::now().to_rfc3339();
 
-        sqlx::query(
+        let user_id = user_id.to_string();
+        let access_token = access_token.to_string();
+        let refresh_token = refresh_token.to_string();
+
+        sqlx::query!(
             "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)"
+             VALUES (?, ?, ?, ?, ?)",
+            user_id, access_token, refresh_token, expires_at_str, created_at
         )
-        .bind(user_id)
-        .bind(access_token)
-        .bind(refresh_token)
-        .bind(&expires_at_str)
-        .bind(&created_at)
         .execute(self.db.pool())
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -90,8 +90,8 @@ impl TokenManager {
     ///
     /// Returns `Ok(None)` if no token is stored.
     pub async fn get_token(&self) -> Result<Option<StoredToken>, NexusApiError> {
-        let row: Option<(String, String, String, String, String)> = sqlx::query_as(
-            "SELECT user_id, access_token, refresh_token, expires_at, created_at FROM auth_tokens ORDER BY created_at DESC LIMIT 1"
+        let row = sqlx::query!(
+            r#"SELECT user_id as "user_id!", access_token, refresh_token, expires_at, created_at FROM auth_tokens ORDER BY created_at DESC LIMIT 1"#
         )
         .fetch_optional(self.db.pool())
         .await
@@ -102,14 +102,14 @@ impl TokenManager {
             None => return Ok(None),
         };
 
-        let expires_at = DateTime::parse_from_rfc3339(&row.3)
+        let expires_at = DateTime::parse_from_rfc3339(&row.expires_at)
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
                 message: format!("Invalid expires_at: {}", e),
             })?
             .with_timezone(&Utc);
 
-        let created_at = DateTime::parse_from_rfc3339(&row.4)
+        let created_at = DateTime::parse_from_rfc3339(&row.created_at)
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
                 message: format!("Invalid created_at: {}", e),
@@ -117,9 +117,9 @@ impl TokenManager {
             .with_timezone(&Utc);
 
         Ok(Some(StoredToken {
-            user_id: row.0,
-            access_token: row.1,
-            refresh_token: row.2,
+            user_id: row.user_id,
+            access_token: row.access_token,
+            refresh_token: row.refresh_token,
             expires_at,
             created_at,
         }))
@@ -138,7 +138,7 @@ impl TokenManager {
 
     /// Clear all stored tokens (logout).
     pub async fn clear_tokens(&self) -> Result<(), NexusApiError> {
-        sqlx::query("DELETE FROM auth_tokens")
+        sqlx::query!("DELETE FROM auth_tokens")
             .execute(self.db.pool())
             .await
             .map_err(db_error)?;

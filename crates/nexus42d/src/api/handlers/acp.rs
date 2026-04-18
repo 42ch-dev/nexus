@@ -303,13 +303,13 @@ async fn log_tool_execution(
     .to_string();
     let tool_name = req.tool_name.clone();
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO acp_tool_audit_log (tool_name, path, outcome, agent_id, session_id)
          VALUES (?1, ?2, ?3, NULL, NULL)",
+        tool_name,
+        path,
+        outcome
     )
-    .bind(&tool_name)
-    .bind(&path)
-    .bind(&outcome)
     .execute(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {

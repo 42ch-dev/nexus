@@ -115,9 +115,12 @@ pub async fn list_fragments_by_session(
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
 pub async fn delete_fragment(pool: &SqlitePool, fragment_id: &str) -> Result<bool, LocalDbError> {
-    let result = sqlx::query!("DELETE FROM memory_fragments WHERE fragment_id = ?", fragment_id)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query!(
+        "DELETE FROM memory_fragments WHERE fragment_id = ?",
+        fragment_id
+    )
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 
