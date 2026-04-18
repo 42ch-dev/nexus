@@ -48,47 +48,6 @@
         "qc_status": "approved",
         "qa_status": "approved"
       }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws6-creator-register-e2e-tests",
-      "status": "InReview",
-      "file": ".agents/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
-      "title": "V1.4 WS6 — V1.3 Creator Register E2E integration tests (backlog closure)",
-      "owner": "fullstack-dev",
-      "agents": ["fullstack-dev"],
-      "tags": [
-        "v1.4",
-        "ws6",
-        "v1.3-backlog",
-        "e2e-tests"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-18",
-      "metadata": {
-        "priority": "medium",
-        "phase": "V1.4-M4",
-        "working_branch": "feature/v1.4-ws6-creator-register-e2e",
-        "merge_target": "main",
-        "description": "Close the legacy V1.3 Todo row (formerly 2026-04-17-v1.3-creator-register-e2e-tests). wiremock-driven E2E for creator register -> challenge solve -> verify -> credential store. Happy path + negative paths (bad challenge, verify reject, HTTP 500, challenge expiry, no-credential-leak-on-failure) + idempotency guard (stored-token absence).",
-        "spec_refs": [
-          ".agents/plans/archived/knowledge/challenge-solver-design-v1.md",
-          ".agents/plans/archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "platform M10 (creator register + verify API reachable in test environment; mocked here via wiremock)",
-        "supersedes": "2026-04-17-v1.3-creator-register-e2e-tests (prior Todo row; this plan is the V1.4 work item that closes it)",
-        "effort_agent_oriented": "S (1 agent session)",
-        "gates": {
-          "cargo_test": "pass (7/7)",
-          "cargo_clippy": "pass (0 warnings)",
-          "cargo_fmt": "pass",
-          "qc_status": "rework-complete"
-        },
-        "commits": [
-          "5d715da fix(creator-register-e2e): add 3 medium-severity QC coverage gaps (WS6 qc-rework)"
-        ],
-        "residual_summary": "low/nit items deferred as residuals (no open medium+)"
-      }
     }
   ],
   "metadata": {
@@ -98,13 +57,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-18",
-      "total_open": 34,
+      "total_open": 35,
       "by_severity": {
         "critical": 0,
         "high": 1,
         "medium": 17,
         "low": 7,
-        "nit": 8
+        "nit": 9
       },
       "by_target": {
         "V1.0": 0,
@@ -124,9 +83,119 @@
         "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 5,
         "2026-04-17-v1.4-ws7-creator-schedule-core-context": 11
       },
-      "cross_cutting": []
+      "cross_cutting": [
+        {
+          "id": "DEBT-RAND-073",
+          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "severity": "low",
+          "target_date": "V1.5 or wiremock upstream fix",
+          "note": "Dependabot bumped rand to 0.8.6 in workspace, but wiremock transitively depends on rand 0.7.3 which cannot be removed without upstream http-types migration."
+        }
+      ]
     },
     "residual_findings": {
+      "2026-04-17-v1.4-ws6-creator-register-e2e-tests": [
+        {
+          "id": "QC1-L1",
+          "title": "Wiremock version 0.5 vs plan-suggested 0.6",
+          "severity": "low",
+          "source": "QC1 Low",
+          "scope": "crates/nexus42/Cargo.toml (wiremock dep)",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC1-N1",
+          "title": "Idempotency test lacks second-run exit assertion",
+          "severity": "nit",
+          "source": "QC1 Nit",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs (T4)",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC1-N2",
+          "title": "Plan-suggested common/ module not created",
+          "severity": "nit",
+          "source": "QC1 Nit",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC1-N3",
+          "title": "Verify rejection uses HTTP 200 (correct behavior, nit noted)",
+          "severity": "nit",
+          "source": "QC1 Nit",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC2-L1",
+          "title": "Idempotency test lacks exit-code assertion (duplicate of QC1-N1)",
+          "severity": "low",
+          "source": "QC2 Low",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs (T4)",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC2-L2",
+          "title": "Wiremock version drift (same as QC1-L1)",
+          "severity": "low",
+          "source": "QC2 Low",
+          "scope": "crates/nexus42/Cargo.toml (wiremock dep)",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC2-L3",
+          "title": "Windows portability not verified",
+          "severity": "low",
+          "source": "QC2 Low",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC2-N1",
+          "title": "Fixture files lack header comments",
+          "severity": "nit",
+          "source": "QC2 Nit",
+          "scope": "crates/nexus42/tests/fixtures/creator_register/*.json",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC2-N2",
+          "title": "Mocks don't verify request body content",
+          "severity": "nit",
+          "source": "QC2 Nit",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        },
+        {
+          "id": "QC3-N1",
+          "title": "Idempotency test clarity could be improved",
+          "severity": "nit",
+          "source": "QC3 Nit",
+          "scope": "crates/nexus42/tests/creator_register_e2e.rs (T4)",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null
+        }
+      ],
       "2026-04-17-v1.4-ws7-creator-schedule-core-context": [
         {
           "id": "R1",
