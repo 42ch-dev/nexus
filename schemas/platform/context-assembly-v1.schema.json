@@ -60,6 +60,12 @@
           "minimum": 1,
           "maximum": 50,
           "description": "Maximum number of story summaries (null = platform default)"
+        },
+        "as_of": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "default": null,
+          "description": "ISO-8601 instant for historical read-only context cut. When present, timeline events and key blocks are assembled as if the authoritative graph/state were evaluated at or before this timestamp. Optional per ADR-009. Vector retrieval on the as_of path is optional (fallback to non-vector paths per ADR-007)."
         }
       },
       "additionalProperties": false

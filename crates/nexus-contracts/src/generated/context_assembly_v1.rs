@@ -27,6 +27,8 @@ pub struct ContextAssembleRequestV1 {
     pub max_timeline_events: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_story_summaries: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of: Option<String>,
 }
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
