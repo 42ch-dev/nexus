@@ -400,7 +400,11 @@ impl Outbox {
             .await
     }
 
-    /// Transition an outbox entry to `failed` state with retry scheduling.
+    /// Mark an outbox entry as failed.
+    ///
+    /// NOTE: The entry is committed to the DB *before* returning the result.
+    /// This is intentional — even if the caller ignores the error, the failed
+    /// state is persisted. Do NOT reorder the commit and the return.
     ///
     /// Calculates the next retry time using exponential backoff.
     /// Returns an error if the max retry count has been exceeded.

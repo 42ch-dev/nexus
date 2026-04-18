@@ -11,6 +11,8 @@ use crate::error::LocalDbError;
 pub struct SoulMeta {
     pub creator_id: String,
     pub file_path: String,
+    /// Schema version of the soul's data. Changed from `u32` to `i64` during
+    /// the WS8 sqlx migration (rusqlite → sqlx) for SQLx type compatibility.
     pub schema_version: i64,
     pub personality_hash: Option<String>,
     pub experience_hash: Option<String>,

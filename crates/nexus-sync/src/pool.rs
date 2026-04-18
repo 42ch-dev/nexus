@@ -48,6 +48,9 @@ impl OutboxPool {
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
             .await?;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await?;
         Ok(Self { pool })
     }
 
