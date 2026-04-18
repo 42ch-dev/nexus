@@ -9,7 +9,7 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-19T18:00:00Z",
-      "total_open": 7,
+      "total_open": 8,
       "by_severity": {
         "critical": 0,
         "high": 0,
@@ -18,12 +18,9 @@
         "nit": 1
       },
       "by_target": {
-        "V1.0": 0,
-        "V1.1": 0,
-        "V1.2": 0,
-        "V1.3": 0,
-        "V1.4": 0,
-        "V1.5": 7
+        "V1.6": 5,
+        "V1.7": 2,
+        "V2.0": 1
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 7
