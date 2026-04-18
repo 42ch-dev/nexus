@@ -77,66 +77,6 @@
         "supersedes": "2026-04-17-v1.3-creator-register-e2e-tests (prior Todo row; this plan is the V1.4 work item that closes it)",
         "effort_agent_oriented": "S (1 agent session)"
       }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
-      "status": "InReview",
-      "file": ".agents/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
-      "title": "V1.4 WS7 — Creator Schedule + immutable versioned core_context",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws7",
-        "orchestration",
-        "schedule",
-        "core-context",
-        "new-feature"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-18",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M3b",
-        "working_branch": "feature/v1.4-ws7-schedule",
-        "merge_target": "feature/v1.4",
-        "description": "Multi-Schedule per creator (concurrency declared per-add; serial default), CRUD over prompts by ID, immutable versioned core_context (Seed + UserEdit + PresetHook + PresetSeedExpansion; LlmSummarize reserved for V1.5 zero-migration). 13 CLI subcommands under nexus42 schedule + 8 HTTP endpoints under /v1/local/orchestration/schedules/*. Answers OQ-1..OQ-6 from orchestration-engine-v1 §11.",
-        "wave_0_spec": ".agents/plans/knowledge/creator-schedule-and-core-context-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/creator-schedule-and-core-context-v1.md",
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/schemas-boundary-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-        "effort_agent_oriented": "L (2-3 agent sessions)",
-        "dev_routing": "single-stream",
-        "batch_strategy": "4 batches: ① T1 | ② T2+T3 | ③ T4+T6+T9+T10 | ④ T5+T7+T8+T11",
-        "gates": {
-          "validate_schemas": "pass",
-          "codegen": "pass",
-          "cargo_fmt": "pass",
-          "cargo_clippy": "pass",
-          "cargo_test": "pass (1 pre-existing failure excluded: nexus42 auth serde_yaml)",
-          "pnpm_typecheck": "pass",
-          "rusqlite_deadpool": "pass (zero hits)"
-        },
-        "commits": [
-          "018d23e feat(contracts): WS7 T1 — Schedule + CoreContext types + SQLite migration",
-          "b5337f6 feat(schedule): ScheduleSupervisor admission + hand-off loop per §5 (WS7 T2)",
-          "b90cb1c feat(schedule): CoreContextManager + immutable versioned derivation per §6 (WS7 T3)",
-          "1260742 feat(preset): initial_action + context_update hook fields per §7 (WS7 T4)",
-          "df20fde feat(daemon): /v1/local/orchestration/schedules/* (8 endpoints) per §9 (WS7 T6)",
-          "f37b2c2 feat(daemon): complete schedule HTTP handler implementations (WS7 T6-follow-up)",
-          "b99efbb feat(cli): nexus42 schedule — full 13-subcommand surface per §8 (WS7 T5)",
-          "a3205ea feat(preset/novel-writing): demonstrator context_update on outlining exit (WS7 T7)",
-          "64871ac fix(preset/novel-writing): use tagged enum format for context_update op (WS7 T7-fix)",
-          "bfe6d47 test(schedule): R11/R12/R13/R14 regression gate per compass §6 (WS7 T8)",
-          "7703555 test(schedule): forward-compat guard — LlmSummarize variant parseable (WS7 T10)",
-          "474a00e feat(daemon): wire ScheduleSupervisor at boot + graceful shutdown (WS7 T9)"
-        ],
-        "qc_status": "pending",
-        "qa_status": "scheduled"
-      }
     }
   ],
   "metadata": {
@@ -146,13 +86,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-18",
-      "total_open": 23,
+      "total_open": 34,
       "by_severity": {
         "critical": 0,
         "high": 1,
-        "medium": 8,
+        "medium": 17,
         "low": 7,
-        "nit": 6
+        "nit": 8
       },
       "by_target": {
         "V1.0": 0,
@@ -160,7 +100,7 @@
         "V1.2": 0,
         "V1.3": 0,
         "V1.4": 0,
-        "V1.5": 13,
+        "V1.5": 20,
         "WS2": 1,
         "WS3": 3
       },
@@ -169,11 +109,137 @@
         "2026-04-17-v1.4-ws4-statig-lifecycle": 4,
         "2026-04-17-v1.4-ws5-schemas-boundary": 1,
         "2026-04-17-v1.4-ws2-orchestration-skeleton": 8,
-        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 5
+        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 5,
+        "2026-04-17-v1.4-ws7-creator-schedule-core-context": 11
       },
       "cross_cutting": []
     },
     "residual_findings": {
+      "2026-04-17-v1.4-ws7-creator-schedule-core-context": [
+        {
+          "id": "R1",
+          "title": "RunningSet/CompletedSet not persisted across restart",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/admission.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "No duplicate schedule_id detection",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "No paused→running status transition in FSM",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "No pause signal in FSM",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "No delete cascade for schedules",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "SQLite migration / supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R6",
+          "title": "CoreContextManager version bump race",
+          "severity": "medium",
+          "source": "QC2 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R7",
+          "title": "paused→running requires 2-step UX",
+          "severity": "medium",
+          "source": "QC2 medium",
+          "scope": "CLI UX / daemon signal handler",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R8",
+          "title": "TOCTOU in edit_core_context",
+          "severity": "medium",
+          "source": "QC2 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null,
+          "acceptance_rationale": "single-user daemon"
+        },
+        {
+          "id": "R9",
+          "title": "Auth middleware missing",
+          "severity": "medium",
+          "source": "QC3 medium",
+          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null,
+          "acceptance_rationale": "V1.4 local-only"
+        },
+        {
+          "id": "R10",
+          "title": "tempfile in prod deps",
+          "severity": "nit",
+          "source": "QC3 nit",
+          "scope": "crates/nexus-orchestration/Cargo.toml",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        },
+        {
+          "id": "R11",
+          "title": "async-trait hardcoded pin",
+          "severity": "nit",
+          "source": "QC3 nit",
+          "scope": "crates/nexus-orchestration/Cargo.toml",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": null,
+          "tracking_link": null
+        }
+      ],
       "2026-04-17-v1.4-ws8-local-db-sqlx-migration": [
         {
           "id": "R1",
