@@ -43,9 +43,84 @@ impl CoreContextManager {
         Self { pool }
     }
 
+    /// Apply the seed step to create version 0 of `core_context`.
+    ///
+    /// Per spec §6.2, the seed is version 0 (not 1).
+    /// This must be called before any [`apply`] call for the schedule.
+    ///
+    /// Returns the new [`CoreContextRecord`] with version 0.
+    pub async fn apply_seed(
+        &self,
+        schedule_id: &ScheduleId,
+        raw: &str,
+        author: CoreContextAuthor,
+    ) -> Result<CoreContextRecord, CoreContextError> {
+        let now = chrono::Utc::now().timestamp();
+        let schedule_id_str = &schedule_id.0;
+        let new_version = CoreContextVersion(0);
+
+        let new_payload = CoreContextPayload::Text {
+            body: raw.to_string(),
+        };
+
+        // Serialize payload and derivation for storage
+        let payload_kind = "text";
+        let content_bytes = serde_json::to_vec(&new_payload)?;
+        let step = DerivationStep::Seed {
+            raw: raw.to_string(),
+        };
+        let derivation_json = serde_json::to_string(&step)?;
+
+        let (created_by_kind, created_by_user_id) = match &author {
+            CoreContextAuthor::User { id } => ("user", Some(id.clone())),
+            CoreContextAuthor::System => ("system", None),
+        };
+
+        // Insert version 0 row
+        sqlx::query(
+            r#"INSERT INTO core_context_versions
+               (schedule_id, version, payload_kind, content,
+                derivation_kind, derivation_detail,
+                created_at, created_by_kind, created_by_user_id)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+        )
+        .bind(schedule_id_str)
+        .bind(new_version.0 as i64)
+        .bind(payload_kind)
+        .bind(&content_bytes)
+        .bind("seed")
+        .bind(&derivation_json)
+        .bind(now)
+        .bind(created_by_kind)
+        .bind(&created_by_user_id)
+        .execute(&*self.pool)
+        .await?;
+
+        // Set the schedule's current_core_context_version to 0
+        sqlx::query(
+            "UPDATE creator_schedules
+             SET current_core_context_version = ?1, updated_at = ?2
+             WHERE schedule_id = ?3",
+        )
+        .bind(new_version.0 as i64)
+        .bind(now)
+        .bind(schedule_id_str)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(CoreContextRecord {
+            schedule_id: schedule_id.0.clone(),
+            version: new_version,
+            content: new_payload,
+            derivation: step,
+            created_at: now.to_string(),
+            created_by: author,
+        })
+    }
+
     /// Apply a derivation step to produce the next version of `core_context`.
     ///
-    /// - Reads the current version (or starts from empty for v0).
+    /// - Reads the current version.
     /// - Applies the `DerivationStep` to compute the new payload.
     /// - Inserts a new `core_context_versions` row.
     /// - Bumps `creator_schedules.current_core_context_version`.
@@ -65,9 +140,7 @@ impl CoreContextManager {
         let new_version = CoreContextVersion(current_version.0 + 1);
 
         // Compute new payload from previous content
-        let previous_payload = if current_version.0 == 0 {
-            None
-        } else {
+        let previous_payload = {
             let record = self.read(schedule_id, current_version).await?;
             Some(record.content)
         };
@@ -173,9 +246,7 @@ impl CoreContextManager {
         let current_version = self.current_version(schedule_id).await?;
         let new_version = CoreContextVersion(current_version.0 + 1);
 
-        let previous_payload = if current_version.0 == 0 {
-            None
-        } else {
+        let previous_payload = {
             let record = self.read(schedule_id, current_version).await?;
             Some(record.content)
         };
@@ -519,7 +590,7 @@ fn derivation_kind_str(step: &DerivationStep) -> &'static str {
 mod tests {
     use super::*;
     use nexus_contracts::local::schedule::{
-        CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp,
+        CoreContextAuthor, CoreContextPayload, CoreContextVersion, EditOp,
         ScheduleId,
     };
 
@@ -562,21 +633,19 @@ mod tests {
 
         // v0 from seed:
         let record0 = mgr
-            .apply(
+            .apply_seed(
                 &sid,
-                DerivationStep::Seed {
-                    raw: "topic=bees".to_string(),
-                },
+                "topic=bees",
                 CoreContextAuthor::User {
                     id: "u1".to_string(),
                 },
             )
             .await
             .unwrap();
-        assert_eq!(record0.version, CoreContextVersion(1));
+        assert_eq!(record0.version, CoreContextVersion(0));
         assert_eq!(
             mgr.current_version(&sid).await.unwrap(),
-            CoreContextVersion(1)
+            CoreContextVersion(0)
         );
 
         // v1 from user edit:
@@ -590,14 +659,14 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(record1.version, CoreContextVersion(2));
+        assert_eq!(record1.version, CoreContextVersion(1));
         assert_eq!(
             mgr.current_version(&sid).await.unwrap(),
-            CoreContextVersion(2)
+            CoreContextVersion(1)
         );
 
-        // Read v2 content — should contain both parts
-        let content = mgr.read(&sid, CoreContextVersion(2)).await.unwrap();
+        // Read v1 content — should contain both parts
+        let content = mgr.read(&sid, CoreContextVersion(1)).await.unwrap();
         match &content.content {
             CoreContextPayload::Text { body } => {
                 assert!(body.contains("topic=bees"));
@@ -615,11 +684,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply(
+        mgr.apply_seed(
             &sid,
-            DerivationStep::Seed {
-                raw: "v0".to_string(),
-            },
+            "v0",
             CoreContextAuthor::System,
         )
         .await
@@ -648,11 +715,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply(
+        mgr.apply_seed(
             &sid,
-            DerivationStep::Seed {
-                raw: "initial".to_string(),
-            },
+            "initial",
             CoreContextAuthor::System,
         )
         .await
@@ -670,7 +735,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(record.version, CoreContextVersion(2));
+        assert_eq!(record.version, CoreContextVersion(1));
 
         // Content should be concatenated
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
@@ -690,11 +755,9 @@ mod tests {
         insert_test_schedule(&mgr.pool, &sid.0).await;
 
         // Seed v0
-        mgr.apply(
+        mgr.apply_seed(
             &sid,
-            DerivationStep::Seed {
-                raw: "first".to_string(),
-            },
+            "first",
             CoreContextAuthor::System,
         )
         .await
@@ -723,7 +786,7 @@ mod tests {
         .unwrap();
 
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
-        assert_eq!(snapshot.version, CoreContextVersion(3));
+        assert_eq!(snapshot.version, CoreContextVersion(2));
         match &snapshot.content {
             CoreContextPayload::Text { body } => assert_eq!(body, "replaced"),
             _ => panic!("expected text payload"),

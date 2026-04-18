@@ -86,11 +86,9 @@ async fn r11_schedule_add_inspect_roundtrip() {
 
     // Seed core_context v0
     let record = mgr
-        .apply(
+        .apply_seed(
             &ScheduleId(sid.to_string()),
-            DerivationStep::Seed {
-                raw: seed.to_string(),
-            },
+            seed,
             CoreContextAuthor::User {
                 id: "creator-1".to_string(),
             },
@@ -98,7 +96,7 @@ async fn r11_schedule_add_inspect_roundtrip() {
         .await
         .unwrap();
 
-    assert_eq!(record.version, CoreContextVersion(1));
+    assert_eq!(record.version, CoreContextVersion(0));
 
     // Inspect: v0 should match seed
     let snapshot = mgr
@@ -113,7 +111,7 @@ async fn r11_schedule_add_inspect_roundtrip() {
     }
 
     // Status should be pending
-    assert_eq!(sup.status_of(sid).await, ScheduleStatus::Pending);
+    assert_eq!(sup.status_of(sid).await.unwrap(), ScheduleStatus::Pending);
 }
 
 // ---------------------------------------------------------------------------
@@ -152,11 +150,9 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     .unwrap();
 
     // Seed v0
-    mgr.apply(
+    mgr.apply_seed(
         &ScheduleId(sid.to_string()),
-        DerivationStep::Seed {
-            raw: seed.to_string(),
-        },
+        seed,
         CoreContextAuthor::System,
     )
     .await
@@ -164,7 +160,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
 
     // Verify v0 content
     let v0 = mgr
-        .read(&ScheduleId(sid.to_string()), CoreContextVersion(1))
+        .read(&ScheduleId(sid.to_string()), CoreContextVersion(0))
         .await
         .unwrap();
     match &v0.content {
@@ -185,11 +181,11 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
         .await
         .unwrap();
 
-    assert_eq!(v1.version, CoreContextVersion(2), "edit should create v1");
+    assert_eq!(v1.version, CoreContextVersion(1), "edit should create v1");
 
     // v0 should still be readable (running state finishes on v0)
     let v0_still = mgr
-        .read(&ScheduleId(sid.to_string()), CoreContextVersion(1))
+        .read(&ScheduleId(sid.to_string()), CoreContextVersion(0))
         .await
         .unwrap();
     match &v0_still.content {
@@ -199,7 +195,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
 
     // v1 should have the appended content (next state reads v1)
     let v1_content = mgr
-        .read(&ScheduleId(sid.to_string()), CoreContextVersion(2))
+        .read(&ScheduleId(sid.to_string()), CoreContextVersion(1))
         .await
         .unwrap();
     match &v1_content.content {
@@ -235,11 +231,9 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
     sup.insert_pending(schedule).await.unwrap();
 
     // Seed v0
-    mgr.apply(
+    mgr.apply_seed(
         &ScheduleId(sid.to_string()),
-        DerivationStep::Seed {
-            raw: "topic=bees".to_string(),
-        },
+        "topic=bees",
         CoreContextAuthor::System,
     )
     .await
@@ -324,11 +318,9 @@ async fn r14_dependency_chain_auto_advances() {
 
     // Seed both
     for sid in [sid_a, sid_b] {
-        mgr.apply(
+        mgr.apply_seed(
             &ScheduleId(sid.to_string()),
-            DerivationStep::Seed {
-                raw: format!("seed for {sid}"),
-            },
+            &format!("seed for {sid}"),
             CoreContextAuthor::System,
         )
         .await
@@ -337,9 +329,9 @@ async fn r14_dependency_chain_auto_advances() {
 
     // Tick: A should start (no deps, running set empty)
     sup.tick().await.unwrap();
-    assert_eq!(sup.status_of(sid_a).await, ScheduleStatus::Running);
+    assert_eq!(sup.status_of(sid_a).await.unwrap(), ScheduleStatus::Running);
     assert_eq!(
-        sup.status_of(sid_b).await,
+        sup.status_of(sid_b).await.unwrap(),
         ScheduleStatus::Pending,
         "B should not start — depends on A"
     );
@@ -348,11 +340,11 @@ async fn r14_dependency_chain_auto_advances() {
     sup.on_schedule_terminal(sid_a, ScheduleStatus::Completed)
         .await
         .unwrap();
-    assert_eq!(sup.status_of(sid_a).await, ScheduleStatus::Completed);
+    assert_eq!(sup.status_of(sid_a).await.unwrap(), ScheduleStatus::Completed);
 
     // After A completes, tick should auto-start B (deps satisfied)
     assert_eq!(
-        sup.status_of(sid_b).await,
+        sup.status_of(sid_b).await.unwrap(),
         ScheduleStatus::Running,
         "B should auto-start after A completes"
     );

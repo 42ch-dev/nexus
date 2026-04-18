@@ -107,9 +107,9 @@ pub async fn add_schedule(
         let mgr = supervisor.core_context_manager();
         let sid = ScheduleId(schedule_id.clone());
         let _record = mgr
-            .apply(
+            .apply_seed(
                 &sid,
-                nexus_contracts::local::schedule::DerivationStep::Seed { raw: seed.clone() },
+                seed,
                 CoreContextAuthor::User {
                     id: body.creator_id.clone(),
                 },
@@ -121,7 +121,7 @@ pub async fn add_schedule(
                     format!("failed to seed core context: {e}"),
                 )
             })?;
-        core_version = mgr.current_version(&sid).await.map(|v| v.0).unwrap_or(1);
+        core_version = 0;
     }
 
     Ok((
@@ -255,7 +255,12 @@ pub async fn edit_core_context(
     let sid = ScheduleId(schedule_id.clone());
 
     // Check schedule exists and is not terminal
-    let status = supervisor.status_of(&schedule_id).await;
+    let status = supervisor.status_of(&schedule_id).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("schedule {schedule_id} not found: {e}"),
+        )
+    })?;
     match status {
         ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {
             return Err((
@@ -428,6 +433,16 @@ pub async fn signal_schedule(
         )
     })?;
 
+    // Reject all signals for failed schedules
+    if current_status_str == "failed" {
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "cannot signal failed schedule {schedule_id}: failed schedules require manual intervention"
+            ),
+        ));
+    }
+
     let new_status = match body.signal.as_str() {
         "start" => match current_status_str.as_str() {
             "pending" => "running",
@@ -572,7 +587,12 @@ pub async fn delete_schedule(
     let pool = supervisor.pool();
 
     // Check if terminal
-    let current_status = supervisor.status_of(&schedule_id).await;
+    let current_status = supervisor.status_of(&schedule_id).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("schedule {schedule_id} not found: {e}"),
+        )
+    })?;
     match current_status {
         ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {}
         _ => {
