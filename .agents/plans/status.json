@@ -14,7 +14,7 @@
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 4,
+            "low": 5,
         "nit": 1
       },
       "by_target": {
