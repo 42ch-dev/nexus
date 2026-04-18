@@ -166,3 +166,8 @@ target
 
 # Git worktrees (isolation for parallel branch development)
 .worktrees/
+
+# sqlx offline reference database (only metadata is committed)
+.sqlx/state.db
+.sqlx/state.db-wal
+.sqlx/state.db-shm
