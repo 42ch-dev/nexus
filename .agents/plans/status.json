@@ -1,137 +1,36 @@
 {
   "version": 1,
-  "updated_at": "2026-04-18T00:00:00Z",
-  "plans": [
-    {
-      "id": "2026-04-18-sqlx-compile-time-migration",
-      "status": "Done",
-      "file": ".agents/plans/2026-04-18-sqlx-compile-time-migration.md",
-      "title": "V1.4 — sqlx compile-time macro migration + .sqlx/ workflow",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "sqlx",
-        "refactor",
-        "tech-debt"
-      ],
-      "created_at": "2026-04-18",
-      "updated_at": "2026-04-18T21:30:00Z",
-      "done_at": "2026-04-18",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4",
-        "working_branch": "feature/v1.4",
-        "merge_target": "main",
-        "description": "Migrate all ~79 runtime sqlx::query() calls to compile-time checked macros (query!/query_as!/query_scalar!), establish .sqlx/ offline workflow, codify AGENTS.md convention. Spec: knowledge/sqlx-compile-time-migration-v1.md",
-        "wave_0_spec": ".agents/plans/knowledge/sqlx-compile-time-migration-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/sqlx-compile-time-migration-v1.md"
-        ],
-        "effort_agent_oriented": "M (5 agent sessions, 5 tasks)",
-        "commits": [
-          "df6a293 chore(sqlx): initialize .sqlx offline workflow and reference database setup",
-          "8067f9c refactor(sqlx): migrate nexus-local-db to compile-time checked macros",
-          "2fc819c refactor(sqlx): migrate nexus-sync to compile-time checked macros",
-          "131f345 refactor(sqlx): migrate nexus-orchestration to compile-time checked macros",
-          "e85fb94 refactor(sqlx): migrate nexus42 and nexus42d to compile-time checked macros",
-          "6f217b4 chore(ci,docs): re-enable verify-sqlx-offline and codify sqlx compile-time macro convention",
-          "35f62f9 fix(sqlx): address all blocking QC findings from sqlx migration review"
-        ],
-        "gates": {
-          "cargo_build": "pass",
-          "cargo_test": "pass (385/386; 1 pre-existing auth test failure out of scope)",
-          "cargo_clippy": "pass",
-          "qa_status": "pass",
-          "qc_status": "approved (after fix round)",
-          "sqlx_offline_check": "pass",
-          "tests": "385/386 pass",
-          "fmt": "pass",
-          "sqlx_metadata": "97 query JSON files committed"
-        },
-        "notes": "All 5 batches complete. 97 .sqlx/ metadata files. All runtime queries have SAFETY comments. QC3+suggestions registered as residuals. QA pass on all 9 acceptance criteria.",
-        "residual_summary": "5 low/nit items (QC3 suggestions + QA nits) — deferred, no blocking issues"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
-      "status": "Done",
-      "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
-      "title": "V1.4 WS1 — nexus-acp-host crate extraction",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws1",
-        "orchestration",
-        "refactor"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "done_at": "2026-04-17",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M1",
-        "working_branch": "feature/v1.4-ws1-acp-host",
-        "merge_target": "main",
-        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
-        "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "effort_agent_oriented": "M (1-2 agent sessions)",
-        "gates": {
-          "cargo_build": "pass",
-          "cargo_test": "pass",
-          "cargo_fmt": "pass",
-          "cargo_clippy": "pass",
-          "linkage_gate": "pass",
-          "acp_worker_stub": "pass"
-        },
-        "commits": [
-          "c41647d chore(acp-host): scaffold crate (WS1 T1)",
-          "e361b5a refactor(acp-host): move ACP modules to nexus-acp-host (WS1 T2-T5)",
-          "a2fcfe9 refactor(nexus42): consume nexus-acp-host via compat shim (WS1 T6)",
-          "7ffb013 feat(cli): hidden 'acp-worker' subcommand stub (WS1 T7)",
-          "ef36312 ci(verify-no-acp-in-daemon): enforce nexus42d linkage matrix (WS1 T9)"
-        ],
-        "qc_status": "approved",
-        "qa_status": "approved"
-      }
-    }
-  ],
+  "updated_at": "2026-04-18T22:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-18T07:45:39.992187+00:00",
-      "total_open": 14,
+      "updated_at": "2026-04-18T22:00:00Z",
+      "total_open": 19,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 13,
-        "low": 1,
-        "nit": 0
+        "low": 4,
+        "nit": 2
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
         "V1.2": 0,
         "V1.3": 0,
-        "V1.4": 0,
-        "V1.5": 20,
-        "WS2": 1,
-        "WS3": 3
+        "V1.4": 16,
+        "V1.5": 3
       },
       "by_plan": {
-        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 5,
-        "2026-04-17-v1.4-ws4-statig-lifecycle": 4,
-        "2026-04-17-v1.4-ws5-schemas-boundary": 1,
-        "2026-04-17-v1.4-ws2-orchestration-skeleton": 8,
-        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 5,
-        "2026-04-17-v1.4-ws7-creator-schedule-core-context": 11
+        "2026-04-17-v1.4-ws7-creator-schedule-core-context": 7,
+        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 2,
+        "2026-04-17-v1.4-ws2-orchestration-skeleton": 3,
+        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 2,
+        "2026-04-18-sqlx-compile-time-migration": 5
       },
       "cross_cutting": [
         {
@@ -302,6 +201,63 @@
           "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
           "decision": "defer",
           "owner": "qa-engineer",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-18-sqlx-compile-time-migration": [
+        {
+          "id": "R1",
+          "title": "Missing SAFETY comments on test-only runtime queries (pool.rs, integration tests, test_utils.rs)",
+          "severity": "low",
+          "source": "QC1 W1+W2, QC2 W-003, QA N1",
+          "scope": "crates/nexus-sync/src/pool.rs, crates/nexus-local-db/tests/, crates/nexus42d/src/test_utils.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "Inline FromRow structs (OutboxRow, PartialApplyRow) should be module-level",
+          "severity": "low",
+          "source": "QC1 S2",
+          "scope": "crates/nexus-sync/src/outbox.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "Inconsistent ?1 vs ? placeholder syntax in compile-time macros",
+          "severity": "low",
+          "source": "QC2 W-001",
+          "scope": "crates/nexus42d/src/api/handlers/sync.rs, crates/nexus42d/src/api/handlers/memory.rs, crates/nexus42/src/commands/research.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Misleading SAFETY comment in schedules.rs (copy-paste, inaccurate reason)",
+          "severity": "nit",
+          "source": "QC1 S1, QC2 W-002",
+          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "Test-only queries in schema.rs could use compile-time macros",
+          "severity": "nit",
+          "source": "QC1 S3",
+          "scope": "crates/nexus42d/src/db/schema.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
           "target_date": "V1.5",
           "tracking_link": null
         }
