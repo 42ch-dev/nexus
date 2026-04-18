@@ -53,7 +53,8 @@ fn make_schedule(
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
-        label: None,
+        // Use schedule ID as label to avoid R2 duplicate detection collisions
+        label: Some(id.to_string()),
         created_at: String::new(),
         updated_at: String::new(),
         terminated_at: None,
