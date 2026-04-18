@@ -180,7 +180,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
-      - name: Run ACP integration tests
-        run: cargo test -p nexus-acp-host --test acp_registry --test cli_agent
+      - name: Run ACP registry integration tests
+        run: cargo test -p nexus-acp-host --test acp_registry
+      - name: Run CLI agent integration tests
+        run: cargo test -p nexus42 --test cli_agent
       - name: Run all tests
         run: cargo test --all
