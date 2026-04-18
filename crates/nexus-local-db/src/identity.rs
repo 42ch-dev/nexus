@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use crate::error::LocalDbError;
 
 /// Row representation for the `local_identities` table.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone)]
 pub struct LocalIdentityRow {
     pub creator_id: String,
     pub identity_type: String,
@@ -30,14 +30,14 @@ pub async fn create_local_identity(
     display_name: Option<&str>,
     created_at: &str,
 ) -> Result<LocalIdentityRow, LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO local_identities (creator_id, identity_type, display_name, created_at, platform_linked)
-         VALUES (?1, ?2, ?3, ?4, 0)",
+         VALUES (?, ?, ?, ?, 0)",
+        creator_id,
+        identity_type,
+        display_name,
+        created_at
     )
-    .bind(creator_id)
-    .bind(identity_type)
-    .bind(display_name)
-    .bind(created_at)
     .execute(pool)
     .await?;
 
@@ -58,15 +58,24 @@ pub async fn get_local_identity(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Option<LocalIdentityRow>, LocalDbError> {
-    let row: Option<LocalIdentityRowRaw> = sqlx::query_as(
-        "SELECT creator_id, identity_type, display_name, created_at, platform_linked, platform_creator_id
-         FROM local_identities WHERE creator_id = ?1",
+    let row = sqlx::query!(
+        "SELECT creator_id as \"creator_id!\", identity_type as \"identity_type!\",
+                display_name, created_at as \"created_at!\", platform_linked as \"platform_linked!\",
+                platform_creator_id
+         FROM local_identities WHERE creator_id = ?",
+        creator_id
     )
-    .bind(creator_id)
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| r.into()))
+    Ok(row.map(|r| LocalIdentityRow {
+        creator_id: r.creator_id,
+        identity_type: r.identity_type,
+        display_name: r.display_name,
+        created_at: r.created_at,
+        platform_linked: r.platform_linked != 0,
+        platform_creator_id: r.platform_creator_id,
+    }))
 }
 
 /// List all local identities.
@@ -75,14 +84,26 @@ pub async fn get_local_identity(
 pub async fn list_local_identities(
     pool: &SqlitePool,
 ) -> Result<Vec<LocalIdentityRow>, LocalDbError> {
-    let rows: Vec<LocalIdentityRowRaw> = sqlx::query_as(
-        "SELECT creator_id, identity_type, display_name, created_at, platform_linked, platform_creator_id
-         FROM local_identities ORDER BY created_at",
+    let rows = sqlx::query!(
+        "SELECT creator_id as \"creator_id!\", identity_type as \"identity_type!\",
+                display_name, created_at as \"created_at!\", platform_linked as \"platform_linked!\",
+                platform_creator_id
+         FROM local_identities ORDER BY created_at"
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|r| r.into()).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| LocalIdentityRow {
+            creator_id: r.creator_id,
+            identity_type: r.identity_type,
+            display_name: r.display_name,
+            created_at: r.created_at,
+            platform_linked: r.platform_linked != 0,
+            platform_creator_id: r.platform_creator_id,
+        })
+        .collect())
 }
 
 /// Link a local identity to a platform Creator.
@@ -97,12 +118,12 @@ pub async fn link_to_platform(
     creator_id: &str,
     platform_creator_id: &str,
 ) -> Result<(), LocalDbError> {
-    let result = sqlx::query(
-        "UPDATE local_identities SET platform_linked = 1, platform_creator_id = ?1
-         WHERE creator_id = ?2 AND platform_linked = 0",
+    let result = sqlx::query!(
+        "UPDATE local_identities SET platform_linked = 1, platform_creator_id = ?
+         WHERE creator_id = ? AND platform_linked = 0",
+        platform_creator_id,
+        creator_id
     )
-    .bind(platform_creator_id)
-    .bind(creator_id)
     .execute(pool)
     .await?;
 
@@ -138,11 +159,11 @@ pub async fn link_to_platform(
 ///
 /// Returns `LocalDbError` if the identity does not exist or is not currently linked.
 pub async fn unlink_from_platform(pool: &SqlitePool, creator_id: &str) -> Result<(), LocalDbError> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE local_identities SET platform_linked = 0, platform_creator_id = NULL
-         WHERE creator_id = ?1 AND platform_linked = 1",
+         WHERE creator_id = ? AND platform_linked = 1",
+        creator_id
     )
-    .bind(creator_id)
     .execute(pool)
     .await?;
 
@@ -179,38 +200,11 @@ pub async fn delete_local_identity(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let result = sqlx::query("DELETE FROM local_identities WHERE creator_id = ?1")
-        .bind(creator_id)
+    let result = sqlx::query!("DELETE FROM local_identities WHERE creator_id = ?", creator_id)
         .execute(pool)
         .await?;
 
     Ok(result.rows_affected() > 0)
-}
-
-/// Internal raw row type for sqlx::FromRow mapping.
-///
-/// SQLite stores `platform_linked` as INTEGER (0/1), which we convert to bool.
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct LocalIdentityRowRaw {
-    creator_id: String,
-    identity_type: String,
-    display_name: Option<String>,
-    created_at: String,
-    platform_linked: i32,
-    platform_creator_id: Option<String>,
-}
-
-impl From<LocalIdentityRowRaw> for LocalIdentityRow {
-    fn from(raw: LocalIdentityRowRaw) -> Self {
-        LocalIdentityRow {
-            creator_id: raw.creator_id,
-            identity_type: raw.identity_type,
-            display_name: raw.display_name,
-            created_at: raw.created_at,
-            platform_linked: raw.platform_linked != 0,
-            platform_creator_id: raw.platform_creator_id,
-        }
-    }
 }
 
 #[cfg(test)]

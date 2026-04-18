@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use crate::error::LocalDbError;
 
 /// Pending review record — mirrors DB row.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone)]
 pub struct PendingReviewRecord {
     /// Unique identifier for this pending entry.
     pub pending_id: String,
@@ -33,17 +33,17 @@ pub async fn create_pending_review(
     pool: &SqlitePool,
     record: &PendingReviewRecord,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        record.pending_id,
+        record.session_id,
+        record.creator_id,
+        record.world_id,
+        record.task_kind,
+        record.raw_digest,
+        record.created_at
     )
-    .bind(&record.pending_id)
-    .bind(&record.session_id)
-    .bind(&record.creator_id)
-    .bind(&record.world_id)
-    .bind(&record.task_kind)
-    .bind(&record.raw_digest)
-    .bind(&record.created_at)
     .execute(pool)
     .await?;
     Ok(())
@@ -56,14 +56,29 @@ pub async fn list_pending_reviews(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Vec<PendingReviewRecord>, LocalDbError> {
-    let records: Vec<PendingReviewRecord> = sqlx::query_as(
-        "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE creator_id = ?1 ORDER BY created_at DESC",
+    let rows = sqlx::query!(
+        "SELECT pending_id as \"pending_id!\", session_id as \"session_id!\",
+                creator_id as \"creator_id!\", world_id,
+                task_kind as \"task_kind!\", raw_digest as \"raw_digest!\",
+                created_at as \"created_at!\"
+         FROM memory_pending_review WHERE creator_id = ? ORDER BY created_at DESC",
+        creator_id
     )
-    .bind(creator_id)
     .fetch_all(pool)
     .await?;
-    Ok(records)
+
+    Ok(rows
+        .into_iter()
+        .map(|r| PendingReviewRecord {
+            pending_id: r.pending_id,
+            session_id: r.session_id,
+            creator_id: r.creator_id,
+            world_id: r.world_id,
+            task_kind: r.task_kind,
+            raw_digest: r.raw_digest,
+            created_at: r.created_at,
+        })
+        .collect())
 }
 
 /// Get a specific pending review by ID.
@@ -73,14 +88,26 @@ pub async fn get_pending_review(
     pool: &SqlitePool,
     pending_id: &str,
 ) -> Result<Option<PendingReviewRecord>, LocalDbError> {
-    let record: Option<PendingReviewRecord> = sqlx::query_as(
-        "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE pending_id = ?1",
+    let row = sqlx::query!(
+        "SELECT pending_id as \"pending_id!\", session_id as \"session_id!\",
+                creator_id as \"creator_id!\", world_id,
+                task_kind as \"task_kind!\", raw_digest as \"raw_digest!\",
+                created_at as \"created_at!\"
+         FROM memory_pending_review WHERE pending_id = ?",
+        pending_id
     )
-    .bind(pending_id)
     .fetch_optional(pool)
     .await?;
-    Ok(record)
+
+    Ok(row.map(|r| PendingReviewRecord {
+        pending_id: r.pending_id,
+        session_id: r.session_id,
+        creator_id: r.creator_id,
+        world_id: r.world_id,
+        task_kind: r.task_kind,
+        raw_digest: r.raw_digest,
+        created_at: r.created_at,
+    }))
 }
 
 /// Delete a pending review by ID.
@@ -90,10 +117,10 @@ pub async fn delete_pending_review(
     pool: &SqlitePool,
     pending_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let result = sqlx::query("DELETE FROM memory_pending_review WHERE pending_id = ?1")
-        .bind(pending_id)
-        .execute(pool)
-        .await?;
+    let result =
+        sqlx::query!("DELETE FROM memory_pending_review WHERE pending_id = ?", pending_id)
+            .execute(pool)
+            .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -104,12 +131,13 @@ pub async fn count_pending_reviews(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<usize, LocalDbError> {
-    let count: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review WHERE creator_id = ?1")
-            .bind(creator_id)
-            .fetch_one(pool)
-            .await?;
-    Ok(count.0 as usize)
+    let count = sqlx::query_scalar!(
+        "SELECT COUNT(*) as \"count!\" FROM memory_pending_review WHERE creator_id = ?",
+        creator_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(count as usize)
 }
 
 #[cfg(test)]

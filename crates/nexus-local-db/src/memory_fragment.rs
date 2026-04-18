@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use crate::error::LocalDbError;
 
 /// Memory fragment record — mirrors DB row.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone)]
 pub struct MemoryFragmentRecord {
     /// Unique identifier for this fragment.
     pub fragment_id: String,
@@ -33,17 +33,17 @@ pub async fn create_fragment(
     pool: &SqlitePool,
     fragment: &MemoryFragmentRecord,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        fragment.fragment_id,
+        fragment.session_id,
+        fragment.creator_id,
+        fragment.keywords,
+        fragment.summary,
+        fragment.created_at,
+        fragment.ttl
     )
-    .bind(&fragment.fragment_id)
-    .bind(&fragment.session_id)
-    .bind(&fragment.creator_id)
-    .bind(&fragment.keywords)
-    .bind(&fragment.summary)
-    .bind(&fragment.created_at)
-    .bind(&fragment.ttl)
     .execute(pool)
     .await?;
     Ok(())
@@ -56,14 +56,28 @@ pub async fn list_fragments(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Vec<MemoryFragmentRecord>, LocalDbError> {
-    let records: Vec<MemoryFragmentRecord> = sqlx::query_as(
-        "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl
-         FROM memory_fragments WHERE creator_id = ?1 ORDER BY created_at DESC",
+    let rows = sqlx::query!(
+        "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
+                creator_id as \"creator_id!\", keywords as \"keywords!\",
+                summary as \"summary!\", created_at as \"created_at!\", ttl
+         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC",
+        creator_id
     )
-    .bind(creator_id)
     .fetch_all(pool)
     .await?;
-    Ok(records)
+
+    Ok(rows
+        .into_iter()
+        .map(|r| MemoryFragmentRecord {
+            fragment_id: r.fragment_id,
+            session_id: r.session_id,
+            creator_id: r.creator_id,
+            keywords: r.keywords,
+            summary: r.summary,
+            created_at: r.created_at,
+            ttl: r.ttl,
+        })
+        .collect())
 }
 
 /// List all fragments for a specific session.
@@ -73,22 +87,35 @@ pub async fn list_fragments_by_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<Vec<MemoryFragmentRecord>, LocalDbError> {
-    let records: Vec<MemoryFragmentRecord> = sqlx::query_as(
-        "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl
-         FROM memory_fragments WHERE session_id = ?1 ORDER BY created_at DESC",
+    let rows = sqlx::query!(
+        "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
+                creator_id as \"creator_id!\", keywords as \"keywords!\",
+                summary as \"summary!\", created_at as \"created_at!\", ttl
+         FROM memory_fragments WHERE session_id = ? ORDER BY created_at DESC",
+        session_id
     )
-    .bind(session_id)
     .fetch_all(pool)
     .await?;
-    Ok(records)
+
+    Ok(rows
+        .into_iter()
+        .map(|r| MemoryFragmentRecord {
+            fragment_id: r.fragment_id,
+            session_id: r.session_id,
+            creator_id: r.creator_id,
+            keywords: r.keywords,
+            summary: r.summary,
+            created_at: r.created_at,
+            ttl: r.ttl,
+        })
+        .collect())
 }
 
 /// Delete a fragment by ID.
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
 pub async fn delete_fragment(pool: &SqlitePool, fragment_id: &str) -> Result<bool, LocalDbError> {
-    let result = sqlx::query("DELETE FROM memory_fragments WHERE fragment_id = ?1")
-        .bind(fragment_id)
+    let result = sqlx::query!("DELETE FROM memory_fragments WHERE fragment_id = ?", fragment_id)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
@@ -102,16 +129,17 @@ pub async fn get_all_keywords(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Vec<String>, LocalDbError> {
-    let keywords_json: Vec<(String,)> =
-        sqlx::query_as("SELECT keywords FROM memory_fragments WHERE creator_id = ?1")
-            .bind(creator_id)
-            .fetch_all(pool)
-            .await?;
+    let keywords_rows = sqlx::query_scalar!(
+        "SELECT keywords as \"keywords!\" FROM memory_fragments WHERE creator_id = ?",
+        creator_id
+    )
+    .fetch_all(pool)
+    .await?;
 
     // Parse each JSON array and collect unique keywords
     let mut all_keywords: Vec<String> = Vec::new();
-    for row in keywords_json {
-        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row.0) {
+    for row in keywords_rows {
+        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row) {
             for kw in keywords {
                 if !all_keywords.contains(&kw) {
                     all_keywords.push(kw);
@@ -269,6 +297,7 @@ mod tests {
         create_fragment(&pool, &fragment1).await.unwrap();
 
         // Insert with invalid JSON (should be ignored gracefully)
+        // SAFETY: test-only dynamic data injection for invalid JSON edge case.
         sqlx::query(
             "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords)
              VALUES ('frag_bad', 'sess_test', 'ctr_test', 'not valid json')",
