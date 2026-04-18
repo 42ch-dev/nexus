@@ -33,6 +33,9 @@ pub struct WorkspaceState {
     nexus_home: PathBuf,
     db_path: PathBuf,
     started_at: std::time::Instant,
+    /// Wall-clock timestamp of when the workspace state was created (daemon start).
+    /// Used for reporting `started_at` in the daemon status API.
+    started_at_wall: chrono::DateTime<chrono::Utc>,
     workspace_path: Arc<std::sync::Mutex<Option<String>>>,
     /// Runtime mode read from CLI config at startup.
     runtime_mode: RuntimeMode,
@@ -82,6 +85,7 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
+            started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
@@ -121,6 +125,7 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
+            started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
             cli_config_mtime: None,
@@ -176,6 +181,7 @@ impl WorkspaceState {
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
+            started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
             runtime_mode,
             cli_config_mtime,
@@ -325,6 +331,11 @@ impl WorkspaceState {
     /// Get uptime in seconds
     pub async fn uptime_seconds(&self) -> u64 {
         self.started_at.elapsed().as_secs()
+    }
+
+    /// Wall-clock timestamp when the daemon started (RFC 3339).
+    pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.started_at_wall
     }
 
     /// Current runtime mode (from CLI config at startup).

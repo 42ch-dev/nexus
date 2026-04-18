@@ -119,7 +119,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         version: env!("CARGO_PKG_VERSION").to_string(),
         implementation_scope: "full-fsm (v2)".to_string(),
         uptime_ms: Some(uptime_ms),
-        started_at: None, // Could be set from lifecycle Running.entry timestamp
+        started_at: Some(state.started_at().to_rfc3339()),
         pid: Some(pid),
         degraded: Some(DegradedInfo {
             subsystems: vec![],

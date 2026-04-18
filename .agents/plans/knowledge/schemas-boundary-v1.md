@@ -227,7 +227,7 @@ When V1.4 WS5 lands, the platform-side `{v1-spec}/schema/codegen-strategy-v1.md`
 | `schemas/platform/world-snapshot-response.schema.json`   | refs common/common                           | Yes                | wire     | —                                                                  | Platform HTTP response                          |
 ```
 
-**Total: 64 files.  53 wire, 11 local.**
+**Total: 64 files.  53 wire, 10 local.**
 
 **RISK-06 check**: 13 of 20 `schemas/domain/*` files stay wire (65%). Per compass RISK-06,
 the clearly-local subset (7 domain + 2 acp-runtime + 1 meta = 10 local) ships in V1.4;
