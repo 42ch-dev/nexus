@@ -156,6 +156,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 ]),
                 max_timeline_events: max_timeline_events.map(|v| v as i64),
                 max_story_summaries: max_story_summaries.map(|v| v as i64),
+                as_of: None,
             };
 
             // Note: max_file_size is not yet passed to the daemon API
