@@ -22,14 +22,15 @@
         "effort_agent_oriented": "M (5 agent sessions, 5 tasks)",
         "commits": [
           "df6a293 chore(sqlx): initialize .sqlx offline workflow and reference database setup",
-          "8067f9c refactor(sqlx): migrate nexus-local-db to compile-time checked macros"
+          "8067f9c refactor(sqlx): migrate nexus-local-db to compile-time checked macros",
+          "2fc819c refactor(sqlx): migrate nexus-sync to compile-time checked macros"
         ],
         "gates": {
           "cargo_build": "pass",
-          "cargo_test": "pass (42 tests)",
+          "cargo_test": "pass (nexus-sync: 153 unit + 23 integration tests)",
           "cargo_clippy": "pass"
         },
-        "notes": "Batch 1 of 5 complete: pre-work + nexus-local-db migrated. 23 .sqlx metadata files generated."
+        "notes": "Batch 2 of 5 complete: nexus-sync migrated. 40 .sqlx metadata files total (17 new for nexus-sync). DDL + PRAGMAs kept runtime with // SAFETY: comments."
       }
     },
     {
