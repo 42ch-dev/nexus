@@ -146,6 +146,8 @@ pub async fn list_schedules(
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
+    // SAFETY: dynamic WHERE clause — filters are appended conditionally at runtime.
+    // Compile-time checked macro cannot express variable SQL structure.
     let mut sql = String::from(
         "SELECT schedule_id, creator_id, preset_id, status, label,
                 current_core_context_version, created_at, updated_at
@@ -160,6 +162,7 @@ pub async fn list_schedules(
     }
     sql.push_str(" ORDER BY created_at DESC");
 
+    // SAFETY: dynamic query — see list_schedules SAFETY comment above.
     let mut q = sqlx::query_as::<_, ListRow>(&sql);
     if let Some(ref cid) = query.creator_id {
         q = q.bind(cid);
@@ -192,6 +195,9 @@ pub async fn inspect_schedule(
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
+    // SAFETY: inspected via `schedule_supervisor` pool reference — cannot use compile-time
+    // macro because the pool is obtained from `supervisor.pool()` which returns `&SqlitePool`.
+    // This could be converted in a future pass.
     let row = sqlx::query_as::<_, InspectRow>(
         "SELECT schedule_id, creator_id, preset_id, status, label,
                 current_core_context_version, created_at, updated_at,
@@ -216,6 +222,7 @@ pub async fn inspect_schedule(
     })?;
 
     // Load dependencies
+    // SAFETY: same pool reference constraint as inspect_schedule query above.
     let deps: Vec<String> = sqlx::query_as::<_, (String,)>(
         "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?1",
     )
@@ -359,6 +366,7 @@ pub async fn get_core_context_history(
     let pool = supervisor.pool();
 
     // Query all versions for this schedule, ordered by version DESC
+    // SAFETY: same pool reference constraint as inspect_schedule query above.
     let rows = sqlx::query_as::<_, HistoryRow>(
         "SELECT version, payload_kind, content, derivation_kind,
                 created_at
@@ -413,6 +421,7 @@ pub async fn signal_schedule(
     let pool = supervisor.pool();
     let now = chrono::Utc::now().timestamp();
 
+    // SAFETY: same pool reference constraint as inspect_schedule query above.
     let current_status_str = sqlx::query_as::<_, (String,)>(
         "SELECT status FROM creator_schedules WHERE schedule_id = ?1",
     )
@@ -481,6 +490,7 @@ pub async fn signal_schedule(
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
+                // SAFETY: same pool reference constraint as inspect_schedule query above.
                 sqlx::query(
                         "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?1, updated_at = ?1
                          WHERE schedule_id = ?2",
@@ -542,7 +552,7 @@ pub async fn signal_schedule(
         }
     };
 
-    // Update status for non-terminal signals (start, pause, resume)
+    // SAFETY: same pool reference constraint as inspect_schedule query above.
     sqlx::query(
         "UPDATE creator_schedules SET status = ?1, updated_at = ?2
          WHERE schedule_id = ?3",
@@ -605,7 +615,7 @@ pub async fn delete_schedule(
         }
     }
 
-    // Hard delete the schedule (cascades to dependencies and core_context_versions)
+    // SAFETY: same pool reference constraint as inspect_schedule query above.
     sqlx::query("DELETE FROM creator_schedules WHERE schedule_id = ?1")
         .bind(&schedule_id)
         .execute(&*pool)

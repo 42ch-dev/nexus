@@ -19,8 +19,8 @@ pub async fn status(
 ) -> Result<Json<ManuscriptStatusResponse>, NexusApiError> {
     info!("Handling manuscript status request");
 
-    let phase: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
+    let phase_row: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
             .fetch_optional(state.pool())
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -28,8 +28,8 @@ pub async fn status(
                 message: e.to_string(),
             })?;
 
-    let active_manifest_id: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'active_manifest_id'")
+    let manifest_row: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'active_manifest_id'")
             .fetch_optional(state.pool())
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -37,10 +37,10 @@ pub async fn status(
                 message: e.to_string(),
             })?;
 
-    debug!(phase = ?phase, active_manifest_id = ?active_manifest_id, "Manuscript status retrieved");
+    debug!(phase = ?phase_row, active_manifest_id = ?manifest_row, "Manuscript status retrieved");
     info!("Manuscript status completed");
     Ok(Json(ManuscriptStatusResponse {
-        phase: phase.map(|p| p.0),
-        active_manifest_id: active_manifest_id.map(|a| a.0),
+        phase: phase_row,
+        active_manifest_id: manifest_row,
     }))
 }

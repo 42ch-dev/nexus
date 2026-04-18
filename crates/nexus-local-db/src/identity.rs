@@ -200,9 +200,12 @@ pub async fn delete_local_identity(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let result = sqlx::query!("DELETE FROM local_identities WHERE creator_id = ?", creator_id)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query!(
+        "DELETE FROM local_identities WHERE creator_id = ?",
+        creator_id
+    )
+    .execute(pool)
+    .await?;
 
     Ok(result.rows_affected() > 0)
 }

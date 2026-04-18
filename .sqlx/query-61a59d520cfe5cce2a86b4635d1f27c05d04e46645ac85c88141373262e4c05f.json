@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO device_code_sessions (device_code, user_code, verification_uri, expires_at, status)\n         VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "61a59d520cfe5cce2a86b4635d1f27c05d04e46645ac85c88141373262e4c05f"
+}

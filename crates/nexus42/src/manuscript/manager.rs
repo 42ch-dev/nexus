@@ -281,9 +281,9 @@ impl ManuscriptManager {
         consistency::validate_manuscript_phase(phase)?;
 
         // Check current phase in DB
+        let key = "manuscript_phase";
         let current_phase: Option<String> =
-            sqlx::query_scalar("SELECT value FROM workspace_meta WHERE key = ?1")
-                .bind("manuscript_phase")
+            sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = ?", key)
                 .fetch_optional(pool)
                 .await?;
 
@@ -307,12 +307,13 @@ impl ManuscriptManager {
 
         // Store in workspace_meta
         let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (?1, ?2, ?3)",
+        let key = "manuscript_phase";
+        sqlx::query!(
+            "INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?)",
+            key,
+            phase,
+            now
         )
-        .bind("manuscript_phase")
-        .bind(phase)
-        .bind(&now)
         .execute(pool)
         .await?;
 
@@ -331,7 +332,7 @@ impl ManuscriptManager {
     /// Get the current manuscript phase from SQLite
     pub async fn get_phase(pool: &SqlitePool) -> Result<Option<String>> {
         let phase: Option<String> =
-            sqlx::query_scalar("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
+            sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
                 .fetch_optional(pool)
                 .await?;
         Ok(phase)
@@ -391,12 +392,13 @@ impl ManuscriptManager {
 
         // Persist to SQLite
         let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (?1, ?2, ?3)",
+        let key = "manuscript_phase";
+        sqlx::query!(
+            "INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?)",
+            key,
+            phase_str,
+            now
         )
-        .bind("manuscript_phase")
-        .bind(phase_str)
-        .bind(&now)
         .execute(pool)
         .await?;
 
@@ -464,8 +466,8 @@ impl ManuscriptManager {
     async fn check_sync_conflicts(&self, pool: &SqlitePool) -> Result<bool> {
         // Check if there are any conflicted outbox entries
         // For V1.1, we check the local sync state
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM outbox_entries WHERE delivery_state = 'conflicted'",
+        let count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM outbox_entries WHERE delivery_state = 'conflicted'"
         )
         .fetch_one(pool)
         .await
@@ -939,6 +941,7 @@ mod tests {
         manager.create("Test", Some("wld_test")).unwrap();
 
         // Create outbox table and add a conflicted entry
+        // SAFETY: test-only DDL verification — outbox table may not exist in CLI schema
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS outbox_entries (
                 outbox_entry_id TEXT PRIMARY KEY,
@@ -948,6 +951,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        // SAFETY: test-only data setup helper
         sqlx::query(
             "INSERT INTO outbox_entries (outbox_entry_id, delivery_state) VALUES ('test', 'conflicted')",
         )

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM acp_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f96a5093aa1246ec5ed4403dd55356cf017265339f6ef1be5e890ea90b163e10"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO creators (creator_id, display_name, status, cached_at, data)\n         VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "24310e7f662c7c50c6821804d03720afb0651412952ed063ef25cdb87e43de73"
+}

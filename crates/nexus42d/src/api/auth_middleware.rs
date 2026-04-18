@@ -394,6 +394,8 @@ mod tests {
 
     // --- Helpers ---
 
+    // SAFETY: test-only data setup — inserts mock auth_tokens for middleware tests.
+    // Uses dynamic bind values (expires_at computed at runtime).
     async fn seed_valid_token(state: &WorkspaceState, user_id: &str, access_token: &str) {
         let expires_at = (Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
         let created_at = Utc::now().to_rfc3339();
@@ -412,6 +414,8 @@ mod tests {
         .unwrap();
     }
 
+    // SAFETY: test-only data setup — inserts mock auth_tokens for middleware tests.
+    // Uses dynamic bind values (expires_at computed at runtime).
     async fn seed_expired_token(state: &WorkspaceState, user_id: &str, access_token: &str) {
         let expires_at = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
         let created_at = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();

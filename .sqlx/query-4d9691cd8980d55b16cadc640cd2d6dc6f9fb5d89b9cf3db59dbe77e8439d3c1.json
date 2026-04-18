@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO acp_tool_audit_log (tool_name, path, outcome, agent_id, session_id)\n         VALUES (?1, ?2, ?3, NULL, NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "4d9691cd8980d55b16cadc640cd2d6dc6f9fb5d89b9cf3db59dbe77e8439d3c1"
+}

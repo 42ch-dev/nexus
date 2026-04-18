@@ -89,17 +89,14 @@ pub async fn device_authorization(
 
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
     let verification_uri = "https://auth.42ch.com/activate".to_string();
+    let status = "pending".to_string();
 
     // Store the device code session in SQLite
-    sqlx::query(
+    sqlx::query!(
         "INSERT OR REPLACE INTO device_code_sessions (device_code, user_code, verification_uri, expires_at, status)
-         VALUES (?1, ?2, ?3, ?4, ?5)"
+         VALUES (?, ?, ?, ?, ?)",
+        device_code, user_code, verification_uri, expires_at, status
     )
-    .bind(&device_code)
-    .bind(&user_code)
-    .bind(&verification_uri)
-    .bind(&expires_at)
-    .bind("pending")
     .execute(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -132,17 +129,19 @@ pub async fn exchange_token(
     debug!(device_code = %req.device_code, "Looking up device code session");
 
     // Check the device code session status
-    let session: Option<(String, String)> =
-        sqlx::query_as("SELECT status, user_code FROM device_code_sessions WHERE device_code = ?1")
-            .bind(&req.device_code)
-            .fetch_optional(state.pool())
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("Failed to query device code session: {}", e),
-            })?;
+    let device_code = req.device_code.clone();
+    let session = sqlx::query!(
+        "SELECT status, user_code FROM device_code_sessions WHERE device_code = ?",
+        device_code
+    )
+    .fetch_optional(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("Failed to query device code session: {}", e),
+    })?;
 
-    let (status, user_code) = match session {
+    let session = match session {
         Some(s) => s,
         None => {
             return Ok(Json(serde_json::json!({
@@ -151,6 +150,9 @@ pub async fn exchange_token(
             })));
         }
     };
+
+    let status = &session.status;
+    let user_code = &session.user_code;
 
     if status == "expired" {
         return Ok(Json(serde_json::json!({
@@ -179,10 +181,13 @@ pub async fn exchange_token(
         .await?;
 
     // Clean up device code session
-    let _ = sqlx::query("DELETE FROM device_code_sessions WHERE device_code = ?1")
-        .bind(&req.device_code)
-        .execute(state.pool())
-        .await;
+    let device_code = req.device_code.clone();
+    let _ = sqlx::query!(
+        "DELETE FROM device_code_sessions WHERE device_code = ?",
+        device_code
+    )
+    .execute(state.pool())
+    .await;
 
     info!("Token exchange completed");
     Ok(Json(serde_json::json!({

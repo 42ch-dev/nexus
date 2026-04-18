@@ -38,11 +38,12 @@ mod tests {
         let db_path = tmp.path().join("test.db");
         let pool = Schema::init(&db_path).await.unwrap();
 
-        let tables: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        let tables_raw: Vec<Option<String>> =
+            sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&pool)
                 .await
                 .unwrap();
+        let tables: Vec<String> = tables_raw.into_iter().flatten().collect();
 
         assert!(tables.contains(&"workspace_meta".to_string()));
         assert!(tables.contains(&"creators".to_string()));
@@ -68,11 +69,12 @@ mod tests {
         assert!(path.exists());
 
         // Verify schema initialized
-        let tables: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        let tables_raw: Vec<Option<String>> =
+            sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&pool)
                 .await
                 .unwrap();
+        let tables: Vec<String> = tables_raw.into_iter().flatten().collect();
 
         assert!(tables.contains(&"workspace_meta".to_string()));
     }
@@ -84,22 +86,32 @@ mod tests {
         let pool = Schema::init(&db_path).await.unwrap();
 
         // Verify content column exists (drift fix validation)
-        sqlx::query(
+        let ref_id = "ref_test";
+        let ws_id = "local";
+        let src_type = "pdf";
+        let uri = "test.pdf";
+        let title = "Test";
+        let content = "Extracted text";
+        let scan_status = "pending";
+        let created_at = "2026-01-01T00:00:00Z";
+        sqlx::query!(
             "INSERT INTO reference_sources
              (reference_source_id, workspace_id, source_type, uri, title, content, scan_status, created_at)
-             VALUES ('ref_test', 'local', 'pdf', 'test.pdf', 'Test', 'Extracted text', 'pending', '2026-01-01T00:00:00Z')",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ref_id, ws_id, src_type, uri, title, content, scan_status, created_at
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        let content: Option<String> = sqlx::query_scalar(
-            "SELECT content FROM reference_sources WHERE reference_source_id = 'ref_test'",
+        let result: Option<String> = sqlx::query_scalar!(
+            "SELECT content FROM reference_sources WHERE reference_source_id = ?",
+            ref_id
         )
         .fetch_one(&pool)
         .await
         .unwrap();
 
-        assert_eq!(content, Some("Extracted text".to_string()));
+        assert_eq!(result, Some("Extracted text".to_string()));
     }
 }

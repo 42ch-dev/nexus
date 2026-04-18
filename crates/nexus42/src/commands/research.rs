@@ -122,6 +122,7 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
         status_filter
     {
         println!("  Filter: status={}", filter);
+        // SAFETY: dynamic WHERE clause built from user-provided filter set.
         sqlx::query_as(
             "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ?1 ORDER BY created_at DESC",
         )
@@ -129,11 +130,23 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
         .fetch_all(&pool)
         .await?
     } else {
-        sqlx::query_as(
-            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources ORDER BY created_at DESC",
+        let raw = sqlx::query!(
+            r#"SELECT reference_source_id as "reference_source_id!", source_type as "source_type!", uri as "uri!", title as "title!", scan_status as "scan_status!", created_at as "created_at!" FROM reference_sources ORDER BY created_at DESC"#
         )
         .fetch_all(&pool)
-        .await?
+        .await?;
+        raw.into_iter()
+            .map(|r| {
+                (
+                    r.reference_source_id,
+                    r.source_type,
+                    r.uri,
+                    r.title,
+                    r.scan_status,
+                    r.created_at,
+                )
+            })
+            .collect()
     };
 
     if rows.is_empty() {
@@ -172,25 +185,24 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
 
     if let Some(id) = source_id {
         // Extract by specific ID
-        let result = sqlx::query_as::<_, (String, String, String, String, String, String, Option<String>, Option<String>, Option<String>)>(
-            "SELECT reference_source_id, source_type, uri, title, scan_status, created_at, tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?1",
+        let row = sqlx::query!(
+            r#"SELECT reference_source_id as "reference_source_id!", source_type as "source_type!", uri as "uri!", title as "title!", scan_status as "scan_status!", created_at as "created_at!", tags, content_hash, content FROM reference_sources WHERE reference_source_id = ?1"#,
+            id
         )
-        .bind(id)
         .fetch_optional(&pool)
         .await?;
 
-        match result {
-            Some((
-                ref_id,
-                source_type,
-                uri,
-                title,
-                status,
-                created_at,
-                tags,
-                content_hash,
-                content,
-            )) => {
+        match row {
+            Some(r) => {
+                let ref_id = r.reference_source_id;
+                let source_type = r.source_type;
+                let uri = r.uri;
+                let title = r.title;
+                let status = r.scan_status;
+                let created_at = r.created_at;
+                let tags = r.tags;
+                let content_hash = r.content_hash;
+                let content = r.content;
                 println!("Reference Source: {}", ref_id);
                 println!("  Title:       {}", title);
                 println!("  Type:        {}", source_type);
@@ -233,15 +245,15 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
         }
     } else {
         // Extract all — show count and summary
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM reference_sources WHERE scan_status = 'scanned'",
+        let count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM reference_sources WHERE scan_status = 'scanned'"
         )
         .fetch_one(&pool)
         .await
         .unwrap_or(0);
 
         let with_content: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM reference_sources WHERE content IS NOT NULL")
+            sqlx::query_scalar!("SELECT COUNT(*) FROM reference_sources WHERE content IS NOT NULL")
                 .fetch_one(&pool)
                 .await
                 .unwrap_or(0);
@@ -313,20 +325,19 @@ async fn cache_scan_results_at(
             (None, None, "pending")
         };
 
-        sqlx::query(
+        let full_path_str = full_path.to_string_lossy().to_string();
+        let file_owned = file.clone();
+        let source_type_owned = source_type.to_string();
+        let scan_status_owned = scan_status.to_string();
+        let content_ref = content.as_deref();
+        let content_hash_ref = content_hash.as_deref();
+        let workspace_id = String::from("local");
+        sqlx::query!(
             "INSERT OR IGNORE INTO reference_sources 
              (reference_source_id, workspace_id, source_type, uri, title, scan_status, content, content_hash, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, workspace_id, source_type_owned, full_path_str, file_owned, scan_status_owned, content_ref, content_hash_ref, now
         )
-        .bind(&id)
-        .bind("local")
-        .bind(source_type)
-        .bind(full_path.to_string_lossy().to_string())
-        .bind(file)
-        .bind(scan_status)
-        .bind(&content)
-        .bind(&content_hash)
-        .bind(&now)
         .execute(&pool)
         .await?;
     }

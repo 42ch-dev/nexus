@@ -16,6 +16,7 @@ async fn create_test_state() -> (WorkspaceState, nexus42d::test_utils::TestTempR
         .await
         .unwrap();
 
+    // SAFETY: test-only data setup — inserts mock creators for integration tests.
     sqlx::query(
         "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES ('ctr_test_001', 'Test Creator', 'active', '2026-04-06T00:00:00Z', '{}')"
     )
@@ -23,6 +24,7 @@ async fn create_test_state() -> (WorkspaceState, nexus42d::test_utils::TestTempR
     .await
     .unwrap();
 
+    // SAFETY: test-only data setup — inserts mock reference_sources for integration tests.
     sqlx::query(
         "INSERT INTO reference_sources (reference_source_id, workspace_id, source_type, uri, title, scan_status, created_at) VALUES ('ref_test_001', 'local', 'pdf', 'References/test.pdf', 'Test Reference', 'scanned', '2026-04-06T00:00:00Z')"
     )
@@ -476,6 +478,7 @@ async fn memory_count_pending_reviews_endpoint() {
     let server = TestServer::new(app).unwrap();
 
     // Insert a pending review first
+    // SAFETY: test-only data setup — inserts mock memory_pending_review for count test.
     let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
         .await
         .unwrap();
@@ -506,6 +509,7 @@ async fn memory_delete_pending_review_endpoint() {
     let server = TestServer::new(app).unwrap();
 
     // Insert a pending review first
+    // SAFETY: test-only data setup — inserts mock memory_pending_review for delete test.
     let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
         .await
         .unwrap();
@@ -556,6 +560,7 @@ async fn acp_sessions_list_endpoint() {
     let server = TestServer::new(app).unwrap();
 
     // Insert test sessions directly into the database
+    // SAFETY: test-only data setup — inserts mock acp_sessions for list test.
     let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
         .await
         .unwrap();
@@ -566,6 +571,7 @@ async fn acp_sessions_list_endpoint() {
     .execute(&pool)
     .await
     .unwrap();
+    // SAFETY: test-only data setup — second mock acp_session row.
     sqlx::query(
         "INSERT INTO acp_sessions (session_id, agent_id, created_at, last_active, workspace_hint)
          VALUES ('sess_list_002', 'codex-acp', '2026-04-15T11:00:00Z', '2026-04-15T13:00:00Z', '/tmp/test2')"
@@ -610,6 +616,7 @@ async fn acp_sessions_delete_endpoint() {
     let server = TestServer::new(app).unwrap();
 
     // Insert a test session
+    // SAFETY: test-only data setup — inserts mock acp_session for delete test.
     let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
         .await
         .unwrap();

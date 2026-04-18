@@ -175,11 +175,14 @@ pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, Lo
         key: "db_schema_version".to_string(),
     })?;
 
-    let db_schema_version = row.value.parse::<u32>().map_err(|e| LocalDbError::InvalidVersionValue {
-        key: "db_schema_version".to_string(),
-        value: "".to_string(),
-        reason: e.to_string(),
-    })?;
+    let db_schema_version =
+        row.value
+            .parse::<u32>()
+            .map_err(|e| LocalDbError::InvalidVersionValue {
+                key: "db_schema_version".to_string(),
+                value: "".to_string(),
+                reason: e.to_string(),
+            })?;
 
     let row = sqlx::query_as!(
         WorkspaceMetaRow,
@@ -191,11 +194,14 @@ pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, Lo
         key: "schema_version".to_string(),
     })?;
 
-    let schema_version = row.value.parse::<u32>().map_err(|e| LocalDbError::InvalidVersionValue {
-        key: "schema_version".to_string(),
-        value: "".to_string(),
-        reason: e.to_string(),
-    })?;
+    let schema_version =
+        row.value
+            .parse::<u32>()
+            .map_err(|e| LocalDbError::InvalidVersionValue {
+                key: "schema_version".to_string(),
+                value: "".to_string(),
+                reason: e.to_string(),
+            })?;
 
     Ok(SchemaVersions {
         db_schema_version,

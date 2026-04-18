@@ -138,9 +138,7 @@ impl SessionStorage for SqliteSessionStorage {
         )
         .execute(&*self.pool)
         .await
-        .map_err(|e| {
-            graph_flow::GraphError::StorageError(format!("delete session '{id}': {e}"))
-        })?;
+        .map_err(|e| graph_flow::GraphError::StorageError(format!("delete session '{id}': {e}")))?;
 
         if result.rows_affected() == 0 {
             return Err(graph_flow::GraphError::SessionNotFound(id.to_string()));

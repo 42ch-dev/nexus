@@ -146,9 +146,11 @@ impl DbPool {
             .connect(&url)
             .await
             .map_err(nexus_local_db::LocalDbError::from)?;
+        // SAFETY: PRAGMA statement — no table schema to validate against.
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
             .await?;
+        // SAFETY: PRAGMA statement — no table schema to validate against.
         sqlx::query("PRAGMA foreign_keys = ON")
             .execute(&pool)
             .await?;
@@ -232,18 +234,21 @@ mod tests {
             .map(|i| {
                 let p = pool.clone();
                 tokio::spawn(async move {
-                    sqlx::query("INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?1, ?2, 'active', '2026-01-01T00:00:00Z', '{}')")
-                        .bind(format!("ctr-{}", i))
-                        .bind(format!("Creator {}", i))
-                        .execute(p.pool())
-                        .await
-                        .unwrap();
+                    let cid = format!("ctr-{}", i);
+                    let display_name = format!("Creator {}", i);
+                    sqlx::query!(
+                        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', '2026-01-01T00:00:00Z', '{}')",
+                        cid, display_name
+                    )
+                    .execute(p.pool())
+                    .await
+                    .unwrap();
 
                     let creator_id = format!("ctr-{}", i);
-                    let row: Option<(String,)> = sqlx::query_as(
-                        "SELECT display_name FROM creators WHERE creator_id = ?1"
+                    let row: Option<String> = sqlx::query_scalar!(
+                        "SELECT display_name FROM creators WHERE creator_id = ?",
+                        creator_id
                     )
-                    .bind(&creator_id)
                     .fetch_optional(p.pool())
                     .await
                     .unwrap();

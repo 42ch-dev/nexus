@@ -92,17 +92,17 @@ pub async fn create_pending_review(
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
     // Use INSERT OR IGNORE for idempotent behavior on retries
-    sqlx::query(
+    let pending_id = req.pending_id.clone();
+    let session_id = req.session_id.clone();
+    let creator_id = req.creator_id.clone();
+    let world_id = &req.world_id;
+    let raw_digest = req.raw_digest.clone();
+
+    sqlx::query!(
         "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
     )
-    .bind(&req.pending_id)
-    .bind(&req.session_id)
-    .bind(&req.creator_id)
-    .bind(&req.world_id)
-    .bind(&task_kind)
-    .bind(&req.raw_digest)
-    .bind(&created_at)
     .execute(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -212,11 +212,13 @@ pub async fn list_pending_reviews(
         });
     }
 
-    let pending_reviews = sqlx::query_as::<_, PendingReviewInfo>(
-        "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE creator_id = ?1 ORDER BY created_at DESC",
+    let creator_id_filter = params.creator_id.clone();
+    let pending_reviews = sqlx::query_as!(
+        PendingReviewInfo,
+        r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
+         FROM memory_pending_review WHERE creator_id = ? ORDER BY created_at DESC"#,
+        creator_id_filter
     )
-    .bind(&params.creator_id)
     .fetch_all(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -252,18 +254,20 @@ pub async fn count_pending_reviews(
         });
     }
 
-    let count: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review WHERE creator_id = ?1")
-            .bind(&params.creator_id)
-            .fetch_one(state.pool())
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("failed to count pending reviews: {}", e),
-            })?;
+    let creator_id_filter = params.creator_id.clone();
+    let row = sqlx::query_scalar!(
+        "SELECT COUNT(*) as \"count!\" FROM memory_pending_review WHERE creator_id = ?",
+        creator_id_filter
+    )
+    .fetch_one(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to count pending reviews: {}", e),
+    })?;
 
     Ok(Json(CountPendingReviewsResponse {
-        count: count.0 as usize,
+        count: row as usize,
     }))
 }
 
@@ -302,11 +306,13 @@ pub async fn delete_pending_review(
     }
 
     // Verify ownership before deletion
-    let review: Option<PendingReviewInfo> = sqlx::query_as(
-        "SELECT pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE pending_id = ?1",
+    let pid = pending_id.clone();
+    let review = sqlx::query_as!(
+        PendingReviewInfo,
+        r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
+         FROM memory_pending_review WHERE pending_id = ?1"#,
+        pid
     )
-    .bind(&pending_id)
     .fetch_optional(state.pool())
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -334,14 +340,17 @@ pub async fn delete_pending_review(
     }
 
     // Proceed with deletion
-    let affected = sqlx::query("DELETE FROM memory_pending_review WHERE pending_id = ?1")
-        .bind(&pending_id)
-        .execute(state.pool())
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to delete pending review: {}", e),
-        })?;
+    let pid = pending_id.clone();
+    let affected = sqlx::query!(
+        "DELETE FROM memory_pending_review WHERE pending_id = ?",
+        pid
+    )
+    .execute(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to delete pending review: {}", e),
+    })?;
 
     debug_assert!(
         affected.rows_affected() > 0,
