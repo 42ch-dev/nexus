@@ -130,15 +130,15 @@ git commit -m "refactor(sqlx): migrate nexus-local-db to compile-time checked ma
 - `replay()` and `get()` return 9-tuples — convert to `sqlx::query_as!` with anonymous record struct
 - `stage_if_absent` has a conditional pattern — keep runtime for the conditional branch if needed
 
-- [ ] **Step 1: Convert `outbox.rs` — DML queries**
+- [x] **Step 1: Convert `outbox.rs` — DML queries**
 
 Convert all INSERT/UPDATE/DELETE/SELECT DML queries to macros. Keep DDL and PRAGMAs as runtime.
 
-- [ ] **Step 2: Convert `outbox.rs` — tuple queries**
+- [x] **Step 2: Convert `outbox.rs` — tuple queries**
 
 `replay()` and `get()` return 9-tuples. Use `sqlx::query_as!` returning an anonymous record struct, then map to the tuple type.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 cargo check -p nexus-sync
@@ -146,7 +146,7 @@ cargo test -p nexus-sync
 cargo clippy -p nexus-sync -- -D warnings
 ```
 
-- [ ] **Step 4: Generate .sqlx/ metadata and commit**
+- [x] **Step 4: Generate .sqlx/ metadata and commit**
 
 ```bash
 export DATABASE_URL="sqlite:.sqlx/state.db?mode=rwc"
