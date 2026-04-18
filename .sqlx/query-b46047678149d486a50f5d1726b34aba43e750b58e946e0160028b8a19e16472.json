@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reference_source_id as \"reference_source_id!\", source_type, title, scan_status, created_at\n         FROM reference_sources ORDER BY created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference_source_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_type",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "scan_status",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b46047678149d486a50f5d1726b34aba43e750b58e946e0160028b8a19e16472"
+}

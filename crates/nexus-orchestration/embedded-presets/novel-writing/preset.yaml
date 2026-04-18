@@ -1,0 +1,94 @@
+preset:
+  id: novel-writing
+  version: 1
+  kind: creator
+  description: "A multi-phase novel writing workflow: gather inspiration, brainstorm, outline, and draft"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+  initial: gathering
+  terminal: done
+
+states:
+  - id: gathering
+    description: "Collect inspiration and research directions"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/gathering.md
+          vars:
+            topic: "{{preset.input.topic}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/gathering-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT6H"
+    next: brainstorming
+
+  - id: brainstorming
+    description: "Run diverge-cluster-select brainstorm on the topic"
+    enter:
+      - kind: inner_graph
+        name: brainstorm_graph
+    exit_when:
+      kind: graph_complete
+    next: outlining
+
+  - id: outlining
+    description: "Generate a structured outline for the novel"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/outlining.md
+    exit_when:
+      kind: manual
+    next: drafting
+    context_update:
+      op:
+        kind: append
+      template_file: prompts/outlining-ctx-update.md
+
+  - id: drafting
+    description: "Draft the novel via intro + body pipeline"
+    enter:
+      - kind: inner_graph
+        name: drafting_graph
+    exit_when:
+      kind: graph_complete
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  brainstorm_graph:
+    nodes:
+      - id: diverge
+        kind: acp_prompt
+        template_file: prompts/brainstorm-diverge.md
+        tool_policy: auto_grant_read_only
+      - id: cluster
+        kind: acp_prompt
+        depends_on: [diverge]
+        template_file: prompts/brainstorm-cluster.md
+      - id: select
+        kind: acp_prompt
+        depends_on: [cluster]
+        template_file: prompts/brainstorm-select.md
+    output_binding: select.text
+
+  drafting_graph:
+    nodes:
+      - id: draft_intro
+        kind: acp_prompt
+        template_file: prompts/draft-intro.md
+        tool_policy: auto_grant_read_only
+      - id: draft_body
+        kind: acp_prompt
+        depends_on: [draft_intro]
+        template_file: prompts/draft-body.md
+        tool_policy: auto_grant_read_only
+    output_binding: draft_body.text

@@ -8,7 +8,6 @@
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 /// Local identity type enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,15 +137,20 @@ impl LocalIdentity {
 
 // ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
-impl TryFrom<nexus_contracts::LocalIdentity> for LocalIdentity {
+use nexus_contracts::local::domain::local_identity::IdentityType as ContractIdentityType;
+
+impl TryFrom<nexus_contracts::local::domain::LocalIdentity> for LocalIdentity {
     type Error = DomainError;
 
-    fn try_from(c: nexus_contracts::LocalIdentity) -> Result<Self, Self::Error> {
+    fn try_from(c: nexus_contracts::local::domain::LocalIdentity) -> Result<Self, Self::Error> {
+        let identity_type = match c.identity_type {
+            ContractIdentityType::Anonymous => LocalIdentityType::Anonymous,
+            ContractIdentityType::Persistent => LocalIdentityType::Persistent,
+        };
         Ok(Self {
             schema_version: c.schema_version,
             creator_id: c.creator_id,
-            identity_type: LocalIdentityType::from_str(&c.identity_type)
-                .map_err(DomainError::InvalidIdentityType)?,
+            identity_type,
             display_name: c.display_name,
             created_at: c.created_at,
             platform_linked: c.platform_linked,
@@ -155,12 +159,16 @@ impl TryFrom<nexus_contracts::LocalIdentity> for LocalIdentity {
     }
 }
 
-impl From<LocalIdentity> for nexus_contracts::LocalIdentity {
+impl From<LocalIdentity> for nexus_contracts::local::domain::LocalIdentity {
     fn from(d: LocalIdentity) -> Self {
+        let identity_type = match d.identity_type {
+            LocalIdentityType::Anonymous => ContractIdentityType::Anonymous,
+            LocalIdentityType::Persistent => ContractIdentityType::Persistent,
+        };
         Self {
             schema_version: d.schema_version,
             creator_id: d.creator_id,
-            identity_type: d.identity_type.as_str().to_string(),
+            identity_type,
             display_name: d.display_name,
             created_at: d.created_at,
             platform_linked: d.platform_linked,
@@ -208,6 +216,7 @@ pub fn is_valid_creator_id(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_create_anonymous() {
@@ -346,28 +355,12 @@ mod tests {
     #[test]
     fn test_contract_roundtrip() {
         let identity = LocalIdentity::create_persistent(Some("Test"));
-        let contract: nexus_contracts::LocalIdentity = identity.clone().into();
+        let contract: nexus_contracts::local::domain::LocalIdentity = identity.clone().into();
         let back: LocalIdentity = contract.try_into().unwrap();
         assert_eq!(identity.creator_id, back.creator_id);
         assert_eq!(identity.identity_type, back.identity_type);
         assert_eq!(identity.display_name, back.display_name);
         assert_eq!(identity.platform_linked, back.platform_linked);
-    }
-
-    #[test]
-    fn test_contract_try_from_invalid_identity_type() {
-        let contract = nexus_contracts::LocalIdentity {
-            schema_version: 1,
-            creator_id: "ctr_test123".to_string(),
-            identity_type: "unknown_type".to_string(),
-            display_name: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            platform_linked: false,
-            platform_creator_id: None,
-        };
-        let result = LocalIdentity::try_from(contract);
-        assert!(result.is_err());
-        assert!(matches!(result, Err(DomainError::InvalidIdentityType(_))));
     }
 
     #[test]

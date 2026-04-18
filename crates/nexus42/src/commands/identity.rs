@@ -13,9 +13,8 @@ use nexus_domain::local_identity::{LocalIdentity, LocalIdentityType};
 use nexus_domain::{is_valid_creator_id, DomainError};
 use nexus_local_db::{
     create_local_identity, get_local_identity, link_to_platform, list_local_identities,
-    unlink_from_platform, RuntimeRole,
+    unlink_from_platform,
 };
-use rusqlite::Connection;
 use std::str::FromStr;
 
 #[derive(Debug, Subcommand)]
@@ -65,19 +64,19 @@ pub enum IdentityKindArg {
 /// Run identity command.
 pub async fn run(cmd: IdentityCommand, _config: &CliConfig) -> Result<()> {
     match cmd {
-        IdentityCommand::List => list_identities(),
-        IdentityCommand::Create { kind, name } => create_identity(kind, name),
-        IdentityCommand::Use { creator_id } => use_identity(creator_id),
+        IdentityCommand::List => list_identities().await,
+        IdentityCommand::Create { kind, name } => create_identity(kind, name).await,
+        IdentityCommand::Use { creator_id } => use_identity(creator_id).await,
         IdentityCommand::Link {
             creator_id,
             platform_id,
-        } => link_identity(creator_id, platform_id),
-        IdentityCommand::Unlink { creator_id } => unlink_identity(creator_id),
+        } => link_identity(creator_id, platform_id).await,
+        IdentityCommand::Unlink { creator_id } => unlink_identity(creator_id).await,
     }
 }
 
 /// Open or create the global identity database at `~/.nexus42/state.db`.
-fn open_global_db() -> Result<Connection> {
+async fn open_global_db() -> Result<nexus_local_db::SqlitePool> {
     let home = config::user_home_dir()?;
     let nexus_dir = home.join(".nexus42");
 
@@ -85,15 +84,13 @@ fn open_global_db() -> Result<Connection> {
     std::fs::create_dir_all(&nexus_dir)?;
 
     let db_path = nexus_dir.join("state.db");
-    let conn = Connection::open(&db_path)?;
-    nexus_local_db::init(&conn, RuntimeRole::Cli)?;
-    Ok(conn)
+    crate::db::Schema::init(&db_path).await.map_err(Into::into)
 }
 
 /// List all local identities.
-fn list_identities() -> Result<()> {
-    let conn = open_global_db()?;
-    let identities = list_local_identities(&conn)?;
+async fn list_identities() -> Result<()> {
+    let pool = open_global_db().await?;
+    let identities = list_local_identities(&pool).await?;
 
     if identities.is_empty() {
         println!("No local identities found.");
@@ -103,6 +100,7 @@ fn list_identities() -> Result<()> {
 
     // Use resolve_active_identity for consistency (R4: unified resolution)
     let active_id = resolve_active_identity()
+        .await
         .ok()
         .flatten()
         .map(|r| r.creator_id);
@@ -149,7 +147,7 @@ fn list_identities() -> Result<()> {
 }
 
 /// Create a new local identity.
-fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
+async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
     // R3(identity): Validate display_name — reject empty or whitespace-only
     let trimmed_name = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
     if let Some(raw) = &name {
@@ -169,14 +167,15 @@ fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
 
     if is_persistent {
         // Persist to SQLite
-        let conn = open_global_db()?;
+        let pool = open_global_db().await?;
         create_local_identity(
-            &conn,
+            &pool,
             &identity.creator_id,
             identity.identity_type.as_str(),
             identity.display_name.as_deref(),
             &identity.created_at,
-        )?;
+        )
+        .await?;
     }
 
     println!(
@@ -208,10 +207,10 @@ fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
 /// Wires through [`resolve_active_identity`] internally: after verifying
 /// the identity exists and setting it active, the function returns the
 /// resolved identity so callers can use the same resolution path everywhere.
-fn use_identity(creator_id: String) -> Result<()> {
+async fn use_identity(creator_id: String) -> Result<()> {
     // Verify identity exists
-    let conn = open_global_db()?;
-    let _identity = get_local_identity(&conn, &creator_id)?.ok_or_else(|| {
+    let pool = open_global_db().await?;
+    let _identity = get_local_identity(&pool, &creator_id).await?.ok_or_else(|| {
         CliError::Other(format!(
             "Local identity '{}' not found. Run `nexus42 identity list` to see available identities.",
             creator_id
@@ -223,7 +222,7 @@ fn use_identity(creator_id: String) -> Result<()> {
     cli_config.save()?;
 
     // Verify the resolution path works
-    let resolved = resolve_active_identity()?;
+    let resolved = resolve_active_identity().await?;
     match &resolved {
         Some(r) => {
             println!("Active identity set to: {}", r.creator_id);
@@ -242,7 +241,7 @@ fn use_identity(creator_id: String) -> Result<()> {
 }
 
 /// Link a local identity to a platform Creator.
-fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
+async fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
     if !is_valid_creator_id(&platform_id) {
         return Err(DomainError::InvalidIdFormat(format!(
             "platform_id '{}' does not match CreatorId pattern (expected: ctr_ followed by alphanumeric characters)",
@@ -251,17 +250,17 @@ fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
         .into());
     }
 
-    let conn = open_global_db()?;
-    link_to_platform(&conn, &creator_id, &platform_id)?;
+    let pool = open_global_db().await?;
+    link_to_platform(&pool, &creator_id, &platform_id).await?;
 
     println!("Linked {} to platform creator: {}", creator_id, platform_id);
     Ok(())
 }
 
 /// Unlink a local identity from its platform Creator.
-fn unlink_identity(creator_id: String) -> Result<()> {
-    let conn = open_global_db()?;
-    unlink_from_platform(&conn, &creator_id)?;
+async fn unlink_identity(creator_id: String) -> Result<()> {
+    let pool = open_global_db().await?;
+    unlink_from_platform(&pool, &creator_id).await?;
 
     println!("Unlinked {} from platform creator.", creator_id);
     Ok(())
@@ -278,7 +277,7 @@ fn unlink_identity(creator_id: String) -> Result<()> {
 /// All commands that need the active identity should call this function.
 ///
 /// Returns the resolved identity info or `None` if no identity is configured.
-pub fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
+pub async fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
     let cli_config = CliConfig::load()?;
     let creator_id = match &cli_config.active_creator_id {
         Some(id) => id.clone(),
@@ -286,8 +285,8 @@ pub fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
     };
 
     // Check if it's a persistent identity in the DB
-    let conn = open_global_db()?;
-    let row = get_local_identity(&conn, &creator_id)?;
+    let pool = open_global_db().await?;
+    let row = get_local_identity(&pool, &creator_id).await?;
 
     match row {
         Some(db_row) => {

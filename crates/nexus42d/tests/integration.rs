@@ -8,28 +8,36 @@ use axum_test::TestServer;
 use nexus42d::{api::handlers, test_utils::create_test_workspace, workspace::WorkspaceState};
 
 /// Create a test workspace state with temp directory (ADR-014 layout under `HOME`).
-fn create_test_state() -> (WorkspaceState, nexus42d::test_utils::TestTempRoot) {
-    let (tmp, nexus_home, db_path) = create_test_workspace();
-    let conn = rusqlite::Connection::open(&db_path).unwrap();
+async fn create_test_state() -> (WorkspaceState, nexus42d::test_utils::TestTempRoot) {
+    let (tmp, nexus_home, db_path) = create_test_workspace().await;
 
     // Insert test data
-    conn.execute(
-        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES ('ctr_test_001', 'Test Creator', 'active', '2026-04-06T00:00:00Z', '{}')",
-        [],
-    ).unwrap();
+    let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
+        .await
+        .unwrap();
 
-    conn.execute(
-        "INSERT INTO reference_sources (reference_source_id, workspace_id, source_type, uri, title, scan_status, created_at) VALUES ('ref_test_001', 'local', 'pdf', 'References/test.pdf', 'Test Reference', 'scanned', '2026-04-06T00:00:00Z')",
-        [],
-    ).unwrap();
+    // SAFETY: test-only data setup — inserts mock creators for integration tests.
+    sqlx::query(
+        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES ('ctr_test_001', 'Test Creator', 'active', '2026-04-06T00:00:00Z', '{}')"
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
-    drop(conn);
+    // SAFETY: test-only data setup — inserts mock reference_sources for integration tests.
+    sqlx::query(
+        "INSERT INTO reference_sources (reference_source_id, workspace_id, source_type, uri, title, scan_status, created_at) VALUES ('ref_test_001', 'local', 'pdf', 'References/test.pdf', 'Test Reference', 'scanned', '2026-04-06T00:00:00Z')"
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let state = WorkspaceState::new_for_testing(
         nexus_home,
         db_path,
         Some("/tmp/test-workspace".to_string()),
-    );
+    )
+    .await;
 
     (state, tmp)
 }
@@ -77,7 +85,7 @@ fn build_test_app(state: WorkspaceState) -> Router {
 
 #[tokio::test]
 async fn health_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -91,7 +99,7 @@ async fn health_endpoint() {
 
 #[tokio::test]
 async fn status_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -106,7 +114,7 @@ async fn status_endpoint() {
 
 #[tokio::test]
 async fn daemon_status_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -121,7 +129,7 @@ async fn daemon_status_endpoint() {
 
 #[tokio::test]
 async fn workspace_info_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -136,7 +144,7 @@ async fn workspace_info_endpoint() {
 
 #[tokio::test]
 async fn auth_status_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -149,7 +157,7 @@ async fn auth_status_endpoint() {
 
 #[tokio::test]
 async fn creators_list_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -165,7 +173,7 @@ async fn creators_list_endpoint() {
 
 #[tokio::test]
 async fn manuscript_status_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -179,7 +187,7 @@ async fn manuscript_status_endpoint() {
 
 #[tokio::test]
 async fn references_list_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -196,7 +204,7 @@ async fn references_list_endpoint() {
 
 #[tokio::test]
 async fn context_assemble_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -224,7 +232,7 @@ async fn context_assemble_endpoint() {
 /// Integration test: context/assemble returns 403 for local_only mode
 #[tokio::test]
 async fn context_assemble_blocked_for_local_only() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -251,7 +259,7 @@ async fn context_assemble_blocked_for_local_only() {
 /// to different endpoints without deadlock or pool exhaustion.
 #[tokio::test]
 async fn concurrent_handler_requests_succeed() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -361,7 +369,7 @@ fn build_extended_test_app(state: WorkspaceState) -> Router {
 /// Test: create pending review endpoint
 #[tokio::test]
 async fn memory_create_pending_review_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -388,7 +396,7 @@ async fn memory_create_pending_review_endpoint() {
 /// Test: create pending review with idempotent retry (same pending_id)
 #[tokio::test]
 async fn memory_create_pending_review_idempotent_retry() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -418,7 +426,7 @@ async fn memory_create_pending_review_idempotent_retry() {
 /// Test: create pending review rejects invalid creator_id (must match ctr_<alphanumeric>)
 #[tokio::test]
 async fn memory_create_pending_review_rejects_invalid_creator_id() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -441,7 +449,7 @@ async fn memory_create_pending_review_rejects_invalid_creator_id() {
 /// Test: create pending review rejects empty pending_id
 #[tokio::test]
 async fn memory_create_pending_review_rejects_empty_pending_id() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -463,21 +471,24 @@ async fn memory_create_pending_review_rejects_empty_pending_id() {
 /// Test: count pending reviews endpoint
 #[tokio::test]
 async fn memory_count_pending_reviews_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let db_path = state.database_path();
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
 
     // Insert a pending review first
-    let conn = rusqlite::Connection::open(db_path).unwrap();
-    conn.execute(
+    // SAFETY: test-only data setup — inserts mock memory_pending_review for count test.
+    let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
+        .await
+        .unwrap();
+    sqlx::query(
         "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-         VALUES ('mem_count_001', 'sess_count_001', 'ctr_test001', 'wld_001', 'brainstorm', 'digest content', '2026-04-15T00:00:00Z')",
-        [],
+         VALUES ('mem_count_001', 'sess_count_001', 'ctr_test001', 'wld_001', 'brainstorm', 'digest content', '2026-04-15T00:00:00Z')"
     )
+    .execute(&pool)
+    .await
     .unwrap();
-    drop(conn);
 
     let response = server
         .get("/v1/local/memory/pending-review/count?creator_id=ctr_test001")
@@ -491,21 +502,24 @@ async fn memory_count_pending_reviews_endpoint() {
 /// Test: delete pending review endpoint
 #[tokio::test]
 async fn memory_delete_pending_review_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let db_path = state.database_path();
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
 
     // Insert a pending review first
-    let conn = rusqlite::Connection::open(db_path).unwrap();
-    conn.execute(
+    // SAFETY: test-only data setup — inserts mock memory_pending_review for delete test.
+    let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
+        .await
+        .unwrap();
+    sqlx::query(
         "INSERT INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-         VALUES ('mem_delete_001', 'sess_delete_001', 'ctr_test001', 'wld_001', 'brainstorm', 'digest content', '2026-04-15T00:00:00Z')",
-        [],
+         VALUES ('mem_delete_001', 'sess_delete_001', 'ctr_test001', 'wld_001', 'brainstorm', 'digest content', '2026-04-15T00:00:00Z')"
     )
+    .execute(&pool)
+    .await
     .unwrap();
-    drop(conn);
 
     let response = server
         .delete("/v1/local/memory/pending-review/mem_delete_001?creator_id=ctr_test001")
@@ -520,7 +534,7 @@ async fn memory_delete_pending_review_endpoint() {
 /// Test: delete pending review returns 404 for non-existent id
 #[tokio::test]
 async fn memory_delete_pending_review_not_found() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -539,27 +553,32 @@ async fn memory_delete_pending_review_not_found() {
 /// Test: list ACP sessions endpoint
 #[tokio::test]
 async fn acp_sessions_list_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let db_path = state.database_path();
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
 
     // Insert test sessions directly into the database
-    let conn = rusqlite::Connection::open(db_path).unwrap();
-    conn.execute(
+    // SAFETY: test-only data setup — inserts mock acp_sessions for list test.
+    let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
+        .await
+        .unwrap();
+    sqlx::query(
         "INSERT INTO acp_sessions (session_id, agent_id, created_at, last_active, workspace_hint)
-         VALUES ('sess_list_001', 'claude-acp', '2026-04-15T10:00:00Z', '2026-04-15T12:00:00Z', '/tmp/test')",
-        [],
+         VALUES ('sess_list_001', 'claude-acp', '2026-04-15T10:00:00Z', '2026-04-15T12:00:00Z', '/tmp/test')"
     )
+    .execute(&pool)
+    .await
     .unwrap();
-    conn.execute(
+    // SAFETY: test-only data setup — second mock acp_session row.
+    sqlx::query(
         "INSERT INTO acp_sessions (session_id, agent_id, created_at, last_active, workspace_hint)
-         VALUES ('sess_list_002', 'codex-acp', '2026-04-15T11:00:00Z', '2026-04-15T13:00:00Z', '/tmp/test2')",
-        [],
+         VALUES ('sess_list_002', 'codex-acp', '2026-04-15T11:00:00Z', '2026-04-15T13:00:00Z', '/tmp/test2')"
     )
+    .execute(&pool)
+    .await
     .unwrap();
-    drop(conn);
 
     let response = server.get("/v1/local/acp/sessions").await;
 
@@ -573,7 +592,7 @@ async fn acp_sessions_list_endpoint() {
 /// Test: list ACP sessions returns empty array when no sessions
 #[tokio::test]
 async fn acp_sessions_list_empty() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -590,21 +609,24 @@ async fn acp_sessions_list_empty() {
 /// Test: delete ACP session endpoint
 #[tokio::test]
 async fn acp_sessions_delete_endpoint() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let db_path = state.database_path();
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
 
     // Insert a test session
-    let conn = rusqlite::Connection::open(db_path).unwrap();
-    conn.execute(
+    // SAFETY: test-only data setup — inserts mock acp_session for delete test.
+    let pool = nexus_local_db::open_pool(std::path::Path::new(&db_path))
+        .await
+        .unwrap();
+    sqlx::query(
         "INSERT INTO acp_sessions (session_id, agent_id, created_at, last_active, workspace_hint)
-         VALUES ('sess_delete_001', 'claude-acp', '2026-04-15T10:00:00Z', '2026-04-15T12:00:00Z', '/tmp/test')",
-        [],
+         VALUES ('sess_delete_001', 'claude-acp', '2026-04-15T10:00:00Z', '2026-04-15T12:00:00Z', '/tmp/test')"
     )
+    .execute(&pool)
+    .await
     .unwrap();
-    drop(conn);
 
     let response = server
         .delete("/v1/local/acp/sessions/sess_delete_001")
@@ -619,7 +641,7 @@ async fn acp_sessions_delete_endpoint() {
 /// Test: delete ACP session returns deleted=false for non-existent session
 #[tokio::test]
 async fn acp_sessions_delete_not_found() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -644,7 +666,7 @@ async fn acp_sessions_delete_not_found() {
 /// Uses workspace-safe fixture path (under workspace root) to pass path validation.
 #[tokio::test]
 async fn acp_tool_execute_read_file_success() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state.clone());
 
     let server = TestServer::new(app).unwrap();
@@ -682,7 +704,7 @@ async fn acp_tool_execute_read_file_success() {
 /// Uses workspace-safe fixture path (under workspace root) to pass path validation.
 #[tokio::test]
 async fn acp_tool_execute_write_file_success() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state.clone());
 
     let server = TestServer::new(app).unwrap();
@@ -723,7 +745,7 @@ async fn acp_tool_execute_write_file_success() {
 /// Test: ACP tool execute endpoint - rejects unsupported tool
 #[tokio::test]
 async fn acp_tool_execute_unsupported_tool() {
-    let (state, _tmp) = create_test_state();
+    let (state, _tmp) = create_test_state().await;
     let app = build_extended_test_app(state);
 
     let server = TestServer::new(app).unwrap();
@@ -747,8 +769,9 @@ async fn acp_tool_execute_unsupported_tool() {
 /// Test: sync status endpoint returns zeroed status when outbox not configured
 #[tokio::test]
 async fn sync_status_endpoint_no_outbox() {
-    let (tmp, nexus_home, db_path) = create_test_workspace();
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, Some("/tmp/test".to_string()));
+    let (tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state =
+        WorkspaceState::new_for_testing(nexus_home, db_path, Some("/tmp/test".to_string())).await;
     let state_clone = state.clone();
     let app = build_extended_test_app(state);
 

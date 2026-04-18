@@ -170,6 +170,60 @@ pub fn create_router(state: WorkspaceState) -> Router {
             axum::routing::delete(handlers::memory::delete_pending_review),
         );
 
+    // Orchestration engine-session routes (unguarded — local-only API)
+    let orchestration_routes = Router::new()
+        .route(
+            "/v1/local/orchestration/sessions",
+            get(handlers::orchestration::sessions::list_sessions)
+                .post(handlers::orchestration::sessions::create_session),
+        )
+        .route(
+            "/v1/local/orchestration/sessions/{session_id}",
+            get(handlers::orchestration::sessions::get_session),
+        )
+        .route(
+            "/v1/local/orchestration/sessions/{session_id}/signal",
+            post(handlers::orchestration::sessions::signal_session),
+        )
+        .route(
+            "/v1/local/orchestration/capabilities",
+            get(handlers::orchestration::capabilities::list_capabilities),
+        )
+        .route(
+            "/v1/local/orchestration/presets",
+            get(handlers::orchestration::presets::list_presets),
+        )
+        .route(
+            "/v1/local/orchestration/presets/{id}:reload",
+            axum::routing::post(handlers::orchestration::presets::reload_preset),
+        );
+
+    // Schedule management routes (WS7) — unguarded, local-only API
+    let schedule_routes = Router::new()
+        .route(
+            "/v1/local/orchestration/schedules",
+            axum::routing::post(handlers::orchestration::schedules::add_schedule)
+                .get(handlers::orchestration::schedules::list_schedules),
+        )
+        .route(
+            "/v1/local/orchestration/schedules/{schedule_id}",
+            axum::routing::get(handlers::orchestration::schedules::inspect_schedule)
+                .delete(handlers::orchestration::schedules::delete_schedule),
+        )
+        .route(
+            "/v1/local/orchestration/schedules/{schedule_id}/core-context",
+            axum::routing::patch(handlers::orchestration::schedules::edit_core_context)
+                .get(handlers::orchestration::schedules::get_core_context),
+        )
+        .route(
+            "/v1/local/orchestration/schedules/{schedule_id}/core-context-history",
+            axum::routing::get(handlers::orchestration::schedules::get_core_context_history),
+        )
+        .route(
+            "/v1/local/orchestration/schedules/{schedule_id}/signal",
+            axum::routing::post(handlers::orchestration::schedules::signal_schedule),
+        );
+
     Router::new()
         .merge(runtime_routes)
         .merge(monitoring_routes)
@@ -186,6 +240,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(acp_routes)
         .merge(session_routes)
         .merge(memory_routes)
+        .merge(orchestration_routes)
+        .merge(schedule_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

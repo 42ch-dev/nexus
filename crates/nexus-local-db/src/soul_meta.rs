@@ -2,14 +2,18 @@
 //!
 //! Tracks per-creator SOUL.md metadata for fast lookups without file I/O.
 
-use rusqlite::{params, Connection};
+use sqlx::SqlitePool;
+
+use crate::error::LocalDbError;
 
 /// SOUL metadata record.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SoulMeta {
     pub creator_id: String,
     pub file_path: String,
-    pub schema_version: u32,
+    /// Schema version of the soul's data. Changed from `u32` to `i64` during
+    /// the WS8 sqlx migration (rusqlite → sqlx) for SQLx type compatibility.
+    pub schema_version: i64,
     pub personality_hash: Option<String>,
     pub experience_hash: Option<String>,
     pub created_at: String,
@@ -17,75 +21,68 @@ pub struct SoulMeta {
 }
 
 /// Upsert SOUL metadata (insert or update).
-pub fn upsert(conn: &Connection, meta: &SoulMeta) -> Result<(), rusqlite::Error> {
-    conn.execute(
+pub async fn upsert(pool: &SqlitePool, meta: &SoulMeta) -> Result<(), LocalDbError> {
+    sqlx::query!(
         "INSERT INTO soul_meta (creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(creator_id) DO UPDATE SET
            file_path = excluded.file_path,
            schema_version = excluded.schema_version,
            personality_hash = excluded.personality_hash,
            experience_hash = excluded.experience_hash,
            updated_at = excluded.updated_at",
-        params![
-            meta.creator_id,
-            meta.file_path,
-            meta.schema_version,
-            meta.personality_hash,
-            meta.experience_hash,
-            meta.created_at,
-            meta.updated_at,
-        ],
-    )?;
+        meta.creator_id,
+        meta.file_path,
+        meta.schema_version,
+        meta.personality_hash,
+        meta.experience_hash,
+        meta.created_at,
+        meta.updated_at
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 /// Get SOUL metadata for a creator.
-pub fn get(conn: &Connection, creator_id: &str) -> Result<Option<SoulMeta>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at
-         FROM soul_meta WHERE creator_id = ?1",
-    )?;
-    let result = stmt.query_row(params![creator_id], |row| {
-        Ok(SoulMeta {
-            creator_id: row.get(0)?,
-            file_path: row.get(1)?,
-            schema_version: row.get(2)?,
-            personality_hash: row.get(3)?,
-            experience_hash: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
-        })
-    });
-    match result {
-        Ok(meta) => Ok(Some(meta)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e),
-    }
+pub async fn get(pool: &SqlitePool, creator_id: &str) -> Result<Option<SoulMeta>, LocalDbError> {
+    let row = sqlx::query_as!(
+        SoulMeta,
+        "SELECT creator_id as \"creator_id!\", file_path as \"file_path!\",
+                schema_version as \"schema_version!\",
+                personality_hash, experience_hash,
+                created_at as \"created_at!\", updated_at as \"updated_at!\"
+         FROM soul_meta WHERE creator_id = ?",
+        creator_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
 }
 
 /// Delete SOUL metadata for a creator.
-pub fn delete(conn: &Connection, creator_id: &str) -> Result<bool, rusqlite::Error> {
-    let affected = conn.execute(
-        "DELETE FROM soul_meta WHERE creator_id = ?1",
-        params![creator_id],
-    )?;
-    Ok(affected > 0)
+pub async fn delete(pool: &SqlitePool, creator_id: &str) -> Result<bool, LocalDbError> {
+    let result = sqlx::query!("DELETE FROM soul_meta WHERE creator_id = ?", creator_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn setup_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(crate::schema::SOUL_META_TABLE).unwrap();
-        conn
+    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::open_pool(&db_path).await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        (pool, dir)
     }
 
-    #[test]
-    fn upsert_and_get() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn upsert_and_get() {
+        let (pool, _dir) = fresh_pool().await;
         let meta = SoulMeta {
             creator_id: "ctr_test".to_string(),
             file_path: "/tmp/SOUL.md".to_string(),
@@ -95,17 +92,17 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
-        upsert(&conn, &meta).unwrap();
+        upsert(&pool, &meta).await.unwrap();
 
-        let fetched = get(&conn, "ctr_test").unwrap().unwrap();
+        let fetched = get(&pool, "ctr_test").await.unwrap().unwrap();
         assert_eq!(fetched.creator_id, "ctr_test");
         assert_eq!(fetched.personality_hash.as_deref(), Some("abc"));
         assert_eq!(fetched.experience_hash, None);
     }
 
-    #[test]
-    fn upsert_updates_existing() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn upsert_updates_existing() {
+        let (pool, _dir) = fresh_pool().await;
         let meta = SoulMeta {
             creator_id: "ctr_test".to_string(),
             file_path: "/tmp/SOUL.md".to_string(),
@@ -115,29 +112,29 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
-        upsert(&conn, &meta).unwrap();
+        upsert(&pool, &meta).await.unwrap();
 
         let updated = SoulMeta {
             personality_hash: Some("new_hash".to_string()),
             updated_at: "2026-01-02T00:00:00Z".to_string(),
             ..meta
         };
-        upsert(&conn, &updated).unwrap();
+        upsert(&pool, &updated).await.unwrap();
 
-        let fetched = get(&conn, "ctr_test").unwrap().unwrap();
+        let fetched = get(&pool, "ctr_test").await.unwrap().unwrap();
         assert_eq!(fetched.personality_hash.as_deref(), Some("new_hash"));
         assert_eq!(fetched.updated_at, "2026-01-02T00:00:00Z");
     }
 
-    #[test]
-    fn get_nonexistent_returns_none() {
-        let conn = setup_db();
-        assert!(get(&conn, "ctr_ghost").unwrap().is_none());
+    #[tokio::test]
+    async fn get_nonexistent_returns_none() {
+        let (pool, _dir) = fresh_pool().await;
+        assert!(get(&pool, "ctr_ghost").await.unwrap().is_none());
     }
 
-    #[test]
-    fn delete_existing() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn delete_existing() {
+        let (pool, _dir) = fresh_pool().await;
         let meta = SoulMeta {
             creator_id: "ctr_del".to_string(),
             file_path: "/tmp/SOUL.md".to_string(),
@@ -147,14 +144,14 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
-        upsert(&conn, &meta).unwrap();
-        assert!(delete(&conn, "ctr_del").unwrap());
-        assert!(get(&conn, "ctr_del").unwrap().is_none());
+        upsert(&pool, &meta).await.unwrap();
+        assert!(delete(&pool, "ctr_del").await.unwrap());
+        assert!(get(&pool, "ctr_del").await.unwrap().is_none());
     }
 
-    #[test]
-    fn delete_nonexistent_returns_false() {
-        let conn = setup_db();
-        assert!(!delete(&conn, "ctr_ghost").unwrap());
+    #[tokio::test]
+    async fn delete_nonexistent_returns_false() {
+        let (pool, _dir) = fresh_pool().await;
+        assert!(!delete(&pool, "ctr_ghost").await.unwrap());
     }
 }

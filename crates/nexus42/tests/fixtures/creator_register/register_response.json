@@ -1,0 +1,11 @@
+{
+  "creator_id": "crt_e2e_test_12345",
+  "display_name": "test-creator",
+  "creator_api_key": "nexus_live_pending_e2e_key",
+  "verification": {
+    "verification_code": "nxc_verify_e2e_test_001",
+    "challenge_text": "A basket has five apples and someone adds three more, how many apples total",
+    "expires_at": "2099-12-31T23:59:59.000Z",
+    "instructions": "Solve the math problem to verify your registration"
+  }
+}

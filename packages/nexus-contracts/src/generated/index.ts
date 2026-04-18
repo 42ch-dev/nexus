@@ -10,32 +10,23 @@
 export * from './CommonTypes';
 
 // Per-schema modules (stable order: sorted schema paths at load time)
-export * from './RegistryManifest';
 export * from './ConflictResponse';
 export * from './SyncPullRequest';
 export * from './SyncPullResponse';
 export * from './VersionRef';
-export * from './AgentProfile';
 export * from './Bundle';
 export * from './Creator';
 export * from './Delta';
 export * from './ForkBranch';
 export * from './KeyBlock';
-export * from './LocalIdentity';
-export * from './ManuscriptState';
 export * from './Memory';
-export * from './OutboxEntry';
 export * from './Pairing';
-export * from './ReferenceSource';
-export * from './RuntimeMode';
 export * from './StoryManifest';
 export * from './SyncCommand';
 export * from './TimelineEvent';
 export * from './User';
-export * from './WorkspaceBinding';
 export * from './WorldMembership';
 export * from './World';
-export * from './Meta';
 export * from './ContextAssemblyV1';
 export * from './CreatorRuntimePolicyResponse';
 export * from './ExploreAiAnswerRequest';
@@ -73,32 +64,23 @@ export * from './WorldSnapshotResponse';
 
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
-  RegistryManifest: 1,
   ConflictResponse: 1,
   SyncPullRequest: 1,
   SyncPullResponse: 1,
   VersionRef: 1,
-  AgentProfile: 1,
   Bundle: 1,
   Creator: 1,
   Delta: 1,
   ForkBranch: 1,
   KeyBlock: 1,
-  LocalIdentity: 1,
-  ManuscriptState: 1,
   Memory: 1,
-  OutboxEntry: 1,
   Pairing: 1,
-  ReferenceSource: 1,
-  RuntimeMode: 1,
   StoryManifest: 1,
   SyncCommand: 1,
   TimelineEvent: 1,
   User: 1,
-  WorkspaceBinding: 1,
   WorldMembership: 1,
   World: 1,
-  Meta: 1,
   ContextAssemblyV1: 1,
   CreatorRuntimePolicyResponse: 1,
   ExploreAiAnswerRequest: 1,

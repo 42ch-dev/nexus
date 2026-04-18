@@ -85,9 +85,9 @@ mod tests {
     }
 
     /// Build a test app with an uninitialized workspace (workspace_path = None).
-    fn create_uninitialized_app() -> TestApp {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace();
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None);
+    async fn create_uninitialized_app() -> TestApp {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state);
         let server = TestServer::new(app).unwrap();
         TestApp { _tmp: tmp, server }
@@ -95,14 +95,15 @@ mod tests {
 
     /// Build a test app with an initialized workspace.
     /// Seeds the database with workspace metadata so handlers return 2xx.
-    fn create_initialized_app() -> TestApp {
+    async fn create_initialized_app() -> TestApp {
         let (tmp, nexus_home, db_path, workspace_dir) =
-            crate::test_utils::create_initialized_test_workspace();
+            crate::test_utils::create_initialized_test_workspace().await;
         let state = WorkspaceState::new_for_testing(
             nexus_home,
             db_path,
             Some(workspace_dir.display().to_string()),
-        );
+        )
+        .await;
 
         let app = build_router(state);
         let server = TestServer::new(app).unwrap();
@@ -177,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_route_works_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/runtime/health").await;
         assert!(
             response.status_code().is_success(),
@@ -188,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_status_works_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/runtime/status").await;
         assert!(
             response.status_code().is_success(),
@@ -199,7 +200,7 @@ mod tests {
 
     #[tokio::test]
     async fn daemon_status_works_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/daemon/status").await;
         assert!(
             response.status_code().is_success(),
@@ -213,7 +214,7 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_info_works_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/workspace").await;
         assert!(
             response.status_code().is_success(),
@@ -224,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_status_works_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/auth/status").await;
         assert!(
             response.status_code().is_success(),
@@ -237,7 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn creators_returns_409_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/creators").await;
         assert_eq!(
             response.status_code(),
@@ -249,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn manuscript_returns_409_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/manuscript").await;
         assert_eq!(
             response.status_code(),
@@ -261,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn references_returns_409_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/references").await;
         assert_eq!(
             response.status_code(),
@@ -273,7 +274,7 @@ mod tests {
 
     #[tokio::test]
     async fn context_assemble_returns_409_without_init() {
-        let app = create_uninitialized_app();
+        let app = create_uninitialized_app().await;
         let response = app
             .post("/v1/local/context/assemble")
             .json(&serde_json::json!({
@@ -295,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn creators_succeeds_after_init() {
-        let app = create_initialized_app();
+        let app = create_initialized_app().await;
         let response = app.get("/v1/local/creators").await;
         assert!(
             response.status_code().is_success(),
@@ -306,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn manuscript_succeeds_after_init() {
-        let app = create_initialized_app();
+        let app = create_initialized_app().await;
         let response = app.get("/v1/local/manuscript").await;
         assert!(
             response.status_code().is_success(),
@@ -317,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn references_succeeds_after_init() {
-        let app = create_initialized_app();
+        let app = create_initialized_app().await;
         let response = app.get("/v1/local/references").await;
         assert!(
             response.status_code().is_success(),

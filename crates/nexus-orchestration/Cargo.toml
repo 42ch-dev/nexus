@@ -1,0 +1,35 @@
+[package]
+name = "nexus-orchestration"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Orchestration engine (graph-flow adapter + capability registry + worker manager)."
+
+[dependencies]
+graph-flow = "=0.2.3"                                    # rig feature NOT enabled (per best-practices §1.2 pin policy)
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }
+# sqlx: workspace dep is declared + feature-gated by WS8 T1 (runtime-tokio, sqlite, macros, migrate, chrono, uuid).
+# This crate re-uses the workspace dep; do not add local features.
+sqlx = { workspace = true }
+chrono = { workspace = true }
+# jsonrpsee: per crate-selection-best-practices-v1.md §3.1.
+# Features: server-core, client-core, macros. NO http-server, NO ws-server.
+jsonrpsee = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = "0.3"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-local-db = { path = "../nexus-local-db" }
+blake3 = { workspace = true }
+include_dir = "0.7"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+nexus-domain = { path = "../nexus-domain" }

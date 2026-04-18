@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-14T00:00:00Z",
+  "updated_at": "2026-04-18T22:00:00Z",
   "entries": [
     {
       "updated_at": "2026-04-05",
@@ -161,6 +161,10 @@
     {
       "updated_at": "2026-04-17",
       "message": "V1.4 plans registered: 7 plan rows (WS1-WS7) replacing the single legacy V1.3 E2E backlog Todo. The prior 2026-04-17-v1.3-creator-register-e2e-tests row is superseded by 2026-04-17-v1.4-ws6-creator-register-e2e-tests (same work, promoted into V1.4 scope). Each plan file committed at .agents/plans/2026-04-17-v1.4-wsN-*.md; plan-convention.md metadata fields populated (wave_0_spec, spec_refs, dependency/parallelism, effort_agent_oriented). Execution ordering: WS1 -> {WS2 || WS4 || WS5 || WS6} -> WS3 -> WS7; M1 through M4 + M3b per compass §5."
+    },
+    {
+      "updated_at": "2026-04-18",
+      "message": "V1.4 COMPLETE: All 8 workstreams done (WS1-WS7 + sqlx compile-time macro migration added mid-stream). 141+ commits, 302+ files, PR #7. sqlx migration: ~79 runtime queries → compile-time macros across 5 crates, 97 .sqlx/ metadata files, CI verify-sqlx-offline green. AGENTS.md updated with DATABASE_URL convention and .sqlx/ commit/ignore rules. 19 open residual findings (13 medium, 4 low, 2 nit) tracked across 5 plans — all deferred to V1.5+."
     }
   ]
 }

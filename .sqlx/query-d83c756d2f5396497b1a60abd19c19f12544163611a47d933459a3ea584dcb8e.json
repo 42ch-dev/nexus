@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM device_code_sessions WHERE device_code = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d83c756d2f5396497b1a60abd19c19f12544163611a47d933459a3ea584dcb8e"
+}

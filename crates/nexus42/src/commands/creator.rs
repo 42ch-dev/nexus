@@ -120,7 +120,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
                 rotate_credentials(config, creator_id).await
             }
         },
-        CreatorCommand::Workspace { command } => run_creator_workspace(config, command),
+        CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
     }
 }
 
@@ -132,7 +132,7 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
     init::validate_slug("workspace_slug", slug)
 }
 
-fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Result<()> {
+async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Result<()> {
     let creator_id = config
         .active_creator_id
         .as_deref()
@@ -191,7 +191,8 @@ fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Re
                 &workspace_slug,
                 &creative_root,
                 &workspace_name,
-            )?;
+            )
+            .await?;
             init::persist_cli_workspace_selection(
                 creative_root.clone(),
                 creator_id.to_string(),
@@ -537,7 +538,7 @@ async fn rotate_credentials(config: &CliConfig, creator_id: Option<String>) -> R
 
 /// Cache a Creator locally in SQLite
 #[allow(dead_code)]
-fn cache_creator_locally(creator: &Creator) -> Result<()> {
+async fn cache_creator_locally(creator: &Creator) -> Result<()> {
     use crate::config::state_db_path;
     let db_path = state_db_path()?;
 
@@ -546,20 +547,22 @@ fn cache_creator_locally(creator: &Creator) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let conn = rusqlite::Connection::open(&db_path)?;
-    crate::db::Schema::init(&conn)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
 
-    conn.execute(
+    let cached_at = chrono::Utc::now().to_rfc3339();
+    let data = serde_json::to_string(creator)?;
+    let status_str = creator.status.as_str();
+    sqlx::query!(
         "INSERT OR REPLACE INTO creators (creator_id, display_name, status, cached_at, data)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![
-            creator.creator_id,
-            creator.display_name,
-            creator.status.as_str(),
-            chrono::Utc::now().to_rfc3339(),
-            serde_json::to_string(creator)?,
-        ],
-    )?;
+         VALUES (?, ?, ?, ?, ?)",
+        creator.creator_id,
+        creator.display_name,
+        status_str,
+        cached_at,
+        data
+    )
+    .execute(&pool)
+    .await?;
 
     Ok(())
 }

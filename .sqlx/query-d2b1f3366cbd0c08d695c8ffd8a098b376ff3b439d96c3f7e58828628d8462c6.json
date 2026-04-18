@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM acp_sessions\n         WHERE datetime(last_active) < datetime('now', '-24 hours')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "d2b1f3366cbd0c08d695c8ffd8a098b376ff3b439d96c3f7e58828628d8462c6"
+}

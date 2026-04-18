@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT keywords as \"keywords!\" FROM memory_fragments WHERE creator_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "keywords!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9d0e4f5ae25c96250218f13beb84d7b3fe23d7248a0c6f7c267e980d64bc988f"
+}

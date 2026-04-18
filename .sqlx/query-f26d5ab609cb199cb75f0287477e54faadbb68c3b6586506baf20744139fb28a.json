@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO reference_sources \n             (reference_source_id, workspace_id, source_type, uri, title, scan_status, content, content_hash, created_at)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "f26d5ab609cb199cb75f0287477e54faadbb68c3b6586506baf20744139fb28a"
+}

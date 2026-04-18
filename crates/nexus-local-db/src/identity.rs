@@ -1,9 +1,9 @@
 //! Local identity CRUD operations for SQLite.
 //!
-//! Provides functions to create, read, list, and update local identities
+//! Provides async functions to create, read, list, and update local identities
 //! in the `local_identities` table. These are used by both CLI and daemon.
 
-use rusqlite::Connection;
+use sqlx::SqlitePool;
 
 use crate::error::LocalDbError;
 
@@ -23,18 +23,23 @@ pub struct LocalIdentityRow {
 /// # Errors
 ///
 /// Returns `LocalDbError` if the insert fails (e.g. duplicate creator_id).
-pub fn create_local_identity(
-    conn: &Connection,
+pub async fn create_local_identity(
+    pool: &SqlitePool,
     creator_id: &str,
     identity_type: &str,
     display_name: Option<&str>,
     created_at: &str,
 ) -> Result<LocalIdentityRow, LocalDbError> {
-    conn.execute(
+    sqlx::query!(
         "INSERT INTO local_identities (creator_id, identity_type, display_name, created_at, platform_linked)
-         VALUES (?1, ?2, ?3, ?4, 0)",
-        rusqlite::params![creator_id, identity_type, display_name, created_at],
-    )?;
+         VALUES (?, ?, ?, ?, 0)",
+        creator_id,
+        identity_type,
+        display_name,
+        created_at
+    )
+    .execute(pool)
+    .await?;
 
     Ok(LocalIdentityRow {
         creator_id: creator_id.to_string(),
@@ -49,56 +54,56 @@ pub fn create_local_identity(
 /// Get a local identity by creator_id.
 ///
 /// Returns `None` if no identity exists with the given ID.
-pub fn get_local_identity(
-    conn: &Connection,
+pub async fn get_local_identity(
+    pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Option<LocalIdentityRow>, LocalDbError> {
-    let result = conn.query_row(
-        "SELECT creator_id, identity_type, display_name, created_at, platform_linked, platform_creator_id
-         FROM local_identities WHERE creator_id = ?1",
-        rusqlite::params![creator_id],
-        |row| {
-            Ok(LocalIdentityRow {
-                creator_id: row.get(0)?,
-                identity_type: row.get(1)?,
-                display_name: row.get(2)?,
-                created_at: row.get(3)?,
-                platform_linked: row.get::<_, i32>(4)? != 0,
-                platform_creator_id: row.get(5)?,
-            })
-        },
-    );
+    let row = sqlx::query!(
+        "SELECT creator_id as \"creator_id!\", identity_type as \"identity_type!\",
+                display_name, created_at as \"created_at!\", platform_linked as \"platform_linked!\",
+                platform_creator_id
+         FROM local_identities WHERE creator_id = ?",
+        creator_id
+    )
+    .fetch_optional(pool)
+    .await?;
 
-    match result {
-        Ok(row) => Ok(Some(row)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(LocalDbError::from(e)),
-    }
+    Ok(row.map(|r| LocalIdentityRow {
+        creator_id: r.creator_id,
+        identity_type: r.identity_type,
+        display_name: r.display_name,
+        created_at: r.created_at,
+        platform_linked: r.platform_linked != 0,
+        platform_creator_id: r.platform_creator_id,
+    }))
 }
 
 /// List all local identities.
 ///
 /// Returns all identities sorted by creation time (oldest first).
-pub fn list_local_identities(conn: &Connection) -> Result<Vec<LocalIdentityRow>, LocalDbError> {
-    let mut stmt = conn.prepare(
-        "SELECT creator_id, identity_type, display_name, created_at, platform_linked, platform_creator_id
-         FROM local_identities ORDER BY created_at",
-    )?;
+pub async fn list_local_identities(
+    pool: &SqlitePool,
+) -> Result<Vec<LocalIdentityRow>, LocalDbError> {
+    let rows = sqlx::query!(
+        "SELECT creator_id as \"creator_id!\", identity_type as \"identity_type!\",
+                display_name, created_at as \"created_at!\", platform_linked as \"platform_linked!\",
+                platform_creator_id
+         FROM local_identities ORDER BY created_at"
+    )
+    .fetch_all(pool)
+    .await?;
 
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(LocalIdentityRow {
-                creator_id: row.get(0)?,
-                identity_type: row.get(1)?,
-                display_name: row.get(2)?,
-                created_at: row.get(3)?,
-                platform_linked: row.get::<_, i32>(4)? != 0,
-                platform_creator_id: row.get(5)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(rows)
+    Ok(rows
+        .into_iter()
+        .map(|r| LocalIdentityRow {
+            creator_id: r.creator_id,
+            identity_type: r.identity_type,
+            display_name: r.display_name,
+            created_at: r.created_at,
+            platform_linked: r.platform_linked != 0,
+            platform_creator_id: r.platform_creator_id,
+        })
+        .collect())
 }
 
 /// Link a local identity to a platform Creator.
@@ -108,20 +113,22 @@ pub fn list_local_identities(conn: &Connection) -> Result<Vec<LocalIdentityRow>,
 /// # Errors
 ///
 /// Returns `LocalDbError` if the identity does not exist.
-pub fn link_to_platform(
-    conn: &Connection,
+pub async fn link_to_platform(
+    pool: &SqlitePool,
     creator_id: &str,
     platform_creator_id: &str,
 ) -> Result<(), LocalDbError> {
-    let affected = conn.execute(
-        "UPDATE local_identities SET platform_linked = 1, platform_creator_id = ?1
-         WHERE creator_id = ?2 AND platform_linked = 0",
-        rusqlite::params![platform_creator_id, creator_id],
-    )?;
+    let result = sqlx::query!(
+        "UPDATE local_identities SET platform_linked = 1, platform_creator_id = ?
+         WHERE creator_id = ? AND platform_linked = 0",
+        platform_creator_id,
+        creator_id
+    )
+    .execute(pool)
+    .await?;
 
-    if affected == 0 {
-        // Check if identity exists but is already linked
-        let existing = get_local_identity(conn, creator_id)?;
+    if result.rows_affected() == 0 {
+        let existing = get_local_identity(pool, creator_id).await?;
         match existing {
             Some(row) if row.platform_linked => {
                 return Err(LocalDbError::IdentityAlreadyLinked {
@@ -134,8 +141,6 @@ pub fn link_to_platform(
                 });
             }
             _ => {
-                // Identity exists but not linked — shouldn't happen since UPDATE affected 0
-                // with `platform_linked = 0` condition, but handle defensively
                 return Err(LocalDbError::IdentityNotFound {
                     creator_id: creator_id.to_string(),
                 });
@@ -153,15 +158,17 @@ pub fn link_to_platform(
 /// # Errors
 ///
 /// Returns `LocalDbError` if the identity does not exist or is not currently linked.
-pub fn unlink_from_platform(conn: &Connection, creator_id: &str) -> Result<(), LocalDbError> {
-    let affected = conn.execute(
+pub async fn unlink_from_platform(pool: &SqlitePool, creator_id: &str) -> Result<(), LocalDbError> {
+    let result = sqlx::query!(
         "UPDATE local_identities SET platform_linked = 0, platform_creator_id = NULL
-         WHERE creator_id = ?1 AND platform_linked = 1",
-        rusqlite::params![creator_id],
-    )?;
+         WHERE creator_id = ? AND platform_linked = 1",
+        creator_id
+    )
+    .execute(pool)
+    .await?;
 
-    if affected == 0 {
-        let existing = get_local_identity(conn, creator_id)?;
+    if result.rows_affected() == 0 {
+        let existing = get_local_identity(pool, creator_id).await?;
         match existing {
             Some(row) if !row.platform_linked => {
                 return Err(LocalDbError::IdentityNotLinked {
@@ -189,58 +196,66 @@ pub fn unlink_from_platform(conn: &Connection, creator_id: &str) -> Result<(), L
 /// # Errors
 ///
 /// Returns `LocalDbError` if the delete fails.
-pub fn delete_local_identity(conn: &Connection, creator_id: &str) -> Result<bool, LocalDbError> {
-    let affected = conn.execute(
-        "DELETE FROM local_identities WHERE creator_id = ?1",
-        rusqlite::params![creator_id],
-    )?;
+pub async fn delete_local_identity(
+    pool: &SqlitePool,
+    creator_id: &str,
+) -> Result<bool, LocalDbError> {
+    let result = sqlx::query!(
+        "DELETE FROM local_identities WHERE creator_id = ?",
+        creator_id
+    )
+    .execute(pool)
+    .await?;
 
-    Ok(affected > 0)
+    Ok(result.rows_affected() > 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{init, RuntimeRole};
 
-    fn setup_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        init(&conn, RuntimeRole::Cli).unwrap();
-        conn
+    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::open_pool(&db_path).await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        (pool, dir)
     }
 
-    #[test]
-    fn create_and_get_identity() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn create_and_get_identity() {
+        let (pool, _dir) = fresh_pool().await;
         let row = create_local_identity(
-            &conn,
+            &pool,
             "ctr_localTest123",
             "persistent",
             Some("Test User"),
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
         assert_eq!(row.creator_id, "ctr_localTest123");
         assert_eq!(row.identity_type, "persistent");
         assert_eq!(row.display_name, Some("Test User".to_string()));
 
-        let fetched = get_local_identity(&conn, "ctr_localTest123").unwrap();
+        let fetched = get_local_identity(&pool, "ctr_localTest123").await.unwrap();
         assert!(fetched.is_some());
         let fetched = fetched.unwrap();
         assert_eq!(fetched.creator_id, "ctr_localTest123");
     }
 
-    #[test]
-    fn create_anonymous_identity() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn create_anonymous_identity() {
+        let (pool, _dir) = fresh_pool().await;
         let row = create_local_identity(
-            &conn,
+            &pool,
             "ctr_anonTest456",
             "anonymous",
             None,
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
         assert_eq!(row.identity_type, "anonymous");
@@ -248,91 +263,102 @@ mod tests {
         assert!(!row.platform_linked);
     }
 
-    #[test]
-    fn get_nonexistent_identity() {
-        let conn = setup_db();
-        let result = get_local_identity(&conn, "ctr_nonexistent").unwrap();
+    #[tokio::test]
+    async fn get_nonexistent_identity() {
+        let (pool, _dir) = fresh_pool().await;
+        let result = get_local_identity(&pool, "ctr_nonexistent").await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn list_identities() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn list_identities() {
+        let (pool, _dir) = fresh_pool().await;
 
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_anonAaa",
             "anonymous",
             None,
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_localBbb",
             "persistent",
             Some("User B"),
             "2026-01-02T00:00:00Z",
         )
+        .await
         .unwrap();
 
-        let list = list_local_identities(&conn).unwrap();
+        let list = list_local_identities(&pool).await.unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].creator_id, "ctr_anonAaa");
         assert_eq!(list[1].creator_id, "ctr_localBbb");
     }
 
-    #[test]
-    fn list_identities_empty() {
-        let conn = setup_db();
-        let list = list_local_identities(&conn).unwrap();
+    #[tokio::test]
+    async fn list_identities_empty() {
+        let (pool, _dir) = fresh_pool().await;
+        let list = list_local_identities(&pool).await.unwrap();
         assert!(list.is_empty());
     }
 
-    #[test]
-    fn link_identity_to_platform() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn link_identity_to_platform() {
+        let (pool, _dir) = fresh_pool().await;
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_localLink",
             "persistent",
             Some("Test"),
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
-        link_to_platform(&conn, "ctr_localLink", "ctr_Platform123").unwrap();
+        link_to_platform(&pool, "ctr_localLink", "ctr_Platform123")
+            .await
+            .unwrap();
 
-        let row = get_local_identity(&conn, "ctr_localLink").unwrap().unwrap();
+        let row = get_local_identity(&pool, "ctr_localLink")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(row.platform_linked);
         assert_eq!(row.platform_creator_id, Some("ctr_Platform123".to_string()));
     }
 
-    #[test]
-    fn link_nonexistent_identity() {
-        let conn = setup_db();
-        let result = link_to_platform(&conn, "ctr_nonexistent", "ctr_Platform123");
+    #[tokio::test]
+    async fn link_nonexistent_identity() {
+        let (pool, _dir) = fresh_pool().await;
+        let result = link_to_platform(&pool, "ctr_nonexistent", "ctr_Platform123").await;
         assert!(result.is_err());
         assert!(matches!(result, Err(LocalDbError::IdentityNotFound { .. })));
     }
 
-    #[test]
-    fn link_already_linked_identity() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn link_already_linked_identity() {
+        let (pool, _dir) = fresh_pool().await;
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_localAlreadyLinked",
             "persistent",
             Some("Test"),
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
         // First link succeeds
-        link_to_platform(&conn, "ctr_localAlreadyLinked", "ctr_Platform123").unwrap();
+        link_to_platform(&pool, "ctr_localAlreadyLinked", "ctr_Platform123")
+            .await
+            .unwrap();
 
         // Second link fails with IdentityAlreadyLinked
-        let result = link_to_platform(&conn, "ctr_localAlreadyLinked", "ctr_Another456");
+        let result = link_to_platform(&pool, "ctr_localAlreadyLinked", "ctr_Another456").await;
         assert!(result.is_err());
         assert!(matches!(
             result,
@@ -340,82 +366,99 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn delete_identity() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn delete_identity() {
+        let (pool, _dir) = fresh_pool().await;
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_localDel",
             "persistent",
             None,
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
-        assert!(get_local_identity(&conn, "ctr_localDel").unwrap().is_some());
+        assert!(get_local_identity(&pool, "ctr_localDel")
+            .await
+            .unwrap()
+            .is_some());
 
-        let deleted = delete_local_identity(&conn, "ctr_localDel").unwrap();
+        let deleted = delete_local_identity(&pool, "ctr_localDel").await.unwrap();
         assert!(deleted);
 
-        assert!(get_local_identity(&conn, "ctr_localDel").unwrap().is_none());
+        assert!(get_local_identity(&pool, "ctr_localDel")
+            .await
+            .unwrap()
+            .is_none());
     }
 
-    #[test]
-    fn delete_nonexistent_identity() {
-        let conn = setup_db();
-        let deleted = delete_local_identity(&conn, "ctr_nonexistent").unwrap();
+    #[tokio::test]
+    async fn delete_nonexistent_identity() {
+        let (pool, _dir) = fresh_pool().await;
+        let deleted = delete_local_identity(&pool, "ctr_nonexistent")
+            .await
+            .unwrap();
         assert!(!deleted);
     }
 
-    #[test]
-    fn unlink_identity_from_platform() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn unlink_identity_from_platform() {
+        let (pool, _dir) = fresh_pool().await;
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_localUnlink",
             "persistent",
             Some("Test"),
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
-        link_to_platform(&conn, "ctr_localUnlink", "ctr_Platform123").unwrap();
+        link_to_platform(&pool, "ctr_localUnlink", "ctr_Platform123")
+            .await
+            .unwrap();
 
-        let row = get_local_identity(&conn, "ctr_localUnlink")
+        let row = get_local_identity(&pool, "ctr_localUnlink")
+            .await
             .unwrap()
             .unwrap();
         assert!(row.platform_linked);
 
-        unlink_from_platform(&conn, "ctr_localUnlink").unwrap();
+        unlink_from_platform(&pool, "ctr_localUnlink")
+            .await
+            .unwrap();
 
-        let row = get_local_identity(&conn, "ctr_localUnlink")
+        let row = get_local_identity(&pool, "ctr_localUnlink")
+            .await
             .unwrap()
             .unwrap();
         assert!(!row.platform_linked);
         assert!(row.platform_creator_id.is_none());
     }
 
-    #[test]
-    fn unlink_nonexistent_identity() {
-        let conn = setup_db();
-        let result = unlink_from_platform(&conn, "ctr_nonexistent");
+    #[tokio::test]
+    async fn unlink_nonexistent_identity() {
+        let (pool, _dir) = fresh_pool().await;
+        let result = unlink_from_platform(&pool, "ctr_nonexistent").await;
         assert!(result.is_err());
         assert!(matches!(result, Err(LocalDbError::IdentityNotFound { .. })));
     }
 
-    #[test]
-    fn unlink_already_unlinked_identity() {
-        let conn = setup_db();
+    #[tokio::test]
+    async fn unlink_already_unlinked_identity() {
+        let (pool, _dir) = fresh_pool().await;
         create_local_identity(
-            &conn,
+            &pool,
             "ctr_localNeverLinked",
             "persistent",
             Some("Test"),
             "2026-01-01T00:00:00Z",
         )
+        .await
         .unwrap();
 
-        let result = unlink_from_platform(&conn, "ctr_localNeverLinked");
+        let result = unlink_from_platform(&pool, "ctr_localNeverLinked").await;
         assert!(result.is_err());
         assert!(matches!(
             result,

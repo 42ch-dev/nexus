@@ -1,240 +1,268 @@
 {
   "version": 1,
-  "updated_at": "2026-04-17T03:00:00Z",
-  "plans": [
-    {
-      "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
-      "title": "V1.4 WS1 — nexus-acp-host crate extraction",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws1",
-        "orchestration",
-        "refactor"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M1",
-        "working_branch": "create feature/v1.4-ws1-acp-host from main",
-        "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
-        "wave_0_spec": ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "effort_agent_oriented": "M (1-2 agent sessions)"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
-      "title": "V1.4 WS2 — Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws2",
-        "orchestration",
-        "new-feature"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M2",
-        "working_branch": "create feature/v1.4-ws2-orch-skeleton from feature/v1.4-ws1-acp-host",
-        "description": "New crate crates/nexus-orchestration. OrchestrationEngine trait + GraphFlowEngine adapter over graph-flow=0.2.3, SqliteSessionStorage, Capability trait + non-ACP built-ins (sync/outbox/workspace/registry/creator.{read,write,inject}/judge.rule), WorkerManager + stdin/stdout JSON-RPC IPC, _system.maintenance hardcoded graph, /v1/local/orchestration/* HTTP. ACP-touching capabilities + preset file loader deferred to WS3.",
-        "wave_0_spec": ".agents/plans/knowledge/orchestration-engine-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-          ".agents/plans/knowledge/schemas-boundary-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "2026-04-17-v1.4-ws1-acp-host-extraction",
-        "effort_agent_oriented": "L (2-3 agent sessions)"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
-      "title": "V1.4 WS3 — Preset loader + novel-writing end-to-end",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws3",
-        "orchestration",
-        "new-feature",
-        "preset"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M3",
-        "working_branch": "create feature/v1.4-ws3-preset-loader from feature/v1.4-ws2-orch-skeleton",
-        "description": "YAML -> graph-flow::Graph loader + validation, ACP-touching capabilities (acp.prompt/acp.session_load/judge.llm), full AcpPromptTask + InnerGraphTask impls, embedded novel-writing preset (4 states + 2 inner graphs), mocked-agent E2E test across all states + daemon-restart durability. Minimal nexus42 schedule start/status/advance CLI (WS7 grows this).",
-        "wave_0_spec": ".agents/plans/knowledge/orchestration-engine-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/acp-client-tech-spec-v2.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "2026-04-17-v1.4-ws2-orchestration-skeleton",
-        "effort_agent_oriented": "M (1-2 agent sessions)"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws4-statig-lifecycle",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
-      "title": "V1.4 WS4 — statig daemon lifecycle HSM (TD-9 closure)",
-      "owner": "fullstack-dev-2",
-      "tags": [
-        "v1.4",
-        "ws4",
-        "td-9",
-        "daemon",
-        "lifecycle"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M1",
-        "working_branch": "create feature/v1.4-ws4-statig-lifecycle from main",
-        "description": "Replace nexus42d's single-state 'running-probe' with the full 6-state statig HSM (Stopped/Starting/Running/Degraded/Stopping/Failed). Expose the v2 GET /v1/local/daemon/status superset response (schema_version: 2, subsystems{}, degraded{}) wire-compatible with the v1 probe. Closes TD-9.",
-        "wave_0_spec": ".agents/plans/knowledge/daemon-lifecycle-api-v2.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/daemon-lifecycle-api-v2.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "parallelism": "parallel with WS2 (no file overlap except crates/nexus42d/src/main.rs touch)",
-        "effort_agent_oriented": "S+ (1 agent session)"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws5-schemas-boundary",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws5-schemas-boundary.md",
-      "title": "V1.4 WS5 — schemas/ boundary refactor (wire vs local)",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws5",
-        "schemas",
-        "refactor",
-        "codegen"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "medium",
-        "phase": "V1.4-M2",
-        "working_branch": "create feature/v1.4-ws5-schemas-boundary from main",
-        "description": "Audit every schemas/**/*.schema.json, classify as wire (kept) or local (moved to crates/nexus-contracts/src/local/ as hand-written Rust — no codegen). Regenerate contracts (deletions only), bump @42ch/nexus-contracts minor, post cross-repo handoff note. Per schemas-boundary-v1 §2 rule (platform HTTP observability).",
-        "wave_0_spec": ".agents/plans/knowledge/schemas-boundary-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/schemas-boundary-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "parallelism": "fully parallel with WS1/WS2/WS3/WS4/WS6/WS7",
-        "effort_agent_oriented": "S (1 agent session)"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws6-creator-register-e2e-tests",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
-      "title": "V1.4 WS6 — V1.3 Creator Register E2E integration tests (backlog closure)",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws6",
-        "v1.3-backlog",
-        "e2e-tests"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "medium",
-        "phase": "V1.4-M4",
-        "working_branch": "create feature/v1.4-ws6-creator-register-e2e from main",
-        "description": "Close the legacy V1.3 Todo row (formerly 2026-04-17-v1.3-creator-register-e2e-tests). wiremock-driven E2E for creator register -> challenge solve -> verify -> credential store. Happy path + negative paths (bad challenge, verify reject, no-credential-leak-on-failure) + idempotency guard.",
-        "spec_refs": [
-          ".agents/plans/archived/knowledge/challenge-solver-design-v1.md",
-          ".agents/plans/archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "platform M10 (creator register + verify API reachable in test environment; mocked here via wiremock)",
-        "supersedes": "2026-04-17-v1.3-creator-register-e2e-tests (prior Todo row; this plan is the V1.4 work item that closes it)",
-        "effort_agent_oriented": "S (1 agent session)"
-      }
-    },
-    {
-      "id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
-      "status": "Todo",
-      "file": ".agents/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
-      "title": "V1.4 WS7 — Creator Schedule + immutable versioned core_context",
-      "owner": "fullstack-dev",
-      "tags": [
-        "v1.4",
-        "ws7",
-        "orchestration",
-        "schedule",
-        "core-context",
-        "new-feature"
-      ],
-      "created_at": "2026-04-17",
-      "updated_at": "2026-04-17",
-      "metadata": {
-        "priority": "high",
-        "phase": "V1.4-M3b",
-        "working_branch": "create feature/v1.4-ws7-schedule from feature/v1.4-ws3-preset-loader",
-        "description": "Multi-Schedule per creator (concurrency declared per-add; serial default), CRUD over prompts by ID, immutable versioned core_context (Seed + UserEdit + PresetHook + PresetSeedExpansion; LlmSummarize reserved for V1.5 zero-migration). 13 CLI subcommands under nexus42 schedule + 8 HTTP endpoints under /v1/local/orchestration/schedules/*. Answers OQ-1..OQ-6 from orchestration-engine-v1 §11.",
-        "wave_0_spec": ".agents/plans/knowledge/creator-schedule-and-core-context-v1.md",
-        "spec_refs": [
-          ".agents/plans/knowledge/creator-schedule-and-core-context-v1.md",
-          ".agents/plans/knowledge/orchestration-engine-v1.md",
-          ".agents/plans/knowledge/schemas-boundary-v1.md",
-          ".agents/plans/knowledge/v1.4-delivery-compass-v1.md"
-        ],
-        "dependency": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-        "effort_agent_oriented": "L (2-3 agent sessions)"
-      }
-    }
-  ],
+  "updated_at": "2026-04-18T22:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-17",
-      "total_open": 0,
+      "updated_at": "2026-04-18T22:00:00Z",
+      "total_open": 19,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 0,
-        "nit": 0
+        "medium": 13,
+        "low": 4,
+        "nit": 2
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
         "V1.2": 0,
         "V1.3": 0,
-        "V1.4": 0
+        "V1.4": 16,
+        "V1.5": 3
       },
-      "by_plan": {}
+      "by_plan": {
+        "2026-04-17-v1.4-ws7-creator-schedule-core-context": 7,
+        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 2,
+        "2026-04-17-v1.4-ws2-orchestration-skeleton": 3,
+        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 2,
+        "2026-04-18-sqlx-compile-time-migration": 5
+      },
+      "cross_cutting": [
+        {
+          "id": "DEBT-RAND-073",
+          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "severity": "low",
+          "target_date": "V1.5 or wiremock upstream fix",
+          "note": "Dependabot bumped rand to 0.8.6 in workspace, but wiremock transitively depends on rand 0.7.3 which cannot be removed without upstream http-types migration."
+        }
+      ]
     },
-    "residual_findings": {},
+    "residual_findings": {
+      "2026-04-17-v1.4-ws7-creator-schedule-core-context": [
+        {
+          "id": "R1",
+          "title": "RunningSet/CompletedSet not persisted across restart",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/admission.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "No duplicate schedule_id detection",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "No paused→running status transition in FSM",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "No pause signal in FSM",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "No delete cascade for schedules",
+          "severity": "medium",
+          "source": "QC1 medium",
+          "scope": "SQLite migration / supervisor.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R6",
+          "title": "CoreContextManager version bump race",
+          "severity": "medium",
+          "source": "QC2 medium",
+          "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R7",
+          "title": "paused→running requires 2-step UX",
+          "severity": "medium",
+          "source": "QC2 medium",
+          "scope": "CLI UX / daemon signal handler",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws8-local-db-sqlx-migration": [
+        {
+          "id": "R1",
+          "title": "read_versions discards malformed value in error struct",
+          "severity": "medium",
+          "source": "qc1 W-01",
+          "scope": "crates/nexus-local-db/src/lib.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Outbox schema DDL hardcoded inline rather than using sqlx::migrate",
+          "severity": "medium",
+          "source": "qc3 W1",
+          "scope": "crates/nexus-sync/src/outbox.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws2-orchestration-skeleton": [
+        {
+          "id": "R1",
+          "title": "Daemon restart does not repopulate in-memory session tracker from SQLite",
+          "severity": "medium",
+          "source": "qc",
+          "scope": "crates/nexus42d/src/main.rs — engine restart path",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "WS3",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "FlowRunner clone-per-step correctness unverified",
+          "severity": "medium",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/src/engine.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "WS3",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Worker shutdown SIGTERM→SIGKILL path not implemented (uses start_kill directly)",
+          "severity": "medium",
+          "source": "qc",
+          "scope": "crates/nexus-orchestration/src/worker/manager.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "WS3",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-17-v1.4-ws3-preset-loader-novel-writing": [
+        {
+          "id": "R1",
+          "title": "EngineProxy duplicates GraphFlowEngine logic",
+          "severity": "medium",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/src/engine.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "E2E weak assertions (let _ = ... patterns)",
+          "severity": "low",
+          "source": "qc1+qc2+qc3 consolidation",
+          "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
+          "decision": "defer",
+          "owner": "qa-engineer",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-18-sqlx-compile-time-migration": [
+        {
+          "id": "R1",
+          "title": "Missing SAFETY comments on test-only runtime queries (pool.rs, integration tests, test_utils.rs)",
+          "severity": "low",
+          "source": "QC1 W1+W2, QC2 W-003, QA N1",
+          "scope": "crates/nexus-sync/src/pool.rs, crates/nexus-local-db/tests/, crates/nexus42d/src/test_utils.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R2",
+          "title": "Inline FromRow structs (OutboxRow, PartialApplyRow) should be module-level",
+          "severity": "low",
+          "source": "QC1 S2",
+          "scope": "crates/nexus-sync/src/outbox.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R3",
+          "title": "Inconsistent ?1 vs ? placeholder syntax in compile-time macros",
+          "severity": "low",
+          "source": "QC2 W-001",
+          "scope": "crates/nexus42d/src/api/handlers/sync.rs, crates/nexus42d/src/api/handlers/memory.rs, crates/nexus42/src/commands/research.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R4",
+          "title": "Misleading SAFETY comment in schedules.rs (copy-paste, inaccurate reason)",
+          "severity": "nit",
+          "source": "QC1 S1, QC2 W-002",
+          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "Test-only queries in schema.rs could use compile-time macros",
+          "severity": "nit",
+          "source": "QC1 S3",
+          "scope": "crates/nexus42d/src/db/schema.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.5",
+          "tracking_link": null
+        }
+      ]
+    },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
     }

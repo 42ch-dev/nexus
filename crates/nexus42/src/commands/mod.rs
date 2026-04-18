@@ -7,6 +7,8 @@
 // Enforce no `.unwrap()` in production command code.
 // Each sub-module inherits this deny via the module-level attribute below.
 #[deny(clippy::unwrap_used)]
+pub mod acp_worker;
+#[deny(clippy::unwrap_used)]
 pub mod agent;
 #[deny(clippy::unwrap_used)]
 pub mod auth;
@@ -44,6 +46,8 @@ pub mod publish;
 pub mod research;
 #[deny(clippy::unwrap_used)]
 pub mod runtime_mode;
+#[deny(clippy::unwrap_used)]
+pub mod schedule;
 #[deny(clippy::unwrap_used)]
 pub mod session;
 #[deny(clippy::unwrap_used)]

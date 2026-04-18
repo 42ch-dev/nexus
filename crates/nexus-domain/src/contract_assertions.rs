@@ -132,10 +132,14 @@ fn _assert_memory_item_conversion() {
 
 /// Compile-time assertion: ReferenceSource domain ↔ contract conversion exists.
 fn _assert_reference_source_conversion() {
-    fn domain_to_contract(domain: ReferenceSource) -> nexus_contracts::ReferenceSource {
-        nexus_contracts::ReferenceSource::from(domain)
+    fn domain_to_contract(
+        domain: ReferenceSource,
+    ) -> nexus_contracts::local::domain::ReferenceSource {
+        nexus_contracts::local::domain::ReferenceSource::from(domain)
     }
-    fn contract_to_domain(contract: nexus_contracts::ReferenceSource) -> ReferenceSource {
+    fn contract_to_domain(
+        contract: nexus_contracts::local::domain::ReferenceSource,
+    ) -> ReferenceSource {
         ReferenceSource::from(contract)
     }
     let _ = (domain_to_contract, contract_to_domain);
@@ -143,10 +147,14 @@ fn _assert_reference_source_conversion() {
 
 /// Compile-time assertion: ManuscriptState domain ↔ contract conversion exists.
 fn _assert_manuscript_state_conversion() {
-    fn domain_to_contract(domain: ManuscriptState) -> nexus_contracts::ManuscriptState {
-        nexus_contracts::ManuscriptState::from(domain)
+    fn domain_to_contract(
+        domain: ManuscriptState,
+    ) -> nexus_contracts::local::domain::ManuscriptState {
+        nexus_contracts::local::domain::ManuscriptState::from(domain)
     }
-    fn contract_to_domain(contract: nexus_contracts::ManuscriptState) -> ManuscriptState {
+    fn contract_to_domain(
+        contract: nexus_contracts::local::domain::ManuscriptState,
+    ) -> ManuscriptState {
         ManuscriptState::from(contract)
     }
     let _ = (domain_to_contract, contract_to_domain);

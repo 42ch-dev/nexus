@@ -21,14 +21,14 @@ nexus-contracts = { path = "../nexus-contracts" }
 nexus-domain = { path = "../nexus-domain" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-sync = { path = "../nexus-sync" }
+nexus-orchestration = { path = "../nexus-orchestration" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
-rusqlite = { workspace = true }
-deadpool-sqlite = { workspace = true }
+sqlx = { workspace = true }
 dirs = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
@@ -37,11 +37,18 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
-toml = "0.8"
-hyper = "1"
-hyper-util = { version = "0.1", features = ["tokio"] }
-http-body-util = "0.1"
+toml = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+statig = { workspace = true }
 tempfile = "3"
+async-trait = "0.1"
 
 [dev-dependencies]
 axum-test = "15"
+graph-flow = "=0.2.3"
+nexus-orchestration = { path = "../nexus-orchestration" }
+
+[features]
+test-support = []
