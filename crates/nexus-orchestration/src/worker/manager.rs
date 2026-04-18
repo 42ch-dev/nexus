@@ -10,10 +10,18 @@
 //! stdin/stdout halves (taken before the move), the PID, and a
 //! `CancellationToken` for in-flight request cancellation.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §6.1.
+//! ## WS2 R4: SIGTERM → SIGKILL escalation
+//!
+//! On shutdown, the supervisor sends SIGTERM first, waits for the grace period
+//! from `shutdown_grace`, then escalates to SIGKILL if the worker hasn't exited.
+//! This follows the graceful shutdown pattern from §6.5 of the design spec.
+//!
+//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §6.1, §6.5.
 
 use crate::worker::ipc::call_json_rpc_with_timeout;
 use crate::worker::transport::StdioTransport;
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
 use serde_json::Value;
 use std::time::Duration;
 use thiserror::Error;
@@ -120,7 +128,7 @@ pub struct WorkerHandle {
     /// Broadcast sender for events (used by IpcClient for notification routing in WS3).
     #[allow(dead_code)]
     event_tx: broadcast::Sender<WorkerEvent>,
-    /// Grace period for shutdown (default: 30 seconds).
+    /// Grace period for shutdown (default: 30 seconds, configurable via spec).
     shutdown_grace: Duration,
     /// Stored stdin half for one-shot IPC calls.
     stdin: Option<ChildStdin>,
@@ -166,13 +174,15 @@ impl WorkerHandle {
     /// Request a graceful shutdown of the worker.
     ///
     /// Sends a `worker/shutdown` JSON-RPC request and fires the cancellation
-    /// token. The supervisor task will detect the child exit.
+    /// token. The supervisor task will send SIGTERM first, wait for the grace
+    /// period, then SIGKILL if needed (WS2 R4).
     pub async fn shutdown(&mut self) -> Result<(), WorkerError> {
         self.shutdown_requested = true;
         self.cancel.cancel();
 
         info!(
             pid = self.pid,
+            grace_ms = self.shutdown_grace.as_millis(),
             "requesting worker shutdown via cancellation token"
         );
 
@@ -184,7 +194,7 @@ impl WorkerHandle {
                 .await
             {
                 Ok(_) => {
-                    info!(pid = self.pid, "worker acknowledged shutdown");
+                    info!(pid = self.pid, "worker acknowledged shutdown RPC");
                 }
                 Err(e) => {
                     // Worker may have already exited — this is fine.
@@ -193,10 +203,10 @@ impl WorkerHandle {
             }
         } else {
             // No pipes available. The cancellation token will cause the
-            // supervisor to report the worker as stopped.
+            // supervisor to initiate SIGTERM→SIGKILL sequence.
             info!(
                 pid = self.pid,
-                "no pipes available — relying on cancellation token"
+                "no pipes available — supervisor will send SIGTERM"
             );
         }
 
@@ -211,6 +221,11 @@ impl WorkerHandle {
     /// Return a reference to the cancellation token.
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()
+    }
+
+    /// Return the configured shutdown grace period.
+    pub fn shutdown_grace(&self) -> Duration {
+        self.shutdown_grace
     }
 }
 
@@ -253,6 +268,18 @@ impl WorkerManager {
     /// A background supervisor task monitors the child process and emits
     /// events via the manager's broadcast channel.
     pub async fn spawn(&self, spec: &WorkerSpec) -> Result<WorkerHandle, WorkerError> {
+        self.spawn_with_grace(spec, Duration::from_secs(30)).await
+    }
+
+    /// Spawn a new worker process with a custom shutdown grace period.
+    ///
+    /// WS2 R4: The grace period controls how long the supervisor waits
+    /// after SIGTERM before escalating to SIGKILL.
+    pub async fn spawn_with_grace(
+        &self,
+        spec: &WorkerSpec,
+        shutdown_grace: Duration,
+    ) -> Result<WorkerHandle, WorkerError> {
         let mut cmd = Command::new(&spec.program);
         cmd.args(&spec.args)
             .envs(spec.env.iter().cloned())
@@ -277,25 +304,48 @@ impl WorkerManager {
         let supervisor_cancel = cancel.clone();
         let event_tx = self.event_tx.clone();
 
+        // WS2 R4: Pass grace period to supervisor for SIGTERM→SIGKILL sequence.
+        let grace = shutdown_grace;
+
         // Spawn the supervisor task that waits for child exit.
         tokio::spawn(async move {
             tokio::select! {
                 _ = supervisor_cancel.cancelled() => {
-                    // Shutdown was requested — wait briefly for clean exit.
-                    match tokio::time::timeout(Duration::from_secs(30), child.wait()).await {
+                    // WS2 R4: SIGTERM → SIGKILL escalation.
+                    // 1. Send SIGTERM first.
+                    let nix_pid = Pid::from_raw(pid as i32);
+                    if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
+                        warn!(pid, error = %e, "failed to send SIGTERM to worker");
+                        // If SIGTERM fails, fall back to SIGKILL immediately.
+                        let _ = child.start_kill();
+                    } else {
+                        debug!(pid, grace_ms = grace.as_millis(), "sent SIGTERM, waiting for graceful exit");
+                    }
+
+                    // 2. Wait for grace period for clean exit.
+                    match tokio::time::timeout(grace, child.wait()).await {
                         Ok(Ok(status)) => {
                             if status.success() {
-                                debug!(pid, "worker exited cleanly after cancellation");
+                                debug!(pid, "worker exited cleanly after SIGTERM");
                                 let _ = event_tx.send(WorkerEvent::Stopped { pid });
                             } else {
+                                warn!(pid, code = ?status.code(), "worker exited with non-zero status after SIGTERM");
                                 let _ = event_tx.send(WorkerEvent::Crashed {
                                     pid,
                                     exit_status: status.code(),
                                 });
                             }
                         }
-                        _ => {
-                            // Timeout or error — kill.
+                        Ok(Err(e)) => {
+                            warn!(pid, error = %e, "error waiting for worker after SIGTERM");
+                            let _ = event_tx.send(WorkerEvent::Crashed {
+                                pid,
+                                exit_status: None,
+                            });
+                        }
+                        Err(_) => {
+                            // 3. Grace period expired — escalate to SIGKILL.
+                            warn!(pid, "worker did not exit within grace period, sending SIGKILL");
                             let _ = child.start_kill();
                             let _ = child.wait().await;
                             let _ = event_tx.send(WorkerEvent::Crashed {
@@ -340,7 +390,7 @@ impl WorkerManager {
             pid,
             cancel,
             event_tx: self.event_tx.clone(),
-            shutdown_grace: Duration::from_secs(30),
+            shutdown_grace,
             stdin,
             stdout,
             shutdown_requested: false,
