@@ -99,23 +99,26 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all -- -D warnings
 
-  verify-sqlx-offline:
-    name: Verify sqlx offline metadata
-    runs-on: ubuntu-latest
-    needs: verify-codegen
-    env:
-      SQLX_OFFLINE: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/download-artifact@v4
-        with:
-          name: generated-types
-          path: .
-      - name: Install cargo-sqlx
-        run: cargo install sqlx-cli --no-default-features --features sqlite
-      - name: Verify sqlx offline metadata is up-to-date
-        run: cargo sqlx prepare --workspace --all -- --all-targets
+  # DISABLED: Project uses sqlx::query() runtime API exclusively (zero compile-time query!/query_as! macros).
+  # cargo sqlx prepare generates .sqlx/ metadata for compile-time macro verification, which is unused.
+  # Re-enable when/if the project migrates to sqlx compile-time checked macros.
+  # verify-sqlx-offline:
+  #   name: Verify sqlx offline metadata
+  #   runs-on: ubuntu-latest
+  #   needs: verify-codegen
+  #   env:
+  #     SQLX_OFFLINE: "true"
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: generated-types
+  #         path: .
+  #     - name: Install cargo-sqlx
+  #       run: cargo install sqlx-cli --no-default-features --features sqlite
+  #     - name: Verify sqlx offline metadata is up-to-date
+  #       run: cargo sqlx prepare --workspace --all -- --all-targets
 
   typescript-checks:
     name: TypeScript typecheck
