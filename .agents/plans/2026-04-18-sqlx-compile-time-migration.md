@@ -165,19 +165,19 @@ git commit -m "refactor(sqlx): migrate nexus-sync to compile-time checked macros
 - Modify: `crates/nexus-orchestration/src/schedule/derivation.rs` — ~7 queries
 - Modify: `crates/nexus-orchestration/tests/schedule_regression_r11_r14.rs` — 1 query (test-only, acceptable to keep runtime with SAFETY comment)
 
-- [ ] **Step 1: Convert `storage/sqlite.rs`**
+- [x] **Step 1: Convert `storage/sqlite.rs`**
 
 3 queries (save, get, delete session).
 
-- [ ] **Step 2: Convert `schedule/supervisor.rs`**
+- [x] **Step 2: Convert `schedule/supervisor.rs`**
 
-~8 queries. Watch for `ScheduleRow` type mapping.
+~8 queries. Watch for `ScheduleRow` type mapping. Changed `scheduled_at` from `Option<String>` to `Option<i64>`.
 
-- [ ] **Step 3: Convert `schedule/derivation.rs`**
+- [x] **Step 3: Convert `schedule/derivation.rs`**
 
 ~7 queries. Follow same pattern as supervisor.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 cargo check -p nexus-orchestration
@@ -185,7 +185,7 @@ cargo test -p nexus-orchestration
 cargo clippy -p nexus-orchestration -- -D warnings
 ```
 
-- [ ] **Step 5: Generate .sqlx/ metadata and commit**
+- [x] **Step 5: Generate .sqlx/ metadata and commit**
 
 ```bash
 export DATABASE_URL="sqlite:.sqlx/state.db?mode=rwc"
