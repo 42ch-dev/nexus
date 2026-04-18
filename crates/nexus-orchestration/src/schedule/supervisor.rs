@@ -101,8 +101,9 @@ impl ScheduleSupervisor {
         let pool = &*self.pool;
 
         // Load all schedules from DB
-        let all_rows = sqlx::query_as::<_, ScheduleRow>(
-            "SELECT schedule_id, creator_id, preset_id, preset_version,
+        let all_rows = sqlx::query_as!(
+            ScheduleRow,
+            "SELECT schedule_id as \"schedule_id!\", creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
                     scheduled_at, label, created_at, updated_at, terminated_at
@@ -141,13 +142,14 @@ impl ScheduleSupervisor {
         let pool_ref = &*self.pool;
         let mut pending_with_deps: Vec<Schedule> = Vec::with_capacity(pending.len());
         for schedule in pending {
-            let dep_rows = sqlx::query_as::<_, (String,)>(
-                "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?1",
+            let sid = schedule.id.0.to_owned();
+            let dep_rows = sqlx::query_scalar!(
+                "SELECT depends_on as \"depends_on!\" FROM schedule_dependencies WHERE schedule_id = ?",
+                sid
             )
-            .bind(&schedule.id.0)
             .fetch_all(pool_ref)
             .await?;
-            let deps: Vec<ScheduleId> = dep_rows.into_iter().map(|(d,)| ScheduleId(d)).collect();
+            let deps: Vec<ScheduleId> = dep_rows.into_iter().map(ScheduleId).collect();
             let mut schedule = schedule;
             schedule.depends_on = deps;
             pending_with_deps.push(schedule);
@@ -182,12 +184,13 @@ impl ScheduleSupervisor {
 
         // Update admitted schedules to Running in DB
         for (_creator_id, sid) in &started {
-            sqlx::query(
-                "UPDATE creator_schedules SET status = 'running', updated_at = ?1
-                 WHERE schedule_id = ?2",
+            let sid_owned = sid.to_owned();
+            sqlx::query!(
+                "UPDATE creator_schedules SET status = 'running', updated_at = ?
+                 WHERE schedule_id = ?",
+                now,
+                sid_owned
             )
-            .bind(now)
-            .bind(sid)
             .execute(pool)
             .await?;
         }
@@ -235,26 +238,29 @@ impl ScheduleSupervisor {
         };
 
         // Fetch creator_id for the schedule before removing from running set
-        let row = sqlx::query_as::<_, (String,)>(
-            "SELECT creator_id FROM creator_schedules WHERE schedule_id = ?1",
+        let schedule_id_owned = schedule_id.to_owned();
+        let row = sqlx::query_scalar!(
+            "SELECT creator_id FROM creator_schedules WHERE schedule_id = ?",
+            schedule_id_owned
         )
-        .bind(schedule_id)
         .fetch_optional(&*self.pool)
         .await?;
 
-        sqlx::query(
+        let status_owned = status_str.to_owned();
+        sqlx::query!(
             "UPDATE creator_schedules
-             SET status = ?1, terminated_at = ?2, updated_at = ?2
-             WHERE schedule_id = ?3 AND status = 'running'",
+             SET status = ?, terminated_at = ?, updated_at = ?
+             WHERE schedule_id = ? AND status = 'running'",
+            status_owned,
+            now,
+            now,
+            schedule_id_owned
         )
-        .bind(status_str)
-        .bind(now)
-        .bind(schedule_id)
         .execute(&*self.pool)
         .await?;
 
         // Remove from running cache
-        if let Some((creator_id,)) = row {
+        if let Some(creator_id) = row {
             let mut inner = self.inner.lock().await;
             if let Some(ids) = inner.running_by_creator.get_mut(&creator_id) {
                 ids.remove(&ScheduleId(schedule_id.to_string()));
@@ -295,36 +301,46 @@ impl ScheduleSupervisor {
             ScheduleConcurrency::ParallelAny => ("parallel_any".to_string(), None),
         };
 
-        sqlx::query(
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id = schedule.id.0;
+        let creator_id = schedule.creator_id;
+        let preset_id = schedule.preset_id;
+        let preset_version_i64 = schedule.preset_version as i64;
+        let context_version_i64 = schedule.current_core_context_version.0 as i64;
+        let scheduled_at = schedule.scheduled_at;
+        let label = schedule.label;
+
+        sqlx::query!(
             r#"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, concurrency_whitelist,
                 current_core_context_version, current_session_id,
                 scheduled_at, label, created_at, updated_at, terminated_at)
-               VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?11, NULL)"#,
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL)"#,
+            schedule_id,
+            creator_id,
+            preset_id,
+            preset_version_i64,
+            concurrency_kind,
+            concurrency_whitelist,
+            context_version_i64,
+            scheduled_at,
+            label,
+            created_at,
+            updated_at
         )
-        .bind(&schedule.id.0)
-        .bind(&schedule.creator_id)
-        .bind(&schedule.preset_id)
-        .bind(schedule.preset_version as i64)
-        .bind(&concurrency_kind)
-        .bind(&concurrency_whitelist)
-        .bind(schedule.current_core_context_version.0 as i64)
-        .bind(&schedule.scheduled_at)
-        .bind(&schedule.label)
-        .bind(created_at)
-        .bind(updated_at)
         .execute(&*self.pool)
         .await?;
 
         // Insert dependencies
         for dep in &schedule.depends_on {
-            sqlx::query(
+            let dep_id = dep.0.clone();
+            sqlx::query!(
                 "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on)
-                 VALUES (?1, ?2)",
+                 VALUES (?, ?)",
+                schedule_id,
+                dep_id
             )
-            .bind(&schedule.id.0)
-            .bind(&dep.0)
             .execute(&*self.pool)
             .await?;
         }
@@ -347,15 +363,16 @@ impl ScheduleSupervisor {
 
     /// Get the current status of a schedule by ID (for testing/inspection).
     pub async fn status_of(&self, schedule_id: &str) -> Result<ScheduleStatus, SupervisorError> {
-        let row = sqlx::query_as::<_, (String,)>(
-            "SELECT status FROM creator_schedules WHERE schedule_id = ?1",
+        let schedule_id_owned = schedule_id.to_owned();
+        let row = sqlx::query_scalar!(
+            "SELECT status FROM creator_schedules WHERE schedule_id = ?",
+            schedule_id_owned
         )
-        .bind(schedule_id)
         .fetch_optional(&*self.pool)
         .await?;
 
         match row {
-            Some((status_str,)) => match status_str.as_str() {
+            Some(status_str) => match status_str.as_str() {
                 "pending" => Ok(ScheduleStatus::Pending),
                 "running" => Ok(ScheduleStatus::Running),
                 "paused" => Ok(ScheduleStatus::Paused),
@@ -389,20 +406,20 @@ impl ScheduleSupervisor {
     pub async fn resume_running_as_paused(&self, reason: &str) -> Result<usize, SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
-        let rows = sqlx::query_as::<_, (String,)>(
-            "SELECT schedule_id FROM creator_schedules WHERE status = 'running'",
+        let rows = sqlx::query_scalar!(
+            "SELECT schedule_id as \"schedule_id!\" FROM creator_schedules WHERE status = 'running'",
         )
         .fetch_all(&*self.pool)
         .await?;
 
         let count = rows.len();
-        for (sid,) in rows {
-            sqlx::query(
-                "UPDATE creator_schedules SET status = 'paused', updated_at = ?1
-                 WHERE schedule_id = ?2 AND status = 'running'",
+        for sid in rows {
+            sqlx::query!(
+                "UPDATE creator_schedules SET status = 'paused', updated_at = ?
+                 WHERE schedule_id = ? AND status = 'running'",
+                now,
+                sid
             )
-            .bind(now)
-            .bind(&sid)
             .execute(&*self.pool)
             .await?;
             tracing::info!("paused schedule {} (reason: {})", sid, reason);
@@ -428,7 +445,7 @@ struct ScheduleRow {
     concurrency_whitelist: Option<String>,
     current_core_context_version: i64,
     current_session_id: Option<String>,
-    scheduled_at: Option<String>,
+    scheduled_at: Option<i64>,
     label: Option<String>,
     created_at: i64,
     updated_at: i64,
@@ -477,7 +494,7 @@ impl ScheduleRow {
                 self.current_core_context_version as u32,
             ),
             current_session_id: self.current_session_id.clone(),
-            scheduled_at: self.scheduled_at.clone(),
+            scheduled_at: self.scheduled_at.map(|t| t.to_string()),
             label: self.label.clone(),
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),
@@ -514,6 +531,7 @@ mod tests_t9 {
         status: &str,
     ) {
         let now = chrono::Utc::now().timestamp();
+        // SAFETY: test-only — DML helper that inserts a minimal schedule row for test setup.
         sqlx::query(
             r#"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
@@ -585,6 +603,7 @@ mod tests_t9 {
         insert_schedule(&sup, "DEP-B", "pending").await;
 
         // Insert dependency: B depends on A
+        // SAFETY: test-only — DML helper for dependency setup.
         sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)")
             .bind("DEP-B")
             .bind("DEP-A")
@@ -627,6 +646,7 @@ mod tests_t9 {
         insert_schedule(&sup, "DEP-A-FAIL", "failed").await;
         insert_schedule(&sup, "DEP-B-FAIL", "pending").await;
 
+        // SAFETY: test-only — DML helper for dependency setup.
         sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)")
             .bind("DEP-B-FAIL")
             .bind("DEP-A-FAIL")

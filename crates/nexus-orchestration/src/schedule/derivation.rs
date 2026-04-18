@@ -72,7 +72,6 @@ impl CoreContextManager {
         let _guard = self.write_guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
-        let schedule_id_str = &schedule_id.0;
         let new_version = CoreContextVersion(0);
 
         let new_payload = CoreContextPayload::Text {
@@ -92,35 +91,39 @@ impl CoreContextManager {
             CoreContextAuthor::System => ("system", None),
         };
 
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let version_i64 = new_version.0 as i64;
+
         // Insert version 0 row
-        sqlx::query(
+        sqlx::query!(
             r#"INSERT INTO core_context_versions
                (schedule_id, version, payload_kind, content,
                 derivation_kind, derivation_detail,
                 created_at, created_by_kind, created_by_user_id)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            schedule_id_owned,
+            version_i64,
+            payload_kind,
+            content_bytes,
+            "seed",
+            derivation_json,
+            now,
+            created_by_kind,
+            created_by_user_id
         )
-        .bind(schedule_id_str)
-        .bind(new_version.0 as i64)
-        .bind(payload_kind)
-        .bind(&content_bytes)
-        .bind("seed")
-        .bind(&derivation_json)
-        .bind(now)
-        .bind(created_by_kind)
-        .bind(&created_by_user_id)
         .execute(&*self.pool)
         .await?;
 
         // Set the schedule's current_core_context_version to 0
-        sqlx::query(
+        sqlx::query!(
             "UPDATE creator_schedules
-             SET current_core_context_version = ?1, updated_at = ?2
-             WHERE schedule_id = ?3",
+             SET current_core_context_version = ?, updated_at = ?
+             WHERE schedule_id = ?",
+            version_i64,
+            now,
+            schedule_id_owned
         )
-        .bind(new_version.0 as i64)
-        .bind(now)
-        .bind(schedule_id_str)
         .execute(&*self.pool)
         .await?;
 
@@ -152,7 +155,6 @@ impl CoreContextManager {
         let _guard = self.write_guard.lock().await;
 
         let now = chrono::Utc::now().timestamp();
-        let schedule_id_str = &schedule_id.0;
 
         // Read current version and payload
         let current_version = self.current_version(schedule_id).await?;
@@ -181,35 +183,39 @@ impl CoreContextManager {
 
         let derivation_kind = derivation_kind_str(&step);
 
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let version_i64 = new_version.0 as i64;
+
         // Insert the new version row
-        sqlx::query(
+        sqlx::query!(
             r#"INSERT INTO core_context_versions
                (schedule_id, version, payload_kind, content,
                 derivation_kind, derivation_detail,
                 created_at, created_by_kind, created_by_user_id)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            schedule_id_owned,
+            version_i64,
+            payload_kind,
+            content_bytes,
+            derivation_kind,
+            derivation_json,
+            now,
+            created_by_kind,
+            created_by_user_id
         )
-        .bind(schedule_id_str)
-        .bind(new_version.0 as i64)
-        .bind(payload_kind)
-        .bind(&content_bytes)
-        .bind(derivation_kind)
-        .bind(&derivation_json)
-        .bind(now)
-        .bind(created_by_kind)
-        .bind(&created_by_user_id)
         .execute(&*self.pool)
         .await?;
 
         // Bump the schedule's current_core_context_version
-        sqlx::query(
+        sqlx::query!(
             "UPDATE creator_schedules
-             SET current_core_context_version = ?1, updated_at = ?2
-             WHERE schedule_id = ?3",
+             SET current_core_context_version = ?, updated_at = ?
+             WHERE schedule_id = ?",
+            version_i64,
+            now,
+            schedule_id_owned
         )
-        .bind(new_version.0 as i64)
-        .bind(now)
-        .bind(schedule_id_str)
         .execute(&*self.pool)
         .await?;
 
@@ -262,7 +268,6 @@ impl CoreContextManager {
         // H2: Serialize writes to prevent version chain corruption.
         let _guard = self.write_guard.lock().await;
         let now = chrono::Utc::now().timestamp();
-        let schedule_id_str = &schedule_id.0;
 
         let current_version = self.current_version(schedule_id).await?;
         let new_version = CoreContextVersion(current_version.0 + 1);
@@ -288,32 +293,36 @@ impl CoreContextManager {
         });
         let derivation_json = serde_json::to_string(&detail_json)?;
 
-        sqlx::query(
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let version_i64 = new_version.0 as i64;
+
+        sqlx::query!(
             r#"INSERT INTO core_context_versions
                (schedule_id, version, payload_kind, content,
                 derivation_kind, derivation_detail,
                 created_at, created_by_kind, created_by_user_id)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'system', NULL)"#,
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'system', NULL)"#,
+            schedule_id_owned,
+            version_i64,
+            payload_kind,
+            content_bytes,
+            "preset_hook",
+            derivation_json,
+            now
         )
-        .bind(schedule_id_str)
-        .bind(new_version.0 as i64)
-        .bind(payload_kind)
-        .bind(&content_bytes)
-        .bind("preset_hook")
-        .bind(&derivation_json)
-        .bind(now)
         .execute(&*self.pool)
         .await?;
 
         // Bump the schedule's current_core_context_version
-        sqlx::query(
+        sqlx::query!(
             "UPDATE creator_schedules
-             SET current_core_context_version = ?1, updated_at = ?2
-             WHERE schedule_id = ?3",
+             SET current_core_context_version = ?, updated_at = ?
+             WHERE schedule_id = ?",
+            version_i64,
+            now,
+            schedule_id_owned
         )
-        .bind(new_version.0 as i64)
-        .bind(now)
-        .bind(schedule_id_str)
         .execute(&*self.pool)
         .await?;
 
@@ -362,16 +371,17 @@ impl CoreContextManager {
         &self,
         schedule_id: &ScheduleId,
     ) -> Result<CoreContextVersion, CoreContextError> {
-        let row = sqlx::query_as::<_, (i64,)>(
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let row = sqlx::query_scalar!(
             "SELECT current_core_context_version
-             FROM creator_schedules WHERE schedule_id = ?1",
+             FROM creator_schedules WHERE schedule_id = ?",
+            schedule_id_owned
         )
-        .bind(&schedule_id.0)
         .fetch_optional(&*self.pool)
         .await?;
 
         match row {
-            Some((v,)) => Ok(CoreContextVersion(v as u32)),
+            Some(v) => Ok(CoreContextVersion(v as u32)),
             None => Err(CoreContextError::NotFound(schedule_id.0.clone())),
         }
     }
@@ -382,15 +392,19 @@ impl CoreContextManager {
         schedule_id: &ScheduleId,
         version: CoreContextVersion,
     ) -> Result<CoreContextRecord, CoreContextError> {
-        let row = sqlx::query_as::<_, CoreContextVersionRow>(
+        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
+        let schedule_id_owned = schedule_id.0.to_owned();
+        let version_i64 = version.0 as i64;
+        let row = sqlx::query_as!(
+            CoreContextVersionRow,
             "SELECT schedule_id, version, payload_kind, content,
                     derivation_kind, derivation_detail,
                     created_at, created_by_kind, created_by_user_id
              FROM core_context_versions
-             WHERE schedule_id = ?1 AND version = ?2",
+             WHERE schedule_id = ? AND version = ?",
+            schedule_id_owned,
+            version_i64
         )
-        .bind(&schedule_id.0)
-        .bind(version.0 as i64)
         .fetch_optional(&*self.pool)
         .await?
         .ok_or_else(|| CoreContextError::VersionNotFound(schedule_id.0.clone(), version.0))?;
@@ -638,13 +652,14 @@ mod tests {
     /// Helper: insert a minimal schedule row for testing.
     async fn insert_test_schedule(pool: &SqlitePool, schedule_id: &str) {
         let now = chrono::Utc::now().timestamp();
+        // SAFETY: test-only — DML helper that inserts a minimal schedule row for test setup.
         sqlx::query(
             r#"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
                 created_at, updated_at)
                VALUES (?1, 'test-creator', 'test-preset', 1, 'pending',
-                'serial', 0, ?2, ?2)"#,
+               'serial', 0, ?2, ?2)"#,
         )
         .bind(schedule_id)
         .bind(now)
