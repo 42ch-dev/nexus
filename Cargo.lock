@@ -1985,6 +1985,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror 1.0.69",
 ]
 

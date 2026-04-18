@@ -6,7 +6,7 @@
 //! Design: `orchestration-engine-v1.md` §8.1.
 
 use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{ExitWhen, InnerGraph, NextTarget, PresetManifest};
+use crate::preset::manifest::{ContextUpdateOp, ExitWhen, InnerGraph, NextTarget, PresetManifest};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -36,6 +36,10 @@ pub struct LoadedPreset {
     pub output_bindings: HashMap<String, String>,
     /// The parsed manifest (retained for re-wiring outer graph with engine).
     pub manifest: PresetManifest,
+    /// Initial action for schedule creation (from `preset.initial_action`).
+    pub initial_action: Option<crate::preset::manifest::InitialAction>,
+    /// Per-state context update hooks (keyed by state ID).
+    pub context_update_hooks: HashMap<String, crate::preset::manifest::ContextUpdateHook>,
 }
 
 impl std::fmt::Debug for LoadedPreset {
@@ -73,6 +77,9 @@ pub enum PresetLoadError {
         /// Number of problems (display only).
         len: usize,
     },
+    /// A preset hook used an invalid operation kind (e.g. replace).
+    #[error("invalid preset hook operation: {0}")]
+    InvalidPresetHookOp(String),
 }
 
 impl PresetLoadError {
@@ -142,6 +149,16 @@ pub fn load_preset_from_str(
         signals: manifest.signals.clone(),
         source_hash,
         output_bindings,
+        initial_action: manifest.preset.initial_action.clone(),
+        context_update_hooks: manifest
+            .states
+            .iter()
+            .filter_map(|s| {
+                s.context_update
+                    .as_ref()
+                    .map(|hook| (s.id.clone(), hook.clone()))
+            })
+            .collect(),
         manifest,
     })
 }
@@ -281,6 +298,25 @@ fn validate_manifest(
                     path: format!("{}.exit_when.judge_capability", state_path),
                     error: format!("unknown capability: '{}'", cap_name),
                 });
+            }
+        }
+
+        // Validate context_update hook (WS7 §7)
+        if let Some(ref hook) = state.context_update {
+            match &hook.op {
+                ContextUpdateOp::Append { .. } | ContextUpdateOp::StructMerge { .. } => {}
+                ContextUpdateOp::Replace { .. } => {
+                    problems.push(ValidationProblem {
+                        path: format!("{}.context_update.op", state_path),
+                        error: "'replace' is not allowed in preset hooks (only 'append' and 'struct_merge')".to_string(),
+                    });
+                }
+                ContextUpdateOp::StructRemove { .. } => {
+                    problems.push(ValidationProblem {
+                        path: format!("{}.context_update.op", state_path),
+                        error: "'struct_remove' is not allowed in preset hooks (only 'append' and 'struct_merge')".to_string(),
+                    });
+                }
             }
         }
     }
@@ -1055,5 +1091,193 @@ states:
             loaded.is_ok(),
             "expected valid preset with known requires_capabilities: {loaded:?}"
         );
+    }
+
+    // ── WS7 T4: initial_action + context_update parsing ──────────────────
+
+    #[test]
+    fn parse_initial_action_and_context_update() {
+        use crate::preset::manifest::{ContextUpdateOp, InitialAction};
+
+        let yaml = r#"
+preset:
+  id: demo
+  version: 1
+  kind: creator
+  description: demo
+  requires_capabilities: []
+  initial: a
+  terminal: b
+  initial_action:
+    kind: seed_direct
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: append }
+      template_file: prompts/a-ctx.md
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps).unwrap();
+
+        // Verify initial_action parsed
+        assert!(matches!(
+            loaded.initial_action,
+            Some(InitialAction::SeedDirect)
+        ));
+
+        // Verify context_update hook on state "a"
+        let hook = loaded.context_update_hooks.get("a").unwrap();
+        assert_eq!(hook.template_file, "prompts/a-ctx.md");
+        assert!(matches!(hook.op, ContextUpdateOp::Append { .. }));
+    }
+
+    #[test]
+    fn parse_initial_action_seed_expansion() {
+        use crate::preset::manifest::InitialAction;
+
+        let yaml = r#"
+preset:
+  id: exp-demo
+  version: 1
+  kind: creator
+  description: demo
+  requires_capabilities: []
+  initial: a
+  terminal: b
+  initial_action:
+    kind: seed_expansion
+    capability: context.summarize
+    template_file: prompts/seed-expand.md
+    payload_kind: text
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps).unwrap();
+        assert!(matches!(
+            loaded.initial_action,
+            Some(InitialAction::SeedExpansion { .. })
+        ));
+        if let Some(InitialAction::SeedExpansion {
+            capability,
+            template_file,
+            payload_kind,
+        }) = loaded.initial_action
+        {
+            assert_eq!(capability, "context.summarize");
+            assert_eq!(template_file, Some("prompts/seed-expand.md".to_string()));
+            assert_eq!(payload_kind, Some("text".to_string()));
+        }
+    }
+
+    #[test]
+    fn reject_context_update_with_replace_op() {
+        let yaml = r#"
+preset:
+  id: bad-hook
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: replace, body: "nope" }
+      template_file: prompts/a-ctx.md
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems.iter().any(|p| p.error.contains("replace")),
+            "expected 'replace' problem in context_update: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_context_update_with_struct_remove_op() {
+        let yaml = r#"
+preset:
+  id: bad-hook2
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: struct_remove, path: "key" }
+      template_file: prompts/a-ctx.md
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems.iter().any(|p| p.error.contains("struct_remove")),
+            "expected 'struct_remove' problem in context_update: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn context_update_struct_merge_parses() {
+        use crate::preset::manifest::ContextUpdateOp;
+
+        let yaml = r#"
+preset:
+  id: merge-demo
+  version: 1
+  kind: creator
+  description: demo
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: struct_merge }
+      template_file: prompts/a-ctx.md
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps).unwrap();
+        let hook = loaded.context_update_hooks.get("a").unwrap();
+        assert!(matches!(hook.op, ContextUpdateOp::StructMerge { .. }));
+    }
+
+    #[test]
+    fn preset_without_initial_action_loads_successfully() {
+        // initial_action is optional — existing presets without it should still work.
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap();
+        assert!(loaded.initial_action.is_none());
+        assert!(loaded.context_update_hooks.is_empty());
     }
 }

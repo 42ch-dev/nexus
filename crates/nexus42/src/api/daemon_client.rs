@@ -139,6 +139,38 @@ impl DaemonClient {
         Ok(data)
     }
 
+    /// Send a PATCH request with JSON body
+    pub async fn patch<T: DeserializeOwned, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self.http.patch(&url).json(body).send().await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: T = resp.json().await?;
+        Ok(data)
+    }
+
+    /// Send a DELETE request
+    pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self.http.delete(&url).send().await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: T = resp.json().await?;
+        Ok(data)
+    }
+
     /// Parse an error response from the daemon, attempting structured parsing first
     /// and falling back to raw body text for backward compatibility.
     ///

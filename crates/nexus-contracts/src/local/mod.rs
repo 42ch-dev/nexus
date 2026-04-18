@@ -8,5 +8,6 @@ pub mod acp_runtime;
 pub mod domain;
 pub mod meta;
 pub mod orchestration;
+pub mod schedule;
 
 pub use meta::*;
