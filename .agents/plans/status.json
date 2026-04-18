@@ -4,13 +4,13 @@
   "plans": [
     {
       "id": "2026-04-18-sqlx-compile-time-migration",
-      "status": "InProgress",
+      "status": "InReview",
       "file": ".agents/plans/2026-04-18-sqlx-compile-time-migration.md",
       "title": "V1.4 — sqlx compile-time macro migration + .sqlx/ workflow",
       "owner": "fullstack-dev",
       "tags": ["v1.4", "sqlx", "refactor", "tech-debt"],
       "created_at": "2026-04-18",
-      "updated_at": "2026-04-18T18:45:00Z",
+      "updated_at": "2026-04-18T20:00:00Z",
       "metadata": {
         "priority": "high",
         "phase": "V1.4",
