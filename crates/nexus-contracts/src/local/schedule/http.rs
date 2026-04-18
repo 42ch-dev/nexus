@@ -31,6 +31,10 @@ pub struct AddScheduleRequest {
     pub depends_on: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<ScheduleConcurrencyRequest>,
+    /// V1.5 WS-D: scheduled_at as Unix timestamp (string for JSON compatibility).
+    /// Accepts ISO-8601 datetime in CLI; HTTP accepts Unix timestamp string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,11 +189,29 @@ mod tests {
             label: Some("demo".to_string()),
             depends_on: None,
             concurrency: None,
+            scheduled_at: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.creator_id, "c1");
         assert_eq!(back.seed, Some("topic=bees".to_string()));
+    }
+
+    #[test]
+    fn add_schedule_request_with_scheduled_at() {
+        let req = AddScheduleRequest {
+            creator_id: "c2".to_string(),
+            preset_id: "novel-writing".to_string(),
+            seed: None,
+            label: None,
+            depends_on: None,
+            concurrency: None,
+            scheduled_at: Some("253402300799".to_string()), // Unix timestamp
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"scheduled_at\":\"253402300799\""));
+        let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.scheduled_at, Some("253402300799".to_string()));
     }
 
     #[test]

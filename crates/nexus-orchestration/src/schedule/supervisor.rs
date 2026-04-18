@@ -178,11 +178,14 @@ impl ScheduleSupervisor {
                     // V1.5 WS-D: filter by scheduled_at for clock-triggered tick
                     // scheduled_at_cutoff filters by scheduled_at <= cutoff OR scheduled_at IS NULL
                     let due = match (scheduled_at_cutoff, &schedule.scheduled_at) {
-                        (None, _) => true, // on-demand tick: admit all pending
+                        (None, _) => true,             // on-demand tick: admit all pending
                         (Some(_cutoff), None) => true, // no scheduled_at: on-demand schedule
                         (Some(cutoff), Some(scheduled_str)) => {
                             // Parse scheduled_at string (Unix timestamp as string)
-                            scheduled_str.parse::<i64>().map(|t| t <= cutoff).unwrap_or(false)
+                            scheduled_str
+                                .parse::<i64>()
+                                .map(|t| t <= cutoff)
+                                .unwrap_or(false)
                         }
                     };
                     if due {
