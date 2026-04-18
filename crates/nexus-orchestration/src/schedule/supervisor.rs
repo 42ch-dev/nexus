@@ -93,7 +93,38 @@ impl ScheduleSupervisor {
             return Ok(());
         }
 
-        let result = self.tick_inner().await;
+        // Use system clock for on-demand tick
+        let now = chrono::Utc::now().timestamp();
+        let result = self.tick_inner(now, None).await;
+
+        // Always release the guard, even on error.
+        self.tick_in_progress.store(false, Ordering::Release);
+
+        result
+    }
+
+    /// Clock-triggered tick for V1.5 WS-D.
+    ///
+    /// Like `tick()` but only admits schedules where `scheduled_at <= now`
+    /// (or `scheduled_at IS NULL` for on-demand schedules).
+    ///
+    /// **Used by**: `Scheduler::tick()` for clock-triggered admission.
+    /// **Not used by**: `on_schedule_terminal()` cascade (which uses `tick()`).
+    ///
+    /// **Idempotency guard (H4)**: Shared with `tick()` — if either is in progress,
+    /// the other returns immediately.
+    pub async fn tick_clocked(&self, clock_now: i64) -> Result<(), SupervisorError> {
+        // H4: Re-entrancy guard — shared with tick()
+        if self
+            .tick_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Ok(());
+        }
+
+        // Filter by scheduled_at <= clock_now OR scheduled_at IS NULL
+        let result = self.tick_inner(clock_now, Some(clock_now)).await;
 
         // Always release the guard, even on error.
         self.tick_in_progress.store(false, Ordering::Release);
@@ -102,8 +133,16 @@ impl ScheduleSupervisor {
     }
 
     /// Inner implementation of tick (no re-entrancy guard).
-    async fn tick_inner(&self) -> Result<(), SupervisorError> {
-        let now = chrono::Utc::now().timestamp();
+    ///
+    /// Parameters:
+    /// - `now`: timestamp for DB updates
+    /// - `scheduled_at_cutoff`: if Some, only admit schedules where
+    ///   `scheduled_at IS NULL OR scheduled_at <= cutoff`. If None, admit all pending.
+    async fn tick_inner(
+        &self,
+        now: i64,
+        scheduled_at_cutoff: Option<i64>,
+    ) -> Result<(), SupervisorError> {
         let pool = &*self.pool;
 
         // Load all schedules from DB
@@ -136,7 +175,19 @@ impl ScheduleSupervisor {
                     completed_ids.push(schedule.id.clone());
                 }
                 ScheduleStatus::Pending => {
-                    pending.push(schedule);
+                    // V1.5 WS-D: filter by scheduled_at for clock-triggered tick
+                    // scheduled_at_cutoff filters by scheduled_at <= cutoff OR scheduled_at IS NULL
+                    let due = match (scheduled_at_cutoff, &schedule.scheduled_at) {
+                        (None, _) => true, // on-demand tick: admit all pending
+                        (Some(_cutoff), None) => true, // no scheduled_at: on-demand schedule
+                        (Some(cutoff), Some(scheduled_str)) => {
+                            // Parse scheduled_at string (Unix timestamp as string)
+                            scheduled_str.parse::<i64>().map(|t| t <= cutoff).unwrap_or(false)
+                        }
+                    };
+                    if due {
+                        pending.push(schedule);
+                    }
                 }
                 _ => {}
             }

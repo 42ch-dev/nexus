@@ -8,37 +8,20 @@
 //!
 //! Uses `MockClock` abstraction to control time without sleeping.
 
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use nexus_contracts::local::schedule::{
     CoreContextVersion, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
 use nexus_local_db::SqlitePool;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
+use nexus_orchestration::scheduler::{MockClock, Scheduler};
+use tokio_util::sync::CancellationToken;
 
 // ============================================================================
 // Test helpers
 // ============================================================================
-
-/// Mock clock that provides a controllable `now()` value.
-///
-/// Used to simulate `scheduled_at` triggers without real `tokio::time::sleep`.
-struct MockClock {
-    now: AtomicI64,
-}
-
-impl MockClock {
-    fn new(initial: i64) -> Self {
-        Self {
-            now: AtomicI64::new(initial),
-        }
-    }
-
-    fn set(&self, ts: i64) {
-        self.now.store(ts, Ordering::SeqCst);
-    }
-}
 
 async fn setup_test_db() -> (tempfile::TempDir, Arc<SqlitePool>) {
     let dir = tempfile::tempdir().unwrap();
@@ -78,12 +61,12 @@ fn make_schedule(id: &str, creator: &str, scheduled_at: Option<i64>) -> Schedule
 
 #[tokio::test]
 async fn r21_clock_poller_triggers_at_scheduled_at() {
-    // RED: This test will fail because `Scheduler` module doesn't exist yet.
     let (_dir, pool) = setup_test_db().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Mock clock starts at t=1000
     let clock = Arc::new(MockClock::new(1000));
+    let scheduler = Scheduler::new(pool.clone(), clock.clone());
 
     // Schedule with scheduled_at = 2000 (not yet due)
     let schedule = make_schedule("S01", "creator-1", Some(2000));
@@ -96,19 +79,24 @@ async fn r21_clock_poller_triggers_at_scheduled_at() {
         "schedule should be Pending before scheduled_at"
     );
 
-    // TODO: When scheduler module exists:
-    // let scheduler = Scheduler::new(supervisor.clone(), clock.clone());
-    // scheduler.tick().await; // should NOT start S01 (clock=1000 < scheduled_at=2000)
-    // assert!(supervisor.status_of("S01").await.unwrap() == ScheduleStatus::Pending);
+    // Tick at clock=1000: S01 not due yet (scheduled_at=2000 > now=1000)
+    scheduler.tick(&supervisor).await;
+    assert_eq!(
+        supervisor.status_of("S01").await.unwrap(),
+        ScheduleStatus::Pending,
+        "schedule should remain Pending when scheduled_at > now"
+    );
 
     // Advance clock to scheduled_at
     clock.set(2000);
 
-    // TODO: scheduler.tick().await should start S01 now
-    // assert!(supervisor.status_of("S01").await.unwrap() == ScheduleStatus::Running);
-
-    // For now, this test documents the expected behavior and will fail
-    // once we add the scheduler module import.
+    // Tick at clock=2000: S01 is now due
+    scheduler.tick(&supervisor).await;
+    assert_eq!(
+        supervisor.status_of("S01").await.unwrap(),
+        ScheduleStatus::Running,
+        "schedule should transition to Running when scheduled_at <= now"
+    );
 }
 
 // ============================================================================
@@ -120,27 +108,33 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
     let (_dir, pool) = setup_test_db().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Mock clock at t=1000 (will be used by scheduler once implemented)
-    let _clock = Arc::new(MockClock::new(1000));
+    // Mock clock at t=1000
+    let clock = Arc::new(MockClock::new(1000));
+    let scheduler = Scheduler::new(pool.clone(), clock.clone());
 
     // Schedule due immediately (scheduled_at = 500 < clock=1000)
     let schedule = make_schedule("S02", "creator-2", Some(500));
     supervisor.insert_pending(schedule).await.unwrap();
 
-    // TODO: Once scheduler module exists:
-    // let scheduler = Scheduler::new(supervisor.clone(), clock.clone());
-    //
-    // // First tick: S02 should be admitted
-    // scheduler.tick().await;
-    // assert_eq!(supervisor.status_of("S02").await.unwrap(), ScheduleStatus::Running);
-    //
-    // // Second tick in same cycle: S02 should NOT be double-admitted
-    // // (scheduler tracks admitted IDs in HashSet)
-    // scheduler.tick().await;
-    // // Status should remain Running, not transition twice
-    // assert_eq!(supervisor.status_of("S02").await.unwrap(), ScheduleStatus::Running);
+    // First tick: S02 should be admitted
+    let count = scheduler.tick(&supervisor).await;
+    assert_eq!(count, 1, "one schedule should be found due");
+    assert_eq!(
+        supervisor.status_of("S02").await.unwrap(),
+        ScheduleStatus::Running
+    );
 
-    // This test documents expected duplicate-fire prevention behavior.
+    // Second tick in same cycle: S02 should NOT be double-admitted
+    // (scheduler tracks admitted IDs in HashSet per tick)
+    let count2 = scheduler.tick(&supervisor).await;
+    // Count should be 0 because S02 is no longer pending (now Running)
+    assert_eq!(count2, 0, "no new schedules due — S02 is already running");
+    // Status should remain Running, not transition twice
+    assert_eq!(
+        supervisor.status_of("S02").await.unwrap(),
+        ScheduleStatus::Running,
+        "schedule should remain Running after second tick"
+    );
 }
 
 // ============================================================================
@@ -152,40 +146,51 @@ async fn graceful_shutdown_cancels_pending_poll() {
     let (_dir, pool) = setup_test_db().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Mock clock (will be used by scheduler once implemented)
-    let _clock = Arc::new(MockClock::new(1000));
+    // Mock clock at t=1000
+    let clock = Arc::new(MockClock::new(1000));
+    let scheduler = Scheduler::new(pool.clone(), clock.clone());
 
     // Multiple schedules due at different times
-    let s1 = make_schedule("S03", "creator-3", Some(500)); // due now
-    let s2 = make_schedule("S04", "creator-3", Some(1500)); // future
+    let s1 = make_schedule("S03", "creator-3a", Some(500)); // due now
+    let s2 = make_schedule("S04", "creator-3b", Some(1500)); // future
     supervisor.insert_pending(s1).await.unwrap();
     supervisor.insert_pending(s2).await.unwrap();
 
-    // TODO: Once scheduler module exists with CancellationToken:
-    // let cancel_token = tokio_util::sync::CancellationToken::new();
-    // let scheduler = Scheduler::new(supervisor.clone(), clock.clone());
-    //
-    // // Spawn poller in background
-    // let poller = tokio::spawn(scheduler.run(cancel_token.clone()));
-    //
-    // // Wait briefly for first poll to start S03
-    // tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    // assert_eq!(supervisor.status_of("S03").await.unwrap(), ScheduleStatus::Running);
-    //
-    // // Signal shutdown BEFORE S04's scheduled_at
-    // cancel_token.cancel();
-    //
-    // // Poller should complete cleanly
-    // poller.await.unwrap();
-    //
-    // // S04 should NOT have been started (shutdown happened before scheduled_at)
-    // assert_eq!(
-    //     supervisor.status_of("S04").await.unwrap(),
-    //     ScheduleStatus::Pending,
-    //     "future schedule should remain Pending after graceful shutdown"
-    // );
+    // Spawn poller in background with cancellation token
+    let cancel = CancellationToken::new();
+    let poller = tokio::spawn(scheduler.run(
+        supervisor.clone(),
+        cancel.clone(),
+        100, // 100ms poll interval
+    ));
 
-    // This test documents graceful shutdown behavior.
+    // Wait for first poll to start S03 (due at t=500)
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        supervisor.status_of("S03").await.unwrap(),
+        ScheduleStatus::Running,
+        "S03 should be Running after first poll (scheduled_at=500 < clock=1000)"
+    );
+
+    // S04 should NOT be started yet (scheduled_at=1500 > clock=1000)
+    assert_eq!(
+        supervisor.status_of("S04").await.unwrap(),
+        ScheduleStatus::Pending,
+        "S04 should remain Pending (scheduled_at > now)"
+    );
+
+    // Signal shutdown BEFORE advancing clock to S04's scheduled_at
+    cancel.cancel();
+
+    // Poller should complete cleanly
+    poller.await.unwrap();
+
+    // S04 should NOT have been started (shutdown happened before scheduled_at)
+    assert_eq!(
+        supervisor.status_of("S04").await.unwrap(),
+        ScheduleStatus::Pending,
+        "future schedule should remain Pending after graceful shutdown"
+    );
 }
 
 // ============================================================================
@@ -199,29 +204,35 @@ async fn dst_clock_jump_recomputes_next_run() {
 
     // Simulate DST transition: clock jumps forward 1 hour
     // Real time: 02:00 → 03:00 (spring forward)
-    // (clock will be used by scheduler once implemented)
     let clock = Arc::new(MockClock::new(7200)); // 02:00 in seconds
+    let scheduler = Scheduler::new(pool.clone(), clock.clone());
 
     // Schedule due at 02:30 (9000 seconds)
     let schedule = make_schedule("S05", "creator-4", Some(9000));
     supervisor.insert_pending(schedule).await.unwrap();
 
-    // TODO: DST detection logic in scheduler:
-    // - Compare SystemTime elapsed vs tokio::time::Instant elapsed
-    // - If delta > threshold, recompute scheduled_at interpretation
-    //
+    // Tick at clock=7200 (02:00): S05 not yet due (scheduled_at=9000 > now=7200)
+    scheduler.tick(&supervisor).await;
+    assert_eq!(
+        supervisor.status_of("S05").await.unwrap(),
+        ScheduleStatus::Pending,
+        "schedule should remain Pending before DST jump"
+    );
+
+    // DST spring forward: clock jumps to 03:00 (10800 seconds)
+    // In real DST, 02:30 "disappears" — the scheduler should:
+    // 1. Detect the jump (SystemTime elapsed != Instant elapsed)
+    // 2. Recompute: scheduled_at=9000 is now in the past (02:30 "became" 01:30 in local)
     // For mock clock, we simulate by directly jumping forward:
     clock.set(10800); // Jump to 03:00 (DST spring forward)
 
-    // After DST jump, the scheduler should:
-    // 1. Detect discontinuity (SystemTime != Instant monotonic)
-    // 2. Recompute: scheduled_at=9000 is now in the past (02:30 became 01:30)
-    // 3. Trigger admission
-
-    // TODO: scheduler.tick().await should trigger S05 after DST jump
-    // assert_eq!(supervisor.status_of("S05").await.unwrap(), ScheduleStatus::Running);
-
-    // This test documents DST safety behavior.
+    // Tick after DST jump: scheduled_at=9000 is now in the past
+    scheduler.tick(&supervisor).await;
+    assert_eq!(
+        supervisor.status_of("S05").await.unwrap(),
+        ScheduleStatus::Running,
+        "schedule should trigger after DST jump (scheduled_at became past)"
+    );
 }
 
 // ============================================================================
