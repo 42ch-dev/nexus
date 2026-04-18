@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-18T23:30:00Z",
+  "updated_at": "2026-04-18T23:45:00Z",
   "plans": [
     {
       "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
@@ -31,18 +31,18 @@
       "id": "2026-04-18-v1.5-ws-b-orch-db-residuals",
       "title": "V1.5 WS-B — Orchestration + DB residual cleanup",
       "file": "2026-04-18-v1.5-ws-b-orch-db-residuals.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "fullstack-dev",
       "agents": ["fullstack-dev", "qa-engineer"],
-      "progress": 0,
+      "progress": 100,
       "tags": ["v1.5", "residual", "orchestration", "db", "sqlx", "M1"],
       "created_at": "2026-04-18T23:30:00Z",
-      "updated_at": "2026-04-18T23:30:00Z",
-      "notes": "Parallel with WS-A. 12 residuals across WS2/WS3/WS8/sqlx (7 medium + 3 low + 2 nit).",
+      "updated_at": "2026-04-18T23:45:00Z",
+      "notes": "Implementation complete. Ready for QC/QA validation. All 12 residuals resolved.",
       "metadata": {
         "description": "Resolve remaining 12 residuals across orchestration, preset loader, local DB, and sqlx compile-time migration.",
         "milestone": "M1",
-        "working_branch": "feature/v1.5-stabilization",
+        "working_branch": "feature/v1.5-ws-b-orch-db",
         "dependency": [],
         "blocks": [],
         "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
@@ -53,7 +53,14 @@
             "2026-04-17-v1.4-ws8-local-db-sqlx-migration": ["R1", "R4"],
             "2026-04-18-sqlx-compile-time-migration": ["R1", "R2", "R3", "R4", "R5"]
           }
-        }
+        },
+        "gates": {
+          "tests": "passed",
+          "clippy": "clean",
+          "fmt": "clean",
+          "sqlx_prepare": "verified"
+        },
+        "commits": ["7fe128f", "f49ad5e"]
       }
     },
     {
@@ -126,29 +133,29 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-18T22:00:00Z",
-      "total_open": 19,
+      "updated_at": "2026-04-18T23:45:00Z",
+      "total_open": 7,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 13,
-        "low": 4,
-        "nit": 2
+        "medium": 7,
+        "low": 0,
+        "nit": 0
       },
       "by_target": {
         "V1.0": 0,
         "V1.1": 0,
         "V1.2": 0,
         "V1.3": 0,
-        "V1.4": 16,
-        "V1.5": 3
+        "V1.4": 7,
+        "V1.5": 0
       },
       "by_plan": {
         "2026-04-17-v1.4-ws7-creator-schedule-core-context": 7,
-        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 2,
-        "2026-04-17-v1.4-ws2-orchestration-skeleton": 3,
-        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 2,
-        "2026-04-18-sqlx-compile-time-migration": 5
+        "2026-04-17-v1.4-ws8-local-db-sqlx-migration": 0,
+        "2026-04-17-v1.4-ws2-orchestration-skeleton": 0,
+        "2026-04-17-v1.4-ws3-preset-loader-novel-writing": 0,
+        "2026-04-18-sqlx-compile-time-migration": 0
       },
       "cross_cutting": [
         {
@@ -234,146 +241,6 @@
           "severity": "medium",
           "source": "QC2 medium",
           "scope": "CLI UX / daemon signal handler",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-17-v1.4-ws8-local-db-sqlx-migration": [
-        {
-          "id": "R1",
-          "title": "read_versions discards malformed value in error struct",
-          "severity": "medium",
-          "source": "qc1 W-01",
-          "scope": "crates/nexus-local-db/src/lib.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R4",
-          "title": "Outbox schema DDL hardcoded inline rather than using sqlx::migrate",
-          "severity": "medium",
-          "source": "qc3 W1",
-          "scope": "crates/nexus-sync/src/outbox.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-17-v1.4-ws2-orchestration-skeleton": [
-        {
-          "id": "R1",
-          "title": "Daemon restart does not repopulate in-memory session tracker from SQLite",
-          "severity": "medium",
-          "source": "qc",
-          "scope": "crates/nexus42d/src/main.rs — engine restart path",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "WS3",
-          "tracking_link": null
-        },
-        {
-          "id": "R3",
-          "title": "FlowRunner clone-per-step correctness unverified",
-          "severity": "medium",
-          "source": "qc",
-          "scope": "crates/nexus-orchestration/src/engine.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "WS3",
-          "tracking_link": null
-        },
-        {
-          "id": "R4",
-          "title": "Worker shutdown SIGTERM→SIGKILL path not implemented (uses start_kill directly)",
-          "severity": "medium",
-          "source": "qc",
-          "scope": "crates/nexus-orchestration/src/worker/manager.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "WS3",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-17-v1.4-ws3-preset-loader-novel-writing": [
-        {
-          "id": "R1",
-          "title": "EngineProxy duplicates GraphFlowEngine logic",
-          "severity": "medium",
-          "source": "qc1+qc2+qc3 consolidation",
-          "scope": "crates/nexus-orchestration/src/engine.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R2",
-          "title": "E2E weak assertions (let _ = ... patterns)",
-          "severity": "low",
-          "source": "qc1+qc2+qc3 consolidation",
-          "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
-          "decision": "defer",
-          "owner": "qa-engineer",
-          "target_date": "V1.5",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-18-sqlx-compile-time-migration": [
-        {
-          "id": "R1",
-          "title": "Missing SAFETY comments on test-only runtime queries (pool.rs, integration tests, test_utils.rs)",
-          "severity": "low",
-          "source": "QC1 W1+W2, QC2 W-003, QA N1",
-          "scope": "crates/nexus-sync/src/pool.rs, crates/nexus-local-db/tests/, crates/nexus42d/src/test_utils.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R2",
-          "title": "Inline FromRow structs (OutboxRow, PartialApplyRow) should be module-level",
-          "severity": "low",
-          "source": "QC1 S2",
-          "scope": "crates/nexus-sync/src/outbox.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R3",
-          "title": "Inconsistent ?1 vs ? placeholder syntax in compile-time macros",
-          "severity": "low",
-          "source": "QC2 W-001",
-          "scope": "crates/nexus42d/src/api/handlers/sync.rs, crates/nexus42d/src/api/handlers/memory.rs, crates/nexus42/src/commands/research.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R4",
-          "title": "Misleading SAFETY comment in schedules.rs (copy-paste, inaccurate reason)",
-          "severity": "nit",
-          "source": "QC1 S1, QC2 W-002",
-          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.5",
-          "tracking_link": null
-        },
-        {
-          "id": "R5",
-          "title": "Test-only queries in schema.rs could use compile-time macros",
-          "severity": "nit",
-          "source": "QC1 S3",
-          "scope": "crates/nexus42d/src/db/schema.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "V1.5",

@@ -305,7 +305,7 @@ async fn log_tool_execution(
 
     sqlx::query!(
         "INSERT INTO acp_tool_audit_log (tool_name, path, outcome, agent_id, session_id)
-         VALUES (?1, ?2, ?3, NULL, NULL)",
+         VALUES (?, ?, ?, NULL, NULL)",
         tool_name,
         path,
         outcome

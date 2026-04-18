@@ -318,7 +318,7 @@ pub async fn pull(
 
     let ts = chrono::Utc::now().to_rfc3339();
     if let Err(e) = sqlx::query!(
-        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('last_sync_at', ?1)",
+        "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('last_sync_at', ?)", // sqlx R3: use ? instead of ?1
         ts
     )
     .execute(state.pool())
