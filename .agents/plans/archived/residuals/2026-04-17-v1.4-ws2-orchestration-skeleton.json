@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
+  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "entries": [
+    {
+      "id": "R6",
+      "title": "jsonrpsee dep unused in WS2 (pre-wired for WS3)",
+      "severity": "low",
+      "source": "qc",
+      "scope": "crates/nexus-orchestration/Cargo.toml",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "superseded",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "WS3 done \u2014 jsonrpsee-core used by IPC layer",
+      "closure_evidence": "commit 17320ec"
+    },
+    {
+      "id": "R7",
+      "title": "Sleep-based timing in worker IPC tests",
+      "severity": "low",
+      "source": "qc",
+      "scope": "crates/nexus-orchestration/tests/worker_ipc_roundtrip.rs",
+      "decision": "accept",
+      "owner": "qa-engineer",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 Sleep-based timing in worker IPC tests"
+    },
+    {
+      "id": "R2",
+      "title": "new_session creates orphan sessions with empty task ID (accepted: start_session is the real entry point)",
+      "severity": "high",
+      "source": "qc",
+      "scope": "crates/nexus42d/src/api/handlers/orchestration/sessions.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 new_session creates orphan sessions with empty task ID (accepted: start_session is the real entry point)"
+    },
+    {
+      "id": "R5",
+      "title": "Session ID collision risk with millisecond timestamps",
+      "severity": "low",
+      "source": "qc",
+      "scope": "crates/nexus-orchestration/src/storage/sqlite.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 Session ID collision risk with millisecond timestamps"
+    },
+    {
+      "id": "R8",
+      "title": "Context wrapper zero-utility newtype",
+      "severity": "nit",
+      "source": "qc",
+      "scope": "crates/nexus-orchestration/src/engine.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 Context wrapper zero-utility newtype"
+    }
+  ]
+}

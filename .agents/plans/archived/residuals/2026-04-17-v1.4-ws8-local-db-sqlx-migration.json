@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
+  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "entries": [
+    {
+      "id": "R2",
+      "title": "OutboxPool omits PRAGMA foreign_keys = ON",
+      "severity": "medium",
+      "source": "qc1 W-02",
+      "scope": "crates/nexus-sync/src/pool.rs",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "fixed \u2014 PRAGMA foreign_keys = ON added to nexus-sync pool",
+      "closure_evidence": "commit 17320ec"
+    },
+    {
+      "id": "R3",
+      "title": "mark_failed commit-before-return pattern needs clarifying comment",
+      "severity": "low",
+      "source": "qc2 C2",
+      "scope": "crates/nexus-sync/src/outbox.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "fixed \u2014 clarifying doc comment added to mark_failed",
+      "closure_evidence": "commit 17320ec"
+    },
+    {
+      "id": "R5",
+      "title": "SoulMeta schema_version u32->i64 type change undocumented",
+      "severity": "nit",
+      "source": "qc3 W3",
+      "scope": "crates/nexus-local-db/src/soul_meta.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "fixed \u2014 documented u32->i64 type change rationale",
+      "closure_evidence": "commit 17320ec"
+    }
+  ]
+}

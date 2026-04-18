@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
+  "archived_at": "2026-04-18T07:45:39.992187+00:00",
+  "entries": [
+    {
+      "id": "R10",
+      "title": "tempfile in prod deps",
+      "severity": "nit",
+      "source": "QC3 nit",
+      "scope": "crates/nexus-orchestration/Cargo.toml",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 tempfile in prod deps"
+    },
+    {
+      "id": "R11",
+      "title": "async-trait hardcoded pin",
+      "severity": "nit",
+      "source": "QC3 nit",
+      "scope": "crates/nexus-orchestration/Cargo.toml",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 async-trait hardcoded pin"
+    },
+    {
+      "id": "R9",
+      "title": "Auth middleware missing",
+      "severity": "medium",
+      "source": "QC3 medium",
+      "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "acceptance_rationale": "V1.4 local-only",
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 Auth middleware missing"
+    },
+    {
+      "id": "R8",
+      "title": "TOCTOU in edit_core_context",
+      "severity": "medium",
+      "source": "QC2 medium",
+      "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": null,
+      "tracking_link": null,
+      "acceptance_rationale": "single-user daemon",
+      "lifecycle": "accepted",
+      "closed_at": "2026-04-18T07:45:39.992187+00:00",
+      "closure_note": "Accepted at V1.4 residual review \u2014 TOCTOU in edit_core_context"
+    }
+  ]
+}
