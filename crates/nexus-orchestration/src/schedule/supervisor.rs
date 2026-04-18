@@ -104,8 +104,24 @@ impl ScheduleSupervisor {
 
         let completed_set = CompletedSet::from(completed_ids);
 
+        // Load depends_on for each pending schedule from schedule_dependencies
+        let pool_ref = &*self.pool;
+        let mut pending_with_deps: Vec<Schedule> = Vec::with_capacity(pending.len());
+        for schedule in pending {
+            let dep_rows = sqlx::query_as::<_, (String,)>(
+                "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?1",
+            )
+            .bind(&schedule.id.0)
+            .fetch_all(pool_ref)
+            .await?;
+            let deps: Vec<ScheduleId> = dep_rows.into_iter().map(|(d,)| ScheduleId(d)).collect();
+            let mut schedule = schedule;
+            schedule.depends_on = deps;
+            pending_with_deps.push(schedule);
+        }
+
         // Sort pending by created_at for FIFO ordering
-        pending.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        pending_with_deps.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
         // Evaluate admission one at a time, updating the running set after
         // each admission so that Serial schedules don't all get admitted
@@ -113,7 +129,7 @@ impl ScheduleSupervisor {
         let mut started = Vec::new();
         let mut running_ids_so_far: HashSet<ScheduleId> = running_ids;
 
-        for candidate in &pending {
+        for candidate in &pending_with_deps {
             let running_set = RunningSet::from_ids(running_ids_so_far.clone());
             if admit(candidate, &running_set, &completed_set) {
                 started.push(candidate.id.0.clone());
@@ -277,25 +293,32 @@ impl ScheduleSupervisor {
     }
 
     /// Get the current status of a schedule by ID (for testing/inspection).
-    pub async fn status_of(&self, schedule_id: &str) -> ScheduleStatus {
+    pub async fn status_of(&self, schedule_id: &str) -> Result<ScheduleStatus, SupervisorError> {
         let row = sqlx::query_as::<_, (String,)>(
             "SELECT status FROM creator_schedules WHERE schedule_id = ?1",
         )
         .bind(schedule_id)
         .fetch_optional(&*self.pool)
-        .await;
+        .await?;
 
         match row {
-            Ok(Some((status_str,))) => match status_str.as_str() {
-                "pending" => ScheduleStatus::Pending,
-                "running" => ScheduleStatus::Running,
-                "paused" => ScheduleStatus::Paused,
-                "completed" => ScheduleStatus::Completed,
-                "cancelled" => ScheduleStatus::Cancelled,
-                "failed" => ScheduleStatus::Failed,
-                _ => ScheduleStatus::Pending,
+            Some((status_str,)) => match status_str.as_str() {
+                "pending" => Ok(ScheduleStatus::Pending),
+                "running" => Ok(ScheduleStatus::Running),
+                "paused" => Ok(ScheduleStatus::Paused),
+                "completed" => Ok(ScheduleStatus::Completed),
+                "cancelled" => Ok(ScheduleStatus::Cancelled),
+                "failed" => Ok(ScheduleStatus::Failed),
+                other => {
+                    tracing::warn!(
+                        "unknown status '{}' for schedule {}; treating as error",
+                        other,
+                        schedule_id
+                    );
+                    Err(SupervisorError::NotFound(schedule_id.to_string()))
+                }
             },
-            _ => ScheduleStatus::Pending,
+            None => Err(SupervisorError::NotFound(schedule_id.to_string())),
         }
     }
 }
@@ -453,7 +476,7 @@ mod tests_t9 {
         insert_schedule(&sup, "S01", "running").await;
 
         // Verify it's running.
-        assert_eq!(sup.status_of("S01").await, ScheduleStatus::Running);
+        assert_eq!(sup.status_of("S01").await.unwrap(), ScheduleStatus::Running);
 
         // Simulate daemon boot: resume running as paused.
         let count = sup
@@ -463,7 +486,7 @@ mod tests_t9 {
         assert_eq!(count, 1);
 
         // Verify it's now paused.
-        assert_eq!(sup.status_of("S01").await, ScheduleStatus::Paused);
+        assert_eq!(sup.status_of("S01").await.unwrap(), ScheduleStatus::Paused);
 
         // Calling again should be a no-op (no running schedules left).
         let count2 = sup
@@ -483,8 +506,81 @@ mod tests_t9 {
         let _ = sup.resume_running_as_paused("daemon_restart").await;
 
         // Pending should still be pending.
-        assert_eq!(sup.status_of("S01").await, ScheduleStatus::Pending);
+        assert_eq!(sup.status_of("S01").await.unwrap(), ScheduleStatus::Pending);
         // Running should be paused.
-        assert_eq!(sup.status_of("S02").await, ScheduleStatus::Paused);
+        assert_eq!(sup.status_of("S02").await.unwrap(), ScheduleStatus::Paused);
+    }
+
+    #[tokio::test]
+    async fn tick_blocks_schedule_with_uncompleted_dependency() {
+        let sup = test_supervisor_with_db().await;
+        let pool = sup.pool();
+
+        // Insert schedule A (pending)
+        insert_schedule(&sup, "DEP-A", "pending").await;
+        // Insert schedule B (pending) with dependency on A
+        insert_schedule(&sup, "DEP-B", "pending").await;
+
+        // Insert dependency: B depends on A
+        sqlx::query(
+            "INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)",
+        )
+        .bind("DEP-B")
+        .bind("DEP-A")
+        .execute(&*pool)
+        .await
+        .unwrap();
+
+        // Tick: A should start (no deps), B should remain pending (depends on A)
+        sup.tick().await.unwrap();
+        assert_eq!(
+            sup.status_of("DEP-A").await.unwrap(),
+            ScheduleStatus::Running,
+            "A should start — no dependencies"
+        );
+        assert_eq!(
+            sup.status_of("DEP-B").await.unwrap(),
+            ScheduleStatus::Pending,
+            "B should not start — A is not completed"
+        );
+
+        // Complete A
+        sup.on_schedule_terminal("DEP-A", ScheduleStatus::Completed)
+            .await
+            .unwrap();
+
+        // After A completes, tick should auto-start B
+        assert_eq!(
+            sup.status_of("DEP-B").await.unwrap(),
+            ScheduleStatus::Running,
+            "B should auto-start after A completes"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_blocks_schedule_with_failed_dependency() {
+        let sup = test_supervisor_with_db().await;
+        let pool = sup.pool();
+
+        // Insert A (already failed) and B (pending, depends on A)
+        insert_schedule(&sup, "DEP-A-FAIL", "failed").await;
+        insert_schedule(&sup, "DEP-B-FAIL", "pending").await;
+
+        sqlx::query(
+            "INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?1, ?2)",
+        )
+        .bind("DEP-B-FAIL")
+        .bind("DEP-A-FAIL")
+        .execute(&*pool)
+        .await
+        .unwrap();
+
+        // Tick: B should remain pending — failed dep does not satisfy
+        sup.tick().await.unwrap();
+        assert_eq!(
+            sup.status_of("DEP-B-FAIL").await.unwrap(),
+            ScheduleStatus::Pending,
+            "B should not start — A is failed, not completed"
+        );
     }
 }

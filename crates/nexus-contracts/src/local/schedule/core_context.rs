@@ -43,7 +43,7 @@ pub enum CoreContextPayload {
 /// Uses `#[serde(tag = "kind")]` for forward-compatible tagged enum
 /// representation. `#[non_exhaustive]` on `LlmSummarize` reserves it for
 /// V1.5+ without requiring schema migration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DerivationStep {
     /// v0 — from `schedule add --seed`
@@ -176,5 +176,42 @@ mod tests {
         assert!(json.contains("\"kind\":\"system\""));
         let back: CoreContextAuthor = serde_json::from_str(&json).unwrap();
         assert_eq!(back, a);
+    }
+
+    #[test]
+    fn derivation_step_seed_roundtrip() {
+        let step = DerivationStep::Seed {
+            raw: "topic=bees".to_string(),
+        };
+        let json = serde_json::to_string(&step).unwrap();
+        assert!(json.contains("\"kind\":\"seed\""));
+        let back: DerivationStep = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, step);
+    }
+
+    #[test]
+    fn derivation_step_preset_hook_roundtrip() {
+        let step = DerivationStep::PresetHook {
+            state_id: "outlining".to_string(),
+            hook_name: "context_update".to_string(),
+        };
+        let json = serde_json::to_string(&step).unwrap();
+        assert!(json.contains("\"kind\":\"preset_hook\""));
+        let back: DerivationStep = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, step);
+    }
+
+    #[test]
+    fn derivation_step_user_edit_roundtrip() {
+        let step = DerivationStep::UserEdit {
+            op: EditOp::Append {
+                body: "text".to_string(),
+            },
+            source_user: Some("u1".to_string()),
+        };
+        let json = serde_json::to_string(&step).unwrap();
+        assert!(json.contains("\"kind\":\"user_edit\""));
+        let back: DerivationStep = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, step);
     }
 }

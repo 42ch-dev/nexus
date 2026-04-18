@@ -150,8 +150,8 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
 
     // Tick: 01A should start, 01B stays Pending (serial blocks behind running)
     supervisor.tick().await.unwrap();
-    assert_eq!(supervisor.status_of("01A").await, ScheduleStatus::Running);
-    assert_eq!(supervisor.status_of("01B").await, ScheduleStatus::Pending);
+    assert_eq!(supervisor.status_of("01A").await.unwrap(), ScheduleStatus::Running);
+    assert_eq!(supervisor.status_of("01B").await.unwrap(), ScheduleStatus::Pending);
 
     // Simulate 01A completing (no real session engine — direct status flip)
     supervisor
@@ -161,7 +161,7 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
 
     // After terminal callback: tick is triggered internally.
     // 01B should now be Running since nothing else is.
-    assert_eq!(supervisor.status_of("01B").await, ScheduleStatus::Running);
+    assert_eq!(supervisor.status_of("01B").await.unwrap(), ScheduleStatus::Running);
 }
 
 /// Helper: create a [`ScheduleSupervisor`] backed by a fresh temp SQLite DB
