@@ -105,6 +105,7 @@ jobs:
     needs: verify-codegen
     env:
       SQLX_OFFLINE: "true"
+      DATABASE_URL: "sqlite:.sqlx/state.db?mode=rwc"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -112,10 +113,12 @@ jobs:
         with:
           name: generated-types
           path: .
-      - name: Install cargo-sqlx
-        run: cargo install sqlx-cli --no-default-features --features sqlite
+      - name: Install cargo-sqlx (pin to workspace version)
+        run: cargo install sqlx-cli --no-default-features --features sqlite --version 0.8.6
       - name: Verify sqlx offline metadata is up-to-date
         run: cargo sqlx prepare --workspace --all -- --all-targets
+      - name: Check for metadata drift
+        run: git diff --exit-code .sqlx/
 
   typescript-checks:
     name: TypeScript typecheck
