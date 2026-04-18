@@ -310,7 +310,7 @@ pub async fn delete_pending_review(
     let review = sqlx::query_as!(
         PendingReviewInfo,
         r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE pending_id = ?1"#,
+         FROM memory_pending_review WHERE pending_id = ?"#, // sqlx R3: use ? instead of ?1
         pid
     )
     .fetch_optional(state.pool())

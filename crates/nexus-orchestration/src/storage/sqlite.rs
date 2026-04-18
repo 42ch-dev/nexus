@@ -18,11 +18,19 @@
 //! - `status` ← `"running"` always on save (engine manages lifecycle).
 //! - `context_json` ← `serde_json::to_vec(&session.context)`
 //!
+//! ## Session recovery (WS2 R1)
+//!
+//! On daemon restart, `list_non_terminal_sessions()` queries persisted sessions
+//! with status `running`, `paused`, or `waiting_for_input` so the in-memory
+//! tracker can be repopulated.
+//!
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.3.
 
 use async_trait::async_trait;
 use graph_flow::{Session, SessionStorage};
 use std::sync::Arc;
+
+use crate::engine::{SessionId, SessionStatus, SessionSummary};
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
 pub struct SqliteSessionStorage {
@@ -37,6 +45,59 @@ impl SqliteSessionStorage {
     /// [`nexus_local_db::run_migrations`] before constructing this.
     pub fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
         Self { pool }
+    }
+
+    /// List all sessions with non-terminal status (WS2 R1).
+    ///
+    /// Queries persisted sessions where status is `running`, `paused`, or
+    /// `waiting_for_input`. Used by the engine on daemon restart to repopulate
+    /// the in-memory session tracker.
+    ///
+    /// Returns `SessionSummary` structs suitable for engine recovery.
+    pub async fn list_non_terminal_sessions(&self) -> graph_flow::Result<Vec<SessionSummary>> {
+        #[derive(sqlx::FromRow)]
+        struct SummaryRow {
+            session_id: String,
+            creator_id: String,
+            preset_id: String,
+            status: String,
+            current_task_id: Option<String>,
+        }
+
+        let rows = sqlx::query_as!(
+            SummaryRow,
+            r#"SELECT session_id as "session_id!", creator_id as "creator_id!",
+                      preset_id as "preset_id!", status as "status!", current_task_id
+               FROM orchestration_sessions
+               WHERE status IN ('running', 'paused', 'waiting_for_input')"#
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .map_err(|e| {
+            graph_flow::GraphError::StorageError(format!("list_non_terminal_sessions: {e}"))
+        })?;
+
+        let summaries: Vec<SessionSummary> = rows
+            .into_iter()
+            .map(|row| {
+                let status = match row.status.as_str() {
+                    "running" => SessionStatus::Running,
+                    "paused" => SessionStatus::Paused,
+                    "waiting_for_input" => SessionStatus::WaitingForInput,
+                    // Fallback for any other non-terminal values in DB
+                    _ => SessionStatus::Running,
+                };
+                SessionSummary {
+                    session_id: SessionId(row.session_id),
+                    creator_id: row.creator_id,
+                    preset_id: row.preset_id,
+                    status,
+                    current_task_id: row.current_task_id,
+                }
+            })
+            .collect();
+
+        Ok(summaries)
     }
 }
 

@@ -180,7 +180,7 @@ pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, Lo
             .parse::<u32>()
             .map_err(|e| LocalDbError::InvalidVersionValue {
                 key: "db_schema_version".to_string(),
-                value: "".to_string(),
+                value: row.value.clone(), // WS8 R1: use actual malformed value
                 reason: e.to_string(),
             })?;
 
@@ -199,7 +199,7 @@ pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, Lo
             .parse::<u32>()
             .map_err(|e| LocalDbError::InvalidVersionValue {
                 key: "schema_version".to_string(),
-                value: "".to_string(),
+                value: row.value.clone(), // WS8 R1: use actual malformed value
                 reason: e.to_string(),
             })?;
 

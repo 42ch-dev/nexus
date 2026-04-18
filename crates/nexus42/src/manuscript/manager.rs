@@ -940,20 +940,13 @@ mod tests {
         // Create the manuscript first
         manager.create("Test", Some("wld_test")).unwrap();
 
-        // Create outbox table and add a conflicted entry
-        // SAFETY: test-only DDL verification — outbox table may not exist in CLI schema
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS outbox_entries (
-                outbox_entry_id TEXT PRIMARY KEY,
-                delivery_state TEXT NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        // The outbox_entries table is created by nexus_local_db migrations with full schema.
+        // We just need to insert a conflicted entry with the required columns.
         // SAFETY: test-only data setup helper
         sqlx::query(
-            "INSERT INTO outbox_entries (outbox_entry_id, delivery_state) VALUES ('test', 'conflicted')",
+            "INSERT INTO outbox_entries
+                (outbox_entry_id, bundle_id, idempotency_key, delivery_state, created_at)
+             VALUES ('test', 'test_bundle', 'test_key', 'conflicted', '2026-01-01T00:00:00Z')",
         )
         .execute(&pool)
         .await
