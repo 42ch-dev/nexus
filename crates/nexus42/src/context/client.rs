@@ -52,6 +52,7 @@ mod tests {
             memory_kinds: None,
             max_timeline_events: None,
             max_story_summaries: None,
+            as_of: None,
         }
     }
 
