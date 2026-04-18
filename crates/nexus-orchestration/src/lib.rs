@@ -4,8 +4,8 @@
 pub mod capability;
 pub mod engine;
 pub mod preset;
-pub mod scheduler;
 pub mod schedule;
+pub mod scheduler;
 pub mod storage;
 pub mod system_preset;
 pub mod tasks;

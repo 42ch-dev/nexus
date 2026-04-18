@@ -142,9 +142,8 @@ impl Scheduler {
         cancel: CancellationToken,
         poll_interval_ms: u64,
     ) {
-        let mut interval = tokio::time::interval(
-            std::time::Duration::from_millis(poll_interval_ms),
-        );
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_millis(poll_interval_ms));
 
         loop {
             tokio::select! {
@@ -179,6 +178,9 @@ mod tests {
         let now = clock.now_unix();
 
         // Should be within reasonable range (past 2020)
-        assert!(now > 1577836800, "system clock should return valid timestamp");
+        assert!(
+            now > 1577836800,
+            "system clock should return valid timestamp"
+        );
     }
 }
