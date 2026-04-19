@@ -29,13 +29,14 @@ All harness conventions (residual findings lifecycle, Done archival profiles, `s
 ├── archived/                           # Closed/archived artifacts
 │   ├── plans/                          #   Done plan-row snapshots (cold storage)
 │   ├── plans-done.json                 #   Minimal index of all Done plans
-│   ├── residuals/                      #   Closed residual findings per plan
+│   ├── residuals/                      #   Closed residual findings per plan (structured JSON)
 │   └── knowledge/                      #   Superseded knowledge snapshots
 ├── status.json                         # SSOT: active plan rows + open residual_findings + root metadata
 ├── notes.json                          # Cross-plan program timeline
 └── plans/                              # {PLAN_DIR}
     ├── <plan-id>-<plan-name>.md        #   Plan documents
-    └── reports/<plan-id>/              #   QC/QA reports per plan
+    ├── reports/<plan-id>/              #   QC/QA reports per plan
+    └── residuals/<plan-id>/            #   Open residual detail (prose, complements status.json)
 ```
 
 ## Project-Specific Deviations
@@ -50,6 +51,14 @@ In addition to the upstream pre-merge checklist, this repo requires:
 
 - **Wire contracts / schemas** (when `schemas/` or publish version changes): run `pnpm run codegen` and commit regenerated output. Bump package versions per release policy.
 - **Roadmap in `nexus-platform`** (when a plan is `Done`): edit `roadmap.md` at the path configured as `specs_root.roadmap` in `.agents/local-paths.json` to reflect completion.
+
+### Residual detail prose (`plans/residuals/`)
+
+Open residuals that need more than the structured fields in `status.json` can have prose detail documents under `plans/residuals/<plan-id>/`. These complement (not replace) `metadata.residual_findings` entries.
+
+- **What goes here**: pure deferral records, legacy issue explanations, "why this was deferred + current code state + future implementer pointers". Named `<td-or-r-id>-<short-label>.md`.
+- **What stays in `knowledge/`**: design documents that incidentally mention residuals (e.g., crate-selection doc noting DoS guard TODOs).
+- **Lifecycle**: when the residual is closed, the prose doc is archived alongside the structured JSON to `archived/residuals/<plan-id>.json`.
 
 ### External design specs
 
