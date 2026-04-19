@@ -71,7 +71,7 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 | 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | `device-flow-oauth-scope-v1.md` (TD-10 deferral) |
 | 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `crates/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here, not in `status.json`) |
 | 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | `crates/nexus42d/src/workspace/mod.rs` (deferral note) |
-| 2.7 | **Cron / scheduler** (V1.5+) | **No selection in V1.4.** Record the four constraints (§3.7). `Scheduler` trait placeholder only. | `tokio-cron-scheduler` 0.15.x; hand-rolled `cron` + `chrono-tz` + `sleep_until` | `orchestration-engine-v1.md` (wall-clock deferral); `creator-schedule-and-core-context-v1.md` |
+| 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See `creator-schedule-and-core-context-v1.md` for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | `creator-schedule-and-core-context-v1.md` |
 | 2.8 | **Layered config** (future) | `figment` + `secrecy` for redaction (when needed) | `config-rs`; hand-rolled | — (not yet scheduled) |
 | 2.9 | **Snapshot testing** (dev) | Recommended: `insta` + redactions for new CLI/HTTP integration tests | Hand-rolled golden files | — (optional; per-test-author discretion) |
 
@@ -316,9 +316,9 @@ Before editing any of the above in a way that changes crate selection, update **
 
 - Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
 - V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](v1.4-delivery-compass-v1.md)
-- Orchestration engine SSOT: [`orchestration-engine-v1.md`](orchestration-engine-v1.md)
+- Orchestration engine SSOT: [`orchestration-engine-v1.md`](../archived/knowledge/orchestration-engine-v1.md)
 - Schedule / core context SSOT: [`creator-schedule-and-core-context-v1.md`](creator-schedule-and-core-context-v1.md)
-- Local DB ownership: [`local-db-refactor-v2.md`](local-db-refactor-v2.md)
+- Local DB ownership: [`local-db-refactor-v2.md`](../archived/knowledge/local-db-refactor-v2.md)
 - Device flow deferral: [`device-flow-oauth-scope-v1.md`](device-flow-oauth-scope-v1.md)
 - Repository-wide rules: [`AGENTS.md`](../../../AGENTS.md) — §"Documentation & plans", dependency / release discipline.
 
