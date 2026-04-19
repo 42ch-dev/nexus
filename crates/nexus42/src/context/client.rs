@@ -49,10 +49,7 @@ mod tests {
             include_memory: Some(true),
             include_timeline: Some(true),
             include_story_summaries: Some(true),
-            memory_kinds: None,
-            max_timeline_events: None,
-            max_story_summaries: None,
-            as_of: None,
+            ..Default::default()
         }
     }
 

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::explore_hit::ExploreHit;
 
 /// Paginated Explore results for browse and search responses (POST /v1/explore/browse | /v1/explore/search).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreFeedResponse {
     pub schema_version: u32,

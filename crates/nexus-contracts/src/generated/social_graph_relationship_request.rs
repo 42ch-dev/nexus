@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for social graph mutations: follow / unfollow / favorite / unfavorite (platform plan 17).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphRelationshipRequest {
     pub schema_version: u32,

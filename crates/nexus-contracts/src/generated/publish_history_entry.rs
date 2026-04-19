@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{PublishStoryOutcome};
 
 /// Single publish history row (platform Publish API).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct PublishHistoryEntry {
     pub occurred_at: String,
