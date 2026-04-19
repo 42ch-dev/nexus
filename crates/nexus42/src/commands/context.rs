@@ -149,6 +149,10 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 include_memory: Some(include_memory),
                 include_timeline: Some(include_timeline),
                 include_story_summaries: Some(include_story_summaries),
+                branch_id: None,
+                memory_query: None,
+                timeline_limit: None,
+                key_block_limit: None,
                 memory_kinds: Some(vec![
                     MemoryKind::StorySummary.to_string(),
                     MemoryKind::ResearchMaterial.to_string(),
