@@ -1,0 +1,45 @@
+{
+  "id": "2026-04-10-cli-sync-bidirectional-parity",
+  "title": "CLI Bidirectional Sync Parity (platform sync)",
+  "file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.1",
+    "sync",
+    "cli",
+    "platform-parity"
+  ],
+  "created_at": "2026-04-10",
+  "updated_at": "2026-04-10",
+  "done_at": "2026-04-10",
+  "notes": "Delivered pull path: schemas sync-pull-request/response, SyncClient::pull_bundles (POST /v1/sync/pull), pull_apply + Outbox::stage_if_absent, daemon POST /v1/local/sync/pull, CLI sync pull (--world-id, --after-sequence). Inventory: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/sync-inventory-a1.md. QC self: .agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260410.md. Branch: feature/cli-sync-bidirectional-parity.",
+  "metadata": {
+    "priority": "high",
+    "platform_capability_ref": "10-sync-bidirectional (conceptual cross-repo id)",
+    "dependency": null,
+    "blocks_plans": [
+      "2026-04-10-cli-fork-world-snapshot-parity",
+      "2026-04-10-cli-publish-workflow-parity"
+    ],
+    "spec_refs": [
+      ".agents/knowledge/v1.1-overview-v2.md"
+    ],
+    "working_branch": "feature/cli-sync-bidirectional-parity",
+    "merge_target": "main",
+    "residual_summary": "1 open medium (SYNC-AUTH-TOKEN-01: auth token validation)",
+    "gates": {
+      "tests": "passed: cargo test -p nexus-sync; cargo test -p nexus42 -p nexus42d (full cargo test --all may fail cli_agent without CDN)",
+      "clippy": "passed (-D warnings)",
+      "fmt": "passed (nightly rustfmt)",
+      "typecheck": "passed (pnpm)",
+      "codegen": "passed",
+      "qc_self_report": ".agents/plans/reports/2026-04-10-cli-sync-bidirectional-parity/2026-04-10-cli-sync-bidirectional-parity-qc-self-20260410.md",
+      "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
+    }
+  }
+}

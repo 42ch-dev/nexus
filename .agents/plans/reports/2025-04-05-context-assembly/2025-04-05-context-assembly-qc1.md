@@ -33,7 +33,7 @@ None.
 
 #### CTX-M1: status.json contains duplicate "tests" key (JSON syntax error)
 
-**Location**: `.agents/plans/status.json` lines 253-254  
+**Location**: `.agents/status.json` lines 253-254  
 **Evidence**: JSON object has two `"tests"` keys at same level — one at line 246-252 (object), one at line 254 (string)  
 **Risk**: JSON parsers may silently drop one key; jq and serde_json behavior varies  
 **Fix**: Remove line 254 `"tests": "25 context module tests..."` — keep the object version at lines 246-252  

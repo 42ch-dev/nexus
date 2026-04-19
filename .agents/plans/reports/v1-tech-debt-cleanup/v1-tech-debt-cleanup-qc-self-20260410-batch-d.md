@@ -43,7 +43,7 @@ generated_at: 2026-04-10T23:59:59Z
 
 - Finding ID: W-TD9-SCOPE
 - Source Type: manual-reasoning
-- Source Reference: `.agents/plans/archived/knowledge/daemon-lifecycle-api-v1.md` (archived 2026-04-17), `crates/nexus42d/src/api/handlers/runtime.rs`
+- Source Reference: `.agents/archived/knowledge/daemon-lifecycle-api-v1.md` (archived 2026-04-17), `crates/nexus42d/src/api/handlers/runtime.rs`
 - Confidence: High
 
 ## Summary

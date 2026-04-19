@@ -17,8 +17,8 @@ generated_at: "2026-04-06"
 - `schemas/common/source-anchor.schema.json` — removed `unit_kind` from required array
 - `crates/nexus-domain/src/contract_assertions.rs` — added 2 roundtrip tests
 - `crates/nexus-domain/src/errors.rs` — added 18 Display tests + `#[allow(dead_code)]` annotations
-- `.agents/plans/status.json` — updated residual findings metadata
-- `.agents/plans/archived/residuals/2025-04-05-domain-models.json` — archived closed residuals
+- `.agents/status.json` — updated residual findings metadata
+- `.agents/archived/residuals/2025-04-05-domain-models.json` — archived closed residuals
 
 ---
 
@@ -158,7 +158,7 @@ cargo test --package nexus-domain -- errors::tests
 
 ### 7. `status.json` Structure Issue 🚨 BLOCKING
 
-**File**: `.agents/plans/status.json`
+**File**: `.agents/status.json`
 
 **Issue**: **DUPLICATE JSON KEYS** — `by_target` and `by_plan` appear twice in `tech_debt_summary`:
 
@@ -199,7 +199,7 @@ cargo test --package nexus-domain -- errors::tests
 
 ### 8. Archived Residuals ✅
 
-**File**: `.agents/plans/archived/residuals/2025-04-05-domain-models.json`
+**File**: `.agents/archived/residuals/2025-04-05-domain-models.json`
 
 **Assessment**: **APPROVED**
 
@@ -221,8 +221,8 @@ Properly structured archive with:
 | Roundtrip tests | `crates/nexus-domain/src/contract_assertions.rs` | 282-361 |
 | Display tests | `crates/nexus-domain/src/errors.rs` | 84-267 |
 | Dead code allows | `crates/nexus-domain/src/errors.rs` | 84-91 |
-| Duplicate keys | `.agents/plans/status.json` | 268-291 |
-| Archive structure | `.agents/plans/archived/residuals/2025-04-05-domain-models.json` | 1-46 |
+| Duplicate keys | `.agents/status.json` | 268-291 |
+| Archive structure | `.agents/archived/residuals/2025-04-05-domain-models.json` | 1-46 |
 
 ### Findings Summary by Severity
 | Severity | Count | IDs |
@@ -241,7 +241,7 @@ Properly structured archive with:
 
 1. **Fix `status.json` duplicate keys**
    - Remove lines 280-291 (duplicate `by_target` and `by_plan` blocks)
-   - Validate JSON with `jq '.' .agents/plans/status.json > /dev/null`
+   - Validate JSON with `jq '.' .agents/status.json > /dev/null`
 
 ### Non-Blocking (Should Do)
 
@@ -263,7 +263,7 @@ Properly structured archive with:
 | Schema diff | `git diff main...HEAD -- schemas/` | ✅ Reviewed |
 | Code diff | `git diff main...HEAD -- crates/nexus-domain/` | ✅ Reviewed |
 | Tests | `cargo test --package nexus-domain` | ⚠️ Blocked (permission) |
-| JSON valid | `jq '.' .agents/plans/status.json` | ❌ FAIL (duplicate keys) |
+| JSON valid | `jq '.' .agents/status.json` | ❌ FAIL (duplicate keys) |
 | Archive | `cat archived/residuals/2025-04-05-domain-models.json` | ✅ Valid |
 
 ---
