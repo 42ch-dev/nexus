@@ -140,7 +140,7 @@
     },
     {
       "updated_at": "2026-04-14",
-      "message": "Policy update: avoid metadata.*_note fields in .agents/plans/status.json. Moved previous tech_debt_summary severity_note and archival_note narrative into notes.json. Keep status.json focused on machine-readable structured fields; write timeline/context notes here."
+      "message": "Policy update: avoid metadata.*_note fields in .agents/status.json. Moved previous tech_debt_summary severity_note and archival_note narrative into notes.json. Keep status.json focused on machine-readable structured fields; write timeline/context notes here."
     },
     {
       "updated_at": "2026-04-14",

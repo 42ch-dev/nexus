@@ -22,12 +22,12 @@
     "working_branch": "feature/v1.4-ws8-local-db-sqlx",
     "merge_target": "feature/v1.4",
     "description": "Migrate the entire workspace from rusqlite + deadpool-sqlite + bespoke sequential migrations to sqlx + sqlx migrate. Ports ~34 files / ~193 references across nexus-local-db / nexus42 / nexus42d / nexus-sync. Four existing code-form migrations (v2 local_identities, v3 soul_meta, v4 memory_pipeline + implicit baseline) become timestamped .sql files under crates/nexus-local-db/migrations/. workspace_meta.db_schema_version key preserved (mirrored from sqlx _sqlx_migrations). Hard prerequisite for WS2 Task 3 (SqliteSessionStorage shares the same pool on the unified state.db). PM-approved 2026-04-17 after dual-engine / dual-file SSOT conflict review (both patterns rejected).",
-    "wave_0_spec": ".agents/plans/knowledge/crate-selection-best-practices-v1.md",
+    "wave_0_spec": ".agents/knowledge/crate-selection-best-practices-v1.md",
     "spec_refs": [
-      ".agents/plans/knowledge/crate-selection-best-practices-v1.md",
-      ".agents/plans/knowledge/local-db-refactor-v2.md",
-      ".agents/plans/knowledge/orchestration-engine-v1.md",
-      ".agents/plans/knowledge/v1.4-delivery-compass-v1.md",
+      ".agents/knowledge/crate-selection-best-practices-v1.md",
+      ".agents/knowledge/local-db-refactor-v2.md",
+      ".agents/knowledge/orchestration-engine-v1.md",
+      ".agents/knowledge/v1.4-delivery-compass-v1.md",
       ".agents/plans/reports/2026-04-17-crate-selection-research/research-log.md"
     ],
     "parallelism": "fully parallel with WS1/WS4/WS5 (no DB touch); blocks WS2 Task 3 only",

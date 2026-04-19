@@ -1,6 +1,6 @@
 # Delta bundle `canonical_hash` (OSS companion)
 
-Dev-process knowledge for this repository. For `docs/` vs `.agents/plans/knowledge/`, see [AGENTS.md](../../../AGENTS.md).
+Dev-process knowledge for this repository. For `docs/` vs `.agents/knowledge/`, see [AGENTS.md](../../../AGENTS.md).
 
 ## Normative SSOT (v1-spec)
 

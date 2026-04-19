@@ -1406,7 +1406,7 @@ Expected: Shows count matching schema count (6 schemas → 6 TS files + 1 mod.rs
 ## Completion
 
 After all tasks complete:
-- [x] Update `.agents/plans/status.json` with completion status
+- [x] Update `.agents/status.json` with completion status
 - [ ] Create git tag: `git tag v0.1.0-codegen -a -m "Phase 0: Codegen pipeline implemented"`
 - [ ] Push to remote: `git push origin main --tags`
 

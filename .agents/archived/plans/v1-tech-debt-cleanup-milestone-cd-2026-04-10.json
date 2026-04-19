@@ -29,10 +29,10 @@
         "batch_e": "deferred to V1.2 — TD-11, TD-13"
       },
       "spec_refs": [
-        ".agents/plans/archived/knowledge/fork-branch-contract-alignment-v1.md",
-        ".agents/plans/knowledge/dual-outbox-architecture-v1.md",
-        ".agents/plans/archived/knowledge/daemon-lifecycle-api-v1.md",
-        ".agents/plans/knowledge/device-flow-oauth-scope-v1.md"
+        ".agents/archived/knowledge/fork-branch-contract-alignment-v1.md",
+        ".agents/knowledge/dual-outbox-architecture-v1.md",
+        ".agents/archived/knowledge/daemon-lifecycle-api-v1.md",
+        ".agents/knowledge/device-flow-oauth-scope-v1.md"
       ],
       "gates": {
         "tests": "passed — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",
