@@ -18,6 +18,7 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.2-reclassification-matrix-v1.md](v1.2-reclassification-matrix-v1.md) | `2026-04-14-v1.2-reclassification-baseline` (WS1) | V1.2/V1.3/V1.4/Backlog reclassification matrix: maps every ADR anchor, spec entry, roadmap theme, and tech debt to a program version track. | **Done (Frozen)** — reclassification complete |
 | [v1.3-delivery-compass-v1.md](v1.3-delivery-compass-v1.md) | V1.3 | V1.3 delivery compass: scope lock (Creator Register CLI + 35 residual governance), wave decomposition, cross-repo dependency map, acceptance criteria. | **Done (Frozen)** — V1.3 delivery complete |
 | [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) | V1.4 Orchestration + schemas boundary + Schedule (2026-04-17) | V1.4 delivery compass: 7 workstreams (WS1–WS8), 5 milestones, 14-entry regression gate, 10-entry risk register, §10 SSOT allocation matrix. | **Done (Frozen)** — V1.4 delivery complete |
+| [v1.5-nexus-delivery-compass-v1.md](v1.5-nexus-delivery-compass-v1.md) | V1.5 (2026-04-18) | V1.5 delivery compass: Stabilization + Creator Intelligence. 5 workstreams (WS-A–WS-E), 4 milestones (M1–M4), 10-entry regression gate (R16–R25), 6-entry risk register. | **Done (Frozen)** — V1.5 delivery complete |
 
 ## Archived (`archived/knowledge/`)
 
@@ -34,7 +35,6 @@ Superseded or cold-storage knowledge documents live under [`../archived/knowledg
 | [schemas-boundary-v1.md](../archived/knowledge/schemas-boundary-v1.md) | V1.4 WS5 (2026-04-17) | Wire vs local rule for `schemas/`. WS5 audit fully executed; npm version now 0.4.0. | Archived — WS5 fully executed |
 | [sqlx-compile-time-migration-v1.md](../archived/knowledge/sqlx-compile-time-migration-v1.md) | V1.4 sqlx macro migration | Migration plan from runtime to compile-time sqlx macros. Migration completed; AGENTS.md convention adopted. | Archived — migration complete |
 | [local-db-refactor-v2.md](../archived/knowledge/local-db-refactor-v2.md) | `2026-04-08-local-db-refactor` (WS8 T9 revision) | Local SQLite (`state.db`) refactor design: sqlx ownership, migration runner, async pool APIs. | Archived — WS8 complete; migration count differs |
-| [v1.5-nexus-delivery-compass-v1.md](../archived/knowledge/v1.5-nexus-delivery-compass-v1.md) | V1.5 (2026-04-18) | V1.5 delivery compass: Stabilization + Creator Intelligence (5 workstreams, 4 milestones, R16–R25). Self-declared superseded. | Archived — self-declared superseded |
 | [acp-client-tech-spec-v1.md](../archived/knowledge/acp-client-tech-spec-v1.md) | `2025-04-05-acp-client` | V1.0 ACP Client integration spec. | Archived — superseded by v2 |
 | [daemon-lifecycle-api-v1.md](../archived/knowledge/daemon-lifecycle-api-v1.md) | `v1-tech-debt-cleanup` | TD-9 partial slice: single "running" probe. | Archived — superseded by v2 |
 | [challenge-solver-design-v1.md](../archived/knowledge/challenge-solver-design-v1.md) | V1.3 | Challenge solver module design for Creator Register. | Archived — V1.3 shipped |
