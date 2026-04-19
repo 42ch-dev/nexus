@@ -271,4 +271,4 @@ Based on code inspection (note: unable to run `cargo clippy` due to permission r
 - [ACP-H2-02] → `crates/nexus42/src/acp/registry.rs:528-541`
 - [ACP-M2-01] → Module-level `#![allow(dead_code)]` in 3 files
 - [ACP-M2-02] → `crates/nexus42/src/acp/client.rs:113-125`
-- [ACP-R7] → `.agents/plans/status.json` line 680-690
+- [ACP-R7] → `.agents/status.json` line 680-690

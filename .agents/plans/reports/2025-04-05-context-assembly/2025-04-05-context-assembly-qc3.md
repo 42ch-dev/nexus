@@ -24,7 +24,7 @@ The Context Assembly implementation is functionally complete with good test cove
 ### Critical (must fix before merge)
 
 **CTX-C1: status.json has duplicate keys in plan metadata**
-- **File**: `.agents/plans/status.json`
+- **File**: `.agents/status.json`
 - **Location**: Lines 253-256 in plan "2025-04-05-context-assembly" metadata
 - **Issue**: The metadata object contains duplicate keys `tests` (lines 253-254 and 255) and `clippy` (lines 255-256), which violates JSON spec (RFC 8259). While JSON parsers may accept this, behavior is undefined (last value wins in some parsers, first in others).
 - **Evidence**:
