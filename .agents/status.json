@@ -9,21 +9,23 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-19T18:00:00Z",
-      "total_open": 8,
+      "total_open": 9,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-            "low": 5,
+            "low": 6,
         "nit": 1
       },
       "by_target": {
         "V1.6": 5,
         "V1.7": 2,
-        "V2.0": 1
+        "V2.0": 1,
+        "backlog": 1
       },
       "by_plan": {
-        "2026-04-18-v1.5-stabilization": 7
+        "2026-04-18-v1.5-stabilization": 7,
+        "v1-tech-debt-cleanup": 1
       },
       "cross_cutting": [
         {
@@ -36,6 +38,20 @@
       ]
     },
     "residual_findings": {
+      "v1-tech-debt-cleanup": [
+        {
+          "id": "TD-10",
+          "title": "Device flow OAuth — production auth deferred; stub verify_device_code only",
+          "severity": "low",
+          "source": "v1-tech-debt-cleanup Batch D Task 16",
+          "scope": "crates/nexus42d/src/auth/device_flow.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "detail_path": "plans/residuals/v1-tech-debt-cleanup/td-10-device-flow-oauth.md",
+          "tracking_link": null
+        }
+      ],
       "2026-04-18-v1.5-stabilization": [
         {
           "id": "R1",
