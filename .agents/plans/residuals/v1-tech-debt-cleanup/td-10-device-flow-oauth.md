@@ -1,7 +1,7 @@
 # Device flow OAuth scope (TD-10)
 
 **Source plan:** `v1-tech-debt-cleanup` (Batch D, Task 16 / TD-10)  
-**Status:** Active — scope and dependency record
+**Status:** Active — deferral record (complements `status.json` residual entry)
 
 ## Current behavior (OSS)
 
