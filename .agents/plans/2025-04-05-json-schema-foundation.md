@@ -1871,7 +1871,7 @@ Expected: `validate-schemas` job includes validation script execution
 ## Completion
 
 After all tasks complete:
-- [x] Update `.agents/plans/status.json` with completion status
+- [x] Update `.agents/status.json` with completion status
 - [ ] Create git tag: `git tag v0.1.0-schemas -a -m "Phase 0: JSON Schema foundation initialized"`
 - [ ] Push to remote: `git push origin main --tags`
 

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Narrowed `@42ch/nexus-contracts` to wire contracts only. Types that `nexus-platform` does not consume have been removed from this package; they now live as hand-written Rust in `crates/nexus-contracts/src/local/`.
-- See `.agents/plans/knowledge/schemas-boundary-v1.md` §2 for the boundary rule.
+- See `.agents/knowledge/schemas-boundary-v1.md` §2 for the boundary rule.
 
 ### Removed
 

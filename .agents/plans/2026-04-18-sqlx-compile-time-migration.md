@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, sqlx (compile-time macros), SQLite, cargo-sqlx CLI
 
-**Spec:** `.agents/plans/knowledge/sqlx-compile-time-migration-v1.md` (authoritative technical spec — read before implementing)
+**Spec:** `.agents/knowledge/sqlx-compile-time-migration-v1.md` (authoritative technical spec — read before implementing)
 
 ---
 
@@ -240,7 +240,7 @@ git commit -m "refactor(sqlx): migrate nexus42 and nexus42d to compile-time chec
 **Files:**
 - Modify: `.github/workflows/ci.yml` — uncomment `verify-sqlx-offline` job
 - Modify: `AGENTS.md` — add sqlx compile-time macro convention section (draft in spec §3)
-- Modify: `.agents/plans/knowledge/README.md` — spec already updated
+- Modify: `.agents/knowledge/README.md` — spec already updated
 
 - [x] **Step 1: Re-enable `verify-sqlx-offline` CI job**
 

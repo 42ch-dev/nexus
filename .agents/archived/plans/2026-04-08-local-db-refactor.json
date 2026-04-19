@@ -1,0 +1,82 @@
+{
+  "archived_at": "2026-04-08T17:15:00Z",
+  "plan_id": "2026-04-08-local-db-refactor",
+  "snapshot": {
+    "id": "2026-04-08-local-db-refactor",
+    "title": "Local DB Refactor — Single Ownership Module",
+    "file": ".agents/plans/2026-04-08-local-db-refactor.md",
+    "status": "Done",
+    "owner": "@project-manager",
+    "agents": [
+      "@fullstack-dev"
+    ],
+    "progress": 100,
+    "tags": [
+      "refactor",
+      "foundation",
+      "local-db",
+      "v1.1"
+    ],
+    "created_at": "2026-04-08",
+    "updated_at": "2026-04-08",
+    "done_at": "2026-04-08",
+    "notes": "All phases (A-F) completed. Critical schema drift fixed (reference_sources.content). All DDL unified in nexus-local-db. CI schema consistency checks enforced.",
+    "metadata": {
+      "priority": "P1",
+      "phase": "Done",
+      "description": "Foundational refactor to eliminate schema drift and duplicated logic between CLI and daemon. Creates independent nexus-local-db module with single ownership of shared schema, decoupled version lines (db_schema_version vs schema_version), and unified API.",
+      "working_branch": "feature/local-db-refactor",
+      "merged_to": "main",
+      "merge_commit": "9301529",
+      "dependency": null,
+      "spec_refs": [
+        ".agents/knowledge/local-db-refactor-v1.md"
+      ],
+      "effort": "M (~8 sessions across 6 phases)",
+      "gates": {
+        "tests": "passed (607+)",
+        "clippy": "passed",
+        "fmt": "passed",
+        "ci_schema_checks": "passed"
+      },
+      "phases_completed": {
+        "phase_a": "Module skeleton (RuntimeRole, SchemaVersions, version constants)",
+        "phase_b": "Shared schema migration + critical drift fix (reference_sources.content)",
+        "phase_c": "Daemon-only tables migration",
+        "phase_d": "Version management API (read_versions, validate)",
+        "phase_e": "Migration runner + CLI db status command",
+        "phase_f": "CI schema consistency checks"
+      },
+      "key_achievements": [
+        "Fixed critical schema drift: reference_sources now has content TEXT column",
+        "Unified all DDL in single module (nexus-local-db)",
+        "Role-based initialization (Cli vs Daemon)",
+        "Decoupled version lines (db_schema_version vs schema_version)",
+        "Migration-ready for future schema changes",
+        "CLI visibility via nexus42 db status",
+        "CI enforcement prevents future drift"
+      ],
+      "files_created": [
+        "crates/nexus-local-db/Cargo.toml",
+        "crates/nexus-local-db/src/lib.rs",
+        "crates/nexus-local-db/src/version.rs",
+        "crates/nexus-local-db/src/schema.rs",
+        "crates/nexus-local-db/src/error.rs",
+        "crates/nexus-local-db/src/migration.rs",
+        "crates/nexus42/src/commands/db.rs"
+      ],
+      "files_modified": [
+        "Cargo.toml (workspace)",
+        "Cargo.lock",
+        "crates/nexus42/Cargo.toml",
+        "crates/nexus42/src/db/mod.rs",
+        "crates/nexus42/src/commands/mod.rs",
+        "crates/nexus42/src/main.rs",
+        "crates/nexus42/src/config.rs",
+        "crates/nexus42d/Cargo.toml",
+        "crates/nexus42d/src/db/schema.rs",
+        ".github/workflows/ci.yml"
+      ]
+    }
+  }
+}

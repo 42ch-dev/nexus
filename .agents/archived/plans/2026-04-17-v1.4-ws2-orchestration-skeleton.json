@@ -1,0 +1,64 @@
+{
+  "id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
+  "title": "V1.4 WS2 — Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
+  "owner": "fullstack-dev",
+  "tags": [
+    "v1.4",
+    "ws2",
+    "orchestration",
+    "new-feature"
+  ],
+  "created_at": "2026-04-17",
+  "updated_at": "2026-04-18",
+  "done_at": "2026-04-18",
+  "notes": "All 10 tasks done (T1-T6 in Batches ①-③, T7-T10 in Batch ④). Full CI gate passed. QC triple-review approved. QA verified.",
+  "metadata": {
+    "priority": "high",
+    "phase": "V1.4-M2",
+    "working_branch": "feature/v1.4-ws2-orch-skeleton",
+    "description": "New crate crates/nexus-orchestration. OrchestrationEngine trait + GraphFlowEngine adapter over graph-flow=0.2.3, SqliteSessionStorage (sqlx, sharing nexus-local-db's pool — WS8 prereq for Task 3), Capability trait + non-ACP built-ins (sync/outbox/workspace/registry/creator.{read,write,inject}/judge.rule), WorkerManager + stdin/stdout JSON-RPC IPC (jsonrpsee-core + RpcTransport trait + NDJSON via tokio_util::codec::LinesCodec — selection closed per crate-selection-best-practices-v1 §3.1), _system.maintenance hardcoded graph, /v1/local/orchestration/* HTTP. ACP-touching capabilities + preset file loader deferred to WS3.",
+    "wave_0_spec": ".agents/knowledge/orchestration-engine-v1.md",
+    "spec_refs": [
+      ".agents/knowledge/orchestration-engine-v1.md",
+      ".agents/knowledge/acp-client-tech-spec-v2.md",
+      ".agents/knowledge/schemas-boundary-v1.md",
+      ".agents/knowledge/crate-selection-best-practices-v1.md",
+      ".agents/knowledge/v1.4-delivery-compass-v1.md"
+    ],
+    "dependency": "2026-04-17-v1.4-ws1-acp-host-extraction",
+    "blocking_dependencies": [
+      "2026-04-17-v1.4-ws8-local-db-sqlx-migration (Task 3 SqliteSessionStorage only; Tasks 1-2 + 4-10 may run in parallel with WS8)"
+    ],
+    "effort_agent_oriented": "L (2-3 agent sessions)",
+    "commits": [
+      "bc8a7e9 chore(orchestration): scaffold crate with graph-flow=0.2.3 (WS2 T1)",
+      "f8d225a feat(orchestration): OrchestrationEngine trait + GraphFlowEngine adapter (WS2 T2)",
+      "7f2fe01 feat(orchestration): SqliteSessionStorage + orchestration_sessions migration (WS2 T3)",
+      "43a8386 feat(orchestration): Capability trait + non-ACP built-ins + standard Task impls (WS2 T4)",
+      "bbddcc6 feat(orchestration): Worker Manager + jsonrpsee-core stdio NDJSON IPC (WS2 T5)",
+      "16a93df feat(orchestration): _system.maintenance hardcoded graph + E2E smoke (WS2 T6)",
+      "a0a82e6 feat(daemon): /v1/local/orchestration/* engine-session endpoints (WS2 T7)",
+      "754db03 feat(daemon): wire engine + worker manager + system preset at boot (WS2 T8)",
+      "aa628ed refactor(nexus42): remove WS1 ACP compat shim; import directly from nexus-acp-host (WS2 T9)",
+      "cb467e2 chore(ci): pass full CI gate — fmt + clippy + unused import cleanup (WS2 T10)",
+      "ca1a133 fix(ws2): address 6 must-fix QC findings from triple review",
+      "f358f80 fix(ws2): apply cargo +nightly fmt for CI verify-codegen gate",
+      "368bd05 docs(qa): WS2 orchestration skeleton QA verification report",
+      "b21cc7a Merge feature/v1.4-ws2-orch-skeleton into feature/v1.4 (WS2 done)"
+    ],
+    "gates": {
+      "cargo_build": "pass",
+      "cargo_test": "pass",
+      "cargo_fmt": "pass",
+      "cargo_clippy": "pass",
+      "validate_schemas": "pass",
+      "codegen_no_diff": "pass",
+      "linkage_gate": "pass",
+      "http_smoke_tests": "pass (4/4)",
+      "boot_integration_test": "pass (engine_started_at_boot)",
+      "qa_status": "pass"
+    }
+  }
+}

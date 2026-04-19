@@ -4,7 +4,7 @@
 
 **Goal:** Address residuals from V1.1 development and architecture alignment gaps in bounded batches, improving production readiness and code quality without blocking feature work.
 
-**Source:** Consolidated from all plans' residual findings (high, medium, low severity) + architecture alignment review (`.agents/plans/knowledge/architecture-alignment-review-v1.md`).
+**Source:** Consolidated from all plans' residual findings (high, medium, low severity) + architecture alignment review (`.agents/knowledge/architecture-alignment-review-v1.md`).
 
 **Scope:** **Long-lived plan** covering tech-debt and architecture-alignment work across **V1.x** (V1.1 through V1.2 and later V1 releases until the program explicitly retires this plan). **Milestones:** A–D are **delivered** (C+D completed 2026-04-10). **Batch E** (TD-11, TD-13) is scheduled on the **V1.2 track** but remains **owned by this same plan id** — V1.2 is still V1, not a separate product line for plan ownership.
 
@@ -63,7 +63,7 @@
 - Add unit tests for validation
 - Update error messages to be user-friendly
 
-**Evidence**: Tests passing; residual archived to `.agents/plans/archived/residuals/2025-04-05-context-assembly.json`
+**Evidence**: Tests passing; residual archived to `.agents/archived/residuals/2025-04-05-context-assembly.json`
 
 ---
 
@@ -212,7 +212,7 @@
 
 **Acceptance Criteria**:
 
-- Extract migration documentation to `.agents/plans/archived/knowledge/outbox-schema-v2.md`
+- Extract migration documentation to `.agents/archived/knowledge/outbox-schema-v2.md`
 - Keep inline summary in outbox.rs comments
 - Add migration guide for developers
 
@@ -369,14 +369,14 @@
 **Estimated Effort**: L (~5–9 sessions) — **met via resolved + waived + minimal slice per task**
 **Target**: V1.1+ milestone (**milestone delivered**; plan continues for E + follow-ons)
 **Focus**: Architecture alignment gaps identified in architecture alignment review (TD-7–TD-10)
-**Source**: `.agents/plans/knowledge/architecture-alignment-review-v1.md` §2.6
+**Source**: `.agents/knowledge/architecture-alignment-review-v1.md` §2.6
 
-**Closure**: TD-7 resolved (tests + knowledge). TD-8 / TD-10 waived with knowledge + code/doc pointers. TD-9: minimal `GET /v1/local/daemon/status` + tests + knowledge; full §10.1 state machine **out of scope** until V1.2+. Archive: `.agents/plans/archived/residuals/v1-tech-debt-cleanup-batch-d.json`.
+**Closure**: TD-7 resolved (tests + knowledge). TD-8 / TD-10 waived with knowledge + code/doc pointers. TD-9: minimal `GET /v1/local/daemon/status` + tests + knowledge; full §10.1 state machine **out of scope** until V1.2+. Archive: `.agents/archived/residuals/v1-tech-debt-cleanup-batch-d.json`.
 
 #### Task 13: TD-7 — ForkBranch field naming consistency verification ✅
 
 **Priority**: Medium
-**Source**: Architecture alignment review TD-7, `.agents/plans/knowledge/architecture-alignment-review-v1.md`
+**Source**: Architecture alignment review TD-7, `.agents/knowledge/architecture-alignment-review-v1.md`
 **Scope**: `crates/nexus-domain/src/fork_branch.rs`, `crates/nexus-contracts/src/generated/fork_branch.rs`, spec `data-model-v1.md`
 
 **Context**: Spec uses `parent_branch_id` and `forked_from_event_id`; contracts previously had only `forked_from_event_id`. The review found contracts now add `parent_branch_id` matching spec, but field naming may differ slightly from the domain model. TD-12 noted "no actual issue" after closer inspection, but TD-7 remains as a verification action item to confirm consistency across all three layers.
@@ -397,7 +397,7 @@
 #### Task 14: TD-8 — Consolidate dual outbox implementations ⏸️ waived (documented)
 
 **Priority**: Medium
-**Source**: Architecture alignment review TD-8, `.agents/plans/knowledge/architecture-alignment-review-v1.md`
+**Source**: Architecture alignment review TD-8, `.agents/knowledge/architecture-alignment-review-v1.md`
 **Scope**: `crates/nexus-local-db/src/schema.rs` (daemon `outbox` table), `crates/nexus-sync/src/outbox.rs` (`outbox_entries` table)
 
 **Context**: The daemon has its own `outbox` table in `nexus-local-db`, while `nexus-sync` has a richer `outbox_entries` table with delivery state tracking, retry logic, and precheck hooks. This dual implementation creates data inconsistency risk and duplicated schema management. The consolidation should migrate the daemon's outbox usage to delegation to `nexus-sync::Outbox` or unify the schema.
@@ -420,7 +420,7 @@
 #### Task 15: TD-9 — Implement daemon lifecycle state machine 🔶 → partial (endpoint + doc)
 
 **Priority**: Medium
-**Source**: Architecture alignment review TD-9, `.agents/plans/knowledge/architecture-alignment-review-v1.md`
+**Source**: Architecture alignment review TD-9, `.agents/knowledge/architecture-alignment-review-v1.md`
 **Scope**: `crates/nexus42d/src/main.rs`, spec `cli-spec-v1.md` §10.1
 
 **Context**: Spec §10.1 defines 6 daemon lifecycle states (Stopped, Starting, Running, Degraded, Stopping, Failed) with explicit transition rules. Current implementation has a simple start-and-serve model with no state machine. This limits graceful degradation, status tracking, and recovery capabilities.
@@ -444,7 +444,7 @@
 #### Task 16: TD-10 — Implement real device flow OAuth ⏸️ waived (platform-dependent)
 
 **Priority**: Medium
-**Source**: Architecture alignment review TD-10, `.agents/plans/knowledge/architecture-alignment-review-v1.md`
+**Source**: Architecture alignment review TD-10, `.agents/knowledge/architecture-alignment-review-v1.md`
 **Scope**: `crates/nexus42d/src/auth/device_flow.rs`, platform auth endpoints
 
 **Context**: Current auth flow generates mock tokens (`at_<uuid>`, `usr_mock_<uuid>`) with `verify_device_code` returning `Ok(false)`. Production requires real OAuth device flow with the platform. This is a medium-priority architecture gap since it's explicitly a V1.1+ scope item but critical for production deployment.
@@ -472,12 +472,12 @@
 **Estimated Effort**: L (~6–16 sessions)
 **Target**: **V1.2 milestone** (within V1 product line)
 **Focus**: Missing CLI commands and integration test coverage from architecture alignment review (TD-11, TD-13)
-**Source**: `.agents/plans/knowledge/architecture-alignment-review-v1.md` §2.3, §2.6
+**Source**: `.agents/knowledge/architecture-alignment-review-v1.md` §2.3, §2.6
 
 #### Task 17: TD-11 — Complete missing CLI commands 🔶
 
 **Priority**: Low
-**Source**: Architecture alignment review TD-11, `.agents/plans/knowledge/architecture-alignment-review-v1.md`
+**Source**: Architecture alignment review TD-11, `.agents/knowledge/architecture-alignment-review-v1.md`
 **Scope**: `crates/nexus42/src/commands/`
 
 **Context**: CLI command coverage is approximately 65% functional. Missing commands: `clone <world-ref>`, `link/unlink`, `config` command group, `publish chapter/story`, `debug dump-workspace/replay-delta`, and `doctor`. Some existing commands have partial implementations (`auth profiles`, `daemon restart/logs`).
@@ -500,7 +500,7 @@
 #### Task 18: TD-13 — Improve integration test coverage 🔶
 
 **Priority**: Low
-**Source**: Architecture alignment review TD-13, `.agents/plans/knowledge/architecture-alignment-review-v1.md`
+**Source**: Architecture alignment review TD-13, `.agents/knowledge/architecture-alignment-review-v1.md`
 **Scope**: `crates/nexus42/tests/`, `crates/nexus42d/tests/`, `crates/nexus-sync/`
 
 **Context**: No `cargo test` results were available for the architecture review. Domain logic has unit tests in `#[cfg(test)]` modules, but integration tests for sync workflows, CLI commands, and daemon handlers appear incomplete. This affects regression safety.

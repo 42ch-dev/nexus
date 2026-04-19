@@ -12,7 +12,7 @@
 
 ## Authoritative design input
 
-- [.agents/plans/knowledge/v1.1-overview-v2.md](knowledge/v1.1-overview-v2.md)
+- [.agents/knowledge/v1.1-overview-v2.md](knowledge/v1.1-overview-v2.md)
 - **Program ref:** Explore API (platform plan id `12-explore-api`, conceptual). Visibility: align with v1-spec Explore / world visibility chapters when available to the implementer.
 
 ---

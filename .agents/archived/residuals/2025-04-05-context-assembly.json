@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "plan_id": "2025-04-05-context-assembly",
+  "archived_at": "2026-04-06",
+  "entries": [
+    {
+      "id": "CTX-R1",
+      "title": "Original plan file still contains incorrect scope (Neo4j/pgvector in Rust)",
+      "severity": "high",
+      "source": "Architecture Review",
+      "scope": ".agents/plans/2025-04-05-context-assembly.md — entire plan needs replacement",
+      "decision": "resolved",
+      "owner": "@project-manager",
+      "target": "Rewrite plan file from .agents/knowledge/restructured-context-assembly-v1.md",
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-06",
+      "closure_note": "Plan completely rewritten by @architect (1469 lines, 5 CLI-side-only tasks). All Neo4j/pgvector scope removed. CTX-R1 resolved."
+    },
+    {
+      "id": "CTX-R6",
+      "title": "MemoryKind as String not enum",
+      "severity": "medium",
+      "source": "QC-#3",
+      "scope": "crates/nexus42/src/context/types.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — extract MemoryKind enum matching schema",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08T12:00:00Z",
+      "closure_note": "MemoryKind enum updated with 8 variants matching schema (story_summary, research_material, review_note, character_note, world_building, plot_outline, theme_analysis, custom). Added strum::Display for serialization, FromStr for parsing. CLI commands updated to use enum. 6 new tests for enum behavior.",
+      "archived_at": "2026-04-09"
+    },
+    {
+      "id": "CTX-R7",
+      "title": "Missing file I/O edge case tests (permissions, symlinks)",
+      "severity": "medium",
+      "source": "QC-#3",
+      "scope": "crates/nexus42/src/context/summary.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — add edge case tests",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08T19:55:00Z",
+      "closure_note": "Added 5 edge case tests: permission-denied file (scan and generate), symlink to file, symlink to directory, broken symlink. All tests use catch_unwind to verify no panics. Tests bundled into CTX-R2 commit (file size limit).",
+      "archived_at": "2026-04-09"
+    },
+    {
+      "id": "CTX-R4",
+      "title": "CLI doesn't validate WorldId format at input",
+      "severity": "high",
+      "source": "QC-#2",
+      "scope": "crates/nexus42/src/commands/context.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — add clap validator for wld_ prefix pattern",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-08T19:00:00Z",
+      "closure_note": "WorldId validation already implemented with validate_world_id() clap validator (wld_ prefix + alphanumeric suffix). 5 unit tests covering valid formats, missing/wrong prefix, empty, special characters, and prefix-only input. Applied via #[arg(value_parser = validate_world_id)] on --world_id flag. Part of Batch A tech debt cleanup (plan v1-tech-debt-cleanup).",
+      "closure_evidence": "cargo test --all: 6 context validation tests pass (validate_world_id_accepts_valid_formats, _rejects_missing_prefix, _rejects_wrong_prefix, _rejects_empty, _rejects_special_characters, _rejects_only_prefix). cargo clippy --all -- -D warnings: 0 warnings. cargo +nightly fmt --all -- --check: clean.",
+      "archived_at": "2026-04-08"
+    }
+  ]
+}

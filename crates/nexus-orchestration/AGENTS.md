@@ -128,4 +128,4 @@ Steps 1 and 2 are **not yet implemented** — `load_preset()` in `loader.rs` is 
 
 ### Design Reference
 
-Full design: `.agents/plans/knowledge/orchestration-engine-v1.md` (sections 7–9 cover presets, loader, and validation).
+Full design: `.agents/knowledge/orchestration-engine-v1.md` (sections 7–9 cover presets, loader, and validation).

@@ -12,7 +12,7 @@
 
 ## Authoritative design input
 
-- [.agents/plans/knowledge/v1.1-overview-v2.md](knowledge/v1.1-overview-v2.md)
+- [.agents/knowledge/v1.1-overview-v2.md](knowledge/v1.1-overview-v2.md)
 - **Program ref:** Publish API (platform plan id `14-publish-api`, conceptual).
 
 ---

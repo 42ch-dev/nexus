@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-04-09T12:00:00Z",
+  "plan": {
+    "id": "2026-04-06-codegen-alignment",
+    "title": "Codegen & Contract Alignment",
+    "file": ".agents/plans/2026-04-06-pre-phase2.md",
+    "status": "Done",
+    "owner": "@project-manager",
+    "agents": [
+      "@fullstack-dev",
+      "@qc-specialist",
+      "@qa-engineer"
+    ],
+    "progress": 100,
+    "tags": [
+      "V1.0-phase2",
+      "codegen",
+      "contracts",
+      "schema-first"
+    ],
+    "created_at": "2026-04-06",
+    "updated_at": "2026-04-07",
+    "done_at": "2026-04-07",
+    "notes": "Merged to main. QC Approve (single reviewer, S effort). QA PASS. Codegen pipeline fixed, context assembly types generated, registry types generated. 58 files changed, 1215 insertions.",
+    "metadata": {
+      "phase": "V1.0-phase2",
+      "branch_policy": "feature/v2.0-codegen-alignment from main",
+      "working_branch": "feature/v2.0-codegen-alignment",
+      "priority": "medium",
+      "description": "Fix CommonTypes codegen to read from schema, generate context assembly types, generate registry manifest types",
+      "dependency": "none (can run in parallel with all plans)",
+      "spec_refs": [
+        ".agents/archived/knowledge/phase2-architecture-plan-v1.md"
+      ],
+      "effort": "S — ~1-2 agent sessions",
+      "residual_summary": "5 addressed (2 HIGH, 3 MEDIUM resolved)",
+      "tests": "480+ passed, 0 failed",
+      "clippy": "clean — 0 warnings with -D warnings",
+      "task_status": {
+        "task_1": "done",
+        "task_2": "done",
+        "task_3": "done"
+      }
+    }
+  }
+}

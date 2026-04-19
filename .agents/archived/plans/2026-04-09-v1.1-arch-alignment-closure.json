@@ -1,0 +1,27 @@
+{
+  "id": "2026-04-09-v1.1-arch-alignment-closure",
+  "title": "V1.1 Architecture Alignment — Final Closure",
+  "file": ".agents/plans/2026-04-09-v1.1-arch-alignment-closure.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": ["@fullstack-dev"],
+  "progress": 100,
+  "tags": ["v1.1", "architecture", "sync", "contracts"],
+  "created_at": "2026-04-09",
+  "updated_at": "2026-04-09",
+  "done_at": "2026-04-09",
+  "notes": "Closed ALIGN-HASH-01 + ARCH-SYNC-D1; .agents/knowledge/canonical-hash-v1.md + golden test; daemon eager push env gate; archived residuals appended.",
+  "metadata": {
+    "priority": "high",
+    "scope": "canonical_hash cross-stack preimage + golden vectors; optional daemon eager SyncClient::push_bundle when configured",
+    "spec_refs": [".agents/knowledge/architecture-alignment-review-v1.md"],
+    "resolves_residuals_on_plan": "2026-04-09-v1.1-arch-alignment-blockers",
+    "residual_ids_closed": ["ALIGN-HASH-01", "ARCH-SYNC-D1"],
+    "gates": {
+      "qc_status": "deferred",
+      "tests": "passed",
+      "clippy": "passed",
+      "codegen": "passed"
+    }
+  }
+}

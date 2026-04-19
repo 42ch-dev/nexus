@@ -1,0 +1,70 @@
+{
+  "id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
+  "status": "Done",
+  "file": ".agents/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md",
+  "title": "V1.4 WS8 — nexus-local-db sqlx migration (unified DB engine)",
+  "owner": "fullstack-dev",
+  "tags": [
+    "v1.4",
+    "ws8",
+    "local-db",
+    "sqlx",
+    "refactor"
+  ],
+  "created_at": "2026-04-17",
+  "updated_at": "2026-04-18",
+  "done_at": "2026-04-18",
+  "progress": 100,
+  "notes": "QC Approve with residuals. QA passed. Merged to feature/v1.4.",
+  "metadata": {
+    "priority": "high",
+    "phase": "V1.4-M1",
+    "working_branch": "feature/v1.4-ws8-local-db-sqlx",
+    "merge_target": "feature/v1.4",
+    "description": "Migrate the entire workspace from rusqlite + deadpool-sqlite + bespoke sequential migrations to sqlx + sqlx migrate. Ports ~34 files / ~193 references across nexus-local-db / nexus42 / nexus42d / nexus-sync. Four existing code-form migrations (v2 local_identities, v3 soul_meta, v4 memory_pipeline + implicit baseline) become timestamped .sql files under crates/nexus-local-db/migrations/. workspace_meta.db_schema_version key preserved (mirrored from sqlx _sqlx_migrations). Hard prerequisite for WS2 Task 3 (SqliteSessionStorage shares the same pool on the unified state.db). PM-approved 2026-04-17 after dual-engine / dual-file SSOT conflict review (both patterns rejected).",
+    "wave_0_spec": ".agents/knowledge/crate-selection-best-practices-v1.md",
+    "spec_refs": [
+      ".agents/knowledge/crate-selection-best-practices-v1.md",
+      ".agents/knowledge/local-db-refactor-v2.md",
+      ".agents/knowledge/orchestration-engine-v1.md",
+      ".agents/knowledge/v1.4-delivery-compass-v1.md",
+      ".agents/plans/reports/2026-04-17-crate-selection-research/research-log.md"
+    ],
+    "parallelism": "fully parallel with WS1/WS4/WS5 (no DB touch); blocks WS2 Task 3 only",
+    "blocks_plans": [
+      "2026-04-17-v1.4-ws2-orchestration-skeleton (Task 3 only)"
+    ],
+    "effort_agent_oriented": "L-XL (9-10 agent sessions)",
+    "gates": {
+      "cargo_build": "pass",
+      "cargo_test": "pass (1757+ tests, 0 failures)",
+      "cargo_fmt": "pass",
+      "cargo_clippy": "pass (-D warnings, 0 warnings)",
+      "sqlx_prepare": "pass",
+      "rusqlite_free": "pass (zero references under crates/)",
+      "docs_v2": "pass (local-db-refactor-v2.md created, v1 archived)"
+    },
+    "batch_1_commits": [
+      "d41ced5 chore(local-db): sqlx workspace dep + pool bootstrap (WS8 T1)",
+      "2a5ae6b feat(local-db): single-file dev-mode schema with all tables (WS8 T2)",
+      "eba428f feat(local-db): async versions API + init_pool convenience (WS8 T3)"
+    ],
+    "batch_2_commits": [
+      "f6761cb feat(local-db): identity CRUDs async sqlx (WS8 T4)",
+      "a9129ab feat(local-db): soul_meta / pending_review / memory_fragment async sqlx (WS8 T5)",
+      "67b74db feat(daemon): port nexus42d DB layer + handlers to async sqlx (WS8 T6)"
+    ],
+    "batch_3_commits": [
+      "428f967 feat(cli): port nexus42 CLI + manuscript manager to async sqlx (WS8 T7)"
+    ],
+    "batch_4_commits": [
+      "5c50689 feat(sync): port nexus-sync outbox to async sqlx + CI sqlx offline (WS8 T8)",
+      "fd0ecd6 docs(ws8): revise local-db-refactor to v2 + tighten orchestration §4.3 + drop legacy deps (WS8 T9)",
+      "9045b36 chore(ws8): lint fixes for final CI gate (WS8 T10)"
+    ],
+    "dev_mode_note": "T2 adapted per PM directive: ONE migration file instead of 5 incremental files. Formal migration history added at T9.",
+    "qc_status": "approved_with_residuals",
+    "qa_status": "approved",
+    "residual_summary": "5 residuals (R1-R5): 3 medium defer, 1 low accept, 1 nit accept — all tracked for V1.5"
+  }
+}
