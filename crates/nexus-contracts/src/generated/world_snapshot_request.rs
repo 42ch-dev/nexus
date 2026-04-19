@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for POST /v1/worlds/snapshot — capture a read-only snapshot cursor with optional branch and size limits (platform API).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldSnapshotRequest {
     pub schema_version: u32,

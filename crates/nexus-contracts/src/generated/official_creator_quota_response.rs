@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// GET /official-creator/quota 200 response body. SSOT: v1-spec schema/entitlements-wire-v1.md §4.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct OfficialCreatorQuotaResponse {
     pub schema_version: u32,

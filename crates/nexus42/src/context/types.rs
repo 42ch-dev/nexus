@@ -51,14 +51,7 @@ mod tests {
             include_memory: Some(true),
             include_timeline: Some(true),
             include_story_summaries: Some(true),
-            branch_id: None,
-            memory_query: None,
-            timeline_limit: None,
-            key_block_limit: None,
-            memory_kinds: None,
-            max_timeline_events: None,
-            max_story_summaries: None,
-            as_of: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should be valid");

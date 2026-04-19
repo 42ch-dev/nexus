@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Value object describing the baseline version of a bundle/entity/world. Aligned with data-model-v1.md §6.2.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct VersionRef {
     pub entity_type: String,
