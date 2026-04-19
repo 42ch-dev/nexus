@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for listing notifications (platform plan 20).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsListRequest {
     pub schema_version: u32,

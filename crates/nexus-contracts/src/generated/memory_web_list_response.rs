@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct MemoryWebListResponseItem {
     pub memory_item_id: String,
@@ -25,7 +25,7 @@ pub struct MemoryWebListResponseItem {
     pub updated_at: Option<String>,
 }
 /// Paginated list response for memory web read APIs (platform plan 18). Items are read projections; full MemoryItem sync may use domain bundle types separately.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct MemoryWebListResponse {
     pub schema_version: u32,

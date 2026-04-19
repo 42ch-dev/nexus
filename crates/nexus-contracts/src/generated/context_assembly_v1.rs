@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleRequestV1 {
     pub request_id: String,
@@ -22,6 +22,14 @@ pub struct ContextAssembleRequestV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_story_summaries: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_block_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_kinds: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_timeline_events: Option<i64>,
@@ -31,7 +39,7 @@ pub struct ContextAssembleRequestV1 {
     pub as_of: Option<String>,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1KeyBlock {
     pub key_block_id: String,
@@ -40,7 +48,7 @@ pub struct ContextAssembleResponseV1KeyBlock {
     pub summary: String,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1TimelineEvent {
     pub event_id: String,
@@ -49,7 +57,7 @@ pub struct ContextAssembleResponseV1TimelineEvent {
     pub occurred_at: String,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1StorySummary {
     pub story_manifest_id: String,
@@ -58,7 +66,7 @@ pub struct ContextAssembleResponseV1StorySummary {
     pub manifest_type: String,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1MemoryItem {
     pub memory_id: String,
@@ -66,7 +74,7 @@ pub struct ContextAssembleResponseV1MemoryItem {
     pub content: String,
 }
 /// Response shape for POST /v1/local/context/assemble. Platform returns a stable read-only context snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1 {
     pub request_id: String,

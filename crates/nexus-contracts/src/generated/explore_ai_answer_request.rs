@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for Explore AI grounded Q&A over world / corpus context (platform plan 19). Boundary with context assembly: this is platform-side retrieval + generation; wire shape only.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiAnswerRequest {
     pub schema_version: u32,

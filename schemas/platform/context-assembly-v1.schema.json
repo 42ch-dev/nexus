@@ -40,11 +40,47 @@
           "default": true,
           "description": "Include story summaries in assembled context"
         },
+        "branch_id": {
+          "type": ["string", "null"],
+          "description": "Branch ID for temporal filtering"
+        },
+        "memory_query": {
+          "type": ["string", "null"],
+          "maxLength": 1000,
+          "description": "Natural language query for vector memory search"
+        },
+        "timeline_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50,
+          "description": "Max timeline events to return"
+        },
+        "key_block_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 100,
+          "description": "Max key blocks to return"
+        },
         "memory_kinds": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["story_summary", "research_material", "review_note"]
+            "enum": [
+              "story_summary",
+              "research_material",
+              "review_note",
+              "character_note",
+              "world_building",
+              "plot_outline",
+              "theme_analysis",
+              "location_reference",
+              "timeline_note",
+              "dialogue_snippet",
+              "symbol_motif",
+              "custom"
+            ]
           },
           "default": ["story_summary", "research_material", "review_note"],
           "description": "Filter memory items by kind"

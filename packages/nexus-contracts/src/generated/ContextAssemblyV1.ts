@@ -9,7 +9,7 @@ import type { SchemaVersion } from './CommonTypes';
  */
 
 /** Inline enum type */
-export type ContextAssembleRequestV1MemoryKinds = 'story_summary' | 'research_material' | 'review_note';
+export type ContextAssembleRequestV1MemoryKinds = 'story_summary' | 'research_material' | 'review_note' | 'character_note' | 'world_building' | 'plot_outline' | 'theme_analysis' | 'location_reference' | 'timeline_note' | 'dialogue_snippet' | 'symbol_motif' | 'custom';
 
 /** Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform. */
 export interface ContextAssembleRequestV1 {
@@ -20,6 +20,10 @@ export interface ContextAssembleRequestV1 {
   include_memory?: boolean;
   include_timeline?: boolean;
   include_story_summaries?: boolean;
+  branch_id?: string | null;
+  memory_query?: string | null;
+  timeline_limit?: number;
+  key_block_limit?: number;
   memory_kinds?: ContextAssembleRequestV1MemoryKinds[];
   max_timeline_events?: number | null;
   max_story_summaries?: number | null;

@@ -366,7 +366,7 @@ function generateRustStructContent(
 
   const desc = (schemaContent.description || typeName) as string;
   const result = `/// ${desc}
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ${typeName} {
 ${fields.join('\n')}
@@ -562,7 +562,7 @@ function generateInlineArrayItemStruct(
   }
 
   return `${useLine}/// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ${itemTypeName} {
 ${fields.join('\n')}
@@ -624,14 +624,14 @@ use serde::{Deserialize, Serialize};
         .map(w => w.charAt(0).toUpperCase() + w.slice(1))
         .join('');
     });
-    content += `/// ${en.desc}\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${en.name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n\n`;
+    content += `/// ${en.desc}\n#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${en.name} {\n${variants.map((v, i) => `${i === 0 ? '    #[default]\n' : ''}    ${v},`).join('\n')}\n}\n\n`;
   }
 
   content += `// ── SourceAnchor (from source-anchor.schema.json) ─────────────────────
 
 /// Source anchor for provenance — references platform Story summary entities.
 /// Source: schemas/common/source-anchor.schema.json
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SourceAnchor {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -643,7 +643,7 @@ pub struct SourceAnchor {
 }
 
 /// Reference to a platform Story summary entity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SourceSummaryRef {
     pub story_manifest_id: String,

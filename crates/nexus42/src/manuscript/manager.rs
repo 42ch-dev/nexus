@@ -387,7 +387,7 @@ impl ManuscriptManager {
             .promote()
             .map_err(|e| CliError::Config(format!("{}", e)))?;
 
-        let new_phase = state.current_phase().clone();
+        let new_phase = *state.current_phase();
         let phase_str = phase_to_str(&new_phase);
 
         // Persist to SQLite

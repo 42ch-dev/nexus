@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for Explore AI summarization over a world or manuscript (platform plan 19).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiSummaryRequest {
     pub schema_version: u32,

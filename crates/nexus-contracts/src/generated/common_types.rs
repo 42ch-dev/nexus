@@ -51,18 +51,20 @@ pub type SchemaVersion = u32;
 // ── Enums ─────────────────────────────────────────────────────────────
 
 /// User account status (data-model-v1.md §5.1)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountStatus {
+    #[default]
     Active,
     Suspended,
     Deleted,
 }
 
 /// User subscription tier (data-model-v1.md §5.1)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionTier {
+    #[default]
     Free,
     Pro,
     Studio,
@@ -70,9 +72,10 @@ pub enum SubscriptionTier {
 }
 
 /// Manuscript lifecycle phase (data-model-v1.md §7, §5.9B)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManuscriptPhase {
+    #[default]
     Brainstorm,
     Draft,
     Review,
@@ -81,9 +84,10 @@ pub enum ManuscriptPhase {
 }
 
 /// Outcome of a publish-story operation (platform Publish API wire)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PublishStoryOutcome {
+    #[default]
     Submitted,
     Published,
     Rejected,
@@ -91,27 +95,30 @@ pub enum PublishStoryOutcome {
 }
 
 /// World timeline evolution policy (data-model-v1.md §5.3)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TimePolicy {
+    #[default]
     Manual,
     OwnerDriven,
     EventDriven,
 }
 
 /// Visibility/access level (data-model-v1.md §5.3)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
+    #[default]
     Private,
     Unlisted,
     Public,
 }
 
 /// KeyBlock content type (data-model-v1.md §5.5)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockType {
+    #[default]
     Character,
     Ability,
     Scene,
@@ -123,54 +130,60 @@ pub enum BlockType {
 }
 
 /// MemoryItem type (data-model-v1.md §5.8)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryType {
+    #[default]
     Canon,
     Working,
     Experience,
 }
 
 /// DeltaBundle type (data-model-v1.md §5.11)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BundleType {
+    #[default]
     WorldSync,
     MemorySync,
     PublishMetadata,
 }
 
 /// Creator status (data-model-v1.md §5.2)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CreatorStatus {
+    #[default]
     Active,
     Archived,
     Locked,
 }
 
 /// How creator was registered (data-model-v1.md §5.2)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RegistrationSource {
+    #[default]
     Cli,
     WebAgent,
     Platform,
 }
 
 /// World status (data-model-v1.md §5.3)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WorldStatus {
+    #[default]
     Active,
     Paused,
     Archived,
 }
 
 /// Membership role (data-model-v1.md §5.4)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MembershipRole {
+    #[default]
     Owner,
     Maintainer,
     Collaborator,
@@ -178,9 +191,10 @@ pub enum MembershipRole {
 }
 
 /// Membership status (data-model-v1.md §5.4)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MembershipStatus {
+    #[default]
     Active,
     Invited,
     Suspended,
@@ -188,26 +202,29 @@ pub enum MembershipStatus {
 }
 
 /// How pairing was established (data-model-v1.md §5.2A)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PairingSource {
+    #[default]
     AutoCli,
     ManualWeb,
     PlatformAuto,
 }
 
 /// Pairing status (data-model-v1.md §5.2A)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PairingStatus {
+    #[default]
     Active,
     Revoked,
 }
 
 /// KeyBlock status (data-model-v1.md §5.5)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBlockStatus {
+    #[default]
     Provisional,
     Confirmed,
     Deprecated,
@@ -216,9 +233,10 @@ pub enum KeyBlockStatus {
 }
 
 /// Timeline event type (data-model-v1.md §5.6)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TimelineEventType {
+    #[default]
     StoryAdvance,
     StateUpdate,
     ForkMarker,
@@ -227,26 +245,29 @@ pub enum TimelineEventType {
 }
 
 /// Timeline event status (data-model-v1.md §5.6)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TimelineEventStatus {
+    #[default]
     Canon,
     Provisional,
     Rejected,
 }
 
 /// Fork branch status (data-model-v1.md §5.7)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForkBranchStatus {
+    #[default]
     Active,
     Archived,
 }
 
 /// Fork branch verification status (data-model-v1.md §5.7)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VerificationStatus {
+    #[default]
     Unverified,
     Requested,
     Verified,
@@ -254,9 +275,10 @@ pub enum VerificationStatus {
 }
 
 /// Memory content kind (data-model-v1.md §5.8, ADR-001)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryKind {
+    #[default]
     StorySummary,
     ResearchMaterial,
     ReviewNote,
@@ -269,18 +291,20 @@ pub enum MemoryKind {
 }
 
 /// Memory status (data-model-v1.md §5.8)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryStatus {
+    #[default]
     Active,
     Superseded,
     Archived,
 }
 
 /// Story manifest type (data-model-v1.md §5.9)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManifestType {
+    #[default]
     Chapter,
     Arc,
     Story,
@@ -288,9 +312,10 @@ pub enum ManifestType {
 }
 
 /// Story manifest status (data-model-v1.md §5.9)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryManifestStatus {
+    #[default]
     SummaryReady,
     StagedForPublish,
     Published,
@@ -298,18 +323,20 @@ pub enum StoryManifestStatus {
 }
 
 /// Manuscript storage location (data-model-v1.md §5.9)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManuscriptStorage {
+    #[default]
     None,
     LocalWorkspace,
     PlatformSandbox,
 }
 
 /// Reference source type (data-model-v1.md §5.9A)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceSourceType {
+    #[default]
     File,
     Pdf,
     Url,
@@ -317,9 +344,10 @@ pub enum ReferenceSourceType {
 }
 
 /// Reference scan status (data-model-v1.md §5.9A)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanStatus {
+    #[default]
     Pending,
     Scanned,
     Failed,
@@ -327,9 +355,10 @@ pub enum ScanStatus {
 }
 
 /// Sync command type (data-model-v1.md §5.10)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandType {
+    #[default]
     AdvanceWorld,
     InjectFutureEvent,
     ExtractKb,
@@ -340,9 +369,10 @@ pub enum CommandType {
 }
 
 /// Command origin (data-model-v1.md §5.10)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandOrigin {
+    #[default]
     LocalUser,
     LocalAgent,
     OfficialCreator,
@@ -350,9 +380,10 @@ pub enum CommandOrigin {
 }
 
 /// Command execution status (data-model-v1.md §5.10)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandStatus {
+    #[default]
     Pending,
     Running,
     Completed,
@@ -361,9 +392,10 @@ pub enum CommandStatus {
 }
 
 /// Delta target aggregate type (data-model-v1.md §5.12)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeltaType {
+    #[default]
     World,
     KeyBlock,
     TimelineEvent,
@@ -373,9 +405,10 @@ pub enum DeltaType {
 }
 
 /// Delta operation (data-model-v1.md §5.12)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeltaOperation {
+    #[default]
     Create,
     Update,
     Upsert,
@@ -384,9 +417,10 @@ pub enum DeltaOperation {
 }
 
 /// Outbox delivery state (data-model-v1.md §5.13)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryState {
+    #[default]
     Staged,
     Ready,
     Sent,
@@ -396,44 +430,49 @@ pub enum DeliveryState {
 }
 
 /// Workspace binding status (data-model-v1.md §5.14)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BindingStatus {
+    #[default]
     Active,
     Unlinked,
     Stale,
 }
 
 /// Agent profile kind (data-model-v1.md §5.15)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileKind {
+    #[default]
     LocalAgent,
     PlatformHosted,
 }
 
 /// Agent selection mode (data-model-v1.md §5.15)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionMode {
+    #[default]
     Registry,
     ManualCommand,
     ManualRemote,
 }
 
 /// Agent transport method (data-model-v1.md §5.15)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
+    #[default]
     Stdio,
     Http,
     Websocket,
 }
 
 /// Agent profile status (data-model-v1.md §5.15)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentProfileStatus {
+    #[default]
     Active,
     Unavailable,
     Deprecated,
@@ -443,7 +482,7 @@ pub enum AgentProfileStatus {
 
 /// Source anchor for provenance — references platform Story summary entities.
 /// Source: schemas/common/source-anchor.schema.json
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SourceAnchor {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -455,7 +494,7 @@ pub struct SourceAnchor {
 }
 
 /// Reference to a platform Story summary entity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SourceSummaryRef {
     pub story_manifest_id: String,

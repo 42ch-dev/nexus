@@ -128,7 +128,7 @@ impl World {
             &format!("{} (fork)", self.title),
             &format!("{}-fork", self.slug),
             Visibility::Private,
-            self.time_policy.clone(),
+            self.time_policy,
         );
         child_world.root_fork_branch_id = Some(fork.fork_branch_id.clone());
 
