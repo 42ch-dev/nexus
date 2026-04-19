@@ -22,6 +22,14 @@ pub struct ContextAssembleRequestV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_story_summaries: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_block_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_kinds: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_timeline_events: Option<i64>,
