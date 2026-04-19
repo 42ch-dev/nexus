@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsListResponseItem {
     pub notification_id: String,
@@ -23,7 +23,7 @@ pub struct NotificationsListResponseItem {
     pub link_url: Option<String>,
 }
 /// Paginated notifications list (platform plan 20). Item shape matches NotificationsInboxItem fields for wire stability.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsListResponse {
     pub schema_version: u32,

@@ -149,10 +149,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 include_memory: Some(include_memory),
                 include_timeline: Some(include_timeline),
                 include_story_summaries: Some(include_story_summaries),
-                branch_id: None,
-                memory_query: None,
-                timeline_limit: None,
-                key_block_limit: None,
                 memory_kinds: Some(vec![
                     MemoryKind::StorySummary.to_string(),
                     MemoryKind::ResearchMaterial.to_string(),
@@ -160,7 +156,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 ]),
                 max_timeline_events: max_timeline_events.map(|v| v as i64),
                 max_story_summaries: max_story_summaries.map(|v| v as i64),
-                as_of: None,
+                ..Default::default()
             };
 
             // Note: max_file_size is not yet passed to the daemon API
