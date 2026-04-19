@@ -991,7 +991,7 @@ Expected: Full workspace builds (contracts + domain)
 ## Completion
 
 After all tasks complete:
-- [ ] Update `.agents/plans/status.json` - mark domain-models as `completed`
+- [ ] Update `.agents/status.json` - mark domain-models as `completed`
 - [ ] Push feature branch: `git push origin feature/v1.0-domain-models`
 - [ ] Create PR or merge (user decision)
 

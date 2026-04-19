@@ -823,7 +823,7 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 | [daemon-lifecycle-api-v1.md](../archived/knowledge/daemon-lifecycle-api-v1.md) (archived) | [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md)  |
 | [acp-client-tech-spec-v1.md](../archived/knowledge/acp-client-tech-spec-v1.md) (archived) | [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md)  |
 
-**Archived 2026-04-17** (same merge as this spec): v1 files moved to `.agents/plans/archived/knowledge/`. Active docs (README index, `v1.3-delivery-compass-v1.md`, `v1.2-reclassification-matrix-v1.md`, `architecture-alignment-review-v1.md`, the three v2/orchestration specs) updated to point at the archived path. References inside Done plan `.md` files under `.agents/plans/` root were also refreshed for reachability.
+**Archived 2026-04-17** (same merge as this spec): v1 files moved to `.agents/archived/knowledge/`. Active docs (README index, `v1.3-delivery-compass-v1.md`, `v1.2-reclassification-matrix-v1.md`, `architecture-alignment-review-v1.md`, the three v2/orchestration specs) updated to point at the archived path. References inside Done plan `.md` files under `.agents/plans/` root were also refreshed for reachability.
 
 ---
 

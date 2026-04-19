@@ -27,7 +27,7 @@
       "2026-04-10-cli-publish-workflow-parity"
     ],
     "spec_refs": [
-      ".agents/plans/knowledge/v1.1-overview-v2.md"
+      ".agents/knowledge/v1.1-overview-v2.md"
     ],
     "working_branch": "feature/cli-sync-bidirectional-parity",
     "merge_target": "main",

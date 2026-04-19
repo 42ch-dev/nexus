@@ -25,7 +25,7 @@
     "working_branch": "feature/v1.1-cli-daemon-hardening",
     "dependency": null,
     "spec_refs": [
-      ".agents/plans/knowledge/v1.1-overview-v1.md"
+      ".agents/knowledge/v1.1-overview-v1.md"
     ],
     "residual_ids": [
       "CLI-R15",

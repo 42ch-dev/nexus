@@ -23,7 +23,7 @@
     "platform_capability_ref": "11-fork-api (conceptual cross-repo id)",
     "dependency": "2026-04-10-cli-sync-bidirectional-parity",
     "spec_refs": [
-      ".agents/plans/knowledge/v1.1-overview-v2.md"
+      ".agents/knowledge/v1.1-overview-v2.md"
     ],
     "working_branch": "feature/cli-fork-world-snapshot-parity",
     "merge_target": "main",

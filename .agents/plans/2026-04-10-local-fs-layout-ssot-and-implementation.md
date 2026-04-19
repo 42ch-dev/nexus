@@ -21,7 +21,7 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 | `{v1-spec/domain/data-model-v1.md}` | `WorkspaceBinding` and domain prose |
 | `{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}` | **Normative ADR** — local FS layout, binding, commands |
 
-**OSS companion (reachable without platform checkout):** `.agents/plans/knowledge/local-fs-layout-creator-workspace-v1.md` (non-normative recap + pointer)
+**OSS companion (reachable without platform checkout):** `.agents/knowledge/local-fs-layout-creator-workspace-v1.md` (non-normative recap + pointer)
 
 ---
 
@@ -29,7 +29,7 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 
 | Area | Responsibility |
 |------|------------------|
-| `.agents/plans/knowledge/local-fs-layout-creator-workspace-v1.md` | OSS companion — pointer to ADR-014 |
+| `.agents/knowledge/local-fs-layout-creator-workspace-v1.md` | OSS companion — pointer to ADR-014 |
 | `{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}` | Normative ADR |
 | `{v1-spec/cli-sync/cli-spec-v1.md}` | User-facing command SSOT (`creator use` + `creator workspace *`) |
 | `{v1-spec/cli-sync/local-db-schema-v1.md}` | Canonical **on-disk** path for `state.db` |
@@ -46,7 +46,7 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 **Files:**
 
 - Read: `{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}` (normative)
-- Read: `.agents/plans/knowledge/local-fs-layout-creator-workspace-v1.md` (OSS companion)
+- Read: `.agents/knowledge/local-fs-layout-creator-workspace-v1.md` (OSS companion)
 - Read: `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2B–§6.3, §13.2
 - Read: `{v1-spec/cli-sync/local-db-schema-v1.md}` §0
 - Read: `{v1-spec/domain/data-model-v1.md}` §5.14

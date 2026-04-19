@@ -50,7 +50,7 @@ docs/                   # User & contributor docs (installation, architecture, c
 .github/workflows/      # CI: see `.github/workflows/ci.yml` (schemas, codegen diff, fmt, clippy, TS typecheck)
 ```
 
-## Content Boundary: `docs/` vs `.agents/plans/knowledge/`
+## Content Boundary: `docs/` vs `.agents/knowledge/`
 
 ### `docs/` — User & Contributor Documentation
 
@@ -67,7 +67,7 @@ End-user and contributor-facing content that anyone cloning the repo should read
 - Per-plan design decisions or implementation notes
 - Any document that is an **input to** or **output from** a specific plan
 
-### `.agents/plans/knowledge/` — Dev-Process Knowledge
+### `.agents/knowledge/` — Dev-Process Knowledge
 
 Development process artifacts generated during planning and review:
 
@@ -78,7 +78,7 @@ Development process artifacts generated during planning and review:
 
 These documents are valuable for agent handoff and cross-session continuity, but are not intended for external consumers.
 
-**Index**: All knowledge documents are catalogued in `[.agents/plans/knowledge/README.md](.agents/plans/knowledge/README.md)` with source plan, description, and status.
+**Index**: All knowledge documents are catalogued in `[.agents/knowledge/README.md](.agents/knowledge/README.md)` with source plan, description, and status.
 
 **Maintenance rules**:
 
@@ -126,7 +126,7 @@ This repository is **public** and plan reports are often **tracked**. Anything y
 
 **Use instead** (pick one style and stay consistent within a document):
 
-- **Relative paths from the repository root** (preferred for real files in this repo), e.g. `.agents/plans/status.json`, `crates/nexus42/src/...`.
+- **Relative paths from the repository root** (preferred for real files in this repo), e.g. `.agents/status.json`, `crates/nexus42/src/...`.
 - **Neutral placeholders** when the exact mount point does not matter, e.g. `<repository-root>`, `<repository-root>/.worktrees/<branch-name>/` for git worktrees under this repo’s `.worktrees/` convention.
 - `**{PLAN_DIR}`** / `.agents/plans/` when referring to the plan tree, per this file’s naming above.
 
@@ -212,7 +212,7 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 
 ### Pre-merge checklist (mandatory)
 
-**Before merging any feature branch or opening a PR that closes plan work**, update `**{PLAN_DIR}/status.json`** (this repo: `.agents/plans/status.json`) so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
+**Before merging any feature branch or opening a PR that closes plan work**, update `**{PLAN_DIR}/status.json`** (this repo: `.agents/status.json`) so it stays the single source of truth. This mirrors the private `nexus-platform` pre-merge discipline but uses **this repo’s** metadata shape (see root `metadata` in `status.json`: `versioning`, `tech_debt_summary`, `notes`, `residual_findings`).
 
 #### Required updates
 
@@ -231,17 +231,17 @@ Full conventions (lifecycle, archive file shape, `tech_debt_summary`, QC severit
 
 ```bash
 # Open residuals by plan (keys are full plan ids)
-jq '.metadata.residual_findings | to_entries[] | {plan: .key, count: (.value | length)}' .agents/plans/status.json
+jq '.metadata.residual_findings | to_entries[] | {plan: .key, count: (.value | length)}' .agents/status.json
 
 # Tech-debt rollup and branch-prefix conventions
-jq '.metadata.tech_debt_summary, .metadata.branch_naming' .agents/plans/status.json
+jq '.metadata.tech_debt_summary, .metadata.branch_naming' .agents/status.json
 
 # Program timeline (legacy in status.json, or prefer notes.json when adopted)
-jq '.metadata.notes' .agents/plans/status.json
-# jq '.entries' .agents/plans/notes.json   # when notes.json exists
+jq '.metadata.notes' .agents/status.json
+# jq '.entries' .agents/notes.json   # when notes.json exists
 
 # Optional: sum of residual_findings entries (compare mentally with tech_debt_summary.total_open when both track the same scope)
-jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agents/plans/status.json
+jq '[.metadata.residual_findings | to_entries[] | .value | length] | add' .agents/status.json
 ```
 
 #### Common mistakes
@@ -269,7 +269,7 @@ Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, 
 
 **Cold storage (plan row snapshot at `Done`):**
 
-- **Path:** `{PLAN_DIR}/archived/plans/<plan-id>.json` (here, `.agents/plans/archived/plans/<plan-id>.json`)
+- **Path:** `{PLAN_DIR}/archived/plans/<plan-id>.json` (here, `.agents/archived/plans/<plan-id>.json`)
 - **Content:** Full `plans[]` element as it existed when the plan was marked `Done` (including rich `metadata`), for audit and agent handoff.
 - **Relationship to residuals:** `archived/residuals/<plan-id>.json` stores **closed finding rows**; `archived/plans/<plan-id>.json` stores the **plan row snapshot**. Do not treat the plan snapshot as a second copy of **open** `residual_findings`.
 
@@ -292,31 +292,31 @@ Each `plans[]` entry keeps **canonical top-level keys**: `id`, `title`, `file`, 
 
 ```bash
 # View plan status (plans is an array; filter by id)
-jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/status.json
+jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/status.json
 
 # View plan-local metadata
-jq '.plans[] | select(.id == "2025-04-05-domain-models") | .metadata' .agents/plans/status.json
+jq '.plans[] | select(.id == "2025-04-05-domain-models") | .metadata' .agents/status.json
 
 # Residual findings for one plan (SSOT key matches plans[].id)
-jq '.metadata.residual_findings["2025-04-05-domain-models"]' .agents/plans/status.json
+jq '.metadata.residual_findings["2025-04-05-domain-models"]' .agents/status.json
 
 # Program-level timeline (if present)
-jq '.metadata.notes' .agents/plans/status.json
+jq '.metadata.notes' .agents/status.json
 
 # Open tech-debt rollup (if present)
-jq '.metadata.tech_debt_summary' .agents/plans/status.json
+jq '.metadata.tech_debt_summary' .agents/status.json
 
 # View detailed QC report
 cat .agents/plans/reports/2025-04-05-domain-models/2025-04-05-domain-models-qc-consolidated.md
 
 # Full archived plan row (Done snapshot)
-cat .agents/plans/archived/plans/2025-04-05-domain-models.json
+cat .agents/archived/plans/2025-04-05-domain-models.json
 
 # List all Done plans from minimal catalog
-jq '.plans[]' .agents/plans/archived/plans-done.json
+jq '.plans[]' .agents/archived/plans-done.json
 
 # Locate one Done plan pointer row
-jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/plans/archived/plans-done.json
+jq '.plans[] | select(.id == "2025-04-05-domain-models")' .agents/archived/plans-done.json
 ```
 
 ## Development Workflow

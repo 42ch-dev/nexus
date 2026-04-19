@@ -33,7 +33,7 @@
       "21-contracts-openapi-freeze-audit"
     ],
     "spec_refs": [
-      ".agents/plans/knowledge/v1.1-overview-v2.md"
+      ".agents/knowledge/v1.1-overview-v2.md"
     ],
     "working_branch": "feature/v1-spec-wire-schema-sprint",
     "merge_target": "main",

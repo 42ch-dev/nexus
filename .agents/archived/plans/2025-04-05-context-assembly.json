@@ -31,7 +31,7 @@
       "priority": "high",
       "description": "Implement Context Assembly basic version — CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
       "working_branch": "feature/v1.0-context-assembly",
-      "wave_0_spec": ".agents/plans/knowledge/restructured-context-assembly-v1.md",
+      "wave_0_spec": ".agents/knowledge/restructured-context-assembly-v1.md",
       "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
       "qc_status": "APPROVE — status.json key, fmt, import path fixed",
       "qc_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc-consolidated.md",

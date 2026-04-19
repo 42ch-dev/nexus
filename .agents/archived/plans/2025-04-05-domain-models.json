@@ -28,7 +28,7 @@
       "branch_policy": "feature/v1.0-domain-models from main",
       "priority": "high",
       "description": "Implement domain models (15 aggregates) with consistency rules and gates",
-      "wave_0_spec": ".agents/plans/archived/knowledge/revised-domain-models-spec-v1.md",
+      "wave_0_spec": ".agents/archived/knowledge/revised-domain-models-spec-v1.md",
       "qc_status": "APPROVE — C-1 and C-2 fixed and verified",
       "tests": "133 passed, 0 failed",
       "commits": "8 commits (a22a2cd..e0b9e8c)",

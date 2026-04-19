@@ -21,7 +21,7 @@
   "metadata": {
     "description": "Implement operational tree under ~/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/, creator workspace subcommands, migration from flat state.db; follow plan tasks + v1-spec via specs_root (local-paths.json).",
     "spec_refs": [
-      ".agents/plans/knowledge/local-fs-layout-creator-workspace-v1.md"
+      ".agents/knowledge/local-fs-layout-creator-workspace-v1.md"
     ],
     "working_branch": "feature/local-fs-layout-paths",
     "gates": {

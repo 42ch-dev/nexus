@@ -23,7 +23,7 @@
     "platform_capability_ref": "12-explore-api (conceptual cross-repo id)",
     "dependency": "2026-04-10-v1-spec-wire-schema-sprint",
     "spec_refs": [
-      ".agents/plans/knowledge/v1.1-overview-v2.md"
+      ".agents/knowledge/v1.1-overview-v2.md"
     ],
     "working_branch": "feature/cli-explore-read-parity",
     "merge_target": "main",
