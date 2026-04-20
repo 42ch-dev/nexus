@@ -255,24 +255,18 @@ states:
     enter:
       - kind: capability
         name: sync.pull
-    exit_when:
-      kind: rule
     next: outbox_flush
   - id: outbox_flush
     description: "Flush pending outbox entries"
     enter:
       - kind: capability
         name: outbox.flush
-    exit_when:
-      kind: rule
     next: registry_refresh
   - id: registry_refresh
     description: "Refresh capability registry"
     enter:
       - kind: capability
         name: registry.refresh
-    exit_when:
-      kind: rule
     next: end
   - id: end
     terminal: true
