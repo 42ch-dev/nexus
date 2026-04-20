@@ -34,7 +34,7 @@
     },
     {
       "id": "2026-04-20-v1.6-ws-c-permission-cli",
-      "status": "Todo",
+      "status": "InReview",
       "title": "V1.6 WS-C — Permission Policy CLI",
       "file": "plans/2026-04-20-v1.6-ws-c-permission-cli.md",
       "milestone": "M2",
