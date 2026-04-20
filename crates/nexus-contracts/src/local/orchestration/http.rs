@@ -123,7 +123,7 @@ pub struct CapabilityInfo {
 // ---------------------------------------------------------------------------
 
 /// Response body for `GET /v1/local/orchestration/presets`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListPresetsResponse {
     /// Loadable preset IDs.

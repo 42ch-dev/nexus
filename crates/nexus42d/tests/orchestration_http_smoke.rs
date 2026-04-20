@@ -20,8 +20,9 @@ async fn axum_app_with_ephemeral_engine() -> Router {
     // Wire an ephemeral engine with in-memory storage.
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
-    state.set_engine(engine as Arc<dyn OrchestrationEngine>);
+    let engine: Arc<dyn OrchestrationEngine> =
+        Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
+    state.set_engine(engine);
 
     // Wire a capability registry.
     state.set_capability_registry(registry);
@@ -74,7 +75,37 @@ async fn get_capabilities_returns_list() {
 
 #[tokio::test]
 async fn get_presets_returns_system_maintenance() {
-    let app = axum_app_with_ephemeral_engine().await;
+    let (tmp, nexus_home, db_path) = nexus42d::test_utils::create_test_workspace().await;
+
+    // Create _system/maintenance/ directory with embedded preset YAML.
+    let system_dir = nexus_home
+        .join("presets")
+        .join("_system")
+        .join("maintenance");
+    std::fs::create_dir_all(&system_dir).unwrap();
+    std::fs::write(
+        system_dir.join("preset.yaml"),
+        nexus_orchestration::system_preset_dir::EMBEDDED_MAINTENANCE_YAML,
+    )
+    .unwrap();
+
+    let mut state =
+        nexus42d::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+    // Wire an ephemeral engine with in-memory storage.
+    let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
+    let registry = Arc::new(CapabilityRegistry::with_builtins());
+    let engine: Arc<dyn OrchestrationEngine> =
+        Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
+    state.set_engine(engine);
+
+    // Wire a capability registry.
+    state.set_capability_registry(registry);
+
+    // Keep tmp alive — leak is acceptable in tests.
+    std::mem::forget(tmp);
+
+    let app = nexus42d::api::create_router(state);
     let req = Request::builder()
         .method("GET")
         .uri("/v1/local/orchestration/presets")

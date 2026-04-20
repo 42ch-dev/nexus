@@ -505,6 +505,15 @@ pub struct GraphFlowEngine {
     caps: Arc<CapabilityRegistry>,
 }
 
+impl Clone for GraphFlowEngine {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            caps: self.caps.clone(),
+        }
+    }
+}
+
 impl GraphFlowEngine {
     /// Create a new engine that persists sessions into `storage`.
     ///
