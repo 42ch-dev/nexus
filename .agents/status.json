@@ -1,68 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-04-20T15:30:00Z",
-  "plans": [
-    {
-      "id": "2026-04-20-v1.6-ws-a-residual-governance",
-      "status": "Done",
-      "title": "V1.6 WS-A — Residual Governance (R1/R2/R3/R6)",
-      "file": "plans/2026-04-20-v1.6-ws-a-residual-governance.md",
-      "done_at": "2026-04-20T12:00:00Z",
-      "archived_record": "archived/plans/2026-04-20-v1.6-ws-a-residual-governance.json",
-      "milestone": "M1",
-      "metadata": {
-        "working_branch": "feature/v1.6",
-        "dependency": [],
-        "parallelism": "none",
-        "effort_agent_oriented": "M"
-      }
-    },
-    {
-      "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
-      "status": "Done",
-      "title": "V1.6 WS-B — ACP SDK DTO Decoupling",
-      "file": "plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
-      "done_at": "2026-04-20T13:00:00Z",
-      "archived_record": "archived/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.json",
-      "milestone": "M2",
-      "metadata": {
-        "working_branch": "feature/v1.6",
-        "dependency": [],
-        "parallelism": "none",
-        "effort_agent_oriented": "L"
-      }
-    },
-    {
-      "id": "2026-04-20-v1.6-ws-c-permission-cli",
-      "status": "Done",
-      "title": "V1.6 WS-C — Permission Policy CLI",
-      "file": "plans/2026-04-20-v1.6-ws-c-permission-cli.md",
-      "done_at": "2026-04-20T14:00:00Z",
-      "archived_record": "archived/plans/2026-04-20-v1.6-ws-c-permission-cli.json",
-      "milestone": "M2",
-      "metadata": {
-        "working_branch": "feature/v1.6",
-        "dependency": [],
-        "parallelism": "none",
-        "effort_agent_oriented": "S"
-      }
-    },
-    {
-      "id": "2026-04-20-v1.6-ws-d-multi-preset",
-      "status": "Done",
-      "title": "V1.6 WS-D — Multi-Preset Scheduler",
-      "file": "plans/2026-04-20-v1.6-ws-d-multi-preset.md",
-      "done_at": "2026-04-20T15:00:00Z",
-      "archived_record": "archived/plans/2026-04-20-v1.6-ws-d-multi-preset.json",
-      "milestone": "M2",
-      "metadata": {
-        "working_branch": "feature/v1.6",
-        "dependency": [],
-        "parallelism": "none",
-        "effort_agent_oriented": "M"
-      }
-    }
-  ],
+  "updated_at": "2026-04-20T16:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -93,11 +32,11 @@
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
           "severity": "low",
           "target_date": "backlog",
           "decision": "accept",
-          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
+          "note": "Blocked by wiremock \u2192 http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ]
     },
@@ -105,7 +44,7 @@
       "v1-tech-debt-cleanup": [
         {
           "id": "TD-10",
-          "title": "Device flow OAuth — production auth deferred; stub verify_device_code only",
+          "title": "Device flow OAuth \u2014 production auth deferred; stub verify_device_code only",
           "severity": "low",
           "source": "v1-tech-debt-cleanup Batch D Task 16",
           "scope": "crates/nexus42d/src/auth/device_flow.rs",
@@ -119,7 +58,7 @@
       "2026-04-18-v1.5-stabilization": [
         {
           "id": "R4",
-          "title": "SystemClock DST safety not implemented — doc overstates guarantee",
+          "title": "SystemClock DST safety not implemented \u2014 doc overstates guarantee",
           "severity": "low",
           "source": "QC1 W-4",
           "scope": "crates/nexus-orchestration/src/scheduler/mod.rs",
@@ -130,7 +69,7 @@
         },
         {
           "id": "R5",
-          "title": "nix crate unconditionally included — Windows build blocked",
+          "title": "nix crate unconditionally included \u2014 Windows build blocked",
           "severity": "low",
           "source": "QC2 W1",
           "scope": "crates/nexus-orchestration/Cargo.toml",
