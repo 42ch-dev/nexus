@@ -32,7 +32,7 @@
 //! These are documented in the tech spec (§5.2) and tracked as residual findings
 //! (ACP-R3 through ACP-R11) for future implementation.
 
-use crate::client::ClientCapabilities;
+use agent_client_protocol::ClientCapabilities;
 use agent_client_protocol::FileSystemCapabilities;
 
 /// Frozen capability IDs for V1.0.

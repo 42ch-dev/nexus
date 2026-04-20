@@ -30,7 +30,7 @@ use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     schedule::supervisor::ScheduleSupervisor,
     storage::sqlite::SqliteSessionStorage,
-    system_preset, CapabilityRegistry, GraphFlowEngine, WorkerManager,
+    system_preset_dir, CapabilityRegistry, GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -162,19 +162,46 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Kick off _system.maintenance session on the concrete engine
-    // (start_session is a GraphFlowEngine method, not on the trait).
-    let sys_graph = system_preset::build(capabilities.clone());
-    match concrete_engine
-        .start_session("_system.maintenance", sys_graph)
-        .await
-    {
-        Ok(sid) => {
-            tracing::info!(session_id = sid.0, "started _system.maintenance session");
-        }
-        Err(e) => {
-            tracing::warn!("failed to start _system.maintenance: {}", e);
-            // Non-fatal: the daemon can still operate without the system preset.
+    // --- WS-D: Discover and start system presets from directory ---
+    // Scan ~/.nexus42/presets/_system/<name>/ for system preset bundles.
+    // First-start fallback: auto-create _system/maintenance/ from embedded YAML.
+    let system_presets_dir = state.nexus_home().clone();
+    match system_preset_dir::ensure_maintenance_preset(&system_presets_dir) {
+        Ok(true) => tracing::info!("auto-created _system.maintenance preset directory"),
+        Ok(false) => {} // Already existed
+        Err(e) => tracing::warn!("failed to auto-create _system.maintenance: {}", e),
+    }
+
+    // Wrap engine in Arc<dyn OrchestrationEngine> for preset graph wiring.
+    let engine_ref: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine.clone());
+    let scan_result = system_preset_dir::scan_system_presets(&system_presets_dir, &capabilities);
+    for entry in &scan_result.presets {
+        // Build the outer graph from the loaded system preset with engine wiring.
+        let graph = nexus_orchestration::preset::loader::build_wired_outer_graph(
+            &entry.loaded,
+            engine_ref.clone(),
+            capabilities.clone(),
+        );
+        let graph = Arc::new(graph);
+
+        match concrete_engine
+            .start_session(&entry.qualified_id, graph)
+            .await
+        {
+            Ok(sid) => {
+                tracing::info!(
+                    session_id = sid.0,
+                    preset_id = %entry.qualified_id,
+                    "started system preset session"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    preset_id = %entry.qualified_id,
+                    error = %e,
+                    "failed to start system preset session"
+                );
+            }
         }
     }
 

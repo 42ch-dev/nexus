@@ -505,6 +505,15 @@ pub struct GraphFlowEngine {
     caps: Arc<CapabilityRegistry>,
 }
 
+impl Clone for GraphFlowEngine {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            caps: self.caps.clone(),
+        }
+    }
+}
+
 impl GraphFlowEngine {
     /// Create a new engine that persists sessions into `storage`.
     ///
@@ -521,13 +530,86 @@ impl GraphFlowEngine {
         }
     }
 
-    /// Recover persisted sessions into the in-memory tracker (WS2 R1).
+    /// Recover persisted sessions into the in-memory tracker (WS2 R1 + R6).
     ///
     /// Called after engine construction on daemon restart. Queries
     /// `SqliteSessionStorage.list_non_terminal_sessions()` and repopulates
     /// the in-memory tracker.
+    ///
+    /// **R6 fix**: For each non-terminal session summary, reconstructs the
+    /// `FlowRunner` from the embedded preset so that `run_step` succeeds
+    /// after recovery (previously returned `NoGraphLoaded`).
     pub async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        for summary in &summaries {
+            // Skip terminal sessions — they don't need runners.
+            if summary.status.is_terminal() {
+                continue;
+            }
+
+            // R6: Try to reconstruct the FlowRunner from the embedded preset.
+            // The preset_id in the summary corresponds to the preset that was
+            // used to start the session. We load it, wire the outer graph,
+            // and create a FlowRunner pointing at the same storage (which
+            // already has the persisted session data).
+            if let Err(e) = self.reconstruct_runner(summary).await {
+                tracing::warn!(
+                    "R6: failed to reconstruct runner for session {}: {}; \
+                     session will remain in tracker but run_step will fail until \
+                     manually re-started",
+                    summary.session_id.0,
+                    e
+                );
+            }
+        }
+
+        // Add all summaries to the in-memory tracker (idempotent).
         self.state.recover_sessions(summaries).await;
+    }
+
+    /// Reconstruct a FlowRunner for a recovered session (R6).
+    ///
+    /// Loads the embedded preset by `preset_id`, builds the wired outer graph,
+    /// and creates a `FlowRunner` with the engine's storage. The persisted
+    /// session data in `SqliteSessionStorage` preserves the execution position.
+    async fn reconstruct_runner(&self, summary: &SessionSummary) -> Result<(), EngineError> {
+        // Step 1: Load the embedded preset by preset_id.
+        let loaded =
+            crate::preset::load_embedded_preset(&summary.preset_id, &self.caps).map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: failed to load embedded preset '{}' for session {}: {}",
+                    summary.preset_id, summary.session_id.0, e
+                )))
+            })?;
+
+        // Step 2: Build the wired outer graph using EngineProxy + capabilities.
+        let proxy = Arc::new(EngineProxy {
+            state: self.state.clone(),
+        });
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            &loaded,
+            proxy as Arc<dyn OrchestrationEngine>,
+            self.caps.clone(),
+        );
+
+        // Step 3: Create FlowRunner with the wired graph and existing storage.
+        // The storage already contains the persisted session data, so the
+        // runner will resume from the correct execution position.
+        let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
+
+        // Step 4: Store the runner in the shared state.
+        self.state
+            .runners
+            .write()
+            .await
+            .insert(summary.session_id.0.clone(), runner);
+
+        tracing::info!(
+            "R6: reconstructed runner for session {} (preset: {})",
+            summary.session_id.0,
+            summary.preset_id
+        );
+
+        Ok(())
     }
 
     /// Get a reference to the shared state for use in preset loader (WS3 R1).
@@ -758,3 +840,149 @@ impl OrchestrationEngine for GraphFlowEngine {
 
 // Re-export EngineSharedState for consumers (e.g., preset loader).
 pub use EngineSharedState as SharedState;
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use graph_flow::InMemorySessionStorage;
+
+    /// Helper: create a test engine with in-memory storage and built-in caps.
+    fn test_engine() -> GraphFlowEngine {
+        let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
+        let caps = Arc::new(CapabilityRegistry::with_builtins());
+        GraphFlowEngine::new_with_storage(storage, caps)
+    }
+
+    // ---------- R6: Session recovery reconstructs FlowRunner ----------
+
+    #[tokio::test]
+    async fn r6_recovered_session_has_runner_no_graph_loaded_fix() {
+        // Before the R6 fix, recover_sessions() only added summaries to the
+        // in-memory tracker but did NOT reconstruct FlowRunners. Calling
+        // run_step() on a recovered session would fail with NoGraphLoaded.
+        //
+        // With the R6 fix, recover_sessions() loads the embedded preset and
+        // reconstructs the FlowRunner. However, this only works for sessions
+        // started with known embedded presets (e.g., "novel-writing").
+        //
+        // For sessions with unknown presets, reconstruct_runner logs a warning
+        // and the runner is not created. The session remains in the tracker
+        // but run_step will fail — this is expected behavior for unknown presets.
+
+        let engine = test_engine();
+
+        // Create a session summary with an unknown preset (simulating a session
+        // that was started with a preset not available as embedded).
+        let summary = SessionSummary {
+            session_id: SessionId("test:unknown-preset-session".to_string()),
+            creator_id: "test-creator".to_string(),
+            preset_id: "nonexistent-preset".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("gathering".to_string()),
+        };
+
+        // Recover should not panic even with unknown preset
+        engine.recover_sessions(vec![summary.clone()]).await;
+
+        // Session should be in the tracker
+        let active = engine.list_active(SessionFilter::default()).await.unwrap();
+        assert!(
+            active.iter().any(|s| s.session_id == summary.session_id),
+            "recovered session should be in active list"
+        );
+
+        // run_step should fail because no runner was reconstructed for
+        // unknown preset (this is the expected degraded behavior).
+        let result = engine.run_step(&summary.session_id).await;
+        assert!(
+            result.is_err(),
+            "run_step should fail for unknown preset recovery (NoGraphLoaded)"
+        );
+    }
+
+    #[tokio::test]
+    async fn r6_recovered_session_with_known_preset_has_runner() {
+        // Test that recovery works for sessions started with known embedded presets.
+        let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
+        let caps = Arc::new(CapabilityRegistry::with_builtins());
+        let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps);
+
+        // Create a session summary that matches an embedded preset
+        let summary = SessionSummary {
+            session_id: SessionId("novel-writing:1234567890".to_string()),
+            creator_id: "test-creator".to_string(),
+            preset_id: "novel-writing".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("gathering".to_string()),
+        };
+
+        // Simulate a persisted session in storage (even though it's minimal,
+        // the FlowRunner reconstruction should succeed)
+        let session = graph_flow::Session::new_from_task(
+            summary.session_id.0.clone(),
+            summary.current_task_id.as_deref().unwrap_or(""),
+        );
+        storage.save(session).await.unwrap();
+
+        // Recover — should reconstruct runner from embedded "novel-writing" preset
+        engine.recover_sessions(vec![summary.clone()]).await;
+
+        // Session should be in the tracker
+        let active = engine.list_active(SessionFilter::default()).await.unwrap();
+        assert!(
+            active.iter().any(|s| s.session_id == summary.session_id),
+            "recovered session should be in active list"
+        );
+
+        // The runner should exist now — run_step should NOT fail with NoGraphLoaded.
+        // (It may fail for other reasons if the session state is minimal,
+        // but it should not be NoGraphLoaded.)
+        let result = engine.run_step(&summary.session_id).await;
+        match result {
+            Err(EngineError::NoGraphLoaded) => {
+                panic!("R6 regression: run_step returned NoGraphLoaded for recovered session with known preset");
+            }
+            _ => {
+                // Any other result is acceptable — the runner was reconstructed.
+                // The session may complete, error, or pause depending on its state.
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn r6_terminal_sessions_skipped_during_recovery() {
+        let engine = test_engine();
+
+        let terminal_summary = SessionSummary {
+            session_id: SessionId("test:completed-session".to_string()),
+            creator_id: "test-creator".to_string(),
+            preset_id: "novel-writing".to_string(),
+            status: SessionStatus::Completed,
+            current_task_id: None,
+        };
+
+        // Recovery should skip terminal sessions for runner reconstruction
+        engine
+            .recover_sessions(vec![terminal_summary.clone()])
+            .await;
+
+        // Terminal session should NOT be in active list
+        let active = engine.list_active(SessionFilter::default()).await.unwrap();
+        assert!(
+            active.is_empty(),
+            "terminal sessions should not appear in active list"
+        );
+
+        // No runner should have been reconstructed for the terminal session.
+        // The runners map should not contain the terminal session ID.
+        let runners = engine.state.runners.read().await;
+        assert!(
+            !runners.contains_key(&terminal_summary.session_id.0),
+            "terminal session should not have a reconstructed runner"
+        );
+    }
+}
