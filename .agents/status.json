@@ -19,7 +19,7 @@
     },
     {
       "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
-      "status": "Todo",
+      "status": "InReview",
       "title": "V1.6 WS-B — ACP SDK DTO Decoupling",
       "file": "plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
       "milestone": "M2",
