@@ -39,6 +39,8 @@ pub mod manuscript;
 #[deny(clippy::unwrap_used)]
 pub mod memory;
 #[deny(clippy::unwrap_used)]
+pub mod permission;
+#[deny(clippy::unwrap_used)]
 pub mod policy;
 #[deny(clippy::unwrap_used)]
 pub mod publish;

@@ -21,9 +21,10 @@ use commands::{
     config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
     identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
-    memory::MemoryCommand, policy::PolicyCommand, publish::PublishCommand,
-    research::ResearchCommand, runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand,
-    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, world::WorldCommand,
+    memory::MemoryCommand, permission::PermissionCommand, policy::PolicyCommand,
+    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
+    schedule::ScheduleCommand, session::SessionCommand, soul::SoulCommand, sync::SyncCommand,
+    world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -168,6 +169,12 @@ enum Commands {
         command: PolicyCommand,
     },
 
+    /// Agent-scoped permission management (V1.6)
+    Permission {
+        #[command(subcommand)]
+        command: PermissionCommand,
+    },
+
     /// Local identity management (local_only mode)
     Identity {
         #[command(subcommand)]
@@ -235,6 +242,7 @@ async fn main() {
         Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
+        Some(Commands::Permission { command }) => commands::permission::run(command).await,
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
         Some(Commands::RuntimeMode { command }) => {
             commands::runtime_mode::run(command, &config).await

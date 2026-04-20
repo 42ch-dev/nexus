@@ -22,7 +22,7 @@ pub use error::{AcpError, AcpResult};
 
 // Re-export policy types for permission management.
 #[allow(unused_imports)]
-pub use policy::{DefaultPolicy, PermissionDecision, PermissionPolicy};
+pub use policy::{AgentRules, DefaultPolicy, PermissionDecision, PermissionPolicy};
 
 // Re-export registry types for commands and other consumers.
 #[allow(unused_imports)]
