@@ -24,7 +24,7 @@ use commands::{
     memory::MemoryCommand, permission::PermissionCommand, policy::PolicyCommand,
     publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
     schedule::ScheduleCommand, session::SessionCommand, soul::SoulCommand, sync::SyncCommand,
-    world::WorldCommand,
+    system::SystemPresetCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -204,6 +204,12 @@ enum Commands {
         #[command(subcommand)]
         command: ScheduleCommand,
     },
+
+    /// System management (presets, diagnostics)
+    System {
+        #[command(subcommand)]
+        command: SystemPresetCommand,
+    },
 }
 
 #[tokio::main]
@@ -250,6 +256,7 @@ async fn main() {
         Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
         Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
         Some(Commands::Schedule { command }) => commands::schedule::run(command, &config).await,
+        Some(Commands::System { command }) => commands::system::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

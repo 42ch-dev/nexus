@@ -57,4 +57,6 @@ pub mod soul;
 #[deny(clippy::unwrap_used)]
 pub mod sync;
 #[deny(clippy::unwrap_used)]
+pub mod system;
+#[deny(clippy::unwrap_used)]
 pub mod world;
