@@ -467,9 +467,7 @@ mod tests {
     fn nexus_initialize_response_roundtrip() {
         let resp = NexusInitializeResponse {
             protocol_version: NexusProtocolVersion::v1(),
-            agent_capabilities: NexusAgentCapabilities {
-                load_session: true,
-            },
+            agent_capabilities: NexusAgentCapabilities { load_session: true },
             agent_info: Some(NexusAgentInfo {
                 name: "claude-code".to_string(),
                 title: None,

@@ -70,9 +70,9 @@ use crate::localset_bridge::LocalSetBridge;
 use crate::policy::{PermissionDecision, PermissionPolicy};
 use nexus_contracts::local::acp::{
     NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult,
-    NexusInitializeRequest, NexusInitializeResponse, NexusNewSessionRequest,
-    NexusPromptCompleted, NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated,
-    NexusSessionId, NexusSessionModeState, NexusStopReason,
+    NexusInitializeRequest, NexusInitializeResponse, NexusNewSessionRequest, NexusPromptCompleted,
+    NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated, NexusSessionId,
+    NexusSessionModeState, NexusStopReason,
 };
 
 // ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
@@ -133,9 +133,11 @@ fn nexus_session_mode_state_from_sdk(state: &acp::SessionModeState) -> NexusSess
 }
 
 fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> acp::InitializeRequest {
-    let protocol_version: acp::ProtocolVersion = serde_json::from_value(
-        serde_json::json!(req.protocol_version.0.parse::<u16>().unwrap_or(1)),
-    )
+    let protocol_version: acp::ProtocolVersion = serde_json::from_value(serde_json::json!(req
+        .protocol_version
+        .0
+        .parse::<u16>()
+        .unwrap_or(1)))
     .unwrap_or(acp::ProtocolVersion::LATEST);
 
     let mut builder = acp::InitializeRequest::new(protocol_version);
@@ -767,14 +769,11 @@ impl NexusAcpClient for AcpSdkAdapter {
                             agent_capabilities: nexus_agent_capabilities_from_sdk(
                                 &response.agent_capabilities,
                             ),
-                            agent_info: response
-                                .agent_info
-                                .as_ref()
-                                .map(|i| nexus_agent_info_from_sdk(i)),
+                            agent_info: response.agent_info.as_ref().map(nexus_agent_info_from_sdk),
                             auth_methods: response
                                 .auth_methods
                                 .iter()
-                                .map(|m| nexus_auth_method_from_sdk(m))
+                                .map(nexus_auth_method_from_sdk)
                                 .collect(),
                         })
                     })
@@ -819,7 +818,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                             modes: response
                                 .modes
                                 .as_ref()
-                                .map(|m| nexus_session_mode_state_from_sdk(m)),
+                                .map(nexus_session_mode_state_from_sdk),
                         })
                     })
                 })
