@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-20T12:00:00Z",
+  "updated_at": "2026-04-20T15:30:00Z",
   "plans": [
     {
       "id": "2026-04-20-v1.6-ws-a-residual-governance",
@@ -69,7 +69,7 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-20T14:00:00Z",
+      "updated_at": "2026-04-20T15:30:00Z",
       "total_open": 11,
       "by_severity": {
         "critical": 0,
@@ -113,6 +113,76 @@
           "owner": "fullstack-dev",
           "target_date": "backlog",
           "detail_path": "plans/residuals/v1-tech-debt-cleanup/td-10-device-flow-oauth.md",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-18-v1.5-stabilization": [
+        {
+          "id": "R4",
+          "title": "SystemClock DST safety not implemented — doc overstates guarantee",
+          "severity": "low",
+          "source": "QC1 W-4",
+          "scope": "crates/nexus-orchestration/src/scheduler/mod.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "R5",
+          "title": "nix crate unconditionally included — Windows build blocked",
+          "severity": "low",
+          "source": "QC2 W1",
+          "scope": "crates/nexus-orchestration/Cargo.toml",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V2.0",
+          "tracking_link": null
+        },
+        {
+          "id": "R7",
+          "title": "CoreContextManager schedule_guards HashMap unbounded growth",
+          "severity": "nit",
+          "source": "QC1 S-1",
+          "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-20-v1.6-ws-b-acp-sdk-dto": [
+        {
+          "id": "DTO-C1",
+          "title": "sdk_new_session_request_from_nexus silently drops mcp_servers field",
+          "severity": "medium",
+          "source": "QC1 C1",
+          "scope": "crates/nexus-acp-host/src/client.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "DTO-C2",
+          "title": "Protocol version .parse::<u16>().unwrap_or(1) silent degradation",
+          "severity": "low",
+          "source": "QC1 C2",
+          "scope": "crates/nexus-acp-host/src/client.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "DTO-W1",
+          "title": "NexusContentBlock missing Eq derive",
+          "severity": "nit",
+          "source": "QC2 W1",
+          "scope": "crates/nexus-contracts/src/local/acp/types.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
           "tracking_link": null
         }
       ],
