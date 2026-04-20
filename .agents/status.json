@@ -1,7 +1,60 @@
 {
   "version": 1,
       "updated_at": "2026-04-20T00:00:00Z",
-  "plans": [],
+  "plans": [
+    {
+      "id": "2026-04-20-v1.6-ws-a-residual-governance",
+      "status": "Todo",
+      "title": "V1.6 WS-A — Residual Governance (R1/R2/R3/R6)",
+      "file": "plans/2026-04-20-v1.6-ws-a-residual-governance.md",
+      "milestone": "M1",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "M"
+      }
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
+      "status": "Todo",
+      "title": "V1.6 WS-B — ACP SDK DTO Decoupling",
+      "file": "plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
+      "milestone": "M2",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "L"
+      }
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-c-permission-cli",
+      "status": "Todo",
+      "title": "V1.6 WS-C — Permission Policy CLI",
+      "file": "plans/2026-04-20-v1.6-ws-c-permission-cli.md",
+      "milestone": "M2",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "S"
+      }
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-d-multi-preset",
+      "status": "Todo",
+      "title": "V1.6 WS-D — Multi-Preset Scheduler",
+      "file": "plans/2026-04-20-v1.6-ws-d-multi-preset.md",
+      "milestone": "M2",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "M"
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
