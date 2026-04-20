@@ -15,6 +15,27 @@
 //!   the nexus42 codebase.
 //! - Unit testing can swap the adapter with a mock implementation.
 //!
+//! # DTO Boundary
+//!
+//! The `NexusAcpClient` trait uses Nexus-owned DTO types from
+//! `nexus_contracts::local::acp` (e.g. `NexusInitializeRequest`,
+//! `NexusInitializeResponse`). SDK types (`agent_client_protocol::`) are
+//! confined to `AcpSdkAdapter` implementation blocks and `FromSdk` conversion
+//! methods. This decoupling allows future SDK migration without changing
+//! consumers.
+//!
+//! # subscribe() Design Decision
+//!
+//! `subscribe()` returns `async_broadcast::StreamReceiver` which is tightly
+//! coupled to the SDK's broadcast channel implementation. It has been moved
+//! off the `NexusAcpClient` trait onto `AcpSdkAdapter` as a direct method.
+//! Rationale:
+//! 1. No consumer uses `subscribe()` through the trait abstraction.
+//! 2. Creating `NexusStreamEvent` + `NexusEventStream` wrappers would add
+//!    complexity for an unused feature.
+//! 3. If streaming is needed in the future, it can be added back with proper
+//!    DTO types at that time.
+//!
 //! # LocalSetBridge Integration
 //!
 //! The SDK's `ClientSideConnection` produces `!Send` futures because it uses
@@ -40,121 +61,147 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
-use agent_client_protocol::{Error, StreamReceiver};
+use agent_client_protocol::{Agent as _, Error as SdkError, StreamReceiver};
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::error::AcpResult;
 use crate::localset_bridge::LocalSetBridge;
 use crate::policy::{PermissionDecision, PermissionPolicy};
-
-// Re-export commonly used SDK types for convenience.
-#[allow(unused_imports)]
-pub use acp::{
-    Agent, AgentCapabilities, CancelNotification, Client, ClientCapabilities, ContentBlock,
-    Implementation, InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, SessionId, StopReason,
+use nexus_contracts::local::acp::{
+    NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult,
+    NexusInitializeRequest, NexusInitializeResponse, NexusNewSessionRequest,
+    NexusPromptCompleted, NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated,
+    NexusSessionId, NexusSessionModeState, NexusStopReason,
 };
 
-/// Protocol version constant — re-exported from the SDK's schema crate.
-pub use acp::ProtocolVersion;
+// ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
+//
+// These are free functions (not trait impls) to avoid orphan rule violations
+// since both the SDK types and Nexus DTOs are defined in external crates.
 
-/// Result of an ACP initialization handshake.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct InitializedSession {
-    /// Protocol version agreed upon.
-    pub protocol_version: ProtocolVersion,
-    /// Capabilities reported by the agent.
-    pub agent_capabilities: AgentCapabilities,
-    /// Metadata about the agent (name, version, etc.).
-    pub agent_info: Option<Implementation>,
-    /// Authentication methods required by the agent (empty if none).
-    pub auth_methods: Vec<acp::AuthMethod>,
+fn nexus_protocol_version_from_sdk(version: acp::ProtocolVersion) -> NexusProtocolVersion {
+    NexusProtocolVersion::new(version.to_string())
 }
 
-impl InitializedSession {
-    /// Convert from SDK's InitializeResponse.
-    #[allow(dead_code)]
-    pub fn from_sdk_response(response: InitializeResponse) -> Self {
-        Self {
-            protocol_version: response.protocol_version,
-            agent_capabilities: response.agent_capabilities,
-            agent_info: response.agent_info,
-            auth_methods: response.auth_methods,
-        }
+fn nexus_stop_reason_from_sdk(reason: acp::StopReason) -> NexusStopReason {
+    match reason {
+        acp::StopReason::EndTurn => NexusStopReason::EndTurn,
+        acp::StopReason::MaxTokens => NexusStopReason::MaxTokens,
+        acp::StopReason::MaxTurnRequests => NexusStopReason::MaxTurnRequests,
+        acp::StopReason::Refusal => NexusStopReason::Refusal,
+        acp::StopReason::Cancelled => NexusStopReason::Cancelled,
+        _ => NexusStopReason::EndTurn, // fallback for future variants
     }
 }
 
-/// Result of creating a new ACP session.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct SessionCreated {
-    /// The unique session identifier.
-    pub session_id: SessionId,
-    /// Available interaction modes (if the agent reports them).
-    pub modes: Option<acp::SessionModeState>,
-}
-
-impl SessionCreated {
-    /// Convert from SDK's NewSessionResponse.
-    #[allow(dead_code)]
-    pub fn from_sdk_response(response: NewSessionResponse) -> Self {
-        Self {
-            session_id: response.session_id,
-            modes: response.modes,
-        }
+fn nexus_auth_method_from_sdk(method: &acp::AuthMethod) -> NexusAuthMethod {
+    NexusAuthMethod {
+        id: method.id().to_string(),
+        name: method.name().to_string(),
+        description: method.description().map(|s| s.to_string()),
     }
 }
 
-/// Result of prompting an agent.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct PromptCompleted {
-    /// Why the agent stopped generating.
-    pub stop_reason: StopReason,
+fn nexus_agent_info_from_sdk(impl_: &acp::Implementation) -> NexusAgentInfo {
+    NexusAgentInfo {
+        name: impl_.name.clone(),
+        title: impl_.title.clone(),
+        version: impl_.version.clone(),
+    }
 }
 
-impl PromptCompleted {
-    /// Convert from SDK's PromptResponse.
-    #[allow(dead_code)]
-    pub fn from_sdk_response(response: PromptResponse) -> Self {
-        Self {
-            stop_reason: response.stop_reason,
-        }
+fn nexus_agent_capabilities_from_sdk(caps: &acp::AgentCapabilities) -> NexusAgentCapabilities {
+    NexusAgentCapabilities {
+        load_session: caps.load_session,
     }
+}
+
+fn nexus_session_mode_state_from_sdk(state: &acp::SessionModeState) -> NexusSessionModeState {
+    NexusSessionModeState {
+        current_mode_id: state.current_mode_id.to_string(),
+        available_modes: state
+            .available_modes
+            .iter()
+            .map(|m| nexus_contracts::local::acp::NexusSessionMode {
+                id: m.id.to_string(),
+                name: m.name.clone(),
+                description: m.description.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> acp::InitializeRequest {
+    let protocol_version: acp::ProtocolVersion = serde_json::from_value(
+        serde_json::json!(req.protocol_version.0.parse::<u16>().unwrap_or(1)),
+    )
+    .unwrap_or(acp::ProtocolVersion::LATEST);
+
+    let mut builder = acp::InitializeRequest::new(protocol_version);
+    if let Some(info) = req.client_info {
+        builder = builder.client_info(acp::Implementation::new(info.name, info.version));
+    }
+    builder
+}
+
+fn sdk_new_session_request_from_nexus(req: NexusNewSessionRequest) -> acp::NewSessionRequest {
+    acp::NewSessionRequest::new(req.cwd)
+}
+
+fn sdk_prompt_request_from_nexus(req: NexusPromptRequest) -> acp::PromptRequest {
+    let content_blocks: Vec<acp::ContentBlock> = req
+        .prompt
+        .into_iter()
+        .map(|block| match block {
+            nexus_contracts::local::acp::NexusContentBlock::Text(t) => {
+                acp::ContentBlock::Text(acp::TextContent::new(t.text))
+            }
+            nexus_contracts::local::acp::NexusContentBlock::ResourceLink(r) => {
+                let builder = acp::ResourceLink::new(r.name.unwrap_or_default(), r.uri);
+                acp::ContentBlock::ResourceLink(builder)
+            }
+        })
+        .collect();
+    acp::PromptRequest::new(acp::SessionId::new(req.session_id.0), content_blocks)
 }
 
 /// The nexus42 ACP client abstraction.
 ///
 /// All ACP communication from the CLI goes through this trait. The methods
 /// mirror the ACP protocol lifecycle: initialize → session → prompt → cancel.
+///
+/// **DTO boundary**: All types in trait signatures are Nexus-owned DTOs from
+/// `nexus_contracts::local::acp`. SDK types are confined to `AcpSdkAdapter`.
+///
+/// **subscribe()**: Moved off the trait onto `AcpSdkAdapter` as a direct
+/// method (see module docs for rationale).
 #[allow(async_fn_in_trait)]
 #[allow(dead_code)]
 pub trait NexusAcpClient: Send + Sync {
     /// Perform the ACP `initialize` handshake with the agent.
     fn initialize(
         &self,
-        request: InitializeRequest,
-    ) -> impl Future<Output = AcpResult<InitializedSession>> + Send;
+        request: NexusInitializeRequest,
+    ) -> impl Future<Output = AcpResult<NexusInitializeResponse>> + Send;
 
     /// Create a new ACP session on the agent.
     fn create_session(
         &self,
-        request: NewSessionRequest,
-    ) -> impl Future<Output = AcpResult<SessionCreated>> + Send;
+        request: NexusNewSessionRequest,
+    ) -> impl Future<Output = AcpResult<NexusSessionCreated>> + Send;
 
     /// Send a prompt to the agent within an existing session.
     fn prompt(
         &self,
-        request: PromptRequest,
-    ) -> impl Future<Output = AcpResult<PromptCompleted>> + Send;
+        request: NexusPromptRequest,
+    ) -> impl Future<Output = AcpResult<NexusPromptCompleted>> + Send;
 
     /// Cancel an in-progress prompt operation.
-    fn cancel(&self, session_id: SessionId) -> impl Future<Output = AcpResult<()>> + Send;
-
-    /// Subscribe to stream messages from the agent.
-    fn subscribe(&self) -> StreamReceiver;
+    fn cancel(
+        &self,
+        session_id: NexusSessionId,
+    ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send;
 }
 
 /// Policy-aware client handler for V1.1+ — uses configurable permission policy.
@@ -318,7 +365,7 @@ impl acp::Client for PolicyAwareClientHandler {
             agent_id = %self.agent_id,
             "Agent requested fs/write_text_file — not supported in V1.0"
         );
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn read_text_file(
@@ -329,7 +376,7 @@ impl acp::Client for PolicyAwareClientHandler {
             agent_id = %self.agent_id,
             "Agent requested fs/read_text_file — not supported in V1.0"
         );
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     /// Terminal operations — not implemented in V1.0.
@@ -341,35 +388,35 @@ impl acp::Client for PolicyAwareClientHandler {
             agent_id = %self.agent_id,
             "Agent requested terminal/create — not supported in V1.0"
         );
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn terminal_output(
         &self,
         _args: acp::TerminalOutputRequest,
     ) -> acp::Result<acp::TerminalOutputResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn release_terminal(
         &self,
         _args: acp::ReleaseTerminalRequest,
     ) -> acp::Result<acp::ReleaseTerminalResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn wait_for_terminal_exit(
         &self,
         _args: acp::WaitForTerminalExitRequest,
     ) -> acp::Result<acp::WaitForTerminalExitResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn kill_terminal(
         &self,
         _args: acp::KillTerminalRequest,
     ) -> acp::Result<acp::KillTerminalResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 }
 
@@ -451,7 +498,7 @@ impl acp::Client for SimpleClientHandler {
             agent_id = %self.agent_id,
             "Agent requested fs/write_text_file — not supported in V1.0"
         );
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn read_text_file(
@@ -462,7 +509,7 @@ impl acp::Client for SimpleClientHandler {
             agent_id = %self.agent_id,
             "Agent requested fs/read_text_file — not supported in V1.0"
         );
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     /// Terminal operations — not implemented in V1.0.
@@ -474,35 +521,35 @@ impl acp::Client for SimpleClientHandler {
             agent_id = %self.agent_id,
             "Agent requested terminal/create — not supported in V1.0"
         );
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn terminal_output(
         &self,
         _args: acp::TerminalOutputRequest,
     ) -> acp::Result<acp::TerminalOutputResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn release_terminal(
         &self,
         _args: acp::ReleaseTerminalRequest,
     ) -> acp::Result<acp::ReleaseTerminalResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn wait_for_terminal_exit(
         &self,
         _args: acp::WaitForTerminalExitRequest,
     ) -> acp::Result<acp::WaitForTerminalExitResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 
     async fn kill_terminal(
         &self,
         _args: acp::KillTerminalRequest,
     ) -> acp::Result<acp::KillTerminalResponse> {
-        Err(Error::method_not_found())
+        Err(SdkError::method_not_found())
     }
 }
 
@@ -685,14 +732,12 @@ impl Drop for AcpSdkAdapter {
 impl NexusAcpClient for AcpSdkAdapter {
     fn initialize(
         &self,
-        request: InitializeRequest,
-    ) -> impl Future<Output = AcpResult<InitializedSession>> + Send {
+        request: NexusInitializeRequest,
+    ) -> impl Future<Output = AcpResult<NexusInitializeResponse>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
 
         async move {
-            // execute returns AcpResult<Result<T, AcpError>>
-            // Flatten with and_then
             bridge
                 .execute(move || {
                     let connection = connection.clone();
@@ -708,13 +753,30 @@ impl NexusAcpClient for AcpSdkAdapter {
                             }
                         };
 
+                        let sdk_request = sdk_initialize_request_from_nexus(request);
                         let response = sdk_conn
                             .connection
-                            .initialize(request)
+                            .initialize(sdk_request)
                             .await
                             .map_err(crate::AcpError::sdk)?;
 
-                        Ok(InitializedSession::from_sdk_response(response))
+                        Ok(NexusInitializeResponse {
+                            protocol_version: nexus_protocol_version_from_sdk(
+                                response.protocol_version,
+                            ),
+                            agent_capabilities: nexus_agent_capabilities_from_sdk(
+                                &response.agent_capabilities,
+                            ),
+                            agent_info: response
+                                .agent_info
+                                .as_ref()
+                                .map(|i| nexus_agent_info_from_sdk(i)),
+                            auth_methods: response
+                                .auth_methods
+                                .iter()
+                                .map(|m| nexus_auth_method_from_sdk(m))
+                                .collect(),
+                        })
                     })
                 })
                 .await
@@ -724,8 +786,8 @@ impl NexusAcpClient for AcpSdkAdapter {
 
     fn create_session(
         &self,
-        request: NewSessionRequest,
-    ) -> impl Future<Output = AcpResult<SessionCreated>> + Send {
+        request: NexusNewSessionRequest,
+    ) -> impl Future<Output = AcpResult<NexusSessionCreated>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
 
@@ -745,13 +807,20 @@ impl NexusAcpClient for AcpSdkAdapter {
                             }
                         };
 
+                        let sdk_request = sdk_new_session_request_from_nexus(request);
                         let response = sdk_conn
                             .connection
-                            .new_session(request)
+                            .new_session(sdk_request)
                             .await
                             .map_err(crate::AcpError::sdk)?;
 
-                        Ok(SessionCreated::from_sdk_response(response))
+                        Ok(NexusSessionCreated {
+                            session_id: NexusSessionId(response.session_id.to_string()),
+                            modes: response
+                                .modes
+                                .as_ref()
+                                .map(|m| nexus_session_mode_state_from_sdk(m)),
+                        })
                     })
                 })
                 .await
@@ -761,8 +830,8 @@ impl NexusAcpClient for AcpSdkAdapter {
 
     fn prompt(
         &self,
-        request: PromptRequest,
-    ) -> impl Future<Output = AcpResult<PromptCompleted>> + Send {
+        request: NexusPromptRequest,
+    ) -> impl Future<Output = AcpResult<NexusPromptCompleted>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
 
@@ -782,13 +851,16 @@ impl NexusAcpClient for AcpSdkAdapter {
                             }
                         };
 
+                        let sdk_request = sdk_prompt_request_from_nexus(request);
                         let response = sdk_conn
                             .connection
-                            .prompt(request)
+                            .prompt(sdk_request)
                             .await
                             .map_err(crate::AcpError::sdk)?;
 
-                        Ok(PromptCompleted::from_sdk_response(response))
+                        Ok(NexusPromptCompleted {
+                            stop_reason: nexus_stop_reason_from_sdk(response.stop_reason),
+                        })
                     })
                 })
                 .await
@@ -796,7 +868,10 @@ impl NexusAcpClient for AcpSdkAdapter {
         }
     }
 
-    fn cancel(&self, session_id: SessionId) -> impl Future<Output = AcpResult<()>> + Send {
+    fn cancel(
+        &self,
+        session_id: NexusSessionId,
+    ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
 
@@ -816,20 +891,34 @@ impl NexusAcpClient for AcpSdkAdapter {
                             }
                         };
 
-                        let cancel_notification = CancelNotification::new(session_id);
+                        let session_id_str = session_id.0.clone();
+                        let cancel_notification =
+                            acp::CancelNotification::new(acp::SessionId::new(session_id_str));
                         let result: Result<(), acp::Error> =
                             sdk_conn.connection.cancel(cancel_notification).await;
                         result.map_err(crate::AcpError::sdk)?;
 
-                        Ok(())
+                        Ok(NexusCancelResult {
+                            session_id: NexusSessionId(session_id.0),
+                        })
                     })
                 })
                 .await
                 .and_then(|r| r)
         }
     }
+}
 
-    fn subscribe(&self) -> StreamReceiver {
+/// Direct streaming access (not on the trait — see module docs for rationale).
+impl AcpSdkAdapter {
+    /// Subscribe to stream messages from the agent.
+    ///
+    /// This method is not on the `NexusAcpClient` trait because the return
+    /// type (`StreamReceiver`) is tightly coupled to the SDK's `async-broadcast`
+    /// implementation. Consumers that need streaming should use this method
+    /// directly on the adapter.
+    #[allow(dead_code)]
+    pub fn subscribe(&self) -> StreamReceiver {
         let _connection = self.connection.clone();
 
         // Create a fresh receiver (this will be updated to use the actual connection's receiver)
@@ -851,30 +940,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initialized_session_conversion() {
-        let response = InitializeResponse::new(ProtocolVersion::LATEST);
-
-        let session = InitializedSession::from_sdk_response(response);
-        assert_eq!(session.protocol_version, ProtocolVersion::LATEST);
-        assert!(session.agent_info.is_none());
+    fn protocol_version_from_sdk() {
+        let sdk_version = acp::ProtocolVersion::LATEST;
+        let nexus_version = nexus_protocol_version_from_sdk(sdk_version);
+        assert_eq!(nexus_version.0, "1");
     }
 
     #[test]
-    fn session_created_conversion() {
-        let session_id = SessionId::new("test-session");
-        let response = NewSessionResponse::new(session_id.clone());
-
-        let created = SessionCreated::from_sdk_response(response);
-        assert_eq!(created.session_id, session_id);
-        assert!(created.modes.is_none());
+    fn stop_reason_from_sdk() {
+        assert_eq!(
+            nexus_stop_reason_from_sdk(acp::StopReason::EndTurn),
+            NexusStopReason::EndTurn
+        );
+        assert_eq!(
+            nexus_stop_reason_from_sdk(acp::StopReason::Cancelled),
+            NexusStopReason::Cancelled
+        );
     }
 
     #[test]
-    fn prompt_completed_conversion() {
-        let response = PromptResponse::new(StopReason::EndTurn);
+    fn agent_info_from_sdk() {
+        let sdk_impl = acp::Implementation::new("claude-code", "1.0.0");
+        let nexus_info = nexus_agent_info_from_sdk(&sdk_impl);
+        assert_eq!(nexus_info.name, "claude-code");
+        assert_eq!(nexus_info.version, "1.0.0");
+    }
 
-        let completed = PromptCompleted::from_sdk_response(response);
-        assert_eq!(completed.stop_reason, StopReason::EndTurn);
+    #[test]
+    fn initialize_request_to_sdk() {
+        let nexus_req = NexusInitializeRequest::new();
+        let _sdk_req = sdk_initialize_request_from_nexus(nexus_req);
+        // Just verify conversion succeeds
     }
 
     #[tokio::test]
@@ -899,12 +995,9 @@ mod tests {
             PathBuf::from("/usr/bin/test-agent"),
         );
 
-        let request = InitializeRequest::new(ProtocolVersion::LATEST);
+        let request = NexusInitializeRequest::new();
 
         let result = adapter.initialize(request).await;
-        // Since the closure returns Result<T, AcpError> and execute wraps it,
-        // we get AcpResult<AcpResult<InitializedSession>>
-        // The ? will flatten outer errors, inner result contains connection error
         assert!(result.is_err());
     }
 }
