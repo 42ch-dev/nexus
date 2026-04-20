@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-19T18:00:00Z",
+      "updated_at": "2026-04-20T00:00:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -8,7 +8,7 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-19T18:00:00Z",
+  "updated_at": "2026-04-20T00:00:00Z",
       "total_open": 9,
       "by_severity": {
         "critical": 0,
@@ -18,10 +18,10 @@
         "nit": 1
       },
       "by_target": {
-        "V1.6": 5,
+        "V1.6": 4,
         "V1.7": 2,
         "V2.0": 1,
-        "backlog": 1
+        "backlog": 2
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 7,
@@ -32,8 +32,9 @@
           "id": "DEBT-RAND-073",
           "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
           "severity": "low",
-          "target_date": "V1.6 or wiremock upstream fix",
-          "note": "Dependabot bumped rand to 0.8.6 in workspace, but wiremock transitively depends on rand 0.7.3 which cannot be removed without upstream http-types migration."
+          "target_date": "backlog",
+          "decision": "accept",
+          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ]
     },
@@ -61,8 +62,8 @@
           "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
+          "target_date": "V1.6 Track A",
+          "tracking_link": "knowledge/v1.6-delivery-compass-v1.md"
         },
         {
           "id": "R2",
@@ -72,8 +73,8 @@
           "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
+          "target_date": "V1.6 Track A",
+          "tracking_link": "knowledge/v1.6-delivery-compass-v1.md"
         },
         {
           "id": "R3",
@@ -83,8 +84,8 @@
           "scope": "crates/nexus-orchestration/src/scheduler/mod.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
+          "target_date": "V1.6 Track A",
+          "tracking_link": "knowledge/v1.6-delivery-compass-v1.md"
         },
         {
           "id": "R4",
@@ -116,8 +117,8 @@
           "scope": "crates/nexus-orchestration/src/engine.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
+          "target_date": "V1.6 Track A",
+          "tracking_link": "knowledge/v1.6-delivery-compass-v1.md"
         },
         {
           "id": "R7",
