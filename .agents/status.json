@@ -19,9 +19,11 @@
     },
     {
       "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
-      "status": "InReview",
+      "status": "Done",
       "title": "V1.6 WS-B — ACP SDK DTO Decoupling",
       "file": "plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
+      "done_at": "2026-04-20T13:00:00Z",
+      "archived_record": "archived/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.json",
       "milestone": "M2",
       "metadata": {
         "working_branch": "feature/v1.6",
@@ -63,23 +65,24 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-20T12:00:00Z",
-      "total_open": 5,
+      "updated_at": "2026-04-20T13:00:00Z",
+      "total_open": 8,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 4,
-        "nit": 1
+        "medium": 1,
+        "low": 5,
+        "nit": 2
       },
       "by_target": {
         "V1.6": 0,
-        "V1.7": 2,
+        "V1.7": 5,
         "V2.0": 1,
         "backlog": 2
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 3,
+        "2026-04-20-v1.6-ws-b-acp-sdk-dto": 3,
         "v1-tech-debt-cleanup": 1
       },
       "cross_cutting": [
@@ -138,6 +141,41 @@
           "source": "QC1 S-1",
           "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
           "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-20-v1.6-ws-b-acp-sdk-dto": [
+        {
+          "id": "DTO-C1",
+          "title": "sdk_new_session_request_from_nexus silently drops mcp_servers field",
+          "severity": "medium",
+          "source": "QC1 C1",
+          "scope": "crates/nexus-acp-host/src/client.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "DTO-C2",
+          "title": "Protocol version .parse::<u16>().unwrap_or(1) silent degradation",
+          "severity": "low",
+          "source": "QC1 C2",
+          "scope": "crates/nexus-acp-host/src/client.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "DTO-W1",
+          "title": "NexusContentBlock missing Eq derive",
+          "severity": "nit",
+          "source": "QC2 W1",
+          "scope": "crates/nexus-contracts/src/local/acp/types.rs",
+          "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "V1.7",
           "tracking_link": null
