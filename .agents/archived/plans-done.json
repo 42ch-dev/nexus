@@ -1,52 +1,52 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-19T18:00:00Z",
+  "updated_at": "2026-04-20T16:00:00Z",
   "plans": [
     {
       "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
-      "title": "V1.5 WS-A — Schedule FSM hardening",
+      "title": "V1.5 WS-A \u2014 Schedule FSM hardening",
       "done_at": "2026-04-19",
       "plan_file": ".agents/plans/2026-04-18-v1.5-ws-a-schedule-fsm.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-a-schedule-fsm.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-b-orch-db-residuals",
-      "title": "V1.5 WS-B — Orchestration + DB residual cleanup",
+      "title": "V1.5 WS-B \u2014 Orchestration + DB residual cleanup",
       "done_at": "2026-04-19",
       "plan_file": ".agents/plans/2026-04-18-v1.5-ws-b-orch-db-residuals.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-b-orch-db-residuals.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-c-context-summarize",
-      "title": "V1.5 WS-C — context.summarize capability",
+      "title": "V1.5 WS-C \u2014 context.summarize capability",
       "done_at": "2026-04-19",
       "plan_file": ".agents/plans/2026-04-18-v1.5-ws-c-context-summarize.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-c-context-summarize.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-d-cron-triggers",
-      "title": "V1.5 WS-D — Cron / wall-clock triggers",
+      "title": "V1.5 WS-D \u2014 Cron / wall-clock triggers",
       "done_at": "2026-04-19",
       "plan_file": ".agents/plans/2026-04-18-v1.5-ws-d-cron-triggers.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-d-cron-triggers.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-e-platform-coordination",
-      "title": "V1.5 WS-E — Platform coordination",
+      "title": "V1.5 WS-E \u2014 Platform coordination",
       "done_at": "2026-04-19",
       "plan_file": ".agents/plans/2026-04-18-v1.5-ws-e-platform-coordination.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-e-platform-coordination.json"
     },
     {
       "id": "2026-04-18-sqlx-compile-time-migration",
-      "title": "V1.4 — sqlx compile-time macro migration + .sqlx/ workflow",
+      "title": "V1.4 \u2014 sqlx compile-time macro migration + .sqlx/ workflow",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-18-sqlx-compile-time-migration.md",
       "archived_record": "archived/plans/2026-04-18-sqlx-compile-time-migration.json"
     },
     {
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
-      "title": "V1.4 WS1 — nexus-acp-host crate extraction",
+      "title": "V1.4 WS1 \u2014 nexus-acp-host crate extraction",
       "done_at": "2026-04-17",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws1-acp-host-extraction.json"
@@ -165,7 +165,7 @@
     },
     {
       "id": "2026-04-09-v1.1-arch-alignment-closure",
-      "title": "V1.1 Architecture Alignment — Final Closure",
+      "title": "V1.1 Architecture Alignment \u2014 Final Closure",
       "done_at": "2026-04-09",
       "plan_file": ".agents/plans/2026-04-09-v1.1-arch-alignment-closure.md",
       "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-closure.json"
@@ -200,7 +200,7 @@
     },
     {
       "id": "2026-04-08-local-db-refactor",
-      "title": "Local DB Refactor — Single Ownership Module",
+      "title": "Local DB Refactor \u2014 Single Ownership Module",
       "done_at": "2026-04-08",
       "plan_file": ".agents/plans/2026-04-08-local-db-refactor.md",
       "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
@@ -221,7 +221,7 @@
     },
     {
       "id": "2026-04-10-v1-spec-wire-schema-sprint",
-      "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
+      "title": "V1-Spec Wire Schema Sprint \u2014 Platform Contract Unblock",
       "done_at": "2026-04-10",
       "plan_file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
       "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
@@ -270,7 +270,7 @@
     },
     {
       "id": "2026-04-10-local-fs-layout-ssot-and-implementation",
-      "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
+      "title": "Local FS layout (ADR-014) \u2014 CLI/daemon paths & creator workspace",
       "done_at": "2026-04-10",
       "plan_file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
       "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
@@ -319,7 +319,7 @@
     },
     {
       "id": "2026-04-14-v1.2-regression-suite",
-      "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
+      "title": "V1.2 M3: Minimum Automated Regression Suite (R1\u2013R5)",
       "done_at": "2026-04-15",
       "plan_file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-regression-suite.json"
@@ -340,52 +340,80 @@
     },
     {
       "id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
-      "title": "V1.4 WS8 — nexus-local-db sqlx migration (unified DB engine)",
+      "title": "V1.4 WS8 \u2014 nexus-local-db sqlx migration (unified DB engine)",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.json"
     },
     {
       "id": "2026-04-17-v1.4-ws4-statig-lifecycle",
-      "title": "V1.4 WS4 — statig daemon lifecycle HSM (TD-9 closure)",
+      "title": "V1.4 WS4 \u2014 statig daemon lifecycle HSM (TD-9 closure)",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws4-statig-lifecycle.json"
     },
     {
       "id": "2026-04-17-v1.4-ws5-schemas-boundary",
-      "title": "V1.4 WS5 — schemas/ boundary refactor (wire vs local)",
+      "title": "V1.4 WS5 \u2014 schemas/ boundary refactor (wire vs local)",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws5-schemas-boundary.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws5-schemas-boundary.json"
     },
     {
       "id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
-      "title": "V1.4 WS2 — Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
+      "title": "V1.4 WS2 \u2014 Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.json"
     },
     {
       "id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
-      "title": "V1.4 WS3 — Preset loader + novel-writing end-to-end",
+      "title": "V1.4 WS3 \u2014 Preset loader + novel-writing end-to-end",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.json"
     },
     {
       "id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
-      "title": "V1.4 WS7 — Creator Schedule + immutable versioned core_context",
+      "title": "V1.4 WS7 \u2014 Creator Schedule + immutable versioned core_context",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.json"
     },
     {
       "id": "2026-04-17-v1.4-ws6-creator-register-e2e-tests",
-      "title": "V1.4 WS6 — V1.3 Creator Register E2E integration tests (backlog closure)",
+      "title": "V1.4 WS6 \u2014 V1.3 Creator Register E2E integration tests (backlog closure)",
       "done_at": "2026-04-18",
       "plan_file": ".agents/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.json"
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-a-residual-governance",
+      "title": "V1.6 WS-A \u2014 Residual Governance (R1/R2/R3/R6)",
+      "done_at": "2026-04-20",
+      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-a-residual-governance.md",
+      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-a-residual-governance.json"
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
+      "title": "V1.6 WS-B \u2014 ACP SDK DTO Decoupling",
+      "done_at": "2026-04-20",
+      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
+      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.json"
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-c-permission-cli",
+      "title": "V1.6 WS-C \u2014 Permission Policy CLI",
+      "done_at": "2026-04-20",
+      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-c-permission-cli.md",
+      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-c-permission-cli.json"
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-d-multi-preset",
+      "title": "V1.6 WS-D \u2014 Multi-Preset Scheduler",
+      "done_at": "2026-04-20",
+      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-d-multi-preset.md",
+      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-d-multi-preset.json"
     }
   ]
 }
