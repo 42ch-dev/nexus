@@ -117,23 +117,22 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
     supervisor.insert_pending(schedule).await.unwrap();
 
     // First tick: S02 should be admitted
-    let count = scheduler.tick(&supervisor).await;
-    assert_eq!(count, 1, "one schedule should be found due");
+    scheduler.tick(&supervisor).await;
     assert_eq!(
         supervisor.status_of("S02").await.unwrap(),
-        ScheduleStatus::Running
+        ScheduleStatus::Running,
+        "schedule should be Running after first tick (admitted)"
     );
 
     // Second tick in same cycle: S02 should NOT be double-admitted
-    // (scheduler tracks admitted IDs in HashSet per tick)
-    let count2 = scheduler.tick(&supervisor).await;
-    // Count should be 0 because S02 is no longer pending (now Running)
-    assert_eq!(count2, 0, "no new schedules due — S02 is already running");
+    // Duplicate prevention is handled by supervisor.tick_clocked()'s re-entrancy
+    // guard and the status check in the UPDATE WHERE clause.
+    scheduler.tick(&supervisor).await;
     // Status should remain Running, not transition twice
     assert_eq!(
         supervisor.status_of("S02").await.unwrap(),
         ScheduleStatus::Running,
-        "schedule should remain Running after second tick"
+        "schedule should remain Running after second tick (no double admission)"
     );
 }
 

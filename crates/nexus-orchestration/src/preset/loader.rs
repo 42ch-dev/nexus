@@ -19,6 +19,7 @@ use thiserror::Error;
 /// A fully validated preset ready for execution.
 ///
 /// Design: `orchestration-engine-v1.md` §8.1.
+#[derive(Clone)]
 pub struct LoadedPreset {
     /// Preset identifier.
     pub id: String,

@@ -4,6 +4,7 @@
 //! Local types are those that `nexus-platform` never observes over any wire channel.
 //! They live exclusively in the nexus OSS Rust codebase.
 
+pub mod acp;
 pub mod acp_runtime;
 pub mod domain;
 pub mod meta;

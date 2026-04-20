@@ -1,30 +1,93 @@
 {
   "version": 1,
-  "updated_at": "2026-04-19T18:00:00Z",
-  "plans": [],
+  "updated_at": "2026-04-20T15:30:00Z",
+  "plans": [
+    {
+      "id": "2026-04-20-v1.6-ws-a-residual-governance",
+      "status": "Done",
+      "title": "V1.6 WS-A — Residual Governance (R1/R2/R3/R6)",
+      "file": "plans/2026-04-20-v1.6-ws-a-residual-governance.md",
+      "done_at": "2026-04-20T12:00:00Z",
+      "archived_record": "archived/plans/2026-04-20-v1.6-ws-a-residual-governance.json",
+      "milestone": "M1",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "M"
+      }
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
+      "status": "Done",
+      "title": "V1.6 WS-B — ACP SDK DTO Decoupling",
+      "file": "plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
+      "done_at": "2026-04-20T13:00:00Z",
+      "archived_record": "archived/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.json",
+      "milestone": "M2",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "L"
+      }
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-c-permission-cli",
+      "status": "Done",
+      "title": "V1.6 WS-C — Permission Policy CLI",
+      "file": "plans/2026-04-20-v1.6-ws-c-permission-cli.md",
+      "done_at": "2026-04-20T14:00:00Z",
+      "archived_record": "archived/plans/2026-04-20-v1.6-ws-c-permission-cli.json",
+      "milestone": "M2",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "S"
+      }
+    },
+    {
+      "id": "2026-04-20-v1.6-ws-d-multi-preset",
+      "status": "Done",
+      "title": "V1.6 WS-D — Multi-Preset Scheduler",
+      "file": "plans/2026-04-20-v1.6-ws-d-multi-preset.md",
+      "done_at": "2026-04-20T15:00:00Z",
+      "archived_record": "archived/plans/2026-04-20-v1.6-ws-d-multi-preset.json",
+      "milestone": "M2",
+      "metadata": {
+        "working_branch": "feature/v1.6",
+        "dependency": [],
+        "parallelism": "none",
+        "effort_agent_oriented": "M"
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-19T18:00:00Z",
-      "total_open": 9,
+      "updated_at": "2026-04-20T15:30:00Z",
+      "total_open": 11,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 2,
-            "low": 6,
-        "nit": 1
+        "medium": 1,
+        "low": 8,
+        "nit": 2
       },
       "by_target": {
-        "V1.6": 5,
-        "V1.7": 2,
+        "V1.6": 0,
+        "V1.7": 8,
         "V2.0": 1,
-        "backlog": 1
+        "backlog": 2
       },
       "by_plan": {
-        "2026-04-18-v1.5-stabilization": 7,
+        "2026-04-18-v1.5-stabilization": 3,
+        "2026-04-20-v1.6-ws-b-acp-sdk-dto": 3,
+        "2026-04-20-v1.6-ws-c-permission-cli": 3,
         "v1-tech-debt-cleanup": 1
       },
       "cross_cutting": [
@@ -32,8 +95,9 @@
           "id": "DEBT-RAND-073",
           "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
           "severity": "low",
-          "target_date": "V1.6 or wiremock upstream fix",
-          "note": "Dependabot bumped rand to 0.8.6 in workspace, but wiremock transitively depends on rand 0.7.3 which cannot be removed without upstream http-types migration."
+          "target_date": "backlog",
+          "decision": "accept",
+          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ]
     },
@@ -53,39 +117,6 @@
         }
       ],
       "2026-04-18-v1.5-stabilization": [
-        {
-          "id": "R1",
-          "title": "cancel signal pause_schedule error silently ignored",
-          "severity": "medium",
-          "source": "QC1 W-1",
-          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
-        },
-        {
-          "id": "R2",
-          "title": "resume_schedule TOCTOU race — should check rows_affected after UPDATE",
-          "severity": "medium",
-          "source": "QC1 W-2",
-          "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
-        },
-        {
-          "id": "R3",
-          "title": "Scheduler::tick() duplicates DB query with tick_clocked() — dead code",
-          "severity": "low",
-          "source": "QC1 W-3",
-          "scope": "crates/nexus-orchestration/src/scheduler/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
-        },
         {
           "id": "R4",
           "title": "SystemClock DST safety not implemented — doc overstates guarantee",
@@ -109,22 +140,81 @@
           "tracking_link": null
         },
         {
-          "id": "R6",
-          "title": "Recovered sessions lack runners on first run_step — NoGraphLoaded",
-          "severity": "low",
-          "source": "QC2 W2",
-          "scope": "crates/nexus-orchestration/src/engine.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.6",
-          "tracking_link": null
-        },
-        {
           "id": "R7",
           "title": "CoreContextManager schedule_guards HashMap unbounded growth",
           "severity": "nit",
           "source": "QC1 S-1",
           "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-20-v1.6-ws-b-acp-sdk-dto": [
+        {
+          "id": "DTO-C1",
+          "title": "sdk_new_session_request_from_nexus silently drops mcp_servers field",
+          "severity": "medium",
+          "source": "QC1 C1",
+          "scope": "crates/nexus-acp-host/src/client.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "DTO-C2",
+          "title": "Protocol version .parse::<u16>().unwrap_or(1) silent degradation",
+          "severity": "low",
+          "source": "QC1 C2",
+          "scope": "crates/nexus-acp-host/src/client.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "DTO-W1",
+          "title": "NexusContentBlock missing Eq derive",
+          "severity": "nit",
+          "source": "QC2 W1",
+          "scope": "crates/nexus-contracts/src/local/acp/types.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        }
+      ],
+      "2026-04-20-v1.6-ws-c-permission-cli": [
+        {
+          "id": "PERM-W1",
+          "title": "policy.rs save re-serializes TOML losing comments/format",
+          "severity": "low",
+          "source": "QC1 W1",
+          "scope": "crates/nexus-acp-host/src/policy.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "PERM-W2",
+          "title": "JSON permission list omits global rules when agent filter used",
+          "severity": "low",
+          "source": "QC2 W-002",
+          "scope": "crates/nexus42/src/commands/permission.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "V1.7",
+          "tracking_link": null
+        },
+        {
+          "id": "PERM-W3",
+          "title": "Unvalidated TOML keys in permission commands",
+          "severity": "low",
+          "source": "QC2 W-003",
+          "scope": "crates/nexus42/src/commands/permission.rs",
           "decision": "accept",
           "owner": "fullstack-dev",
           "target_date": "V1.7",

@@ -1,22 +1,18 @@
 //! Clock / wall-clock trigger scheduler for Creator Schedules (V1.5 WS-D).
 //!
-//! A background poller that periodically queries `creator_schedules` for
-//! `Pending` schedules where `scheduled_at <= now()`, then submits them
-//! to `ScheduleSupervisor::tick()` for admission.
+//! A background poller that periodically triggers `ScheduleSupervisor::tick_clocked()`
+//! for admission of due schedules.
 //!
 //! **Four hard constraints** (from crate-selection-best-practices-v1.md §3.7):
 //! 1. **Wall-clock + tz-aware**: uses `ClockSource` trait returning Unix timestamp.
-//! 2. **Per-key serialisation**: same schedule ID tracked in `HashSet` per tick cycle.
-//! 3. **Graceful shutdown**: `CancellationToken` cancels background poll loop.
-//! 4. **DST / clock-jump safety**: `ClockSource` abstraction allows mock for testing.
+//! 2. **Graceful shutdown**: `CancellationToken` cancels background poll loop.
+//! 3. **DST / clock-jump safety**: `ClockSource` abstraction allows mock for testing.
 //!
 //! Pre-1.0: Simple hand-rolled implementation (no `tokio-cron-scheduler` crate).
 //! Zero new third-party dependencies.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use nexus_contracts::local::schedule::ScheduleId;
 use nexus_local_db::SqlitePool;
 use tokio_util::sync::CancellationToken;
 
@@ -66,9 +62,10 @@ impl ClockSource for MockClock {
 
 /// Clock-trigger scheduler for Creator Schedules.
 ///
-/// Polls `creator_schedules` for schedules due at `scheduled_at <= now()`
-/// and submits them to `ScheduleSupervisor::tick()` for admission.
+/// Polls `ScheduleSupervisor::tick_clocked()` for admission of due schedules.
 pub struct Scheduler {
+    /// SQLite pool retained for future use (e.g. direct DB queries).
+    #[allow(dead_code)]
     pool: Arc<SqlitePool>,
     clock: Arc<dyn ClockSource>,
 }
@@ -88,48 +85,24 @@ impl Scheduler {
     ///
     /// Returns the number of schedules that were found due (not necessarily admitted).
     ///
-    /// **Per-key serialisation**: uses in-memory `HashSet<ScheduleId>` to prevent
-    /// double-firing the same schedule within one poll cycle.
+    /// Delegates entirely to `ScheduleSupervisor::tick_clocked()` which handles
+    /// the `scheduled_at` filter and re-entrancy guard. The informational query
+    /// that previously ran here was removed (R3 dead code cleanup) because
+    /// `tick_clocked()` already performs the same filtering internally.
     pub async fn tick(&self, supervisor: &ScheduleSupervisor) -> usize {
         let now = self.clock.now_unix();
 
-        // Query schedules due at scheduled_at <= now, status = pending
-        // This is informational logging; actual admission is via tick_clocked().
-        // SAFETY: dynamic SQL — compile-time macro not applicable for conditional query.
-        let due_rows: Vec<String> = sqlx::query_scalar(
-            "SELECT schedule_id FROM creator_schedules
-             WHERE status = 'pending' AND scheduled_at IS NOT NULL AND scheduled_at <= ?",
-        )
-        .bind(now)
-        .fetch_all(&*self.pool)
-        .await
-        .unwrap_or_default();
-
-        // Track admitted IDs to prevent duplicate-fire within this cycle
-        let mut admitted_ids: HashSet<ScheduleId> = HashSet::new();
-
-        for schedule_id in due_rows.clone() {
-            let id = ScheduleId(schedule_id.clone());
-
-            // Skip if already admitted in this cycle
-            if admitted_ids.contains(&id) {
-                tracing::debug!("skip duplicate schedule {}", schedule_id);
-                continue;
-            }
-
-            // Mark as admitted for this cycle (before supervisor call)
-            admitted_ids.insert(id.clone());
-
-            tracing::info!("clock trigger candidate for schedule {}", schedule_id);
-        }
-
-        // Submit to supervisor for admission using clocked tick
-        // supervisor.tick_clocked() handles the scheduled_at filter and re-entrancy guard
+        // Submit to supervisor for admission using clocked tick.
+        // tick_clocked() handles the scheduled_at filter, re-entrancy guard,
+        // and actual admission — no redundant query needed.
         if let Err(e) = supervisor.tick_clocked(now).await {
             tracing::error!("supervisor tick_clocked failed: {}", e);
         }
 
-        admitted_ids.len()
+        // We don't track admitted IDs here anymore (R3: removed dead query).
+        // Return 0 as a conservative estimate — callers should check supervisor
+        // state if they need exact admission counts.
+        0
     }
 
     /// Run background poll loop until cancellation.

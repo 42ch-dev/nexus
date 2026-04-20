@@ -540,9 +540,18 @@ pub async fn signal_schedule(
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
-                // Use supervisor for consistent DB + running cache update
+                // Use supervisor for consistent DB + running cache update.
+                // R1 fix: log pause error at warn! level instead of silently ignoring.
+                // The pause failure must NOT block the cancel operation — the
+                // schedule enters terminal state regardless.
                 if current_status_str == "running" {
-                    let _ = supervisor.pause_schedule(&schedule_id).await;
+                    if let Err(e) = supervisor.pause_schedule(&schedule_id).await {
+                        tracing::warn!(
+                            "pause failed during cancel for schedule {}: {}; continuing with cancel",
+                            schedule_id,
+                            e
+                        );
+                    }
                 }
 
                 // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.

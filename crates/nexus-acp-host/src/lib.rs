@@ -16,15 +16,13 @@ pub mod transport;
 
 // Re-export the primary types at module level for convenience.
 #[allow(unused_imports)]
-pub use client::{
-    AcpSdkAdapter, InitializedSession, NexusAcpClient, PromptCompleted, SessionCreated,
-};
+pub use client::{AcpSdkAdapter, NexusAcpClient};
 #[allow(unused_imports)]
 pub use error::{AcpError, AcpResult};
 
 // Re-export policy types for permission management.
 #[allow(unused_imports)]
-pub use policy::{DefaultPolicy, PermissionDecision, PermissionPolicy};
+pub use policy::{AgentRules, DefaultPolicy, PermissionDecision, PermissionPolicy};
 
 // Re-export registry types for commands and other consumers.
 #[allow(unused_imports)]

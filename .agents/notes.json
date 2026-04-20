@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-18T22:00:00Z",
+  "updated_at": "2026-04-20T00:00:00Z",
   "entries": [
     {
       "updated_at": "2026-04-05",
@@ -169,6 +169,10 @@
     {
       "updated_at": "2026-04-19",
       "message": "V1.5 COMPLETE: All 5 workstreams done (WS-A Schedule FSM hardening, WS-B Orch+DB residual cleanup, WS-C context.summarize capability, WS-D cron/wall-clock triggers, WS-E platform coordination). 25 commits, 47 files, +2848/-492 lines. PR #8. 19 V1.4 residuals resolved and archived. QC三审 consolidated: Approve with residuals (0 Critical, 7 open: 2 medium→V1.6, 4 low→V1.6/V1.7/V2.0, 1 nit→V1.7). Plans archived, status.json cleaned, compass marked Superseded."
+    },
+    {
+      "updated_at": "2026-04-20",
+      "message": "V1.6 delivery compass created (knowledge/v1.6-delivery-compass-v1.md). 4 tracks: Track A (residual governance R1/R2/R3/R6), Track B (ACP SDK DTO decoupling — 16 hand-written DTOs + subscribe extraction), Track C (permission CLI — add/revoke/list/reset), Track D (multi-preset scheduler). Architect + PM dual review integrated. 8 risks registered. DEBT-RAND-073 moved from V1.6 to backlog (accept). Branch: feature/v1.6."
     }
   ]
 }

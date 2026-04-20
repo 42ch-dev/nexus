@@ -8,6 +8,7 @@ pub mod schedule;
 pub mod scheduler;
 pub mod storage;
 pub mod system_preset;
+pub mod system_preset_dir;
 pub mod tasks;
 pub mod worker;
 
