@@ -54,7 +54,10 @@ roles:
     assert_eq!(writer.description, "Content writer");
     assert_eq!(writer.system_prompt_file, "prompts/writer.md");
     assert_eq!(writer.recommended_models.len(), 2);
-    assert_eq!(writer.recommended_models[0], "claude-acp:claude-sonnet-4-20250514");
+    assert_eq!(
+        writer.recommended_models[0],
+        "claude-acp:claude-sonnet-4-20250514"
+    );
     assert_eq!(writer.recommended_models[1], "gemini:gemini-2.5-pro");
 
     let reviewer = loaded.roles.iter().find(|r| r.id == "reviewer").unwrap();
@@ -116,10 +119,11 @@ roles:
       - "claude-acp-without-colon"
 "#;
     let err = load_preset_from_str(yaml_no_colon, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.error.contains("invalid recommended_models format") && 
-        p.error.contains("expected 'acp_agent_id:model_name'")
-    ));
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_models format")
+            && p.error.contains("expected 'acp_agent_id:model_name'")));
 
     // Invalid format: multiple colons
     let yaml_multi_colon = r#"
@@ -146,9 +150,10 @@ roles:
       - "agent:model:extra"
 "#;
     let err = load_preset_from_str(yaml_multi_colon, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.error.contains("invalid recommended_models format")
-    ));
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_models format")));
 
     // Invalid format: empty agent id
     let yaml_empty_agent = r#"
@@ -175,9 +180,10 @@ roles:
       - ":model-name"
 "#;
     let err = load_preset_from_str(yaml_empty_agent, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.error.contains("invalid recommended_models format")
-    ));
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_models format")));
 
     // Invalid format: empty model name
     let yaml_empty_model = r#"
@@ -204,9 +210,10 @@ roles:
       - "agent-id:"
 "#;
     let err = load_preset_from_str(yaml_empty_model, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.error.contains("invalid recommended_models format")
-    ));
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_models format")));
 }
 
 #[test]
@@ -234,9 +241,9 @@ roles:
 "#;
     let caps = test_capability_registry();
     let err = load_preset_from_str(yaml, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.error.contains("role must have at least one recommended_model")
-    ));
+    assert!(err.problems().iter().any(|p| p
+        .error
+        .contains("role must have at least one recommended_model")));
 }
 
 #[test]
@@ -271,9 +278,10 @@ roles:
 "#;
     let caps = test_capability_registry();
     let err = load_preset_from_str(yaml, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.error.contains("duplicate role id: 'writer'")
-    ));
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("duplicate role id: 'writer'")));
 }
 
 // ── Agent reference validation tests ────────────────────────────────────────
@@ -314,10 +322,9 @@ inner_graphs:
 "#;
     let caps = test_capability_registry();
     let err = load_preset_from_str(yaml, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.path.contains("agent") && 
-        p.error.contains("unknown role reference: 'nonexistent_role'")
-    ));
+    assert!(err.problems().iter().any(|p| p.path.contains("agent")
+        && p.error
+            .contains("unknown role reference: 'nonexistent_role'")));
 }
 
 #[test]
@@ -350,10 +357,10 @@ inner_graphs:
 "#;
     let caps = test_capability_registry();
     let err = load_preset_from_str(yaml, &caps).unwrap_err();
-    assert!(err.problems().iter().any(|p| 
-        p.path.contains("agent") && 
-        p.error.contains("no roles section defined")
-    ));
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.path.contains("agent") && p.error.contains("no roles section defined")));
 }
 
 #[test]
@@ -529,7 +536,7 @@ roles:
 "#;
     let caps = test_capability_registry();
     let loaded = load_preset_from_str(yaml, &caps).unwrap();
-    
+
     // Serialize back to YAML and parse again
     let serialized = serde_yaml::to_string(&loaded.manifest).unwrap();
     let parsed: PresetManifest = serde_yaml::from_str(&serialized).unwrap();
