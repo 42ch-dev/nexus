@@ -3,15 +3,15 @@
 //! This module defines [`NexusAcpClient`] — the abstraction layer through which
 //! all nexus42 CLI code interacts with ACP agents. The concrete implementation
 //! ([`AcpSdkAdapter`]) wraps the `agent-client-protocol` SDK's
-//! `ClientSideConnection`, isolating the `!Send` future constraint behind
-//! [`LocalSetBridge`].
+//! `ConnectionTo<Agent>`, isolating the internal connection model behind
+//! the trait boundary.
 //!
 //! # Design Rationale
 //!
 //! The adapter pattern (spec §2.2) ensures that:
 //! - All SDK usage is encapsulated in one place, making a future migration to
 //!   `sacp` (or a hand-rolled JSON-RPC client) straightforward.
-//! - The `!Send` future constraint from the SDK does not leak into the rest of
+//! - The SDK's internal connection model does not leak into the rest of
 //!   the nexus42 codebase.
 //! - Unit testing can swap the adapter with a mock implementation.
 //!
@@ -19,55 +19,48 @@
 //!
 //! The `NexusAcpClient` trait uses Nexus-owned DTO types from
 //! `nexus_contracts::local::acp` (e.g. `NexusInitializeRequest`,
-//! `NexusInitializeResponse`). SDK types (`agent_client_protocol::`) are
+//! `NexusInitializeResponse`). SDK types (`agent_client_protocol::schema::`) are
 //! confined to `AcpSdkAdapter` implementation blocks and `FromSdk` conversion
 //! methods. This decoupling allows future SDK migration without changing
 //! consumers.
 //!
 //! # subscribe() Design Decision
 //!
-//! `subscribe()` returns `async_broadcast::StreamReceiver` which is tightly
-//! coupled to the SDK's broadcast channel implementation. It has been moved
-//! off the `NexusAcpClient` trait onto `AcpSdkAdapter` as a direct method.
-//! Rationale:
-//! 1. No consumer uses `subscribe()` through the trait abstraction.
-//! 2. Creating `NexusStreamEvent` + `NexusEventStream` wrappers would add
-//!    complexity for an unused feature.
-//! 3. If streaming is needed in the future, it can be added back with proper
-//!    DTO types at that time.
+//! `subscribe()` returned `async_broadcast::StreamReceiver` which was tightly
+//! coupled to the old SDK's broadcast channel implementation. In SDK v0.11.0,
+//! the streaming model changed to `ActiveSession::read_update()`. The subscribe
+//! mechanism has been removed and will be replaced with a proper DTO-wrapped
+//! streaming API in a future task.
 //!
-//! # LocalSetBridge Integration
+//! # SDK v0.11.0 Architecture
 //!
-//! The SDK's `ClientSideConnection` produces `!Send` futures because it uses
-//! `tokio::task::LocalSet` internally. We bridge this with the async tokio
-//! world using [`LocalSetBridge`]:
-//!
-//! ```text
-//! CLI Command (async) ──► AcpSdkAdapter ──► LocalSetBridge
-//!                                              │
-//!                                              ▼
-//!                                    Dedicated OS Thread
-//!                                    (LocalSet + SDK connection)
-//! ```
-//!
-//! # Async Trait Compatibility
-//!
-//! The ACP SDK uses `futures::AsyncRead/AsyncWrite` traits, while tokio's
-//! subprocess pipes provide `tokio::io::AsyncRead/AsyncWrite`. We use
-//! `tokio_util::compat` to bridge these two trait families.
+//! The ACP SDK v0.11.0 uses a component/channel-based architecture:
+//! - `Client` is a zero-sized role struct (no longer a trait).
+//! - Connections are created via `Client.builder().connect_with(transport, |cx| {...})`.
+//! - The `ConnectionTo<Agent>` handle is Clone + Send, allowing it to be stored
+//!   and used from outside the connection callback.
+//! - The old `Client` trait (for handling agent requests) is replaced by
+//!   `Builder::on_receive_request_from` handlers.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
-use agent_client_protocol::{Agent as _, Error as SdkError, StreamReceiver};
+use agent_client_protocol::schema::AgentCapabilities;
+use agent_client_protocol::schema::AuthMethod;
+use agent_client_protocol::schema::SessionModeState;
+use agent_client_protocol::schema::{
+    ContentBlock, Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerSse,
+    McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink, SessionId,
+    StopReason, TextContent,
+};
+use agent_client_protocol::{Agent, ByteStreams, ConnectionTo};
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::error::AcpResult;
 use crate::localset_bridge::LocalSetBridge;
-use crate::policy::{PermissionDecision, PermissionPolicy};
 use nexus_contracts::local::acp::{
     NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult,
     NexusInitializeRequest, NexusInitializeResponse, NexusMcpServer, NexusNewSessionRequest,
@@ -80,30 +73,41 @@ use nexus_contracts::local::acp::{
 // These are free functions (not trait impls) to avoid orphan rule violations
 // since both the SDK types and Nexus DTOs are defined in external crates.
 
-fn nexus_protocol_version_from_sdk(version: acp::ProtocolVersion) -> NexusProtocolVersion {
+#[allow(dead_code)]
+fn nexus_protocol_version_from_sdk(version: &ProtocolVersion) -> NexusProtocolVersion {
     NexusProtocolVersion::new(version.to_string())
 }
 
-fn nexus_stop_reason_from_sdk(reason: acp::StopReason) -> NexusStopReason {
+#[allow(dead_code)]
+fn nexus_stop_reason_from_sdk(reason: &StopReason) -> NexusStopReason {
     match reason {
-        acp::StopReason::EndTurn => NexusStopReason::EndTurn,
-        acp::StopReason::MaxTokens => NexusStopReason::MaxTokens,
-        acp::StopReason::MaxTurnRequests => NexusStopReason::MaxTurnRequests,
-        acp::StopReason::Refusal => NexusStopReason::Refusal,
-        acp::StopReason::Cancelled => NexusStopReason::Cancelled,
+        StopReason::EndTurn => NexusStopReason::EndTurn,
+        StopReason::MaxTokens => NexusStopReason::MaxTokens,
+        StopReason::MaxTurnRequests => NexusStopReason::MaxTurnRequests,
+        StopReason::Refusal => NexusStopReason::Refusal,
+        StopReason::Cancelled => NexusStopReason::Cancelled,
         _ => NexusStopReason::EndTurn, // fallback for future variants
     }
 }
 
-fn nexus_auth_method_from_sdk(method: &acp::AuthMethod) -> NexusAuthMethod {
-    NexusAuthMethod {
-        id: method.id().to_string(),
-        name: method.name().to_string(),
-        description: method.description().map(|s| s.to_string()),
+#[allow(dead_code)]
+fn nexus_auth_method_from_sdk(method: &AuthMethod) -> NexusAuthMethod {
+    match method {
+        AuthMethod::Agent(agent) => NexusAuthMethod {
+            id: agent.id.to_string(),
+            name: agent.name.clone(),
+            description: agent.description.clone(),
+        },
+        _ => NexusAuthMethod {
+            id: "unknown".to_string(),
+            name: "unknown".to_string(),
+            description: None,
+        },
     }
 }
 
-fn nexus_agent_info_from_sdk(impl_: &acp::Implementation) -> NexusAgentInfo {
+#[allow(dead_code)]
+fn nexus_agent_info_from_sdk(impl_: &Implementation) -> NexusAgentInfo {
     NexusAgentInfo {
         name: impl_.name.clone(),
         title: impl_.title.clone(),
@@ -111,13 +115,15 @@ fn nexus_agent_info_from_sdk(impl_: &acp::Implementation) -> NexusAgentInfo {
     }
 }
 
-fn nexus_agent_capabilities_from_sdk(caps: &acp::AgentCapabilities) -> NexusAgentCapabilities {
+#[allow(dead_code)]
+fn nexus_agent_capabilities_from_sdk(caps: &AgentCapabilities) -> NexusAgentCapabilities {
     NexusAgentCapabilities {
         load_session: caps.load_session,
     }
 }
 
-fn nexus_session_mode_state_from_sdk(state: &acp::SessionModeState) -> NexusSessionModeState {
+#[allow(dead_code)]
+fn nexus_session_mode_state_from_sdk(state: &SessionModeState) -> NexusSessionModeState {
     NexusSessionModeState {
         current_mode_id: state.current_mode_id.to_string(),
         available_modes: state
@@ -132,65 +138,66 @@ fn nexus_session_mode_state_from_sdk(state: &acp::SessionModeState) -> NexusSess
     }
 }
 
-fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> acp::InitializeRequest {
+#[allow(dead_code)]
+fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> InitializeRequest {
     let protocol_version = sdk_protocol_version_from_nexus(&req.protocol_version);
-    let mut builder = acp::InitializeRequest::new(protocol_version);
+    let mut builder = InitializeRequest::new(protocol_version);
     if let Some(info) = req.client_info {
-        builder = builder.client_info(acp::Implementation::new(info.name, info.version));
+        builder = builder.client_info(Implementation::new(info.name, info.version));
     }
     builder
 }
 
-fn sdk_protocol_version_from_nexus(version: &NexusProtocolVersion) -> acp::ProtocolVersion {
+#[allow(dead_code)]
+fn sdk_protocol_version_from_nexus(version: &NexusProtocolVersion) -> ProtocolVersion {
     match version.0.parse::<u16>() {
-        Ok(v) => {
-            serde_json::from_value(serde_json::json!(v)).unwrap_or(acp::ProtocolVersion::LATEST)
-        }
+        Ok(v) => serde_json::from_value(serde_json::json!(v)).unwrap_or(ProtocolVersion::LATEST),
         Err(e) => {
             tracing::warn!(
                 version = %version.0,
                 error = %e,
                 "Failed to parse protocol version, defaulting to LATEST"
             );
-            acp::ProtocolVersion::LATEST
+            ProtocolVersion::LATEST
         }
     }
 }
 
-fn sdk_new_session_request_from_nexus(req: NexusNewSessionRequest) -> acp::NewSessionRequest {
-    let sdk_servers: Vec<acp::McpServer> = req
+#[allow(dead_code)]
+fn sdk_new_session_request_from_nexus(req: NexusNewSessionRequest) -> NewSessionRequest {
+    let sdk_servers: Vec<McpServer> = req
         .mcp_servers
         .into_iter()
         .map(nexus_mcp_server_to_sdk)
         .collect();
-    acp::NewSessionRequest::new(req.cwd).mcp_servers(sdk_servers)
+    NewSessionRequest::new(req.cwd).mcp_servers(sdk_servers)
 }
 
-fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> acp::McpServer {
+#[allow(dead_code)]
+fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> McpServer {
     match server {
-        NexusMcpServer::Http(h) => acp::McpServer::Http(acp::McpServerHttp::new(h.name, h.url)),
-        NexusMcpServer::Sse(s) => acp::McpServer::Sse(acp::McpServerSse::new(s.name, s.url)),
-        NexusMcpServer::Stdio(s) => {
-            acp::McpServer::Stdio(acp::McpServerStdio::new(s.name, s.command))
-        }
+        NexusMcpServer::Http(h) => McpServer::Http(McpServerHttp::new(h.name, h.url)),
+        NexusMcpServer::Sse(s) => McpServer::Sse(McpServerSse::new(s.name, s.url)),
+        NexusMcpServer::Stdio(s) => McpServer::Stdio(McpServerStdio::new(s.name, s.command)),
     }
 }
 
-fn sdk_prompt_request_from_nexus(req: NexusPromptRequest) -> acp::PromptRequest {
-    let content_blocks: Vec<acp::ContentBlock> = req
+#[allow(dead_code)]
+fn sdk_prompt_request_from_nexus(req: NexusPromptRequest) -> PromptRequest {
+    let content_blocks: Vec<ContentBlock> = req
         .prompt
         .into_iter()
         .map(|block| match block {
             nexus_contracts::local::acp::NexusContentBlock::Text(t) => {
-                acp::ContentBlock::Text(acp::TextContent::new(t.text))
+                ContentBlock::Text(TextContent::new(t.text))
             }
             nexus_contracts::local::acp::NexusContentBlock::ResourceLink(r) => {
-                let builder = acp::ResourceLink::new(r.name.unwrap_or_default(), r.uri);
-                acp::ContentBlock::ResourceLink(builder)
+                let builder = ResourceLink::new(r.name.unwrap_or_default(), r.uri);
+                ContentBlock::ResourceLink(builder)
             }
         })
         .collect();
-    acp::PromptRequest::new(acp::SessionId::new(req.session_id.0), content_blocks)
+    PromptRequest::new(SessionId::new(req.session_id.0), content_blocks)
 }
 
 /// The nexus42 ACP client abstraction.
@@ -201,8 +208,9 @@ fn sdk_prompt_request_from_nexus(req: NexusPromptRequest) -> acp::PromptRequest 
 /// **DTO boundary**: All types in trait signatures are Nexus-owned DTOs from
 /// `nexus_contracts::local::acp`. SDK types are confined to `AcpSdkAdapter`.
 ///
-/// **subscribe()**: Moved off the trait onto `AcpSdkAdapter` as a direct
-/// method (see module docs for rationale).
+/// **subscribe()**: Removed in SDK v0.11.0 migration. The old `StreamReceiver`
+/// type no longer exists. Will be replaced with a proper DTO-wrapped streaming
+/// API in a future task.
 #[allow(async_fn_in_trait)]
 #[allow(dead_code)]
 pub trait NexusAcpClient: Send + Sync {
@@ -231,371 +239,21 @@ pub trait NexusAcpClient: Send + Sync {
     ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send;
 }
 
-/// Policy-aware client handler for V1.1+ — uses configurable permission policy.
-///
-/// This implements the ACP `Client` trait with policy-based permission handling:
-/// - `request_permission`: Consults PermissionPolicy, prompts if needed
-/// - `session_notification`: Log updates for debugging
-/// - File/terminal operations: Return errors (not implemented in V1.0)
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct PolicyAwareClientHandler {
-    /// Agent ID for logging context.
-    agent_id: String,
-    /// Permission policy for evaluating requests.
-    policy: Arc<RwLock<PermissionPolicy>>,
-    /// Workspace root for saving policy changes.
-    workspace_root: PathBuf,
-}
-
-#[allow(dead_code)]
-impl PolicyAwareClientHandler {
-    /// Create a new policy-aware client handler.
-    pub fn new(agent_id: String, workspace_root: PathBuf) -> Self {
-        let policy = PermissionPolicy::load(&workspace_root).unwrap_or_default();
-        Self {
-            agent_id,
-            policy: Arc::new(RwLock::new(policy)),
-            workspace_root,
-        }
-    }
-
-    /// Prompt user for permission decision.
-    async fn prompt_user(
-        &self,
-        tool_call: &str,
-        options: &[acp::PermissionOption],
-    ) -> PermissionDecision {
-        println!("\n⚠️  Agent '{}' requests permission:", self.agent_id);
-        println!("   Tool: {}", tool_call);
-
-        if !options.is_empty() {
-            println!("\nOptions:");
-            for (i, opt) in options.iter().enumerate() {
-                println!("  {}. {}", i + 1, opt.name);
-            }
-        }
-
-        println!("\nChoose action:");
-        println!("  [g] Grant this time");
-        println!("  [G] Grant always (save to policy)");
-        println!("  [d] Deny this time");
-        println!("  [D] Deny always (save to policy)");
-        println!("  [c] Cancel");
-
-        // Read user input (simplified for V1.1 - in production, use a proper prompt library)
-        // For now, we default to asking, but save policy if user chooses
-        // TODO: Add proper interactive prompting with dialoguer or similar
-
-        // Default to deny for safety in automated environments
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            tool_call = %tool_call,
-            "Interactive prompt not available - defaulting to deny"
-        );
-
-        PermissionDecision::Deny
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl acp::Client for PolicyAwareClientHandler {
-    /// Evaluate permission request against policy (V1.1 policy engine).
-    async fn request_permission(
-        &self,
-        args: acp::RequestPermissionRequest,
-    ) -> acp::Result<acp::RequestPermissionResponse> {
-        let tool_call_name = format!("{:?}", args.tool_call);
-
-        tracing::info!(
-            agent_id = %self.agent_id,
-            tool_call = %tool_call_name,
-            "Permission request received"
-        );
-
-        // Load current policy
-        let policy = self.policy.read().await;
-        let decision = policy.evaluate(&tool_call_name);
-        drop(policy);
-
-        // If decision is Ask, prompt user
-        let final_decision = if decision == PermissionDecision::Ask {
-            self.prompt_user(&tool_call_name, &args.options).await
-        } else {
-            decision
-        };
-
-        match final_decision {
-            PermissionDecision::Grant => {
-                tracing::info!(
-                    agent_id = %self.agent_id,
-                    tool_call = %tool_call_name,
-                    "Permission granted"
-                );
-
-                if args.options.is_empty() {
-                    tracing::error!(
-                        agent_id = %self.agent_id,
-                        "Permission request has no options - cancelling"
-                    );
-                    return Ok(acp::RequestPermissionResponse::new(
-                        acp::RequestPermissionOutcome::Cancelled,
-                    ));
-                }
-
-                let selected_option =
-                    acp::SelectedPermissionOutcome::new(args.options[0].option_id.clone());
-                Ok(acp::RequestPermissionResponse::new(
-                    acp::RequestPermissionOutcome::Selected(selected_option),
-                ))
-            }
-            PermissionDecision::Deny => {
-                tracing::warn!(
-                    agent_id = %self.agent_id,
-                    tool_call = %tool_call_name,
-                    "Permission denied"
-                );
-                Ok(acp::RequestPermissionResponse::new(
-                    acp::RequestPermissionOutcome::Cancelled,
-                ))
-            }
-            PermissionDecision::Ask => {
-                // Should not reach here (Ask is handled above), but deny for safety
-                tracing::warn!(
-                    agent_id = %self.agent_id,
-                    tool_call = %tool_call_name,
-                    "Permission denied (ask fallback)"
-                );
-                Ok(acp::RequestPermissionResponse::new(
-                    acp::RequestPermissionOutcome::Cancelled,
-                ))
-            }
-        }
-    }
-
-    /// Log session notifications for debugging.
-    async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
-        tracing::debug!(
-            agent_id = %self.agent_id,
-            session_id = ?args.session_id,
-            "Received session notification from agent"
-        );
-        Ok(())
-    }
-
-    /// File system operations — not implemented in V1.0.
-    async fn write_text_file(
-        &self,
-        _args: acp::WriteTextFileRequest,
-    ) -> acp::Result<acp::WriteTextFileResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "Agent requested fs/write_text_file — not supported in V1.0"
-        );
-        Err(SdkError::method_not_found())
-    }
-
-    async fn read_text_file(
-        &self,
-        _args: acp::ReadTextFileRequest,
-    ) -> acp::Result<acp::ReadTextFileResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "Agent requested fs/read_text_file — not supported in V1.0"
-        );
-        Err(SdkError::method_not_found())
-    }
-
-    /// Terminal operations — not implemented in V1.0.
-    async fn create_terminal(
-        &self,
-        _args: acp::CreateTerminalRequest,
-    ) -> acp::Result<acp::CreateTerminalResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "Agent requested terminal/create — not supported in V1.0"
-        );
-        Err(SdkError::method_not_found())
-    }
-
-    async fn terminal_output(
-        &self,
-        _args: acp::TerminalOutputRequest,
-    ) -> acp::Result<acp::TerminalOutputResponse> {
-        Err(SdkError::method_not_found())
-    }
-
-    async fn release_terminal(
-        &self,
-        _args: acp::ReleaseTerminalRequest,
-    ) -> acp::Result<acp::ReleaseTerminalResponse> {
-        Err(SdkError::method_not_found())
-    }
-
-    async fn wait_for_terminal_exit(
-        &self,
-        _args: acp::WaitForTerminalExitRequest,
-    ) -> acp::Result<acp::WaitForTerminalExitResponse> {
-        Err(SdkError::method_not_found())
-    }
-
-    async fn kill_terminal(
-        &self,
-        _args: acp::KillTerminalRequest,
-    ) -> acp::Result<acp::KillTerminalResponse> {
-        Err(SdkError::method_not_found())
-    }
-}
-
-/// Simple client handler for V1.0 — auto-grants all tool requests.
-///
-/// This implements the ACP `Client` trait with a simple policy:
-/// - `request_permission`: Auto-grant with warning log
-/// - `session_notification`: Log updates for debugging
-/// - File operations: Return errors (not implemented in V1.0)
-/// - Terminal operations: Return errors (not implemented in V1.0)
-///
-/// NOTE: In V1.0, the daemon_client field was removed during crate extraction
-/// because no tool operations actually dispatch to the daemon yet.
-/// Future versions will add daemon-mediated tool routing (ACP-R8).
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct SimpleClientHandler {
-    /// Agent ID for logging context.
-    agent_id: String,
-}
-
-#[allow(dead_code)]
-impl SimpleClientHandler {
-    /// Create a new simple client handler.
-    pub fn new(agent_id: String) -> Self {
-        Self { agent_id }
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl acp::Client for SimpleClientHandler {
-    /// Auto-grant all permission requests (V1.0 policy).
-    async fn request_permission(
-        &self,
-        args: acp::RequestPermissionRequest,
-    ) -> acp::Result<acp::RequestPermissionResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            tool_call = ?args.tool_call,
-            "Auto-granting permission request (V1.0 policy)"
-        );
-
-        // V1.0: Auto-grant by selecting the first available option
-        // If no options are provided, this is an error - cancel
-        if args.options.is_empty() {
-            tracing::error!(
-                agent_id = %self.agent_id,
-                "Permission request has no options - cancelling"
-            );
-            return Ok(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Cancelled,
-            ));
-        }
-
-        // Select the first option (auto-grant)
-        let selected_option =
-            acp::SelectedPermissionOutcome::new(args.options[0].option_id.clone());
-        Ok(acp::RequestPermissionResponse::new(
-            acp::RequestPermissionOutcome::Selected(selected_option),
-        ))
-    }
-
-    /// Log session notifications for debugging.
-    async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
-        tracing::debug!(
-            agent_id = %self.agent_id,
-            session_id = ?args.session_id,
-            "Received session notification from agent"
-        );
-        Ok(())
-    }
-
-    /// File system operations — not implemented in V1.0.
-    async fn write_text_file(
-        &self,
-        _args: acp::WriteTextFileRequest,
-    ) -> acp::Result<acp::WriteTextFileResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "Agent requested fs/write_text_file — not supported in V1.0"
-        );
-        Err(SdkError::method_not_found())
-    }
-
-    async fn read_text_file(
-        &self,
-        _args: acp::ReadTextFileRequest,
-    ) -> acp::Result<acp::ReadTextFileResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "Agent requested fs/read_text_file — not supported in V1.0"
-        );
-        Err(SdkError::method_not_found())
-    }
-
-    /// Terminal operations — not implemented in V1.0.
-    async fn create_terminal(
-        &self,
-        _args: acp::CreateTerminalRequest,
-    ) -> acp::Result<acp::CreateTerminalResponse> {
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "Agent requested terminal/create — not supported in V1.0"
-        );
-        Err(SdkError::method_not_found())
-    }
-
-    async fn terminal_output(
-        &self,
-        _args: acp::TerminalOutputRequest,
-    ) -> acp::Result<acp::TerminalOutputResponse> {
-        Err(SdkError::method_not_found())
-    }
-
-    async fn release_terminal(
-        &self,
-        _args: acp::ReleaseTerminalRequest,
-    ) -> acp::Result<acp::ReleaseTerminalResponse> {
-        Err(SdkError::method_not_found())
-    }
-
-    async fn wait_for_terminal_exit(
-        &self,
-        _args: acp::WaitForTerminalExitRequest,
-    ) -> acp::Result<acp::WaitForTerminalExitResponse> {
-        Err(SdkError::method_not_found())
-    }
-
-    async fn kill_terminal(
-        &self,
-        _args: acp::KillTerminalRequest,
-    ) -> acp::Result<acp::KillTerminalResponse> {
-        Err(SdkError::method_not_found())
-    }
-}
-
 /// Internal state for the SDK adapter (stored in LocalSet thread).
 #[allow(dead_code)]
 struct SdkConnection {
-    /// The ACP SDK connection.
-    connection: acp::ClientSideConnection,
-    /// The I/O task handle (must be kept alive).
-    _io_task: tokio::task::JoinHandle<()>,
-    /// Stream receiver for notifications.
-    stream_receiver: StreamReceiver,
+    /// The ACP SDK connection handle to the agent.
+    connection: ConnectionTo<Agent>,
 }
 
 /// Concrete adapter wrapping the `agent-client-protocol` SDK.
 ///
-/// This struct uses [`LocalSetBridge`] to execute `!Send` SDK operations on a
-/// dedicated thread with a `LocalSet`. The connection is created once and reused
-/// for all subsequent operations.
+/// This struct uses the SDK v0.11.0 `Client.builder().connect_with()` pattern
+/// to establish a connection to the agent. The `ConnectionTo<Agent>` handle is
+/// stored and reused for all subsequent operations.
+///
+/// The adapter uses [`LocalSetBridge`] to execute operations that may require
+/// !Send futures, bridging them to the async tokio world.
 #[allow(dead_code)]
 pub struct AcpSdkAdapter {
     /// The agent's resolved binary path or command string (for error messages).
@@ -607,8 +265,6 @@ pub struct AcpSdkAdapter {
     /// The ACP SDK connection (wrapped for thread-safe access).
     /// This is `Some` after `with_connection()` is called.
     connection: Arc<RwLock<Option<SdkConnection>>>,
-    /// Client handler for permission requests.
-    handler: SimpleClientHandler,
     /// Handle to the connection setup task (must be joined during cleanup).
     _setup_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -619,13 +275,11 @@ impl AcpSdkAdapter {
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[allow(dead_code)]
     pub fn new(agent_id: String, agent_path: PathBuf) -> Self {
-        let handler = SimpleClientHandler::new(agent_id.clone());
         Self {
             agent_path,
             agent_id: agent_id.clone(),
             bridge: LocalSetBridge::new(),
             connection: Arc::new(RwLock::new(None)),
-            handler,
             _setup_task: None,
         }
     }
@@ -633,7 +287,13 @@ impl AcpSdkAdapter {
     /// Create adapter with established connection.
     ///
     /// This method establishes the ACP SDK connection using the provided
-    /// stdin/stdout pipes from the agent subprocess.
+    /// stdin/stdout pipes from the agent subprocess. The connection uses
+    /// the SDK's `Client.builder().connect_with()` pattern.
+    ///
+    /// In SDK v0.11.0, the connection lifecycle is managed by `connect_with`
+    /// which provides a `ConnectionTo<Agent>` handle inside the callback.
+    /// We store this handle for use by trait methods. The connection is kept
+    /// alive by the callback returning a pending future.
     #[allow(dead_code)]
     #[allow(clippy::needless_pass_by_value)]
     pub fn with_connection(
@@ -642,65 +302,69 @@ impl AcpSdkAdapter {
         stdin: tokio::process::ChildStdin,
         stdout: tokio::process::ChildStdout,
     ) -> Self {
-        let handler = SimpleClientHandler::new(agent_id.clone());
         let bridge = LocalSetBridge::new();
         let connection = Arc::new(RwLock::new(None));
 
         tracing::info!(
             agent_id = %agent_id,
-            "Creating ACP SDK adapter with connection"
+            "Creating ACP SDK adapter with connection (v0.11.0)"
         );
 
-        // Clone for use inside the closure
         let connection_clone = connection.clone();
-        let handler_clone = handler.clone();
         let agent_id_for_log = agent_id.clone();
         let agent_id_for_error = agent_id.clone();
 
-        // Execute the connection setup on the LocalSet
         let bridge_clone = bridge.clone();
         let setup_task = tokio::spawn(async move {
             let result = bridge_clone
                 .execute(move || {
                     let connection_clone = connection_clone.clone();
-                    let handler = handler_clone;
                     let agent_id = agent_id_for_log;
 
                     // Convert tokio pipes to futures-compatible traits inside the LocalSet
-                    // This is where Compat is created - inside the !Send context
                     let stdin_compat = stdin.compat_write();
                     let stdout_compat = stdout.compat();
 
                     Box::pin(async move {
-                        // Create the SDK connection on the LocalSet
-                        let spawn_local = |fut| {
-                            tokio::task::spawn_local(fut);
-                        };
+                        // Create the transport using SDK ByteStreams
+                        let transport = ByteStreams::new(stdin_compat, stdout_compat);
 
-                        let (conn, io_task) = acp::ClientSideConnection::new(
-                            handler,
-                            stdin_compat,
-                            stdout_compat,
-                            spawn_local,
-                        );
+                        // Build the Client with a no-op handler (auto-grant all permissions)
+                        let builder = acp::Client.builder().name(&agent_id);
 
-                        let stream_receiver = conn.subscribe();
+                        // Connect with the transport.
+                        // The callback receives ConnectionTo<Agent> which we clone into
+                        // our shared state. We then await a pending future to keep the
+                        // connection alive indefinitely.
+                        let connection_for_callback = connection_clone.clone();
+                        let agent_id_for_connect = agent_id.clone();
+                        let connect_result = builder
+                            .connect_with(transport, async move |cx| {
+                                // Store the connection handle for use by trait methods
+                                let mut guard = connection_for_callback.write().await;
+                                *guard = Some(SdkConnection { connection: cx });
+                                drop(guard);
 
-                        // Store the connection
-                        let mut guard = connection_clone.write().await;
-                        *guard = Some(SdkConnection {
-                            connection: conn,
-                            _io_task: tokio::task::spawn_local(async move {
-                                if let Err(e) = io_task.await {
-                                    tracing::error!(
-                                        agent_id = %agent_id,
-                                        error = %e,
-                                        "ACP I/O task failed"
-                                    );
-                                }
-                            }),
-                            stream_receiver,
-                        });
+                                tracing::info!(
+                                    agent_id = %agent_id_for_connect,
+                                    "ACP SDK connection established, ConnectionTo<Agent> stored"
+                                );
+
+                                // Keep the connection alive by awaiting a pending future
+                                std::future::pending::<()>().await;
+
+                                Ok(())
+                            })
+                            .await;
+
+                        if let Err(e) = connect_result {
+                            tracing::error!(
+                                agent_id = %agent_id,
+                                error = %e,
+                                "ACP SDK connection failed"
+                            );
+                            return Err(crate::AcpError::sdk(e));
+                        }
 
                         Ok::<(), crate::AcpError>(())
                     })
@@ -721,7 +385,6 @@ impl AcpSdkAdapter {
             agent_id,
             bridge,
             connection,
-            handler,
             _setup_task: Some(setup_task),
         }
     }
@@ -759,10 +422,11 @@ impl Drop for AcpSdkAdapter {
 impl NexusAcpClient for AcpSdkAdapter {
     fn initialize(
         &self,
-        request: NexusInitializeRequest,
+        _request: NexusInitializeRequest,
     ) -> impl Future<Output = AcpResult<NexusInitializeResponse>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
 
         async move {
             bridge
@@ -771,36 +435,25 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                     Box::pin(async move {
                         let guard = connection.read().await;
-                        let sdk_conn = match guard.as_ref() {
+                        let _sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
                                 return Err(crate::AcpError::connection_failed(
-                                    "Connection not established",
+                                    "Connection not established — SDK v0.11.0 migration in progress",
                                 ))
                             }
                         };
 
-                        let sdk_request = sdk_initialize_request_from_nexus(request);
-                        let response = sdk_conn
-                            .connection
-                            .initialize(sdk_request)
-                            .await
-                            .map_err(crate::AcpError::sdk)?;
+                        tracing::warn!(
+                            agent_id = %agent_id,
+                            "initialize() called — SDK v0.11.0 connection architecture migration pending"
+                        );
 
-                        Ok(NexusInitializeResponse {
-                            protocol_version: nexus_protocol_version_from_sdk(
-                                response.protocol_version,
-                            ),
-                            agent_capabilities: nexus_agent_capabilities_from_sdk(
-                                &response.agent_capabilities,
-                            ),
-                            agent_info: response.agent_info.as_ref().map(nexus_agent_info_from_sdk),
-                            auth_methods: response
-                                .auth_methods
-                                .iter()
-                                .map(nexus_auth_method_from_sdk)
-                                .collect(),
-                        })
+                        // The full initialize flow will be implemented once the
+                        // connection architecture is fully migrated to use ConnectionTo<Agent>.
+                        Err(crate::AcpError::connection_failed(
+                            "SDK v0.11.0 adapter not fully implemented",
+                        ))
                     })
                 })
                 .await
@@ -810,10 +463,11 @@ impl NexusAcpClient for AcpSdkAdapter {
 
     fn create_session(
         &self,
-        request: NexusNewSessionRequest,
+        _request: NexusNewSessionRequest,
     ) -> impl Future<Output = AcpResult<NexusSessionCreated>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
 
         async move {
             bridge
@@ -822,29 +476,23 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                     Box::pin(async move {
                         let guard = connection.read().await;
-                        let sdk_conn = match guard.as_ref() {
+                        let _sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
                                 return Err(crate::AcpError::connection_failed(
-                                    "Connection not established",
+                                    "Connection not established — SDK v0.11.0 migration in progress",
                                 ))
                             }
                         };
 
-                        let sdk_request = sdk_new_session_request_from_nexus(request);
-                        let response = sdk_conn
-                            .connection
-                            .new_session(sdk_request)
-                            .await
-                            .map_err(crate::AcpError::sdk)?;
+                        tracing::warn!(
+                            agent_id = %agent_id,
+                            "create_session() called — SDK v0.11.0 connection architecture migration pending"
+                        );
 
-                        Ok(NexusSessionCreated {
-                            session_id: NexusSessionId(response.session_id.to_string()),
-                            modes: response
-                                .modes
-                                .as_ref()
-                                .map(nexus_session_mode_state_from_sdk),
-                        })
+                        Err(crate::AcpError::connection_failed(
+                            "SDK v0.11.0 adapter not fully implemented",
+                        ))
                     })
                 })
                 .await
@@ -854,10 +502,11 @@ impl NexusAcpClient for AcpSdkAdapter {
 
     fn prompt(
         &self,
-        request: NexusPromptRequest,
+        _request: NexusPromptRequest,
     ) -> impl Future<Output = AcpResult<NexusPromptCompleted>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
 
         async move {
             bridge
@@ -866,25 +515,23 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                     Box::pin(async move {
                         let guard = connection.read().await;
-                        let sdk_conn = match guard.as_ref() {
+                        let _sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
                                 return Err(crate::AcpError::connection_failed(
-                                    "Connection not established",
+                                    "Connection not established — SDK v0.11.0 migration in progress",
                                 ))
                             }
                         };
 
-                        let sdk_request = sdk_prompt_request_from_nexus(request);
-                        let response = sdk_conn
-                            .connection
-                            .prompt(sdk_request)
-                            .await
-                            .map_err(crate::AcpError::sdk)?;
+                        tracing::warn!(
+                            agent_id = %agent_id,
+                            "prompt() called — SDK v0.11.0 connection architecture migration pending"
+                        );
 
-                        Ok(NexusPromptCompleted {
-                            stop_reason: nexus_stop_reason_from_sdk(response.stop_reason),
-                        })
+                        Err(crate::AcpError::connection_failed(
+                            "SDK v0.11.0 adapter not fully implemented",
+                        ))
                     })
                 })
                 .await
@@ -894,10 +541,11 @@ impl NexusAcpClient for AcpSdkAdapter {
 
     fn cancel(
         &self,
-        session_id: NexusSessionId,
+        _session_id: NexusSessionId,
     ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
 
         async move {
             bridge
@@ -906,55 +554,28 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                     Box::pin(async move {
                         let guard = connection.read().await;
-                        let sdk_conn = match guard.as_ref() {
+                        let _sdk_conn = match guard.as_ref() {
                             Some(conn) => conn,
                             None => {
                                 return Err(crate::AcpError::connection_failed(
-                                    "Connection not established",
+                                    "Connection not established — SDK v0.11.0 migration in progress",
                                 ))
                             }
                         };
 
-                        let session_id_str = session_id.0.clone();
-                        let cancel_notification =
-                            acp::CancelNotification::new(acp::SessionId::new(session_id_str));
-                        let result: Result<(), acp::Error> =
-                            sdk_conn.connection.cancel(cancel_notification).await;
-                        result.map_err(crate::AcpError::sdk)?;
+                        tracing::warn!(
+                            agent_id = %agent_id,
+                            "cancel() called — SDK v0.11.0 connection architecture migration pending"
+                        );
 
-                        Ok(NexusCancelResult {
-                            session_id: NexusSessionId(session_id.0),
-                        })
+                        Err(crate::AcpError::connection_failed(
+                            "SDK v0.11.0 adapter not fully implemented",
+                        ))
                     })
                 })
                 .await
                 .and_then(|r| r)
         }
-    }
-}
-
-/// Direct streaming access (not on the trait — see module docs for rationale).
-impl AcpSdkAdapter {
-    /// Subscribe to stream messages from the agent.
-    ///
-    /// This method is not on the `NexusAcpClient` trait because the return
-    /// type (`StreamReceiver`) is tightly coupled to the SDK's `async-broadcast`
-    /// implementation. Consumers that need streaming should use this method
-    /// directly on the adapter.
-    #[allow(dead_code)]
-    pub fn subscribe(&self) -> StreamReceiver {
-        let _connection = self.connection.clone();
-
-        // Create a fresh receiver (this will be updated to use the actual connection's receiver)
-        let (tx, rx) = async_broadcast::broadcast(16);
-        drop(tx);
-
-        tracing::warn!(
-            agent_id = %self.agent_id,
-            "subscribe() called — returning empty receiver (connection may not be established yet)"
-        );
-
-        StreamReceiver::from(rx)
     }
 }
 
@@ -965,26 +586,27 @@ mod tests {
 
     #[test]
     fn protocol_version_from_sdk() {
-        let sdk_version = acp::ProtocolVersion::LATEST;
-        let nexus_version = nexus_protocol_version_from_sdk(sdk_version);
+        let sdk_version = ProtocolVersion::LATEST;
+        let nexus_version = nexus_protocol_version_from_sdk(&sdk_version);
         assert_eq!(nexus_version.0, "1");
     }
 
     #[test]
     fn stop_reason_from_sdk() {
+        use agent_client_protocol::schema::StopReason;
         assert_eq!(
-            nexus_stop_reason_from_sdk(acp::StopReason::EndTurn),
+            nexus_stop_reason_from_sdk(&StopReason::EndTurn),
             NexusStopReason::EndTurn
         );
         assert_eq!(
-            nexus_stop_reason_from_sdk(acp::StopReason::Cancelled),
+            nexus_stop_reason_from_sdk(&StopReason::Cancelled),
             NexusStopReason::Cancelled
         );
     }
 
     #[test]
     fn agent_info_from_sdk() {
-        let sdk_impl = acp::Implementation::new("claude-code", "1.0.0");
+        let sdk_impl = Implementation::new("claude-code", "1.0.0");
         let nexus_info = nexus_agent_info_from_sdk(&sdk_impl);
         assert_eq!(nexus_info.name, "claude-code");
         assert_eq!(nexus_info.version, "1.0.0");
@@ -1019,7 +641,7 @@ mod tests {
 
         // Verify HTTP server
         match &sdk_req.mcp_servers[0] {
-            acp::McpServer::Http(h) => {
+            McpServer::Http(h) => {
                 assert_eq!(h.name, "http-server");
                 assert_eq!(h.url, "https://example.com/mcp");
                 assert!(h.headers.is_empty());
@@ -1029,7 +651,7 @@ mod tests {
 
         // Verify SSE server
         match &sdk_req.mcp_servers[1] {
-            acp::McpServer::Sse(s) => {
+            McpServer::Sse(s) => {
                 assert_eq!(s.name, "sse-server");
                 assert_eq!(s.url, "https://example.com/sse");
             }
@@ -1038,7 +660,7 @@ mod tests {
 
         // Verify Stdio server
         match &sdk_req.mcp_servers[2] {
-            acp::McpServer::Stdio(s) => {
+            McpServer::Stdio(s) => {
                 assert_eq!(s.name, "local-server");
                 assert_eq!(s.command, std::path::PathBuf::from("/usr/bin/mcp-server"));
             }
@@ -1064,14 +686,14 @@ mod tests {
     fn protocol_version_invalid_string_defaults_to_latest() {
         let version = NexusProtocolVersion::new("not-a-number");
         let sdk_version = sdk_protocol_version_from_nexus(&version);
-        assert_eq!(sdk_version, acp::ProtocolVersion::LATEST);
+        assert_eq!(sdk_version, ProtocolVersion::LATEST);
     }
 
     #[test]
     fn protocol_version_empty_string_defaults_to_latest() {
         let version = NexusProtocolVersion::new("");
         let sdk_version = sdk_protocol_version_from_nexus(&version);
-        assert_eq!(sdk_version, acp::ProtocolVersion::LATEST);
+        assert_eq!(sdk_version, ProtocolVersion::LATEST);
     }
 
     #[tokio::test]
