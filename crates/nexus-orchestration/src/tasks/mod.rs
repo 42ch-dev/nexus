@@ -806,7 +806,7 @@ impl Task for AcpPromptTask {
         let full_text = if let Some(ref handle_arc) = self.worker_handle {
             // Take the handle out of the Arc<Mutex> to avoid holding
             // the MutexGuard across the await point (which is !Send).
-            let mut handle = {
+            let handle = {
                 let mut guard = handle_arc.lock().map_err(|e| {
                     graph_flow::GraphError::TaskExecutionFailed(format!("worker handle lock: {e}"))
                 })?;
