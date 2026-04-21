@@ -1032,4 +1032,52 @@ mod tests {
         let content = std::fs::read_to_string(&path).expect("read failed");
         assert!(content.contains("future_feature"));
     }
+
+    #[test]
+    fn test_validate_toml_keys_known_keys_no_warnings() {
+        let toml_str = r#"
+default = "ask"
+
+[grant]
+"file_system.read" = true
+
+[deny]
+"terminal.kill" = true
+
+[agents.my-agent.grant]
+"terminal.create" = true
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().expect("parse failed");
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_validate_toml_keys_unknown_top_level_key() {
+        let toml_str = r#"
+default = "ask"
+unknown_key = "value"
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().expect("parse failed");
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unknown_key"));
+    }
+
+    #[test]
+    fn test_validate_toml_keys_unknown_sub_key_under_agent() {
+        let toml_str = r#"
+[agents.my-agent]
+unknown_action = "value"
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().expect("parse failed");
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unknown_action"));
+        assert!(warnings[0].contains("my-agent"));
+    }
 }
