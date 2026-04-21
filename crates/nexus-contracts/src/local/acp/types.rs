@@ -381,6 +381,148 @@ pub struct NexusCancelResult {
     pub session_id: NexusSessionId,
 }
 
+// ── Session config option ─────────────────────────────────────────────
+
+/// Request to set a session configuration option.
+///
+/// Mirrors the SDK `SetSessionConfigOptionRequest` — identifies the session,
+/// the config key, and the new value (a string newtype for value IDs).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusSetConfigOptionRequest {
+    /// The session to update.
+    pub session_id: NexusSessionId,
+    /// The configuration option to set.
+    pub config_id: String,
+    /// The value to set (a config value ID string).
+    pub value: String,
+}
+
+impl NexusSetConfigOptionRequest {
+    /// Create a new set-config-option request.
+    #[must_use]
+    pub fn new(
+        session_id: NexusSessionId,
+        config_id: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_id,
+            config_id: config_id.into(),
+            value: value.into(),
+        }
+    }
+}
+
+/// Category of a session configuration option (UX hint).
+///
+/// Mirrors the SDK `SessionConfigOptionCategory` enum.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NexusConfigOptionCategory {
+    /// Session mode selector.
+    Mode,
+    /// Model selector.
+    Model,
+    /// Thought/reasoning level selector.
+    ThoughtLevel,
+    /// Unknown / uncategorized.
+    Other(String),
+}
+
+/// A possible value in a select configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigSelectOption {
+    /// Unique identifier for this option value.
+    pub value: String,
+    /// Human-readable label.
+    pub name: String,
+    /// Optional description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// A group of selectable options in a configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigSelectGroup {
+    /// Unique identifier for this group.
+    pub group: String,
+    /// Human-readable label for this group.
+    pub name: String,
+    /// The set of option values in this group.
+    pub options: Vec<NexusConfigSelectOption>,
+}
+
+/// Options layout for a select configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NexusConfigSelectOptions {
+    /// A flat list of options with no grouping.
+    Ungrouped(Vec<NexusConfigSelectOption>),
+    /// A list of options grouped under headers.
+    Grouped(Vec<NexusConfigSelectGroup>),
+}
+
+/// The payload for a select-type configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigSelect {
+    /// The currently selected value.
+    pub current_value: String,
+    /// The selectable options.
+    pub options: NexusConfigSelectOptions,
+}
+
+/// Type-specific payload for a session configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NexusConfigKind {
+    /// Single-value selector (dropdown).
+    Select(NexusConfigSelect),
+}
+
+/// A session configuration option returned by the agent.
+///
+/// Mirrors the SDK `SessionConfigOption` struct.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigOption {
+    /// Unique identifier for the configuration option.
+    pub id: String,
+    /// Human-readable label.
+    pub name: String,
+    /// Optional description for display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Optional semantic category for the option (UX hint).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<NexusConfigOptionCategory>,
+    /// Type-specific payload.
+    #[serde(flatten)]
+    pub kind: NexusConfigKind,
+}
+
+/// Response from setting a session configuration option.
+///
+/// Mirrors the SDK `SetSessionConfigOptionResponse` — returns the full set of
+/// configuration options and their current values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusSetConfigOptionResponse {
+    /// The full set of configuration options with their current values.
+    pub config_options: Vec<NexusConfigOption>,
+}
+
+impl NexusSetConfigOptionResponse {
+    /// Create a new set-config-option response.
+    #[must_use]
+    pub fn new(config_options: Vec<NexusConfigOption>) -> Self {
+        Self { config_options }
+    }
+}
+
 // ── Session list ───────────────────────────────────────────────────────
 
 /// Request to list sessions from the agent.
@@ -666,6 +808,177 @@ mod tests {
             let deserialized: NexusMcpServer = serde_json::from_str(&json).unwrap();
             assert_eq!(*server, deserialized);
         }
+    }
+
+    // ── Config option DTO tests ─────────────────────────────────────────────
+
+    #[test]
+    fn nexus_set_config_option_request_new() {
+        let req = NexusSetConfigOptionRequest::new(
+            NexusSessionId::new("sess-1"),
+            "model",
+            "claude-3-opus",
+        );
+        assert_eq!(req.session_id.0, "sess-1");
+        assert_eq!(req.config_id, "model");
+        assert_eq!(req.value, "claude-3-opus");
+    }
+
+    #[test]
+    fn nexus_set_config_option_request_roundtrip() {
+        let req = NexusSetConfigOptionRequest::new(
+            NexusSessionId::new("sess-42"),
+            "thought_level",
+            "high",
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let deserialized: NexusSetConfigOptionRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req.session_id, deserialized.session_id);
+        assert_eq!(req.config_id, deserialized.config_id);
+        assert_eq!(req.value, deserialized.value);
+    }
+
+    #[test]
+    fn nexus_set_config_option_request_camel_case() {
+        let req = NexusSetConfigOptionRequest::new(NexusSessionId::new("s1"), "cfg_id", "val");
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("sessionId"));
+        assert!(json.contains("configId"));
+    }
+
+    #[test]
+    fn nexus_config_option_category_roundtrip() {
+        for cat in [
+            NexusConfigOptionCategory::Mode,
+            NexusConfigOptionCategory::Model,
+            NexusConfigOptionCategory::ThoughtLevel,
+            NexusConfigOptionCategory::Other("custom".to_string()),
+        ] {
+            let json = serde_json::to_string(&cat).unwrap();
+            let deserialized: NexusConfigOptionCategory = serde_json::from_str(&json).unwrap();
+            assert_eq!(cat, deserialized);
+        }
+    }
+
+    #[test]
+    fn nexus_config_select_option_roundtrip() {
+        let opt = NexusConfigSelectOption {
+            value: "opt-1".to_string(),
+            name: "Option One".to_string(),
+            description: Some("First option".to_string()),
+        };
+        let json = serde_json::to_string(&opt).unwrap();
+        let deserialized: NexusConfigSelectOption = serde_json::from_str(&json).unwrap();
+        assert_eq!(opt, deserialized);
+
+        // Without description
+        let opt_no_desc = NexusConfigSelectOption {
+            value: "opt-2".to_string(),
+            name: "Two".to_string(),
+            description: None,
+        };
+        let json2 = serde_json::to_string(&opt_no_desc).unwrap();
+        assert!(!json2.contains("description"));
+    }
+
+    #[test]
+    fn nexus_config_select_options_roundtrip() {
+        let ungrouped = NexusConfigSelectOptions::Ungrouped(vec![NexusConfigSelectOption {
+            value: "a".to_string(),
+            name: "A".to_string(),
+            description: None,
+        }]);
+        let json = serde_json::to_string(&ungrouped).unwrap();
+        let d: NexusConfigSelectOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(ungrouped, d);
+
+        let grouped = NexusConfigSelectOptions::Grouped(vec![NexusConfigSelectGroup {
+            group: "g1".to_string(),
+            name: "Group 1".to_string(),
+            options: vec![],
+        }]);
+        let json2 = serde_json::to_string(&grouped).unwrap();
+        let d2: NexusConfigSelectOptions = serde_json::from_str(&json2).unwrap();
+        assert_eq!(grouped, d2);
+    }
+
+    #[test]
+    fn nexus_config_kind_select_roundtrip() {
+        let kind = NexusConfigKind::Select(NexusConfigSelect {
+            current_value: "claude-3-opus".to_string(),
+            options: NexusConfigSelectOptions::Ungrouped(vec![NexusConfigSelectOption {
+                value: "claude-3-opus".to_string(),
+                name: "Claude 3 Opus".to_string(),
+                description: None,
+            }]),
+        });
+        let json = serde_json::to_string(&kind).unwrap();
+        let d: NexusConfigKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(kind, d);
+    }
+
+    #[test]
+    fn nexus_config_option_full_roundtrip() {
+        let opt = NexusConfigOption {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            description: Some("Select the AI model".to_string()),
+            category: Some(NexusConfigOptionCategory::Model),
+            kind: NexusConfigKind::Select(NexusConfigSelect {
+                current_value: "claude-3-opus".to_string(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![
+                    NexusConfigSelectOption {
+                        value: "claude-3-opus".to_string(),
+                        name: "Claude 3 Opus".to_string(),
+                        description: None,
+                    },
+                    NexusConfigSelectOption {
+                        value: "claude-3-sonnet".to_string(),
+                        name: "Claude 3 Sonnet".to_string(),
+                        description: Some("Faster model".to_string()),
+                    },
+                ]),
+            }),
+        };
+        let json = serde_json::to_string(&opt).unwrap();
+        let deserialized: NexusConfigOption = serde_json::from_str(&json).unwrap();
+        assert_eq!(opt, deserialized);
+    }
+
+    #[test]
+    fn nexus_set_config_option_response_new() {
+        let resp = NexusSetConfigOptionResponse::new(vec![NexusConfigOption {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            description: None,
+            category: None,
+            kind: NexusConfigKind::Select(NexusConfigSelect {
+                current_value: "claude-3-opus".to_string(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![]),
+            }),
+        }]);
+        assert_eq!(resp.config_options.len(), 1);
+    }
+
+    #[test]
+    fn nexus_set_config_option_response_roundtrip() {
+        let resp = NexusSetConfigOptionResponse::new(vec![NexusConfigOption {
+            id: "mode".to_string(),
+            name: "Mode".to_string(),
+            description: None,
+            category: Some(NexusConfigOptionCategory::Mode),
+            kind: NexusConfigKind::Select(NexusConfigSelect {
+                current_value: "act".to_string(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![NexusConfigSelectOption {
+                    value: "act".to_string(),
+                    name: "Act".to_string(),
+                    description: None,
+                }]),
+            }),
+        }]);
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: NexusSetConfigOptionResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, deserialized);
     }
 
     #[test]
