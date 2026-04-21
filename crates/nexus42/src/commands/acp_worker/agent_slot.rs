@@ -21,6 +21,10 @@ pub struct AgentConfig {
     pub role: Option<String>,
     /// Optional model override for the agent.
     pub model: Option<String>,
+    /// Optional system prompt content (T8).
+    /// When present, injected as the first message in the ACP session.
+    /// Daemon reads from role's `system_prompt_file` and sends via IPC.
+    pub system_prompt: Option<String>,
 }
 
 impl AgentConfig {
@@ -31,6 +35,7 @@ impl AgentConfig {
             acp_agent_id,
             role: None,
             model: None,
+            system_prompt: None,
         }
     }
 
@@ -43,6 +48,12 @@ impl AgentConfig {
     /// Builder-style model override.
     pub fn with_model(mut self, model: String) -> Self {
         self.model = Some(model);
+        self
+    }
+
+    /// Builder-style system prompt (T8).
+    pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
+        self.system_prompt = Some(system_prompt);
         self
     }
 }
@@ -131,6 +142,12 @@ impl SlotHealth {
 ///
 /// The slot can enter Error state from any non-terminal state.
 /// From Error, it can transition to Ready (recovery) or Stopping.
+///
+/// # System Prompt (T8)
+///
+/// When `config.system_prompt` is set, the content is injected as the first
+/// system message when the ACP session is created. This allows role-based
+/// persona customization without modifying preset prompt templates.
 pub struct AgentSlot {
     /// Runtime configuration for this agent.
     config: AgentConfig,
@@ -198,6 +215,12 @@ impl AgentSlot {
     /// Get the model override (if set).
     pub fn model(&self) -> Option<&str> {
         self.config.model.as_deref()
+    }
+
+    /// Get the system prompt content (if set) — T8.
+    /// This is injected as the first message when creating the ACP session.
+    pub fn system_prompt(&self) -> Option<&str> {
+        self.config.system_prompt.as_deref()
     }
 
     /// Transition to Ready state.
@@ -346,6 +369,7 @@ mod tests {
             acp_agent_id: "agent_456".to_string(),
             role: Some("writer".to_string()),
             model: Some("claude-3".to_string()),
+            system_prompt: Some("You are a creative writer.".to_string()),
         }
     }
 
@@ -448,12 +472,14 @@ mod tests {
     fn config_builder() {
         let config = AgentConfig::new("sess_abc".to_string(), "agent_xyz".to_string())
             .with_role("editor".to_string())
-            .with_model("gpt-4".to_string());
+            .with_model("gpt-4".to_string())
+            .with_system_prompt("You are an editor.".to_string());
 
         assert_eq!(config.session_id, "sess_abc");
         assert_eq!(config.acp_agent_id, "agent_xyz");
         assert_eq!(config.role, Some("editor".to_string()));
         assert_eq!(config.model, Some("gpt-4".to_string()));
+        assert_eq!(config.system_prompt, Some("You are an editor.".to_string()));
     }
 
     #[test]
@@ -463,6 +489,17 @@ mod tests {
         assert_eq!(slot.acp_agent_id(), "agent_456");
         assert_eq!(slot.role(), Some("writer"));
         assert_eq!(slot.model(), Some("claude-3"));
+        assert_eq!(slot.system_prompt(), Some("You are a creative writer."));
+    }
+
+    #[test]
+    fn slot_accessors_without_system_prompt() {
+        let config = AgentConfig::new("sess_no_sp".to_string(), "agent_sp".to_string())
+            .with_role("researcher".to_string());
+        let slot = AgentSlot::new(config);
+        assert_eq!(slot.session_id(), "sess_no_sp");
+        assert_eq!(slot.role(), Some("researcher"));
+        assert!(slot.system_prompt().is_none());
     }
 
     #[test]
