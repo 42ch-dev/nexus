@@ -45,6 +45,20 @@ pub struct AcpWorkerArgs {
     /// Deprecated: prefer `agents` array in `worker/initialize`.
     #[arg(long, default_value = "claude-sonnet-4-20250514")]
     pub agent: Option<String>,
+
+    /// Model override (e.g. `claude-3-opus`, `o3`).
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Role ID for this worker (e.g. `writer`, `reviewer`).
+    #[arg(long)]
+    pub role: Option<String>,
+
+    /// Agent reference in `role:acp_agent_id[:model]` format (repeatable).
+    /// Each ref overrides the agent and/or model for a specific role.
+    /// Example: `--agent-ref reviewer:codex-acp:o3 --agent-ref writer:claude-acp`
+    #[arg(long = "agent-ref", value_name = "ROLE:AGENT_ID[:MODEL]")]
+    pub agent_ref: Vec<String>,
 }
 
 /// Shared state for the multiplexed worker, managing multiple agent sessions.
@@ -1512,5 +1526,153 @@ mod tests {
             .as_ref()
             .expect("error")
             .contains("second crash"));
+    }
+
+    // --- T7: CLI flag parsing for multi-agent config ---
+
+    use clap::Parser;
+
+    /// Wrapper for parsing `AcpWorkerArgs` in tests.
+    #[derive(Debug, Parser)]
+    #[command(name = "acp-worker")]
+    struct AcpWorkerCli {
+        #[command(flatten)]
+        args: AcpWorkerArgs,
+    }
+
+    #[test]
+    fn acp_worker_args_basic_creator_agent() {
+        let cli = AcpWorkerCli::try_parse_from([
+            "acp-worker",
+            "--creator",
+            "c1",
+            "--agent",
+            "claude-sonnet-4-20250514",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.args.creator, "c1");
+        assert_eq!(cli.args.agent.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert!(cli.args.model.is_none());
+        assert!(cli.args.role.is_none());
+        assert!(cli.args.agent_ref.is_empty());
+    }
+
+    #[test]
+    fn acp_worker_args_with_model_and_role() {
+        let cli = AcpWorkerCli::try_parse_from([
+            "acp-worker",
+            "--creator",
+            "c1",
+            "--model",
+            "claude-3-opus",
+            "--role",
+            "writer",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.args.creator, "c1");
+        assert_eq!(cli.args.model.as_deref(), Some("claude-3-opus"));
+        assert_eq!(cli.args.role.as_deref(), Some("writer"));
+    }
+
+    #[test]
+    fn acp_worker_args_with_agent_ref_two_segments() {
+        let cli = AcpWorkerCli::try_parse_from([
+            "acp-worker",
+            "--creator",
+            "c1",
+            "--agent-ref",
+            "writer:claude-acp",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.args.agent_ref.len(), 1);
+        assert_eq!(cli.args.agent_ref[0], "writer:claude-acp");
+    }
+
+    #[test]
+    fn acp_worker_args_with_agent_ref_three_segments() {
+        let cli = AcpWorkerCli::try_parse_from([
+            "acp-worker",
+            "--creator",
+            "c1",
+            "--agent-ref",
+            "reviewer:codex-acp:o3",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.args.agent_ref.len(), 1);
+        assert_eq!(cli.args.agent_ref[0], "reviewer:codex-acp:o3");
+    }
+
+    #[test]
+    fn acp_worker_args_with_multiple_agent_refs() {
+        let cli = AcpWorkerCli::try_parse_from([
+            "acp-worker",
+            "--creator",
+            "c1",
+            "--agent-ref",
+            "reviewer:codex-acp:o3",
+            "--agent-ref",
+            "writer:claude-acp",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.args.agent_ref.len(), 2);
+    }
+
+    #[test]
+    fn acp_worker_args_all_flags() {
+        let cli = AcpWorkerCli::try_parse_from([
+            "acp-worker",
+            "--creator",
+            "c1",
+            "--agent",
+            "claude-sonnet-4-20250514",
+            "--model",
+            "claude-3-opus",
+            "--role",
+            "writer",
+            "--agent-ref",
+            "reviewer:codex-acp:o3",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.args.creator, "c1");
+        assert_eq!(cli.args.agent.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert_eq!(cli.args.model.as_deref(), Some("claude-3-opus"));
+        assert_eq!(cli.args.role.as_deref(), Some("writer"));
+        assert_eq!(cli.args.agent_ref.len(), 1);
+    }
+
+    // --- T7: Integration with parse_agent_ref ---
+
+    #[test]
+    fn acp_worker_agent_ref_integration_two_segments() {
+        let ref_str = "writer:claude-acp";
+        let (role, agent, model) = crate::config::parse_agent_ref(ref_str).unwrap();
+        assert_eq!(role, "writer");
+        assert_eq!(agent, "claude-acp");
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn acp_worker_agent_ref_integration_three_segments() {
+        let ref_str = "reviewer:codex-acp:o3";
+        let (role, agent, model) = crate::config::parse_agent_ref(ref_str).unwrap();
+        assert_eq!(role, "reviewer");
+        assert_eq!(agent, "codex-acp");
+        assert_eq!(model.as_deref(), Some("o3"));
+    }
+
+    #[test]
+    fn acp_worker_agent_ref_integration_invalid_format() {
+        let result = crate::config::parse_agent_ref("bad-format");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid --agent-ref format"));
     }
 }
