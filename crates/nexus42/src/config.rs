@@ -635,6 +635,542 @@ platform_url = "https://direct.api.io"
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_save_test"));
         assert_eq!(loaded.platform_url, "https://save.test.io");
     }
+
+    // -----------------------------------------------------------------------
+    // UserAgentsConfig tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn user_agents_config_loads_missing_file_as_default() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let cfg = UserAgentsConfig::load().expect("load should succeed");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert!(cfg.strategies.is_empty());
+    }
+
+    #[test]
+    fn user_agents_config_loads_valid_toml() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        let toml_content = r#"
+[strategies.novel-writing.roles.writer]
+agent = "claude-sonnet-4-20250514"
+model = "claude-3-opus"
+
+[strategies.novel-writing.roles.reviewer]
+agent = "codex-acp"
+model = "o3"
+
+[strategies.default.roles.editor]
+agent = "claude-sonnet-4-20250514"
+"#;
+        std::fs::write(nexus_dir.join("agents.toml"), toml_content).expect("write toml");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let cfg = UserAgentsConfig::load().expect("load should succeed");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(cfg.strategies.len(), 2);
+
+        // Check novel-writing strategy
+        let novel = cfg
+            .strategies
+            .get("novel-writing")
+            .expect("novel-writing strategy");
+        let writer = novel.roles.get("writer").expect("writer role");
+        assert_eq!(writer.agent.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert_eq!(writer.model.as_deref(), Some("claude-3-opus"));
+
+        let reviewer = novel.roles.get("reviewer").expect("reviewer role");
+        assert_eq!(reviewer.agent.as_deref(), Some("codex-acp"));
+        assert_eq!(reviewer.model.as_deref(), Some("o3"));
+
+        // Check default strategy
+        let default_strat = cfg.strategies.get("default").expect("default strategy");
+        let editor = default_strat.roles.get("editor").expect("editor role");
+        assert_eq!(editor.agent.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert!(editor.model.is_none());
+    }
+
+    #[test]
+    fn user_agents_config_returns_defaults_on_corrupt_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        std::fs::write(nexus_dir.join("agents.toml"), "this is not toml {{{")
+            .expect("write corrupt");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let cfg = UserAgentsConfig::load().expect("load should succeed with defaults");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert!(cfg.strategies.is_empty());
+    }
+
+    #[test]
+    fn user_agents_config_empty_file_returns_default() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        std::fs::write(nexus_dir.join("agents.toml"), "").expect("write empty");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let cfg = UserAgentsConfig::load().expect("load should succeed");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert!(cfg.strategies.is_empty());
+    }
+
+    #[test]
+    fn user_agents_config_roundtrips_via_toml() {
+        let mut cfg = UserAgentsConfig::default();
+        let mut roles = HashMap::new();
+        roles.insert(
+            "writer".to_string(),
+            RoleOverride::new(
+                Some("claude-sonnet-4-20250514".to_string()),
+                Some("claude-3-opus".to_string()),
+            ),
+        );
+        let strat = StrategyOverrides { roles };
+        cfg.strategies.insert("novel-writing".to_string(), strat);
+
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let back: UserAgentsConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(back.strategies.len(), 1);
+        let writer = back
+            .strategies
+            .get("novel-writing")
+            .and_then(|s| s.roles.get("writer"))
+            .expect("writer");
+        assert_eq!(writer.agent.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert_eq!(writer.model.as_deref(), Some("claude-3-opus"));
+    }
+
+    #[test]
+    fn user_agents_config_path_is_correct() {
+        let path = UserAgentsConfig::config_path().unwrap();
+        assert!(path.ends_with("agents.toml"));
+        assert!(path.to_string_lossy().contains(".nexus42"));
+    }
+
+    #[test]
+    fn user_agents_resolve_role_checks_strategy_then_default() {
+        let mut cfg = UserAgentsConfig::default();
+
+        // Add a "default" strategy with an editor role.
+        let mut default_roles = HashMap::new();
+        default_roles.insert(
+            "editor".to_string(),
+            RoleOverride::new(Some("default-agent".to_string()), None),
+        );
+        cfg.strategies.insert(
+            "default".to_string(),
+            StrategyOverrides {
+                roles: default_roles,
+            },
+        );
+
+        // No "novel-writing" strategy — should fall back to "default".
+        let result = cfg.resolve_role("novel-writing", "editor");
+        assert!(result.is_some());
+        assert_eq!(
+            result.expect("found").agent.as_deref(),
+            Some("default-agent")
+        );
+
+        // Role not in either — should return None.
+        assert!(cfg.resolve_role("novel-writing", "writer").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_agent_ref tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_agent_ref_two_segments() {
+        let (role, agent, model) = parse_agent_ref("writer:claude-acp").unwrap();
+        assert_eq!(role, "writer");
+        assert_eq!(agent, "claude-acp");
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn parse_agent_ref_three_segments() {
+        let (role, agent, model) = parse_agent_ref("reviewer:codex-acp:o3").unwrap();
+        assert_eq!(role, "reviewer");
+        assert_eq!(agent, "codex-acp");
+        assert_eq!(model.as_deref(), Some("o3"));
+    }
+
+    #[test]
+    fn parse_agent_ref_three_segments_empty_model() {
+        let (role, agent, model) = parse_agent_ref("writer:claude-acp:").unwrap();
+        assert_eq!(role, "writer");
+        assert_eq!(agent, "claude-acp");
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn parse_agent_ref_single_segment_errors() {
+        let err = parse_agent_ref("just-one").unwrap_err();
+        assert!(err.to_string().contains("invalid --agent-ref format"));
+        assert!(err.to_string().contains("must have at least 2"));
+    }
+
+    #[test]
+    fn parse_agent_ref_empty_string_errors() {
+        let err = parse_agent_ref("").unwrap_err();
+        assert!(err.to_string().contains("invalid --agent-ref format"));
+    }
+
+    #[test]
+    fn parse_agent_ref_empty_role_errors() {
+        let err = parse_agent_ref(":claude-acp").unwrap_err();
+        assert!(err.to_string().contains("role ID must not be empty"));
+    }
+
+    #[test]
+    fn parse_agent_ref_empty_agent_errors() {
+        let err = parse_agent_ref("writer:").unwrap_err();
+        assert!(err.to_string().contains("agent ID must not be empty"));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_agent_model tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_cli_overrides_take_highest_priority() {
+        let mut cli = HashMap::new();
+        cli.insert(
+            "writer".to_string(),
+            RoleOverride::new(Some("cli-agent".to_string()), Some("cli-model".to_string())),
+        );
+
+        let user_cfg = UserAgentsConfig::default();
+        let preset = vec!["preset-model".to_string()];
+
+        let (agent, model) =
+            resolve_agent_model("writer", "novel-writing", &preset, &user_cfg, &cli);
+        assert_eq!(agent.as_deref(), Some("cli-agent"));
+        assert_eq!(model.as_deref(), Some("cli-model"));
+    }
+
+    #[test]
+    fn resolve_user_config_used_when_no_cli_override() {
+        let mut user_cfg = UserAgentsConfig::default();
+        let mut roles = HashMap::new();
+        roles.insert(
+            "writer".to_string(),
+            RoleOverride::new(
+                Some("user-agent".to_string()),
+                Some("user-model".to_string()),
+            ),
+        );
+        user_cfg
+            .strategies
+            .insert("novel-writing".to_string(), StrategyOverrides { roles });
+
+        let cli = HashMap::new();
+        let preset = vec!["preset-model".to_string()];
+
+        let (agent, model) =
+            resolve_agent_model("writer", "novel-writing", &preset, &user_cfg, &cli);
+        assert_eq!(agent.as_deref(), Some("user-agent"));
+        assert_eq!(model.as_deref(), Some("user-model"));
+    }
+
+    #[test]
+    fn resolve_preset_fallback_when_no_cli_or_user() {
+        let user_cfg = UserAgentsConfig::default();
+        let cli = HashMap::new();
+        let preset = vec!["preset-model-v1".to_string(), "preset-model-v2".to_string()];
+
+        let (agent, model) =
+            resolve_agent_model("writer", "novel-writing", &preset, &user_cfg, &cli);
+        assert!(agent.is_none());
+        assert_eq!(model.as_deref(), Some("preset-model-v1"));
+    }
+
+    #[test]
+    fn resolve_nothing_when_all_layers_empty() {
+        let user_cfg = UserAgentsConfig::default();
+        let cli = HashMap::new();
+        let preset: Vec<String> = vec![];
+
+        let (agent, model) =
+            resolve_agent_model("writer", "novel-writing", &preset, &user_cfg, &cli);
+        assert!(agent.is_none());
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn resolve_user_config_fallback_to_default_strategy() {
+        let mut user_cfg = UserAgentsConfig::default();
+        let mut default_roles = HashMap::new();
+        default_roles.insert(
+            "writer".to_string(),
+            RoleOverride::new(Some("default-agent".to_string()), None),
+        );
+        user_cfg.strategies.insert(
+            "default".to_string(),
+            StrategyOverrides {
+                roles: default_roles,
+            },
+        );
+
+        let cli = HashMap::new();
+        let preset: Vec<String> = vec![];
+
+        let (agent, model) =
+            resolve_agent_model("writer", "some-strategy", &preset, &user_cfg, &cli);
+        assert_eq!(agent.as_deref(), Some("default-agent"));
+        assert!(model.is_none());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-agent user configuration (`~/.nexus42/agents.toml`)
+//
+// These types and functions are public API for multi-agent worker configuration.
+// They are consumed by the lib crate (tests, future schedule/worker wiring).
+// The binary crate re-declares `mod config` privately, so dead_code is expected
+// until wiring is complete (T8+).
+// ---------------------------------------------------------------------------
+
+/// Per-role agent/model override specified by the user.
+///
+/// Used in CLI `--agent-ref` flags and user config file to override
+/// the agent ACP ID and/or model for a given role.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleOverride {
+    /// ACP agent identifier (e.g. `claude-sonnet-4-20250514`, `codex-acp`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+
+    /// Model override (e.g. `o3`, `claude-3-opus`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+#[allow(dead_code)]
+impl RoleOverride {
+    /// Create a new override with both agent and model.
+    pub fn new(agent: Option<String>, model: Option<String>) -> Self {
+        Self { agent, model }
+    }
+}
+
+/// Per-strategy role overrides from user config.
+///
+/// In the TOML file this appears as a flat table keyed by role ID:
+/// ```toml
+/// [strategies.novel-writing.roles.writer]
+/// agent = "claude-sonnet-4-20250514"
+/// model = "claude-3-opus"
+/// ```
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StrategyOverrides {
+    /// Role ID → override mapping.
+    #[serde(default)]
+    pub roles: HashMap<String, RoleOverride>,
+}
+
+/// User-level multi-agent configuration file (`~/.nexus42/agents.toml`).
+///
+/// This file provides persistent agent/model overrides per strategy and role.
+/// It is the middle layer in the priority resolution chain:
+/// CLI flags > user config > preset `recommended_models`.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UserAgentsConfig {
+    /// Strategy ID → per-role overrides.
+    #[serde(default)]
+    pub strategies: HashMap<String, StrategyOverrides>,
+}
+
+#[allow(dead_code)]
+impl UserAgentsConfig {
+    /// File name for the user agents configuration.
+    const FILENAME: &str = "agents.toml";
+
+    /// Load the user agents configuration from `~/.nexus42/agents.toml`.
+    ///
+    /// Returns a default (empty) config if the file does not exist.
+    /// Logs a warning and returns defaults if the file exists but cannot be parsed.
+    pub fn load() -> anyhow::Result<Self> {
+        let path = Self::config_path()?;
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+
+        let content = std::fs::read_to_string(&path)?;
+        if content.trim().is_empty() {
+            return Ok(Self::default());
+        }
+
+        match toml::from_str::<UserAgentsConfig>(&content) {
+            Ok(cfg) => Ok(cfg),
+            Err(e) => {
+                tracing::warn!("agents.toml parse error, using defaults: {}", e);
+                Ok(Self::default())
+            }
+        }
+    }
+
+    /// Return the path to `~/.nexus42/agents.toml`.
+    pub fn config_path() -> anyhow::Result<PathBuf> {
+        Ok(nexus_home()?.join(Self::FILENAME))
+    }
+
+    /// Look up a role override for a given strategy.
+    ///
+    /// Returns `None` if the strategy or role is not configured.
+    pub fn get_role_override(&self, strategy_id: &str, role_id: &str) -> Option<&RoleOverride> {
+        self.strategies
+            .get(strategy_id)
+            .and_then(|s| s.roles.get(role_id))
+    }
+
+    /// Look up a role override across all strategies (fallback).
+    ///
+    /// Checks the specified strategy first, then falls back to a
+    /// `"default"` strategy if it exists.
+    pub fn resolve_role(&self, strategy_id: &str, role_id: &str) -> Option<&RoleOverride> {
+        self.get_role_override(strategy_id, role_id)
+            .or_else(|| self.get_role_override("default", role_id))
+    }
+}
+
+/// Parse an `--agent-ref` string into `(role_id, acp_agent_id, model)`.
+///
+/// Accepted formats:
+/// - `role:acp_agent_id` (2 segments) — model is `None`
+/// - `role:acp_agent_id:model` (3 segments) — all fields present
+///
+/// # Errors
+///
+/// Returns a descriptive error if the string has fewer than 2 or more than 3
+/// colon-separated segments, or if any segment is empty.
+#[allow(dead_code)]
+pub fn parse_agent_ref(ref_str: &str) -> anyhow::Result<(String, String, Option<String>)> {
+    let segments: Vec<&str> = ref_str.splitn(3, ':').collect();
+
+    if segments.len() < 2 {
+        anyhow::bail!(
+            "invalid --agent-ref format '{}': expected 'role:agent_id' or 'role:agent_id:model' \
+             (must have at least 2 colon-separated segments)",
+            ref_str
+        );
+    }
+
+    let role_id = segments[0];
+    let acp_agent_id = segments[1];
+
+    if role_id.is_empty() {
+        anyhow::bail!(
+            "invalid --agent-ref '{}': role ID must not be empty",
+            ref_str
+        );
+    }
+    if acp_agent_id.is_empty() {
+        anyhow::bail!(
+            "invalid --agent-ref '{}': agent ID must not be empty",
+            ref_str
+        );
+    }
+
+    // Third segment (model) is optional.
+    let model = if segments.len() == 3 {
+        let m = segments[2];
+        if m.is_empty() {
+            None
+        } else {
+            Some(m.to_string())
+        }
+    } else {
+        None
+    };
+
+    Ok((role_id.to_string(), acp_agent_id.to_string(), model))
+}
+
+/// Resolve the effective agent and model for a role using priority chain.
+///
+/// Priority: CLI `--agent-ref` overrides > user config > preset `recommended_models[0]`.
+///
+/// # Arguments
+///
+/// * `role_id` — the role to resolve (e.g. `"writer"`, `"reviewer"`)
+/// * `strategy_id` — the strategy context (e.g. `"novel-writing"`)
+/// * `preset_recommended` — from `PresetRoleDefinition.recommended_models` (from T6)
+/// * `user_config` — loaded `UserAgentsConfig`
+/// * `cli_overrides` — map of role_id → `RoleOverride` from `--agent-ref` flags
+///
+/// # Returns
+///
+/// `(Option<agent>, Option<model>)` — the resolved agent ACP ID and model.
+#[allow(dead_code)]
+pub fn resolve_agent_model(
+    role_id: &str,
+    strategy_id: &str,
+    preset_recommended: &[String],
+    user_config: &UserAgentsConfig,
+    cli_overrides: &HashMap<String, RoleOverride>,
+) -> (Option<String>, Option<String>) {
+    // 1. CLI overrides (highest priority)
+    if let Some(cli_override) = cli_overrides.get(role_id) {
+        return (cli_override.agent.clone(), cli_override.model.clone());
+    }
+
+    // 2. User config
+    if let Some(user_override) = user_config.resolve_role(strategy_id, role_id) {
+        return (user_override.agent.clone(), user_override.model.clone());
+    }
+
+    // 3. Preset recommended_models[0] — model only (no agent override from preset)
+    let model = preset_recommended.first().cloned();
+    (None, model)
 }
 
 /// Get the nexus42 home directory (`$HOME/.nexus42`)
