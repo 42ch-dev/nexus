@@ -40,7 +40,7 @@
 | DF-04 | ACP SDK migration to sacp v1.0 | V1.4 | **V1.7** | L | V1.4 (not forced)→V1.6+→V1.7+ | V1.6 DTO decoupling was preparation. SDK v0.11.0 available (2026-04-20). Adapter-trait policy in `acp-client-tech-spec-v2.md`. |
 | DF-05 | Full ACP permission policy engine UI (web-based) | V1.4 | V1.8+ | XL | V1.4 (V1.5)→V1.6+→V1.7+ | V1.6 delivered CLI surface only. See `acp-client-tech-spec-v2.md` Appendix B (ACP-R7). |
 | DF-06 | Preset hot-reload with in-flight session migration | V1.4 | V1.8+ | L | V1.4→V1.5+→V1.6+→V1.7+ | V1.4 snapshot semantics handle new sessions. In-flight migration requires state migration protocol design. |
-| DF-07 | Capability schema registry sharing with platform | V1.4 | **V1.7** | M | V1.4 backlog→V1.5+→V1.6+→V1.7+ | Cross-repo catalog sync. Evaluate in V1.7. |
+| DF-07 | ~~Capability schema registry sharing with platform~~ | V1.4 | **Cancelled** | M | V1.4 backlog→V1.5+→V1.6+→V1.7+ | **Cancelled 2026-04-21**: Nexus OSS built-in capabilities do not need platform registration. Over-designed item — removed from all future scope. |
 | DF-08 | Wire/local drift auto-detect tooling | V1.6 | V1.8+ | M | V1.6→V1.7+ | Automated detection of schema classification drift. Per V1.6 WS5 OQ-S3. |
 | DF-09 | Template_file path validation | V1.6 | V1.8+ | S | V1.6→V1.7+ | Filesystem preset path traversal protection. When third-party preset authoring opens. First noted V1.4 WS3 QC S-1. |
 | DF-10 | WS4 Starting lifecycle edge cases | V1.6 | V1.8+ | M | V1.6→V1.7+ | HealthDegraded during Starting, Starting.exit in-flight cancel, ActionContext not used. Daemon lifecycle hardening. |
@@ -101,6 +101,7 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 | ~~DF-J~~ | Full daemon lifecycle state machine (6-state FSM) | **Shipped** | V1.4 (WS4) | `statig` HSM. Originally deferred from V1.2 matrix (TD-9-FU). |
 | ~~DF-K~~ | User registration / Creator binding full story | **Shipped** | V1.3 | V1.2 deferred to V1.3. Creator register CLI delivered. |
 | ~~DF-L~~ | DEBT-RAND-073 — rand 0.7.3 blocked by wiremock/http-types | **Cancelled** | V1.6 (accepted) | Low impact, upstream dependency. Decision: accept as permanent tech debt. No further action. |
+| ~~DF-M~~ | DF-07 — Capability schema registry sharing with platform | **Cancelled** | 2026-04-21 (V1.7 planning) | Over-designed. Nexus OSS built-in capabilities do not need platform registration. |
 
 ---
 
@@ -110,9 +111,9 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 
 | Category | Count | IDs |
 |----------|-------|-----|
-| Features (from compass "Out") | 3 | DF-01, DF-04, DF-07 |
+| Features (from compass "Out") | 2 | DF-01, DF-04 |
 | Tech-debt residuals | 8 | DTO-C1, DTO-C2, DTO-W1, PERM-W1, PERM-W2, PERM-W3, R4, R7 |
-| **Total** | **11** | |
+| **Total** | **10** | |
 
 ### Items targeting V1.8+ (or "Any future")
 
