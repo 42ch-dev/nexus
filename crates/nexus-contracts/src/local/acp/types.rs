@@ -381,6 +381,146 @@ pub struct NexusCancelResult {
     pub session_id: NexusSessionId,
 }
 
+// ── Session list ───────────────────────────────────────────────────────
+
+/// Request to list sessions from the agent.
+///
+/// Mirrors the SDK `ListSessionsRequest` — supports filtering by cwd
+/// and cursor-based pagination.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusListSessionsRequest {
+    /// Filter sessions by working directory. Must be an absolute path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    /// Opaque cursor token from a previous response's nextCursor field
+    /// for cursor-based pagination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+impl NexusListSessionsRequest {
+    /// Create a new list sessions request with no filters.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Filter sessions by working directory.
+    #[must_use]
+    pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+
+    /// Set the pagination cursor.
+    #[must_use]
+    pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.cursor = Some(cursor.into());
+        self
+    }
+}
+
+/// Information about a session returned by session/list.
+///
+/// Mirrors the SDK `SessionInfo` type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusSessionInfo {
+    /// Unique identifier for the session.
+    pub session_id: NexusSessionId,
+    /// The working directory for this session. Must be an absolute path.
+    pub cwd: PathBuf,
+    /// Human-readable title for the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// ISO 8601 timestamp of last activity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+impl NexusSessionInfo {
+    /// Create a new session info.
+    #[must_use]
+    pub fn new(session_id: NexusSessionId, cwd: impl Into<PathBuf>) -> Self {
+        Self {
+            session_id,
+            cwd: cwd.into(),
+            title: None,
+            updated_at: None,
+        }
+    }
+
+    /// Set the session title.
+    #[must_use]
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Set the session title from an Option.
+    #[must_use]
+    pub fn title_opt(mut self, title: Option<String>) -> Self {
+        self.title = title;
+        self
+    }
+
+    /// Set the last activity timestamp.
+    #[must_use]
+    pub fn updated_at(mut self, updated_at: impl Into<String>) -> Self {
+        self.updated_at = Some(updated_at.into());
+        self
+    }
+
+    /// Set the last activity timestamp from an Option.
+    #[must_use]
+    pub fn updated_at_opt(mut self, updated_at: Option<String>) -> Self {
+        self.updated_at = updated_at;
+        self
+    }
+}
+
+/// Response from listing sessions.
+///
+/// Mirrors the SDK `ListSessionsResponse` — contains session info
+/// objects and optional pagination cursor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusListSessionsResponse {
+    /// Array of session information objects.
+    pub sessions: Vec<NexusSessionInfo>,
+    /// Opaque cursor token. If present, pass this in the next request's
+    /// cursor parameter to fetch the next page. If absent, there are no
+    /// more results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+impl NexusListSessionsResponse {
+    /// Create a new list sessions response.
+    #[must_use]
+    pub fn new(sessions: Vec<NexusSessionInfo>) -> Self {
+        Self {
+            sessions,
+            next_cursor: None,
+        }
+    }
+
+    /// Set the pagination cursor.
+    #[must_use]
+    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.next_cursor = Some(cursor.into());
+        self
+    }
+
+    /// Set the pagination cursor from an Option.
+    #[must_use]
+    pub fn next_cursor_opt(mut self, cursor: Option<String>) -> Self {
+        self.next_cursor = cursor;
+        self
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -526,5 +666,120 @@ mod tests {
             let deserialized: NexusMcpServer = serde_json::from_str(&json).unwrap();
             assert_eq!(*server, deserialized);
         }
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_default() {
+        let req = NexusListSessionsRequest::new();
+        assert!(req.cwd.is_none());
+        assert!(req.cursor.is_none());
+
+        let req2 = NexusListSessionsRequest::default();
+        assert_eq!(req.cwd, req2.cwd);
+        assert_eq!(req.cursor, req2.cursor);
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_with_filters() {
+        let req = NexusListSessionsRequest::new()
+            .cwd("/tmp/workspace")
+            .cursor("next-page-token");
+        assert_eq!(req.cwd, Some(PathBuf::from("/tmp/workspace")));
+        assert_eq!(req.cursor, Some("next-page-token".to_string()));
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_roundtrip() {
+        let req = NexusListSessionsRequest::new()
+            .cwd("/home/user/project")
+            .cursor("abc123");
+
+        let json = serde_json::to_string(&req).unwrap();
+        let deserialized: NexusListSessionsRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req.cwd, deserialized.cwd);
+        assert_eq!(req.cursor, deserialized.cursor);
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_skip_serializing_none() {
+        let req = NexusListSessionsRequest::new();
+        let json = serde_json::to_string(&req).unwrap();
+        // Should not contain cwd or cursor fields when None
+        assert!(!json.contains("cwd"));
+        assert!(!json.contains("cursor"));
+    }
+
+    #[test]
+    fn nexus_session_info_new() {
+        let info = NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/workspace");
+        assert_eq!(info.session_id.0, "sess-1");
+        assert_eq!(info.cwd, PathBuf::from("/tmp/workspace"));
+        assert!(info.title.is_none());
+        assert!(info.updated_at.is_none());
+    }
+
+    #[test]
+    fn nexus_session_info_with_optional_fields() {
+        let info = NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/home/user/project")
+            .title("My Project Session")
+            .updated_at("2026-04-21T10:30:00Z");
+        assert_eq!(info.title, Some("My Project Session".to_string()));
+        assert_eq!(info.updated_at, Some("2026-04-21T10:30:00Z".to_string()));
+    }
+
+    #[test]
+    fn nexus_session_info_roundtrip() {
+        let info = NexusSessionInfo::new(NexusSessionId::new("sess-3"), "/var/app")
+            .title("Production")
+            .updated_at("2026-04-21T12:00:00Z");
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: NexusSessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(info.session_id, deserialized.session_id);
+        assert_eq!(info.cwd, deserialized.cwd);
+        assert_eq!(info.title, deserialized.title);
+        assert_eq!(info.updated_at, deserialized.updated_at);
+    }
+
+    #[test]
+    fn nexus_list_sessions_response_new() {
+        let sessions = vec![
+            NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/a"),
+            NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/tmp/b"),
+        ];
+        let resp = NexusListSessionsResponse::new(sessions.clone());
+        assert_eq!(resp.sessions.len(), 2);
+        assert_eq!(resp.sessions[0].session_id.0, "sess-1");
+        assert!(resp.next_cursor.is_none());
+    }
+
+    #[test]
+    fn nexus_list_sessions_response_with_cursor() {
+        let sessions = vec![NexusSessionInfo::new(
+            NexusSessionId::new("sess-x"),
+            "/tmp/x",
+        )];
+        let resp = NexusListSessionsResponse::new(sessions).next_cursor("next-token");
+        assert_eq!(resp.next_cursor, Some("next-token".to_string()));
+    }
+
+    #[test]
+    fn nexus_list_sessions_response_roundtrip() {
+        let resp = NexusListSessionsResponse::new(vec![
+            NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/a")
+                .title("Session A")
+                .updated_at("2026-04-21T09:00:00Z"),
+            NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/tmp/b"),
+        ])
+        .next_cursor("page2");
+
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: NexusListSessionsResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp.sessions.len(), deserialized.sessions.len());
+        assert_eq!(
+            resp.sessions[0].session_id,
+            deserialized.sessions[0].session_id
+        );
+        assert_eq!(resp.next_cursor, deserialized.next_cursor);
     }
 }
