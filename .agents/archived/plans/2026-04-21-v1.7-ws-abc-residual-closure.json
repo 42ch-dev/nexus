@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "2026-04-21-v1.7-ws-abc-residual-closure",
+  "title": "WS-A/B/C — Residual Closure (V1.7)",
+  "status": "Done",
+  "phase": "done",
+  "done_at": "2026-04-21",
+  "plan_file": ".agents/plans/2026-04-21-v1.7-ws-abc-residual-closure.md",
+  "milestone": "M1",
+  "working_branch": "fix/v1.7-ws-abc",
+  "integration_branch": "feature/v1.7",
+  "effort": "S",
+  "tasks_count": 8,
+  "tasks_summary": "DTO-C1, DTO-C2, DTO-W1, PERM-W1, PERM-W2, PERM-W3, R4, R7",
+  "closes_residuals": {
+    "2026-04-18-v1.5-stabilization": ["R4", "R7"],
+    "2026-04-20-v1.6-ws-b-acp-sdk-dto": ["DTO-C1", "DTO-C2", "DTO-W1"],
+    "2026-04-20-v1.6-ws-c-permission-cli": ["PERM-W1", "PERM-W2", "PERM-W3"]
+  }
+}
