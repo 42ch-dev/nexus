@@ -63,15 +63,12 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     )
     .expect("meta.json");
 
-    let cfg = serde_json::json!({
-        "active_creator_id": TEST_CREATOR_ID,
-        "active_workspace_slug_by_creator": { TEST_CREATOR_ID: TEST_WORKSPACE_SLUG }
-    });
-    std::fs::write(
-        nexus_home.join("config.json"),
-        serde_json::to_string(&cfg).expect("config json"),
-    )
-    .expect("config.json");
+    // Write as TOML so daemon reads config.toml natively
+    let toml_str = format!(
+        "active_creator_id = \"{}\"\n[active_workspace_slug_by_creator]\n\"{}\" = \"{}\"",
+        TEST_CREATOR_ID, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG
+    );
+    std::fs::write(nexus_home.join("config.toml"), toml_str).expect("config.toml");
 
     let db_path =
         nexus_home_layout::workspace_state_db_path(user_home, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG);
