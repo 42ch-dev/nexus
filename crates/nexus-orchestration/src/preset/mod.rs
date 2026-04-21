@@ -112,7 +112,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 2);  // WS-E T6: bumped for multi-agent roles
+        assert_eq!(loaded.version, 2); // WS-E T6: bumped for multi-agent roles
 
         // Must have both inner graphs.
         assert!(

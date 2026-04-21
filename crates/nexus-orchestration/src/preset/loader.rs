@@ -368,7 +368,12 @@ fn validate_manifest(
         }
 
         // Reject empty recommended_models (loader should enforce at least one entry)
-        if !role.recommended_models.is_empty() && manifest.roles.iter().any(|r| r.recommended_models.is_empty()) {
+        if !role.recommended_models.is_empty()
+            && manifest
+                .roles
+                .iter()
+                .any(|r| r.recommended_models.is_empty())
+        {
             // Only report if there are other roles with models (mixed state)
             // If ALL roles have empty recommended_models, that's a different error
         }
