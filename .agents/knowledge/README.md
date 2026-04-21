@@ -18,6 +18,8 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.3-delivery-compass-v1.md](v1.3-delivery-compass-v1.md) | V1.3 | V1.3 delivery compass: scope lock (Creator Register CLI + 35 residual governance), wave decomposition, cross-repo dependency map, acceptance criteria. | **Done (Frozen)** — V1.3 delivery complete |
 | [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) | V1.4 Orchestration + schemas boundary + Schedule (2026-04-17) | V1.4 delivery compass: 7 workstreams (WS1–WS8), 5 milestones, 14-entry regression gate, 10-entry risk register, §10 SSOT allocation matrix. | **Done (Frozen)** — V1.4 delivery complete |
 | [v1.5-nexus-delivery-compass-v1.md](v1.5-nexus-delivery-compass-v1.md) | V1.5 (2026-04-18) | V1.5 delivery compass: Stabilization + Creator Intelligence. 5 workstreams (WS-A–WS-E), 4 milestones (M1–M4), 10-entry regression gate (R16–R25), 6-entry risk register. | **Done (Frozen)** — V1.5 delivery complete |
+| [v1.6-delivery-compass-v1.md](v1.6-delivery-compass-v1.md) | V1.6 (2026-04-20) | V1.6 delivery compass: Residual Governance + ACP SDK Preparation + Creator Tooling. 4 workstreams (WS-A–WS-D), 3 milestones, 7-entry regression gate (R26–R32), 8-entry risk register. | **Done (Frozen)** — V1.6 delivery complete |
+| [deferred-features-cross-version-tracker-v1.md](deferred-features-cross-version-tracker-v1.md) | V1.7 planning (2026-04-21) | **Cross-version deferred feature tracker**: all features/tech-debt deferred from V1.2–V1.6 compasses, with lifecycle status (Open/Shipped/Cancelled/Superseded), target versions, effort estimates, and per-version summaries. | **Active** — review when any version ships |
 
 ## Archived (`archived/knowledge/`)
 
