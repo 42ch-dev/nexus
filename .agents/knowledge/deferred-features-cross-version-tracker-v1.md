@@ -35,16 +35,12 @@
 | ID | Feature | First deferred | Target | Effort est. | Deferral history | Blocking reason / Notes |
 |----|---------|---------------|--------|-------------|-----------------|----------------------|
 | DF-01 | Multi-agent worker (single worker hosting >1 ACP agent) | V1.4 | **V1.7** | XL | V1.4→V1.5+→V1.6+→V1.7+ | Requires ACP session multiplexing design. See `orchestration-engine-v1.md` §11 OQ-7. Two approaches: (a) multiplex one worker, (b) spawn sibling workers. |
-| DF-02 | User-authored capabilities (shell / WASM plugin ABI) | V1.4 | V1.8+ | XL | V1.4→V1.5+→V1.6+→V1.7+ | Requires plugin ABI + sandboxing spec. See `orchestration-engine-v1.md` §11 OQ-8. |
-| DF-03 | Preset third-party registry / signing / publish | V1.4 | V1.8+ | XL | V1.4→V1.5+→V1.6+→V1.7+ | Requires trust model + distribution protocol. |
 | DF-04 | ACP SDK migration to sacp v1.0 | V1.4 | **V1.7** | L | V1.4 (not forced)→V1.6+→V1.7+ | V1.6 DTO decoupling was preparation. SDK v0.11.0 available (2026-04-20). Adapter-trait policy in `acp-client-tech-spec-v2.md`. |
-| DF-05 | Full ACP permission policy engine UI (web-based) | V1.4 | V1.8+ | XL | V1.4 (V1.5)→V1.6+→V1.7+ | V1.6 delivered CLI surface only. See `acp-client-tech-spec-v2.md` Appendix B (ACP-R7). |
-| DF-06 | Preset hot-reload with in-flight session migration | V1.4 | V1.8+ | L | V1.4→V1.5+→V1.6+→V1.7+ | V1.4 snapshot semantics handle new sessions. In-flight migration requires state migration protocol design. |
-| DF-07 | ~~Capability schema registry sharing with platform~~ | V1.4 | **Cancelled** | M | V1.4 backlog→V1.5+→V1.6+→V1.7+ | **Cancelled 2026-04-21**: Nexus OSS built-in capabilities do not need platform registration. Over-designed item — removed from all future scope. |
-| DF-08 | Wire/local drift auto-detect tooling | V1.6 | V1.8+ | M | V1.6→V1.7+ | Automated detection of schema classification drift. Per V1.6 WS5 OQ-S3. |
-| DF-09 | Template_file path validation | V1.6 | V1.8+ | S | V1.6→V1.7+ | Filesystem preset path traversal protection. When third-party preset authoring opens. First noted V1.4 WS3 QC S-1. |
-| DF-10 | WS4 Starting lifecycle edge cases | V1.6 | V1.8+ | M | V1.6→V1.7+ | HealthDegraded during Starting, Starting.exit in-flight cancel, ActionContext not used. Daemon lifecycle hardening. |
-| DF-11 | CoreContext Handlebars template engine binding | V1.6 | V1.8+ | L | V1.6→V1.7+ | Data produced by V1.4 WS7, template rendering not yet integrated. |
+| DF-08 | Wire/local drift auto-detect tooling | V1.6 | V1.8+ | M | V1.6→V1.7+ | Automated detection of schema classification drift. Per V1.6 WS5 OQ-S3. Worth doing. |
+| DF-09 | Template_file path validation | V1.6 | V1.8+ | S | V1.6→V1.7+ | Filesystem preset path traversal protection. Must work with `~/.nexus/strategies/` third-party presets (see DF-17). First noted V1.4 WS3 QC S-1. Worth prioritizing. |
+| DF-10 | WS4 Starting lifecycle edge cases | V1.6 | V1.8+ | M | V1.6→V1.7+ | HealthDegraded during Starting, Starting.exit in-flight cancel, ActionContext not used. Daemon lifecycle hardening. Worth doing. |
+| DF-11 | CoreContext Handlebars template engine binding | V1.6 | V1.8+ | L | V1.6→V1.7+ | Data produced by V1.4 WS7, template rendering not yet integrated. Worth doing. |
+| DF-17 | Third-party preset loading (`~/.nexus/strategies/`) + CLI init templates | V1.6+ insight | V1.8+ | M | New (from DF-06 cancellation insight) | Read user-config directory `~/.nexus/strategies/` for third-party presets. CLI command to scaffold custom strategy templates. Prerequisite for DF-09 path validation in third-party context. |
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture-v1.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
 | DF-14 | CLI+Platform e2e integration | V1.2 | V2.0+ | L | V1.2 (V1.3)→V1.3 (not in V1.3) | Cross-repo integration. |
@@ -55,6 +51,7 @@
 
 | ID | Feature | First deferred | Target | Effort est. | Notes |
 |----|---------|---------------|--------|-------------|-------|
+| DF-03 | Preset third-party registry / signing / publish | V1.4 | Backlog | XL | Requires trust model + distribution protocol. **Long-term backlog** — potentially an independent project, not a nexus version feature. |
 | BL-01 | World Merge complete execution / rollback product form | V1.2 | Backlog | XL | Spec anchor: `platform/world-merge-execution-backlog-v1.md`. |
 | BL-02 | Local Shadow Read / staged change full chain | V1.2 | Backlog | L | Requires product spec. |
 | BL-03 | Advanced declarative Context Assembly API / DSL | V1.2 | Backlog | XL | Spec anchor: `platform/context-assembly-advanced-dsl-backlog-v1.md`. |
@@ -102,6 +99,9 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 | ~~DF-K~~ | User registration / Creator binding full story | **Shipped** | V1.3 | V1.2 deferred to V1.3. Creator register CLI delivered. |
 | ~~DF-L~~ | DEBT-RAND-073 — rand 0.7.3 blocked by wiremock/http-types | **Cancelled** | V1.6 (accepted) | Low impact, upstream dependency. Decision: accept as permanent tech debt. No further action. |
 | ~~DF-M~~ | DF-07 — Capability schema registry sharing with platform | **Cancelled** | 2026-04-21 (V1.7 planning) | Over-designed. Nexus OSS built-in capabilities do not need platform registration. |
+| ~~DF-N~~ | DF-02 — User-authored capabilities (shell / WASM plugin ABI) | **Cancelled** | 2026-04-21 (V1.7 planning) | Over-designed. If users need new capabilities, OSS code contributions are the proper channel — no plugin ABI needed. |
+| ~~DF-O~~ | DF-05 — Full ACP permission policy engine UI (web-based) | **Cancelled** | 2026-04-21 (V1.7 planning) | Over-designed. ACP permission is not a core product value — ACP Session is a tool for orchestration, not a focus area. CLI surface shipped in V1.6 is sufficient. |
+| ~~DF-P~~ | DF-06 — Preset hot-reload with in-flight session migration | **Superseded** | 2026-04-21 (V1.7 planning) | Snapshot semantics are the correct design (running sessions keep their snapshot; new sessions pick up changes). In-flight migration is unnecessary complexity. The real need is **DF-17** (third-party preset loading from `~/.nexus/strategies/` + CLI init templates). |
 
 ---
 
@@ -119,9 +119,18 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 
 | Category | Count | Key IDs |
 |----------|-------|---------|
-| Features | 8 | DF-02, DF-03, DF-05, DF-06, DF-08, DF-09, DF-10, DF-11, DF-12 |
-| Backlog | 8 | BL-01 through BL-08 |
-| **Total** | **17** | |
+| Features | 5 | DF-08, DF-09, DF-10, DF-11, DF-17 |
+| Backlog | 9 | DF-03, BL-01 through BL-08 |
+| **Total** | **14** | |
+
+### Cancelled / Superseded (V1.7 planning)
+
+| ID | Status | Reason |
+|----|--------|--------|
+| DF-02 | Cancelled | Over-designed; OSS contributions sufficient |
+| DF-05 | Cancelled | ACP permission not core product value |
+| DF-06 | Superseded | Snapshot semantics correct; real need → DF-17 |
+| DF-07 | Cancelled | Over-designed; built-in capabilities don't need platform registration |
 
 ### Items targeting V2.0+
 
@@ -132,6 +141,22 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 | Tech-debt residuals | 1 | R5 (nix crate Windows) |
 | Backlog | 1 | BL-08 (Social/marketing) |
 | **Total** | **6** | |
+
+---
+
+### Decision log (V1.7 planning, 2026-04-21)
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| DF-02 | **Cancelled** | Over-designed; users can contribute capabilities via OSS code contributions |
+| DF-03 | **→ Backlog** (independent project) | Too large for a nexus version feature; potentially standalone |
+| DF-05 | **Cancelled** | ACP permission is not core value — ACP Session is an orchestration tool, not a product focus |
+| DF-06 | **Superseded** | Snapshot semantics are correct; real need is DF-17 (`~/.nexus/strategies/` loading + CLI init) |
+| DF-07 | **Cancelled** | Over-designed; built-in capabilities don't need platform registration |
+| DF-08 | Keep (worth doing) | Schema drift detection |
+| DF-09 | Keep (prioritize) | Must work with `~/.nexus/strategies/` (DF-17) |
+| DF-10 | Keep (worth doing) | Daemon lifecycle hardening |
+| DF-11 | Keep (worth doing) | Handlebars binding for CoreContext |
 
 ---
 
