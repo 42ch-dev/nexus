@@ -244,15 +244,20 @@ async fn emit_session_event(
     stdout: &mut tokio::io::Stdout,
     session_id: &str,
     event: &str,
+    reason: Option<&str>,
 ) -> Result<()> {
+    let mut params = json!({
+        "session_id": session_id,
+        "event": event,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    if let Some(reason) = reason {
+        params["reason"] = json!(reason);
+    }
     let notification = json!({
         "jsonrpc": "2.0",
         "method": "worker/agent_session_event",
-        "params": {
-            "session_id": session_id,
-            "event": event,
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        }
+        "params": params,
     });
     let bytes = format!("{}\n", notification);
     stdout.write_all(bytes.as_bytes()).await?;
@@ -358,7 +363,7 @@ async fn handle_initialize(
     write_jsonrpc_response(stdout, id, &init_result).await?;
 
     for sid in &started_session_ids {
-        emit_session_event(stdout, sid, "started").await?;
+        emit_session_event(stdout, sid, "started", None).await?;
     }
 
     Ok(())
@@ -565,7 +570,7 @@ async fn handle_agent_start(
     match start_result {
         StartResult::Created(summary) => {
             // Emit started event (async, no lock held).
-            emit_session_event(stdout, &session_id, "started").await?;
+            emit_session_event(stdout, &session_id, "started", None).await?;
 
             let result = json!({ "session": summary });
             write_jsonrpc_response(stdout, id, &result).await?;
@@ -633,7 +638,7 @@ async fn handle_agent_stop(
     }
 
     // Emit stopped event (async, no lock held).
-    emit_session_event(stdout, &session_id, "stopped").await?;
+    emit_session_event(stdout, &session_id, "stopped", None).await?;
 
     let result = json!({ "ok": true });
     write_jsonrpc_response(stdout, id, &result).await?;
@@ -715,6 +720,70 @@ async fn handle_shutdown(
 
     let result = json!({});
     write_jsonrpc_response(stdout, id, &result).await?;
+    Ok(())
+}
+
+/// Handle a detected agent subprocess crash.
+///
+/// Called when a subprocess monitor detects that an agent process has exited
+/// unexpectedly. Marks the slot as crashed (Error state) and emits a
+/// `worker/agent_session_event` notification with `"crashed"` event.
+///
+/// The slot remains in the sessions map (not removed) so the daemon can
+/// inspect its state and decide whether to restart or stop it. Other slots
+/// are unaffected.
+///
+/// # Arguments
+///
+/// * `state` — shared worker state
+/// * `stdout` — stdout for JSON-RPC responses and notifications
+/// * `session_id` — which agent session crashed
+/// * `reason` — human-readable crash reason (e.g., "exit code 1", "signal 9")
+///
+/// # Future integration
+///
+/// This function will be called from a per-slot subprocess monitor task once
+/// real ACP subprocess supervision is implemented. Currently it is infrastructure
+/// for crash detection; tests use `AgentSlot::simulate_crash` to exercise this
+/// code path.
+#[allow(dead_code)]
+async fn handle_agent_crash(
+    state: &MultiplexedWorkerState,
+    stdout: &mut tokio::io::Stdout,
+    session_id: &str,
+    reason: &str,
+) -> Result<()> {
+    warn!(
+        session_id = session_id,
+        reason = reason,
+        "agent subprocess crash detected"
+    );
+
+    // Synchronous lock scope: find the slot and mark it as crashed.
+    let found = {
+        let sessions = state
+            .sessions
+            .read()
+            .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
+
+        if let Some(slot) = sessions.get(session_id) {
+            slot.mark_crashed(reason.to_string());
+            true
+        } else {
+            false
+        }
+    };
+
+    if found {
+        // Emit crashed event (async, no lock held).
+        emit_session_event(stdout, session_id, "crashed", Some(reason)).await?;
+    } else {
+        warn!(
+            session_id = session_id,
+            "crash reported for unknown session, ignoring"
+        );
+    }
+
     Ok(())
 }
 
@@ -1278,5 +1347,170 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert!(sessions.contains_key("new_s1"));
         assert!(!sessions.contains_key("old_s1"));
+    }
+
+    // --- T3b: Crash isolation ---
+
+    #[test]
+    fn crash_isolation_one_slot_crash_does_not_affect_others() {
+        let state = MultiplexedWorkerState::new("test".to_string());
+
+        // Create two sessions.
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let s1 = AgentSlot::new(AgentConfig::new("s1".to_string(), "agent_a".to_string()));
+            s1.mark_ready();
+            sessions.insert("s1".to_string(), s1);
+
+            let s2 = AgentSlot::new(AgentConfig::new("s2".to_string(), "agent_b".to_string()));
+            s2.mark_ready();
+            sessions.insert("s2".to_string(), s2);
+        }
+
+        // Simulate crash on s1.
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            let s1 = sessions.get("s1").expect("found");
+            s1.simulate_crash("exit code 1");
+        }
+
+        // Verify s1 is in error state but s2 is still ready.
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            let s1 = sessions.get("s1").expect("found");
+            assert!(s1.state().is_error());
+
+            let s2 = sessions.get("s2").expect("found");
+            assert!(s2.state().is_ready());
+        }
+    }
+
+    #[test]
+    fn crash_isolation_three_slots_one_crashes() {
+        let state = MultiplexedWorkerState::new("test".to_string());
+
+        // Create three sessions.
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            for sid in &["s1", "s2", "s3"] {
+                let slot =
+                    AgentSlot::new(AgentConfig::new(sid.to_string(), format!("agent_{sid}")));
+                slot.mark_ready();
+                sessions.insert(sid.to_string(), slot);
+            }
+        }
+
+        // Crash s2 only.
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            sessions
+                .get("s2")
+                .expect("found")
+                .simulate_crash("OOM killed");
+        }
+
+        // Verify only s2 is in error state.
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            assert!(sessions.get("s1").expect("found").state().is_ready());
+            assert!(sessions.get("s2").expect("found").state().is_error());
+            assert!(sessions.get("s3").expect("found").state().is_ready());
+        }
+    }
+
+    #[test]
+    fn crashed_slot_remains_in_sessions_map() {
+        let state = MultiplexedWorkerState::new("test".to_string());
+
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let slot = AgentSlot::new(AgentConfig::new("s1".to_string(), "agent_a".to_string()));
+            slot.mark_ready();
+            sessions.insert("s1".to_string(), slot);
+        }
+
+        // Crash the slot.
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            sessions
+                .get("s1")
+                .expect("found")
+                .simulate_crash("signal 9");
+        }
+
+        // Slot should still be in the map (not removed).
+        let sessions = state.sessions.read().expect("lock ok");
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains_key("s1"));
+        // And it should be in error state.
+        assert!(sessions.get("s1").expect("found").state().is_error());
+    }
+
+    #[test]
+    fn crash_reason_recorded_in_health() {
+        let state = MultiplexedWorkerState::new("test".to_string());
+
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let slot = AgentSlot::new(AgentConfig::new("s1".to_string(), "agent_a".to_string()));
+            slot.mark_ready();
+            sessions.insert("s1".to_string(), slot);
+        }
+
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            sessions
+                .get("s1")
+                .expect("found")
+                .simulate_crash("segfault at address 0x0");
+        }
+
+        let sessions = state.sessions.read().expect("lock ok");
+        let slot = sessions.get("s1").expect("found");
+        let health = slot.health();
+        assert!(!health.is_healthy());
+        assert!(health
+            .last_error
+            .as_ref()
+            .expect("error")
+            .contains("segfault at address 0x0"));
+        assert!(health
+            .last_error
+            .as_ref()
+            .expect("error")
+            .starts_with("[crash]"));
+    }
+
+    #[test]
+    fn mark_crashed_from_any_state() {
+        // Crash should work from Ready state.
+        let s1 = AgentSlot::new(AgentConfig::new("s1".to_string(), "a".to_string()));
+        s1.mark_ready();
+        s1.simulate_crash("crash");
+        assert!(s1.state().is_error());
+
+        // Crash should work from Prompting state.
+        let s2 = AgentSlot::new(AgentConfig::new("s2".to_string(), "a".to_string()));
+        s2.mark_ready();
+        s2.mark_prompting();
+        s2.simulate_crash("crash");
+        assert!(s2.state().is_error());
+
+        // Crash should work from Initializing state.
+        let s3 = AgentSlot::new(AgentConfig::new("s3".to_string(), "a".to_string()));
+        s3.simulate_crash("crash during init");
+        assert!(s3.state().is_error());
+
+        // Crash should work from Error state (overwrite previous error).
+        let s4 = AgentSlot::new(AgentConfig::new("s4".to_string(), "a".to_string()));
+        s4.mark_error("first error".to_string());
+        s4.simulate_crash("second crash");
+        assert!(s4.state().is_error());
+        let health = s4.health();
+        assert!(health
+            .last_error
+            .as_ref()
+            .expect("error")
+            .contains("second crash"));
     }
 }

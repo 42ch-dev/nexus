@@ -230,6 +230,25 @@ impl AgentSlot {
         }
     }
 
+    /// Transition to Error state due to a crash.
+    ///
+    /// A dedicated method for crash-induced errors (as opposed to general
+    /// `mark_error`). Prepends "[crash]" to the message for traceability.
+    /// Used by the worker's subprocess supervisor and `simulate_crash` tests.
+    ///
+    /// # Errors
+    ///
+    /// If either lock is poisoned, silently returns without change.
+    pub fn mark_crashed(&self, error_msg: String) {
+        let msg = format!("[crash] {error_msg}");
+        if let Ok(mut state) = self.state.lock() {
+            *state = AgentSlotState::Error(msg.clone());
+        }
+        if let Ok(mut last_error) = self.last_error.lock() {
+            *last_error = Some(msg);
+        }
+    }
+
     /// Transition to Prompting state.
     ///
     /// Called when agent starts processing a prompt via `worker/acp_prompt`.
@@ -293,6 +312,16 @@ impl AgentSlot {
         if let Ok(mut state) = self.state.lock() {
             *state = AgentSlotState::Stopped;
         }
+    }
+
+    /// Test helper: simulate a subprocess crash.
+    ///
+    /// Calls [`mark_crashed`] with the given message, transitioning the slot
+    /// to the `Error` state. This allows tests to exercise crash detection
+    /// without spawning real child processes.
+    #[cfg(test)]
+    pub fn simulate_crash(&self, error_msg: &str) {
+        self.mark_crashed(error_msg.to_string());
     }
 }
 
@@ -463,5 +492,40 @@ mod tests {
         slot.request_shutdown();
         assert_eq!(slot.state(), AgentSlotState::Stopping);
         assert!(slot.is_shutdown_requested());
+    }
+
+    #[test]
+    fn mark_crashed_transitions_to_error() {
+        let slot = AgentSlot::new(test_config());
+        slot.mark_ready();
+        slot.mark_crashed("segfault in agent subprocess".to_string());
+        let state = slot.state();
+        assert!(state.is_error());
+        // The error message should be prefixed with [crash].
+        if let AgentSlotState::Error(msg) = state {
+            assert!(msg.starts_with("[crash]"));
+            assert!(msg.contains("segfault in agent subprocess"));
+        } else {
+            panic!("Expected Error state after mark_crashed");
+        }
+        let health = slot.health();
+        assert_eq!(
+            health.last_error,
+            Some("[crash] segfault in agent subprocess".to_string())
+        );
+    }
+
+    #[test]
+    fn simulate_crash_test_helper() {
+        let slot = AgentSlot::new(test_config());
+        slot.mark_ready();
+        slot.simulate_crash("OOM killed");
+        assert!(slot.state().is_error());
+        let health = slot.health();
+        assert!(health
+            .last_error
+            .as_ref()
+            .expect("error")
+            .contains("[crash] OOM killed"));
     }
 }
