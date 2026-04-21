@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn config_command_path_returns_pathbuf() {
         let path = CliConfig::path().unwrap();
-        assert!(path.ends_with("config.json"));
+        assert!(path.ends_with("config.toml"));
     }
 
     #[test]

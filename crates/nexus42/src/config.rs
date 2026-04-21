@@ -40,7 +40,7 @@ pub struct CliConfig {
     #[serde(default = "default_runtime_mode")]
     pub runtime_mode: DomainRuntimeMode,
 
-    /// Persisted degradation guard state (inline in config.json for V1.2 MVP).
+    /// Persisted degradation guard state (inline in config.toml for V1.2 MVP).
     /// Written by the daemon/runtime when degradation occurs; read-only for CLI display.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degradation_snapshot: Option<DegradationSnapshot>,
@@ -72,32 +72,75 @@ pub const VALID_CONFIG_KEYS: &[&str] = &[
 ];
 
 impl CliConfig {
-    /// Load configuration from the standard location
+    /// Load configuration from the standard location.
+    ///
+    /// Migration: if `config.toml` does not exist but `config.json` does,
+    /// the JSON file is read, converted to TOML, and the original is renamed
+    /// to `config.json.migrated`.
     pub fn load() -> anyhow::Result<Self> {
         let config_path = Self::config_path()?;
-        if !config_path.exists() {
-            return Ok(Self::default());
-        }
-        let content = std::fs::read_to_string(&config_path)?;
-        // Handle empty files by returning default config
-        if content.trim().is_empty() {
-            return Ok(Self::default());
-        }
-        match serde_json::from_str::<CliConfig>(&content) {
-            Ok(cfg) => Ok(cfg),
-            Err(e) => {
-                // Backup corrupted file and re-initialize with defaults
-                tracing::warn!(
-                    "Config file corrupted, backing up and re-initializing: {}",
-                    e
-                );
-                let bak = config_path.with_extension("json.bak");
-                if let Err(rename_err) = std::fs::rename(&config_path, &bak) {
-                    tracing::error!("Failed to backup corrupted config: {}", rename_err);
-                }
-                Ok(Self::default())
+        let nexus = nexus_home()?;
+
+        // 1. Try loading config.toml
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            if content.trim().is_empty() {
+                return Ok(Self::default());
             }
+            return match toml::from_str::<CliConfig>(&content) {
+                Ok(cfg) => Ok(cfg),
+                Err(e) => {
+                    // Backup corrupted file and re-initialize with defaults
+                    tracing::warn!(
+                        "Config file corrupted, backing up and re-initializing: {}",
+                        e
+                    );
+                    let bak = config_path.with_extension("toml.bak");
+                    if let Err(rename_err) = std::fs::rename(&config_path, &bak) {
+                        tracing::error!("Failed to backup corrupted config: {}", rename_err);
+                    }
+                    Ok(Self::default())
+                }
+            };
         }
+
+        // 2. Migration: try loading legacy config.json
+        let json_path = nexus.join("config.json");
+        if json_path.exists() {
+            let content = std::fs::read_to_string(&json_path)?;
+            if content.trim().is_empty() {
+                // Empty JSON file — just rename it and return defaults
+                std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
+                return Ok(Self::default());
+            }
+            match serde_json::from_str::<CliConfig>(&content) {
+                Ok(cfg) => {
+                    // Write config.toml and rename legacy file
+                    let toml_str = toml::to_string_pretty(&cfg)?;
+                    if let Some(parent) = config_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&config_path, toml_str)?;
+                    std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
+                    tracing::info!("Migrated config.json → config.toml");
+                    return Ok(cfg);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Legacy config.json corrupted, backing up and re-initializing: {}",
+                        e
+                    );
+                    let bak = json_path.with_extension("json.bak");
+                    if let Err(rename_err) = std::fs::rename(&json_path, &bak) {
+                        tracing::error!("Failed to backup corrupted config: {}", rename_err);
+                    }
+                    return Ok(Self::default());
+                }
+            };
+        }
+
+        // 3. No config file — return defaults
+        Ok(Self::default())
     }
 
     /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
@@ -116,14 +159,14 @@ impl CliConfig {
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let content = serde_json::to_string_pretty(self)?;
+        let content = toml::to_string_pretty(self)?;
         std::fs::write(&config_path, content)?;
         Ok(())
     }
 
     /// Path to the configuration file
     fn config_path() -> anyhow::Result<PathBuf> {
-        Ok(nexus_home()?.join("config.json"))
+        Ok(nexus_home()?.join("config.toml"))
     }
 
     /// Public path to the configuration file (for `config path` command)
@@ -256,13 +299,13 @@ mod tests {
     }
 
     #[test]
-    fn workspace_slug_roundtrips_via_json() {
+    fn workspace_slug_roundtrips_via_toml() {
         let mut c = CliConfig::default();
         c.active_workspace_slug_by_creator
             .insert("ctr_a".into(), "staging".into());
         assert_eq!(c.workspace_slug_for_creator("ctr_a"), "staging");
-        let json = serde_json::to_string(&c).unwrap();
-        let back: CliConfig = serde_json::from_str(&json).unwrap();
+        let toml_str = toml::to_string(&c).unwrap();
+        let back: CliConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(back.workspace_slug_for_creator("ctr_a"), "staging");
     }
 
@@ -273,18 +316,18 @@ mod tests {
     }
 
     #[test]
-    fn runtime_mode_roundtrips_via_json() {
+    fn runtime_mode_roundtrips_via_toml() {
         let mut c = CliConfig::default();
         c.runtime_mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
-        let json = serde_json::to_string(&c).unwrap();
-        let back: CliConfig = serde_json::from_str(&json).unwrap();
+        let toml_str = toml::to_string(&c).unwrap();
+        let back: CliConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(back.runtime_mode().to_string(), "cloud_enhanced");
     }
 
     #[test]
-    fn runtime_mode_parses_from_config_file() {
-        let json = r#"{"runtime_mode": "local_first"}"#;
-        let c: CliConfig = serde_json::from_str(json).unwrap();
+    fn runtime_mode_parses_from_config_toml() {
+        let toml_str = "runtime_mode = \"local_first\"";
+        let c: CliConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(c.runtime_mode().to_string(), "local_first");
     }
 
@@ -295,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn degradation_snapshot_roundtrips_via_json() {
+    fn degradation_snapshot_roundtrips_via_toml() {
         use nexus_domain::degradation::DegradationState;
         use nexus_domain::HealthCheckSnapshot;
 
@@ -310,8 +353,8 @@ mod tests {
             last_upgrade_attempt: None,
         });
 
-        let json = serde_json::to_string(&c).unwrap();
-        let back: CliConfig = serde_json::from_str(&json).unwrap();
+        let toml_str = toml::to_string(&c).unwrap();
+        let back: CliConfig = toml::from_str(&toml_str).unwrap();
 
         let snap = back.degradation_snapshot().unwrap();
         assert_eq!(snap.state, DegradationState::DegradedLevel1);
@@ -323,8 +366,8 @@ mod tests {
 
     #[test]
     fn degradation_snapshot_absent_key_loads_as_none() {
-        let json = r#"{"runtime_mode": "local_only"}"#;
-        let c: CliConfig = serde_json::from_str(json).unwrap();
+        let toml_str = "runtime_mode = \"local_only\"";
+        let c: CliConfig = toml::from_str(toml_str).unwrap();
         assert!(c.degradation_snapshot().is_none());
     }
 
@@ -439,9 +482,9 @@ mod tests {
     }
 
     #[test]
-    fn path_returns_config_json_path() {
+    fn path_returns_config_toml_path() {
         let path = CliConfig::path().unwrap();
-        assert!(path.ends_with("config.json"));
+        assert!(path.ends_with("config.toml"));
         assert!(path.to_string_lossy().contains(".nexus42"));
     }
 
@@ -452,6 +495,145 @@ mod tests {
         assert!(VALID_CONFIG_KEYS.contains(&"daemon_url"));
         assert!(VALID_CONFIG_KEYS.contains(&"workspace_path"));
         assert!(VALID_CONFIG_KEYS.contains(&"active_creator_id"));
+    }
+
+    #[test]
+    fn migration_converts_json_to_toml() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        // Write a legacy config.json with non-default values
+        let json_content = r#"{
+  "active_creator_id": "ctr_test",
+  "platform_url": "https://custom.api.io",
+  "daemon_url": "http://127.0.0.1:9999",
+  "runtime_mode": "cloud_enhanced"
+}"#;
+        std::fs::write(nexus_dir.join("config.json"), json_content).expect("write json");
+
+        // Temporarily override HOME so CliConfig::load() finds our temp dir
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let result = CliConfig::load().expect("load should succeed");
+
+        // Restore HOME
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        // Verify values were loaded correctly
+        assert_eq!(result.active_creator_id.as_deref(), Some("ctr_test"));
+        assert_eq!(result.platform_url, "https://custom.api.io");
+        assert_eq!(result.daemon_url, "http://127.0.0.1:9999");
+
+        // Verify config.toml was created
+        assert!(
+            nexus_dir.join("config.toml").exists(),
+            "config.toml should be created"
+        );
+
+        // Verify config.toml content is valid TOML
+        let toml_content = std::fs::read_to_string(nexus_dir.join("config.toml")).unwrap();
+        let loaded: CliConfig = toml::from_str(&toml_content).unwrap();
+        assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_test"));
+
+        // Verify config.json was renamed to config.json.migrated
+        assert!(
+            !nexus_dir.join("config.json").exists(),
+            "config.json should be renamed"
+        );
+        assert!(
+            nexus_dir.join("config.json.migrated").exists(),
+            "config.json.migrated should exist"
+        );
+    }
+
+    #[test]
+    fn migration_with_empty_json_returns_default() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        // Write an empty config.json
+        std::fs::write(nexus_dir.join("config.json"), "").expect("write empty json");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let result = CliConfig::load().expect("load should succeed");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        // Should return defaults
+        assert_eq!(result.active_creator_id, None);
+
+        // config.json should be renamed
+        assert!(nexus_dir.join("config.json.migrated").exists());
+    }
+
+    #[test]
+    fn load_reads_toml_when_present() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        // Write a config.toml directly
+        let toml_content = r#"active_creator_id = "ctr_direct"
+platform_url = "https://direct.api.io"
+"#;
+        std::fs::write(nexus_dir.join("config.toml"), toml_content).expect("write toml");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        let result = CliConfig::load().expect("load should succeed");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(result.active_creator_id.as_deref(), Some("ctr_direct"));
+        assert_eq!(result.platform_url, "https://direct.api.io");
+    }
+
+    #[test]
+    fn save_writes_toml() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let nexus_dir = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+
+        let mut cfg = CliConfig::default();
+        cfg.active_creator_id = Some("ctr_save_test".to_string());
+        cfg.platform_url = "https://save.test.io".to_string();
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+
+        cfg.save().expect("save should succeed");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        let config_path = nexus_dir.join("config.toml");
+        assert!(config_path.exists(), "config.toml should exist after save");
+
+        let content = std::fs::read_to_string(&config_path).unwrap();
+        let loaded: CliConfig = toml::from_str(&content).unwrap();
+        assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_save_test"));
+        assert_eq!(loaded.platform_url, "https://save.test.io");
     }
 }
 
