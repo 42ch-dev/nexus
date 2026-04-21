@@ -6,7 +6,16 @@
 //! **Four hard constraints** (from crate-selection-best-practices-v1.md §3.7):
 //! 1. **Wall-clock + tz-aware**: uses `ClockSource` trait returning Unix timestamp.
 //! 2. **Graceful shutdown**: `CancellationToken` cancels background poll loop.
-//! 3. **DST / clock-jump safety**: `ClockSource` abstraction allows mock for testing.
+//!
+//! # DST Safety
+//!
+//! The scheduler operates entirely in UTC via Unix timestamps. `scheduled_at`
+//! values are stored as UTC Unix timestamps, and all comparisons use UTC.
+//! This design is inherently safe against DST transitions.
+//!
+//! **Limitation**: The scheduler does not support wall-clock recurrence rules
+//! (e.g., "every day at 8am local time"). If wall-clock recurrence is added
+//! in a future version, DST jump detection will be required at that time.
 //!
 //! Pre-1.0: Simple hand-rolled implementation (no `tokio-cron-scheduler` crate).
 //! Zero new third-party dependencies.

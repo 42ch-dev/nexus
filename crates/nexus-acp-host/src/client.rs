@@ -70,9 +70,9 @@ use crate::localset_bridge::LocalSetBridge;
 use crate::policy::{PermissionDecision, PermissionPolicy};
 use nexus_contracts::local::acp::{
     NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult,
-    NexusInitializeRequest, NexusInitializeResponse, NexusNewSessionRequest, NexusPromptCompleted,
-    NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated, NexusSessionId,
-    NexusSessionModeState, NexusStopReason,
+    NexusInitializeRequest, NexusInitializeResponse, NexusMcpServer, NexusNewSessionRequest,
+    NexusPromptCompleted, NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated,
+    NexusSessionId, NexusSessionModeState, NexusStopReason,
 };
 
 // ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
@@ -133,13 +133,7 @@ fn nexus_session_mode_state_from_sdk(state: &acp::SessionModeState) -> NexusSess
 }
 
 fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> acp::InitializeRequest {
-    let protocol_version: acp::ProtocolVersion = serde_json::from_value(serde_json::json!(req
-        .protocol_version
-        .0
-        .parse::<u16>()
-        .unwrap_or(1)))
-    .unwrap_or(acp::ProtocolVersion::LATEST);
-
+    let protocol_version = sdk_protocol_version_from_nexus(&req.protocol_version);
     let mut builder = acp::InitializeRequest::new(protocol_version);
     if let Some(info) = req.client_info {
         builder = builder.client_info(acp::Implementation::new(info.name, info.version));
@@ -147,8 +141,39 @@ fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> acp::Initia
     builder
 }
 
+fn sdk_protocol_version_from_nexus(version: &NexusProtocolVersion) -> acp::ProtocolVersion {
+    match version.0.parse::<u16>() {
+        Ok(v) => {
+            serde_json::from_value(serde_json::json!(v)).unwrap_or(acp::ProtocolVersion::LATEST)
+        }
+        Err(e) => {
+            tracing::warn!(
+                version = %version.0,
+                error = %e,
+                "Failed to parse protocol version, defaulting to LATEST"
+            );
+            acp::ProtocolVersion::LATEST
+        }
+    }
+}
+
 fn sdk_new_session_request_from_nexus(req: NexusNewSessionRequest) -> acp::NewSessionRequest {
-    acp::NewSessionRequest::new(req.cwd)
+    let sdk_servers: Vec<acp::McpServer> = req
+        .mcp_servers
+        .into_iter()
+        .map(nexus_mcp_server_to_sdk)
+        .collect();
+    acp::NewSessionRequest::new(req.cwd).mcp_servers(sdk_servers)
+}
+
+fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> acp::McpServer {
+    match server {
+        NexusMcpServer::Http(h) => acp::McpServer::Http(acp::McpServerHttp::new(h.name, h.url)),
+        NexusMcpServer::Sse(s) => acp::McpServer::Sse(acp::McpServerSse::new(s.name, s.url)),
+        NexusMcpServer::Stdio(s) => {
+            acp::McpServer::Stdio(acp::McpServerStdio::new(s.name, s.command))
+        }
+    }
 }
 
 fn sdk_prompt_request_from_nexus(req: NexusPromptRequest) -> acp::PromptRequest {
@@ -970,6 +995,83 @@ mod tests {
         let nexus_req = NexusInitializeRequest::new();
         let _sdk_req = sdk_initialize_request_from_nexus(nexus_req);
         // Just verify conversion succeeds
+    }
+
+    #[test]
+    fn new_session_request_propagates_mcp_servers() {
+        let nexus_req = NexusNewSessionRequest::new("/tmp/workspace").mcp_servers(vec![
+            NexusMcpServer::Http(nexus_contracts::local::acp::NexusMcpServerHttp {
+                name: "http-server".to_string(),
+                url: "https://example.com/mcp".to_string(),
+            }),
+            NexusMcpServer::Sse(nexus_contracts::local::acp::NexusMcpServerSse {
+                name: "sse-server".to_string(),
+                url: "https://example.com/sse".to_string(),
+            }),
+            NexusMcpServer::Stdio(nexus_contracts::local::acp::NexusMcpServerStdio {
+                name: "local-server".to_string(),
+                command: std::path::PathBuf::from("/usr/bin/mcp-server"),
+            }),
+        ]);
+
+        let sdk_req = sdk_new_session_request_from_nexus(nexus_req);
+        assert_eq!(sdk_req.mcp_servers.len(), 3);
+
+        // Verify HTTP server
+        match &sdk_req.mcp_servers[0] {
+            acp::McpServer::Http(h) => {
+                assert_eq!(h.name, "http-server");
+                assert_eq!(h.url, "https://example.com/mcp");
+                assert!(h.headers.is_empty());
+            }
+            _ => panic!("Expected Http variant"),
+        }
+
+        // Verify SSE server
+        match &sdk_req.mcp_servers[1] {
+            acp::McpServer::Sse(s) => {
+                assert_eq!(s.name, "sse-server");
+                assert_eq!(s.url, "https://example.com/sse");
+            }
+            _ => panic!("Expected Sse variant"),
+        }
+
+        // Verify Stdio server
+        match &sdk_req.mcp_servers[2] {
+            acp::McpServer::Stdio(s) => {
+                assert_eq!(s.name, "local-server");
+                assert_eq!(s.command, std::path::PathBuf::from("/usr/bin/mcp-server"));
+            }
+            _ => panic!("Expected Stdio variant"),
+        }
+    }
+
+    #[test]
+    fn new_session_request_empty_mcp_servers() {
+        let nexus_req = NexusNewSessionRequest::new("/tmp/workspace");
+        let sdk_req = sdk_new_session_request_from_nexus(nexus_req);
+        assert!(sdk_req.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn protocol_version_valid_string() {
+        let version = NexusProtocolVersion::new("1");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version.to_string(), "1");
+    }
+
+    #[test]
+    fn protocol_version_invalid_string_defaults_to_latest() {
+        let version = NexusProtocolVersion::new("not-a-number");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version, acp::ProtocolVersion::LATEST);
+    }
+
+    #[test]
+    fn protocol_version_empty_string_defaults_to_latest() {
+        let version = NexusProtocolVersion::new("");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version, acp::ProtocolVersion::LATEST);
     }
 
     #[tokio::test]
