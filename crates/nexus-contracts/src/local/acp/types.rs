@@ -176,7 +176,7 @@ pub struct NexusSessionModeState {
 /// This is a simplified view — only `Text` and `ResourceLink` variants
 /// are needed by Nexus consumers today. New variants can be added as
 /// needed without breaking the SDK boundary.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NexusContentBlock {
     /// Text content.
