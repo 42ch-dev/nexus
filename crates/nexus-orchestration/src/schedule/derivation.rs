@@ -60,6 +60,23 @@ impl CoreContextManager {
         }
     }
 
+    /// Remove the per-schedule guard for a terminal schedule.
+    ///
+    /// Callers (schedule supervisor) should invoke this when a schedule reaches
+    /// Completed/Cancelled/Failed status to prevent the `schedule_guards`
+    /// HashMap from growing unboundedly.
+    ///
+    /// # Safety
+    ///
+    /// - Cleanup on non-existent schedule → `HashMap::remove` is a no-op.
+    /// - Active write in progress → guard is `Arc`-shared; the active write
+    ///   holds a clone and completes safely before the `Arc` is dropped.
+    pub async fn cleanup_guard(&self, schedule_id: &ScheduleId) {
+        let key = schedule_id.0.clone();
+        let mut guards = self.schedule_guards.lock().await;
+        guards.remove(&key);
+    }
+
     /// Get or create a per-schedule write guard.
     ///
     /// Returns an `Arc<Mutex<()>>` for the given schedule. The Arc allows
@@ -1252,5 +1269,63 @@ mod tests {
         // Verify current snapshot is the LLM summary
         let snapshot = mgr.current_snapshot(&sid).await.unwrap();
         assert_eq!(snapshot.version, CoreContextVersion(3));
+    }
+
+    // ---------- R7: cleanup_guard tests ----------
+
+    #[tokio::test]
+    async fn cleanup_guard_removes_entry_and_allows_new_guard() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("R7-CLEANUP1".to_string());
+        insert_test_schedule(&mgr.pool, &sid.0).await;
+
+        // Seed v0 — this creates the per-schedule guard
+        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
+            .await
+            .unwrap();
+
+        // Verify guard exists (schedule_guards has an entry for sid)
+        // We can't inspect the HashMap directly (it's private), but we can
+        // verify behavior: after cleanup, a new operation should still work
+        // with a freshly created guard.
+        mgr.cleanup_guard(&sid).await;
+
+        // After cleanup, applying a new edit should still work
+        // (a new guard is created on demand by schedule_guard)
+        let record = mgr
+            .apply_user_edit(
+                &sid,
+                EditOp::Append {
+                    body: " after cleanup".to_string(),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            record.version,
+            CoreContextVersion(1),
+            "new guard should be created after cleanup"
+        );
+
+        // Verify the content
+        match &record.content {
+            CoreContextPayload::Text { body } => {
+                assert_eq!(body, "initial after cleanup");
+            }
+            _ => panic!("expected text payload"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_guard_on_nonexistent_schedule_is_noop() {
+        let (pool, _db) = fresh_pool().await;
+        let mgr = CoreContextManager::new(pool);
+        let sid = ScheduleId("R7-NONEXISTENT".to_string());
+
+        // Cleanup on a schedule that was never used — should not panic
+        mgr.cleanup_guard(&sid).await;
     }
 }
