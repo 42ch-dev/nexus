@@ -87,6 +87,17 @@ use nexus_contracts::local::acp::{
     NexusSetConfigOptionRequest, NexusSetConfigOptionResponse, NexusStopReason,
 };
 
+// ── Compile-time Send assertion for ConnectionTo<Agent> ────────────
+//
+// The LocalSetBridge pattern relies on ConnectionTo<Agent> being Send so
+// it can be extracted from the !Send LocalSet context and stored in
+// Arc<RwLock<...>> accessible from the async tokio world. This const
+// block fails to compile if the SDK ever changes that guarantee.
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<agent_client_protocol::ConnectionTo<agent_client_protocol::Agent>>();
+};
+
 // ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
 //
 // These are free functions (not trait impls) to avoid orphan rule violations
@@ -336,10 +347,17 @@ fn sdk_config_option_to_nexus(
     use agent_client_protocol::schema::SessionConfigKind;
     let kind = match &opt.kind {
         SessionConfigKind::Select(sel) => NexusConfigKind::Select(sdk_config_select_to_nexus(sel)),
-        _ => NexusConfigKind::Select(NexusConfigSelect {
-            current_value: String::new(),
-            options: NexusConfigSelectOptions::Ungrouped(vec![]),
-        }),
+        other => {
+            tracing::warn!(
+                config_id = %opt.id,
+                kind = ?other,
+                "Unknown SessionConfigKind variant, falling back to empty Select"
+            );
+            NexusConfigKind::Select(NexusConfigSelect {
+                current_value: String::new(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![]),
+            })
+        }
     };
     NexusConfigOption {
         id: opt.id.to_string(),
