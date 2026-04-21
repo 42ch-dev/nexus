@@ -14,8 +14,12 @@
       "working_branch": "feature/v1.7-ws-d",
       "integration_branch": "feature/v1.7",
       "created": "2026-04-21",
-      "depends_on": ["2026-04-21-v1.7-ws-abc-residual-closure"],
-      "blocking": ["2026-04-21-v1.7-ws-e-multi-agent-worker"],
+      "depends_on": [
+        "2026-04-21-v1.7-ws-abc-residual-closure"
+      ],
+      "blocking": [
+        "2026-04-21-v1.7-ws-e-multi-agent-worker"
+      ],
       "compass": ".agents/knowledge/v1.7-delivery-compass-v1.md",
       "tasks_count": 4,
       "tasks_summary": "T1 iterative bump+compile, T2 session/list adoption, T3 session_info_update, T4 integration verification",
@@ -33,7 +37,9 @@
       "working_branch": "feature/v1.7",
       "integration_branch": "feature/v1.7",
       "created": "2026-04-21",
-      "depends_on": ["2026-04-21-v1.7-ws-d-acp-sdk-migration"],
+      "depends_on": [
+        "2026-04-21-v1.7-ws-d-acp-sdk-migration"
+      ],
       "blocking": [],
       "compass": ".agents/knowledge/v1.7-delivery-compass-v1.md",
       "tasks_count": 9,
