@@ -5,13 +5,14 @@
     {
       "id": "2026-04-21-v1.7-ws-abc-residual-closure",
       "title": "WS-A/B/C — Residual Closure (V1.7)",
-      "status": "Todo",
-      "phase": "prepare",
+      "status": "InReview",
+      "phase": "review",
       "priority": "high",
       "effort": "S",
       "effort_sessions": "~2-3",
       "milestone": "M1",
-      "working_branch": "feature/v1.7",
+      "working_branch": "fix/v1.7-ws-abc",
+      "integration_branch": "feature/v1.7",
       "created": "2026-04-21",
       "depends_on": [],
       "blocking": ["2026-04-21-v1.7-ws-d-acp-sdk-migration"],
@@ -67,29 +68,29 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-21T10:00:00Z",
-      "total_open": 11,
+      "updated_at": "2026-04-21T14:00:00Z",
+      "total_open": 7,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 8,
-        "nit": 2
+        "medium": 0,
+        "low": 6,
+        "nit": 1
       },
       "by_target": {
-        "V1.6": 0,
-        "V1.7": 8,
-        "V2.0": 1,
+        "V1.7": 0,
+        "V2.0": 5,
         "backlog": 2
       },
       "by_plan": {
-        "2026-04-18-v1.5-stabilization": 3,
-        "2026-04-20-v1.6-ws-b-acp-sdk-dto": 3,
-        "2026-04-20-v1.6-ws-c-permission-cli": 3,
+        "2026-04-18-v1.5-stabilization": 1,
+        "2026-04-20-v1.6-ws-b-acp-sdk-dto": 0,
+        "2026-04-20-v1.6-ws-c-permission-cli": 0,
+        "2026-04-21-v1.7-ws-abc-residual-closure": 4,
         "v1-tech-debt-cleanup": 1
       },
       "in_flight": {
-        "2026-04-21-v1.7-ws-abc-residual-closure": 8
+        "2026-04-21-v1.7-ws-abc-residual-closure": 4
       },
       "cross_cutting": [
         {
@@ -102,127 +103,83 @@
         }
       ]
     },
-    "residual_findings": {
-      "v1-tech-debt-cleanup": [
-        {
-          "id": "TD-10",
-          "title": "Device flow OAuth \u2014 production auth deferred; stub verify_device_code only",
-          "severity": "low",
-          "source": "v1-tech-debt-cleanup Batch D Task 16",
-          "scope": "crates/nexus42d/src/auth/device_flow.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "detail_path": "plans/residuals/v1-tech-debt-cleanup/td-10-device-flow-oauth.md",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-18-v1.5-stabilization": [
-        {
-          "id": "R4",
-          "title": "SystemClock DST safety not implemented \u2014 doc overstates guarantee",
-          "severity": "low",
-          "source": "QC1 W-4",
-          "scope": "crates/nexus-orchestration/src/scheduler/mod.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        },
-        {
-          "id": "R5",
-          "title": "nix crate unconditionally included \u2014 Windows build blocked",
-          "severity": "low",
-          "source": "QC2 W1",
-          "scope": "crates/nexus-orchestration/Cargo.toml",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        },
-        {
-          "id": "R7",
-          "title": "CoreContextManager schedule_guards HashMap unbounded growth",
-          "severity": "nit",
-          "source": "QC1 S-1",
-          "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-20-v1.6-ws-b-acp-sdk-dto": [
-        {
-          "id": "DTO-C1",
-          "title": "sdk_new_session_request_from_nexus silently drops mcp_servers field",
-          "severity": "medium",
-          "source": "QC1 C1",
-          "scope": "crates/nexus-acp-host/src/client.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        },
-        {
-          "id": "DTO-C2",
-          "title": "Protocol version .parse::<u16>().unwrap_or(1) silent degradation",
-          "severity": "low",
-          "source": "QC1 C2",
-          "scope": "crates/nexus-acp-host/src/client.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        },
-        {
-          "id": "DTO-W1",
-          "title": "NexusContentBlock missing Eq derive",
-          "severity": "nit",
-          "source": "QC2 W1",
-          "scope": "crates/nexus-contracts/src/local/acp/types.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-20-v1.6-ws-c-permission-cli": [
-        {
-          "id": "PERM-W1",
-          "title": "policy.rs save re-serializes TOML losing comments/format",
-          "severity": "low",
-          "source": "QC1 W1",
-          "scope": "crates/nexus-acp-host/src/policy.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        },
-        {
-          "id": "PERM-W2",
-          "title": "JSON permission list omits global rules when agent filter used",
-          "severity": "low",
-          "source": "QC2 W-002",
-          "scope": "crates/nexus42/src/commands/permission.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        },
-        {
-          "id": "PERM-W3",
-          "title": "Unvalidated TOML keys in permission commands",
-          "severity": "low",
-          "source": "QC2 W-003",
-          "scope": "crates/nexus42/src/commands/permission.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.7",
-          "tracking_link": null
-        }
-      ]
-    },
+      "residual_findings": {
+        "v1-tech-debt-cleanup": [
+          {
+            "id": "TD-10",
+            "title": "Device flow OAuth — production auth deferred; stub verify_device_code only",
+            "severity": "low",
+            "source": "v1-tech-debt-cleanup Batch D Task 16",
+            "scope": "crates/nexus42d/src/auth/device_flow.rs",
+            "decision": "defer",
+            "owner": "fullstack-dev",
+            "target_date": "backlog",
+            "detail_path": "plans/residuals/v1-tech-debt-cleanup/td-10-device-flow-oauth.md",
+            "tracking_link": null
+          }
+        ],
+        "2026-04-18-v1.5-stabilization": [
+          {
+            "id": "R5",
+            "title": "nix crate unconditionally included — Windows build blocked",
+            "severity": "low",
+            "source": "QC2 W1",
+            "scope": "crates/nexus-orchestration/Cargo.toml",
+            "decision": "accept",
+            "owner": "fullstack-dev",
+            "target_date": "V2.0",
+            "tracking_link": null
+          }
+        ],
+        "2026-04-20-v1.6-ws-b-acp-sdk-dto": [],
+        "2026-04-20-v1.6-ws-c-permission-cli": [],
+        "2026-04-21-v1.7-ws-abc-residual-closure": [
+          {
+            "id": "R9",
+            "title": "Protocol version JSON round-trip — serde_json::json!(v) instead of direct constructor",
+            "severity": "low",
+            "source": "QC#1 S1, QC#2 S2-1",
+            "scope": "crates/nexus-acp-host/src/client.rs",
+            "decision": "defer",
+            "owner": "fullstack-dev",
+            "target_date": "V2.0",
+            "tracking_link": null
+          },
+          {
+            "id": "R10",
+            "title": "MCP server conversion drops HTTP headers field",
+            "severity": "low",
+            "source": "QC#2 S2-2",
+            "scope": "crates/nexus-acp-host/src/client.rs",
+            "decision": "defer",
+            "owner": "fullstack-dev",
+            "target_date": "V2.0",
+            "tracking_link": null
+          },
+          {
+            "id": "R11",
+            "title": "run_reset does raw toml_edit document surgery instead of delegating to policy helpers",
+            "severity": "low",
+            "source": "QC#2 S2-3",
+            "scope": "crates/nexus42/src/commands/permission.rs",
+            "decision": "defer",
+            "owner": "fullstack-dev",
+            "target_date": "V2.0",
+            "tracking_link": null
+          },
+          {
+            "id": "R12",
+            "title": "VALID_TOP_LEVEL_KEYS hardcodes schema contract",
+            "severity": "low",
+            "source": "QC#3 R3-2",
+            "scope": "crates/nexus-acp-host/src/policy.rs",
+            "decision": "defer",
+            "owner": "fullstack-dev",
+            "target_date": "V2.0",
+            "tracking_link": null
+          }
+        ]
+      },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
     }
