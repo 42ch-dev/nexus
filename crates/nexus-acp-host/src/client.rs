@@ -133,18 +133,28 @@ fn nexus_session_mode_state_from_sdk(state: &acp::SessionModeState) -> NexusSess
 }
 
 fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> acp::InitializeRequest {
-    let protocol_version: acp::ProtocolVersion = serde_json::from_value(serde_json::json!(req
-        .protocol_version
-        .0
-        .parse::<u16>()
-        .unwrap_or(1)))
-    .unwrap_or(acp::ProtocolVersion::LATEST);
-
+    let protocol_version = sdk_protocol_version_from_nexus(&req.protocol_version);
     let mut builder = acp::InitializeRequest::new(protocol_version);
     if let Some(info) = req.client_info {
         builder = builder.client_info(acp::Implementation::new(info.name, info.version));
     }
     builder
+}
+
+fn sdk_protocol_version_from_nexus(version: &NexusProtocolVersion) -> acp::ProtocolVersion {
+    match version.0.parse::<u16>() {
+        Ok(v) => {
+            serde_json::from_value(serde_json::json!(v)).unwrap_or(acp::ProtocolVersion::LATEST)
+        }
+        Err(e) => {
+            tracing::warn!(
+                version = %version.0,
+                error = %e,
+                "Failed to parse protocol version, defaulting to LATEST"
+            );
+            acp::ProtocolVersion::LATEST
+        }
+    }
 }
 
 fn sdk_new_session_request_from_nexus(req: NexusNewSessionRequest) -> acp::NewSessionRequest {
@@ -1041,6 +1051,27 @@ mod tests {
         let nexus_req = NexusNewSessionRequest::new("/tmp/workspace");
         let sdk_req = sdk_new_session_request_from_nexus(nexus_req);
         assert!(sdk_req.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn protocol_version_valid_string() {
+        let version = NexusProtocolVersion::new("1");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version.to_string(), "1");
+    }
+
+    #[test]
+    fn protocol_version_invalid_string_defaults_to_latest() {
+        let version = NexusProtocolVersion::new("not-a-number");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version, acp::ProtocolVersion::LATEST);
+    }
+
+    #[test]
+    fn protocol_version_empty_string_defaults_to_latest() {
+        let version = NexusProtocolVersion::new("");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version, acp::ProtocolVersion::LATEST);
     }
 
     #[tokio::test]
