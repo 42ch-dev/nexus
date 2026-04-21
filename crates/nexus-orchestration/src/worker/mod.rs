@@ -16,10 +16,12 @@
 
 pub mod ipc;
 pub mod manager;
+pub mod registry;
 pub mod transport;
 
 pub use ipc::{IpcClient, IpcError};
 pub use manager::{WorkerError, WorkerEvent, WorkerHandle, WorkerManager, WorkerSpec};
+pub use registry::WorkerRegistry;
 pub use transport::{
     DuplexTransport, RpcTransport, RpcTransportRead, RpcTransportWrite, StdioTransport,
 };

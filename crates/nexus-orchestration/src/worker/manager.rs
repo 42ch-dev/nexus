@@ -149,6 +149,31 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
+    /// Create a `WorkerHandle` from an [`IpcClient`] for testing.
+    ///
+    /// Uses PID 0 (sentinel for mock workers), a fresh cancellation token,
+    /// and a no-op broadcast channel. The shutdown grace period is set to
+    /// 1 second to keep tests fast.
+    /// Create a `WorkerHandle` from an [`IpcClient`] for testing.
+    ///
+    /// Uses PID 0 (sentinel for mock workers), a fresh cancellation token,
+    /// and a no-op broadcast channel. The shutdown grace period is set to
+    /// 1 second to keep tests fast.
+    ///
+    /// This is only intended for integration tests; production code should
+    /// obtain handles via [`WorkerManager::spawn`].
+    pub fn from_ipc_for_test(ipc: IpcClient) -> Self {
+        let (event_tx, _) = broadcast::channel(1);
+        Self {
+            pid: 0,
+            cancel: CancellationToken::new(),
+            event_tx,
+            shutdown_grace: Duration::from_secs(1),
+            ipc,
+            shutdown_requested: false,
+        }
+    }
+
     /// Send a JSON-RPC request to the worker and await the response.
     ///
     /// Delegates to the internal [`IpcClient`]. This method can be called
