@@ -5,8 +5,8 @@
     {
       "id": "2026-04-21-v1.7-ws-abc-residual-closure",
       "title": "WS-A/B/C — Residual Closure (V1.7)",
-      "status": "InReview",
-      "phase": "review",
+      "status": "Done",
+      "phase": "done",
       "priority": "high",
       "effort": "S",
       "effort_sessions": "~2-3",
