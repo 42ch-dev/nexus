@@ -52,13 +52,13 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
     match command {
         PolicyCommand::Grant { permission } => {
             policy.grant_permission(permission.clone());
-            policy.save(&workspace_root)?;
+            policy.save_toml_edit(&workspace_root)?;
             println!("✓ Granted permission: {}", permission);
         }
 
         PolicyCommand::Deny { permission } => {
             policy.deny_permission(permission.clone());
-            policy.save(&workspace_root)?;
+            policy.save_toml_edit(&workspace_root)?;
             println!("✓ Denied permission: {}", permission);
         }
 
@@ -120,7 +120,7 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
             };
 
             policy.default = default_policy;
-            policy.save(&workspace_root)?;
+            policy.save_toml_edit(&workspace_root)?;
             println!("✓ Default policy set to: {:?}", default_policy);
         }
 
