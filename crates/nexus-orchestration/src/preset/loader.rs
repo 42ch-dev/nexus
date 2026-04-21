@@ -612,7 +612,14 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 /// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask` (stub in T3,
 /// full in T4).
 /// `inner_graphs.<name>.nodes[].depends_on` → `add_edge`.
+///
+/// ## WS-E T5: agent field propagation
+///
+/// Each node's `agent` field (if present) is stored in `InnerGraphNodeTask::agent_ref`.
+/// At runtime, the engine resolves agent refs to session_ids and stores them
+/// in context as `_session_routes`, which `InnerGraphNodeTask::run()` uses for routing.
 fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_flow::Graph>> {
+    use crate::preset::manifest::GraphNodeKind;
     use crate::tasks::InnerGraphNodeTask;
 
     let mut result = HashMap::new();
@@ -622,7 +629,23 @@ fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_fl
             let graph = graph_flow::Graph::new(name);
 
             for node in &ig.nodes {
-                let task = InnerGraphNodeTask::new(&node.id);
+                // Determine kind (currently only acp_prompt supported).
+                let task = match node.kind {
+                    GraphNodeKind::AcpPrompt => {
+                        InnerGraphNodeTask::new(&node.id)
+                            // WS-E T5: store agent ref for runtime resolution
+                            .with_agent_ref(node.agent.clone().unwrap_or_default())
+                            // Tool policy from node (parse from string)
+                            .with_tool_policy(
+                                node.tool_policy
+                                    .as_ref()
+                                    .and_then(|s| std::str::FromStr::from_str(s.as_str()).ok())
+                                    .unwrap_or(crate::tasks::ToolPolicy::AutoGrantReadOnly),
+                            )
+                            // Template file path (will be resolved at runtime)
+                            .with_template(node.template_file.clone().unwrap_or_default())
+                    }
+                };
                 graph.add_task(std::sync::Arc::new(task));
             }
 

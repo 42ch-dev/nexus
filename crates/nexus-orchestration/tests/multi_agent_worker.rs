@@ -19,14 +19,14 @@
 //! 6. `shutdown_with_multiple_agents`        — Step 6
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use nexus_orchestration::worker::{
     DuplexTransport, IpcClient, RpcTransport, WorkerAgentConfig, WorkerHandle,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::{Mutex, RwLock};
 
 // ---------------------------------------------------------------------------

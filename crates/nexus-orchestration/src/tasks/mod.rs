@@ -621,21 +621,111 @@ impl Task for StateCompositeTask {
 }
 
 // ---------------------------------------------------------------------------
-// InnerGraphNodeTask (inner graph nodes — per §8.2)
+// InnerGraphNodeTask (inner graph nodes — per §8.2, WS-E T5)
 // ---------------------------------------------------------------------------
 
 /// A task for a node within an inner graph.
 ///
 /// §8.2 mapping:
 /// - `kind=acp_prompt` → AcpPromptTask (full in T4; T3 stub that stores a placeholder).
+///
+/// ## WS-E T5: session_id routing
+///
+/// The task can route prompts to different agent sessions based on:
+/// 1. Explicit `session_id` provided at construction (for preset resolution)
+/// 2. Node's `agent` field resolved from `session_routes` in context (runtime lookup)
+///
+/// Backward compatible: if no session routing is configured, uses `"default"`.
 pub struct InnerGraphNodeTask {
     id: String,
+    /// Worker handle for IPC. `None` for stub mode.
+    worker_handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+    /// Template file path (resolved relative to preset bundle root).
+    template: String,
+    /// Tool policy for this node.
+    tool_policy: ToolPolicy,
+    /// Explicit session_id (if preset resolution already determined it).
+    session_id: Option<String>,
+    /// Agent role reference (if node has `agent` field — will be resolved from session_routes).
+    agent_ref: Option<String>,
 }
 
 impl InnerGraphNodeTask {
-    /// Create a new inner graph node task.
+    /// Create a new inner graph node task (stub mode, no IPC).
+    ///
+    /// Used by preset loader for initial graph construction. The real task
+    /// is wired at runtime when worker_handle and session_routes are available.
     pub fn new(id: &str) -> Self {
-        Self { id: id.to_string() }
+        Self {
+            id: id.to_string(),
+            worker_handle: None,
+            template: String::new(),
+            tool_policy: ToolPolicy::AutoGrantReadOnly,
+            session_id: None,
+            agent_ref: None,
+        }
+    }
+
+    /// Builder-style session_id setter.
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Builder-style agent_ref setter.
+    pub fn with_agent_ref(mut self, agent_ref: impl Into<String>) -> Self {
+        self.agent_ref = Some(agent_ref.into());
+        self
+    }
+
+    /// Builder-style worker_handle setter.
+    pub fn with_worker_handle(
+        mut self,
+        handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+    ) -> Self {
+        self.worker_handle = handle;
+        self
+    }
+
+    /// Builder-style template setter.
+    pub fn with_template(mut self, template: impl Into<String>) -> Self {
+        self.template = template.into();
+        self
+    }
+
+    /// Builder-style tool_policy setter.
+    pub fn with_tool_policy(mut self, tool_policy: ToolPolicy) -> Self {
+        self.tool_policy = tool_policy;
+        self
+    }
+
+    /// Resolve the effective session_id for this node (WS-E T5).
+    ///
+    /// Priority:
+    /// 1. Explicit session_id (if set at construction)
+    /// 2. Lookup from context using agent_ref (if set and session_routes present)
+    /// 3. Default "default"
+    async fn resolve_session_id(&self, context: &graph_flow::Context) -> String {
+        // Priority 1: explicit session_id
+        if let Some(ref sid) = self.session_id {
+            return sid.clone();
+        }
+
+        // Priority 2: lookup from session_routes via agent_ref
+        if let Some(ref agent) = self.agent_ref {
+            let routes_key = "_session_routes";
+            let routes_json: Option<serde_json::Value> = context.get(routes_key).await;
+            if let Some(routes) = routes_json {
+                if let Some(obj) = routes.as_object() {
+                    if let Some(sid) = obj.get(agent).and_then(|v| v.as_str()) {
+                        return sid.to_string();
+                    }
+                }
+            }
+        }
+
+        // Priority 3: default
+        "default".to_string()
     }
 }
 
@@ -649,15 +739,43 @@ impl Task for InnerGraphNodeTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // T4 will replace this stub with the full AcpPromptTask behavior.
-        // For T3, we just store a placeholder output and continue.
-        let output = format!("inner_node:{}:stub_output", self.id);
+        // Resolve session_id for this node (WS-E T5).
+        let session_id = self.resolve_session_id(&context).await;
+
+        // If we have a worker handle, delegate to AcpPromptTask.
+        if let Some(ref handle_arc) = self.worker_handle {
+            let acp_task = AcpPromptTask::new(
+                Some(handle_arc.clone()),
+                &self.id,
+                self.template.clone(),
+                self.tool_policy.clone(),
+                Some(session_id),
+            );
+            return acp_task.run(context).await;
+        }
+
+        // Stub mode: return a placeholder.
+        tracing::debug!(
+            node_id = %self.id,
+            session_id = %session_id,
+            agent_ref = ?self.agent_ref,
+            "InnerGraphNodeTask running in stub mode"
+        );
+
+        let output = format!(
+            "inner_node:{}:stub_output [session_id={}]",
+            self.id, session_id
+        );
         context
             .set(format!("nodes.{}.text", self.id), output.clone())
             .await;
         context
             .set(format!("nodes.{}.output", self.id), output.clone())
             .await;
+        context
+            .set(format!("nodes.{}.session_id", self.id), session_id)
+            .await;
+
         Ok(TaskResult::new(Some(output), NextAction::Continue))
     }
 }
@@ -726,6 +844,10 @@ pub struct AcpPromptTask {
     template: String,
     /// Tool policy for this prompt.
     tool_policy: ToolPolicy,
+    /// Session ID for multi-agent routing (WS-E T5).
+    /// Routes the prompt to a specific agent slot within the worker.
+    /// Default `"default"` for backward compatibility with single-agent workers.
+    session_id: String,
 }
 
 impl AcpPromptTask {
@@ -733,6 +855,9 @@ impl AcpPromptTask {
     ///
     /// `worker_handle`: the worker handle for IPC. Can be `None` for test mode
     /// where the task operates in stub mode.
+    ///
+    /// `session_id`: optional session ID for multi-agent routing. If `None`,
+    /// defaults to `"default"` for backward compatibility with single-agent workers.
     pub fn new(
         worker_handle: Option<
             std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>,
@@ -740,12 +865,14 @@ impl AcpPromptTask {
         state_id: impl Into<String>,
         template: impl Into<String>,
         tool_policy: ToolPolicy,
+        session_id: Option<String>,
     ) -> Self {
         Self {
             worker_handle,
             state_id: state_id.into(),
             template: template.into(),
             tool_policy,
+            session_id: session_id.unwrap_or_else(|| "default".to_string()),
         }
     }
 
@@ -761,6 +888,29 @@ impl AcpPromptTask {
             state_id: state_id.into(),
             template: template.into(),
             tool_policy,
+            session_id: "default".to_string(),
+        }
+    }
+
+    /// Create an AcpPromptTask with explicit session_id (WS-E T5).
+    ///
+    /// Convenience constructor for multi-agent presets where the session_id
+    /// is known at task creation time.
+    pub fn with_session_id(
+        worker_handle: Option<
+            std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>,
+        >,
+        state_id: impl Into<String>,
+        template: impl Into<String>,
+        tool_policy: ToolPolicy,
+        session_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            worker_handle,
+            state_id: state_id.into(),
+            template: template.into(),
+            tool_policy,
+            session_id: session_id.into(),
         }
     }
 
@@ -818,9 +968,11 @@ impl Task for AcpPromptTask {
             };
 
             // Call worker/acp_prompt via IPC.
+            // WS-E T5: include session_id for multi-agent routing.
             let params = serde_json::json!({
                 "prompt": prompt,
                 "tool_policy": self.tool_policy.as_str(),
+                "session_id": self.session_id,
             });
 
             let ipc_result = handle.call_json_rpc("worker/acp_prompt", params).await;
@@ -967,6 +1119,7 @@ mod tests {
             "test-state",
             "Hello {{core_context.version}}",
             ToolPolicy::DenyAll,
+            None, // default session_id
         );
         let ctx = graph_flow::Context::new();
         ctx.set("core_context.version", "42").await;
@@ -983,12 +1136,144 @@ mod tests {
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
+            None, // default session_id
         );
         let ctx = graph_flow::Context::new();
         let result = task.run(ctx.clone()).await.unwrap();
         let stored: String = ctx.get("state.state-1.output").await.unwrap();
         assert!(stored.contains("test prompt"), "stored: {stored}");
         assert_eq!(result.response.as_deref(), Some(stored.as_str()));
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_task_with_explicit_session_id() {
+        // WS-E T5: test session_id field
+        let task = AcpPromptTask::new(
+            None,
+            "state-1",
+            "test prompt",
+            ToolPolicy::AutoGrantReadOnly,
+            Some("writer_session".to_string()), // explicit session_id
+        );
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        // Stub mode should still work with explicit session_id
+        let stored: String = ctx.get("state.state-1.output").await.unwrap();
+        assert!(stored.contains("test prompt"), "stored: {stored}");
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_task_with_session_id_method() {
+        // WS-E T5: test with_session_id constructor
+        let task = AcpPromptTask::with_session_id(
+            None,
+            "state-1",
+            "test prompt",
+            ToolPolicy::AutoGrantReadOnly,
+            "reviewer_session",
+        );
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(matches!(result.next_action, NextAction::Continue));
+    }
+
+    #[tokio::test]
+    async fn inner_graph_node_task_stub_mode_with_session_id() {
+        // WS-E T5: InnerGraphNodeTask should track session_id even in stub mode
+        let task = InnerGraphNodeTask::new("n1").with_session_id("writer_session");
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+
+        // Check output includes session_id
+        let stored: String = ctx.get("nodes.n1.text").await.unwrap();
+        assert!(
+            stored.contains("writer_session"),
+            "stored should contain session_id: {stored}"
+        );
+
+        // Check session_id stored in context
+        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
+        assert_eq!(sid, "writer_session");
+    }
+
+    #[tokio::test]
+    async fn inner_graph_node_task_resolves_session_id_from_routes() {
+        // WS-E T5: InnerGraphNodeTask should lookup session_id from session_routes
+        let task = InnerGraphNodeTask::new("n1").with_agent_ref("writer"); // agent role reference
+
+        let ctx = graph_flow::Context::new();
+        // Set session_routes: writer → writer_session
+        ctx.set(
+            "_session_routes",
+            serde_json::json!({
+                "writer": "writer_session",
+                "reviewer": "reviewer_session",
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+
+        // Check session_id was resolved correctly
+        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
+        assert_eq!(sid, "writer_session");
+
+        // Check output includes resolved session_id
+        let stored: String = ctx.get("nodes.n1.text").await.unwrap();
+        assert!(stored.contains("writer_session"), "stored: {stored}");
+    }
+
+    #[tokio::test]
+    async fn inner_graph_node_task_falls_back_to_default() {
+        // WS-E T5: No session_id, no agent_ref, no routes → default
+        let task = InnerGraphNodeTask::new("n1");
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+
+        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
+        assert_eq!(sid, "default");
+    }
+
+    #[tokio::test]
+    async fn inner_graph_node_task_agent_ref_missing_in_routes() {
+        // WS-E T5: agent_ref set but not in routes → default
+        let task = InnerGraphNodeTask::new("n1").with_agent_ref("unknown_role");
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "_session_routes",
+            serde_json::json!({
+                "writer": "writer_session",
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+
+        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
+        assert_eq!(sid, "default");
+    }
+
+    #[tokio::test]
+    async fn inner_graph_node_task_explicit_session_id_overrides_routes() {
+        // WS-E T5: explicit session_id should win over routes lookup
+        let task = InnerGraphNodeTask::new("n1")
+            .with_session_id("explicit_session")
+            .with_agent_ref("writer"); // this should be ignored
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "_session_routes",
+            serde_json::json!({
+                "writer": "writer_session",
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+
+        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
+        assert_eq!(sid, "explicit_session");
     }
 
     #[tokio::test]
