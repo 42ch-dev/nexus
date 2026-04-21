@@ -24,11 +24,8 @@ use tracing::{debug, info};
 #[allow(async_fn_in_trait)]
 pub trait WorkerSpawner: Send + Sync {
     /// Spawn a new worker for the given creator using the provided spec.
-    async fn spawn(
-        &self,
-        creator_id: &str,
-        spec: &WorkerSpec,
-    ) -> Result<WorkerHandle, WorkerError>;
+    async fn spawn(&self, creator_id: &str, spec: &WorkerSpec)
+        -> Result<WorkerHandle, WorkerError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,17 +90,13 @@ impl<S: WorkerSpawner> WorkerRegistry<S> {
         }
 
         let handle = self.spawner.spawn(creator_id, spec).await?;
-        info!(
-            creator_id,
-            pid = handle.pid(),
-            "registered new worker"
-        );
+        info!(creator_id, pid = handle.pid(), "registered new worker");
 
         self.workers.insert(creator_id.to_string(), handle);
         // Safe: we just inserted.
-        self.workers.get(creator_id).ok_or_else(|| {
-            WorkerError::Internal("handle disappeared after insert".to_string())
-        })
+        self.workers
+            .get(creator_id)
+            .ok_or_else(|| WorkerError::Internal("handle disappeared after insert".to_string()))
     }
 
     /// Get a reference to the handle for the given creator, if present.

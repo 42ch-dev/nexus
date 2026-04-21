@@ -15,11 +15,10 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use nexus_orchestration::worker::{
-    DuplexTransport, IpcClient, RpcTransport, WorkerError, WorkerHandle, WorkerRegistry,
-    WorkerSpec,
-};
 use nexus_orchestration::worker::registry::WorkerSpawner;
+use nexus_orchestration::worker::{
+    DuplexTransport, IpcClient, RpcTransport, WorkerError, WorkerHandle, WorkerRegistry, WorkerSpec,
+};
 
 /// Mock spawner that creates `WorkerHandle`s backed by `DuplexTransport`.
 ///
@@ -126,7 +125,9 @@ async fn registry_get_returns_handle() {
         .expect("spawn");
     let pid = spawned.pid();
 
-    let found = registry.get("creator-a").expect("should find existing creator");
+    let found = registry
+        .get("creator-a")
+        .expect("should find existing creator");
     assert_eq!(found.pid(), pid);
 }
 
@@ -157,8 +158,14 @@ async fn registry_remove_removes_entry() {
     assert_eq!(removed.unwrap().pid(), 0);
 
     assert_eq!(registry.len(), 1);
-    assert!(registry.get("creator-a").is_none(), "removed creator should be gone");
-    assert!(registry.get("creator-b").is_some(), "other creator should remain");
+    assert!(
+        registry.get("creator-a").is_none(),
+        "removed creator should be gone"
+    );
+    assert!(
+        registry.get("creator-b").is_some(),
+        "other creator should remain"
+    );
 }
 
 #[tokio::test]
@@ -230,7 +237,10 @@ async fn registry_shutdown_all() {
 
     registry.shutdown_all().await.expect("shutdown_all");
 
-    assert!(registry.is_empty(), "all workers should be removed after shutdown");
+    assert!(
+        registry.is_empty(),
+        "all workers should be removed after shutdown"
+    );
 }
 
 #[tokio::test]
