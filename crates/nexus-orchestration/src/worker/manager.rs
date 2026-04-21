@@ -2,12 +2,12 @@
 //!
 //! Architecture:
 //! - `WorkerManager` spawns child processes and tracks them.
-//! - `WorkerHandle` provides IPC (stdin/stdout) and shutdown.
+//! - `WorkerHandle` provides IPC via [`IpcClient`] and shutdown.
 //! - A background supervisor task per worker calls `child.wait()` and
 //!   emits `WorkerEvent::Crashed` on unexpected exit.
 //!
 //! The `Child` is moved into the supervisor task. The handle holds the
-//! stdin/stdout halves (taken before the move), the PID, and a
+//! `IpcClient` (wrapping stdin/stdout), the PID, and a
 //! `CancellationToken` for in-flight request cancellation.
 //!
 //! ## WS2 R4: SIGTERM → SIGKILL escalation
@@ -16,16 +16,22 @@
 //! from `shutdown_grace`, then escalates to SIGKILL if the worker hasn't exited.
 //! This follows the graceful shutdown pattern from §6.5 of the design spec.
 //!
+//! ## WS-E T1: Persistent IpcClient
+//!
+//! `WorkerHandle` now holds an [`IpcClient`] internally. The legacy
+//! `call_json_rpc` method is preserved for backward compatibility — it
+//! delegates to the internal `IpcClient`.
+//!
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §6.1, §6.5.
 
-use crate::worker::ipc::call_json_rpc_with_timeout;
+use crate::worker::ipc::IpcClient;
 use crate::worker::transport::StdioTransport;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use serde_json::Value;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::process::{ChildStdin, ChildStdout, Command};
+use tokio::process::Command;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -118,8 +124,14 @@ pub enum WorkerEvent {
 
 /// Handle to a running worker process.
 ///
-/// Owns the child's stdin/stdout pipe halves for IPC and a cancellation token.
+/// Owns an [`IpcClient`] for multiplexed IPC and a cancellation token.
 /// The `Child` itself is owned by a background supervisor task.
+///
+/// ## Backward compatibility
+///
+/// The legacy `call_json_rpc` method is preserved — it delegates to the
+/// internal `IpcClient::call`. New code should prefer using
+/// [`WorkerHandle::ipc_client`] directly for concurrent requests.
 pub struct WorkerHandle {
     /// PID of the worker process.
     pid: u32,
@@ -130,10 +142,8 @@ pub struct WorkerHandle {
     event_tx: broadcast::Sender<WorkerEvent>,
     /// Grace period for shutdown (default: 30 seconds, configurable via spec).
     shutdown_grace: Duration,
-    /// Stored stdin half for one-shot IPC calls.
-    stdin: Option<ChildStdin>,
-    /// Stored stdout half for one-shot IPC calls.
-    stdout: Option<ChildStdout>,
+    /// Persistent IpcClient for multiplexed JSON-RPC communication.
+    ipc: IpcClient,
     /// Whether a clean shutdown has been requested.
     shutdown_requested: bool,
 }
@@ -141,34 +151,17 @@ pub struct WorkerHandle {
 impl WorkerHandle {
     /// Send a JSON-RPC request to the worker and await the response.
     ///
-    /// This is a **one-shot** operation: it takes stdin/stdout, creates a
-    /// transport, sends the request, reads the response, and then drops
-    /// the transport. Subsequent calls will fail because the pipes are
-    /// consumed.
+    /// Delegates to the internal [`IpcClient`]. This method can be called
+    /// multiple times — the underlying `IpcClient` supports concurrent
+    /// in-flight requests.
     ///
-    /// For multi-request sessions, use `IpcClient` (not yet wired in WS2).
-    pub async fn call_json_rpc(
-        &mut self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, WorkerError> {
-        let stdin = self
-            .stdin
-            .take()
-            .ok_or_else(|| WorkerError::Internal("stdin already consumed".to_string()))?;
-
-        let stdout = self
-            .stdout
-            .take()
-            .ok_or_else(|| WorkerError::Internal("stdout already consumed".to_string()))?;
-
-        let mut transport = StdioTransport::new(stdin, stdout);
-        let result =
-            call_json_rpc_with_timeout(&mut transport, method, params, Duration::from_secs(30))
-                .await
-                .map_err(|e| WorkerError::Ipc(e.to_string()))?;
-
-        Ok(result)
+    /// For concurrent requests, prefer [`WorkerHandle::ipc_client`] which
+    /// returns `&IpcClient` for direct use with multiple outstanding calls.
+    pub async fn call_json_rpc(&self, method: &str, params: Value) -> Result<Value, WorkerError> {
+        self.ipc
+            .call(method, params)
+            .await
+            .map_err(|e| WorkerError::Ipc(e.to_string()))
     }
 
     /// Request a graceful shutdown of the worker.
@@ -186,11 +179,12 @@ impl WorkerHandle {
             "requesting worker shutdown via cancellation token"
         );
 
-        // Try to send a shutdown RPC if we still have pipes.
-        if self.stdin.is_some() && self.stdout.is_some() {
+        // Try to send a shutdown RPC via IpcClient.
+        if !self.ipc.is_closed() {
             let grace_ms = self.shutdown_grace.as_millis() as u32;
             match self
-                .call_json_rpc("worker/shutdown", serde_json::json!({"grace_ms": grace_ms}))
+                .ipc
+                .call("worker/shutdown", serde_json::json!({"grace_ms": grace_ms}))
                 .await
             {
                 Ok(_) => {
@@ -202,15 +196,24 @@ impl WorkerHandle {
                 }
             }
         } else {
-            // No pipes available. The cancellation token will cause the
-            // supervisor to initiate SIGTERM→SIGKILL sequence.
             info!(
                 pid = self.pid,
-                "no pipes available — supervisor will send SIGTERM"
+                "IPC client already closed — supervisor will send SIGTERM"
             );
         }
 
+        // Close the IpcClient to clean up the background reader.
+        self.ipc.close().await;
+
         Ok(())
+    }
+
+    /// Return a reference to the internal [`IpcClient`].
+    ///
+    /// Use this for concurrent multiplexed requests — multiple callers can
+    /// call [`IpcClient::call`] on the returned reference simultaneously.
+    pub fn ipc_client(&self) -> &IpcClient {
+        &self.ipc
     }
 
     /// Return the process ID.
@@ -297,8 +300,18 @@ impl WorkerManager {
         info!(pid, program = %spec.program, "spawned worker");
 
         // Take stdin/stdout BEFORE moving the child into the supervisor.
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take();
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| WorkerError::Internal("failed to capture child stdin".to_string()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| WorkerError::Internal("failed to capture child stdout".to_string()))?;
+
+        // Create persistent IpcClient from the transport.
+        let transport = StdioTransport::new(stdin, stdout);
+        let ipc = IpcClient::new(Box::new(transport));
 
         let cancel = CancellationToken::new();
         let supervisor_cancel = cancel.clone();
@@ -391,8 +404,7 @@ impl WorkerManager {
             cancel,
             event_tx: self.event_tx.clone(),
             shutdown_grace,
-            stdin,
-            stdout,
+            ipc,
             shutdown_requested: false,
         };
 
