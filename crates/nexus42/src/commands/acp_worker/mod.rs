@@ -326,12 +326,18 @@ async fn handle_initialize(
                     .get("model")
                     .and_then(|v| v.as_str())
                     .map(String::from);
+                // T8: system_prompt from IPC params (daemon reads from preset)
+                let system_prompt = agent_obj
+                    .get("system_prompt")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
 
                 let config = AgentConfig {
                     session_id: session_id.clone(),
                     acp_agent_id,
                     role,
                     model,
+                    system_prompt,
                 };
 
                 let slot = AgentSlot::new(config);
@@ -551,6 +557,11 @@ async fn handle_agent_start(
         .get("model")
         .and_then(|v| v.as_str())
         .map(String::from);
+    // T8: system_prompt from IPC params (daemon reads from preset)
+    let system_prompt = params
+        .get("system_prompt")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     // Synchronous lock scope.
     enum StartResult {
@@ -572,6 +583,7 @@ async fn handle_agent_start(
                 acp_agent_id,
                 role,
                 model,
+                system_prompt,
             };
             let slot = AgentSlot::new(config);
             slot.mark_ready();
@@ -962,6 +974,7 @@ mod tests {
     }
 
     // --- Initialize with new agents array ---
+    // --- T8: includes system_prompt extraction
 
     #[test]
     fn initialize_with_agents_array_creates_multiple_sessions() {
@@ -972,7 +985,8 @@ mod tests {
                     "session_id": "writer_1",
                     "acp_agent_id": "claude-sonnet-4-20250514",
                     "role": "writer",
-                    "model": "claude-3"
+                    "model": "claude-3",
+                    "system_prompt": "You are a creative writer."
                 },
                 {
                     "session_id": "editor_1",
@@ -1005,12 +1019,18 @@ mod tests {
                         .get("model")
                         .and_then(|v| v.as_str())
                         .map(String::from);
+                    // T8: system_prompt
+                    let system_prompt = agent_obj
+                        .get("system_prompt")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
 
                     let config = AgentConfig {
                         session_id: session_id.clone(),
                         acp_agent_id,
                         role,
                         model,
+                        system_prompt,
                     };
                     let slot = AgentSlot::new(config);
                     slot.mark_ready();
@@ -1027,10 +1047,14 @@ mod tests {
         let writer = sessions.get("writer_1").expect("exists");
         assert_eq!(writer.role(), Some("writer"));
         assert_eq!(writer.model(), Some("claude-3"));
+        // T8: system_prompt stored correctly
+        assert_eq!(writer.system_prompt(), Some("You are a creative writer."));
 
         let editor = sessions.get("editor_1").expect("exists");
         assert_eq!(editor.role(), Some("editor"));
         assert!(editor.model().is_none());
+        // T8: editor has no system_prompt in params
+        assert!(editor.system_prompt().is_none());
     }
 
     // --- Agent start / stop lifecycle ---
@@ -1257,6 +1281,119 @@ mod tests {
         assert!(sessions.contains_key("default"));
     }
 
+    // --- T8: agent_start with system_prompt ---
+
+    #[test]
+    fn agent_start_with_system_prompt_stores_correctly() {
+        let state = MultiplexedWorkerState::new("test".to_string());
+
+        // Simulate agent_start IPC with system_prompt.
+        let params = json!({
+            "session_id": "writer_sp",
+            "acp_agent_id": "claude-acp",
+            "role": "writer",
+            "model": "claude-sonnet-4",
+            "system_prompt": "You are a creative writing assistant."
+        });
+
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let session_id = params
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .expect("session_id");
+            let acp_agent_id = params
+                .get("acp_agent_id")
+                .and_then(|v| v.as_str())
+                .expect("acp_agent_id");
+            let role = params
+                .get("role")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let model = params
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let system_prompt = params
+                .get("system_prompt")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+
+            let config = AgentConfig {
+                session_id: session_id.to_string(),
+                acp_agent_id: acp_agent_id.to_string(),
+                role,
+                model,
+                system_prompt,
+            };
+            let slot = AgentSlot::new(config);
+            slot.mark_ready();
+            sessions.insert(session_id.to_string(), slot);
+        }
+
+        let sessions = state.sessions.read().expect("lock ok");
+        let slot = sessions.get("writer_sp").expect("exists");
+        assert_eq!(
+            slot.system_prompt(),
+            Some("You are a creative writing assistant.")
+        );
+        assert_eq!(slot.role(), Some("writer"));
+    }
+
+    // --- T8: agent_start without system_prompt (graceful handling) ---
+
+    #[test]
+    fn agent_start_without_system_prompt_works_gracefully() {
+        let state = MultiplexedWorkerState::new("test".to_string());
+
+        // Simulate agent_start IPC WITHOUT system_prompt.
+        let params = json!({
+            "session_id": "no_sp",
+            "acp_agent_id": "claude-acp",
+            "role": "editor"
+        });
+
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let session_id = params
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .expect("session_id");
+            let acp_agent_id = params
+                .get("acp_agent_id")
+                .and_then(|v| v.as_str())
+                .expect("acp_agent_id");
+            let role = params
+                .get("role")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let model = params
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let system_prompt = params
+                .get("system_prompt")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+
+            let config = AgentConfig {
+                session_id: session_id.to_string(),
+                acp_agent_id: acp_agent_id.to_string(),
+                role,
+                model,
+                system_prompt,
+            };
+            let slot = AgentSlot::new(config);
+            slot.mark_ready();
+            sessions.insert(session_id.to_string(), slot);
+        }
+
+        let sessions = state.sessions.read().expect("lock ok");
+        let slot = sessions.get("no_sp").expect("exists");
+        assert!(slot.system_prompt().is_none());
+        assert_eq!(slot.role(), Some("editor"));
+    }
+
     // --- Duplicate agent_start is rejected ---
 
     #[test]
@@ -1297,7 +1434,7 @@ mod tests {
         assert!(removed.is_none());
     }
 
-    // --- Idempotent re-init ---
+    // --- T8: verify system_prompt extraction in re-init path
 
     #[test]
     fn initialize_idempotent_replaces_sessions() {
@@ -1315,7 +1452,12 @@ mod tests {
         // Re-init with new agents array.
         let params = json!({
             "agents": [
-                { "session_id": "new_s1", "acp_agent_id": "new_agent" }
+                {
+                    "session_id": "new_s1",
+                    "acp_agent_id": "new_agent",
+                    "role": "writer",
+                    "system_prompt": "New system prompt."
+                }
             ]
         });
 
@@ -1343,12 +1485,18 @@ mod tests {
                         .get("model")
                         .and_then(|v| v.as_str())
                         .map(String::from);
+                    // T8: system_prompt
+                    let system_prompt = agent_obj
+                        .get("system_prompt")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
 
                     let config = AgentConfig {
                         session_id: session_id.clone(),
                         acp_agent_id,
                         role,
                         model,
+                        system_prompt,
                     };
                     let slot = AgentSlot::new(config);
                     slot.mark_ready();
@@ -1361,6 +1509,9 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert!(sessions.contains_key("new_s1"));
         assert!(!sessions.contains_key("old_s1"));
+        // T8: verify system_prompt in new slot
+        let new_slot = sessions.get("new_s1").expect("exists");
+        assert_eq!(new_slot.system_prompt(), Some("New system prompt."));
     }
 
     // --- T3b: Crash isolation ---
