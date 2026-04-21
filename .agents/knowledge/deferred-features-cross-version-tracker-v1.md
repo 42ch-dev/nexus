@@ -34,7 +34,7 @@
 
 | ID | Feature | First deferred | Target | Effort est. | Deferral history | Blocking reason / Notes |
 |----|---------|---------------|--------|-------------|-----------------|----------------------|
-| DF-01 | Multi-agent worker (single worker hosting >1 ACP agent) | V1.4 | **V1.7** | XL | V1.4→V1.5+→V1.6+→V1.7+ | Requires ACP session multiplexing design. See `orchestration-engine-v1.md` §11 OQ-7. Two approaches: (a) multiplex one worker, (b) spawn sibling workers. |
+| DF-01 | Multi-agent worker (single worker hosting >1 ACP agent + multi-creator WorkerRegistry + role/persona system) | V1.4 | **V1.7** | XL | V1.4→V1.5+→V1.6+→V1.7+ | Design plan: `.agents/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md`. Approach A selected (multiplex one worker). Three-concept AgentConfig: agent_id (ACP Registry), role (preset persona), model (LLM). WorkerRegistry: `HashMap<CreatorId, WorkerHandle>` for multi-creator management. |
 | DF-04 | ACP SDK migration to sacp v1.0 | V1.4 | **V1.7** | L | V1.4 (not forced)→V1.6+→V1.7+ | V1.6 DTO decoupling was preparation. SDK v0.11.0 available (2026-04-20). Adapter-trait policy in `acp-client-tech-spec-v2.md`. |
 | DF-08 | Wire/local drift auto-detect tooling | V1.6 | V1.8+ | M | V1.6→V1.7+ | Automated detection of schema classification drift. Per V1.6 WS5 OQ-S3. Worth doing. |
 | DF-09 | Template_file path validation | V1.6 | V1.8+ | S | V1.6→V1.7+ | Filesystem preset path traversal protection. Must work with `~/.nexus/strategies/` third-party presets (see DF-17). First noted V1.4 WS3 QC S-1. Worth prioritizing. |
