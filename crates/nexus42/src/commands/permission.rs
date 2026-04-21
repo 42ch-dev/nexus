@@ -183,6 +183,13 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
 }
 
 fn print_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> Result<()> {
+    let result = build_list_json(policy, agent_filter);
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+/// Build the JSON value for the `permission list --output json` command.
+fn build_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> serde_json::Value {
     let mut agents_json = serde_json::Map::new();
 
     let agent_ids: Vec<&str> = if let Some(filter) = agent_filter {
@@ -208,12 +215,27 @@ fn print_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> Res
         }
     }
 
-    let result = serde_json::json!({
-        "default": format!("{:?}", policy.default).to_lowercase(),
-        "agents": agents_json,
-    });
-    println!("{}", serde_json::to_string_pretty(&result)?);
-    Ok(())
+    let mut result = serde_json::Map::new();
+    result.insert(
+        "default".to_string(),
+        serde_json::Value::String(format!("{:?}", policy.default).to_lowercase()),
+    );
+
+    // Include global rules when they exist
+    let (global_granted, global_denied) = policy.list_permissions();
+    if !global_granted.is_empty() || !global_denied.is_empty() {
+        let mut global = serde_json::Map::new();
+        if !global_granted.is_empty() {
+            global.insert("grant".to_string(), serde_json::json!(global_granted));
+        }
+        if !global_denied.is_empty() {
+            global.insert("deny".to_string(), serde_json::json!(global_denied));
+        }
+        result.insert("global".to_string(), serde_json::Value::Object(global));
+    }
+
+    result.insert("agents".to_string(), serde_json::Value::Object(agents_json));
+    serde_json::Value::Object(result)
 }
 
 fn run_grant(workspace_root: &std::path::Path, agent: &str, capability: &str) -> Result<()> {
@@ -525,5 +547,53 @@ mod tests {
         let loaded = PermissionPolicy::load(ws.path()).expect("load failed");
         let (granted, _, _) = loaded.list_agent_rules("agent-a");
         assert_eq!(granted, vec!["cap-a"]);
+    }
+
+    #[test]
+    fn test_json_output_includes_global_when_present() {
+        let mut policy = PermissionPolicy::new();
+        policy.grant_permission("file_system.read".to_string());
+        policy.deny_permission("terminal.kill".to_string());
+        policy.grant_agent("test-agent", "terminal.create");
+
+        let json_val = build_list_json(&policy, None);
+        let parsed = json_val.as_object().expect("should be object");
+
+        // Should have global key with grant/deny
+        assert!(
+            parsed.contains_key("global"),
+            "JSON should contain 'global' key"
+        );
+        let global = parsed["global"]
+            .as_object()
+            .expect("global should be object");
+        assert!(global.contains_key("grant"));
+        assert!(global.contains_key("deny"));
+
+        // Should have agents key
+        assert!(
+            parsed.contains_key("agents"),
+            "JSON should contain 'agents' key"
+        );
+        assert!(parsed["agents"]
+            .as_object()
+            .unwrap()
+            .contains_key("test-agent"));
+    }
+
+    #[test]
+    fn test_json_output_omits_global_when_absent() {
+        let mut policy = PermissionPolicy::new();
+        policy.grant_agent("test-agent", "terminal.create");
+
+        let json_val = build_list_json(&policy, None);
+        let parsed = json_val.as_object().expect("should be object");
+
+        // Should NOT have global key when no global rules exist
+        assert!(
+            !parsed.contains_key("global"),
+            "JSON should NOT contain 'global' key when no global rules exist. Got: {:?}",
+            parsed
+        );
     }
 }
