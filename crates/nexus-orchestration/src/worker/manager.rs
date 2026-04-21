@@ -116,6 +116,22 @@ pub enum WorkerEvent {
     Started { pid: u32 },
     /// Worker was gracefully shut down.
     Stopped { pid: u32 },
+    /// An agent session within a worker reported a state change.
+    ///
+    /// Emitted when the worker sends a `worker/agent_session_event`
+    /// notification (e.g., `"started"`, `"stopped"`, `"crashed"`).
+    /// The daemon uses this to track per-session health and trigger
+    /// crash recovery for individual agents without affecting others.
+    AgentSessionEvent {
+        /// Worker PID that owns the session.
+        pid: u32,
+        /// Session identifier within the worker.
+        session_id: String,
+        /// Event type: `"started"`, `"stopped"`, `"crashed"`.
+        event: String,
+        /// Human-readable reason (present for `"crashed"` events).
+        reason: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
