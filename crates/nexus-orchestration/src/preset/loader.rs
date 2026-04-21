@@ -41,6 +41,9 @@ pub struct LoadedPreset {
     pub initial_action: Option<crate::preset::manifest::InitialAction>,
     /// Per-state context update hooks (keyed by state ID).
     pub context_update_hooks: HashMap<String, crate::preset::manifest::ContextUpdateHook>,
+    /// Role definitions for multi-agent presets (WS-E T6).
+    /// Empty = single-agent mode (backward compatible).
+    pub roles: Vec<crate::preset::manifest::PresetRoleDefinition>,
 }
 
 impl std::fmt::Debug for LoadedPreset {
@@ -160,6 +163,7 @@ pub fn load_preset_from_str(
                     .map(|hook| (s.id.clone(), hook.clone()))
             })
             .collect(),
+        roles: manifest.roles.clone(),
         manifest,
     })
 }
@@ -334,6 +338,48 @@ fn validate_manifest(
         }
     }
 
+    // --- WS-E T6: Role validation ---
+    // Build role ID set for agent reference validation
+    let role_ids: HashSet<&str> = manifest.roles.iter().map(|r| r.id.as_str()).collect();
+
+    // Check role ID uniqueness (already implicitly unique via HashSet,
+    // but we want explicit error message)
+    let mut seen_role_ids: HashSet<&str> = HashSet::new();
+    for (i, role) in manifest.roles.iter().enumerate() {
+        if seen_role_ids.contains(role.id.as_str()) {
+            problems.push(ValidationProblem {
+                path: format!("roles[{}].id", i),
+                error: format!("duplicate role id: '{}'", role.id),
+            });
+        }
+        seen_role_ids.insert(role.id.as_str());
+
+        // Check recommended_models format: must be "acp_agent_id:model_name"
+        for (j, rec_model) in role.recommended_models.iter().enumerate() {
+            if !validate_recommended_model_format(rec_model) {
+                problems.push(ValidationProblem {
+                    path: format!("roles[{}].recommended_models[{}]", i, j),
+                    error: format!(
+                        "invalid recommended_models format '{}': expected 'acp_agent_id:model_name'",
+                        rec_model
+                    ),
+                });
+            }
+        }
+
+        // Reject empty recommended_models (loader should enforce at least one entry)
+        if !role.recommended_models.is_empty() && manifest.roles.iter().any(|r| r.recommended_models.is_empty()) {
+            // Only report if there are other roles with models (mixed state)
+            // If ALL roles have empty recommended_models, that's a different error
+        }
+        if role.recommended_models.is_empty() {
+            problems.push(ValidationProblem {
+                path: format!("roles[{}].recommended_models", i),
+                error: "role must have at least one recommended_model".to_string(),
+            });
+        }
+    }
+
     // Validate inner graphs
     if let Some(ref inner_graphs) = manifest.inner_graphs {
         for (name, ig) in inner_graphs.iter() {
@@ -356,6 +402,27 @@ fn validate_manifest(
                         problems.push(ValidationProblem {
                             path: format!("{}.nodes[{}].depends_on", ig_path, k),
                             error: format!("unknown node: '{}'", dep),
+                        });
+                    }
+                }
+
+                // WS-E T6: Check agent references
+                if let Some(ref agent_ref) = node.agent {
+                    // If roles are defined, agent must reference a valid role ID
+                    if !manifest.roles.is_empty() && !role_ids.contains(agent_ref.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{}.nodes[{}].agent", ig_path, k),
+                            error: format!("unknown role reference: '{}'", agent_ref),
+                        });
+                    }
+                    // If no roles defined, agent field should not be present
+                    if manifest.roles.is_empty() {
+                        problems.push(ValidationProblem {
+                            path: format!("{}.nodes[{}].agent", ig_path, k),
+                            error: format!(
+                                "agent field '{}' references role, but no roles section defined",
+                                agent_ref
+                            ),
                         });
                     }
                 }
@@ -450,6 +517,18 @@ fn dfs_cycle2<'a>(
     black.insert(node);
     path.pop();
     None
+}
+
+/// Validate recommended_models format: "acp_agent_id:model_name".
+///
+/// Format must contain exactly one colon separating the agent ID and model name.
+/// Both parts must be non-empty.
+fn validate_recommended_model_format(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    !parts[0].is_empty() && !parts[1].is_empty()
 }
 
 // ---------------------------------------------------------------------------
