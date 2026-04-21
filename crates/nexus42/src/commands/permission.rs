@@ -101,6 +101,14 @@ fn run_list(
 ) -> Result<()> {
     let policy = PermissionPolicy::load(workspace_root)?;
 
+    // Validate TOML keys and print warnings for unknown keys
+    if let Ok(doc) = PermissionPolicy::load_toml_edit(workspace_root) {
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        for warning in &warnings {
+            eprintln!("Warning: {}", warning);
+        }
+    }
+
     if output_format == "json" {
         print_list_json(&policy, agent_filter)?;
     } else {
@@ -595,5 +603,19 @@ mod tests {
             "JSON should NOT contain 'global' key when no global rules exist. Got: {:?}",
             parsed
         );
+    }
+
+    #[test]
+    fn test_list_warns_on_unknown_toml_keys() {
+        let ws = make_workspace();
+        let path = PermissionPolicy::policy_path(ws.path());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create dir failed");
+        }
+        // Write a file with an unknown top-level key
+        std::fs::write(&path, "default = \"ask\"\nfuture_key = \"value\"\n").expect("write failed");
+
+        // run_list should succeed (warnings are informational only)
+        run_list(ws.path(), None, "text").expect("list should succeed");
     }
 }
