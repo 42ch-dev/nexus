@@ -381,6 +381,288 @@ pub struct NexusCancelResult {
     pub session_id: NexusSessionId,
 }
 
+// ── Session config option ─────────────────────────────────────────────
+
+/// Request to set a session configuration option.
+///
+/// Mirrors the SDK `SetSessionConfigOptionRequest` — identifies the session,
+/// the config key, and the new value (a string newtype for value IDs).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusSetConfigOptionRequest {
+    /// The session to update.
+    pub session_id: NexusSessionId,
+    /// The configuration option to set.
+    pub config_id: String,
+    /// The value to set (a config value ID string).
+    pub value: String,
+}
+
+impl NexusSetConfigOptionRequest {
+    /// Create a new set-config-option request.
+    #[must_use]
+    pub fn new(
+        session_id: NexusSessionId,
+        config_id: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_id,
+            config_id: config_id.into(),
+            value: value.into(),
+        }
+    }
+}
+
+/// Category of a session configuration option (UX hint).
+///
+/// Mirrors the SDK `SessionConfigOptionCategory` enum.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NexusConfigOptionCategory {
+    /// Session mode selector.
+    Mode,
+    /// Model selector.
+    Model,
+    /// Thought/reasoning level selector.
+    ThoughtLevel,
+    /// Unknown / uncategorized.
+    Other(String),
+}
+
+/// A possible value in a select configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigSelectOption {
+    /// Unique identifier for this option value.
+    pub value: String,
+    /// Human-readable label.
+    pub name: String,
+    /// Optional description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// A group of selectable options in a configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigSelectGroup {
+    /// Unique identifier for this group.
+    pub group: String,
+    /// Human-readable label for this group.
+    pub name: String,
+    /// The set of option values in this group.
+    pub options: Vec<NexusConfigSelectOption>,
+}
+
+/// Options layout for a select configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NexusConfigSelectOptions {
+    /// A flat list of options with no grouping.
+    Ungrouped(Vec<NexusConfigSelectOption>),
+    /// A list of options grouped under headers.
+    Grouped(Vec<NexusConfigSelectGroup>),
+}
+
+/// The payload for a select-type configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigSelect {
+    /// The currently selected value.
+    pub current_value: String,
+    /// The selectable options.
+    pub options: NexusConfigSelectOptions,
+}
+
+/// Type-specific payload for a session configuration option.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NexusConfigKind {
+    /// Single-value selector (dropdown).
+    Select(NexusConfigSelect),
+}
+
+/// A session configuration option returned by the agent.
+///
+/// Mirrors the SDK `SessionConfigOption` struct.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusConfigOption {
+    /// Unique identifier for the configuration option.
+    pub id: String,
+    /// Human-readable label.
+    pub name: String,
+    /// Optional description for display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Optional semantic category for the option (UX hint).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<NexusConfigOptionCategory>,
+    /// Type-specific payload.
+    #[serde(flatten)]
+    pub kind: NexusConfigKind,
+}
+
+/// Response from setting a session configuration option.
+///
+/// Mirrors the SDK `SetSessionConfigOptionResponse` — returns the full set of
+/// configuration options and their current values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusSetConfigOptionResponse {
+    /// The full set of configuration options with their current values.
+    pub config_options: Vec<NexusConfigOption>,
+}
+
+impl NexusSetConfigOptionResponse {
+    /// Create a new set-config-option response.
+    #[must_use]
+    pub fn new(config_options: Vec<NexusConfigOption>) -> Self {
+        Self { config_options }
+    }
+}
+
+// ── Session list ───────────────────────────────────────────────────────
+
+/// Request to list sessions from the agent.
+///
+/// Mirrors the SDK `ListSessionsRequest` — supports filtering by cwd
+/// and cursor-based pagination.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusListSessionsRequest {
+    /// Filter sessions by working directory. Must be an absolute path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    /// Opaque cursor token from a previous response's nextCursor field
+    /// for cursor-based pagination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+impl NexusListSessionsRequest {
+    /// Create a new list sessions request with no filters.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Filter sessions by working directory.
+    #[must_use]
+    pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+
+    /// Set the pagination cursor.
+    #[must_use]
+    pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.cursor = Some(cursor.into());
+        self
+    }
+}
+
+/// Information about a session returned by session/list.
+///
+/// Mirrors the SDK `SessionInfo` type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusSessionInfo {
+    /// Unique identifier for the session.
+    pub session_id: NexusSessionId,
+    /// The working directory for this session. Must be an absolute path.
+    pub cwd: PathBuf,
+    /// Human-readable title for the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// ISO 8601 timestamp of last activity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+impl NexusSessionInfo {
+    /// Create a new session info.
+    #[must_use]
+    pub fn new(session_id: NexusSessionId, cwd: impl Into<PathBuf>) -> Self {
+        Self {
+            session_id,
+            cwd: cwd.into(),
+            title: None,
+            updated_at: None,
+        }
+    }
+
+    /// Set the session title.
+    #[must_use]
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Set the session title from an Option.
+    #[must_use]
+    pub fn title_opt(mut self, title: Option<String>) -> Self {
+        self.title = title;
+        self
+    }
+
+    /// Set the last activity timestamp.
+    #[must_use]
+    pub fn updated_at(mut self, updated_at: impl Into<String>) -> Self {
+        self.updated_at = Some(updated_at.into());
+        self
+    }
+
+    /// Set the last activity timestamp from an Option.
+    #[must_use]
+    pub fn updated_at_opt(mut self, updated_at: Option<String>) -> Self {
+        self.updated_at = updated_at;
+        self
+    }
+}
+
+/// Response from listing sessions.
+///
+/// Mirrors the SDK `ListSessionsResponse` — contains session info
+/// objects and optional pagination cursor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusListSessionsResponse {
+    /// Array of session information objects.
+    pub sessions: Vec<NexusSessionInfo>,
+    /// Opaque cursor token. If present, pass this in the next request's
+    /// cursor parameter to fetch the next page. If absent, there are no
+    /// more results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+impl NexusListSessionsResponse {
+    /// Create a new list sessions response.
+    #[must_use]
+    pub fn new(sessions: Vec<NexusSessionInfo>) -> Self {
+        Self {
+            sessions,
+            next_cursor: None,
+        }
+    }
+
+    /// Set the pagination cursor.
+    #[must_use]
+    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.next_cursor = Some(cursor.into());
+        self
+    }
+
+    /// Set the pagination cursor from an Option.
+    #[must_use]
+    pub fn next_cursor_opt(mut self, cursor: Option<String>) -> Self {
+        self.next_cursor = cursor;
+        self
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -526,5 +808,291 @@ mod tests {
             let deserialized: NexusMcpServer = serde_json::from_str(&json).unwrap();
             assert_eq!(*server, deserialized);
         }
+    }
+
+    // ── Config option DTO tests ─────────────────────────────────────────────
+
+    #[test]
+    fn nexus_set_config_option_request_new() {
+        let req = NexusSetConfigOptionRequest::new(
+            NexusSessionId::new("sess-1"),
+            "model",
+            "claude-3-opus",
+        );
+        assert_eq!(req.session_id.0, "sess-1");
+        assert_eq!(req.config_id, "model");
+        assert_eq!(req.value, "claude-3-opus");
+    }
+
+    #[test]
+    fn nexus_set_config_option_request_roundtrip() {
+        let req = NexusSetConfigOptionRequest::new(
+            NexusSessionId::new("sess-42"),
+            "thought_level",
+            "high",
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let deserialized: NexusSetConfigOptionRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req.session_id, deserialized.session_id);
+        assert_eq!(req.config_id, deserialized.config_id);
+        assert_eq!(req.value, deserialized.value);
+    }
+
+    #[test]
+    fn nexus_set_config_option_request_camel_case() {
+        let req = NexusSetConfigOptionRequest::new(NexusSessionId::new("s1"), "cfg_id", "val");
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("sessionId"));
+        assert!(json.contains("configId"));
+    }
+
+    #[test]
+    fn nexus_config_option_category_roundtrip() {
+        for cat in [
+            NexusConfigOptionCategory::Mode,
+            NexusConfigOptionCategory::Model,
+            NexusConfigOptionCategory::ThoughtLevel,
+            NexusConfigOptionCategory::Other("custom".to_string()),
+        ] {
+            let json = serde_json::to_string(&cat).unwrap();
+            let deserialized: NexusConfigOptionCategory = serde_json::from_str(&json).unwrap();
+            assert_eq!(cat, deserialized);
+        }
+    }
+
+    #[test]
+    fn nexus_config_select_option_roundtrip() {
+        let opt = NexusConfigSelectOption {
+            value: "opt-1".to_string(),
+            name: "Option One".to_string(),
+            description: Some("First option".to_string()),
+        };
+        let json = serde_json::to_string(&opt).unwrap();
+        let deserialized: NexusConfigSelectOption = serde_json::from_str(&json).unwrap();
+        assert_eq!(opt, deserialized);
+
+        // Without description
+        let opt_no_desc = NexusConfigSelectOption {
+            value: "opt-2".to_string(),
+            name: "Two".to_string(),
+            description: None,
+        };
+        let json2 = serde_json::to_string(&opt_no_desc).unwrap();
+        assert!(!json2.contains("description"));
+    }
+
+    #[test]
+    fn nexus_config_select_options_roundtrip() {
+        let ungrouped = NexusConfigSelectOptions::Ungrouped(vec![NexusConfigSelectOption {
+            value: "a".to_string(),
+            name: "A".to_string(),
+            description: None,
+        }]);
+        let json = serde_json::to_string(&ungrouped).unwrap();
+        let d: NexusConfigSelectOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(ungrouped, d);
+
+        let grouped = NexusConfigSelectOptions::Grouped(vec![NexusConfigSelectGroup {
+            group: "g1".to_string(),
+            name: "Group 1".to_string(),
+            options: vec![],
+        }]);
+        let json2 = serde_json::to_string(&grouped).unwrap();
+        let d2: NexusConfigSelectOptions = serde_json::from_str(&json2).unwrap();
+        assert_eq!(grouped, d2);
+    }
+
+    #[test]
+    fn nexus_config_kind_select_roundtrip() {
+        let kind = NexusConfigKind::Select(NexusConfigSelect {
+            current_value: "claude-3-opus".to_string(),
+            options: NexusConfigSelectOptions::Ungrouped(vec![NexusConfigSelectOption {
+                value: "claude-3-opus".to_string(),
+                name: "Claude 3 Opus".to_string(),
+                description: None,
+            }]),
+        });
+        let json = serde_json::to_string(&kind).unwrap();
+        let d: NexusConfigKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(kind, d);
+    }
+
+    #[test]
+    fn nexus_config_option_full_roundtrip() {
+        let opt = NexusConfigOption {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            description: Some("Select the AI model".to_string()),
+            category: Some(NexusConfigOptionCategory::Model),
+            kind: NexusConfigKind::Select(NexusConfigSelect {
+                current_value: "claude-3-opus".to_string(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![
+                    NexusConfigSelectOption {
+                        value: "claude-3-opus".to_string(),
+                        name: "Claude 3 Opus".to_string(),
+                        description: None,
+                    },
+                    NexusConfigSelectOption {
+                        value: "claude-3-sonnet".to_string(),
+                        name: "Claude 3 Sonnet".to_string(),
+                        description: Some("Faster model".to_string()),
+                    },
+                ]),
+            }),
+        };
+        let json = serde_json::to_string(&opt).unwrap();
+        let deserialized: NexusConfigOption = serde_json::from_str(&json).unwrap();
+        assert_eq!(opt, deserialized);
+    }
+
+    #[test]
+    fn nexus_set_config_option_response_new() {
+        let resp = NexusSetConfigOptionResponse::new(vec![NexusConfigOption {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            description: None,
+            category: None,
+            kind: NexusConfigKind::Select(NexusConfigSelect {
+                current_value: "claude-3-opus".to_string(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![]),
+            }),
+        }]);
+        assert_eq!(resp.config_options.len(), 1);
+    }
+
+    #[test]
+    fn nexus_set_config_option_response_roundtrip() {
+        let resp = NexusSetConfigOptionResponse::new(vec![NexusConfigOption {
+            id: "mode".to_string(),
+            name: "Mode".to_string(),
+            description: None,
+            category: Some(NexusConfigOptionCategory::Mode),
+            kind: NexusConfigKind::Select(NexusConfigSelect {
+                current_value: "act".to_string(),
+                options: NexusConfigSelectOptions::Ungrouped(vec![NexusConfigSelectOption {
+                    value: "act".to_string(),
+                    name: "Act".to_string(),
+                    description: None,
+                }]),
+            }),
+        }]);
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: NexusSetConfigOptionResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, deserialized);
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_default() {
+        let req = NexusListSessionsRequest::new();
+        assert!(req.cwd.is_none());
+        assert!(req.cursor.is_none());
+
+        let req2 = NexusListSessionsRequest::default();
+        assert_eq!(req.cwd, req2.cwd);
+        assert_eq!(req.cursor, req2.cursor);
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_with_filters() {
+        let req = NexusListSessionsRequest::new()
+            .cwd("/tmp/workspace")
+            .cursor("next-page-token");
+        assert_eq!(req.cwd, Some(PathBuf::from("/tmp/workspace")));
+        assert_eq!(req.cursor, Some("next-page-token".to_string()));
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_roundtrip() {
+        let req = NexusListSessionsRequest::new()
+            .cwd("/home/user/project")
+            .cursor("abc123");
+
+        let json = serde_json::to_string(&req).unwrap();
+        let deserialized: NexusListSessionsRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req.cwd, deserialized.cwd);
+        assert_eq!(req.cursor, deserialized.cursor);
+    }
+
+    #[test]
+    fn nexus_list_sessions_request_skip_serializing_none() {
+        let req = NexusListSessionsRequest::new();
+        let json = serde_json::to_string(&req).unwrap();
+        // Should not contain cwd or cursor fields when None
+        assert!(!json.contains("cwd"));
+        assert!(!json.contains("cursor"));
+    }
+
+    #[test]
+    fn nexus_session_info_new() {
+        let info = NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/workspace");
+        assert_eq!(info.session_id.0, "sess-1");
+        assert_eq!(info.cwd, PathBuf::from("/tmp/workspace"));
+        assert!(info.title.is_none());
+        assert!(info.updated_at.is_none());
+    }
+
+    #[test]
+    fn nexus_session_info_with_optional_fields() {
+        let info = NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/home/user/project")
+            .title("My Project Session")
+            .updated_at("2026-04-21T10:30:00Z");
+        assert_eq!(info.title, Some("My Project Session".to_string()));
+        assert_eq!(info.updated_at, Some("2026-04-21T10:30:00Z".to_string()));
+    }
+
+    #[test]
+    fn nexus_session_info_roundtrip() {
+        let info = NexusSessionInfo::new(NexusSessionId::new("sess-3"), "/var/app")
+            .title("Production")
+            .updated_at("2026-04-21T12:00:00Z");
+
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: NexusSessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(info.session_id, deserialized.session_id);
+        assert_eq!(info.cwd, deserialized.cwd);
+        assert_eq!(info.title, deserialized.title);
+        assert_eq!(info.updated_at, deserialized.updated_at);
+    }
+
+    #[test]
+    fn nexus_list_sessions_response_new() {
+        let sessions = vec![
+            NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/a"),
+            NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/tmp/b"),
+        ];
+        let resp = NexusListSessionsResponse::new(sessions.clone());
+        assert_eq!(resp.sessions.len(), 2);
+        assert_eq!(resp.sessions[0].session_id.0, "sess-1");
+        assert!(resp.next_cursor.is_none());
+    }
+
+    #[test]
+    fn nexus_list_sessions_response_with_cursor() {
+        let sessions = vec![NexusSessionInfo::new(
+            NexusSessionId::new("sess-x"),
+            "/tmp/x",
+        )];
+        let resp = NexusListSessionsResponse::new(sessions).next_cursor("next-token");
+        assert_eq!(resp.next_cursor, Some("next-token".to_string()));
+    }
+
+    #[test]
+    fn nexus_list_sessions_response_roundtrip() {
+        let resp = NexusListSessionsResponse::new(vec![
+            NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/a")
+                .title("Session A")
+                .updated_at("2026-04-21T09:00:00Z"),
+            NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/tmp/b"),
+        ])
+        .next_cursor("page2");
+
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: NexusListSessionsResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp.sessions.len(), deserialized.sessions.len());
+        assert_eq!(
+            resp.sessions[0].session_id,
+            deserialized.sessions[0].session_id
+        );
+        assert_eq!(resp.next_cursor, deserialized.next_cursor);
     }
 }
