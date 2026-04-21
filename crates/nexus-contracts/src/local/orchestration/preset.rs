@@ -5,6 +5,14 @@
 //!
 //! **NOT** in `schemas/` — this is a local type; `nexus-platform` never
 //! observes it over any wire channel.
+//!
+//! ## Roles and recommended_models (WS-E §7)
+//!
+//! Presets define role-based agent configurations:
+//! - `roles`: list of `PresetRoleDefinition` with `recommended_models`
+//! - `GraphNode.agent`: optional role ID reference
+//!
+//! Backward compatible: presets without `roles` operate in single-agent mode.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +29,9 @@ use serde::{Deserialize, Serialize};
 ///   ...
 /// states:
 ///   - ...
+/// roles:
+///   - id: writer
+///     ...
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetManifest {
@@ -34,6 +45,10 @@ pub struct PresetManifest {
     /// Optional signal bindings (external events).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<SignalBinding>,
+    /// Optional role definitions for multi-agent presets (WS-E §7).
+    /// Each role defines `recommended_models` and a `system_prompt_file`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<PresetRoleDefinition>,
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +288,10 @@ pub struct GraphNode {
     /// Tool policy for ACP prompt nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_policy: Option<String>,
+    /// Optional role ID reference for multi-agent presets (WS-E §7).
+    /// Must match a role ID in `roles[]` if present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 /// Kind of inner-graph node.
@@ -394,6 +413,43 @@ pub enum SignalActionKind {
     Pause,
     /// Force transition to a target state.
     ForceTransition,
+}
+
+// ---------------------------------------------------------------------------
+// PresetRoleDefinition (WS-E §7)
+// ---------------------------------------------------------------------------
+
+/// A role definition for multi-agent presets (WS-E §7).
+///
+/// Defines a named agent role with:
+/// - A system prompt template (via `system_prompt_file`)
+/// - Recommended agent:model pairs (ordered list, first = default)
+///
+/// At runtime, the daemon resolves each role to an `acp_agent_id` + `model`
+/// using the priority resolution order (CLI > user config > recommended_models).
+///
+/// ```yaml
+/// roles:
+///   - id: writer
+///     description: "Primary content writer"
+///     system_prompt_file: prompts/writer-system.md
+///     recommended_models:
+///       - "claude-acp:claude-sonnet-4-20250514"
+///       - "gemini:gemini-2.5-pro"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetRoleDefinition {
+    /// Unique role ID within this preset.
+    pub id: String,
+    /// Human-readable description.
+    pub description: String,
+    /// Path to system prompt template (relative to preset bundle root).
+    pub system_prompt_file: String,
+    /// Ordered list of "acp_agent_id:model_name" pairs.
+    /// First entry is the default; subsequent entries are fallbacks.
+    /// Format validated by loader: must contain exactly one colon.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommended_models: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -670,6 +726,154 @@ states:
         }
     }
 
+    // ── WS-E T6: Roles and recommended_models ──────────────────────────────
+
+    #[test]
+    fn parse_preset_with_roles() {
+        let yaml = r#"
+preset:
+  id: multi-agent-demo
+  version: 1
+  kind: creator
+  description: "Multi-agent workflow"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: writer
+    description: "Primary content writer"
+    system_prompt_file: prompts/writer-system.md
+    recommended_models:
+      - "claude-acp:claude-sonnet-4-20250514"
+      - "gemini:gemini-2.5-pro"
+  - id: reviewer
+    description: "Content reviewer"
+    system_prompt_file: prompts/reviewer-system.md
+    recommended_models:
+      - "codex-acp:o3"
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.roles.len(), 2);
+        assert_eq!(p.roles[0].id, "writer");
+        assert_eq!(p.roles[0].description, "Primary content writer");
+        assert_eq!(p.roles[0].system_prompt_file, "prompts/writer-system.md");
+        assert_eq!(p.roles[0].recommended_models.len(), 2);
+        assert_eq!(
+            p.roles[0].recommended_models[0],
+            "claude-acp:claude-sonnet-4-20250514"
+        );
+        assert_eq!(p.roles[1].id, "reviewer");
+        assert_eq!(p.roles[1].recommended_models.len(), 1);
+    }
+
+    #[test]
+    fn parse_graph_node_with_agent_field() {
+        let yaml = r#"
+preset:
+  id: agent-node-test
+  version: 1
+  kind: creator
+  description: "Test agent field in graph nodes"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: work_graph
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: writer
+    description: "Writer"
+    system_prompt_file: prompts/writer.md
+    recommended_models:
+      - "claude-acp:claude-sonnet-4-20250514"
+inner_graphs:
+  work_graph:
+    nodes:
+      - id: draft
+        kind: acp_prompt
+        agent: writer
+        template_file: prompts/draft.md
+      - id: review
+        kind: acp_prompt
+        depends_on: [draft]
+        template_file: prompts/review.md
+    output_binding: review.text
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let ig = p.inner_graphs.as_ref().unwrap();
+        let nodes = &ig["work_graph"].nodes;
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].agent.as_deref(), Some("writer"));
+        assert!(nodes[1].agent.is_none());
+    }
+
+    #[test]
+    fn preset_without_roles_is_backward_compatible() {
+        // Existing presets without roles should still parse correctly.
+        let yaml = r#"
+preset:
+  id: single-agent
+  version: 1
+  kind: creator
+  description: "Single-agent preset"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.roles.is_empty());
+    }
+
+    #[test]
+    fn role_without_recommended_models_parses() {
+        // recommended_models is optional (can be empty).
+        // Loader will reject empty recommended_models during validation.
+        let yaml = r#"
+preset:
+  id: empty-roles
+  version: 1
+  kind: creator
+  description: "Preset with empty recommended_models"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: writer
+    description: "Writer"
+    system_prompt_file: prompts/writer.md
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.roles.len(), 1);
+        assert!(p.roles[0].recommended_models.is_empty());
+    }
+
     #[test]
     fn roundtrip_serialize_minimal() {
         let manifest = PresetManifest {
@@ -708,9 +912,11 @@ states:
             ],
             inner_graphs: None,
             signals: vec![],
+            roles: vec![],
         };
         let yaml = serde_yaml::to_string(&manifest).unwrap();
         let back: PresetManifest = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back.preset.id, "roundtrip");
+        assert!(back.roles.is_empty());
     }
 }
