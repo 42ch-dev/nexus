@@ -8,7 +8,6 @@ use crate::config::find_workspace_root;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_acp_host::PermissionPolicy;
-use std::path::PathBuf;
 
 /// Permission management commands (agent-scoped rules)
 #[derive(Debug, Subcommand)]
@@ -218,46 +217,52 @@ fn print_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> Res
 }
 
 fn run_grant(workspace_root: &std::path::Path, agent: &str, capability: &str) -> Result<()> {
-    let mut doc = load_toml_edit(workspace_root)?;
-    ensure_agents_table(&mut doc);
-    ensure_agent_action_table(&mut doc, agent, "grant");
-    set_agent_capability(&mut doc, agent, "grant", capability, true);
+    let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+    PermissionPolicy::ensure_agents_table_doc(&mut doc);
+    PermissionPolicy::ensure_agent_action_table_doc(&mut doc, agent, "grant");
+    PermissionPolicy::set_agent_capability_doc(&mut doc, agent, "grant", capability, true);
 
     // Remove from deny/ask if present
-    remove_agent_capability(&mut doc, agent, "deny", capability);
-    remove_agent_capability(&mut doc, agent, "ask", capability);
+    PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "deny", capability);
+    PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "ask", capability);
 
-    save_toml_edit(workspace_root, &doc)?;
+    PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
     println!("Granted '{}' for agent '{}'.", capability, agent);
     Ok(())
 }
 
 fn run_deny(workspace_root: &std::path::Path, agent: &str, capability: &str) -> Result<()> {
-    let mut doc = load_toml_edit(workspace_root)?;
-    ensure_agents_table(&mut doc);
-    ensure_agent_action_table(&mut doc, agent, "deny");
-    set_agent_capability(&mut doc, agent, "deny", capability, true);
+    let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+    PermissionPolicy::ensure_agents_table_doc(&mut doc);
+    PermissionPolicy::ensure_agent_action_table_doc(&mut doc, agent, "deny");
+    PermissionPolicy::set_agent_capability_doc(&mut doc, agent, "deny", capability, true);
 
     // Remove from grant/ask if present
-    remove_agent_capability(&mut doc, agent, "grant", capability);
-    remove_agent_capability(&mut doc, agent, "ask", capability);
+    PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "grant", capability);
+    PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "ask", capability);
 
-    save_toml_edit(workspace_root, &doc)?;
+    PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
     println!("Denied '{}' for agent '{}'.", capability, agent);
     Ok(())
 }
 
 fn run_ask(workspace_root: &std::path::Path, agent: &str, capability: &str) -> Result<()> {
-    let mut doc = load_toml_edit(workspace_root)?;
-    ensure_agents_table(&mut doc);
-    ensure_agent_action_table(&mut doc, agent, "ask");
-    set_agent_capability(&mut doc, agent, "ask", capability, true);
+    let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+    PermissionPolicy::ensure_agents_table_doc(&mut doc);
+    PermissionPolicy::ensure_agent_action_table_doc(&mut doc, agent, "ask");
+    PermissionPolicy::set_agent_capability_doc(&mut doc, agent, "ask", capability, true);
 
     // Remove from grant/deny if present
-    remove_agent_capability(&mut doc, agent, "grant", capability);
-    remove_agent_capability(&mut doc, agent, "deny", capability);
+    PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "grant", capability);
+    PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "deny", capability);
 
-    save_toml_edit(workspace_root, &doc)?;
+    PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
     println!("Set '{}' to 'ask' for agent '{}'.", capability, agent);
     Ok(())
 }
@@ -282,14 +287,17 @@ fn run_revoke(workspace_root: &std::path::Path, agent: &str, capability: &str) -
         )));
     }
 
-    let mut doc = load_toml_edit(workspace_root)?;
-    let removed = remove_agent_capability(&mut doc, agent, "grant", capability)
-        || remove_agent_capability(&mut doc, agent, "deny", capability)
-        || remove_agent_capability(&mut doc, agent, "ask", capability);
+    let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+    let removed =
+        PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "grant", capability)
+            || PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "deny", capability)
+            || PermissionPolicy::remove_agent_capability_doc(&mut doc, agent, "ask", capability);
 
     if removed {
-        clean_empty_agent_tables(&mut doc, agent);
-        save_toml_edit(workspace_root, &doc)?;
+        PermissionPolicy::clean_empty_agent_tables_doc(&mut doc, agent);
+        PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+            .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
         println!("Revoked '{}' for agent '{}'.", capability, agent);
     }
 
@@ -311,7 +319,8 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
                 )));
             }
 
-            let mut doc = load_toml_edit(workspace_root)?;
+            let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
             if let Some(agents) = doc.get_mut("agents") {
                 if let Some(agent_table) = agents.get_mut(agent_id) {
                     if let Some(t) = agent_table.as_table_like_mut() {
@@ -323,7 +332,8 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
                     agents_table.remove(agent_id);
                 }
             }
-            save_toml_edit(workspace_root, &doc)?;
+            PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
             println!("Reset all rules for agent '{}'.", agent_id);
         }
         None => {
@@ -333,13 +343,15 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
                 ));
             }
 
-            let mut doc = load_toml_edit(workspace_root)?;
+            let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
             if let Some(agents) = doc.get_mut("agents") {
                 if let Some(table) = agents.as_table_like_mut() {
                     table.clear();
                 }
             }
-            save_toml_edit(workspace_root, &doc)?;
+            PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
             println!("Reset all agent rules.");
         }
     }
@@ -347,128 +359,7 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
     Ok(())
 }
 
-// -- toml_edit helpers --
-
-/// Path to the permissions TOML file.
-fn permissions_path(workspace_root: &std::path::Path) -> PathBuf {
-    workspace_root.join(".nexus42").join("permissions.toml")
-}
-
-/// Load the permissions TOML as a mutable document, creating if absent.
-fn load_toml_edit(workspace_root: &std::path::Path) -> Result<toml_edit::DocumentMut> {
-    let path = permissions_path(workspace_root);
-    if path.exists() {
-        let content = std::fs::read_to_string(&path)?;
-        let doc = content
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|e| crate::errors::CliError::Other(format!("Failed to parse TOML: {}", e)))?;
-        Ok(doc)
-    } else {
-        Ok(toml_edit::DocumentMut::new())
-    }
-}
-
-/// Save the TOML document to the permissions file.
-fn save_toml_edit(workspace_root: &std::path::Path, doc: &toml_edit::DocumentMut) -> Result<()> {
-    let path = permissions_path(workspace_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, doc.to_string())?;
-    Ok(())
-}
-
-/// Ensure the `[agents]` table exists in the document.
-fn ensure_agents_table(doc: &mut toml_edit::DocumentMut) {
-    if doc.get("agents").is_none() {
-        doc["agents"] = toml_edit::Item::Table(toml_edit::Table::new());
-    }
-}
-
-/// Ensure `[agents.<agent>.<action>]` table exists.
-fn ensure_agent_action_table(doc: &mut toml_edit::DocumentMut, agent: &str, action: &str) {
-    ensure_agents_table(doc);
-    let agents = doc["agents"].as_table_mut().expect("agents table");
-    if !agents.contains_key(agent) {
-        agents.insert(agent, toml_edit::Item::Table(toml_edit::Table::new()));
-    }
-    let agent_table = agents[agent].as_table_mut().expect("agent table");
-    if !agent_table.contains_key(action) {
-        agent_table.insert(action, toml_edit::Item::Table(toml_edit::Table::new()));
-    }
-}
-
-/// Set a capability value in `[agents.<agent>.<action>]`.
-fn set_agent_capability(
-    doc: &mut toml_edit::DocumentMut,
-    agent: &str,
-    action: &str,
-    capability: &str,
-    value: bool,
-) {
-    if let Some(agents) = doc.get_mut("agents") {
-        if let Some(agent_table) = agents.get_mut(agent) {
-            if let Some(action_table) = agent_table.get_mut(action) {
-                action_table[capability] = toml_edit::value(value);
-            }
-        }
-    }
-}
-
-/// Remove a capability from `[agents.<agent>.<action>]`.
-/// Returns true if the capability existed and was removed.
-fn remove_agent_capability(
-    doc: &mut toml_edit::DocumentMut,
-    agent: &str,
-    action: &str,
-    capability: &str,
-) -> bool {
-    if let Some(agents) = doc.get_mut("agents") {
-        if let Some(agent_table) = agents.get_mut(agent) {
-            if let Some(action_table) = agent_table.get_mut(action) {
-                if action_table.get(capability).is_some() {
-                    action_table
-                        .as_table_like_mut()
-                        .map(|t| t.remove(capability));
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Clean up empty action tables and agent entries after removal.
-fn clean_empty_agent_tables(doc: &mut toml_edit::DocumentMut, agent: &str) {
-    let actions = ["grant", "deny", "ask"];
-    if let Some(agents) = doc.get_mut("agents") {
-        if let Some(agent_table) = agents.get_mut(agent) {
-            for action in &actions {
-                if let Some(action_table) = agent_table.get_mut(*action) {
-                    if let Some(table) = action_table.as_table() {
-                        if table.is_empty() {
-                            if let Some(t) = agent_table.as_table_like_mut() {
-                                t.remove(action);
-                            }
-                        }
-                    }
-                }
-            }
-            // If the agent entry is now empty, remove it
-            if let Some(table) = agent_table.as_table() {
-                if table.is_empty() {
-                    agents.as_table_like_mut().map(|t| t.remove(agent));
-                }
-            }
-        }
-        // If the agents table is now empty, remove it
-        if let Some(agents_table) = doc["agents"].as_table() {
-            if agents_table.is_empty() {
-                doc.remove("agents");
-            }
-        }
-    }
-}
+// -- toml_edit helpers are now in policy.rs as PermissionPolicy methods --
 
 #[cfg(test)]
 mod tests {
@@ -484,7 +375,7 @@ mod tests {
         let ws = make_workspace();
         run_grant(ws.path(), "test-agent", "terminal.create").expect("grant failed");
 
-        let path = permissions_path(ws.path());
+        let path = PermissionPolicy::policy_path(ws.path());
         assert!(path.exists());
 
         let loaded = PermissionPolicy::load(ws.path()).expect("load failed");
@@ -556,7 +447,7 @@ mod tests {
         // Set up global rules first
         let mut policy = PermissionPolicy::new();
         policy.grant_permission("file_system.read".to_string());
-        policy.save(ws.path()).expect("save failed");
+        policy.save_toml_edit(ws.path()).expect("save failed");
 
         // Add agent rule
         run_grant(ws.path(), "test-agent", "terminal.create").expect("grant failed");
@@ -577,7 +468,7 @@ mod tests {
     #[test]
     fn test_preserves_comments_via_toml_edit() {
         let ws = make_workspace();
-        let path = permissions_path(ws.path());
+        let path = PermissionPolicy::policy_path(ws.path());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create dir failed");
         }
