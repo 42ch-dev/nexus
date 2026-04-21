@@ -64,6 +64,8 @@ use agent_client_protocol::schema::ListSessionsRequest;
 use agent_client_protocol::schema::ListSessionsResponse;
 use agent_client_protocol::schema::SessionInfo;
 use agent_client_protocol::schema::SessionModeState;
+use agent_client_protocol::schema::SetSessionConfigOptionRequest;
+use agent_client_protocol::schema::SetSessionConfigOptionResponse;
 use agent_client_protocol::schema::{
     ContentBlock, Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerSse,
     McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink, SessionId,
@@ -76,11 +78,13 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use crate::error::AcpResult;
 use crate::localset_bridge::LocalSetBridge;
 use nexus_contracts::local::acp::{
-    NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult,
-    NexusInitializeRequest, NexusInitializeResponse, NexusListSessionsRequest,
-    NexusListSessionsResponse, NexusMcpServer, NexusNewSessionRequest, NexusPromptCompleted,
-    NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated, NexusSessionId,
-    NexusSessionInfo, NexusSessionModeState, NexusStopReason,
+    NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult, NexusConfigKind,
+    NexusConfigOption, NexusConfigOptionCategory, NexusConfigSelect, NexusConfigSelectGroup,
+    NexusConfigSelectOption, NexusConfigSelectOptions, NexusInitializeRequest,
+    NexusInitializeResponse, NexusListSessionsRequest, NexusListSessionsResponse, NexusMcpServer,
+    NexusNewSessionRequest, NexusPromptCompleted, NexusPromptRequest, NexusProtocolVersion,
+    NexusSessionCreated, NexusSessionId, NexusSessionInfo, NexusSessionModeState,
+    NexusSetConfigOptionRequest, NexusSetConfigOptionResponse, NexusStopReason,
 };
 
 // ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
@@ -247,6 +251,119 @@ fn sdk_list_sessions_response_to_nexus(resp: &ListSessionsResponse) -> NexusList
     NexusListSessionsResponse::new(sessions).next_cursor_opt(resp.next_cursor.clone())
 }
 
+// ── Config option SDK ↔ Nexus conversion helpers ─────────────────────
+
+fn sdk_set_config_option_request_from_nexus(
+    req: NexusSetConfigOptionRequest,
+) -> SetSessionConfigOptionRequest {
+    SetSessionConfigOptionRequest::new(req.session_id.0, req.config_id, req.value)
+}
+
+fn sdk_config_option_category_to_nexus(
+    cat: &agent_client_protocol::schema::SessionConfigOptionCategory,
+) -> NexusConfigOptionCategory {
+    match cat {
+        agent_client_protocol::schema::SessionConfigOptionCategory::Mode => {
+            NexusConfigOptionCategory::Mode
+        }
+        agent_client_protocol::schema::SessionConfigOptionCategory::Model => {
+            NexusConfigOptionCategory::Model
+        }
+        agent_client_protocol::schema::SessionConfigOptionCategory::ThoughtLevel => {
+            NexusConfigOptionCategory::ThoughtLevel
+        }
+        agent_client_protocol::schema::SessionConfigOptionCategory::Other(s) => {
+            NexusConfigOptionCategory::Other(s.clone())
+        }
+        _ => NexusConfigOptionCategory::Other("unknown".to_string()),
+    }
+}
+
+fn sdk_config_select_option_to_nexus(
+    opt: &agent_client_protocol::schema::SessionConfigSelectOption,
+) -> NexusConfigSelectOption {
+    NexusConfigSelectOption {
+        value: opt.value.to_string(),
+        name: opt.name.clone(),
+        description: opt.description.clone(),
+    }
+}
+
+fn sdk_config_select_options_to_nexus(
+    opts: &agent_client_protocol::schema::SessionConfigSelectOptions,
+) -> NexusConfigSelectOptions {
+    match opts {
+        agent_client_protocol::schema::SessionConfigSelectOptions::Ungrouped(items) => {
+            NexusConfigSelectOptions::Ungrouped(
+                items
+                    .iter()
+                    .map(sdk_config_select_option_to_nexus)
+                    .collect(),
+            )
+        }
+        agent_client_protocol::schema::SessionConfigSelectOptions::Grouped(groups) => {
+            NexusConfigSelectOptions::Grouped(
+                groups
+                    .iter()
+                    .map(|g| NexusConfigSelectGroup {
+                        group: g.group.to_string(),
+                        name: g.name.clone(),
+                        options: g
+                            .options
+                            .iter()
+                            .map(sdk_config_select_option_to_nexus)
+                            .collect(),
+                    })
+                    .collect(),
+            )
+        }
+        _ => NexusConfigSelectOptions::Ungrouped(vec![]),
+    }
+}
+
+fn sdk_config_select_to_nexus(
+    sel: &agent_client_protocol::schema::SessionConfigSelect,
+) -> NexusConfigSelect {
+    NexusConfigSelect {
+        current_value: sel.current_value.to_string(),
+        options: sdk_config_select_options_to_nexus(&sel.options),
+    }
+}
+
+fn sdk_config_option_to_nexus(
+    opt: &agent_client_protocol::schema::SessionConfigOption,
+) -> NexusConfigOption {
+    use agent_client_protocol::schema::SessionConfigKind;
+    let kind = match &opt.kind {
+        SessionConfigKind::Select(sel) => NexusConfigKind::Select(sdk_config_select_to_nexus(sel)),
+        _ => NexusConfigKind::Select(NexusConfigSelect {
+            current_value: String::new(),
+            options: NexusConfigSelectOptions::Ungrouped(vec![]),
+        }),
+    };
+    NexusConfigOption {
+        id: opt.id.to_string(),
+        name: opt.name.clone(),
+        description: opt.description.clone(),
+        category: opt
+            .category
+            .as_ref()
+            .map(sdk_config_option_category_to_nexus),
+        kind,
+    }
+}
+
+fn sdk_set_config_option_response_to_nexus(
+    resp: &SetSessionConfigOptionResponse,
+) -> NexusSetConfigOptionResponse {
+    let config_options = resp
+        .config_options
+        .iter()
+        .map(sdk_config_option_to_nexus)
+        .collect();
+    NexusSetConfigOptionResponse::new(config_options)
+}
+
 /// The nexus42 ACP client abstraction.
 ///
 /// All ACP communication from the CLI goes through this trait. The methods
@@ -291,6 +408,15 @@ pub trait NexusAcpClient: Send + Sync {
         &self,
         request: NexusListSessionsRequest,
     ) -> impl Future<Output = AcpResult<NexusListSessionsResponse>> + Send;
+
+    /// Set a session configuration option.
+    ///
+    /// Sends a `session/set_config_option` request to the agent and returns
+    /// the full set of configuration options with their updated values.
+    fn set_config_option(
+        &self,
+        request: NexusSetConfigOptionRequest,
+    ) -> impl Future<Output = AcpResult<NexusSetConfigOptionResponse>> + Send;
 }
 
 /// Internal state for the SDK adapter.
@@ -895,6 +1021,81 @@ impl NexusAcpClient for AcpSdkAdapter {
                 .and_then(|r| r)
         }
     }
+
+    fn set_config_option(
+        &self,
+        request: NexusSetConfigOptionRequest,
+    ) -> impl Future<Output = AcpResult<NexusSetConfigOptionResponse>> + Send {
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
+
+        async move {
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
+
+                    Box::pin(async move {
+                        let guard = connection.read().await;
+                        let sdk_conn = match guard.as_ref() {
+                            Some(conn) => conn,
+                            None => {
+                                return Err(crate::AcpError::connection_failed(
+                                    "Connection not established",
+                                ));
+                            }
+                        };
+
+                        // Convert Nexus request to SDK SetSessionConfigOptionRequest
+                        let sdk_req = sdk_set_config_option_request_from_nexus(request);
+
+                        tracing::info!(
+                            agent_id = %agent_id,
+                            session_id = %sdk_req.session_id,
+                            config_id = %sdk_req.config_id,
+                            "Setting session config option"
+                        );
+
+                        // Send the request via raw JSON-RPC using spawn + block_task
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        let connection_handle = sdk_conn.connection.clone();
+                        let connection_for_spawn = connection_handle.clone();
+                        connection_handle
+                            .spawn(async move {
+                                let result = connection_for_spawn
+                                    .send_request_to(Agent, sdk_req)
+                                    .block_task()
+                                    .await;
+                                let _ = tx.send(result);
+                                Ok(())
+                            })
+                            .map_err(crate::AcpError::sdk)?;
+
+                        let set_result = rx
+                            .await
+                            .map_err(|_| {
+                                crate::AcpError::connection_failed(
+                                    "Set config option response channel closed",
+                                )
+                            })?
+                            .map_err(crate::AcpError::sdk)?;
+
+                        // Convert SDK response to Nexus DTOs
+                        let nexus_response = sdk_set_config_option_response_to_nexus(&set_result);
+
+                        tracing::info!(
+                            agent_id = %agent_id,
+                            option_count = nexus_response.config_options.len(),
+                            "Set config option completed"
+                        );
+
+                        Ok(nexus_response)
+                    })
+                })
+                .await
+                .and_then(|r| r)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1334,5 +1535,154 @@ mod tests {
         assert_eq!(nexus_resp.sessions[0].session_id.0, "sess-1");
         assert_eq!(nexus_resp.sessions[0].title, Some("Session A".to_string()));
         assert_eq!(nexus_resp.next_cursor, Some("page-2".to_string()));
+    }
+
+    // ── Set config option conversion tests ────────────────────────────────────
+
+    #[test]
+    fn set_config_option_request_to_sdk() {
+        let nexus_req = NexusSetConfigOptionRequest::new(
+            NexusSessionId::new("sess-1"),
+            "model",
+            "claude-3-opus",
+        );
+        let sdk_req = sdk_set_config_option_request_from_nexus(nexus_req);
+        assert_eq!(sdk_req.session_id.to_string(), "sess-1");
+        assert_eq!(sdk_req.config_id.to_string(), "model");
+        assert_eq!(sdk_req.value.to_string(), "claude-3-opus");
+    }
+
+    #[test]
+    fn config_option_category_to_nexus_all_variants() {
+        use agent_client_protocol::schema::SessionConfigOptionCategory;
+        assert_eq!(
+            sdk_config_option_category_to_nexus(&SessionConfigOptionCategory::Mode),
+            NexusConfigOptionCategory::Mode
+        );
+        assert_eq!(
+            sdk_config_option_category_to_nexus(&SessionConfigOptionCategory::Model),
+            NexusConfigOptionCategory::Model
+        );
+        assert_eq!(
+            sdk_config_option_category_to_nexus(&SessionConfigOptionCategory::ThoughtLevel),
+            NexusConfigOptionCategory::ThoughtLevel
+        );
+        assert_eq!(
+            sdk_config_option_category_to_nexus(&SessionConfigOptionCategory::Other(
+                "custom".to_string()
+            )),
+            NexusConfigOptionCategory::Other("custom".to_string())
+        );
+    }
+
+    #[test]
+    fn config_select_option_to_nexus() {
+        let sdk_opt =
+            agent_client_protocol::schema::SessionConfigSelectOption::new("opt-1", "Option One")
+                .description("First option");
+        let nexus_opt = sdk_config_select_option_to_nexus(&sdk_opt);
+        assert_eq!(nexus_opt.value, "opt-1");
+        assert_eq!(nexus_opt.name, "Option One");
+        assert_eq!(nexus_opt.description, Some("First option".to_string()));
+    }
+
+    #[test]
+    fn config_select_options_ungrouped_to_nexus() {
+        let sdk_opts = agent_client_protocol::schema::SessionConfigSelectOptions::Ungrouped(vec![
+            agent_client_protocol::schema::SessionConfigSelectOption::new("a", "A"),
+        ]);
+        let nexus_opts = sdk_config_select_options_to_nexus(&sdk_opts);
+        match nexus_opts {
+            NexusConfigSelectOptions::Ungrouped(items) => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].value, "a");
+            }
+            NexusConfigSelectOptions::Grouped(_) => panic!("Expected Ungrouped"),
+        }
+    }
+
+    #[test]
+    fn config_select_to_nexus() {
+        let sdk_sel = agent_client_protocol::schema::SessionConfigSelect::new(
+            "claude-3-opus",
+            vec![
+                agent_client_protocol::schema::SessionConfigSelectOption::new(
+                    "claude-3-opus",
+                    "Claude 3 Opus",
+                ),
+            ],
+        );
+        let nexus_sel = sdk_config_select_to_nexus(&sdk_sel);
+        assert_eq!(nexus_sel.current_value, "claude-3-opus");
+        match &nexus_sel.options {
+            NexusConfigSelectOptions::Ungrouped(items) => {
+                assert_eq!(items[0].value, "claude-3-opus");
+            }
+            NexusConfigSelectOptions::Grouped(_) => panic!("Expected Ungrouped"),
+        }
+    }
+
+    #[test]
+    fn config_option_to_nexus_select() {
+        let sdk_opt = agent_client_protocol::schema::SessionConfigOption::select(
+            "model",
+            "Model",
+            "claude-3-opus",
+            vec![
+                agent_client_protocol::schema::SessionConfigSelectOption::new(
+                    "claude-3-opus",
+                    "Claude 3 Opus",
+                ),
+            ],
+        )
+        .description("Select the model")
+        .category(agent_client_protocol::schema::SessionConfigOptionCategory::Model);
+        let nexus_opt = sdk_config_option_to_nexus(&sdk_opt);
+        assert_eq!(nexus_opt.id, "model");
+        assert_eq!(nexus_opt.name, "Model");
+        assert_eq!(nexus_opt.description, Some("Select the model".to_string()));
+        assert_eq!(nexus_opt.category, Some(NexusConfigOptionCategory::Model));
+    }
+
+    #[test]
+    fn set_config_option_response_to_nexus_empty() {
+        let sdk_resp = SetSessionConfigOptionResponse::new(vec![]);
+        let nexus_resp = sdk_set_config_option_response_to_nexus(&sdk_resp);
+        assert!(nexus_resp.config_options.is_empty());
+    }
+
+    #[test]
+    fn set_config_option_response_to_nexus_with_options() {
+        let sdk_resp = SetSessionConfigOptionResponse::new(vec![
+            agent_client_protocol::schema::SessionConfigOption::select(
+                "mode",
+                "Mode",
+                "act",
+                vec![
+                    agent_client_protocol::schema::SessionConfigSelectOption::new("act", "Act"),
+                    agent_client_protocol::schema::SessionConfigSelectOption::new("ask", "Ask"),
+                ],
+            ),
+        ]);
+        let nexus_resp = sdk_set_config_option_response_to_nexus(&sdk_resp);
+        assert_eq!(nexus_resp.config_options.len(), 1);
+        assert_eq!(nexus_resp.config_options[0].id, "mode");
+        assert_eq!(nexus_resp.config_options[0].name, "Mode");
+    }
+
+    #[tokio::test]
+    async fn adapter_set_config_option_without_connection_fails() {
+        let adapter = AcpSdkAdapter::new(
+            "test-agent".to_string(),
+            PathBuf::from("/usr/bin/test-agent"),
+        );
+
+        let request = NexusSetConfigOptionRequest::new(
+            NexusSessionId::new("nonexistent"),
+            "model",
+            "claude-3-opus",
+        );
+        let result = adapter.set_config_option(request).await;
+        assert!(result.is_err());
     }
 }
