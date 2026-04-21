@@ -60,6 +60,9 @@ use agent_client_protocol::schema::AgentCapabilities;
 use agent_client_protocol::schema::AuthMethod;
 use agent_client_protocol::schema::CancelNotification;
 use agent_client_protocol::schema::InitializeResponse;
+use agent_client_protocol::schema::ListSessionsRequest;
+use agent_client_protocol::schema::ListSessionsResponse;
+use agent_client_protocol::schema::SessionInfo;
 use agent_client_protocol::schema::SessionModeState;
 use agent_client_protocol::schema::{
     ContentBlock, Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerSse,
@@ -74,9 +77,10 @@ use crate::error::AcpResult;
 use crate::localset_bridge::LocalSetBridge;
 use nexus_contracts::local::acp::{
     NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult,
-    NexusInitializeRequest, NexusInitializeResponse, NexusMcpServer, NexusNewSessionRequest,
-    NexusPromptCompleted, NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated,
-    NexusSessionId, NexusSessionModeState, NexusStopReason,
+    NexusInitializeRequest, NexusInitializeResponse, NexusListSessionsRequest,
+    NexusListSessionsResponse, NexusMcpServer, NexusNewSessionRequest, NexusPromptCompleted,
+    NexusPromptRequest, NexusProtocolVersion, NexusSessionCreated, NexusSessionId,
+    NexusSessionInfo, NexusSessionModeState, NexusStopReason,
 };
 
 // ── SDK ↔ Nexus DTO conversion helpers ──────────────────────────────
@@ -214,6 +218,35 @@ fn sdk_prompt_request_from_nexus(req: NexusPromptRequest) -> PromptRequest {
     PromptRequest::new(SessionId::new(req.session_id.0), content_blocks)
 }
 
+fn sdk_list_sessions_request_from_nexus(req: NexusListSessionsRequest) -> ListSessionsRequest {
+    let mut builder = ListSessionsRequest::new();
+    if let Some(cwd) = req.cwd {
+        builder = builder.cwd(cwd);
+    }
+    if let Some(cursor) = req.cursor {
+        builder = builder.cursor(cursor);
+    }
+    builder
+}
+
+fn sdk_session_info_to_nexus(info: &SessionInfo) -> NexusSessionInfo {
+    NexusSessionInfo::new(
+        NexusSessionId::new(info.session_id.to_string()),
+        info.cwd.clone(),
+    )
+    .title_opt(info.title.clone())
+    .updated_at_opt(info.updated_at.clone())
+}
+
+fn sdk_list_sessions_response_to_nexus(resp: &ListSessionsResponse) -> NexusListSessionsResponse {
+    let sessions = resp
+        .sessions
+        .iter()
+        .map(sdk_session_info_to_nexus)
+        .collect();
+    NexusListSessionsResponse::new(sessions).next_cursor_opt(resp.next_cursor.clone())
+}
+
 /// The nexus42 ACP client abstraction.
 ///
 /// All ACP communication from the CLI goes through this trait. The methods
@@ -250,6 +283,14 @@ pub trait NexusAcpClient: Send + Sync {
         &self,
         session_id: NexusSessionId,
     ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send;
+
+    /// List sessions on the agent.
+    ///
+    /// Supports filtering by working directory and cursor-based pagination.
+    fn list_sessions(
+        &self,
+        request: NexusListSessionsRequest,
+    ) -> impl Future<Output = AcpResult<NexusListSessionsResponse>> + Send;
 }
 
 /// Internal state for the SDK adapter.
@@ -778,6 +819,82 @@ impl NexusAcpClient for AcpSdkAdapter {
                 .and_then(|r| r)
         }
     }
+
+    fn list_sessions(
+        &self,
+        request: NexusListSessionsRequest,
+    ) -> impl Future<Output = AcpResult<NexusListSessionsResponse>> + Send {
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
+
+        async move {
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
+
+                    Box::pin(async move {
+                        let guard = connection.read().await;
+                        let sdk_conn = match guard.as_ref() {
+                            Some(conn) => conn,
+                            None => {
+                                return Err(crate::AcpError::connection_failed(
+                                    "Connection not established",
+                                ));
+                            }
+                        };
+
+                        // Convert Nexus request to SDK ListSessionsRequest
+                        let sdk_req = sdk_list_sessions_request_from_nexus(request);
+
+                        tracing::info!(
+                            agent_id = %agent_id,
+                            cwd = ?sdk_req.cwd,
+                            cursor = ?sdk_req.cursor,
+                            "Listing sessions"
+                        );
+
+                        // Send the request via raw JSON-RPC using spawn + block_task
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        let connection_handle = sdk_conn.connection.clone();
+                        let connection_for_spawn = connection_handle.clone();
+                        connection_handle
+                            .spawn(async move {
+                                let result = connection_for_spawn
+                                    .send_request_to(Agent, sdk_req)
+                                    .block_task()
+                                    .await;
+                                let _ = tx.send(result);
+                                Ok(())
+                            })
+                            .map_err(crate::AcpError::sdk)?;
+
+                        let list_result = rx
+                            .await
+                            .map_err(|_| {
+                                crate::AcpError::connection_failed(
+                                    "List sessions response channel closed",
+                                )
+                            })?
+                            .map_err(crate::AcpError::sdk)?;
+
+                        // Convert SDK response to Nexus DTOs
+                        let nexus_response = sdk_list_sessions_response_to_nexus(&list_result);
+
+                        tracing::info!(
+                            agent_id = %agent_id,
+                            session_count = nexus_response.sessions.len(),
+                            has_next_cursor = nexus_response.next_cursor.is_some(),
+                            "List sessions completed"
+                        );
+
+                        Ok(nexus_response)
+                    })
+                })
+                .await
+                .and_then(|r| r)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1127,5 +1244,95 @@ mod tests {
         let result = adapter.prompt(request).await;
         // Should fail because connection is None (no real connection established)
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn adapter_list_sessions_without_connection_fails() {
+        let adapter = AcpSdkAdapter::new(
+            "test-agent".to_string(),
+            PathBuf::from("/usr/bin/test-agent"),
+        );
+
+        let request = NexusListSessionsRequest::new();
+        let result = adapter.list_sessions(request).await;
+        assert!(result.is_err());
+    }
+
+    // ── List sessions conversion tests ────────────────────────────────────────
+
+    #[test]
+    fn list_sessions_request_to_sdk_empty() {
+        let nexus_req = NexusListSessionsRequest::new();
+        let sdk_req = sdk_list_sessions_request_from_nexus(nexus_req);
+        assert!(sdk_req.cwd.is_none());
+        assert!(sdk_req.cursor.is_none());
+    }
+
+    #[test]
+    fn list_sessions_request_to_sdk_with_filters() {
+        let nexus_req = NexusListSessionsRequest::new()
+            .cwd("/tmp/workspace")
+            .cursor("next-page-token");
+        let sdk_req = sdk_list_sessions_request_from_nexus(nexus_req);
+        assert_eq!(sdk_req.cwd, Some(PathBuf::from("/tmp/workspace")));
+        assert_eq!(sdk_req.cursor, Some("next-page-token".to_string()));
+    }
+
+    #[test]
+    fn session_info_to_nexus_basic() {
+        let sdk_info = SessionInfo::new(
+            agent_client_protocol::schema::SessionId::new("session-abc"),
+            PathBuf::from("/home/user/project"),
+        );
+        let nexus_info = sdk_session_info_to_nexus(&sdk_info);
+        assert_eq!(nexus_info.session_id.0, "session-abc");
+        assert_eq!(nexus_info.cwd, PathBuf::from("/home/user/project"));
+        assert!(nexus_info.title.is_none());
+        assert!(nexus_info.updated_at.is_none());
+    }
+
+    #[test]
+    fn session_info_to_nexus_with_optional_fields() {
+        let sdk_info = SessionInfo::new(
+            agent_client_protocol::schema::SessionId::new("session-def"),
+            PathBuf::from("/var/app"),
+        )
+        .title("Production Session")
+        .updated_at("2026-04-21T10:00:00Z");
+        let nexus_info = sdk_session_info_to_nexus(&sdk_info);
+        assert_eq!(nexus_info.title, Some("Production Session".to_string()));
+        assert_eq!(
+            nexus_info.updated_at,
+            Some("2026-04-21T10:00:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn list_sessions_response_to_nexus_empty() {
+        let sdk_resp = ListSessionsResponse::new(vec![]);
+        let nexus_resp = sdk_list_sessions_response_to_nexus(&sdk_resp);
+        assert!(nexus_resp.sessions.is_empty());
+        assert!(nexus_resp.next_cursor.is_none());
+    }
+
+    #[test]
+    fn list_sessions_response_to_nexus_with_sessions() {
+        let sdk_sessions = vec![
+            SessionInfo::new(
+                agent_client_protocol::schema::SessionId::new("sess-1"),
+                PathBuf::from("/tmp/a"),
+            )
+            .title("Session A"),
+            SessionInfo::new(
+                agent_client_protocol::schema::SessionId::new("sess-2"),
+                PathBuf::from("/tmp/b"),
+            ),
+        ];
+        let sdk_resp = ListSessionsResponse::new(sdk_sessions).next_cursor("page-2");
+        let nexus_resp = sdk_list_sessions_response_to_nexus(&sdk_resp);
+        assert_eq!(nexus_resp.sessions.len(), 2);
+        assert_eq!(nexus_resp.sessions[0].session_id.0, "sess-1");
+        assert_eq!(nexus_resp.sessions[0].title, Some("Session A".to_string()));
+        assert_eq!(nexus_resp.next_cursor, Some("page-2".to_string()));
     }
 }
