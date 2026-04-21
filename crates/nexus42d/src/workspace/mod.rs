@@ -152,7 +152,7 @@ impl WorkspaceState {
         let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
 
         // R3(runtime): Record CLI config file modification time for staleness detection.
-        let cli_config_path = nexus_home.join("config.json");
+        let cli_config_path = nexus_home.join("config.toml");
         let cli_config_mtime = std::fs::metadata(&cli_config_path)
             .ok()
             .and_then(|m| m.modified().ok());
