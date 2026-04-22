@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use agent_client_protocol::SessionId;
+use agent_client_protocol::schema::SessionId;
 
 /// A persisted ACP session entry.
 ///

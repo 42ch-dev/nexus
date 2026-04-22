@@ -58,6 +58,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Known top-level keys in the permissions TOML file.
+pub const VALID_TOP_LEVEL_KEYS: &[&str] = &["default", "grant", "deny", "agents"];
+
 /// Permission decision returned by policy evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionDecision {
@@ -152,21 +155,295 @@ impl PermissionPolicy {
         Ok(policy)
     }
 
-    /// Save permission policy to workspace.
-    pub fn save(&self, workspace_root: &Path) -> anyhow::Result<()> {
+    /// Save permission policy to workspace using `toml_edit` for round-trip
+    /// preservation of comments, formatting, and unknown keys.
+    ///
+    /// If the policy file already exists, it is parsed as a `toml_edit` document
+    /// and updated in place. Otherwise a new document is created.
+    pub fn save_toml_edit(&self, workspace_root: &Path) -> anyhow::Result<()> {
+        let mut doc = Self::load_toml_edit(workspace_root)?;
+
+        // Update `default` key
+        doc["default"] = toml_edit::value(format!("{:?}", self.default).to_lowercase());
+
+        // Update `grant` keys
+        Self::sync_hashmap_to_table(&mut doc, "grant", &self.grant);
+
+        // Update `deny` keys
+        Self::sync_hashmap_to_table(&mut doc, "deny", &self.deny);
+
+        // Update per-agent rules
+        for (agent_id, rules) in &self.agents {
+            if !rules.grant.is_empty() || !rules.deny.is_empty() || !rules.ask.is_empty() {
+                Self::ensure_agents_table_doc(&mut doc);
+                Self::sync_hashmap_to_table_nested(&mut doc, agent_id, "grant", &rules.grant);
+                Self::sync_hashmap_to_table_nested(&mut doc, agent_id, "deny", &rules.deny);
+                Self::sync_hashmap_to_table_nested(&mut doc, agent_id, "ask", &rules.ask);
+            }
+        }
+
+        Self::save_toml_edit_doc(workspace_root, &doc)?;
+        Ok(())
+    }
+
+    /// Load the permissions TOML as a mutable `toml_edit` document.
+    ///
+    /// Returns an empty document if the file doesn't exist.
+    pub fn load_toml_edit(workspace_root: &Path) -> anyhow::Result<toml_edit::DocumentMut> {
+        let policy_path = Self::policy_path(workspace_root);
+        if policy_path.exists() {
+            let content = std::fs::read_to_string(&policy_path)?;
+            let doc = content
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|e| anyhow::anyhow!("Failed to parse permissions TOML: {}", e))?;
+            Ok(doc)
+        } else {
+            Ok(toml_edit::DocumentMut::new())
+        }
+    }
+
+    /// Save a `toml_edit` document to the permissions file.
+    pub fn save_toml_edit_doc(
+        workspace_root: &Path,
+        doc: &toml_edit::DocumentMut,
+    ) -> anyhow::Result<()> {
         let policy_path = Self::policy_path(workspace_root);
         if let Some(parent) = policy_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(&policy_path, content)?;
+        std::fs::write(&policy_path, doc.to_string())?;
         Ok(())
     }
 
+    /// Ensure the `[agents]` table exists in the document.
+    pub fn ensure_agents_table_doc(doc: &mut toml_edit::DocumentMut) {
+        if doc.get("agents").is_none() {
+            doc["agents"] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+    }
+
+    /// Ensure `[agents.<agent>.<action>]` table exists.
+    pub fn ensure_agent_action_table_doc(
+        doc: &mut toml_edit::DocumentMut,
+        agent: &str,
+        action: &str,
+    ) {
+        Self::ensure_agents_table_doc(doc);
+        let agents = doc["agents"].as_table_mut().expect("agents table");
+        if !agents.contains_key(agent) {
+            agents.insert(agent, toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        let agent_table = agents[agent].as_table_mut().expect("agent table");
+        if !agent_table.contains_key(action) {
+            agent_table.insert(action, toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+    }
+
+    /// Set a capability value in `[agents.<agent>.<action>]`.
+    pub fn set_agent_capability_doc(
+        doc: &mut toml_edit::DocumentMut,
+        agent: &str,
+        action: &str,
+        capability: &str,
+        value: bool,
+    ) {
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(agent_table) = agents.get_mut(agent) {
+                if let Some(action_table) = agent_table.get_mut(action) {
+                    action_table[capability] = toml_edit::value(value);
+                }
+            }
+        }
+    }
+
+    /// Remove a capability from `[agents.<agent>.<action>]`.
+    /// Returns true if the capability existed and was removed.
+    pub fn remove_agent_capability_doc(
+        doc: &mut toml_edit::DocumentMut,
+        agent: &str,
+        action: &str,
+        capability: &str,
+    ) -> bool {
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(agent_table) = agents.get_mut(agent) {
+                if let Some(action_table) = agent_table.get_mut(action) {
+                    if action_table.get(capability).is_some() {
+                        action_table
+                            .as_table_like_mut()
+                            .map(|t| t.remove(capability));
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Clean up empty action tables and agent entries after removal.
+    pub fn clean_empty_agent_tables_doc(doc: &mut toml_edit::DocumentMut, agent: &str) {
+        let actions = ["grant", "deny", "ask"];
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(agent_table) = agents.get_mut(agent) {
+                for action in &actions {
+                    if let Some(action_table) = agent_table.get_mut(*action) {
+                        if let Some(table) = action_table.as_table() {
+                            if table.is_empty() {
+                                if let Some(t) = agent_table.as_table_like_mut() {
+                                    t.remove(action);
+                                }
+                            }
+                        }
+                    }
+                }
+                // If the agent entry is now empty, remove it
+                if let Some(table) = agent_table.as_table() {
+                    if table.is_empty() {
+                        agents.as_table_like_mut().map(|t| t.remove(agent));
+                    }
+                }
+            }
+            // If the agents table is now empty, remove it
+            if let Some(agents_table) = doc["agents"].as_table() {
+                if agents_table.is_empty() {
+                    doc.remove("agents");
+                }
+            }
+        }
+    }
+
+    /// Validate top-level keys in the TOML document against the known schema.
+    ///
+    /// Returns a list of warning messages for unknown keys.
+    pub fn validate_toml_keys(doc: &toml_edit::DocumentMut) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Check top-level keys
+        for (key, _value) in doc.iter() {
+            let key_str = key.to_string();
+            if !VALID_TOP_LEVEL_KEYS.contains(&key_str.as_str()) {
+                warnings.push(format!("Unknown top-level key: '{}'", key_str));
+            }
+        }
+
+        // Check sub-keys under [agents.<agent>]
+        if let Some(agents) = doc.get("agents") {
+            if let Some(agents_table) = agents.as_table() {
+                for (agent_id, agent_item) in agents_table.iter() {
+                    let agent_str = agent_id.to_string();
+                    if let Some(agent_tbl) = agent_item.as_table() {
+                        for (action_key, _) in agent_tbl.iter() {
+                            let action_str = action_key.to_string();
+                            if !["grant", "deny", "ask"].contains(&action_str.as_str()) {
+                                warnings.push(format!(
+                                    "Unknown key '{}' under agent '{}'",
+                                    action_str, agent_str
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        warnings
+    }
+
     /// Get the path to the policy file.
-    fn policy_path(workspace_root: &Path) -> PathBuf {
+    pub fn policy_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".nexus42").join("permissions.toml")
+    }
+
+    /// Sync a `HashMap<String, bool>` into a top-level table in the document.
+    ///
+    /// Removes keys not in the map, adds keys that are missing, preserves existing formatting.
+    fn sync_hashmap_to_table(
+        doc: &mut toml_edit::DocumentMut,
+        table_key: &str,
+        map: &HashMap<String, bool>,
+    ) {
+        if map.is_empty() {
+            doc.remove(table_key);
+            return;
+        }
+        // Ensure the table exists
+        if doc.get(table_key).is_none() {
+            doc[table_key] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+        if let Some(item) = doc.get_mut(table_key) {
+            if let Some(table) = item.as_table_mut() {
+                // Remove keys not in the map
+                let to_remove: Vec<String> = table
+                    .iter()
+                    .filter_map(|(k, _)| {
+                        let key_str = k.to_string();
+                        if !map.contains_key(&key_str) {
+                            Some(key_str)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for key in &to_remove {
+                    table.remove(key);
+                }
+                // Add/update keys from the map
+                for (k, v) in map {
+                    table[k.as_str()] = toml_edit::value(*v);
+                }
+            }
+        }
+    }
+
+    /// Sync a `HashMap<String, bool>` into a nested `[agents.<agent>.<action>]` table.
+    fn sync_hashmap_to_table_nested(
+        doc: &mut toml_edit::DocumentMut,
+        agent: &str,
+        action: &str,
+        map: &HashMap<String, bool>,
+    ) {
+        if map.is_empty() {
+            // Remove the action table if empty
+            if let Some(agents) = doc.get_mut("agents") {
+                if let Some(agent_table) = agents.get_mut(agent) {
+                    if let Some(action_table) = agent_table.get_mut(action) {
+                        if let Some(t) = action_table.as_table() {
+                            if t.is_empty() {
+                                agent_table.as_table_like_mut().map(|at| at.remove(action));
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        Self::ensure_agent_action_table_doc(doc, agent, action);
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(agent_table) = agents.get_mut(agent) {
+                if let Some(action_item) = agent_table.get_mut(action) {
+                    if let Some(table) = action_item.as_table_mut() {
+                        // Remove keys not in the map
+                        let to_remove: Vec<String> = table
+                            .iter()
+                            .filter_map(|(k, _)| {
+                                let key_str = k.to_string();
+                                if !map.contains_key(&key_str) {
+                                    Some(key_str)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        for key in &to_remove {
+                            table.remove(key);
+                        }
+                        // Add/update keys from the map
+                        for (k, v) in map {
+                            table[k.as_str()] = toml_edit::value(*v);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Evaluate a permission request against the policy.
@@ -409,7 +686,9 @@ mod tests {
         policy.deny_permission("terminal.kill".to_string());
 
         // Save
-        policy.save(workspace_root).expect("Failed to save policy");
+        policy
+            .save_toml_edit(workspace_root)
+            .expect("Failed to save policy");
 
         // Load
         let loaded = PermissionPolicy::load(workspace_root).expect("Failed to load policy");
@@ -683,7 +962,9 @@ mod tests {
         policy.grant_agent("test-agent", "terminal.create");
         policy.deny_agent("test-agent", "terminal.kill");
 
-        policy.save(workspace_root).expect("Failed to save policy");
+        policy
+            .save_toml_edit(workspace_root)
+            .expect("Failed to save policy");
 
         let loaded = PermissionPolicy::load(workspace_root).expect("Failed to load policy");
         assert_eq!(
@@ -703,5 +984,100 @@ mod tests {
 
         rules.grant.insert("cap".to_string(), true);
         assert!(!rules.is_empty());
+    }
+
+    #[test]
+    fn test_save_toml_edit_preserves_comments() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let workspace_root = temp_dir.path();
+
+        // Write a file with a comment
+        let path = PermissionPolicy::policy_path(workspace_root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create dir failed");
+        }
+        std::fs::write(&path, "# My important comment\ndefault = \"ask\"\n").expect("write failed");
+
+        let mut policy = PermissionPolicy::new();
+        policy.grant_agent("test-agent", "terminal.create");
+        policy
+            .save_toml_edit(workspace_root)
+            .expect("Failed to save policy");
+
+        // Reload raw content and check comment preserved
+        let content = std::fs::read_to_string(&path).expect("read failed");
+        assert!(content.contains("# My important comment"));
+    }
+
+    #[test]
+    fn test_save_toml_edit_preserves_unknown_key() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let workspace_root = temp_dir.path();
+
+        // Write a file with a future unknown key
+        let path = PermissionPolicy::policy_path(workspace_root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create dir failed");
+        }
+        std::fs::write(&path, "default = \"ask\"\nfuture_feature = \"enabled\"\n")
+            .expect("write failed");
+
+        let mut policy = PermissionPolicy::new();
+        policy.grant_permission("file_system.read".to_string());
+        policy
+            .save_toml_edit(workspace_root)
+            .expect("Failed to save policy");
+
+        // Reload raw content and check unknown key preserved
+        let content = std::fs::read_to_string(&path).expect("read failed");
+        assert!(content.contains("future_feature"));
+    }
+
+    #[test]
+    fn test_validate_toml_keys_known_keys_no_warnings() {
+        let toml_str = r#"
+default = "ask"
+
+[grant]
+"file_system.read" = true
+
+[deny]
+"terminal.kill" = true
+
+[agents.my-agent.grant]
+"terminal.create" = true
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().expect("parse failed");
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_validate_toml_keys_unknown_top_level_key() {
+        let toml_str = r#"
+default = "ask"
+unknown_key = "value"
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().expect("parse failed");
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unknown_key"));
+    }
+
+    #[test]
+    fn test_validate_toml_keys_unknown_sub_key_under_agent() {
+        let toml_str = r#"
+[agents.my-agent]
+unknown_action = "value"
+"#;
+        let doc: toml_edit::DocumentMut = toml_str.parse().expect("parse failed");
+        let warnings = PermissionPolicy::validate_toml_keys(&doc);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unknown_action"));
+        assert!(warnings[0].contains("my-agent"));
     }
 }

@@ -49,6 +49,20 @@ pub enum ScheduleCommand {
         /// Example: `2099-01-01T00:00:00Z` or `2099-01-01T00:00:00+08:00`.
         #[arg(long)]
         scheduled_at: Option<String>,
+
+        /// Model override for the default agent (e.g. `claude-3-opus`).
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Role ID for this schedule's primary agent.
+        #[arg(long)]
+        role: Option<String>,
+
+        /// Agent reference in `role:acp_agent_id[:model]` format (repeatable).
+        /// Overrides the agent and/or model for a specific role.
+        /// Example: `--agent-ref reviewer:codex-acp:o3 --agent-ref writer:claude-acp`
+        #[arg(long = "agent-ref", value_name = "ROLE:AGENT_ID[:MODEL]")]
+        agent_ref: Vec<String>,
     },
 
     /// Edit core_context of a schedule
@@ -176,6 +190,9 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             parallel_with,
             parallel_any,
             scheduled_at,
+            model: _,
+            role: _,
+            agent_ref: _,
         } => {
             add_schedule(
                 &client,
@@ -828,6 +845,162 @@ mod tests {
                 assert_eq!(days, 14);
             }
             other => panic!("expected Timeline, got: {other:?}"),
+        }
+    }
+
+    // --- T7: Multi-agent CLI flags ---
+
+    #[test]
+    fn add_with_model_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--model",
+            "claude-3-opus",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { model, .. } => {
+                assert_eq!(model, Some("claude-3-opus".to_string()));
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_role_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--role",
+            "writer",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { role, .. } => {
+                assert_eq!(role, Some("writer".to_string()));
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_agent_ref_two_segments_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--agent-ref",
+            "writer:claude-acp",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { agent_ref, .. } => {
+                assert_eq!(agent_ref.len(), 1);
+                assert_eq!(agent_ref[0], "writer:claude-acp");
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_agent_ref_three_segments_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--agent-ref",
+            "reviewer:codex-acp:o3",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { agent_ref, .. } => {
+                assert_eq!(agent_ref.len(), 1);
+                assert_eq!(agent_ref[0], "reviewer:codex-acp:o3");
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_multiple_agent_refs_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--agent-ref",
+            "reviewer:codex-acp:o3",
+            "--agent-ref",
+            "writer:claude-acp",
+            "--agent-ref",
+            "editor:claude-acp:claude-3-opus",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add { agent_ref, .. } => {
+                assert_eq!(agent_ref.len(), 3);
+            }
+            other => panic!("expected Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_with_all_multi_agent_flags_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "add",
+            "--preset",
+            "novel-writing",
+            "--creator",
+            "c1",
+            "--seed",
+            "test-seed",
+            "--model",
+            "claude-3-opus",
+            "--role",
+            "writer",
+            "--agent-ref",
+            "reviewer:codex-acp:o3",
+        ])
+        .unwrap();
+
+        match cmd.command {
+            ScheduleCommand::Add {
+                model,
+                role,
+                agent_ref,
+                seed,
+                ..
+            } => {
+                assert_eq!(model, Some("claude-3-opus".to_string()));
+                assert_eq!(role, Some("writer".to_string()));
+                assert_eq!(seed.as_deref(), Some("test-seed"));
+                assert_eq!(agent_ref.len(), 1);
+                assert_eq!(agent_ref[0], "reviewer:codex-acp:o3");
+            }
+            other => panic!("expected Add, got: {other:?}"),
         }
     }
 }

@@ -414,6 +414,27 @@
       "done_at": "2026-04-20",
       "plan_file": ".agents/plans/2026-04-20-v1.6-ws-d-multi-preset.md",
       "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-d-multi-preset.json"
+    },
+    {
+      "id": "2026-04-21-v1.7-ws-abc-residual-closure",
+      "title": "WS-A/B/C — Residual Closure (V1.7)",
+      "done_at": "2026-04-21",
+      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-abc-residual-closure.md",
+      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-abc-residual-closure.json"
+    },
+    {
+      "id": "2026-04-21-v1.7-ws-d-acp-sdk-migration",
+      "title": "WS-D — ACP SDK Migration to v0.11.0 (V1.7)",
+      "done_at": "2026-04-21",
+      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.md",
+      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.json"
+    },
+    {
+      "id": "2026-04-21-v1.7-ws-e-multi-agent-worker",
+      "title": "WS-E — Multi-Agent Worker (V1.7)",
+      "done_at": "2026-04-22",
+      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md",
+      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.json"
     }
   ]
 }
