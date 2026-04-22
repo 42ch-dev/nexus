@@ -1168,9 +1168,16 @@ pub fn resolve_agent_model(
         return (user_override.agent.clone(), user_override.model.clone());
     }
 
-    // 3. Preset recommended_models[0] — model only (no agent override from preset)
-    let model = preset_recommended.first().cloned();
-    (None, model)
+    // 3. Preset recommended_models[0] — may be "agent_id:model_name" or plain model name
+    if let Some(preset) = preset_recommended.first() {
+        if let Some((agent, model)) = preset.split_once(':') {
+            let agent = agent.to_string();
+            let model = model.to_string();
+            return (Some(agent), Some(model));
+        }
+        return (None, Some(preset.clone()));
+    }
+    (None, None)
 }
 
 /// Get the nexus42 home directory (`$HOME/.nexus42`)
