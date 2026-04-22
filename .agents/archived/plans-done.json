@@ -428,6 +428,13 @@
       "done_at": "2026-04-21",
       "plan_file": ".agents/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.md",
       "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.json"
+    },
+    {
+      "id": "2026-04-21-v1.7-ws-e-multi-agent-worker",
+      "title": "WS-E — Multi-Agent Worker (V1.7)",
+      "done_at": "2026-04-22",
+      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md",
+      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.json"
     }
   ]
 }
