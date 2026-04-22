@@ -3,38 +3,15 @@
   "updated_at": "2026-04-21T15:00:00Z",
   "plans": [
     {
-      "id": "2026-04-21-v1.7-ws-d-acp-sdk-migration",
-      "title": "WS-D — ACP SDK Migration to v0.11.0+ (V1.7)",
+      "id": "2026-04-21-v1.7-ws-e-multi-agent-worker",
+      "title": "WS-E — Multi-Agent Worker (V1.7)",
       "status": "InProgress",
       "phase": "implement",
       "priority": "high",
-      "effort": "L",
-      "effort_sessions": "~4-6",
-      "milestone": "M2",
-      "working_branch": "feature/v1.7-ws-d",
-      "integration_branch": "feature/v1.7",
-      "created": "2026-04-21",
-      "depends_on": [
-        "2026-04-21-v1.7-ws-abc-residual-closure"
-      ],
-      "blocking": [
-        "2026-04-21-v1.7-ws-e-multi-agent-worker"
-      ],
-      "compass": ".agents/knowledge/v1.7-delivery-compass-v1.md",
-      "tasks_count": 4,
-      "tasks_summary": "T1 iterative bump+compile, T2 session/list adoption, T3 session_info_update, T4 integration verification",
-      "notes": "SDK pin =0.11.7. All changes confined to nexus-acp-host internals. NexusAcpClient trait API unchanged."
-    },
-    {
-      "id": "2026-04-21-v1.7-ws-e-multi-agent-worker",
-      "title": "WS-E — Multi-Agent Worker (V1.7)",
-      "status": "Todo",
-      "phase": "prepare",
-      "priority": "high",
       "effort": "XL",
-      "effort_sessions": "~13-19",
+      "effort_sessions": "~14-20",
       "milestone": "M3",
-      "working_branch": "feature/v1.7",
+      "working_branch": "feature/v1.7-ws-e",
       "integration_branch": "feature/v1.7",
       "created": "2026-04-21",
       "depends_on": [
@@ -42,9 +19,9 @@
       ],
       "blocking": [],
       "compass": ".agents/knowledge/v1.7-delivery-compass-v1.md",
-      "tasks_count": 9,
-      "tasks_summary": "T1-T8 WorkerRegistry + session routing + AgentConfig + agents.toml + CLI flags + preset loading; T9 config.json→config.toml migration",
-      "notes": "Approach A (multiplex one worker with session routing). Plan v3.2. DF-01 (multi-agent) + OQ-7 (concurrent creators). Includes DF-17 third-party preset loading."
+      "tasks_count": 13,
+      "tasks_summary": "T0-T9: WorkerRegistry, IpcClient, AgentSlot, IPC handlers, crash recovery, daemon integration, engine integration, preset YAML roles, CLI/user config, role system prompt, config.json→config.toml migration",
+      "notes": "Approach A (multiplex one worker with session routing). Plan v3.2. DF-01 + OQ-7 + DF-17. 6 batches. XL effort (~14-20 sessions)."
     }
   ],
   "metadata": {

@@ -581,7 +581,7 @@ fn config_path_shows_location() {
         .env("HOME", tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("config.json"));
+        .stdout(predicate::str::contains("config.toml"));
 }
 
 /// Test debug command shows help

@@ -44,7 +44,14 @@ async fn acp_prompt_task_dispatches_to_worker_and_records_output() {
 #[tokio::test]
 async fn acp_prompt_task_no_worker_returns_stub() {
     // No worker handle — should operate in stub mode.
-    let task = AcpPromptTask::new(None, "state-2", "test prompt {{name}}", ToolPolicy::DenyAll);
+    // WS-E T5: session_id parameter defaults to "default" when None.
+    let task = AcpPromptTask::new(
+        None,
+        "state-2",
+        "test prompt {{name}}",
+        ToolPolicy::DenyAll,
+        None,
+    );
 
     let ctx = graph_flow::Context::new();
     ctx.set("name", "world").await;
