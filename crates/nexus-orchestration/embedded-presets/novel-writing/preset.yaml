@@ -1,6 +1,6 @@
 preset:
   id: novel-writing
-  version: 1
+  version: 2  # Bumped for multi-agent roles addition
   kind: creator
   description: "A multi-phase novel writing workflow: gather inspiration, brainstorm, outline, and draft"
   requires_capabilities:
@@ -9,6 +9,24 @@ preset:
     - judge.llm
   initial: gathering
   terminal: done
+
+# Multi-agent role definitions (WS-E §7)
+# Each role defines recommended agent:model pairs and a system prompt.
+# Runtime resolution: CLI --agent-ref > user config > recommended_models[0]
+roles:
+  - id: writer
+    description: "Primary content writer for drafting narrative text"
+    system_prompt_file: prompts/writer-system.md
+    recommended_models:
+      - "claude-acp:claude-sonnet-4-20250514"
+      - "gemini:gemini-2.5-pro"
+
+  - id: reviewer
+    description: "Editor/reviewer for quality assessment and refinement"
+    system_prompt_file: prompts/reviewer-system.md
+    recommended_models:
+      - "claude-acp:claude-sonnet-4-20250514"
+      - "codex-acp:o3"
 
 states:
   - id: gathering
@@ -68,14 +86,17 @@ inner_graphs:
     nodes:
       - id: diverge
         kind: acp_prompt
+        agent: writer
         template_file: prompts/brainstorm-diverge.md
         tool_policy: auto_grant_read_only
       - id: cluster
         kind: acp_prompt
+        agent: writer
         depends_on: [diverge]
         template_file: prompts/brainstorm-cluster.md
       - id: select
         kind: acp_prompt
+        agent: reviewer
         depends_on: [cluster]
         template_file: prompts/brainstorm-select.md
     output_binding: select.text
@@ -84,10 +105,12 @@ inner_graphs:
     nodes:
       - id: draft_intro
         kind: acp_prompt
+        agent: writer
         template_file: prompts/draft-intro.md
         tool_policy: auto_grant_read_only
       - id: draft_body
         kind: acp_prompt
+        agent: writer
         depends_on: [draft_intro]
         template_file: prompts/draft-body.md
         tool_policy: auto_grant_read_only

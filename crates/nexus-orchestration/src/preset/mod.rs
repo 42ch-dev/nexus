@@ -112,7 +112,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.version, 2); // WS-E T6: bumped for multi-agent roles
 
         // Must have both inner graphs.
         assert!(
@@ -266,16 +266,34 @@ mod tests {
             "expected 8 prompt template references in enter + context_update + inner_graphs"
         );
 
-        // Verify the embedded directory has all 9 prompt files (includes
+        // Verify the embedded directory has all 11 prompt files (includes
         // gathering-exit.md which is referenced from exit_when, not enter,
-        // and outlining-ctx-update.md from the context_update hook).
+        // outlining-ctx-update.md from the context_update hook, and
+        // writer-system.md / reviewer-system.md from the roles section).
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
         assert_eq!(
             prompts_dir.files().count(),
-            9,
-            "expected 9 embedded prompt files"
+            11,
+            "expected 11 embedded prompt files"
         );
+    }
+
+    #[test]
+    fn novel_writing_has_multi_agent_roles() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
+
+        // WS-E T6: Verify roles section
+        assert_eq!(loaded.roles.len(), 2);
+        assert!(loaded.roles.iter().any(|r| r.id == "writer"));
+        assert!(loaded.roles.iter().any(|r| r.id == "reviewer"));
+
+        // Verify writer role has recommended_models
+        let writer = loaded.roles.iter().find(|r| r.id == "writer").unwrap();
+        assert_eq!(writer.recommended_models.len(), 2);
+        assert!(writer.recommended_models[0].contains(':'));
+        assert!(writer.recommended_models[1].contains(':'));
     }
 }
