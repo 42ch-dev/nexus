@@ -9,24 +9,24 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-22T02:30:00Z",
-      "total_open": 7,
+      "total_open": 3,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 6,
-        "nit": 1
+        "low": 3,
+        "nit": 0
       },
       "by_target": {
         "V1.7": 0,
-        "V2.0": 5,
+        "V2.0": 1,
         "backlog": 2
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
         "2026-04-20-v1.6-ws-b-acp-sdk-dto": 0,
         "2026-04-20-v1.6-ws-c-permission-cli": 0,
-        "2026-04-21-v1.7-ws-abc-residual-closure": 4,
+        "2026-04-21-v1.7-ws-abc-residual-closure": 1,
         "2026-04-21-v1.7-ws-d-acp-sdk-migration": 0,
         "2026-04-21-v1.7-ws-e-multi-agent-worker": 0,
         "v1-tech-debt-cleanup": 1
@@ -75,44 +75,11 @@
       "2026-04-20-v1.6-ws-c-permission-cli": [],
       "2026-04-21-v1.7-ws-abc-residual-closure": [
         {
-          "id": "R9",
-          "title": "Protocol version JSON round-trip — serde_json::json!(v) instead of direct constructor",
-          "severity": "low",
-          "source": "QC#1 S1, QC#2 S2-1",
-          "scope": "crates/nexus-acp-host/src/client.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        },
-        {
-          "id": "R10",
-          "title": "MCP server conversion drops HTTP headers field",
-          "severity": "low",
-          "source": "QC#2 S2-2",
-          "scope": "crates/nexus-acp-host/src/client.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        },
-        {
           "id": "R11",
           "title": "run_reset does raw toml_edit document surgery instead of delegating to policy helpers",
           "severity": "low",
           "source": "QC#2 S2-3",
           "scope": "crates/nexus42/src/commands/permission.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        },
-        {
-          "id": "R12",
-          "title": "VALID_TOP_LEVEL_KEYS hardcodes schema contract",
-          "severity": "low",
-          "source": "QC#3 R3-2",
-          "scope": "crates/nexus-acp-host/src/policy.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "V2.0",
