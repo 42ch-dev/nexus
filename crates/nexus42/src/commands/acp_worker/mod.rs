@@ -297,12 +297,13 @@ async fn handle_initialize(
             .write()
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
-        // If sessions already exist, warn but allow (idempotent re-init).
+        // If sessions already exist, clear them for idempotent re-init.
         if !sessions.is_empty() {
             warn!(
                 count = sessions.len(),
-                "worker/initialize called with existing sessions"
+                "worker/initialize called with existing sessions, clearing"
             );
+            sessions.clear();
         }
 
         // Check for new multi-agent format first.
