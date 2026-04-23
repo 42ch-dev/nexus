@@ -6,7 +6,7 @@
       "id": "2026-04-23-v1.8-ws-b-creator-handle-param",
       "title": "WS-B — Creator Handle CLI Parameter (V1.8)",
       "file": ".agents/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
       "progress": 0,
@@ -14,7 +14,7 @@
       "created_at": "2026-04-23",
       "updated_at": "2026-04-24",
       "done_at": null,
-      "notes": "M2 gate. Unblocked: WS-A and WS-C are Done. **Platform V1.8 Theme A resolved** (2026-04-23): registration endpoint accepts handle. Ready for dispatch.",
+      "notes": "M2 gate. Dispatched to fullstack-dev. Unblocked: WS-A and WS-C are Done. **Platform V1.8 Theme A resolved** (2026-04-23): registration endpoint accepts handle.",
       "metadata": {
         "phase": "v1.8",
         "priority": "medium",
