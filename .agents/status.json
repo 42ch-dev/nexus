@@ -117,6 +117,65 @@
       ]
     },
     "residual_findings": {
+      "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [
+        {
+          "id": "R-WA-001",
+          "title": "async_fn_in_trait MSRV concern",
+          "severity": "warning",
+          "source": "QC3 F-003",
+          "scope": "crates/nexus42/src/challenge/mod.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-WA-002",
+          "title": "No fallback metrics/telemetry",
+          "severity": "warning",
+          "source": "QC3 F-004",
+          "scope": "crates/nexus42/src/challenge/mod.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "post-M1",
+          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
+        }
+      ],
+      "2026-04-23-v1.8-ws-c-name-positional-to-flag": [
+        {
+          "id": "R-WC-001",
+          "title": "No max-length validation on name",
+          "severity": "warning",
+          "source": "QC2 F-003",
+          "scope": "crates/nexus42/src/commands/creator.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "M2/WS-B",
+          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-WC-002",
+          "title": "Positional→flag migration UX",
+          "severity": "warning",
+          "source": "QC3 F-005",
+          "scope": "crates/nexus42/src/commands/creator.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-WC-003",
+          "title": "HashMap non-determinism in obtain_auth_token test",
+          "severity": "warning",
+          "source": "QC2 F-004",
+          "scope": "crates/nexus42/src/commands/creator.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
+        }
+      ],
       "v1-tech-debt-cleanup": [
         {
           "id": "TD-10",
