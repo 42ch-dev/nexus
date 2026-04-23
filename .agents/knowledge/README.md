@@ -21,6 +21,7 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.6-delivery-compass-v1.md](v1.6-delivery-compass-v1.md) | V1.6 (2026-04-20) | V1.6 delivery compass: Residual Governance + ACP SDK Preparation + Creator Tooling. 4 workstreams (WS-A–WS-D), 3 milestones, 7-entry regression gate (R26–R32), 8-entry risk register. | **Done (Frozen)** — V1.6 delivery complete |
 | [deferred-features-cross-version-tracker-v1.md](deferred-features-cross-version-tracker-v1.md) | V1.7 planning (2026-04-21) | **Cross-version deferred feature tracker**: all features/tech-debt deferred from V1.2–V1.6 compasses, with lifecycle status (Open/Shipped/Cancelled/Superseded), target versions, effort estimates, and per-version summaries. | **Active** — review when any version ships |
 | [v1.7-delivery-compass-v1.md](v1.7-delivery-compass-v1.md) | V1.7 (2026-04-21) | V1.7 delivery compass: Residual Closure + ACP SDK Migration + Multi-Agent Worker. 5 workstreams (WS-A–WS-E), 4 milestones (M1–M4), 10-entry regression gate (R33–R42), 8-entry risk register. | **Draft** — pending user confirmation |
+| [v1.8-delivery-compass-v1.md](v1.8-delivery-compass-v1.md) | V1.8 (2026-04-23) | V1.8 delivery compass: CLI Spec Alignment + Handle Support. 3 workstreams (WS-A–WS-C), 3 milestones (M1–M3), 6-entry regression gate (R43–R48), 4-entry risk register. | **Draft** — pending user confirmation |
 
 ## Archived (`archived/knowledge/`)
 
