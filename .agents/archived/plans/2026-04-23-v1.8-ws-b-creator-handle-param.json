@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "2026-04-23-v1.8-ws-b-creator-handle-param",
+  "title": "WS-B — Creator Handle CLI Parameter (V1.8)",
+  "status": "Done",
+  "phase": "v1.8",
+  "done_at": "2026-04-24",
+  "plan_file": ".agents/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
+  "milestone": "M2",
+  "working_branch": "feature/v1.8",
+  "integration_branch": "feature/v1.8",
+  "effort": "S",
+  "tasks_count": 7,
+  "tasks_summary": "T1-T7: read CLI surface, add --handle arg, pass to API, valid test, too-short test, invalid-chars test, CI clean",
+  "closes_residuals": {},
+  "opens_residuals": {}
+}

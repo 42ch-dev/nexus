@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "2026-04-23-v1.8-ws-a-challenge-llm-fallback",
+  "title": "WS-A — Challenge Solver LLM Fallback (V1.8)",
+  "status": "Done",
+  "phase": "v1.8",
+  "done_at": "2026-04-24",
+  "plan_file": ".agents/plans/2026-04-23-v1.8-ws-a-challenge-llm-fallback.md",
+  "milestone": "M1",
+  "working_branch": "feature/v1.8",
+  "integration_branch": "feature/v1.8",
+  "effort": "M",
+  "tasks_count": 7,
+  "tasks_summary": "T1-T7: understand pipeline, assess runtime, implement fallback, numeric validation, success tests, error tests, CI clean",
+  "opens_residuals": {
+    "2026-04-23-v1.8-ws-a-challenge-llm-fallback": ["R-WA-001", "R-WA-002"]
+  }
+}

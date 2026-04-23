@@ -4,7 +4,7 @@
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
 
 use crate::auth;
-use crate::challenge::solve_challenge;
+use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
 use crate::commands::init;
 use crate::config::{CliConfig, DEFAULT_WORKSPACE_SLUG};
 use crate::errors::{CliError, Result};
@@ -17,6 +17,13 @@ use std::path::PathBuf;
 /// Default registration source for the CLI.
 const DEFAULT_REGISTRATION_SOURCE: &str = "cli";
 
+/// Handle validation regex: 4–15 chars, starts/ends with `[a-z0-9]`, interior allows `[a-z0-9._-]`.
+/// Frozen spec v3 §7.
+static HANDLE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"^[a-z0-9][a-z0-9._-]{2,13}[a-z0-9]$")
+        .expect("frozen spec handle regex is valid")
+});
+
 /// Buffer seconds added to expiry check to avoid edge-case failures.
 const EXPIRY_BUFFER_SECS: i64 = 10;
 
@@ -26,12 +33,18 @@ const MAX_VERIFY_ATTEMPTS: u32 = 2;
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
     /// Register a new Creator entity
+    ///
+    /// Usage: nexus42 creator register --name "My Agent" [--source cli|web_agent] [--handle <handle>]
     Register {
-        /// Display name for the Creator
+        /// Display name for the Creator (required)
+        #[arg(long)]
         name: String,
         /// Registration source (default: cli)
         #[arg(long, default_value = DEFAULT_REGISTRATION_SOURCE)]
         source: String,
+        /// Creator handle — 4–15 chars, lowercase alphanumeric, dots, hyphens, underscores
+        #[arg(long)]
+        handle: Option<String>,
     },
 
     /// Show current Creator status
@@ -109,7 +122,11 @@ pub enum CredentialsAction {
 /// Run creator command
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        CreatorCommand::Register { name, source } => register_creator(config, name, source).await,
+        CreatorCommand::Register {
+            name,
+            source,
+            handle,
+        } => register_creator(config, name, source, handle).await,
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref).await,
         CreatorCommand::List => list_creators(config).await,
@@ -130,6 +147,21 @@ fn user_home() -> Result<PathBuf> {
 
 fn validate_workspace_slug(slug: &str) -> Result<()> {
     init::validate_slug("workspace_slug", slug)
+}
+
+/// Validate a creator handle against the frozen spec v3 §7 regex.
+///
+/// Handle must be 4–15 chars, start and end with `[a-z0-9]`,
+/// and contain only `[a-z0-9._-]`.
+fn validate_handle(handle: &str) -> Result<()> {
+    if HANDLE_RE.is_match(handle) {
+        Ok(())
+    } else {
+        Err(CliError::InvalidHandle {
+            handle: handle.to_string(),
+            reason: "Handle must be 4\u{2013}15 characters, start and end with a letter or digit, and contain only lowercase letters, digits, dots, hyphens, and underscores.".to_string(),
+        })
+    }
 }
 
 async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Result<()> {
@@ -236,7 +268,20 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
 /// register → solve challenge → verify → store credentials.
 ///
 /// On wrong answer, auto-retries once (D4). On second failure, reports error.
-async fn register_creator(config: &CliConfig, name: String, source: String) -> Result<()> {
+async fn register_creator(
+    config: &CliConfig,
+    name: String,
+    source: String,
+    handle: Option<String>,
+) -> Result<()> {
+    // Validate handle if provided
+    let validated_handle = match &handle {
+        Some(h) => {
+            validate_handle(h)?;
+            Some(h.as_str())
+        }
+        None => None,
+    };
     // --- Step 1: Obtain auth token ---
     let auth_store = auth::AuthStore::load()?;
 
@@ -250,7 +295,9 @@ async fn register_creator(config: &CliConfig, name: String, source: String) -> R
 
     let client = PlatformClient::new(&config.platform_url, &auth_token)?;
 
-    let register_response = client.register_creator(&name, &source).await?;
+    let register_response = client
+        .register_creator(&name, &source, validated_handle)
+        .await?;
 
     let creator_id = &register_response.creator_id;
     let pending_api_key = &register_response.creator_api_key;
@@ -280,17 +327,20 @@ async fn register_creator(config: &CliConfig, name: String, source: String) -> R
     // --- Step 4: Solve challenge ---
     println!("Solving challenge...");
 
-    let answer: String = match solve_challenge(&verification.challenge_text) {
-        Ok(answer) => {
-            println!("  Answer computed: {}", answer);
-            answer
-        }
-        Err(challenge_err) => {
-            return Err(CliError::ChallengeFailed {
-                reason: challenge_err.to_string(),
-            });
-        }
-    };
+    let answer: String =
+        match solve_challenge_with_fallback(&verification.challenge_text, &UnavailableLlmSolver)
+            .await
+        {
+            Ok(answer) => {
+                println!("  Answer computed: {}", answer);
+                answer
+            }
+            Err(challenge_err) => {
+                return Err(CliError::ChallengeFailed {
+                    reason: challenge_err.to_string(),
+                });
+            }
+        };
 
     // --- Step 5: Re-check challenge expiry before submit ---
     // Solve may have taken time; re-check to give a clearer error than a
@@ -898,5 +948,107 @@ mod tests {
     #[test]
     fn max_verify_attempts_is_two() {
         assert_eq!(MAX_VERIFY_ATTEMPTS, 2);
+    }
+
+    // ── Handle validation tests ─────────────────────────────────
+
+    #[test]
+    fn validate_handle_accepts_valid_handle() {
+        assert!(validate_handle("valid-handle").is_ok());
+    }
+
+    #[test]
+    fn validate_handle_accepts_min_length() {
+        assert!(validate_handle("abcd").is_ok());
+    }
+
+    #[test]
+    fn validate_handle_accepts_max_length() {
+        // 15 chars: starts/ends with [a-z0-9], interior 13 chars
+        assert!(validate_handle("abcdefghijklmno").is_ok());
+    }
+
+    #[test]
+    fn validate_handle_accepts_dots_and_underscores() {
+        assert!(validate_handle("my.agent_name").is_ok());
+    }
+
+    #[test]
+    fn validate_handle_rejects_too_short() {
+        let result = validate_handle("AB");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("4"));
+        assert!(display.contains("15"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_three_chars() {
+        let result = validate_handle("abc");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("4"));
+        assert!(display.contains("15"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_too_long() {
+        let result = validate_handle("abcdefghijklmnop"); // 16 chars
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("4"));
+        assert!(display.contains("15"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_spaces() {
+        let result = validate_handle("a b");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("lowercase letters"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_uppercase() {
+        let result = validate_handle("ValidHandle");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("lowercase letters"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_leading_hyphen() {
+        let result = validate_handle("-ab");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("start and end"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_trailing_hyphen() {
+        let result = validate_handle("ab-");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("start and end"));
+    }
+
+    #[test]
+    fn validate_handle_rejects_empty_string() {
+        let result = validate_handle("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_handle_rejects_special_chars() {
+        let result = validate_handle("ab@cd");
+        assert!(result.is_err());
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("lowercase letters"));
+    }
+
+    #[test]
+    fn validate_handle_regex_is_frozen_spec_compliant() {
+        // Confirm the regex constant matches spec v3 §7 exactly
+        assert_eq!(HANDLE_RE.as_str(), r"^[a-z0-9][a-z0-9._-]{2,13}[a-z0-9]$");
     }
 }
