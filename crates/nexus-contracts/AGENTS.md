@@ -1,6 +1,6 @@
 # nexus-contracts — Generated Wire Types
 
-Published as `nexus-contracts` on [crates.io](https://crates.io/crates/nexus-contracts). All types are generated from `schemas/` via `pnpm run codegen`.
+Monorepo-internal crate — **not published to crates.io**. All types are generated from `schemas/` via `pnpm run codegen`.
 
 ## Strict Rules
 

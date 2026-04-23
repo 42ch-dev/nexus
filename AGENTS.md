@@ -9,7 +9,7 @@ This is the **public open-source monorepo** containing:
 - `nexus42` CLI executable (Rust)
 - `nexus42d` daemon/supervisor (Rust)
 - JSON Schema wire contracts (truth source for TypeScript/Rust code generation)
-- Published packages: `@42ch/nexus-contracts` (npm) and `nexus-contracts` (crates.io)
+- Published package: `@42ch/nexus-contracts` (npm) — Rust `nexus-contracts` crate is monorepo-internal only
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
@@ -35,7 +35,7 @@ crates/
   nexus-contracts/      # Generated Rust types → see crates/nexus-contracts/AGENTS.md
   nexus42/              # CLI binary → see crates/nexus42/AGENTS.md
   nexus42d/             # Daemon → see crates/nexus42d/AGENTS.md
-  nexus-sync/           # Bundle/outbox state machine (library)
+  nexus-sync/           # CLI ↔ Platform sync (library)
   nexus-acp-host/       # ACP client adapter → see crates/nexus-acp-host/AGENTS.md
   nexus-domain/         # Domain types and logic
   nexus-home-layout/    # ~/.nexus42/ path layout → see crates/nexus-home-layout/AGENTS.md
@@ -88,7 +88,7 @@ docs/                   # User & contributor docs
 | Deliverable | Version | Declared in |
 |---|---|---|
 | Rust workspace crates | **0.1.0** | Root `Cargo.toml` → `[workspace.package] version` |
-| `nexus-contracts` on crates.io | **0.1.0** | Same; publish from `crates/nexus-contracts` |
+| `nexus-contracts` (monorepo-internal) | **0.1.0** | Root `Cargo.toml` → `[workspace.package] version`; not published to crates.io |
 | `@42ch/nexus-contracts` (npm) | **0.3.0** | `packages/nexus-contracts/package.json` |
 | `nexus-codegen` (private tooling) | **0.1.0** | `tooling/codegen/package.json` |
 | Root `nexus-monorepo` meta package | **0.1.0** | Root `package.json` |
