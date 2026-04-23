@@ -99,7 +99,7 @@ Violations break onboarding and agent handoff.
 
 ### Harness alignment
 
-Plan conventions follow **[Harness Engineering](https://github.com/btspoony/harness-opencode-team)** upstream defaults. `{HARNESS_DIR}` = `.agents/`, `{PLAN_DIR}` = `.agents/plans/`.
+Plan conventions follow **[Harness Engineering](https://github.com/btspoony/mstar-harness)** upstream defaults. `{HARNESS_DIR}` = `.agents/`, `{PLAN_DIR}` = `.agents/plans/`.
 
 ### `{PLAN_DIR}` discovery
 

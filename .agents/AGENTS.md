@@ -14,9 +14,9 @@
 
 All harness conventions (residual findings lifecycle, Done archival profiles, `status.json` structure, `knowledge/` management, QC/QA report naming, pre-merge checklist, file naming, severity levels, etc.) are defined in the upstream Harness Engineering spec. This repo follows upstream defaults unless noted in **Project-Specific Deviations** below.
 
-- **Plan management**: [`plan-convention.md`](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/plan-convention.md)
-- **Task lifecycle & QC gates**: [`harness-loop.md`](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/harness-loop.md)
-- **QC review checklist**: [`review-harness.md`](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/review-harness.md)
+- **Plan management**: [`plan-convention.md`](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/plan-convention.md)
+- **Task lifecycle & QC gates**: [`harness-loop.md`](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/harness-loop.md)
+- **QC review checklist**: [`review-harness.md`](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/review-harness.md)
 
 ## Directory Structure
 

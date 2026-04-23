@@ -70,7 +70,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 
 ### 1.4 Effort (agent-oriented)
 
-Per [effort-estimation.md](https://github.com/btspoony/harness-opencode-team/blob/main/docs/agents/effort-estimation.md) conventions (**agent sessions only; no human time**):
+Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/effort-estimation.md) conventions (**agent sessions only; no human time**):
 
 | Phase                                                           | Effort     | Approx. agent sessions |
 | --------------------------------------------------------------- | ---------- | ---------------------- |
