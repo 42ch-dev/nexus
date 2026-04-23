@@ -32,11 +32,15 @@ This is the **public open-source monorepo** containing:
 ```
 schemas/                # JSON Schema truth source → see schemas/AGENTS.md
 crates/
-  nexus-contracts/      # Generated Rust types
+  nexus-contracts/      # Generated Rust types → see crates/nexus-contracts/AGENTS.md
   nexus42/              # CLI binary → see crates/nexus42/AGENTS.md
   nexus42d/             # Daemon → see crates/nexus42d/AGENTS.md
   nexus-sync/           # Bundle/outbox state machine (library)
   nexus-acp-host/       # ACP client adapter → see crates/nexus-acp-host/AGENTS.md
+  nexus-domain/         # Domain types and logic
+  nexus-home-layout/    # ~/.nexus42/ path layout → see crates/nexus-home-layout/AGENTS.md
+  nexus-local-db/       # Local database layer → see crates/nexus-local-db/AGENTS.md
+  nexus-orchestration/  # Orchestration engine → see crates/nexus-orchestration/AGENTS.md
 packages/
   nexus-contracts/      # Generated TypeScript wire types (npm package)
 tooling/
@@ -50,12 +54,18 @@ docs/                   # User & contributor docs
 
 | Directory | Scope | Key Rules |
 |-----------|-------|-----------|
-| [`schemas/AGENTS.md`](schemas/AGENTS.md) | JSON Schema wire contracts | Schema URI, codegen flow, mandatory regeneration, `enum_conversions.rs` |
+| [`schemas/AGENTS.md`](schemas/AGENTS.md) | JSON Schema wire contracts | Schema URI, codegen flow, mandatory regeneration |
 | [`tooling/AGENTS.md`](tooling/AGENTS.md) | Codegen pipeline & CI | Pre-merge checklist, formatting, linting |
 | [`crates/nexus42/AGENTS.md`](crates/nexus42/AGENTS.md) | CLI executable | ACP client behavior, shared contract types, daemon control |
 | [`crates/nexus42d/AGENTS.md`](crates/nexus42d/AGENTS.md) | Daemon / supervisor | Not an ACP server, sqlx macros, database migrations |
 | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) | ACP client adapter | ACP protocol rules, official SDK usage |
+| [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) | Generated Rust wire types | No hand-editing generated code, `enum_conversions.rs` |
+| [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) | `~/.nexus42/` path layout | ADR-014 canonical paths, no hardcoded paths |
+| [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) | Local database layer | Migrations, sqlx compile-time macros |
+| [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) | Orchestration engine | Embedded presets, validation rules |
 | [`.agents/AGENTS.md`](.agents/AGENTS.md) | Harness infrastructure | Plans, residuals, knowledge, QC/QA, upstream mstar-harness |
+
+**New crate policy:** when adding a new package or crate directory to the monorepo, create an `AGENTS.md` in that directory documenting its purpose, key rules, and dependencies — even if it starts minimal. This keeps the onboarding index complete.
 
 ## Development Workflow
 
