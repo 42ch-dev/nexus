@@ -12,11 +12,16 @@
 
 ## Upstream Harness Convention
 
-All harness conventions (residual findings lifecycle, Done archival profiles, `status.json` structure, `knowledge/` management, QC/QA report naming, pre-merge checklist, file naming, severity levels, etc.) are defined in the upstream Harness Engineering spec. This repo follows upstream defaults unless noted in **Project-Specific Deviations** below.
+This repo follows the **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** framework — a skill-driven multi-agent harness. All harness conventions (residual findings lifecycle, Done archival profiles, `status.json` structure, `knowledge/` management, QC/QA report naming, pre-merge checklist, file naming, severity levels, etc.) are defined as `mstar-*` skills in the upstream `skills/` directory. This repo follows upstream defaults unless noted in **Project-Specific Deviations** below.
 
-- **Plan management**: [`plan-convention.md`](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/plan-convention.md)
-- **Task lifecycle & QC gates**: [`harness-loop.md`](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/harness-loop.md)
-- **QC review checklist**: [`review-harness.md`](https://github.com/btspoony/mstar-harness/blob/main/docs/agents/review-harness.md)
+| Skill | Scope |
+|-------|-------|
+| `mstar-harness-core` | State machine, Spec-Driven gates, task routing, branch/worktree invariants |
+| `mstar-plan-conventions` | `status.json` SSOT, residual lifecycle, `knowledge/`, Done archival, pre-merge checklist |
+| `mstar-review-qc` | QC triple-review workflow, report template, gate rules |
+| `mstar-roles` | Role prompt bus (role bodies in `references/`) |
+| `mstar-coding-behavior` | Cross-role coding behavior baseline |
+| `mstar-superpowers-align` | Alignment and conflict handling with Superpowers |
 
 ## Directory Structure
 
