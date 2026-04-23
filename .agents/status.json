@@ -1,34 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-04-24T00:00:00Z",
-  "plans": [
-    {
-      "id": "2026-04-23-v1.8-ws-b-creator-handle-param",
-      "title": "WS-B — Creator Handle CLI Parameter (V1.8)",
-      "file": ".agents/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.8", "creator-register", "handle", "cli"],
-      "created_at": "2026-04-23",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "M2 gate. Implementation complete (b140145). Awaiting QC triple-review.",
-      "metadata": {
-        "phase": "v1.8",
-        "priority": "medium",
-        "working_branch": "feature/v1.8",
-        "merge_target": "main",
-        "branch_policy": "feature/v1.8 from main",
-        "description": "Add optional --handle parameter to creator register command",
-        "effort": "S (~0.5-1 agent session)",
-        "primary_spec": ".agents/knowledge/v1.8-delivery-compass-v1.md",
-        "dependency": "Platform V1.8 Theme A (Creator Handle) — resolved 2026-04-23",
-        "milestone": "M2"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
