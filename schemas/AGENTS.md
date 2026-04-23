@@ -19,7 +19,7 @@ schemas/  →  pnpm run codegen  →  crates/nexus-contracts/src/generated/  (Ru
 ```
 
 - JSON Schema (`schemas/`) → single codegen pass → Rust + TypeScript
-- Both packages must be published and version-locked with `schema_version`
+- The npm package (`@42ch/nexus-contracts`) must be published and version-locked with `schema_version`; the Rust crate is monorepo-internal
 
 ## ⚠️ Mandatory: Run Codegen After Any Schema Change
 
