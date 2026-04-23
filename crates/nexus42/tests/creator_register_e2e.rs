@@ -95,7 +95,7 @@ async fn creator_register_happy_path() {
 
     // Run the CLI
     let output = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("run nexus42 creator register");
 
@@ -151,7 +151,7 @@ async fn creator_register_challenge_unsolvable_falls_back_or_errors() {
         .await;
 
     let output = cli_cmd(home.path())
-        .args(["creator", "register", "test-bad"])
+        .args(["creator", "register", "--name", "test-bad"])
         .output()
         .expect("run nexus42 creator register");
 
@@ -198,7 +198,7 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
         .await;
 
     let output = cli_cmd(home.path())
-        .args(["creator", "register", "test-reject"])
+        .args(["creator", "register", "--name", "test-reject"])
         .output()
         .expect("run nexus42 creator register");
 
@@ -261,14 +261,14 @@ async fn creator_register_twice_does_not_double_write_credentials() {
 
     // --- First run ---
     let output1 = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("first run");
     assert!(output1.status.success(), "first register should succeed");
 
     // --- Second run (same mock, same name) ---
     let output2 = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("second run");
 
@@ -346,7 +346,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
         .await;
 
     let output1 = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("first register run");
     assert!(
@@ -381,7 +381,7 @@ async fn creator_register_does_not_overwrite_existing_credential() {
         .await;
 
     let output2 = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("second register run");
 
@@ -440,7 +440,7 @@ async fn creator_register_verify_http_500_exits_with_error() {
         .await;
 
     let output = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("run nexus42 creator register");
 
@@ -493,7 +493,7 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
         .await;
 
     let output = cli_cmd(home.path())
-        .args(["creator", "register", "test-creator"])
+        .args(["creator", "register", "--name", "test-creator"])
         .output()
         .expect("run nexus42 creator register");
 
@@ -528,4 +528,57 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
             "no api_key credential should be stored after expired verify failure"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// T5 — Positional syntax rejection (migration hint)
+// ---------------------------------------------------------------------------
+// WS-C requirement: positional syntax (old `creator register <name>` without --name)
+// should produce a clear error message guiding users to the new flag syntax.
+
+#[tokio::test]
+async fn creator_register_positional_syntax_rejected_with_migration_hint() {
+    let home = tempfile::tempdir().unwrap();
+
+    // Seed minimal config (no auth token needed for this CLI-args-only rejection test)
+    let nexus_dir = home.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_dir).expect("create .nexus42 dir");
+    let config = serde_json::json!({
+        "platform_url": "http://mock.local",
+        "daemon_url": "http://127.0.0.1:8420",
+        "runtime_mode": "local_first"
+    });
+    std::fs::write(
+        nexus_dir.join("config.json"),
+        serde_json::to_string_pretty(&config).unwrap(),
+    )
+    .expect("write config.json");
+
+    // Try using old positional syntax: nexus42 creator register "My Agent"
+    // (without --name flag)
+    let output = cli_cmd(home.path())
+        .args(["creator", "register", "My Agent"])
+        .output()
+        .expect("run nexus42 creator register with positional arg");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // CLI must exit with non-zero status when positional syntax is used
+    assert!(
+        !output.status.success(),
+        "register should fail when positional syntax is used; stdout={stdout} stderr={stderr}"
+    );
+
+    // Error output should mention --name or provide a migration hint
+    // Clap's default error for unexpected positional args will mention
+    // "unexpected argument" and suggest the correct usage.
+    assert!(
+        combined.contains("--name")
+            || combined.contains("unexpected")
+            || combined.contains("required")
+            || combined.contains("Usage"),
+        "error output should mention --name or usage hint; got: {combined}"
+    );
 }

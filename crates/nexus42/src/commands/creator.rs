@@ -26,8 +26,11 @@ const MAX_VERIFY_ATTEMPTS: u32 = 2;
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
     /// Register a new Creator entity
+    ///
+    /// Usage: nexus42 creator register --name "My Agent" [--source cli|web_agent]
     Register {
-        /// Display name for the Creator
+        /// Display name for the Creator (required)
+        #[arg(long)]
         name: String,
         /// Registration source (default: cli)
         #[arg(long, default_value = DEFAULT_REGISTRATION_SOURCE)]
