@@ -571,14 +571,9 @@ async fn creator_register_positional_syntax_rejected_with_migration_hint() {
         "register should fail when positional syntax is used; stdout={stdout} stderr={stderr}"
     );
 
-    // Error output should mention --name or provide a migration hint
-    // Clap's default error for unexpected positional args will mention
-    // "unexpected argument" and suggest the correct usage.
+    // Error output should mention --name specifically
     assert!(
-        combined.contains("--name")
-            || combined.contains("unexpected")
-            || combined.contains("required")
-            || combined.contains("Usage"),
-        "error output should mention --name or usage hint; got: {combined}"
+        combined.contains("--name"),
+        "error output should mention --name; got: {combined}"
     );
 }

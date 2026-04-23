@@ -4,7 +4,7 @@
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
 
 use crate::auth;
-use crate::challenge::solve_challenge;
+use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
 use crate::commands::init;
 use crate::config::{CliConfig, DEFAULT_WORKSPACE_SLUG};
 use crate::errors::{CliError, Result};
@@ -283,17 +283,20 @@ async fn register_creator(config: &CliConfig, name: String, source: String) -> R
     // --- Step 4: Solve challenge ---
     println!("Solving challenge...");
 
-    let answer: String = match solve_challenge(&verification.challenge_text) {
-        Ok(answer) => {
-            println!("  Answer computed: {}", answer);
-            answer
-        }
-        Err(challenge_err) => {
-            return Err(CliError::ChallengeFailed {
-                reason: challenge_err.to_string(),
-            });
-        }
-    };
+    let answer: String =
+        match solve_challenge_with_fallback(&verification.challenge_text, &UnavailableLlmSolver)
+            .await
+        {
+            Ok(answer) => {
+                println!("  Answer computed: {}", answer);
+                answer
+            }
+            Err(challenge_err) => {
+                return Err(CliError::ChallengeFailed {
+                    reason: challenge_err.to_string(),
+                });
+            }
+        };
 
     // --- Step 5: Re-check challenge expiry before submit ---
     // Solve may have taken time; re-check to give a clearer error than a

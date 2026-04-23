@@ -15,7 +15,8 @@
 //!
 //! When the pure logic pipeline fails with `ChallengeError::ParseError`, the solver
 //! can fall back to an LLM invocation via the [`LlmSolver`] trait. The LLM receives
-//! the challenge text as user input and [`challenge-solver-skill.md`](crate::skills::challenge_solver_skill::SKILL_CONTENT)
+//! the challenge text as user input and `challenge-solver-skill.md`
+//! (embedded at compile time via [`CHALLENGE_SOLVER_SYSTEM_PROMPT`])
 //! as the system prompt. If the LLM is unavailable or its response fails numeric
 //! validation, the original parse error is returned.
 
@@ -79,6 +80,22 @@ pub trait LlmSolver: Send + Sync {
     /// is unavailable, times out, or produces an invalid response.
     async fn solve(&self, challenge_text: &str) -> Option<String>;
 }
+
+/// Default [`LlmSolver`] that always returns `None`, indicating unavailability.
+///
+/// Used as the default solver in production when no real LLM provider is
+/// configured. This makes the fallback infrastructure active without
+/// requiring an LLM provider.
+pub struct UnavailableLlmSolver;
+
+impl LlmSolver for UnavailableLlmSolver {
+    async fn solve(&self, _challenge_text: &str) -> Option<String> {
+        None
+    }
+}
+
+/// Default timeout (in seconds) for LLM fallback calls.
+const LLM_FALLBACK_TIMEOUT_SECS: u64 = 30;
 
 /// Solve a challenge text and return the numeric answer as a string.
 ///
@@ -153,8 +170,14 @@ where
         ok @ Ok(_) => ok,
         Err(ChallengeError::ParseError) => {
             tracing::warn!("pure logic pipeline failed, attempting LLM fallback for challenge");
-            match llm.solve(text).await {
-                Some(response) => {
+            let llm_result = tokio::time::timeout(
+                std::time::Duration::from_secs(LLM_FALLBACK_TIMEOUT_SECS),
+                llm.solve(text),
+            )
+            .await;
+
+            match llm_result {
+                Ok(Some(response)) => {
                     let trimmed = response.trim().to_string();
                     if is_valid_numeric_answer(&trimmed) {
                         tracing::info!("LLM fallback succeeded with answer: {}", trimmed);
@@ -164,8 +187,15 @@ where
                         Err(ChallengeError::ParseError)
                     }
                 }
-                None => {
+                Ok(None) => {
                     tracing::warn!("LLM fallback unavailable, returning original parse error");
+                    Err(ChallengeError::ParseError)
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "LLM fallback timed out after {}s, returning original parse error",
+                        LLM_FALLBACK_TIMEOUT_SECS
+                    );
                     Err(ChallengeError::ParseError)
                 }
             }
@@ -360,6 +390,29 @@ mod tests {
         )
         .await;
         assert!(matches!(result, Err(ChallengeError::DivisionByZero)));
+    }
+
+    struct SlowLlmSolver {
+        delay: std::time::Duration,
+    }
+
+    impl LlmSolver for SlowLlmSolver {
+        async fn solve(&self, _challenge_text: &str) -> Option<String> {
+            tokio::time::sleep(self.delay).await;
+            Some("42".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_returns_parse_error_on_timeout() {
+        let llm = SlowLlmSolver {
+            delay: std::time::Duration::from_secs(60), // longer than 30s timeout
+        };
+        let result = solve_challenge_with_fallback("hello world", &llm).await;
+        assert!(
+            matches!(result, Err(ChallengeError::ParseError)),
+            "timeout should fall through to original parse error"
+        );
     }
 
     // --- is_valid_numeric_answer tests ---
