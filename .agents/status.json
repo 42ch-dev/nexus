@@ -39,7 +39,7 @@
       "created_at": "2026-04-23",
       "updated_at": "2026-04-23",
       "done_at": null,
-      "notes": "M2 gate. Blocked by WS-A, WS-C, and platform V1.8 Theme A.",
+      "notes": "M2 gate. Blocked by WS-A, WS-C (stable CLI surface). **Platform V1.8 Theme A resolved** (2026-04-23): registration endpoint accepts handle.",
       "metadata": {
         "phase": "v1.8",
         "priority": "medium",
@@ -50,7 +50,7 @@
         "effort": "S (~0.5-1 agent session)",
         "primary_spec": ".agents/knowledge/v1.8-delivery-compass-v1.md",
         "blocked_by_plan_id": "2026-04-23-v1.8-ws-a-challenge-llm-fallback,2026-04-23-v1.8-ws-c-name-positional-to-flag",
-        "dependency": "Platform V1.8 Theme A (Creator Handle) must be complete",
+        "dependency": "Platform V1.8 Theme A (Creator Handle) — resolved 2026-04-23",
         "milestone": "M2"
       }
     },
