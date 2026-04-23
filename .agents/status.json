@@ -96,17 +96,12 @@
         "nit": 0
       },
       "by_target": {
-        "V1.7": 0,
         "V2.0": 1,
         "backlog": 2
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
-        "2026-04-20-v1.6-ws-b-acp-sdk-dto": 0,
-        "2026-04-20-v1.6-ws-c-permission-cli": 0,
         "2026-04-21-v1.7-ws-abc-residual-closure": 1,
-        "2026-04-21-v1.7-ws-d-acp-sdk-migration": 0,
-        "2026-04-21-v1.7-ws-e-multi-agent-worker": 0,
         "v1-tech-debt-cleanup": 1
       },
       "in_flight": {},
@@ -149,8 +144,6 @@
           "tracking_link": null
         }
       ],
-      "2026-04-20-v1.6-ws-b-acp-sdk-dto": [],
-      "2026-04-20-v1.6-ws-c-permission-cli": [],
       "2026-04-21-v1.7-ws-abc-residual-closure": [
         {
           "id": "R11",
@@ -163,9 +156,7 @@
           "target_date": "V2.0",
           "tracking_link": null
         }
-      ],
-      "2026-04-21-v1.7-ws-d-acp-sdk-migration": [],
-      "2026-04-21-v1.7-ws-e-multi-agent-worker": []
+      ]
     },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
