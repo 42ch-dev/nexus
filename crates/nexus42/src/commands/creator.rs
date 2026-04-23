@@ -157,20 +157,9 @@ fn validate_handle(handle: &str) -> Result<()> {
     if HANDLE_RE.is_match(handle) {
         Ok(())
     } else {
-        let reason = if handle.len() < 4 {
-            "too short (minimum 4 characters)"
-        } else if handle.len() > 15 {
-            "too long (maximum 15 characters)"
-        } else if !handle.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit()) {
-            "must start with a lowercase letter or digit"
-        } else if !handle.ends_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit()) {
-            "must end with a lowercase letter or digit"
-        } else {
-            "contains invalid characters (only lowercase letters, digits, dots, hyphens, and underscores allowed)"
-        };
         Err(CliError::InvalidHandle {
             handle: handle.to_string(),
-            reason: reason.to_string(),
+            reason: "Handle must be 4\u{2013}15 characters, start and end with a letter or digit, and contain only lowercase letters, digits, dots, hyphens, and underscores.".to_string(),
         })
     }
 }
@@ -988,9 +977,9 @@ mod tests {
     fn validate_handle_rejects_too_short() {
         let result = validate_handle("AB");
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        let display = format!("{}", err);
-        assert!(display.contains("too short"));
+        let display = format!("{}", result.unwrap_err());
+        assert!(display.contains("4"));
+        assert!(display.contains("15"));
     }
 
     #[test]
@@ -998,7 +987,8 @@ mod tests {
         let result = validate_handle("abc");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("too short"));
+        assert!(display.contains("4"));
+        assert!(display.contains("15"));
     }
 
     #[test]
@@ -1006,17 +996,16 @@ mod tests {
         let result = validate_handle("abcdefghijklmnop"); // 16 chars
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("too long"));
+        assert!(display.contains("4"));
+        assert!(display.contains("15"));
     }
 
     #[test]
     fn validate_handle_rejects_spaces() {
-        // "a b" is 3 chars — caught by length check before character check
         let result = validate_handle("a b");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        // 3 chars triggers "too short" since length check comes first
-        assert!(display.contains("too short") || display.contains("invalid characters"));
+        assert!(display.contains("lowercase letters"));
     }
 
     #[test]
@@ -1024,11 +1013,7 @@ mod tests {
         let result = validate_handle("ValidHandle");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        // 'V' doesn't match [a-z0-9] at start → "start with" branch triggers
-        assert!(
-            display.contains("start with") || display.contains("invalid characters"),
-            "display: {display}"
-        );
+        assert!(display.contains("lowercase letters"));
     }
 
     #[test]
@@ -1036,8 +1021,7 @@ mod tests {
         let result = validate_handle("-ab");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        // 3 chars → "too short" since length < 4
-        assert!(display.contains("too short") || display.contains("start with"));
+        assert!(display.contains("start and end"));
     }
 
     #[test]
@@ -1045,7 +1029,7 @@ mod tests {
         let result = validate_handle("ab-");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("end with"));
+        assert!(display.contains("start and end"));
     }
 
     #[test]
@@ -1059,7 +1043,7 @@ mod tests {
         let result = validate_handle("ab@cd");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("invalid characters"));
+        assert!(display.contains("lowercase letters"));
     }
 
     #[test]
