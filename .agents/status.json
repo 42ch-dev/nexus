@@ -1,37 +1,12 @@
 {
   "version": 1,
-  "updated_at": "2026-04-23T00:00:00Z",
+  "updated_at": "2026-04-24T00:00:00Z",
   "plans": [
-    {
-      "id": "2026-04-23-v1.8-ws-a-challenge-llm-fallback",
-      "title": "WS-A — Challenge Solver LLM Fallback (V1.8)",
-      "file": ".agents/plans/2026-04-23-v1.8-ws-a-challenge-llm-fallback.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.8", "challenge-solver", "llm-fallback"],
-      "created_at": "2026-04-23",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "M1 gate (shared with WS-C). Implementation complete (3cbc555). Awaiting QC triple-review.",
-      "metadata": {
-        "phase": "v1.8",
-        "priority": "high",
-        "working_branch": "feature/v1.8",
-        "merge_target": "main",
-        "branch_policy": "feature/v1.8 from main",
-        "description": "Implement LLM fallback path for challenge solver when pure logic pipeline fails",
-        "effort": "M (~1 agent session)",
-        "primary_spec": ".agents/knowledge/v1.8-delivery-compass-v1.md",
-        "milestone": "M1"
-      }
-    },
     {
       "id": "2026-04-23-v1.8-ws-b-creator-handle-param",
       "title": "WS-B — Creator Handle CLI Parameter (V1.8)",
       "file": ".agents/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
-      "status": "Blocked",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
       "progress": 0,
@@ -39,7 +14,7 @@
       "created_at": "2026-04-23",
       "updated_at": "2026-04-24",
       "done_at": null,
-      "notes": "M2 gate. Blocked by WS-A, WS-C (stable CLI surface). **Platform V1.8 Theme A resolved** (2026-04-23): registration endpoint accepts handle.",
+      "notes": "M2 gate. Unblocked: WS-A and WS-C are Done. **Platform V1.8 Theme A resolved** (2026-04-23): registration endpoint accepts handle. Ready for dispatch.",
       "metadata": {
         "phase": "v1.8",
         "priority": "medium",
@@ -49,34 +24,8 @@
         "description": "Add optional --handle parameter to creator register command",
         "effort": "S (~0.5-1 agent session)",
         "primary_spec": ".agents/knowledge/v1.8-delivery-compass-v1.md",
-        "blocked_by_plan_id": "2026-04-23-v1.8-ws-a-challenge-llm-fallback,2026-04-23-v1.8-ws-c-name-positional-to-flag",
         "dependency": "Platform V1.8 Theme A (Creator Handle) — resolved 2026-04-23",
         "milestone": "M2"
-      }
-    },
-    {
-      "id": "2026-04-23-v1.8-ws-c-name-positional-to-flag",
-      "title": "WS-C — `--name` Positional to Flag (V1.8)",
-      "file": ".agents/plans/2026-04-23-v1.8-ws-c-name-positional-to-flag.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["v1.8", "creator-register", "cli", "breaking-change"],
-      "created_at": "2026-04-23",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "M1 gate (shared with WS-A). Implementation complete (97e7441, 3d5d07b). Awaiting QC triple-review.",
-      "metadata": {
-        "phase": "v1.8",
-        "priority": "high",
-        "working_branch": "feature/v1.8",
-        "merge_target": "main",
-        "branch_policy": "feature/v1.8 from main",
-        "description": "Change creator register <name> to creator register --name <name> for spec alignment",
-        "effort": "XS (~0.5 agent session)",
-        "primary_spec": ".agents/knowledge/v1.8-delivery-compass-v1.md",
-        "milestone": "M1"
       }
     }
   ],
