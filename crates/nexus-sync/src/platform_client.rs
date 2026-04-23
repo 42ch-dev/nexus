@@ -27,6 +27,9 @@ pub struct RegisterRequest {
     pub display_name: String,
     /// Registration source (e.g. "cli", "web_agent").
     pub registration_source: String,
+    /// Optional creator handle (4–15 chars, `[a-z0-9-_.]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
 }
 
 /// Response from creator registration endpoint.
@@ -163,11 +166,13 @@ impl PlatformClient {
         &self,
         display_name: &str,
         registration_source: &str,
+        handle: Option<&str>,
     ) -> SyncResult<RegisterResponse> {
         let url = format!("{}/api/v1/creators/register", self.base_url);
         let body = RegisterRequest {
             display_name: display_name.to_string(),
             registration_source: registration_source.to_string(),
+            handle: handle.map(|h| h.to_string()),
         };
 
         tracing::info!(display_name = %display_name, "Registering creator on platform");
@@ -277,10 +282,13 @@ mod tests {
         let req = RegisterRequest {
             display_name: "Test Creator".to_string(),
             registration_source: "cli".to_string(),
+            handle: None,
         };
         let json = serde_json::to_string(&req).expect("serialize");
         assert!(json.contains("Test Creator"));
         assert!(json.contains("cli"));
+        // When handle is None, the field should be omitted from JSON
+        assert!(!json.contains("handle"));
     }
 
     #[test]
@@ -436,7 +444,7 @@ mod tests {
 
         let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
         let resp = client
-            .register_creator("Test Creator", "cli")
+            .register_creator("Test Creator", "cli", None)
             .await
             .expect("register");
 
@@ -460,7 +468,7 @@ mod tests {
             .await;
 
         let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
-        let result = client.register_creator("Test", "cli").await;
+        let result = client.register_creator("Test", "cli", None).await;
         assert!(matches!(
             result,
             Err(SyncError::PlatformError { status: 500, .. })

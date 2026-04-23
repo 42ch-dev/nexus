@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "2026-04-23-v1.8-ws-c-name-positional-to-flag",
+  "title": "WS-C — `--name` Positional to Flag (V1.8)",
+  "status": "Done",
+  "phase": "v1.8",
+  "done_at": "2026-04-24",
+  "plan_file": ".agents/plans/2026-04-23-v1.8-ws-c-name-positional-to-flag.md",
+  "milestone": "M1",
+  "working_branch": "feature/v1.8",
+  "integration_branch": "feature/v1.8",
+  "effort": "XS",
+  "tasks_count": 6,
+  "tasks_summary": "T1c-T6c: modify clap def, update help text, update E2E tests, add positional rejection test, CI clean, plan update",
+  "opens_residuals": {
+    "2026-04-23-v1.8-ws-c-name-positional-to-flag": ["R-WC-001", "R-WC-002", "R-WC-003"]
+  }
+}

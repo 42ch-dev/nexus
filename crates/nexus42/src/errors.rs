@@ -86,6 +86,14 @@ pub enum CliError {
         expires_at: String,
     },
 
+    /// Invalid creator handle format.
+    InvalidHandle {
+        /// The invalid handle value.
+        handle: String,
+        /// Human-readable reason.
+        reason: String,
+    },
+
     /// Agent not found with ID
     AgentNotFound {
         /// Agent ID that was requested
@@ -182,6 +190,15 @@ impl fmt::Display for CliError {
                     f,
                     "Challenge expired at {}. Register again with `nexus42 creator register <name>`.",
                     expires_at
+                )
+            }
+            Self::InvalidHandle { handle, reason } => {
+                write!(
+                    f,
+                    "Invalid handle {:?}: {}\n\n  Suggestion: \
+                     Handle must be 4–15 characters, start and end with a lowercase letter or digit, \
+                     and contain only lowercase letters, digits, dots, hyphens, and underscores.",
+                    handle, reason
                 )
             }
             Self::DaemonNotReachable { message, suggestion } => {

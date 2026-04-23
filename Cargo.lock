@@ -2218,6 +2218,7 @@ dependencies = [
  "nexus-sync",
  "nix 0.28.0",
  "predicates",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
