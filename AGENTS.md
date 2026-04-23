@@ -99,7 +99,18 @@ Violations break onboarding and agent handoff.
 
 ### Harness alignment
 
-Plan conventions follow **[Harness Engineering](https://github.com/btspoony/mstar-harness)** upstream defaults. `{HARNESS_DIR}` = `.agents/`, `{PLAN_DIR}` = `.agents/plans/`.
+This repo follows the **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** framework — a skill-driven multi-agent harness for OpenCode / Cursor. All execution rules, plan conventions, and QC workflows are defined as `mstar-*` skills (see upstream `skills/` directory).
+
+Key upstream skills:
+
+| Skill | Scope |
+|-------|-------|
+| `mstar-harness-core` | State machine, Spec-Driven gates, task routing, branch/worktree invariants |
+| `mstar-plan-conventions` | `status.json` SSOT, residual lifecycle, `knowledge/`, Done archival, pre-merge checklist |
+| `mstar-review-qc` | QC triple-review workflow, report template, gate rules |
+| `mstar-roles` | Role prompt bus (role bodies in `references/`) |
+
+`{HARNESS_DIR}` = `.agents/`, `{PLAN_DIR}` = `.agents/plans/`.
 
 ### `{PLAN_DIR}` discovery
 
