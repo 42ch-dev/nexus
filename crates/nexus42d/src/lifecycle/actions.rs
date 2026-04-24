@@ -26,7 +26,7 @@ pub struct ActionContext {
     /// Grace period for shutdown (ms).
     shutdown_grace_ms: u64,
     /// Join handles for subsystem start tasks (used to cancel in-flight starts).
-    start_handles: tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    start_handles: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// Reason for entering Starting state (e.g., "daemon_boot", "restart_after_failure").
     start_reason: String,
     /// Timestamp when Starting state was entered.
@@ -58,7 +58,7 @@ impl ActionContext {
             lifecycle,
             subsystems,
             shutdown_grace_ms,
-            start_handles: tokio::sync::Mutex::new(Vec::new()),
+            start_handles: std::sync::Mutex::new(Vec::new()),
             start_reason: String::from("daemon_boot"),
             started_at: chrono::Utc::now(),
             initiating_event: None,
@@ -151,13 +151,8 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
         });
 
         // Store the handle for potential cancellation in exit_starting.
-        let handles = ctx.start_handles.try_lock();
-        if let Ok(mut handles) = handles {
+        if let Ok(mut handles) = ctx.start_handles.lock() {
             handles.push(handle);
-        } else {
-            tracing::warn!(
-                "start_handles mutex contested during enter_starting — handle not tracked"
-            );
         }
     }
 }
@@ -173,7 +168,10 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
 pub fn exit_starting(ctx: Arc<ActionContext>) {
     tracing::info!("exiting Starting state — cancelling in-flight subsystem starts");
 
-    let mut handles = ctx.start_handles.blocking_lock();
+    let mut handles = ctx
+        .start_handles
+        .lock()
+        .expect("start_handles mutex not poisoned");
     let count = handles.len();
     for handle in handles.drain(..) {
         handle.abort();
