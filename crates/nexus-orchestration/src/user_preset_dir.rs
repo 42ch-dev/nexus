@@ -62,7 +62,7 @@ pub struct UserPresetWarning {
 ///
 /// The `nexus_home` parameter is typically `$HOME/.nexus42`.
 pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPresetScanResult {
-    let user_dir = user_preset_base_dir(nexus_home);
+    let user_dir = nexus_home.join("presets");
 
     // Missing directory = no user presets (not an error).
     if !user_dir.exists() {
@@ -70,6 +70,9 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
         return UserPresetScanResult::default();
     }
 
+    let mut result = UserPresetScanResult::default();
+
+    // Read directory entries and filter (skip _, . prefixed, non-dirs, missing preset.yaml).
     let entries = match std::fs::read_dir(&user_dir) {
         Ok(entries) => entries,
         Err(e) => {
@@ -81,8 +84,6 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
             return UserPresetScanResult::default();
         }
     };
-
-    let mut result = UserPresetScanResult::default();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -104,6 +105,15 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
 
         // Skip hidden directories (starting with `.`).
         if dir_name.starts_with('.') {
+            continue;
+        }
+
+        // Skip directories without preset.yaml.
+        if !path.join("preset.yaml").exists() {
+            result.warnings.push(UserPresetWarning {
+                dir_name: dir_name.clone(),
+                message: "missing preset.yaml".to_string(),
+            });
             continue;
         }
 
@@ -176,6 +186,12 @@ pub fn load_user_preset_from_dir(
                 message: format!("invalid hook operation: {}", e),
             });
         }
+        Err(PresetLoadError::NotFound { preset_id }) => {
+            return Err(UserPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("preset not found: {}", preset_id),
+            });
+        }
     };
 
     Ok(UserPresetEntry {
@@ -183,16 +199,6 @@ pub fn load_user_preset_from_dir(
         bundle_dir: bundle_dir.to_path_buf(),
         loaded,
     })
-}
-
-/// Get the user preset base directory path: `<nexus_home>/presets/`.
-pub fn user_preset_base_dir(nexus_home: &Path) -> PathBuf {
-    nexus_home.join("presets")
-}
-
-/// Get the path to a specific user preset's bundle directory.
-pub fn user_preset_bundle_dir(nexus_home: &Path, name: &str) -> PathBuf {
-    user_preset_base_dir(nexus_home).join(name)
 }
 
 /// Return the user preset IDs from a scan result.
@@ -240,23 +246,6 @@ states:
     }
 
     #[test]
-    fn user_preset_base_dir_layout() {
-        let nexus_home = PathBuf::from("/fake/home/.nexus42");
-        let dir = user_preset_base_dir(&nexus_home);
-        assert_eq!(dir, PathBuf::from("/fake/home/.nexus42/presets"));
-    }
-
-    #[test]
-    fn user_preset_bundle_dir_layout() {
-        let nexus_home = PathBuf::from("/fake/home/.nexus42");
-        let dir = user_preset_bundle_dir(&nexus_home, "my-strategy");
-        assert_eq!(
-            dir,
-            PathBuf::from("/fake/home/.nexus42/presets/my-strategy")
-        );
-    }
-
-    #[test]
     fn missing_directory_returns_empty() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
@@ -272,7 +261,7 @@ states:
     fn scan_loads_valid_user_presets() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         // Create my-strategy/ with valid preset.yaml
         let strategy_dir = base.join("my-strategy");
@@ -291,7 +280,7 @@ states:
     fn scan_skips_system_prefixed_directories() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         // Create _system/maintenance/ (should be skipped by user scanner)
         let system_dir = base.join("_system");
@@ -309,7 +298,7 @@ states:
     fn scan_skips_hidden_directories() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         // Create .hidden/ (should be skipped)
         let hidden_dir = base.join(".hidden");
@@ -327,7 +316,7 @@ states:
     fn scan_skips_corrupted_presets_with_warning() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         // Create broken/ with invalid YAML
         let broken_dir = base.join("broken");
@@ -347,7 +336,7 @@ states:
     fn scan_skips_directory_without_preset_yaml() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         // Create empty/ with no preset.yaml
         let empty_dir = base.join("empty");
@@ -359,13 +348,14 @@ states:
         assert!(result.presets.is_empty());
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(result.warnings[0].dir_name, "empty");
+        assert!(result.warnings[0].message.contains("missing preset.yaml"));
     }
 
     #[test]
     fn scan_loads_multiple_user_presets() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         // Create strategy-a/
         let dir_a = base.join("strategy-a");
@@ -407,7 +397,7 @@ states:
     fn list_user_preset_ids_returns_ids() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         let strategy_dir = base.join("my-strategy");
         fs::create_dir_all(&strategy_dir).unwrap();
@@ -424,7 +414,7 @@ states:
     fn find_user_preset_by_id() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
-        let base = user_preset_base_dir(&nexus_home);
+        let base = nexus_home.join("presets");
 
         let strategy_dir = base.join("my-strategy");
         fs::create_dir_all(&strategy_dir).unwrap();
@@ -442,7 +432,7 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
 
-        let bundle_dir = user_preset_bundle_dir(&nexus_home, "test-strat");
+        let bundle_dir = nexus_home.join("presets").join("test-strat");
         fs::create_dir_all(&bundle_dir).unwrap();
         fs::write(bundle_dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
