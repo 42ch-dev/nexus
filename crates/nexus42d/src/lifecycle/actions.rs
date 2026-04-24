@@ -155,7 +155,9 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
         if let Ok(mut handles) = handles {
             handles.push(handle);
         } else {
-            tracing::warn!("start_handles mutex contested during enter_starting — handle not tracked");
+            tracing::warn!(
+                "start_handles mutex contested during enter_starting — handle not tracked"
+            );
         }
     }
 }

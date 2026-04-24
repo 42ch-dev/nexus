@@ -149,11 +149,7 @@ fn action_context_diagnostic_fields_populated() {
 fn action_context_custom_start_reason() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
     let mocks = nexus42d::lifecycle::MockAllSubsystems::all_succeed();
-    let ctx = ActionContext::new(
-        lifecycle,
-        mocks.as_bootstraps(),
-        10_000,
-    );
+    let ctx = ActionContext::new(lifecycle, mocks.as_bootstraps(), 10_000);
 
     // The default start_reason is "daemon_boot" — verify it.
     assert_eq!(ctx.start_reason(), "daemon_boot");
