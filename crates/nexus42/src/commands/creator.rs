@@ -277,6 +277,13 @@ async fn register_creator(
     source: String,
     handle: Option<String>,
 ) -> Result<()> {
+    // WS-B T4: validate name length (cheap check before regex)
+    if name.len() > MAX_CREATOR_NAME_LENGTH {
+        return Err(CliError::Other(format!(
+            "Creator name exceeds maximum length ({} characters)",
+            MAX_CREATOR_NAME_LENGTH
+        )));
+    }
     // Validate handle if provided
     let validated_handle = match &handle {
         Some(h) => {
@@ -285,13 +292,6 @@ async fn register_creator(
         }
         None => None,
     };
-    // WS-B T4: validate name length
-    if name.len() > MAX_CREATOR_NAME_LENGTH {
-        return Err(CliError::Other(format!(
-            "Creator name exceeds maximum length ({} characters)",
-            MAX_CREATOR_NAME_LENGTH
-        )));
-    }
     // --- Step 1: Obtain auth token ---
     let auth_store = auth::AuthStore::load()?;
 

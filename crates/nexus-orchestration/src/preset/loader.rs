@@ -228,6 +228,11 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
             "template_file must be a relative path: {path:?} (absolute paths are not allowed)"
         ));
     }
+    if path.contains('\\') {
+        return Err(format!(
+            "template_file contains backslash: {path:?} (backslash separators are not allowed)"
+        ));
+    }
     if path.contains("..") {
         return Err(format!(
             "template_file contains '..': {path:?} (directory traversal is not allowed)"
@@ -244,32 +249,11 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Collect all `template_file` paths from a manifest and verify they resolve
-/// within the given `bundle_root` (defense-in-depth sandbox check).
+/// Collect all `template_file` paths from a manifest as `(dot_path, &str)` pairs.
 ///
-/// This is called from [`load_preset`] after YAML parsing. Each `template_file`
-/// is joined to `bundle_root`, canonicalized, and checked that the result
-/// starts with the canonical `bundle_root`. Errors from `canonicalize` (e.g.
-/// nonexistent files, symlinks) are gracefully reported as validation problems.
-fn validate_template_files_in_sandbox(
-    manifest: &PresetManifest,
-    bundle_root: &Path,
-) -> Vec<ValidationProblem> {
-    let mut problems = Vec::new();
-    let canonical_root = match bundle_root.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            // bundle_root itself doesn't exist — not a path traversal issue,
-            // but still fatal. Return a single problem.
-            problems.push(ValidationProblem {
-                path: "bundle_root".to_string(),
-                error: format!("cannot canonicalize bundle root: {}", e),
-            });
-            return problems;
-        }
-    };
-
-    // Collect all template_file paths with their dot-paths
+/// Shared by [`validate_manifest`] and [`validate_template_files_in_sandbox`]
+/// to avoid duplicating the manifest-walking logic.
+fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str)> {
     let mut entries: Vec<(String, &str)> = Vec::new();
 
     // Outer state exit_when template_file
@@ -312,6 +296,36 @@ fn validate_template_files_in_sandbox(
     {
         entries.push(("preset.initial_action.template_file".to_string(), tf));
     }
+
+    entries
+}
+
+/// Verify all `template_file` paths resolve within the given `bundle_root`
+/// (defense-in-depth sandbox check).
+///
+/// This is called from [`load_preset`] after YAML parsing. Each `template_file`
+/// is joined to `bundle_root`, canonicalized, and checked that the result
+/// starts with the canonical `bundle_root`. Errors from `canonicalize` (e.g.
+/// nonexistent files, symlinks) are gracefully reported as validation problems.
+fn validate_template_files_in_sandbox(
+    manifest: &PresetManifest,
+    bundle_root: &Path,
+) -> Vec<ValidationProblem> {
+    let mut problems = Vec::new();
+    let canonical_root = match bundle_root.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            // bundle_root itself doesn't exist — not a path traversal issue,
+            // but still fatal. Return a single problem.
+            problems.push(ValidationProblem {
+                path: "bundle_root".to_string(),
+                error: format!("cannot canonicalize bundle root: {}", e),
+            });
+            return problems;
+        }
+    };
+
+    let entries = collect_template_file_entries(manifest);
 
     // Validate each path resolves within bundle_root
     for (dot_path, template_file) in &entries {
@@ -599,61 +613,10 @@ fn validate_manifest(
     }
 
     // --- WS-B T2: template_file path safety validation ---
-
-    // Validate template_file in each outer state's exit_when
-    for (i, state) in manifest.states.iter().enumerate() {
-        let state_path = format!("states[{}]", i);
-
-        if let Some(ExitWhen::LlmJudge {
-            template_file: Some(ref tf),
-            ..
-        }) = state.exit_when
-        {
-            if let Err(reason) = assert_template_file_safe(tf) {
-                problems.push(ValidationProblem {
-                    path: format!("{}.exit_when.template_file", state_path),
-                    error: reason,
-                });
-            }
-        }
-
-        // Validate template_file in context_update hooks
-        if let Some(ref hook) = state.context_update {
-            if let Err(reason) = assert_template_file_safe(&hook.template_file) {
-                problems.push(ValidationProblem {
-                    path: format!("{}.context_update.template_file", state_path),
-                    error: reason,
-                });
-            }
-        }
-    }
-
-    // Validate template_file in inner graph nodes
-    if let Some(ref inner_graphs) = manifest.inner_graphs {
-        for (name, ig) in inner_graphs {
-            let ig_path = format!("inner_graphs.{}", name);
-            for (k, node) in ig.nodes.iter().enumerate() {
-                if let Some(ref tf) = node.template_file {
-                    if let Err(reason) = assert_template_file_safe(tf) {
-                        problems.push(ValidationProblem {
-                            path: format!("{}.nodes[{}].template_file", ig_path, k),
-                            error: reason,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // Validate template_file in initial_action (seed_expansion)
-    if let Some(InitialAction::SeedExpansion {
-        template_file: Some(ref tf),
-        ..
-    }) = manifest.preset.initial_action
-    {
-        if let Err(reason) = assert_template_file_safe(tf) {
+    for (dot_path, template_file) in collect_template_file_entries(manifest) {
+        if let Err(reason) = assert_template_file_safe(template_file) {
             problems.push(ValidationProblem {
-                path: "preset.initial_action.template_file".to_string(),
+                path: dot_path,
                 error: reason,
             });
         }
@@ -1764,6 +1727,11 @@ states:
     #[test]
     fn template_file_safe_rejects_absolute_path() {
         assert!(assert_template_file_safe("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_backslash() {
+        assert!(assert_template_file_safe("prompts\\windows\\path.md").is_err());
     }
 
     #[test]
