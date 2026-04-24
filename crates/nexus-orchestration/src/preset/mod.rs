@@ -58,12 +58,8 @@ pub fn load_embedded_preset(
     // Read preset.yaml from the embedded tree.
     let preset_file = EMBEDDED_PRESETS
         .get_file(format!("{id}/preset.yaml"))
-        .ok_or_else(|| PresetLoadError::Validation {
-            len: 1,
-            problems: vec![loader::ValidationProblem {
-                path: String::new(),
-                error: format!("embedded preset '{id}' not found or missing preset.yaml"),
-            }],
+        .ok_or_else(|| PresetLoadError::NotFound {
+            preset_id: id.to_string(),
         })?;
 
     let yaml = preset_file
@@ -132,18 +128,10 @@ pub fn resolve_preset(
             tracing::debug!(preset_id = %id, source = "embedded", "resolved preset from embedded");
             Ok(loaded)
         }
-        Err(PresetLoadError::Validation { problems, .. })
-            if problems.iter().any(|p| p.error.contains("not found")) =>
-        {
+        Err(PresetLoadError::NotFound { .. }) => {
             // Embedded preset not found — return a comprehensive error.
-            Err(PresetLoadError::Validation {
-                len: 1,
-                problems: vec![loader::ValidationProblem {
-                    path: String::new(),
-                    error: format!(
-                        "preset '{id}' not found in any source (user, system, embedded)"
-                    ),
-                }],
+            Err(PresetLoadError::NotFound {
+                preset_id: id.to_string(),
             })
         }
         Err(e) => Err(e),
@@ -243,10 +231,9 @@ mod tests {
     fn embedded_preset_unknown_id_fails() {
         let caps = CapabilityRegistry::with_builtins();
         let err = load_embedded_preset("nonexistent-preset", &caps).unwrap_err();
-        let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.error.contains("not found")),
-            "expected 'not found' error: {problems:?}"
+            matches!(&err, PresetLoadError::NotFound { .. }),
+            "expected NotFound error: {err:?}"
         );
     }
 
@@ -368,14 +355,13 @@ mod tests {
 
     #[test]
     fn resolve_preset_user_overrides_embedded() {
-        use crate::user_preset_dir::user_preset_bundle_dir;
         use std::fs;
 
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
         // Create a user preset with the same ID as an embedded preset.
-        let bundle_dir = user_preset_bundle_dir(nexus_home, "novel-writing");
+        let bundle_dir = nexus_home.join("presets").join("novel-writing");
         fs::create_dir_all(&bundle_dir).unwrap();
         let override_yaml = r#"
 preset:
@@ -416,16 +402,15 @@ states:
         let caps = CapabilityRegistry::with_builtins();
 
         let err = resolve_preset("nonexistent-preset", nexus_home, &caps).unwrap_err();
-        let problems = err.problems();
         assert!(
-            problems.iter().any(|p| p.error.contains("not found")),
-            "expected 'not found' error: {problems:?}"
+            matches!(&err, PresetLoadError::NotFound { .. }),
+            "expected NotFound error: {err:?}"
         );
     }
 
     #[test]
     fn resolve_preset_finds_system_preset() {
-        use crate::system_preset_dir::{ensure_maintenance_preset, system_preset_base_dir};
+        use crate::system_preset_dir::ensure_maintenance_preset;
         use std::fs;
 
         let tmp = tempfile::tempdir().unwrap();
@@ -443,14 +428,13 @@ states:
 
     #[test]
     fn user_preset_loads_end_to_end() {
-        use crate::user_preset_dir::user_preset_bundle_dir;
         use std::fs;
 
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
         // Create a full user preset at ~/.nexus42/presets/test-strategy/
-        let bundle_dir = user_preset_bundle_dir(nexus_home, "test-strategy");
+        let bundle_dir = nexus_home.join("presets").join("test-strategy");
         fs::create_dir_all(&bundle_dir).unwrap();
 
         let valid_yaml = r#"

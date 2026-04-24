@@ -84,6 +84,12 @@ pub enum PresetLoadError {
     /// A preset hook used an invalid operation kind (e.g. replace).
     #[error("invalid preset hook operation: {0}")]
     InvalidPresetHookOp(String),
+    /// No embedded preset with the given ID was found.
+    #[error("preset not found: {preset_id}")]
+    NotFound {
+        /// The preset ID that was not found.
+        preset_id: String,
+    },
 }
 
 impl PresetLoadError {
