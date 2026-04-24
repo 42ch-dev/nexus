@@ -108,6 +108,27 @@ impl DaemonHsm {
                     Handled // TODO: retry logic beyond T4
                 }
             }
+            Event::HealthDegraded { kind, reason } => {
+                // Only transition to Degraded if the subsystem has already
+                // reported SubsystemUp. Ignore HealthDegraded for subsystems
+                // still booting (RISK-WSC-01).
+                if self.up_subsystems.contains(kind) {
+                    tracing::warn!(
+                        "health degraded during starting: {} ({:?})",
+                        reason,
+                        kind
+                    );
+                    self.degraded_subsystems.insert(*kind);
+                    self.degraded_reasons.insert(*kind, reason.clone());
+                    Transition(State::degraded())
+                } else {
+                    tracing::debug!(
+                        "ignoring HealthDegraded for {:?} — not yet up",
+                        kind
+                    );
+                    Handled
+                }
+            }
             Event::ShutdownRequested { source } => {
                 tracing::info!("shutdown requested during starting: {}", source);
                 Transition(State::stopping())
