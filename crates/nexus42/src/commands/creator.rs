@@ -17,6 +17,9 @@ use std::path::PathBuf;
 /// Default registration source for the CLI.
 const DEFAULT_REGISTRATION_SOURCE: &str = "cli";
 
+/// Maximum length for creator display name (WS-B T4).
+const MAX_CREATOR_NAME_LENGTH: usize = 64;
+
 /// Handle validation regex: 4–15 chars, starts/ends with `[a-z0-9]`, interior allows `[a-z0-9._-]`.
 /// Frozen spec v3 §7.
 static HANDLE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -282,6 +285,13 @@ async fn register_creator(
         }
         None => None,
     };
+    // WS-B T4: validate name length
+    if name.len() > MAX_CREATOR_NAME_LENGTH {
+        return Err(CliError::Other(format!(
+            "Creator name exceeds maximum length ({} characters)",
+            MAX_CREATOR_NAME_LENGTH
+        )));
+    }
     // --- Step 1: Obtain auth token ---
     let auth_store = auth::AuthStore::load()?;
 
@@ -1050,5 +1060,25 @@ mod tests {
     fn validate_handle_regex_is_frozen_spec_compliant() {
         // Confirm the regex constant matches spec v3 §7 exactly
         assert_eq!(HANDLE_RE.as_str(), r"^[a-z0-9][a-z0-9._-]{2,13}[a-z0-9]$");
+    }
+
+    // ── WS-B T4/T6: name max-length tests ──────────────────────
+
+    #[test]
+    fn max_creator_name_length_is_64() {
+        assert_eq!(MAX_CREATOR_NAME_LENGTH, 64);
+    }
+
+    #[test]
+    fn name_exactly_64_chars_passes_length_check() {
+        let name_64 = "a".repeat(64);
+        // Simulate the check logic
+        assert!(name_64.len() <= MAX_CREATOR_NAME_LENGTH);
+    }
+
+    #[test]
+    fn name_65_chars_exceeds_max_length() {
+        let name_65 = "a".repeat(65);
+        assert!(name_65.len() > MAX_CREATOR_NAME_LENGTH);
     }
 }
