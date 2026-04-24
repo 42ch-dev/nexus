@@ -147,9 +147,9 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
         .collect();
 
     // ── User presets ────────────────────────────────────────────────
-    // Scan user presets directly from the filesystem.
-    let home = nexus_home()?;
-    let user_result = scan_user_presets_local(&home);
+    // Scan user preset IDs directly from the filesystem.
+    let home = crate::config::user_home_dir()?;
+    let user_ids = nexus_home_layout::list_user_preset_ids(&home);
 
     println!("Available presets:\n");
 
@@ -159,7 +159,7 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
         println!("  (none)");
     } else {
         for id in &embedded {
-            let user_override = user_result.presets.iter().any(|e| e == id.as_str());
+            let user_override = user_ids.iter().any(|e| e == id.as_str());
             if user_override {
                 println!("  {}  (overridden by user preset)", id);
             } else {
@@ -180,10 +180,10 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
 
     // User section.
     println!("\n[user]");
-    if user_result.presets.is_empty() {
+    if user_ids.is_empty() {
         println!("  (none)");
     } else {
-        for id in &user_result.presets {
+        for id in &user_ids {
             let embedded_override = embedded.iter().any(|e| e.as_str() == id);
             if embedded_override {
                 println!("  {}  (overrides embedded)", id);
@@ -195,60 +195,13 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
 
     println!(
         "\n{} preset(s) total ({} embedded, {} system, {} user)",
-        embedded.len() + system.len() + user_result.presets.len(),
+        embedded.len() + system.len() + user_ids.len(),
         embedded.len(),
         system.len(),
-        user_result.presets.len()
+        user_ids.len()
     );
 
     Ok(())
-}
-
-/// Minimal local scan of user presets (no dependency on the daemon).
-///
-/// This is a simplified version used by the CLI for listing. It only reads
-/// directory names, not the full YAML content, for fast listing.
-struct LocalUserScan {
-    presets: Vec<String>,
-}
-
-fn scan_user_presets_local(nexus_home: &std::path::Path) -> LocalUserScan {
-    let user_dir = nexus_home_layout::user_preset_base_dir(nexus_home);
-
-    if !user_dir.exists() {
-        return LocalUserScan {
-            presets: Vec::new(),
-        };
-    }
-
-    let entries = match std::fs::read_dir(&user_dir) {
-        Ok(entries) => entries,
-        Err(_) => {
-            return LocalUserScan {
-                presets: Vec::new(),
-            }
-        }
-    };
-
-    let presets = entries
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            // Skip system-prefixed and hidden dirs.
-            if name.starts_with('_') || name.starts_with('.') {
-                return None;
-            }
-            // Must contain a preset.yaml to be valid.
-            if e.path().join("preset.yaml").exists() {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    LocalUserScan { presets }
 }
 
 // ---------------------------------------------------------------------------
@@ -340,10 +293,10 @@ mod tests {
     }
 
     #[test]
-    fn scan_user_presets_local_finds_dirs_with_preset_yaml() {
+    fn list_user_preset_ids_finds_dirs_with_preset_yaml() {
         let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("home");
-        let base = nexus_home_layout::user_preset_base_dir(&home.join(".nexus42"));
+        let home = tmp.path();
+        let base = nexus_home_layout::user_preset_base_dir(home);
         std::fs::create_dir_all(&base).unwrap();
 
         // Create a valid preset dir.
@@ -353,8 +306,8 @@ mod tests {
         // Create a dir without preset.yaml (should be skipped).
         std::fs::create_dir_all(base.join("empty-dir")).unwrap();
 
-        let result = scan_user_presets_local(&home.join(".nexus42"));
-        assert_eq!(result.presets.len(), 1);
-        assert_eq!(result.presets[0], "valid-strat");
+        let result = nexus_home_layout::list_user_preset_ids(home);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "valid-strat");
     }
 }
