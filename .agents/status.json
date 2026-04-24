@@ -1,22 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-04-24T12:00:00Z",
+  "updated_at": "2026-04-24T18:00:00Z",
   "plans": [
-    {
-      "id": "2026-04-24-v1.9-ws-a-third-party-preset",
-      "title": "V1.9 WS-A: Third-Party Preset Loading + CLI",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-a-third-party-preset.md",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "preset-ecosystem"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "Third-party preset loading from ~/.nexus42/presets/<name>/ + nexus42 preset init/list CLI (DF-17)",
-      "metadata": {}
-    },
     {
       "id": "2026-04-24-v1.9-ws-b-template-path-hardening",
       "title": "V1.9 WS-B: Template Path Hardening",
@@ -29,37 +14,7 @@
       "created_at": "2026-04-24",
       "updated_at": "2026-04-24",
       "done_at": null,
-      "notes": "Template_file path traversal protection + name max-length validation (DF-09, merges R-WC-001)",
-      "metadata": {}
-    },
-    {
-      "id": "2026-04-24-v1.9-ws-c-starting-lifecycle-edges",
-      "title": "V1.9 WS-C: Starting Lifecycle Edges",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-c-starting-lifecycle-edges.md",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "daemon-lifecycle"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "HealthDegraded transition, in-flight cancel with ActionContext for Starting state (DF-10)",
-      "metadata": {}
-    },
-    {
-      "id": "2026-04-24-v1.9-ws-d-schema-drift-detection",
-      "title": "V1.9 WS-D: Wire/Local Schema Drift Detection",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-d-schema-drift-detection.md",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "infrastructure"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "Auto-detect drift between schema JSON definitions and generated Rust/TypeScript types (DF-08)",
+      "notes": "Template_file path traversal protection + name max-length validation (DF-09, merges R-WC-001). Deferred to V1.9 M2 after WS-A stable.",
       "metadata": {}
     }
   ],
@@ -69,7 +24,7 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-24T12:00:00Z",
+      "updated_at": "2026-04-24T18:00:00Z",
       "total_open": 12,
       "by_severity": {
         "critical": 0,
