@@ -25,6 +25,14 @@ pub struct ActionContext {
     subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
     /// Grace period for shutdown (ms).
     shutdown_grace_ms: u64,
+    /// Join handles for subsystem start tasks (used to cancel in-flight starts).
+    start_handles: tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Reason for entering Starting state (e.g., "daemon_boot", "restart_after_failure").
+    start_reason: String,
+    /// Timestamp when Starting state was entered.
+    started_at: chrono::DateTime<chrono::Utc>,
+    /// The event that triggered the start (if available).
+    initiating_event: Option<String>,
 }
 
 impl std::fmt::Debug for ActionContext {
@@ -32,6 +40,9 @@ impl std::fmt::Debug for ActionContext {
         f.debug_struct("ActionContext")
             .field("shutdown_grace_ms", &self.shutdown_grace_ms)
             .field("subsystems_count", &self.subsystems.len())
+            .field("start_reason", &self.start_reason)
+            .field("started_at", &self.started_at)
+            .field("initiating_event", &self.initiating_event)
             .finish_non_exhaustive()
     }
 }
@@ -47,6 +58,10 @@ impl ActionContext {
             lifecycle,
             subsystems,
             shutdown_grace_ms,
+            start_handles: tokio::sync::Mutex::new(Vec::new()),
+            start_reason: String::from("daemon_boot"),
+            started_at: chrono::Utc::now(),
+            initiating_event: None,
         }
     }
 
@@ -69,6 +84,21 @@ impl ActionContext {
     pub fn shutdown_grace_ms(&self) -> u64 {
         self.shutdown_grace_ms
     }
+
+    /// Get the start reason.
+    pub fn start_reason(&self) -> &str {
+        &self.start_reason
+    }
+
+    /// Get the timestamp when Starting was entered.
+    pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.started_at
+    }
+
+    /// Get the initiating event (if available).
+    pub fn initiating_event(&self) -> Option<&str> {
+        self.initiating_event.as_deref()
+    }
 }
 
 /// Entry action for `Starting` state.
@@ -85,6 +115,16 @@ impl ActionContext {
 pub fn enter_starting(ctx: Arc<ActionContext>) {
     tracing::info!("entering Starting state — spawning subsystem tasks");
 
+    // Emit diagnostic tracing event.
+    tracing::info!(
+        target: "daemon_lifecycle",
+        event = "starting",
+        start_reason = %ctx.start_reason,
+        started_at = %ctx.started_at.to_rfc3339(),
+        initiating_event = ctx.initiating_event.as_deref().unwrap_or("none"),
+        "daemon lifecycle: starting"
+    );
+
     let lc = ctx.lifecycle();
 
     for subsystem in &ctx.subsystems {
@@ -92,7 +132,7 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
         let subsystem_clone = Arc::clone(subsystem);
         let lc_clone = Arc::clone(&lc);
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let result = subsystem_clone.start().await;
             match result {
                 Ok(()) => {
@@ -109,18 +149,39 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
                 }
             }
         });
+
+        // Store the handle for potential cancellation in exit_starting.
+        let handles = ctx.start_handles.try_lock();
+        if let Ok(mut handles) = handles {
+            handles.push(handle);
+        } else {
+            tracing::warn!(
+                "start_handles mutex contested during enter_starting — handle not tracked"
+            );
+        }
     }
 }
 
 /// Exit action for `Starting` state.
 ///
-/// Per spec §5.6: Cancel any in-flight subsystem start tasks.
-/// (For now, we rely on the tasks completing or the state transition
-/// making their events irrelevant.)
-pub fn exit_starting(_ctx: Arc<ActionContext>) {
-    tracing::info!("exiting Starting state — in-flight starts will complete or be ignored");
-    // In a full implementation, we would cancel the tokio tasks here.
-    // For now, rely on state transition making their events irrelevant.
+/// Cancels any in-flight subsystem start tasks that haven't completed yet.
+/// This prevents the FSM from hanging when `ShutdownRequested` arrives during boot.
+///
+/// Note (RISK-WSC-02): `abort()` cancels the tokio task but does not guarantee
+/// full resource cleanup (file handles, sockets). Full cleanup requires
+/// `SubsystemBootstrap` to implement an `abort()` method (WS7+ work).
+pub fn exit_starting(ctx: Arc<ActionContext>) {
+    tracing::info!("exiting Starting state — cancelling in-flight subsystem starts");
+
+    let mut handles = ctx.start_handles.blocking_lock();
+    let count = handles.len();
+    for handle in handles.drain(..) {
+        handle.abort();
+        tracing::debug!("aborted in-flight subsystem start task");
+    }
+    if count > 0 {
+        tracing::info!("cancelled {} in-flight subsystem start tasks", count);
+    }
 }
 
 /// Entry action for `Running` state.
