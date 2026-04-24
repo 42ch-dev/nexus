@@ -113,19 +113,12 @@ impl DaemonHsm {
                 // reported SubsystemUp. Ignore HealthDegraded for subsystems
                 // still booting (RISK-WSC-01).
                 if self.up_subsystems.contains(kind) {
-                    tracing::warn!(
-                        "health degraded during starting: {} ({:?})",
-                        reason,
-                        kind
-                    );
+                    tracing::warn!("health degraded during starting: {} ({:?})", reason, kind);
                     self.degraded_subsystems.insert(*kind);
                     self.degraded_reasons.insert(*kind, reason.clone());
                     Transition(State::degraded())
                 } else {
-                    tracing::debug!(
-                        "ignoring HealthDegraded for {:?} — not yet up",
-                        kind
-                    );
+                    tracing::debug!("ignoring HealthDegraded for {:?} — not yet up", kind);
                     Handled
                 }
             }
