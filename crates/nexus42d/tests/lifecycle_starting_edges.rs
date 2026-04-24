@@ -14,7 +14,6 @@ use nexus42d::lifecycle::{
 
 /// Helper: drive machine to Running state by dispatching all subsystem ups.
 async fn drive_to_running(m: &StatigLifecycle) {
-    m.dispatch(Event::ProcessStarted);
     for kind in SubsystemKind::mandatory() {
         m.dispatch(Event::SubsystemUp(*kind));
     }
