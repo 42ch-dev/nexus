@@ -43,6 +43,8 @@ pub mod permission;
 #[deny(clippy::unwrap_used)]
 pub mod policy;
 #[deny(clippy::unwrap_used)]
+pub mod preset;
+#[deny(clippy::unwrap_used)]
 pub mod publish;
 #[deny(clippy::unwrap_used)]
 pub mod research;
