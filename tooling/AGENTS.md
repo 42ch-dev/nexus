@@ -32,16 +32,31 @@ pnpm run validate-schemas
 pnpm run codegen
 git diff --exit-code packages/nexus-contracts/src/generated/ crates/nexus-contracts/src/generated/
 
-# 3) Rust formatting (nightly rustfmt required)
+# 3) Wire schema drift detection (WS-D)
+./tooling/check-wire-drift.sh
+
+# 4) Rust formatting (nightly rustfmt required)
 cargo +nightly fmt --all -- --check
 
-# 4) Rust lints (warnings fail CI)
+# 5) Rust lints (warnings fail CI)
 cargo clippy --all -- -D warnings
 
-# 5) TypeScript contract package
+# 6) TypeScript contract package
 pnpm install   # if needed
 pnpm run typecheck
 ```
+
+### Wire Schema Drift Detection
+
+`./tooling/check-wire-drift.sh` runs `cargo test --test schema_drift_detection` on the
+`nexus-contracts` crate. It validates that every registered JSON Schema in `schemas/`
+has a corresponding Rust struct in `crates/nexus-contracts/src/generated/` whose
+serialized field names match the schema's property names.
+
+- Add new schemas to the inventory in `crates/nexus-contracts/tests/schema_drift_detection.rs`
+  (the `build_schema_map()` function).
+- For local-only types that are intentionally a superset of the wire schema, use
+  `CheckMode::Subset`. For wire types that must match exactly, use `CheckMode::Strict`.
 
 CI does not run `cargo test`; run `cargo test --all` locally when you touch Rust behavior.
 
