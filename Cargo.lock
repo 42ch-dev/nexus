@@ -2165,6 +2165,7 @@ dependencies = [
  "jsonrpsee",
  "nexus-contracts",
  "nexus-domain",
+ "nexus-home-layout",
  "nexus-local-db",
  "nix 0.29.0",
  "serde",
