@@ -1,42 +1,25 @@
 {
   "version": 1,
-  "updated_at": "2026-04-24T18:00:00Z",
-  "plans": [
-    {
-      "id": "2026-04-24-v1.9-ws-b-template-path-hardening",
-      "title": "V1.9 WS-B: Template Path Hardening",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-b-template-path-hardening.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "preset-ecosystem"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "Template_file path traversal protection + name max-length validation (DF-09, merges R-WC-001). Deferred to V1.9 M2 after WS-A stable.",
-      "metadata": {}
-    }
-  ],
+  "updated_at": "2026-04-24T20:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-24T18:00:00Z",
-      "total_open": 12,
+      "updated_at": "2026-04-24T20:00:00Z",
+      "total_open": 11,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
         "low": 11,
-        "nit": 1
+        "nit": 0
       },
       "by_target": {
         "V2.0": 3,
-        "M2": 2,
-        "backlog": 6,
+        "backlog": 7,
         "post-M1": 1
       },
       "by_plan": {
@@ -44,7 +27,7 @@
         "2026-04-21-v1.7-ws-abc-residual-closure": 1,
         "v1-tech-debt-cleanup": 1,
         "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
-        "2026-04-23-v1.8-ws-c-name-positional-to-flag": 3,
+        "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
         "2026-04-24-v1.9-m1": 9
       },
       "in_flight": {},
@@ -85,17 +68,6 @@
         }
       ],
       "2026-04-23-v1.8-ws-c-name-positional-to-flag": [
-        {
-          "id": "R-WC-001",
-          "title": "No max-length validation on name",
-          "severity": "warning",
-          "source": "QC2 F-003",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "M2/WS-B",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        },
         {
           "id": "R-WC-002",
           "title": "Positional→flag migration UX",
