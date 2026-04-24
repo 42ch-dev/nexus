@@ -175,17 +175,19 @@ pub fn load_preset_from_str(
 ///
 /// Future: also reads prompt templates and validates template_file paths.
 pub fn load_preset(
-    _bundle_root: &Path,
-    _caps: &CapabilityRegistry,
+    bundle_root: &Path,
+    caps: &CapabilityRegistry,
 ) -> Result<LoadedPreset, PresetLoadError> {
-    // T6 (embedded presets) will implement the real file-system loading.
-    Err(PresetLoadError::Validation {
-        len: 1,
-        problems: vec![ValidationProblem {
-            path: String::new(),
-            error: "load_preset from directory not yet implemented (WS3 T6)".to_string(),
-        }],
-    })
+    let preset_yaml_path = bundle_root.join("preset.yaml");
+    let yaml =
+        std::fs::read_to_string(&preset_yaml_path).map_err(|e| PresetLoadError::Validation {
+            len: 1,
+            problems: vec![ValidationProblem {
+                path: preset_yaml_path.to_string_lossy().to_string(),
+                error: format!("failed to read preset.yaml: {}", e),
+            }],
+        })?;
+    load_preset_from_str(&yaml, caps)
 }
 
 // ---------------------------------------------------------------------------
@@ -1433,6 +1435,88 @@ states:
         if let ContextUpdateOp::LlmSummarize { capability } = &hook.op {
             assert_eq!(capability, "context.summarize");
         }
+    }
+
+    #[test]
+    fn load_preset_from_directory_loads_valid_preset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("my-preset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let yaml_path = bundle_root.join("preset.yaml");
+        std::fs::write(&yaml_path, minimal_valid_yaml()).unwrap();
+
+        let caps = test_capability_registry();
+        let loaded = load_preset(&bundle_root, &caps).unwrap();
+        assert_eq!(loaded.id, "tiny");
+        assert_eq!(loaded.version, 1);
+    }
+
+    #[test]
+    fn load_preset_from_directory_rejects_invalid_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("bad-preset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        std::fs::write(bundle_root.join("preset.yaml"), "not valid yaml: [").unwrap();
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        assert!(
+            matches!(&err, PresetLoadError::YamlParse(_)),
+            "expected YAML parse error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_preset_from_directory_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("missing");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        // No preset.yaml written
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("failed to read preset.yaml")),
+            "expected 'failed to read' error: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn load_preset_from_directory_rejects_validation_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("invalid-preset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let yaml = r#"
+preset:
+  id: invalid
+  version: 1
+  kind: creator
+  description: bad
+  requires_capabilities: []
+  initial: nonexistent
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("initial") && p.error.contains("unknown state")),
+            "expected validation error for unknown initial state: {problems:?}"
+        );
     }
 
     #[test]
