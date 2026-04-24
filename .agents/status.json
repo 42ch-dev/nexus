@@ -9,17 +9,17 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-24T20:00:00Z",
-      "total_open": 11,
+      "total_open": 9,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 11,
+        "low": 9,
         "nit": 0
       },
       "by_target": {
         "V2.0": 3,
-        "backlog": 7,
+        "backlog": 5,
         "post-M1": 1
       },
       "by_plan": {
@@ -28,7 +28,7 @@
         "v1-tech-debt-cleanup": 1,
         "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
         "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
-        "2026-04-24-v1.9-m1": 9
+        "2026-04-24-v1.9-m1": 7
       },
       "in_flight": {},
       "cross_cutting": [
@@ -133,17 +133,6 @@
       ],
       "2026-04-24-v1.9-m1": [
         {
-          "id": "R-M1-W01",
-          "title": "start_handles try_lock may silently drop handles (mooted by F-QC2-04 fix)",
-          "severity": "low",
-          "source": "QC1 F-004",
-          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "M2",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
           "id": "R-M1-W02",
           "title": "ALL_SCHEMA_PATHS manually maintained list separate from build_schema_map()",
           "severity": "low",
@@ -207,17 +196,6 @@
           "decision": "accept",
           "owner": "fullstack-dev",
           "target_date": "V2.0",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W08",
-          "title": "Mutex try_lock contention loses handles (same root as R-M1-W01)",
-          "severity": "low",
-          "source": "QC3 W-3",
-          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "M2",
           "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
         },
         {
