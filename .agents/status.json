@@ -9,17 +9,18 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-24T20:00:00Z",
-      "total_open": 9,
+      "total_open": 14,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
         "low": 9,
-        "nit": 0
+        "warning": 4,
+        "nit": 1
       },
       "by_target": {
         "V2.0": 3,
-        "backlog": 5,
+        "backlog": 10,
         "post-M1": 1
       },
       "by_plan": {
