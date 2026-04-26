@@ -1,91 +1,35 @@
 {
   "version": 1,
-  "updated_at": "2026-04-24T10:00:00Z",
-  "plans": [
-    {
-      "id": "2026-04-24-v1.9-ws-a-third-party-preset",
-      "title": "V1.9 WS-A: Third-Party Preset Loading + CLI",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-a-third-party-preset.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "preset-ecosystem"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "Third-party preset loading from ~/.nexus42/presets/<name>/ + nexus42 preset init/list CLI (DF-17)",
-      "metadata": {}
-    },
-    {
-      "id": "2026-04-24-v1.9-ws-b-template-path-hardening",
-      "title": "V1.9 WS-B: Template Path Hardening",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-b-template-path-hardening.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "preset-ecosystem"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "Template_file path traversal protection + name max-length validation (DF-09, merges R-WC-001)",
-      "metadata": {}
-    },
-    {
-      "id": "2026-04-24-v1.9-ws-c-starting-lifecycle-edges",
-      "title": "V1.9 WS-C: Starting Lifecycle Edges",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-c-starting-lifecycle-edges.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "daemon-lifecycle"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "HealthDegraded transition, in-flight cancel with ActionContext for Starting state (DF-10)",
-      "metadata": {}
-    },
-    {
-      "id": "2026-04-24-v1.9-ws-d-schema-drift-detection",
-      "title": "V1.9 WS-D: Wire/Local Schema Drift Detection",
-      "file": ".agents/plans/2026-04-24-v1.9-ws-d-schema-drift-detection.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.9", "infrastructure"],
-      "created_at": "2026-04-24",
-      "updated_at": "2026-04-24",
-      "done_at": null,
-      "notes": "Auto-detect drift between schema JSON definitions and generated Rust/TypeScript types (DF-08)",
-      "metadata": {}
-    }
-  ],
+  "updated_at": "2026-04-24T20:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-22T02:30:00Z",
-      "total_open": 3,
+      "updated_at": "2026-04-24T20:00:00Z",
+      "total_open": 14,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 3,
-        "nit": 0
+        "low": 9,
+        "warning": 4,
+        "nit": 1
       },
       "by_target": {
-        "V2.0": 1,
-        "backlog": 2
+        "V2.0": 3,
+        "backlog": 10,
+        "post-M1": 1
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
         "2026-04-21-v1.7-ws-abc-residual-closure": 1,
-        "v1-tech-debt-cleanup": 1
+        "v1-tech-debt-cleanup": 1,
+        "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
+        "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
+        "2026-04-24-v1.9-m1": 7
       },
       "in_flight": {},
       "cross_cutting": [
@@ -125,17 +69,6 @@
         }
       ],
       "2026-04-23-v1.8-ws-c-name-positional-to-flag": [
-        {
-          "id": "R-WC-001",
-          "title": "No max-length validation on name",
-          "severity": "warning",
-          "source": "QC2 F-003",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "M2/WS-B",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        },
         {
           "id": "R-WC-002",
           "title": "Positional→flag migration UX",
@@ -197,6 +130,85 @@
           "owner": "fullstack-dev",
           "target_date": "V2.0",
           "tracking_link": null
+        }
+      ],
+      "2026-04-24-v1.9-m1": [
+        {
+          "id": "R-M1-W02",
+          "title": "ALL_SCHEMA_PATHS manually maintained list separate from build_schema_map()",
+          "severity": "low",
+          "source": "QC1 F-007",
+          "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-M1-W03",
+          "title": "preset list requires daemon running for embedded presets",
+          "severity": "low",
+          "source": "QC1 F-008",
+          "scope": "crates/nexus42/src/commands/preset.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-M1-W04",
+          "title": "No YAML depth/size limits on user-supplied preset YAML",
+          "severity": "low",
+          "source": "QC2 F-QC2-02",
+          "scope": "crates/nexus-orchestration/src/preset/loader.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-M1-W05",
+          "title": "init rejects _ prefix but scan silently skips — inconsistent UX",
+          "severity": "low",
+          "source": "QC2 F-QC2-03",
+          "scope": "crates/nexus42/src/commands/preset.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-M1-W06",
+          "title": "Preset lookup scans all user presets O(n) instead of O(1)",
+          "severity": "low",
+          "source": "QC3 W-1",
+          "scope": "crates/nexus-orchestration/src/preset/mod.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-M1-W07",
+          "title": "JoinHandle abort() risk — no graceful cleanup (documented RISK-WSC-02)",
+          "severity": "low",
+          "source": "QC3 W-2",
+          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "V2.0",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+        },
+        {
+          "id": "R-M1-W09",
+          "title": "Drift detection test may be slow at scale",
+          "severity": "nit",
+          "source": "QC3 W-4",
+          "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
         }
       ]
     },

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "R-M1-W01",
+    "title": "start_handles try_lock may silently drop handles (mooted by F-QC2-04 fix)",
+    "severity": "low",
+    "source": "QC1 F-004",
+    "scope": "crates/nexus42d/src/lifecycle/actions.rs",
+    "decision": "superseded",
+    "owner": "fullstack-dev",
+    "target_date": "M2",
+    "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md",
+    "closure_note": "Superseded by F-QC2-04 fix (commit 2466a72): tokio::sync::Mutex changed to std::sync::Mutex + lock().expect(). try_lock() no longer exists in codebase. Verified by grep.",
+    "closed_at": "2026-04-24",
+    "closed_by": "@project-manager",
+    "superseded_by": "F-QC2-04"
+  },
+  {
+    "id": "R-M1-W08",
+    "title": "Mutex try_lock contention loses handles (same root as R-M1-W01)",
+    "severity": "low",
+    "source": "QC3 W-3",
+    "scope": "crates/nexus42d/src/lifecycle/actions.rs",
+    "decision": "superseded",
+    "owner": "fullstack-dev",
+    "target_date": "M2",
+    "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md",
+    "closure_note": "Superseded by same fix as R-M1-W01 (F-QC2-04, commit 2466a72). std::sync::Mutex with lock().expect() eliminates try_lock contention issue.",
+    "closed_at": "2026-04-24",
+    "closed_by": "@project-manager",
+    "superseded_by": "R-M1-W01"
+  }
+]

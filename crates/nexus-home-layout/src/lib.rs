@@ -38,6 +38,55 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
         .join("global_state.db")
 }
 
+/// `$HOME/.nexus42/presets/` — base directory for user-installed presets.
+///
+/// Each subdirectory under this path is expected to contain a `preset.yaml`.
+/// See `crates/nexus-orchestration/src/user_preset_dir.rs` for scanning logic.
+/// Directories starting with `_` or `.` are reserved and skipped by the scanner.
+pub fn user_preset_base_dir(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("presets")
+}
+
+/// `$HOME/.nexus42/presets/<name>/` — path to a specific user preset bundle.
+pub fn user_preset_bundle_dir(home: &Path, name: &str) -> PathBuf {
+    user_preset_base_dir(home).join(name)
+}
+
+/// List user preset IDs (directory names containing `preset.yaml`) under the presets directory.
+///
+/// Returns an empty vector if the presets directory doesn't exist or can't be read.
+/// Directories starting with `_` or `.` are skipped.
+pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
+    let user_dir = user_preset_base_dir(nexus_home);
+
+    if !user_dir.exists() {
+        return Vec::new();
+    }
+
+    let entries = match std::fs::read_dir(&user_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+
+    entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            // Skip system-prefixed and hidden dirs.
+            if name.starts_with('_') || name.starts_with('.') {
+                return None;
+            }
+            // Must contain a preset.yaml to be valid.
+            if e.path().join("preset.yaml").exists() {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (ADR-014, ADR-016 D1).
 ///
 /// # Defense-in-depth
@@ -101,6 +150,24 @@ mod tests {
         assert_eq!(
             workspace_state_db_path(&home, "c", "w"),
             PathBuf::from("/h/.nexus42/creators/c/workspaces/w/state.db")
+        );
+    }
+
+    #[test]
+    fn user_preset_base_dir_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            user_preset_base_dir(&home),
+            PathBuf::from("/fake/home/.nexus42/presets")
+        );
+    }
+
+    #[test]
+    fn user_preset_bundle_dir_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            user_preset_bundle_dir(&home, "my-strategy"),
+            PathBuf::from("/fake/home/.nexus42/presets/my-strategy")
         );
     }
 

@@ -1,0 +1,24 @@
+{
+  "id": "2026-04-24-v1.9-ws-b-template-path-hardening",
+  "title": "V1.9 WS-B: Template Path Hardening",
+  "file": ".agents/plans/2026-04-24-v1.9-ws-b-template-path-hardening.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": ["@fullstack-dev"],
+  "progress": 100,
+  "tags": ["v1.9", "preset-ecosystem", "hardening"],
+  "created_at": "2026-04-24",
+  "updated_at": "2026-04-24",
+  "done_at": "2026-04-24",
+  "notes": "All acceptance criteria verified. QC triple review passed (wave1 Request Changes → fix round → wave2 Approve). QA verification PASS. R-WC-001 closed.",
+  "metadata": {
+    "residuals_closed": ["R-WC-001"],
+    "qc_reports": [
+      ".agents/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc1.md",
+      ".agents/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc2.md",
+      ".agents/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc3.md",
+      ".agents/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc1-wave2.md"
+    ],
+    "qa_report": ".agents/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qa.md"
+  }
+}

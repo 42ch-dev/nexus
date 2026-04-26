@@ -1,0 +1,962 @@
+//! Schema Drift Detection (WS-D)
+//!
+//! Detects drift between JSON Schema wire contracts in `schemas/` and their
+//! corresponding Rust struct definitions in `crates/nexus-contracts/src/`.
+//!
+//! ## How it works
+//!
+//! For each registered schema → Rust struct pair:
+//! 1. Parse the JSON Schema to extract property names and types
+//! 2. Build a JSON test payload with dummy values derived from the schema
+//! 3. Deserialize the payload into the Rust struct (verifies structural compatibility)
+//! 4. Serialize back to JSON and compare field names against schema properties
+//!
+//! ## Adding a new schema
+//!
+//! 1. Create the `.schema.json` file under `schemas/`
+//! 2. Run `pnpm run codegen` to generate Rust and TypeScript types
+//! 3. Add a new entry to `build_schema_map()` in this file
+//! 4. For local-only types (subset of wire), use `CheckMode::Subset`; for wire types, use `Strict`
+//!
+//! ## Modes
+//!
+//! - `Strict`: All schema fields must exist in Rust, and all Rust fields must exist in schema
+//! - `Subset`: All required schema fields must exist in Rust; Rust may have extra internal fields
+
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use nexus_contracts::*;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CheckMode {
+    /// All schema fields must exist in Rust (bidirectional exact match)
+    Strict,
+    /// Required schema fields must exist in Rust; Rust may have extra fields
+    #[allow(dead_code)]
+    Subset,
+}
+
+/// A function pointer that deserializes a JSON Value into a concrete Rust type,
+/// serializes it back, and returns `(type_name, serialized_value)`.
+type CheckFn = Box<dyn Fn(Value) -> Result<(String, Value), String>>;
+
+struct SchemaEntry {
+    /// Path to the JSON Schema file, relative to repo root
+    schema_path: &'static str,
+    /// Validation mode (Strict or Subset)
+    mode: CheckMode,
+    /// One checker per Rust struct type generated from this schema
+    checkers: Vec<CheckFn>,
+}
+
+// ---------------------------------------------------------------------------
+// Macros
+// ---------------------------------------------------------------------------
+
+/// Build a checker for a single Rust struct type.
+macro_rules! make_checker {
+    ($t:ty) => {{
+        let type_name: &'static str = stringify!($t);
+        Box::new(move |json_val: Value| -> Result<(String, Value), String> {
+            let v: $t =
+                serde_json::from_value(json_val).map_err(|e| format!("{type_name}: {e}"))?;
+            let serialized =
+                serde_json::to_value(&v).map_err(|e| format!("{type_name} serialize: {e}"))?;
+            Ok((type_name.to_string(), serialized))
+        }) as CheckFn
+    }};
+}
+
+/// Build a SchemaEntry. Accepts either a single type or a list of types in brackets.
+macro_rules! entry {
+    ($path:expr, $mode:ident, [$($t:ty),+ $(,)?]) => {
+        SchemaEntry {
+            schema_path: $path,
+            mode: CheckMode::$mode,
+            checkers: vec![$(make_checker!($t)),+],
+        }
+    };
+    ($path:expr, $mode:ident, $t:ty) => {
+        SchemaEntry {
+            schema_path: $path,
+            mode: CheckMode::$mode,
+            checkers: vec![make_checker!($t)],
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Schema Inventory Registry (T1)
+// ---------------------------------------------------------------------------
+
+/// Build the complete inventory of schema → Rust struct mappings.
+///
+/// This is the single source of truth for what gets checked by drift detection.
+/// Add new entries here when you add new schemas or structs.
+fn build_schema_map() -> Vec<SchemaEntry> {
+    vec![
+        // ── domain/ ──────────────────────────────────────────────────────
+        entry!("schemas/domain/world.schema.json", Strict, World),
+        entry!("schemas/domain/memory.schema.json", Strict, Memory),
+        entry!("schemas/domain/creator.schema.json", Strict, Creator),
+        entry!("schemas/domain/delta.schema.json", Strict, Delta),
+        entry!("schemas/domain/fork-branch.schema.json", Strict, ForkBranch),
+        entry!("schemas/domain/key-block.schema.json", Strict, KeyBlock),
+        entry!("schemas/domain/pairing.schema.json", Strict, Pairing),
+        entry!(
+            "schemas/domain/story-manifest.schema.json",
+            Strict,
+            StoryManifest
+        ),
+        entry!(
+            "schemas/domain/sync-command.schema.json",
+            Strict,
+            SyncCommand
+        ),
+        entry!(
+            "schemas/domain/timeline-event.schema.json",
+            Strict,
+            TimelineEvent
+        ),
+        entry!("schemas/domain/user.schema.json", Strict, User),
+        entry!(
+            "schemas/domain/world-membership.schema.json",
+            Strict,
+            WorldMembership
+        ),
+        // Bundle: generated ONLY from domain/bundle.schema.json (cli-sync variant is
+        // allOf-only, skipped by codegen per SKIP_STRUCT_GENERATION_REL_PATHS)
+        entry!("schemas/domain/bundle.schema.json", Strict, Bundle),
+        // ── common/ ──────────────────────────────────────────────────────
+        entry!("schemas/common/version-ref.schema.json", Strict, VersionRef),
+        // SourceAnchor lives in common_types.rs, generated from source-anchor.schema.json
+        entry!(
+            "schemas/common/source-anchor.schema.json",
+            Strict,
+            SourceAnchor
+        ),
+        // ── cli-sync/ ────────────────────────────────────────────────────
+        entry!(
+            "schemas/cli-sync/conflict-response.schema.json",
+            Strict,
+            ConflictResponse
+        ),
+        entry!(
+            "schemas/cli-sync/sync-pull-request.schema.json",
+            Strict,
+            SyncPullRequest
+        ),
+        entry!(
+            "schemas/cli-sync/sync-pull-response.schema.json",
+            Strict,
+            SyncPullResponse
+        ),
+        // ── platform/ ────────────────────────────────────────────────────
+        entry!(
+            "schemas/platform/context-assembly-v1.schema.json",
+            Strict,
+            [ContextAssembleRequestV1, ContextAssembleResponseV1,]
+        ),
+        entry!(
+            "schemas/platform/creator-runtime-policy-response.schema.json",
+            Strict,
+            CreatorRuntimePolicyResponse
+        ),
+        entry!(
+            "schemas/platform/explore-ai-answer-request.schema.json",
+            Strict,
+            ExploreAiAnswerRequest
+        ),
+        entry!(
+            "schemas/platform/explore-ai-answer-response.schema.json",
+            Strict,
+            ExploreAiAnswerResponse
+        ),
+        entry!(
+            "schemas/platform/explore-ai-summary-request.schema.json",
+            Strict,
+            ExploreAiSummaryRequest
+        ),
+        entry!(
+            "schemas/platform/explore-ai-summary-response.schema.json",
+            Strict,
+            ExploreAiSummaryResponse
+        ),
+        entry!(
+            "schemas/platform/explore-browse-request.schema.json",
+            Strict,
+            ExploreBrowseRequest
+        ),
+        entry!(
+            "schemas/platform/explore-creator-card.schema.json",
+            Strict,
+            ExploreCreatorCard
+        ),
+        entry!(
+            "schemas/platform/explore-feed-response.schema.json",
+            Strict,
+            ExploreFeedResponse
+        ),
+        entry!(
+            "schemas/platform/explore-hit.schema.json",
+            Strict,
+            ExploreHit
+        ),
+        entry!(
+            "schemas/platform/explore-search-request.schema.json",
+            Strict,
+            ExploreSearchRequest
+        ),
+        entry!(
+            "schemas/platform/me-entitlements-response.schema.json",
+            Strict,
+            MeEntitlementsResponse
+        ),
+        entry!(
+            "schemas/platform/memory-web-list-request.schema.json",
+            Strict,
+            MemoryWebListRequest
+        ),
+        entry!(
+            "schemas/platform/memory-web-list-response.schema.json",
+            Strict,
+            MemoryWebListResponse
+        ),
+        entry!(
+            "schemas/platform/notifications-inbox-item.schema.json",
+            Strict,
+            NotificationsInboxItem
+        ),
+        entry!(
+            "schemas/platform/notifications-list-request.schema.json",
+            Strict,
+            NotificationsListRequest
+        ),
+        entry!(
+            "schemas/platform/notifications-list-response.schema.json",
+            Strict,
+            NotificationsListResponse
+        ),
+        entry!(
+            "schemas/platform/notifications-mark-read-request.schema.json",
+            Strict,
+            NotificationsMarkReadRequest
+        ),
+        entry!(
+            "schemas/platform/notifications-mark-read-response.schema.json",
+            Strict,
+            NotificationsMarkReadResponse
+        ),
+        entry!(
+            "schemas/platform/official-creator-quota-response.schema.json",
+            Strict,
+            OfficialCreatorQuotaResponse
+        ),
+        entry!(
+            "schemas/platform/publish-chapter-request.schema.json",
+            Strict,
+            PublishChapterRequest
+        ),
+        entry!(
+            "schemas/platform/publish-history-entry.schema.json",
+            Strict,
+            PublishHistoryEntry
+        ),
+        entry!(
+            "schemas/platform/publish-history-request.schema.json",
+            Strict,
+            PublishHistoryRequest
+        ),
+        entry!(
+            "schemas/platform/publish-history-response.schema.json",
+            Strict,
+            PublishHistoryResponse
+        ),
+        entry!(
+            "schemas/platform/publish-story-request.schema.json",
+            Strict,
+            PublishStoryRequest
+        ),
+        entry!(
+            "schemas/platform/publish-story-response.schema.json",
+            Strict,
+            PublishStoryResponse
+        ),
+        entry!(
+            "schemas/platform/social-graph-feed-request.schema.json",
+            Strict,
+            SocialGraphFeedRequest
+        ),
+        entry!(
+            "schemas/platform/social-graph-feed-response.schema.json",
+            Strict,
+            SocialGraphFeedResponse
+        ),
+        entry!(
+            "schemas/platform/social-graph-relationship-request.schema.json",
+            Strict,
+            SocialGraphRelationshipRequest
+        ),
+        entry!(
+            "schemas/platform/social-graph-relationship-response.schema.json",
+            Strict,
+            SocialGraphRelationshipResponse
+        ),
+        entry!(
+            "schemas/platform/world-fork-request.schema.json",
+            Strict,
+            WorldForkRequest
+        ),
+        entry!(
+            "schemas/platform/world-fork-response.schema.json",
+            Strict,
+            WorldForkResponse
+        ),
+        entry!(
+            "schemas/platform/world-snapshot-request.schema.json",
+            Strict,
+            WorldSnapshotRequest
+        ),
+        entry!(
+            "schemas/platform/world-snapshot-response.schema.json",
+            Strict,
+            WorldSnapshotResponse
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Schema File Loading and Caching (T2)
+// ---------------------------------------------------------------------------
+
+/// List of all known schema file paths for the cache.
+const ALL_SCHEMA_PATHS: &[&str] = &[
+    "schemas/common/common.schema.json",
+    "schemas/common/source-anchor.schema.json",
+    "schemas/common/version-ref.schema.json",
+    "schemas/domain/bundle.schema.json",
+    "schemas/domain/creator.schema.json",
+    "schemas/domain/delta.schema.json",
+    "schemas/domain/fork-branch.schema.json",
+    "schemas/domain/key-block.schema.json",
+    "schemas/domain/memory.schema.json",
+    "schemas/domain/pairing.schema.json",
+    "schemas/domain/story-manifest.schema.json",
+    "schemas/domain/sync-command.schema.json",
+    "schemas/domain/timeline-event.schema.json",
+    "schemas/domain/user.schema.json",
+    "schemas/domain/world.schema.json",
+    "schemas/domain/world-membership.schema.json",
+    "schemas/cli-sync/bundle.schema.json",
+    "schemas/cli-sync/conflict-response.schema.json",
+    "schemas/cli-sync/sync-pull-request.schema.json",
+    "schemas/cli-sync/sync-pull-response.schema.json",
+    "schemas/platform/context-assembly-v1.schema.json",
+    "schemas/platform/creator-runtime-policy-response.schema.json",
+    "schemas/platform/explore-ai-answer-request.schema.json",
+    "schemas/platform/explore-ai-answer-response.schema.json",
+    "schemas/platform/explore-ai-summary-request.schema.json",
+    "schemas/platform/explore-ai-summary-response.schema.json",
+    "schemas/platform/explore-browse-request.schema.json",
+    "schemas/platform/explore-creator-card.schema.json",
+    "schemas/platform/explore-feed-response.schema.json",
+    "schemas/platform/explore-hit.schema.json",
+    "schemas/platform/explore-search-request.schema.json",
+    "schemas/platform/me-entitlements-response.schema.json",
+    "schemas/platform/memory-web-list-request.schema.json",
+    "schemas/platform/memory-web-list-response.schema.json",
+    "schemas/platform/notifications-inbox-item.schema.json",
+    "schemas/platform/notifications-list-request.schema.json",
+    "schemas/platform/notifications-list-response.schema.json",
+    "schemas/platform/notifications-mark-read-request.schema.json",
+    "schemas/platform/notifications-mark-read-response.schema.json",
+    "schemas/platform/official-creator-quota-response.schema.json",
+    "schemas/platform/publish-chapter-request.schema.json",
+    "schemas/platform/publish-history-entry.schema.json",
+    "schemas/platform/publish-history-request.schema.json",
+    "schemas/platform/publish-history-response.schema.json",
+    "schemas/platform/publish-story-request.schema.json",
+    "schemas/platform/publish-story-response.schema.json",
+    "schemas/platform/social-graph-feed-request.schema.json",
+    "schemas/platform/social-graph-feed-response.schema.json",
+    "schemas/platform/social-graph-relationship-request.schema.json",
+    "schemas/platform/social-graph-relationship-response.schema.json",
+    "schemas/platform/world-fork-request.schema.json",
+    "schemas/platform/world-fork-response.schema.json",
+    "schemas/platform/world-snapshot-request.schema.json",
+    "schemas/platform/world-snapshot-response.schema.json",
+];
+
+/// Workspace root: traverse up from CARGO_MANIFEST_DIR (crates/nexus-contracts)
+/// to the workspace root (2 levels up).
+fn workspace_root() -> PathBuf {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    // CARGO_MANIFEST_DIR = .../crates/nexus-contracts
+    // workspace root = .../ (parent of crates/)
+    dir.parent().unwrap().parent().unwrap().to_path_buf()
+}
+
+/// Load a JSON file from a path relative to the workspace root.
+fn load_json(relative_path: &str) -> Result<Value, String> {
+    let full_path = workspace_root().join(relative_path);
+    let content = std::fs::read_to_string(&full_path)
+        .map_err(|e| format!("Cannot read {relative_path}: {e}"))?;
+    serde_json::from_str(&content).map_err(|e| format!("Cannot parse {relative_path}: {e}"))
+}
+
+/// Build a cache of all schema files keyed by their relative path.
+/// Also keyed by the `https://nexus42.invalid/...` URL for $ref resolution.
+fn build_schema_cache() -> HashMap<String, Value> {
+    let mut cache = HashMap::new();
+    for path in ALL_SCHEMA_PATHS {
+        if let Ok(val) = load_json(path) {
+            // Key by relative path
+            cache.insert(path.to_string(), val.clone());
+            // Also key by the `$id` URL if present
+            if let Some(id) = val.get("$id").and_then(|v| v.as_str()) {
+                // Strip any #fragment from $id before using as key
+                let clean_id = id.split('#').next().unwrap_or(id);
+                cache.insert(clean_id.to_string(), val);
+            }
+        }
+    }
+    cache
+}
+
+// ---------------------------------------------------------------------------
+// Schema Property Extraction (T2)
+// ---------------------------------------------------------------------------
+
+/// Extract property names and their schema definitions from a JSON Schema object.
+fn extract_properties(schema: &Value) -> Vec<(String, Value)> {
+    let mut props = Vec::new();
+    if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+        for (name, prop_def) in properties {
+            props.push((name.clone(), prop_def.clone()));
+        }
+    }
+    props
+}
+
+/// Extract the set of required field names from a JSON Schema object.
+fn extract_required(schema: &Value) -> BTreeSet<String> {
+    let mut required = BTreeSet::new();
+    if let Some(req) = schema.get("required").and_then(|r| r.as_array()) {
+        for val in req {
+            if let Some(name) = val.as_str() {
+                required.insert(name.to_string());
+            }
+        }
+    }
+    required
+}
+
+/// Describe a property's type for error messages.
+fn describe_type(properties: &[(String, Value)], name: &str) -> String {
+    properties
+        .iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, def)| describe_schema_type(def))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Get a human-readable type description from a schema property definition.
+fn describe_schema_type(def: &Value) -> String {
+    if def.get("$ref").and_then(|r| r.as_str()).is_some() {
+        if let Some(ref_path) = def.get("$ref").and_then(|r| r.as_str()) {
+            // Extract the definition name from the ref path
+            if let Some(fragment) = ref_path.split('#').nth(1) {
+                if let Some(def_name) = fragment.rsplit('/').next() {
+                    return format!("ref({def_name})");
+                }
+            }
+            return format!("ref({ref_path})");
+        }
+    }
+    if let Some(type_val) = def.get("type") {
+        match type_val {
+            Value::String(s) => return s.clone(),
+            Value::Array(arr) => {
+                let types: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                return types.join(" | ");
+            }
+            _ => {}
+        }
+    }
+    if def.get("enum").is_some() {
+        return "enum".to_string();
+    }
+    if def.get("properties").is_some() || def.get("additionalProperties").is_some() {
+        return "object".to_string();
+    }
+    "unknown".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Dummy Value Generation (T2)
+// ---------------------------------------------------------------------------
+
+/// Build a JSON test payload from schema properties using dummy values.
+/// The returned JSON object has all schema properties filled with type-appropriate
+/// dummy values, so it can be deserialized into the corresponding Rust struct.
+fn build_test_json(
+    properties: &[(String, Value)],
+    schema_cache: &HashMap<String, Value>,
+    current_schema_path: &str,
+) -> Value {
+    let mut map = serde_json::Map::new();
+    let current_dir = Path::new(current_schema_path)
+        .parent()
+        .and_then(|p| p.to_str())
+        .unwrap_or("");
+    for (name, prop_def) in properties {
+        let dummy = make_dummy_value(prop_def, schema_cache, current_dir);
+        map.insert(name.clone(), dummy);
+    }
+    Value::Object(map)
+}
+
+/// Generate a dummy JSON value for a schema property definition.
+fn make_dummy_value(
+    prop_def: &Value,
+    schema_cache: &HashMap<String, Value>,
+    current_dir: &str,
+) -> Value {
+    // Handle $ref (must be first to resolve enum references)
+    if let Some(ref_path) = prop_def.get("$ref").and_then(|r| r.as_str()) {
+        return make_dummy_from_ref(ref_path, schema_cache, current_dir);
+    }
+
+    // Handle const value (e.g., "const": 1)
+    if let Some(const_val) = prop_def.get("const") {
+        return const_val.clone();
+    }
+
+    // Handle inline enum (must precede type-based dispatch so we get the correct value)
+    if let Some(enum_vals) = prop_def.get("enum").and_then(|e| e.as_array()) {
+        if let Some(first) = enum_vals.first() {
+            return first.clone();
+        }
+    }
+
+    // Handle type
+    let type_val = prop_def.get("type");
+    let type_str = match type_val {
+        Some(Value::String(s)) => Some(s.as_str()),
+        Some(Value::Array(arr)) => {
+            // Pick the first non-null type from a union type like ["integer", "null"]
+            arr.iter().filter_map(|v| v.as_str()).find(|s| *s != "null")
+        }
+        _ => None,
+    };
+
+    match type_str {
+        Some("string") => Value::String("dummy".to_string()),
+        Some("integer") => Value::Number(serde_json::Number::from(0)),
+        Some("number") => Value::Number(serde_json::Number::from_f64(0.0).unwrap()),
+        Some("boolean") => Value::Bool(false),
+        Some("array") => {
+            // Check for items schema
+            if let Some(items) = prop_def.get("items") {
+                // Generate a single dummy item
+                let item_val = make_dummy_value(items, schema_cache, current_dir);
+                Value::Array(vec![item_val])
+            } else {
+                Value::Array(vec![])
+            }
+        }
+        Some("object") => {
+            // Build a dummy from sub-properties if available
+            if let Some(sub_props) = prop_def.get("properties").and_then(|p| p.as_object()) {
+                let mut map = serde_json::Map::new();
+                for (sub_name, sub_def) in sub_props {
+                    map.insert(
+                        sub_name.clone(),
+                        make_dummy_value(sub_def, schema_cache, current_dir),
+                    );
+                }
+                Value::Object(map)
+            } else {
+                Value::Object(serde_json::Map::new())
+            }
+        }
+        _ => {
+            // Try allOf, oneOf, anyOf
+            for key in &["allOf", "oneOf", "anyOf"] {
+                if let Some(subs) = prop_def.get(*key).and_then(|a| a.as_array()) {
+                    if let Some(first) = subs.first() {
+                        return make_dummy_value(first, schema_cache, current_dir);
+                    }
+                }
+            }
+            // Last resort
+            Value::String("dummy".to_string())
+        }
+    }
+}
+
+/// Generate a dummy value by resolving a `$ref` reference.
+fn make_dummy_from_ref(
+    ref_path: &str,
+    schema_cache: &HashMap<String, Value>,
+    current_dir: &str,
+) -> Value {
+    // Split on # to separate file part from fragment
+    let (file_part, fragment) = if let Some(pos) = ref_path.find('#') {
+        let file = &ref_path[..pos];
+        let frag = &ref_path[pos + 1..];
+        if file.is_empty() {
+            ("", Some(frag))
+        } else {
+            (file, Some(frag))
+        }
+    } else {
+        (ref_path, None)
+    };
+
+    // Resolve the file path
+    let resolved_path = resolve_ref_file(file_part, current_dir);
+
+    // Use the referenced file's directory for resolving nested relative refs
+    let ref_dir = Path::new(&resolved_path)
+        .parent()
+        .and_then(|p| p.to_str())
+        .unwrap_or(current_dir);
+
+    // Look up in cache; try both the resolved path and the raw ref_path
+    let schema = schema_cache
+        .get(&resolved_path)
+        .or_else(|| schema_cache.get(ref_path));
+
+    if let Some(s) = schema {
+        if let Some(frag) = fragment {
+            // Navigate the fragment path like "/definitions/SchemaVersion"
+            // Skip leading empty element from "/" prefix
+            let parts: Vec<&str> = frag.split('/').filter(|p| !p.is_empty()).collect();
+            let mut current = s;
+            for part in &parts {
+                if let Some(next) = current.get(*part) {
+                    current = next;
+                } else {
+                    return Value::String("dummy".to_string());
+                }
+            }
+            // Now 'current' is the referenced definition
+            make_dummy_value(current, schema_cache, ref_dir)
+        } else {
+            // No fragment: the entire schema is the referenced value
+            make_dummy_value(s, schema_cache, ref_dir)
+        }
+    } else {
+        // If we can't resolve, try using the raw property definition as a fallback
+        // This happens with relative refs to files that might not be in our cache
+        Value::String("dummy".to_string())
+    }
+}
+
+/// Resolve a `$ref` file path to an absolute schema path relative to the repo root.
+fn resolve_ref_file(file_part: &str, current_dir: &str) -> String {
+    if file_part.is_empty() || file_part.starts_with("https://") {
+        // URL like https://nexus42.invalid/schemas/common/...
+        if let Some(path) = file_part
+            .strip_prefix("https://nexus42.invalid/")
+            .or_else(|| file_part.strip_prefix("https://nexus42.invalid"))
+        {
+            path.to_string()
+        } else {
+            // Could not parse URL, use as-is
+            file_part.to_string()
+        }
+    } else if file_part.starts_with('/') {
+        // Absolute path in repo
+        file_part.trim_start_matches('/').to_string()
+    } else {
+        // Relative path: resolve against current schema directory
+        let current = Path::new(current_dir);
+        let resolved = current.join(file_part);
+        resolved.to_str().unwrap_or(file_part).to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Drift Detection Test (T3, T4, T5)
+// ---------------------------------------------------------------------------
+
+/// Check whether a Rust struct's serialized fields match the schema's properties.
+fn check_fields_match(
+    schema_path: &str,
+    struct_name: &str,
+    serialized: &Value,
+    schema_properties: &[(String, Value)],
+    schema_required: &BTreeSet<String>,
+    mode: CheckMode,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    // Get the serialized field names from the Rust struct
+    let rust_fields: BTreeSet<String> = match serialized {
+        Value::Object(map) => map.keys().cloned().collect(),
+        _other => {
+            // Not an object (e.g., serialized as a string or number)
+            // This can happen for unit structs or wrapper types
+            return errors; // nothing to compare
+        }
+    };
+
+    // Get schema property names
+    let schema_fields: BTreeSet<String> =
+        schema_properties.iter().map(|(n, _)| n.clone()).collect();
+
+    match mode {
+        CheckMode::Strict => {
+            // Check 1: every schema field must exist in Rust serialized output
+            for prop_name in &schema_fields {
+                if !rust_fields.contains(prop_name) {
+                    let prop_type = describe_type(schema_properties, prop_name);
+                    errors.push(format!(
+                        "  [{schema_path}] {struct_name}: MISSING field \
+                         '{prop_name}' (type: {prop_type})",
+                    ));
+                }
+            }
+            // Check 2: every Rust serialized field must exist in schema
+            for field_name in &rust_fields {
+                if !schema_fields.contains(field_name) {
+                    errors.push(format!(
+                        "  [{schema_path}] {struct_name}: EXTRA field \
+                         '{field_name}' not in schema",
+                    ));
+                }
+            }
+        }
+        CheckMode::Subset => {
+            // Only required schema fields must exist in Rust
+            for prop_name in schema_required {
+                if !rust_fields.contains(prop_name) {
+                    let prop_type = describe_type(schema_properties, prop_name);
+                    errors.push(format!(
+                        "  [{schema_path}] {struct_name}: MISSING required field \
+                         '{prop_name}' (type: {prop_type})",
+                    ));
+                }
+            }
+        }
+    }
+
+    errors
+}
+
+// ---------------------------------------------------------------------------
+// Main Test (T5, T6)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn schema_drift_detection() {
+    let entries = build_schema_map();
+    let schema_cache = build_schema_cache();
+    let mut all_errors: Vec<String> = Vec::new();
+    let mut checked_count = 0;
+
+    for entry in &entries {
+        // Load the schema file
+        let schema = match load_json(entry.schema_path) {
+            Ok(s) => s,
+            Err(e) => {
+                all_errors.push(format!(
+                    "  [{path}] ERROR loading schema: {e}",
+                    path = entry.schema_path
+                ));
+                continue;
+            }
+        };
+
+        // Extract properties and required fields from the schema
+        let properties = extract_properties(&schema);
+        let required = extract_required(&schema);
+
+        if properties.is_empty() {
+            // Skip schemas with no properties (definitions-only schemas like common.schema.json)
+            continue;
+        }
+
+        // Build a JSON test payload with dummy values
+        let test_json = build_test_json(&properties, &schema_cache, entry.schema_path);
+
+        // Run each checker on this schema's struct types
+        for checker in &entry.checkers {
+            checked_count += 1;
+            match checker(test_json.clone()) {
+                Ok((struct_name, serialized)) => {
+                    let errors = check_fields_match(
+                        entry.schema_path,
+                        &struct_name,
+                        &serialized,
+                        &properties,
+                        &required,
+                        entry.mode,
+                    );
+                    all_errors.extend(errors);
+                }
+                Err(e) => {
+                    all_errors.push(format!(
+                        "  [{path}] DESERIALIZATION ERROR: {e}",
+                        path = entry.schema_path
+                    ));
+                }
+            }
+        }
+    }
+
+    if !all_errors.is_empty() {
+        // Build a detailed error report
+        let unique_errors: HashSet<&str> = all_errors.iter().map(|s| s.as_str()).collect();
+        let summary = format!(
+            "\n========================================================\n\
+             SCHEMA DRIFT DETECTED\n\
+             ========================================================\n\
+             {} schemas checked, {} structs tested\n\
+             {} drift error(s) found:\n\
+             \n{}",
+            entries.len(),
+            checked_count,
+            unique_errors.len(),
+            unique_errors.into_iter().collect::<Vec<_>>().join("\n"),
+        );
+        panic!("{summary}");
+    }
+
+    println!(
+        "✓ Schema drift detection passed: {} schemas, {} structs checked",
+        entries.len(),
+        checked_count,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Deliberate Drift Tests (T7)
+// ---------------------------------------------------------------------------
+
+/// Helper: create a schema with specific properties for deliberate-drift testing.
+fn make_test_schema(properties: &[(&str, &str)]) -> Value {
+    let mut props = serde_json::Map::new();
+    for (name, type_str) in properties {
+        let mut prop = serde_json::Map::new();
+        prop.insert("type".to_string(), Value::String(type_str.to_string()));
+        props.insert(name.to_string(), Value::Object(prop));
+    }
+    let mut schema = serde_json::Map::new();
+    schema.insert("type".to_string(), Value::String("object".to_string()));
+    schema.insert("properties".to_string(), Value::Object(props));
+    // Default: all properties required
+    let required: Vec<Value> = properties
+        .iter()
+        .map(|(n, _)| Value::String(n.to_string()))
+        .collect();
+    schema.insert("required".to_string(), Value::Array(required));
+    Value::Object(schema)
+}
+
+/// A struct with fields matching a known subset of schema properties.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+struct TestFixture {
+    id: String,
+    name: String,
+}
+
+#[test]
+fn drift_detection_known_matched_passes() {
+    // Verify that a known in-sync schema+struct pair passes.
+    // The TestFixture above has 'id' and 'name'. Schema should match exactly.
+    let schema = make_test_schema(&[("id", "string"), ("name", "string")]);
+    let properties = extract_properties(&schema);
+    let required = extract_required(&schema);
+    let cache = HashMap::new();
+    let test_json = build_test_json(&properties, &cache, "test");
+
+    let v: TestFixture =
+        serde_json::from_value(test_json).expect("TestFixture should deserialize from test schema");
+    let serialized = serde_json::to_value(&v).expect("TestFixture should serialize");
+
+    let errors = check_fields_match(
+        "test",
+        "TestFixture",
+        &serialized,
+        &properties,
+        &required,
+        CheckMode::Strict,
+    );
+
+    assert!(
+        errors.is_empty(),
+        "Expected no drift errors for matched schema, got: {errors:?}"
+    );
+}
+
+#[test]
+fn drift_detection_deliberate_missing_field_fails() {
+    // Schema has a field ('extra_field') that the Rust struct doesn't have.
+    let schema = make_test_schema(&[
+        ("id", "string"),
+        ("name", "string"),
+        ("extra_field", "string"),
+    ]);
+    let properties = extract_properties(&schema);
+    let required = extract_required(&schema);
+    let cache = HashMap::new();
+    let test_json = build_test_json(&properties, &cache, "test");
+
+    let v: TestFixture = serde_json::from_value(test_json)
+        .expect("TestFixture should deserialize (serde ignores unknown fields by default)");
+    let serialized = serde_json::to_value(&v).expect("TestFixture should serialize");
+
+    let errors = check_fields_match(
+        "test",
+        "TestFixture",
+        &serialized,
+        &properties,
+        &required,
+        CheckMode::Strict,
+    );
+
+    assert!(
+        !errors.is_empty(),
+        "Expected drift errors for missing field but got none"
+    );
+
+    // Verify the error mentions the missing field
+    let error_text = errors.join("\n");
+    assert!(
+        error_text.contains("extra_field"),
+        "Expected error to mention 'extra_field', got: {error_text}"
+    );
+    assert!(
+        error_text.contains("MISSING"),
+        "Expected error to mention 'MISSING', got: {error_text}"
+    );
+}
+
+#[test]
+fn drift_detection_type_mismatch_fails() {
+    // Schema has a field that expects integer, but TestFixture has String.
+    // The deserialization should fail because we pass JSON number for a String field.
+    let schema = make_test_schema(&[("id", "integer"), ("name", "string")]);
+    let properties = extract_properties(&schema);
+    let cache = HashMap::new();
+    let test_json = build_test_json(&properties, &cache, "test");
+
+    // TestFixture.id is String, but schema says integer -> deserialization fails
+    let result: Result<TestFixture, _> = serde_json::from_value(test_json);
+    assert!(
+        result.is_err(),
+        "Expected deserialization to fail for type mismatch (schema says integer, Rust has string)"
+    );
+}

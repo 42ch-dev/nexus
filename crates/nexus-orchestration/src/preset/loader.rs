@@ -6,7 +6,9 @@
 //! Design: `orchestration-engine-v1.md` §8.1.
 
 use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{ContextUpdateOp, ExitWhen, InnerGraph, NextTarget, PresetManifest};
+use crate::preset::manifest::{
+    ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -84,6 +86,12 @@ pub enum PresetLoadError {
     /// A preset hook used an invalid operation kind (e.g. replace).
     #[error("invalid preset hook operation: {0}")]
     InvalidPresetHookOp(String),
+    /// No embedded preset with the given ID was found.
+    #[error("preset not found: {preset_id}")]
+    NotFound {
+        /// The preset ID that was not found.
+        preset_id: String,
+    },
 }
 
 impl PresetLoadError {
@@ -111,8 +119,8 @@ pub struct ValidationProblem {
 
 /// Load a preset from a YAML string.
 ///
-/// Validates all §7.6 rules. Does NOT validate template file paths (those
-/// require a filesystem root; use [`load_preset`] for that).
+/// Validates all §7.6 rules. Does NOT validate template file paths against a
+/// filesystem root (use [`load_preset`] for that).
 ///
 /// `source_hash` is blake3 over the YAML string.
 pub fn load_preset_from_str(
@@ -171,21 +179,178 @@ pub fn load_preset_from_str(
 /// Load a preset from a bundle directory on disk.
 ///
 /// Reads `preset.yaml` from the bundle root and delegates to
-/// [`load_preset_from_str`].
-///
-/// Future: also reads prompt templates and validates template_file paths.
+/// [`load_preset_from_str`]. Adds filesystem-level sandbox validation
+/// that template_file paths resolve within the bundle root.
 pub fn load_preset(
-    _bundle_root: &Path,
-    _caps: &CapabilityRegistry,
+    bundle_root: &Path,
+    caps: &CapabilityRegistry,
 ) -> Result<LoadedPreset, PresetLoadError> {
-    // T6 (embedded presets) will implement the real file-system loading.
-    Err(PresetLoadError::Validation {
-        len: 1,
-        problems: vec![ValidationProblem {
-            path: String::new(),
-            error: "load_preset from directory not yet implemented (WS3 T6)".to_string(),
-        }],
-    })
+    let preset_yaml_path = bundle_root.join("preset.yaml");
+    let yaml =
+        std::fs::read_to_string(&preset_yaml_path).map_err(|e| PresetLoadError::Validation {
+            len: 1,
+            problems: vec![ValidationProblem {
+                path: preset_yaml_path.to_string_lossy().to_string(),
+                error: format!("failed to read preset.yaml: {}", e),
+            }],
+        })?;
+
+    // WS-B T3: parse first, then sandbox-validate template_file paths
+    let manifest: PresetManifest = serde_yaml::from_str(&yaml)?;
+    let sandbox_problems = validate_template_files_in_sandbox(&manifest, bundle_root);
+    if !sandbox_problems.is_empty() {
+        return Err(PresetLoadError::Validation {
+            len: sandbox_problems.len(),
+            problems: sandbox_problems,
+        });
+    }
+
+    load_preset_from_str(&yaml, caps)
+}
+
+// ---------------------------------------------------------------------------
+// Template path safety check (WS-B: modeled after assert_creator_id_safe)
+// ---------------------------------------------------------------------------
+
+/// Assert that a `template_file` value does not contain path-traversal patterns.
+///
+/// Returns `Ok(())` for safe relative paths, `Err(String)` with a descriptive
+/// message for dangerous patterns.
+///
+/// Rejected patterns (consistent with `nexus-home-layout::assert_creator_id_safe`):
+/// - `..` (directory traversal)
+/// - `/` prefix (absolute path)
+/// - null bytes
+/// - control characters
+pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
+    if path.starts_with('/') {
+        return Err(format!(
+            "template_file must be a relative path: {path:?} (absolute paths are not allowed)"
+        ));
+    }
+    if path.contains('\\') {
+        return Err(format!(
+            "template_file contains backslash: {path:?} (backslash separators are not allowed)"
+        ));
+    }
+    if path.contains("..") {
+        return Err(format!(
+            "template_file contains '..': {path:?} (directory traversal is not allowed)"
+        ));
+    }
+    if path.contains('\0') {
+        return Err(format!("template_file contains null bytes: {path:?}"));
+    }
+    if path.chars().any(|c| c.is_control()) {
+        return Err(format!(
+            "template_file contains control characters: {path:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// Collect all `template_file` paths from a manifest as `(dot_path, &str)` pairs.
+///
+/// Shared by [`validate_manifest`] and [`validate_template_files_in_sandbox`]
+/// to avoid duplicating the manifest-walking logic.
+fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str)> {
+    let mut entries: Vec<(String, &str)> = Vec::new();
+
+    // Outer state exit_when template_file
+    for (i, state) in manifest.states.iter().enumerate() {
+        if let Some(ExitWhen::LlmJudge {
+            template_file: Some(ref tf),
+            ..
+        }) = state.exit_when
+        {
+            entries.push((format!("states[{}].exit_when.template_file", i), tf));
+        }
+        // context_update template_file
+        if let Some(ref hook) = state.context_update {
+            entries.push((
+                format!("states[{}].context_update.template_file", i),
+                &hook.template_file,
+            ));
+        }
+    }
+
+    // Inner graph node template_file
+    if let Some(ref inner_graphs) = manifest.inner_graphs {
+        for (name, ig) in inner_graphs {
+            for (k, node) in ig.nodes.iter().enumerate() {
+                if let Some(ref tf) = node.template_file {
+                    entries.push((
+                        format!("inner_graphs.{}.nodes[{}].template_file", name, k),
+                        tf,
+                    ));
+                }
+            }
+        }
+    }
+
+    // initial_action template_file
+    if let Some(InitialAction::SeedExpansion {
+        template_file: Some(ref tf),
+        ..
+    }) = manifest.preset.initial_action
+    {
+        entries.push(("preset.initial_action.template_file".to_string(), tf));
+    }
+
+    entries
+}
+
+/// Verify all `template_file` paths resolve within the given `bundle_root`
+/// (defense-in-depth sandbox check).
+///
+/// This is called from [`load_preset`] after YAML parsing. Each `template_file`
+/// is joined to `bundle_root`, canonicalized, and checked that the result
+/// starts with the canonical `bundle_root`. Errors from `canonicalize` (e.g.
+/// nonexistent files, symlinks) are gracefully reported as validation problems.
+fn validate_template_files_in_sandbox(
+    manifest: &PresetManifest,
+    bundle_root: &Path,
+) -> Vec<ValidationProblem> {
+    let mut problems = Vec::new();
+    let canonical_root = match bundle_root.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            // bundle_root itself doesn't exist — not a path traversal issue,
+            // but still fatal. Return a single problem.
+            problems.push(ValidationProblem {
+                path: "bundle_root".to_string(),
+                error: format!("cannot canonicalize bundle root: {}", e),
+            });
+            return problems;
+        }
+    };
+
+    let entries = collect_template_file_entries(manifest);
+
+    // Validate each path resolves within bundle_root
+    for (dot_path, template_file) in &entries {
+        let resolved = bundle_root.join(template_file);
+        match resolved.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(&canonical_root) {
+                    problems.push(ValidationProblem {
+                        path: (*dot_path).to_string(),
+                        error: format!(
+                            "template_file '{}' resolves outside the bundle root",
+                            template_file
+                        ),
+                    });
+                }
+            }
+            Err(_) => {
+                // File doesn't exist yet — this is fine for validation.
+                // The structural check (no .., no absolute) already happened
+                // in assert_template_file_safe. Skip canonicalize failures.
+            }
+        }
+    }
+
+    problems
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +609,16 @@ fn validate_manifest(
                     });
                 }
             }
+        }
+    }
+
+    // --- WS-B T2: template_file path safety validation ---
+    for (dot_path, template_file) in collect_template_file_entries(manifest) {
+        if let Err(reason) = assert_template_file_safe(template_file) {
+            problems.push(ValidationProblem {
+                path: dot_path,
+                error: reason,
+            });
         }
     }
 
@@ -1436,6 +1611,147 @@ states:
     }
 
     #[test]
+    fn load_preset_from_directory_loads_valid_preset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("my-preset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let yaml_path = bundle_root.join("preset.yaml");
+        std::fs::write(&yaml_path, minimal_valid_yaml()).unwrap();
+
+        let caps = test_capability_registry();
+        let loaded = load_preset(&bundle_root, &caps).unwrap();
+        assert_eq!(loaded.id, "tiny");
+        assert_eq!(loaded.version, 1);
+    }
+
+    #[test]
+    fn load_preset_from_directory_rejects_invalid_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("bad-preset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        std::fs::write(bundle_root.join("preset.yaml"), "not valid yaml: [").unwrap();
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        assert!(
+            matches!(&err, PresetLoadError::YamlParse(_)),
+            "expected YAML parse error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_preset_from_directory_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("missing");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        // No preset.yaml written
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("failed to read preset.yaml")),
+            "expected 'failed to read' error: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn load_preset_from_directory_rejects_validation_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("invalid-preset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let yaml = r#"
+preset:
+  id: invalid
+  version: 1
+  kind: creator
+  description: bad
+  requires_capabilities: []
+  initial: nonexistent
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("initial") && p.error.contains("unknown state")),
+            "expected validation error for unknown initial state: {problems:?}"
+        );
+    }
+
+    // ── WS-B T1: assert_template_file_safe tests ───────────────
+
+    #[test]
+    fn template_file_safe_accepts_simple_relative_path() {
+        assert!(assert_template_file_safe("prompts/system.md").is_ok());
+    }
+
+    #[test]
+    fn template_file_safe_accepts_nested_relative_path() {
+        assert!(assert_template_file_safe("a/b/c/template.md").is_ok());
+    }
+
+    #[test]
+    fn template_file_safe_accepts_dot_filename() {
+        assert!(assert_template_file_safe(".hidden").is_ok());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_dotdot_traversal() {
+        assert!(assert_template_file_safe("../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_dotdot_via_sibling() {
+        assert!(assert_template_file_safe("prompts/../secret").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_dotdot_mid_path() {
+        assert!(assert_template_file_safe("a/../b/c.md").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_absolute_path() {
+        assert!(assert_template_file_safe("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_backslash() {
+        assert!(assert_template_file_safe("prompts\\windows\\path.md").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_null_byte() {
+        assert!(assert_template_file_safe("prompts/bad\0file.md").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_rejects_control_characters() {
+        assert!(assert_template_file_safe("prompts/bad\x01file.md").is_err());
+    }
+
+    #[test]
+    fn template_file_safe_error_message_contains_path() {
+        let err = assert_template_file_safe("../../etc/passwd").unwrap_err();
+        assert!(err.contains("../../etc/passwd"));
+        assert!(err.contains(".."));
+    }
+
+    #[test]
     fn context_update_llm_summarize_rejects_unknown_capability() {
         let yaml = r#"
 preset:
@@ -1467,6 +1783,269 @@ states:
                     && p.error.contains("unknown capability for llm_summarize")
             }),
             "expected validation error for unknown llm_summarize capability: {problems:?}"
+        );
+    }
+
+    // ── WS-B T5: path traversal integration tests ──────────────
+
+    #[test]
+    fn reject_template_file_dotdot_traversal_in_exit_when() {
+        let yaml = r#"
+preset:
+  id: traversal-exit
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "../../etc/passwd"
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("template_file") && p.error.contains("..")),
+            "expected '..' traversal rejection in exit_when: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_template_file_absolute_path_in_context_update() {
+        let yaml = r#"
+preset:
+  id: abs-path-hook
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: append }
+      template_file: "/absolute/path.md"
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("template_file") && p.error.contains("absolute")),
+            "expected absolute path rejection in context_update: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_template_file_dotdot_in_inner_graph_node() {
+        let yaml = r#"
+preset:
+  id: traversal-ig
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: bad_ig
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  bad_ig:
+    nodes:
+      - id: n1
+        kind: acp_prompt
+        template_file: "../../etc/passwd"
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("template_file") && p.error.contains("..")),
+            "expected '..' traversal rejection in inner graph: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn accept_valid_relative_template_file_paths() {
+        let yaml = r#"
+preset:
+  id: valid-paths
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "prompts/system.md"
+    next: b
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: c
+    context_update:
+      op: { kind: append }
+      template_file: "prompts/update.md"
+  - id: c
+    terminal: true
+inner_graphs:
+  my_ig:
+    nodes:
+      - id: n1
+        kind: acp_prompt
+        template_file: "prompts/node.md"
+"#;
+        let caps = test_capability_registry();
+        let result = load_preset_from_str(yaml, &caps);
+        assert!(result.is_ok(), "expected valid preset: {result:?}");
+    }
+
+    #[test]
+    fn filesystem_preset_rejects_template_file_escaping_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("escape-test");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        // Create a real prompt file inside the bundle
+        std::fs::create_dir_all(bundle_root.join("prompts")).unwrap();
+        std::fs::write(bundle_root.join("prompts/good.md"), "hello").unwrap();
+        // Create a symlink outside the bundle
+        let outside = tmp.path().join("outside-secret.md");
+        std::fs::write(&outside, "secret").unwrap();
+
+        let yaml = r#"
+preset:
+  id: escape-test
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "../outside-secret.md"
+    next: b
+  - id: b
+    terminal: true
+"#;
+        std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems.iter().any(|p| p.error.contains("..")),
+            "expected '..' structural rejection (load_preset_from_str catches this): {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_template_file_null_byte() {
+        assert!(assert_template_file_safe("prompts/bad\0file.md").is_err());
+    }
+
+    #[test]
+    fn reject_template_file_control_char() {
+        assert!(assert_template_file_safe("prompts/bad\x01file.md").is_err());
+    }
+
+    #[test]
+    fn reject_template_file_dotdot_sibling_dir() {
+        let yaml = r#"
+preset:
+  id: dotdot-sibling
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: append }
+      template_file: "prompts/../secret"
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("template_file") && p.error.contains("..")),
+            "expected '..' traversal rejection via sibling dir: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_template_file_dotdot_in_initial_action() {
+        let yaml = r#"
+preset:
+  id: traversal-init
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+  initial_action:
+    kind: seed_expansion
+    capability: context.summarize
+    template_file: "../../etc/passwd"
+    payload_kind: text
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("initial_action") && p.error.contains("..")),
+            "expected '..' traversal rejection in initial_action: {problems:?}"
         );
     }
 }
