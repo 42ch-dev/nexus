@@ -22,9 +22,9 @@ use commands::{
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
     identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
     memory::MemoryCommand, permission::PermissionCommand, policy::PolicyCommand,
-    publish::PublishCommand, research::ResearchCommand, runtime_mode::RuntimeModeCommand,
-    schedule::ScheduleCommand, session::SessionCommand, soul::SoulCommand, sync::SyncCommand,
-    system::SystemPresetCommand, world::WorldCommand,
+    preset::PresetCommand, publish::PublishCommand, research::ResearchCommand,
+    runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand, session::SessionCommand,
+    soul::SoulCommand, sync::SyncCommand, system::SystemPresetCommand, world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -175,6 +175,12 @@ enum Commands {
         command: PermissionCommand,
     },
 
+    /// User-installed preset management (init, list)
+    Preset {
+        #[command(subcommand)]
+        command: PresetCommand,
+    },
+
     /// Local identity management (local_only mode)
     Identity {
         #[command(subcommand)]
@@ -249,6 +255,7 @@ async fn main() {
         Some(Commands::Session { command }) => commands::session::run(command, &config).await,
         Some(Commands::Policy { command }) => commands::policy::run(command).await,
         Some(Commands::Permission { command }) => commands::permission::run(command).await,
+        Some(Commands::Preset { command }) => commands::preset::run(command, &config).await,
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
         Some(Commands::RuntimeMode { command }) => {
             commands::runtime_mode::run(command, &config).await

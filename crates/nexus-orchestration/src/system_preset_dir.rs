@@ -183,6 +183,12 @@ pub fn load_system_preset_from_dir(
                 message: format!("invalid hook operation: {}", e),
             });
         }
+        Err(PresetLoadError::NotFound { preset_id }) => {
+            return Err(SystemPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("preset not found: {}", preset_id),
+            });
+        }
     };
 
     // The qualified ID uses `_system.<dir_name>` convention.
