@@ -55,7 +55,10 @@ pub async fn login(config: &CliConfig) -> Result<()> {
                 // Extract user_id from JWT claims (decode without verification
                 // — the token came from the platform over HTTPS).
                 let user_id = extract_user_id_from_jwt(&token_response.access_token)
-                    .unwrap_or_else(|| "unknown".to_string());
+                    .unwrap_or_else(|| {
+                        tracing::warn!("Failed to extract user_id from platform JWT, using 'unknown'");
+                        "unknown".to_string()
+                    });
 
                 let user_token = UserTokenState {
                     access_token: token_response.access_token,

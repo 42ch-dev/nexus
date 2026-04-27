@@ -237,8 +237,9 @@ impl DeviceFlowClient {
         }
 
         // Parse the success envelope: { success: true, data: { ... } }
-        let envelope: serde_json::Value =
-            serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "data": &text }));
+        let envelope: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            DeviceFlowError::Other(format!("Failed to parse success response as JSON: {e}"))
+        })?;
 
         let data = envelope.get("data").cloned().unwrap_or(envelope);
 
