@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-27T23:59:00Z",
+  "updated_at": "2026-04-28T12:00:00Z",
   "plans": [
     {
       "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
@@ -9,6 +9,16 @@
       "created_at": "2026-04-27",
       "owner": "project-manager",
       "plan_file": ".agents/plans/2026-04-27-v1.11-daemon-cleanup-toctou.md",
+      "primary_spec": ".agents/knowledge/v1.11-delivery-compass-v1.md",
+      "working_branch": "feature/v1.11"
+    },
+    {
+      "plan_id": "2026-04-28-v1.11-cli-refresh-token",
+      "status": "Todo",
+      "title": "V1.11 \u2014 CLI refresh_token Support",
+      "created_at": "2026-04-28",
+      "owner": "project-manager",
+      "plan_file": ".agents/plans/2026-04-28-v1.11-cli-refresh-token.md",
       "primary_spec": ".agents/knowledge/v1.11-delivery-compass-v1.md",
       "working_branch": "feature/v1.11"
     }
