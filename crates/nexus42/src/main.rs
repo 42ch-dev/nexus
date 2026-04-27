@@ -226,7 +226,21 @@ async fn main() {
     init_logging(cli.verbose);
 
     // Load configuration
-    let config = config::CliConfig::load().unwrap_or_default();
+    let mut config = config::CliConfig::load().unwrap_or_default();
+
+    // Resolve persistent device ID (UUID v4) for platform HTTP requests.
+    // Only create the device-id file if the nexus home already exists
+    // (i.e., the user has already run `init workspace` or equivalent).
+    if let Ok(nexus_home) = config::nexus_home() {
+        if nexus_home.exists() {
+            match nexus_sync::device_id::get_or_create_device_id(&nexus_home) {
+                Ok(device_id) => config.device_id = device_id,
+                Err(e) => {
+                    tracing::warn!("Failed to resolve device ID: {}", e);
+                }
+            }
+        }
+    }
 
     // Execute command
     let result = match cli.command {

@@ -2186,6 +2186,7 @@ dependencies = [
  "chrono",
  "hex",
  "nexus-contracts",
+ "nexus-home-layout",
  "nexus-local-db",
  "reqwest 0.12.28",
  "serde",
