@@ -341,39 +341,4 @@ pub fn enter_failed(exit_code: i32, last_error: Option<String>) {
     std::process::exit(exit_code);
 }
 
-// =============================================================================
-// Legacy stubs (kept for backward compat with existing state.rs entry actions)
-// =============================================================================
 
-/// Stub for `Starting.entry` — replaced by `enter_starting(ctx)` above.
-pub fn enter_starting_stub() {
-    tracing::debug!("Starting.entry stub: would start HTTP, DB, Sync, Engine, WorkerMgr");
-}
-
-/// Stub for `Starting.exit` — replaced by `exit_starting(ctx)` above.
-pub fn exit_starting_stub() {
-    tracing::debug!("Starting.exit stub: would cancel in-flight subsystem starts");
-}
-
-/// Stub for `Running.entry` — replaced by `enter_running(ctx)` above.
-pub fn enter_running_stub() {
-    tracing::debug!("Running.entry stub: would start _system.maintenance session");
-}
-
-/// Stub for `Degraded.entry` — replaced by `enter_degraded(ctx)` above.
-pub fn enter_degraded_stub() {
-    tracing::debug!("Degraded.entry stub: would set HTTP lifecycle_state=degraded");
-}
-
-/// Stub for `Stopping.entry` — replaced by `enter_stopping(ctx)` above.
-pub fn enter_stopping_stub() {
-    tracing::debug!("Stopping.entry stub: would drain engine + workers, start watchdog");
-}
-
-/// Stub for `Failed.entry` — replaced by `enter_failed(exit_code, last_error)` above.
-pub fn enter_failed_stub(exit_code: i32) {
-    tracing::debug!(
-        "Failed.entry stub: would log and exit with code {}",
-        exit_code
-    );
-}
