@@ -2206,6 +2206,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dialoguer",
