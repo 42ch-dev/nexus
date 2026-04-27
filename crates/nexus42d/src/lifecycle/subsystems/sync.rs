@@ -10,7 +10,6 @@ use crate::lifecycle::SubsystemKind;
 
 /// Sync subsystem state.
 #[derive(Debug)]
-#[allow(dead_code)] // Degraded variant will be used for health monitoring
 enum SyncState {
     /// Not yet started.
     NotStarted,
@@ -18,8 +17,6 @@ enum SyncState {
     Running,
     /// Shutdown (outbox closed).
     Shutdown,
-    /// Sync operations failing repeatedly.
-    Degraded { reason: String },
 }
 
 /// Sync subsystem implementation.
@@ -72,7 +69,6 @@ impl SubsystemBootstrap for SyncSubsystem {
         match &*state {
             SyncState::Running => SubsystemHealth::Up,
             SyncState::NotStarted | SyncState::Shutdown => SubsystemHealth::Down,
-            SyncState::Degraded { .. } => SubsystemHealth::Degraded,
         }
     }
 
