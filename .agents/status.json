@@ -3,15 +3,14 @@
   "updated_at": "2026-04-27T23:59:00Z",
   "plans": [
     {
-      "plan_id": "2026-04-27-v1.10-device-flow-login",
-      "status": "Done",
-      "title": "V1.10 — Device Flow Login + DeviceID Header + Daemon Cleanup",
+      "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
+      "status": "Todo",
+      "title": "V1.11 \u2014 Daemon Stub Cleanup + DeviceID TOCTOU Fix",
       "created_at": "2026-04-27",
-      "done_at": "2026-04-27T23:59:00Z",
       "owner": "project-manager",
-      "plan_file": ".agents/plans/2026-04-27-v1.10-device-flow-login.md",
-      "primary_spec": ".agents/knowledge/v1.10-delivery-compass-v1.md",
-      "working_branch": "feature/v1.10"
+      "plan_file": ".agents/plans/2026-04-27-v1.11-daemon-cleanup-toctou.md",
+      "primary_spec": ".agents/knowledge/v1.11-delivery-compass-v1.md",
+      "working_branch": "feature/v1.11"
     }
   ],
   "metadata": {
@@ -45,11 +44,11 @@
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
           "severity": "low",
           "target_date": "backlog",
           "decision": "accept",
-          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
+          "note": "Blocked by wiremock \u2192 http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ]
     },
@@ -81,7 +80,7 @@
       "2026-04-23-v1.8-ws-c-name-positional-to-flag": [
         {
           "id": "R-WC-002",
-          "title": "Positional→flag migration UX",
+          "title": "Positional\u2192flag migration UX",
           "severity": "warning",
           "source": "QC3 F-005",
           "scope": "crates/nexus42/src/commands/creator.rs",
@@ -105,7 +104,7 @@
       "2026-04-18-v1.5-stabilization": [
         {
           "id": "R5",
-          "title": "nix crate unconditionally included — Windows build blocked",
+          "title": "nix crate unconditionally included \u2014 Windows build blocked",
           "severity": "low",
           "source": "QC2 W1",
           "scope": "crates/nexus-orchestration/Cargo.toml",
@@ -164,7 +163,7 @@
         },
         {
           "id": "R-M1-W05",
-          "title": "init rejects _ prefix but scan silently skips — inconsistent UX",
+          "title": "init rejects _ prefix but scan silently skips \u2014 inconsistent UX",
           "severity": "low",
           "source": "QC2 F-QC2-03",
           "scope": "crates/nexus42/src/commands/preset.rs",
@@ -186,7 +185,7 @@
         },
         {
           "id": "R-M1-W07",
-          "title": "JoinHandle abort() risk — no graceful cleanup (documented RISK-WSC-02)",
+          "title": "JoinHandle abort() risk \u2014 no graceful cleanup (documented RISK-WSC-02)",
           "severity": "low",
           "source": "QC3 W-2",
           "scope": "crates/nexus42d/src/lifecycle/actions.rs",
