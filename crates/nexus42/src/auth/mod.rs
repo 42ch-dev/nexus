@@ -9,6 +9,7 @@ pub mod user_auth;
 
 use crate::config::auth_store_path;
 use crate::errors::Result;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -177,10 +178,24 @@ impl AuthStore {
     }
 
     /// Check if a user is authenticated (has a non-expired user token).
+    ///
+    /// Returns `true` only if a `user_token` exists, has a non-empty `access_token`,
+    /// AND the token has not yet expired according to its `expires_at` timestamp.
+    /// If the `expires_at` field cannot be parsed, the token is conservatively
+    /// treated as already expired (returns `false`).
     pub fn is_user_authenticated(&self) -> bool {
-        self.user_token
-            .as_ref()
-            .is_some_and(|t| !t.access_token.is_empty())
+        self.user_token.as_ref().is_some_and(|t| {
+            if t.access_token.is_empty() {
+                return false;
+            }
+            // Parse ISO 8601 expiry; treat unparseable dates as expired.
+            match DateTime::parse_from_rfc3339(&t.expires_at) {
+                Ok(expiry) => expiry > Utc::now(),
+                // If the timestamp doesn't parse, conservatively consider expired.
+                // This prevents a malformed token from being treated as valid.
+                Err(_) => false,
+            }
+        })
     }
 }
 
@@ -382,7 +397,7 @@ mod tests {
         let token = UserTokenState {
             access_token: "tok_clear".to_string(),
             token_type: "Bearer".to_string(),
-            expires_at: "2026-01-01T00:00:00Z".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
             user_id: "usr_clear".to_string(),
         };
 

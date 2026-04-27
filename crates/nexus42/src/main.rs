@@ -236,7 +236,13 @@ async fn main() {
             match nexus_sync::device_id::get_or_create_device_id(&nexus_home) {
                 Ok(device_id) => config.device_id = device_id,
                 Err(e) => {
-                    tracing::warn!("Failed to resolve device ID: {}", e);
+                    // Device ID failure is non-fatal: platform falls back to
+                    // IP-based rate limiting when X-Device-ID is absent.
+                    // Still visible to the user so they understand degraded mode.
+                    eprintln!(
+                        "nexus42: device identity unavailable — {} (platform rate-limit will use IP-based identification)",
+                        e
+                    );
                 }
             }
         }
