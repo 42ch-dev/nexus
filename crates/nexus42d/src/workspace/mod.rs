@@ -42,19 +42,12 @@ pub struct WorkspaceState {
     /// Staleness: file modification time of the CLI config at daemon startup.
     /// Used to detect when CLI-side config changes may have occurred
     /// (e.g., runtime mode, degradation state).
-    /// NOTE: This is a best-effort staleness check, not a real-time watcher.
-    /// The daemon reads config once at startup; changes made after that
-    /// are not reflected until the daemon is restarted.
-    /// See R3(runtime) — a full file-watcher implementation is deferred.
-    #[allow(dead_code)]
-    cli_config_mtime: Option<std::time::SystemTime>,
     /// Lifecycle HSM for daemon state management.
     /// Set in T6 when main.rs wires up the lifecycle.
     lifecycle: Arc<Option<Arc<StatigLifecycle>>>,
     /// Orchestration engine (set at daemon startup when WS2 is wired).
     engine: Arc<Option<Arc<dyn OrchestrationEngine>>>,
     /// Worker manager (set at daemon startup when WS2 is wired).
-    #[allow(dead_code)]
     worker_manager: Arc<Option<Arc<WorkerManager>>>,
     /// Capability registry (set at daemon startup when WS2 is wired).
     capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
@@ -88,7 +81,6 @@ impl WorkspaceState {
             started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
-            cli_config_mtime: None,
             lifecycle: Arc::new(None),
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
@@ -128,7 +120,6 @@ impl WorkspaceState {
             started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
             runtime_mode: RuntimeMode::LocalOnly,
-            cli_config_mtime: None,
             lifecycle: Arc::new(None),
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
@@ -150,12 +141,6 @@ impl WorkspaceState {
         // Read runtime mode from CLI config
         let cli_snapshot = crate::cli_config::CliConfigSnapshot::load(&nexus_home)?;
         let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
-
-        // R3(runtime): Record CLI config file modification time for staleness detection.
-        let cli_config_path = nexus_home.join("config.toml");
-        let cli_config_mtime = std::fs::metadata(&cli_config_path)
-            .ok()
-            .and_then(|m| m.modified().ok());
 
         let db_path = crate::cli_config::resolve_state_db_path(&user_home, &nexus_home)?;
 
@@ -184,7 +169,6 @@ impl WorkspaceState {
             started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(None)),
             runtime_mode,
-            cli_config_mtime,
             lifecycle: Arc::new(None),
             engine: Arc::new(None),
             worker_manager: Arc::new(None),
@@ -232,7 +216,6 @@ impl WorkspaceState {
     }
 
     /// Get the worker manager, if set.
-    #[allow(dead_code)]
     pub fn worker_manager(&self) -> Option<Arc<WorkerManager>> {
         self.worker_manager.as_ref().as_ref().cloned()
     }
