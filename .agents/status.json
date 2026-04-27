@@ -1,7 +1,18 @@
 {
   "version": 1,
-  "updated_at": "2026-04-24T20:00:00Z",
-  "plans": [],
+  "updated_at": "2026-04-27T22:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-04-27-v1.10-device-flow-login",
+      "status": "Todo",
+      "title": "V1.10 — Device Flow Login + DeviceID Header + Daemon Cleanup",
+      "created_at": "2026-04-27",
+      "owner": "project-manager",
+      "plan_file": ".agents/plans/2026-04-27-v1.10-device-flow-login.md",
+      "primary_spec": ".agents/knowledge/v1.10-delivery-compass-v1.md",
+      "working_branch": "feature/v1.10"
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -20,8 +31,9 @@
       },
       "by_target": {
         "V2.0": 3,
-        "backlog": 10,
-        "post-M1": 1
+        "backlog": 9,
+        "post-M1": 1,
+        "in_flight": 1
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
@@ -103,7 +115,8 @@
           "owner": "fullstack-dev",
           "target_date": "backlog",
           "detail_path": "plans/residuals/v1-tech-debt-cleanup/td-10-device-flow-oauth.md",
-          "tracking_link": null
+          "tracking_link": null,
+          "in_flight_by": "2026-04-27-v1.10-device-flow-login"
         }
       ],
       "2026-04-18-v1.5-stabilization": [
