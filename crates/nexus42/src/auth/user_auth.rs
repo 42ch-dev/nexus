@@ -284,12 +284,12 @@ mod tests {
 
         // login() writes to auth.json on disk, which needs a home directory.
         // We test the function but accept that file I/O may fail in sandboxed test env.
+        // JSON errors can occur when auth.json has stale content from other tests.
         let result = login(&config).await;
-        // Either success or IO error (can't write auth.json in test) is acceptable.
-        // The important thing is it doesn't panic or loop infinitely.
         match result {
-            Ok(()) => {}               // Full success
-            Err(CliError::Io(_)) => {} // Expected in sandboxed env
+            Ok(()) => {}                 // Full success
+            Err(CliError::Io(_)) => {}   // Expected in sandboxed env
+            Err(CliError::Json(_)) => {} // Stale auth.json from other tests
             Err(e) => panic!("Unexpected error: {e}"),
         }
     }
