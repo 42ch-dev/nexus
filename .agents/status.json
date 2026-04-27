@@ -21,20 +21,20 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-27T23:59:00Z",
-      "total_open": 17,
+      "total_open": 15,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 8,
-        "warning": 8,
+        "low": 9,
+        "warning": 5,
         "nit": 1
       },
       "by_target": {
         "V2.0": 3,
-        "backlog": 8,
+        "backlog": 9,
         "post-M1": 1,
-        "V1.11": 4,
+        "V1.11": 1,
         "in_flight": 0
       },
       "by_plan": {
@@ -43,7 +43,7 @@
         "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
         "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
         "2026-04-24-v1.9-m1": 7,
-        "2026-04-27-v1.10-device-flow-login": 4
+        "2026-04-27-v1.10-device-flow-login": 2
       },
       "in_flight": {},
       "cross_cutting": [
@@ -213,36 +213,14 @@
       ],
       "2026-04-27-v1.10-device-flow-login": [
         {
-          "id": "R-V110-001",
-          "title": "poll_device_token silent fallback masks parse failures",
-          "severity": "warning",
-          "source": "QC2 W-QC2-001",
-          "scope": "crates/nexus-sync/src/device_flow_client.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.11",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.10-device-flow-login/2026-04-27-v1.10-device-flow-login-qc2.md"
-        },
-        {
-          "id": "R-V110-002",
-          "title": "JWT user_id extraction silently degrades to \"unknown\"",
-          "severity": "warning",
-          "source": "QC2 W-QC2-002",
-          "scope": "crates/nexus42/src/auth/user_auth.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.11",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.10-device-flow-login/2026-04-27-v1.10-device-flow-login-qc2.md"
-        },
-        {
           "id": "R-V110-003",
-          "title": "login() error message inaccuracy on token store failure",
-          "severity": "warning",
+          "title": "login() error message inaccuracy on token store failure (QC2 notes: code path unreachable)",
+          "severity": "low",
           "source": "QC2 W-QC2-003",
           "scope": "crates/nexus42/src/auth/user_auth.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target_date": "V1.11",
+          "target_date": "backlog",
           "tracking_link": ".agents/plans/reports/2026-04-27-v1.10-device-flow-login/2026-04-27-v1.10-device-flow-login-qc2.md"
         },
         {
