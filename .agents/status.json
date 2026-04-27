@@ -31,11 +31,7 @@
         "nit": 1
       },
       "by_target": {
-        "V2.0": 3,
-        "backlog": 9,
-        "post-M1": 1,
-        "V1.11": 1,
-        "in_flight": 0
+        "backlog": 15
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
