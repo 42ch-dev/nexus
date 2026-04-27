@@ -50,6 +50,7 @@ nix = { version = "0.28", features = ["signal", "process"] }
 dialoguer = "0.11"
 tempfile = "3"
 regex = "1"
+base64 = "0.22"
 
 [dev-dependencies]
 assert_cmd = "2.0"

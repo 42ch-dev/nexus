@@ -129,8 +129,6 @@ mod tests {
                 post(handlers::workspace::init_workspace),
             );
 
-        let auth_routes = Router::new().route("/v1/local/auth/status", get(handlers::auth::status));
-
         // Guarded routes — middleware applied
         let creator_routes = Router::new()
             .route("/v1/local/creators", get(handlers::creators::list))
@@ -153,24 +151,12 @@ mod tests {
                 middleware::require_workspace,
             ));
 
-        let context_routes = Router::new()
-            .route(
-                "/v1/local/context/assemble",
-                post(handlers::context::assemble),
-            )
-            .route_layer(axum_mw::from_fn_with_state(
-                state.clone(),
-                middleware::require_workspace,
-            ));
-
         Router::new()
             .merge(runtime_routes)
             .merge(workspace_routes)
-            .merge(auth_routes)
             .merge(creator_routes)
             .merge(manuscript_routes)
             .merge(reference_routes)
-            .merge(context_routes)
             .with_state(state)
     }
 
@@ -223,17 +209,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn auth_status_works_without_init() {
-        let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/auth/status").await;
-        assert!(
-            response.status_code().is_success(),
-            "auth status should return 2xx without init, got {}",
-            response.status_code(),
-        );
-    }
-
     // --- Guarded routes: should be rejected without initialization ---
 
     #[tokio::test]
@@ -268,26 +243,6 @@ mod tests {
             response.status_code(),
             409,
             "references should return 409 without init"
-        );
-        assert_uninitialized_error_body(&response);
-    }
-
-    #[tokio::test]
-    async fn context_assemble_returns_409_without_init() {
-        let app = create_uninitialized_app().await;
-        let response = app
-            .post("/v1/local/context/assemble")
-            .json(&serde_json::json!({
-                "request_id": "test",
-                "workspace_id": "ws",
-                "creator_id": "c1",
-                "world_id": "w1"
-            }))
-            .await;
-        assert_eq!(
-            response.status_code(),
-            409,
-            "context assemble should return 409 without init"
         );
         assert_uninitialized_error_body(&response);
     }

@@ -44,6 +44,11 @@ pub struct CliConfig {
     /// Written by the daemon/runtime when degradation occurs; read-only for CLI display.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degradation_snapshot: Option<DegradationSnapshot>,
+
+    /// Persistent machine identifier (UUID v4) for rate-limiting and device tracking.
+    /// Not serialized to config.toml — resolved at startup from `~/.nexus42/device-id`.
+    #[serde(skip)]
+    pub device_id: String,
 }
 
 fn default_platform_url() -> String {

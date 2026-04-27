@@ -1,6 +1,12 @@
 //! Context Assembly Local API client.
 //!
 //! Calls POST /v1/local/context/assemble through the DaemonClient (nexus42d loopback).
+//!
+//! TODO(V1.10): This client wraps the daemon context endpoint which has been removed.
+//! The client and its tests are retained for reference but are dead code.
+//! Track B or a future version will handle full removal.
+
+#![allow(dead_code)]
 
 use crate::api::DaemonClient;
 use crate::context::types::ContextAssembleRequestV1;

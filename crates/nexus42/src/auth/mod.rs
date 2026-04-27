@@ -1,7 +1,7 @@
 //! Dual-Subject Authentication Module
 //!
 //! Supports both User authentication (device flow OAuth) and Creator API key management.
-//! User auth state is owned by the daemon (SQLite), accessed via HTTP API.
+//! User auth state (platform JWT from device flow) is stored locally in `~/.nexus42/auth.json`.
 //! Creator auth state remains file-based for V1.x (will migrate to daemon in V1.2).
 
 pub mod creator_auth;
@@ -9,16 +9,42 @@ pub mod user_auth;
 
 use crate::config::auth_store_path;
 use crate::errors::Result;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+/// Platform user token obtained via RFC 8628 device flow.
+///
+/// Stored in `AuthStore.user_token` and persisted to `~/.nexus42/auth.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserTokenState {
+    /// Platform JWT access token.
+    pub access_token: String,
+    /// Token type (always "Bearer" for device flow).
+    #[serde(default = "default_token_type")]
+    pub token_type: String,
+    /// ISO 8601 expiry timestamp.
+    pub expires_at: String,
+    /// Platform user ID extracted from JWT claims (`sub` / `userId`).
+    pub user_id: String,
+}
+
+fn default_token_type() -> String {
+    "Bearer".to_string()
+}
+
 /// Auth store — persisted to `$HOME/.nexus42/auth.json`
 ///
-/// NOTE: User auth (OAuth tokens) is now managed by the daemon.
-/// This store is retained for creator API key caching.
+/// Contains both user auth (platform JWT from device flow) and creator API key cache.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthStore {
+    /// Platform user token from device flow login.
+    /// `#[serde(default)]` ensures backward compat — existing auth.json files
+    /// without this field parse correctly (field defaults to `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_token: Option<UserTokenState>,
+
     /// Creator authentication states (keyed by creator_id)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creators: Option<std::collections::HashMap<String, CreatorAuthState>>,
@@ -138,6 +164,39 @@ impl AuthStore {
             Err(e) => Err(e),
         }
     }
+
+    /// Store a platform user token from device flow login.
+    pub fn store_user_token(&mut self, token: UserTokenState) -> Result<()> {
+        self.user_token = Some(token);
+        self.save()
+    }
+
+    /// Clear the platform user token (logout).
+    pub fn clear_user_token(&mut self) -> Result<()> {
+        self.user_token = None;
+        self.save()
+    }
+
+    /// Check if a user is authenticated (has a non-expired user token).
+    ///
+    /// Returns `true` only if a `user_token` exists, has a non-empty `access_token`,
+    /// AND the token has not yet expired according to its `expires_at` timestamp.
+    /// If the `expires_at` field cannot be parsed, the token is conservatively
+    /// treated as already expired (returns `false`).
+    pub fn is_user_authenticated(&self) -> bool {
+        self.user_token.as_ref().is_some_and(|t| {
+            if t.access_token.is_empty() {
+                return false;
+            }
+            // Parse ISO 8601 expiry; treat unparseable dates as expired.
+            match DateTime::parse_from_rfc3339(&t.expires_at) {
+                Ok(expiry) => expiry > Utc::now(),
+                // If the timestamp doesn't parse, conservatively consider expired.
+                // This prevents a malformed token from being treated as valid.
+                Err(_) => false,
+            }
+        })
+    }
 }
 
 #[cfg(test)]
@@ -207,6 +266,7 @@ mod tests {
     #[test]
     fn store_updates_existing_entry() {
         let mut store = AuthStore {
+            user_token: None,
             creators: Some({
                 let mut m = std::collections::HashMap::new();
                 m.insert(
@@ -244,6 +304,7 @@ mod tests {
     #[test]
     fn get_returns_none_when_api_key_not_set() {
         let store = AuthStore {
+            user_token: None,
             creators: Some({
                 let mut m = std::collections::HashMap::new();
                 m.insert(
@@ -279,5 +340,105 @@ mod tests {
         // In-memory retrieval should always work after store
         let key = store.get_creator_api_key("crt_file_test").expect("get");
         assert_eq!(key, Some("nexus_live_file_key".to_string()));
+    }
+
+    // ── User token tests (T2) ───────────────────────────────────────
+
+    #[test]
+    fn user_token_serialization_roundtrip() {
+        let token = UserTokenState {
+            access_token: "eyJhbGciOiJIUzI1NiJ9.test".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2026-04-27T12:00:00Z".to_string(),
+            user_id: "usr_abc123".to_string(),
+        };
+        let json = serde_json::to_string(&token).expect("serialize");
+        assert!(json.contains("eyJhbGciOiJIUzI1NiJ9.test"));
+        assert!(json.contains("usr_abc123"));
+
+        let parsed: UserTokenState = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed.access_token, token.access_token);
+        assert_eq!(parsed.token_type, "Bearer");
+        assert_eq!(parsed.expires_at, "2026-04-27T12:00:00Z");
+        assert_eq!(parsed.user_id, "usr_abc123");
+    }
+
+    #[test]
+    fn user_token_default_token_type() {
+        let json = r#"{
+            "access_token": "tok",
+            "expires_at": "2026-01-01T00:00:00Z",
+            "user_id": "usr_1"
+        }"#;
+        let parsed: UserTokenState = serde_json::from_str(json).expect("parse");
+        assert_eq!(parsed.token_type, "Bearer");
+    }
+
+    #[test]
+    fn auth_store_roundtrip_with_user_token() {
+        let token = UserTokenState {
+            access_token: "tok_roundtrip".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2026-12-31T23:59:59Z".to_string(),
+            user_id: "usr_roundtrip".to_string(),
+        };
+
+        let mut store = AuthStore::default();
+        store.store_user_token(token).expect("store");
+
+        assert!(store.is_user_authenticated());
+        let t = store.user_token.as_ref().expect("has token");
+        assert_eq!(t.access_token, "tok_roundtrip");
+        assert_eq!(t.user_id, "usr_roundtrip");
+    }
+
+    #[test]
+    fn auth_store_clear_user_token() {
+        let token = UserTokenState {
+            access_token: "tok_clear".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+            user_id: "usr_clear".to_string(),
+        };
+
+        let mut store = AuthStore::default();
+        store.store_user_token(token).expect("store");
+        assert!(store.is_user_authenticated());
+
+        store.clear_user_token().expect("clear");
+        assert!(!store.is_user_authenticated());
+        assert!(store.user_token.is_none());
+    }
+
+    #[test]
+    fn auth_store_backward_compat_without_user_token() {
+        // Existing auth.json without user_token field must parse correctly
+        let json = r#"{
+            "creators": {
+                "crt_123": {
+                    "creator_id": "crt_123",
+                    "access_token": "old_tok",
+                    "expires_at": "2026-01-01T00:00:00Z"
+                }
+            }
+        }"#;
+        let store: AuthStore = serde_json::from_str(json).expect("parse");
+        assert!(store.user_token.is_none());
+        assert!(store.creators.is_some());
+        assert!(!store.is_user_authenticated());
+    }
+
+    #[test]
+    fn auth_store_empty_json_parses_correctly() {
+        let store: AuthStore = serde_json::from_str("{}").expect("parse");
+        assert!(store.user_token.is_none());
+        assert!(store.creators.is_none());
+    }
+
+    #[test]
+    fn auth_store_default_no_user_token() {
+        let store = AuthStore::default();
+        assert!(store.user_token.is_none());
+        assert!(!store.is_user_authenticated());
     }
 }

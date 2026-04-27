@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-27-v1.10-device-flow-login",
+  "archived_at": "2026-04-27T23:59:00Z",
+  "entries": [
+    {
+      "id": "R-V110-001",
+      "title": "poll_device_token silent fallback masks parse failures",
+      "severity": "warning",
+      "source": "QC2 W-QC2-001",
+      "scope": "crates/nexus-sync/src/device_flow_client.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target": "V1.10",
+      "closure_evidence": "Commit ae74af7: replaced silent unwrap_or_else fallback with explicit map_err returning DeviceFlowError::Other with parse error context.",
+      "closed_at": "2026-04-27",
+      "lifecycle": "resolved",
+      "closure_note": "Fixed: JSON parse failure now returns DeviceFlowError::Other(format!(\"Failed to parse success response as JSON: {e}\")) instead of silently wrapping in a fake envelope."
+    },
+    {
+      "id": "R-V110-002",
+      "title": "JWT user_id extraction silently degrades to \"unknown\"",
+      "severity": "warning",
+      "source": "QC2 W-QC2-002",
+      "scope": "crates/nexus42/src/auth/user_auth.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target": "V1.10",
+      "closure_evidence": "Commit ae74af7: added tracing::warn!(...\"Failed to extract user_id from platform JWT, using 'unknown'\") before unwrap_or_else fallback.",
+      "closed_at": "2026-04-27",
+      "lifecycle": "resolved",
+      "closure_note": "Fixed: JWT extraction fallback now logs a warning via tracing::warn! for debugging."
+    }
+  ]
+}

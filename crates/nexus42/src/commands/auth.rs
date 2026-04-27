@@ -15,9 +15,9 @@ pub enum AuthCommand {
     Token {
         /// Access token
         access_token: String,
-        /// Refresh token
-        #[arg(long)]
-        refresh_token: Option<String>,
+        /// Expiry time in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        expires_in: u64,
         /// User ID (prefix: "usr_")
         #[arg(long)]
         user_id: Option<String>,
@@ -39,12 +39,11 @@ pub async fn run(cmd: AuthCommand, config: &CliConfig) -> Result<()> {
         }
         AuthCommand::Token {
             access_token,
-            refresh_token,
+            expires_in,
             user_id,
         } => {
-            let refresh = refresh_token.unwrap_or_default();
             let uid = user_id.unwrap_or_else(|| format!("usr_dev_{}", uuid::Uuid::new_v4()));
-            auth::user_auth::login_with_token(config, access_token, refresh, uid).await
+            auth::user_auth::login_with_token(config, access_token, uid, expires_in).await
         }
         AuthCommand::Logout => auth::user_auth::logout(config).await,
         AuthCommand::Status => auth::user_auth::status(config).await,

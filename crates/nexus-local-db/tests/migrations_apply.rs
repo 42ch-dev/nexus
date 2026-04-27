@@ -11,7 +11,6 @@ async fn all_migrations_apply_to_fresh_db() {
         "reference_sources",
         "outbox",
         "auth_tokens",
-        "device_code_sessions",
         "acp_tool_audit_log",
         "acp_sessions",
         "local_identities",

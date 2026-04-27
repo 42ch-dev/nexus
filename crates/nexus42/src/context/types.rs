@@ -9,6 +9,7 @@ pub use nexus_contracts::generated::ContextAssembleRequestV1;
 pub use nexus_contracts::generated::ContextAssembleResponseV1;
 
 // Re-export MemoryKind from domain for CLI use
+#[cfg(test)]
 pub use nexus_domain::memory_item::MemoryKind;
 
 /// Backward-compatible type alias.
@@ -20,18 +21,21 @@ pub type ContextAssembleRequest = ContextAssembleRequestV1;
 pub type ContextAssembleResponse = ContextAssembleResponseV1;
 
 /// Helper: check whether a context assembly response indicates an error.
+#[cfg(test)]
 #[inline]
 pub fn is_error(resp: &ContextAssembleResponse) -> bool {
     !resp.success
 }
 
 /// Helper: get the error code from a context assembly response, if any.
+#[cfg(test)]
 #[inline]
 pub fn error_code(resp: &ContextAssembleResponse) -> Option<&str> {
     resp.error_code.as_deref()
 }
 
 /// Helper: get the error message from a context assembly response, if any.
+#[cfg(test)]
 #[inline]
 pub fn error_message(resp: &ContextAssembleResponse) -> Option<&str> {
     resp.error_message.as_deref()

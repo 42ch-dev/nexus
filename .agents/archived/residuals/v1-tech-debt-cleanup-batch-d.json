@@ -52,13 +52,13 @@
       "severity": "medium",
       "source": "v1-tech-debt-cleanup Batch D",
       "scope": "crates/nexus42d/src/auth/device_flow.rs, platform OAuth",
-      "decision": "waived",
+      "decision": "resolved",
       "owner": "@project-manager",
-      "target": "V1.2+ with platform endpoints",
-      "closure_evidence": "knowledge/device-flow-oauth-scope-v1.md; module docs in device_flow.rs",
-      "closed_at": "2026-04-10",
-      "lifecycle": "waived",
-      "closure_note": "Production OAuth requires platform contracts and CI stubs; not delivered in OSS C+D cap."
+      "target": "V1.10 — Device Flow Login (closed 2026-04-27)",
+      "closure_evidence": "PR #16: feature/v1.10 merged to main. Full RFC 8628 implementation, daemon mock endpoints deleted, TD-10 stub removed.",
+      "closed_at": "2026-04-27",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved via V1.10 Device Flow Login: CLI now calls platform directly, RFC 8628 polling loop, device_flow.rs stub deleted, daemon auth mock removed."
     }
   ]
 }

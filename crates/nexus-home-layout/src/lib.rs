@@ -87,6 +87,11 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         .collect()
 }
 
+/// `$HOME/.nexus42/device-id` — persistent machine identifier (UUID v4).
+pub fn device_id_path(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("device-id")
+}
+
 /// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (ADR-014, ADR-016 D1).
 ///
 /// # Defense-in-depth
@@ -168,6 +173,15 @@ mod tests {
         assert_eq!(
             user_preset_bundle_dir(&home, "my-strategy"),
             PathBuf::from("/fake/home/.nexus42/presets/my-strategy")
+        );
+    }
+
+    #[test]
+    fn device_id_path_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            device_id_path(&home),
+            PathBuf::from("/fake/home/.nexus42/device-id")
         );
     }
 
