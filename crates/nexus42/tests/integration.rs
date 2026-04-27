@@ -96,7 +96,7 @@ fn init_workspace_idempotent() {
         .stdout(predicate::str::contains("already registered"));
 }
 
-/// Test auth status (no daemon running)
+/// Test auth status (no daemon running — uses local AuthStore)
 #[test]
 fn auth_status_not_logged_in() {
     Command::cargo_bin("nexus42")
@@ -106,15 +106,15 @@ fn auth_status_not_logged_in() {
         .env("HOME", TempDir::new().unwrap().path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Daemon not running"));
+        .stdout(predicate::str::contains("Not logged in"));
 }
 
-/// Test auth login with token (daemon not running)
+/// Test auth login with token (writes to local AuthStore, no daemon)
 #[test]
 fn auth_token_login() {
     let tmp = TempDir::new().unwrap();
 
-    // Set HOME to temp dir to isolate auth state — daemon won't be running
+    // V1.10: login_with_token writes to local AuthStore, no daemon needed
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("auth")
@@ -124,24 +124,25 @@ fn auth_token_login() {
         .arg("usr_test_123")
         .env("HOME", tmp.path())
         .assert()
-        .failure() // Daemon not running
-        .stderr(predicate::str::contains("Daemon not running"));
+        .success()
+        .stdout(predicate::str::contains("token stored"));
 }
 
-/// Test auth logout (daemon not running)
+/// Test auth logout (clears local AuthStore, no daemon)
 #[test]
 fn auth_logout() {
     let tmp = TempDir::new().unwrap();
 
-    // Logout requires daemon running
+    // V1.10: logout clears local AuthStore, no daemon needed.
+    // When not logged in, prints "Not logged in." (success exit).
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("auth")
         .arg("logout")
         .env("HOME", tmp.path())
         .assert()
-        .failure() // Daemon not running
-        .stderr(predicate::str::contains("Daemon not running"));
+        .success()
+        .stdout(predicate::str::contains("Not logged in"));
 }
 
 /// Test creator command group
@@ -308,7 +309,7 @@ fn context_assemble_requires_world_id() {
         .stderr(predicate::str::contains("--world-id"));
 }
 
-/// Test context assemble command with --world-id attempts daemon connection
+/// Test context assemble command returns "not yet available" in V1.10
 #[test]
 fn context_assemble_with_world_id_connects_daemon() {
     Command::cargo_bin("nexus42")
@@ -319,7 +320,7 @@ fn context_assemble_with_world_id_connects_daemon() {
         .arg("wld_test123")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Error"));
+        .stderr(predicate::str::contains("not yet available"));
 }
 
 /// Test soul command group help
