@@ -72,14 +72,6 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS device_code_sessions (
-    device_code TEXT PRIMARY KEY,
-    user_code TEXT NOT NULL,
-    verification_uri TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
-);
-
 CREATE TABLE IF NOT EXISTS acp_tool_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tool_name TEXT NOT NULL,

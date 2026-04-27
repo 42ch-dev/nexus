@@ -60,10 +60,6 @@ mod tests {
         assert!(table_names.contains(&"outbox"), "missing outbox");
         assert!(table_names.contains(&"auth_tokens"), "missing auth_tokens");
         assert!(
-            table_names.contains(&"device_code_sessions"),
-            "missing device_code_sessions"
-        );
-        assert!(
             table_names.contains(&"acp_tool_audit_log"),
             "missing acp_tool_audit_log"
         );

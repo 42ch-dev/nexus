@@ -303,7 +303,7 @@ async fn register_creator(
     // --- Step 2: Create platform client and call register ---
     println!("Registering creator \"{}\"...", name);
 
-    let client = PlatformClient::new(&config.platform_url, &auth_token)?;
+    let client = PlatformClient::new(&config.platform_url, &auth_token, &config.device_id)?;
 
     let register_response = client
         .register_creator(&name, &source, validated_handle)
@@ -828,7 +828,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token", "dev_test")
+            .expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_test", "47", 2).await;
 
         assert!(result.is_ok());
@@ -850,7 +851,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token", "dev_test")
+            .expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_expired", "47", 2).await;
 
         assert!(result.is_ok());
@@ -872,7 +874,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token", "dev_test")
+            .expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_locked", "47", 2).await;
 
         assert!(result.is_ok());
@@ -907,7 +910,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token", "dev_test")
+            .expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_retry", "47", 2).await;
 
         assert!(result.is_ok());
@@ -934,7 +938,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create client");
+        let client = PlatformClient::new(&mock_server.uri(), "test_token", "dev_test")
+            .expect("create client");
         let result = submit_with_retry(&client, "nxc_verify_fail", "47", 2).await;
 
         assert!(result.is_ok());

@@ -127,7 +127,6 @@ pub async fn require_auth(
 #[cfg(test)]
 mod tests {
     use crate::api::handlers;
-    use crate::test_utils::create_test_workspace;
     use crate::workspace::WorkspaceState;
     use axum::routing::{get, post};
     use axum::Router;
@@ -178,15 +177,6 @@ mod tests {
                 post(handlers::workspace::init_workspace),
             );
 
-        let auth_routes = Router::new()
-            .route("/v1/local/auth/status", get(handlers::auth::status))
-            .route(
-                "/v1/local/auth/device",
-                post(handlers::auth::device_authorization),
-            )
-            .route("/v1/local/auth/token", post(handlers::auth::exchange_token))
-            .route("/v1/local/auth/logout", post(handlers::auth::logout));
-
         // Auth-protected routes (require valid Bearer token)
         let creator_routes = Router::new()
             .route("/v1/local/creators", get(handlers::creators::list))
@@ -209,24 +199,12 @@ mod tests {
                 super::require_auth,
             ));
 
-        let context_routes = Router::new()
-            .route(
-                "/v1/local/context/assemble",
-                post(handlers::context::assemble),
-            )
-            .route_layer(axum_mw::from_fn_with_state(
-                state.clone(),
-                super::require_auth,
-            ));
-
         Router::new()
             .merge(runtime_routes)
             .merge(workspace_routes)
-            .merge(auth_routes)
             .merge(creator_routes)
             .merge(manuscript_routes)
             .merge(reference_routes)
-            .merge(context_routes)
             .with_state(state)
     }
 
@@ -239,31 +217,6 @@ mod tests {
         assert!(
             response.status_code().is_success(),
             "health should return 2xx without auth, got {}",
-            response.status_code(),
-        );
-    }
-
-    #[tokio::test]
-    async fn auth_status_works_without_auth() {
-        let app = create_test_app().await;
-        let response = app.get("/v1/local/auth/status").await;
-        assert!(
-            response.status_code().is_success(),
-            "auth status should return 2xx without auth, got {}",
-            response.status_code(),
-        );
-    }
-
-    #[tokio::test]
-    async fn auth_device_works_without_auth() {
-        let app = create_test_app().await;
-        let response = app
-            .post("/v1/local/auth/device")
-            .json(&serde_json::json!({}))
-            .await;
-        assert!(
-            response.status_code().is_success(),
-            "auth device should return 2xx without auth, got {}",
             response.status_code(),
         );
     }
