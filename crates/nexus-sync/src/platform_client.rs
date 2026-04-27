@@ -125,6 +125,7 @@ pub struct PlatformClient {
     client: Client,
     base_url: String,
     auth_token: String,
+    device_id: String,
 }
 
 impl PlatformClient {
@@ -133,7 +134,8 @@ impl PlatformClient {
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform API (e.g. `https://api.nexus42.invalid`)
     /// * `auth_token` - Bearer token for authentication
-    pub fn new(platform_base_url: &str, auth_token: &str) -> SyncResult<Self> {
+    /// * `device_id` - Persistent machine identifier (UUID v4)
+    pub fn new(platform_base_url: &str, auth_token: &str, device_id: &str) -> SyncResult<Self> {
         if platform_base_url.is_empty() {
             return Err(SyncError::SyncNotConfigured(
                 "platform_base_url is required".to_string(),
@@ -142,6 +144,11 @@ impl PlatformClient {
         if auth_token.is_empty() {
             return Err(SyncError::SyncNotConfigured(
                 "auth_token is required".to_string(),
+            ));
+        }
+        if device_id.is_empty() {
+            return Err(SyncError::SyncNotConfigured(
+                "device_id is required".to_string(),
             ));
         }
 
@@ -155,6 +162,7 @@ impl PlatformClient {
             client,
             base_url,
             auth_token: auth_token.to_string(),
+            device_id: device_id.to_string(),
         })
     }
 
@@ -243,6 +251,7 @@ impl PlatformClient {
             .client
             .request(method, url)
             .header("Authorization", format!("Bearer {}", self.auth_token))
+            .header("X-Device-ID", &self.device_id)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 
@@ -393,19 +402,25 @@ mod tests {
 
     #[test]
     fn client_creation_requires_base_url() {
-        let result = PlatformClient::new("", "some_token");
+        let result = PlatformClient::new("", "some_token", "dev_123");
         assert!(matches!(result, Err(SyncError::SyncNotConfigured { .. })));
     }
 
     #[test]
     fn client_creation_requires_auth_token() {
-        let result = PlatformClient::new("https://api.example.com", "");
+        let result = PlatformClient::new("https://api.example.com", "", "dev_123");
+        assert!(matches!(result, Err(SyncError::SyncNotConfigured { .. })));
+    }
+
+    #[test]
+    fn client_creation_requires_device_id() {
+        let result = PlatformClient::new("https://api.example.com", "some_token", "");
         assert!(matches!(result, Err(SyncError::SyncNotConfigured { .. })));
     }
 
     #[test]
     fn client_creation_succeeds() {
-        let result = PlatformClient::new("https://api.example.com", "some_token");
+        let result = PlatformClient::new("https://api.example.com", "some_token", "dev_123");
         assert!(result.is_ok());
         let client = result.expect("ok");
         assert_eq!(client.base_url(), "https://api.example.com");
@@ -413,7 +428,7 @@ mod tests {
 
     #[test]
     fn client_normalizes_trailing_slash() {
-        let result = PlatformClient::new("https://api.example.com/", "some_token");
+        let result = PlatformClient::new("https://api.example.com/", "some_token", "dev_123");
         let client = result.expect("ok");
         assert_eq!(client.base_url(), "https://api.example.com");
     }
@@ -442,7 +457,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
+        let client =
+            PlatformClient::new(&mock_server.uri(), "test_token", "dev_123").expect("create");
         let resp = client
             .register_creator("Test Creator", "cli", None)
             .await
@@ -467,7 +483,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
+        let client =
+            PlatformClient::new(&mock_server.uri(), "test_token", "dev_123").expect("create");
         let result = client.register_creator("Test", "cli", None).await;
         assert!(matches!(
             result,
@@ -490,7 +507,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
+        let client =
+            PlatformClient::new(&mock_server.uri(), "test_token", "dev_123").expect("create");
         let resp = client
             .verify_creator("nxc_verify_test", "47")
             .await
@@ -518,7 +536,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = PlatformClient::new(&mock_server.uri(), "test_token").expect("create");
+        let client =
+            PlatformClient::new(&mock_server.uri(), "test_token", "dev_123").expect("create");
         let resp = client
             .verify_creator("nxc_verify_test", "99")
             .await
@@ -526,5 +545,38 @@ mod tests {
 
         assert_eq!(resp.status, VerifyStatus::WrongAnswer);
         assert_eq!(resp.remaining_attempts, Some(2));
+    }
+
+    #[tokio::test]
+    async fn request_includes_x_device_id_header() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/creators/register"))
+            .and(header("X-Device-ID", "dev_test_uuid"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "creator_id": "crt_header_test",
+                "display_name": "Header Test",
+                "creator_api_key": "nexus_live_key",
+                "verification": {
+                    "verification_code": "nxc_verify_test",
+                    "challenge_text": "Test",
+                    "expires_at": "2026-04-16T00:05:00.000Z",
+                    "instructions": "Test"
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            PlatformClient::new(&mock_server.uri(), "test_token", "dev_test_uuid").expect("create");
+        let resp = client
+            .register_creator("Header Test", "cli", None)
+            .await
+            .expect("register");
+
+        assert_eq!(resp.creator_id, "crt_header_test");
     }
 }

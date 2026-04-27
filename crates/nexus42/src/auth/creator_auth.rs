@@ -6,8 +6,7 @@
 
 #![allow(dead_code)]
 
-use super::{user_auth, AuthStore};
-use crate::api::daemon_client::DaemonClient;
+use super::AuthStore;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 
@@ -59,19 +58,16 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
     })
 }
 
-/// Get the current user access token from the daemon.
+/// Get the current user access token from AuthStore.
 ///
+/// Reads the platform JWT from the local auth store.
 /// Returns an error if the user is not authenticated.
-async fn get_user_token(config: &CliConfig) -> Result<String> {
-    let client = DaemonClient::from_config(config);
-    if !client.health_check().await? {
-        return Err(CliError::DaemonNotRunning);
+async fn get_user_token(_config: &CliConfig) -> Result<String> {
+    let store = AuthStore::load()?;
+    match &store.user_token {
+        Some(token) if !token.access_token.is_empty() => Ok(token.access_token.clone()),
+        _ => Err(CliError::Other(
+            "Not authenticated. Run `nexus42 auth login` first.".into(),
+        )),
     }
-    let _status: user_auth::AuthStatusResponse = client.get("/v1/local/auth/status").await?;
-    // The daemon doesn't expose the access_token directly via status.
-    // For now, return a placeholder. The actual token flow will be
-    // handled differently when platform integration lands.
-    Err(CliError::Other(
-        "User token retrieval via daemon not yet implemented. Use `nexus42 auth login`.".into(),
-    ))
 }

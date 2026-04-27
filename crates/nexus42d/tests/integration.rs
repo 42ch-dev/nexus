@@ -61,10 +61,6 @@ fn build_test_app(state: WorkspaceState) -> Router {
             axum::routing::get(handlers::workspace::info),
         )
         .route(
-            "/v1/local/auth/status",
-            axum::routing::get(handlers::auth::status),
-        )
-        .route(
             "/v1/local/creators",
             axum::routing::get(handlers::creators::list),
         )
@@ -75,10 +71,6 @@ fn build_test_app(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/references",
             axum::routing::get(handlers::references::list),
-        )
-        .route(
-            "/v1/local/context/assemble",
-            axum::routing::post(handlers::context::assemble),
         )
         .with_state(state)
 }
@@ -143,19 +135,6 @@ async fn workspace_info_endpoint() {
 }
 
 #[tokio::test]
-async fn auth_status_endpoint() {
-    let (state, _tmp) = create_test_state().await;
-    let app = build_test_app(state);
-
-    let server = TestServer::new(app).unwrap();
-    let response = server.get("/v1/local/auth/status").await;
-
-    response.assert_status_ok();
-    let body: serde_json::Value = response.json();
-    assert_eq!(body["authenticated"], false);
-}
-
-#[tokio::test]
 async fn creators_list_endpoint() {
     let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
@@ -200,57 +179,6 @@ async fn references_list_endpoint() {
     assert_eq!(refs[0]["reference_source_id"], "ref_test_001");
     assert_eq!(refs[0]["source_type"], "pdf");
     assert_eq!(refs[0]["title"], "Test Reference");
-}
-
-#[tokio::test]
-async fn context_assemble_endpoint() {
-    let (state, _tmp) = create_test_state().await;
-    let app = build_test_app(state);
-
-    let server = TestServer::new(app).unwrap();
-
-    // Test: local_first mode returns mock response
-    let payload = serde_json::json!({
-        "creator_id": "ctr_001",
-        "workspace_slug": "default",
-        "runtime_mode": "local_first",
-        "prompt_hint": "Test prompt"
-    });
-    let response = server
-        .post("/v1/local/context/assemble")
-        .json(&payload)
-        .await;
-
-    response.assert_status(StatusCode::OK);
-    let body: serde_json::Value = response.json();
-    assert!(body["memory_items"].is_array());
-    assert!(body["kb"].is_array());
-    assert!(body["timeline"].is_array());
-    assert!(body["metadata"]["assembled_at"].is_string());
-}
-
-/// Integration test: context/assemble returns 403 for local_only mode
-#[tokio::test]
-async fn context_assemble_blocked_for_local_only() {
-    let (state, _tmp) = create_test_state().await;
-    let app = build_test_app(state);
-
-    let server = TestServer::new(app).unwrap();
-
-    let payload = serde_json::json!({
-        "creator_id": "ctr_001",
-        "workspace_slug": "default",
-        "runtime_mode": "local_only"
-    });
-    let response = server
-        .post("/v1/local/context/assemble")
-        .json(&payload)
-        .await;
-
-    response.assert_status(StatusCode::FORBIDDEN);
-    let body: serde_json::Value = response.json();
-    assert!(!body["success"].as_bool().unwrap());
-    assert_eq!(body["error"]["code"], "FORBIDDEN");
 }
 
 /// Integration test: concurrent handler requests all succeed
@@ -313,10 +241,6 @@ fn build_extended_test_app(state: WorkspaceState) -> Router {
             axum::routing::get(handlers::workspace::info),
         )
         .route(
-            "/v1/local/auth/status",
-            axum::routing::get(handlers::auth::status),
-        )
-        .route(
             "/v1/local/creators",
             axum::routing::get(handlers::creators::list),
         )
@@ -327,10 +251,6 @@ fn build_extended_test_app(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/references",
             axum::routing::get(handlers::references::list),
-        )
-        .route(
-            "/v1/local/context/assemble",
-            axum::routing::post(handlers::context::assemble),
         )
         // E9: Memory/KB endpoints
         .route(
