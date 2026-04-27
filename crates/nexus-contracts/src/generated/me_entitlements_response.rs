@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source me-entitlements-response.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{AccountStatus, SubscriptionTier};
+use serde::{Deserialize, Serialize};
 
 /// GET /me/entitlements 200 response body. SSOT: v1-spec schema/entitlements-wire-v1.md §3.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

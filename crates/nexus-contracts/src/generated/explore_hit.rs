@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source explore-hit.schema.json
 
+use crate::generated::common_types::Visibility;
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{Visibility};
 
 /// Single browse/search result row for Explore read APIs (platform contract; plan 16 slice).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

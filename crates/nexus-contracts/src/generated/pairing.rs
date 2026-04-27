@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source pairing.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{PairingSource, PairingStatus};
+use serde::{Deserialize, Serialize};
 
 /// Pairing entity describing Creator <-> User association. Aligned with data-model-v1.md §5.2A.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

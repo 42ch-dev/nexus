@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source sync-pull-response.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::bundle::Bundle;
+use serde::{Deserialize, Serialize};
 
 /// Response body for POST /v1/sync/pull — bundles to apply locally plus server cursors.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

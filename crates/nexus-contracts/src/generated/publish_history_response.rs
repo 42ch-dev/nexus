@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source publish-history-response.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::publish_history_entry::PublishHistoryEntry;
+use serde::{Deserialize, Serialize};
 
 /// Response body for POST /v1/publish/history.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

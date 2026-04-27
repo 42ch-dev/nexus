@@ -340,5 +340,3 @@ pub fn enter_failed(exit_code: i32, last_error: Option<String>) {
     tracing::error!("daemon exiting with code {}", exit_code);
     std::process::exit(exit_code);
 }
-
-

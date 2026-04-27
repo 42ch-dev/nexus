@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source memory.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{MemoryKind, MemoryStatus, MemoryType};
+use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

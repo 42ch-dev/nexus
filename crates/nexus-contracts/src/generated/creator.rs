@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source creator.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{CreatorStatus, RegistrationSource};
+use serde::{Deserialize, Serialize};
 
 /// Creator entity - a first-class creative agent that can be user-owned or agent-registered. Aligned with data-model-v1.md §5.2.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source memory-web-list-request.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{MemoryKind, MemoryStatus, MemoryType};
+use serde::{Deserialize, Serialize};
 
 /// Request body for memory web read — list / filter MemoryItem rows for a world (platform plan 18). Aligns with domain memory.schema.json field semantics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
