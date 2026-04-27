@@ -1,16 +1,20 @@
 {
   "version": 1,
-  "updated_at": "2026-04-27T22:00:00Z",
+  "updated_at": "2026-04-27T23:00:00Z",
   "plans": [
     {
       "plan_id": "2026-04-27-v1.10-device-flow-login",
-      "status": "Todo",
+      "status": "InProgress",
       "title": "V1.10 — Device Flow Login + DeviceID Header + Daemon Cleanup",
       "created_at": "2026-04-27",
       "owner": "project-manager",
       "plan_file": ".agents/plans/2026-04-27-v1.10-device-flow-login.md",
       "primary_spec": ".agents/knowledge/v1.10-delivery-compass-v1.md",
-      "working_branch": "feature/v1.10"
+      "working_branch": "feature/v1.10 (integrated from feature/v1.10-ws-a + feature/v1.10-ws-b)",
+      "worktrees": {
+        "ws-a": ".worktrees/v1.10-ws-a/ (branch: feature/v1.10-ws-a)",
+        "ws-b": ".worktrees/v1.10-ws-b/ (branch: feature/v1.10-ws-b)"
+      }
     }
   ],
   "metadata": {

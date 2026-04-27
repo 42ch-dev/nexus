@@ -86,6 +86,7 @@ pub struct DeviceTokenResponse {
 pub struct DeviceFlowClient {
     client: Client,
     base_url: String,
+    device_id: String,
 }
 
 impl DeviceFlowClient {
@@ -93,7 +94,8 @@ impl DeviceFlowClient {
     ///
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform API (e.g. `https://api.nexus42.io`)
-    pub fn new(platform_base_url: &str) -> SyncResult<Self> {
+    /// * `device_id` - Persistent machine identifier for rate-limit preference
+    pub fn new(platform_base_url: &str, device_id: &str) -> SyncResult<Self> {
         if platform_base_url.is_empty() {
             return Err(SyncError::SyncNotConfigured(
                 "platform_base_url is required".to_string(),
@@ -106,7 +108,11 @@ impl DeviceFlowClient {
 
         let base_url = platform_base_url.trim_end_matches('/').to_string();
 
-        Ok(Self { client, base_url })
+        Ok(Self {
+            client,
+            base_url,
+            device_id: device_id.to_string(),
+        })
     }
 
     /// Request a device authorization code.
@@ -132,6 +138,7 @@ impl DeviceFlowClient {
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
+            .header("X-Device-ID", &self.device_id)
             .json(&body)
             .send()
             .await
@@ -184,6 +191,7 @@ impl DeviceFlowClient {
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
+            .header("X-Device-ID", &self.device_id)
             .json(&body)
             .send()
             .await
@@ -251,15 +259,17 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    const TEST_DEVICE_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+
     #[test]
     fn client_creation_requires_base_url() {
-        let result = DeviceFlowClient::new("");
+        let result = DeviceFlowClient::new("", TEST_DEVICE_ID);
         assert!(matches!(result, Err(SyncError::SyncNotConfigured { .. })));
     }
 
     #[test]
     fn client_creation_succeeds() {
-        let result = DeviceFlowClient::new("https://api.example.com");
+        let result = DeviceFlowClient::new("https://api.example.com", TEST_DEVICE_ID);
         assert!(result.is_ok());
         let client = result.expect("ok");
         assert_eq!(client.base_url(), "https://api.example.com");
@@ -267,7 +277,7 @@ mod tests {
 
     #[test]
     fn client_normalizes_trailing_slash() {
-        let result = DeviceFlowClient::new("https://api.example.com/");
+        let result = DeviceFlowClient::new("https://api.example.com/", TEST_DEVICE_ID);
         let client = result.expect("ok");
         assert_eq!(client.base_url(), "https://api.example.com");
     }
@@ -291,7 +301,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let resp = client
             .request_device_code(None, None)
             .await
@@ -319,7 +329,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let result = client.request_device_code(None, None).await;
         assert!(matches!(
             result,
@@ -343,7 +353,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let resp = client
             .poll_device_token("dc_test_abc123", None)
             .await
@@ -372,7 +382,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let result = client.poll_device_token("dc_test", None).await;
         assert_eq!(result.unwrap_err(), DeviceFlowError::AuthorizationPending);
     }
@@ -395,7 +405,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let result = client.poll_device_token("dc_test", None).await;
         assert_eq!(result.unwrap_err(), DeviceFlowError::SlowDown);
     }
@@ -418,7 +428,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let result = client.poll_device_token("dc_test", None).await;
         assert_eq!(result.unwrap_err(), DeviceFlowError::ExpiredToken);
     }
@@ -441,7 +451,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let result = client.poll_device_token("dc_test", None).await;
         assert_eq!(result.unwrap_err(), DeviceFlowError::AccessDenied);
     }
@@ -457,7 +467,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DeviceFlowClient::new(&mock_server.uri()).expect("create");
+        let client = DeviceFlowClient::new(&mock_server.uri(), TEST_DEVICE_ID).expect("create");
         let result = client.poll_device_token("dc_test", None).await;
         match result.unwrap_err() {
             DeviceFlowError::Other(msg) => {

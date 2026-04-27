@@ -19,7 +19,7 @@ use nexus_sync::device_flow_client::{DeviceFlowClient, DeviceFlowError};
 /// 3. Poll `/device/token` respecting interval and slow_down
 /// 4. On success, store platform JWT in AuthStore
 pub async fn login(config: &CliConfig) -> Result<()> {
-    let client = DeviceFlowClient::new(&config.platform_url)?;
+    let client = DeviceFlowClient::new(&config.platform_url, &config.device_id)?;
 
     // Step 1: Request device authorization from platform
     let auth_response = client.request_device_code(None, None).await?;
