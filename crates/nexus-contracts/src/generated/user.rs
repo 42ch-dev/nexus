@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source user.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{AccountStatus, SubscriptionTier};
+use serde::{Deserialize, Serialize};
 
 /// End-user account for authentication and platform identity. Aligned with data-model-v1.md §5.1.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

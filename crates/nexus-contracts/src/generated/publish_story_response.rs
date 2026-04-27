@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source publish-story-response.schema.json
 
+use crate::generated::common_types::PublishStoryOutcome;
 use serde::{Deserialize, Serialize};
-use crate::generated::common_types::{PublishStoryOutcome};
 
 /// Response body for POST /v1/publish/story.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

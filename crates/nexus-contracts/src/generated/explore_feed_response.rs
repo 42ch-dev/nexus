@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source explore-feed-response.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::explore_hit::ExploreHit;
+use serde::{Deserialize, Serialize};
 
 /// Paginated Explore results for browse and search responses (POST /v1/explore/browse | /v1/explore/search).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

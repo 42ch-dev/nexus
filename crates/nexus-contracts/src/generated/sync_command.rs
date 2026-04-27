@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source sync-command.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{CommandOrigin, CommandStatus, CommandType};
+use serde::{Deserialize, Serialize};
 
 /// SyncCommand entity representing a business action with audit attribution. Aligned with data-model-v1.md §5.10.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

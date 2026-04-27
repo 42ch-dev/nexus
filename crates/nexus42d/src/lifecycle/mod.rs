@@ -15,8 +15,8 @@ pub use actions::*;
 pub use events::{Event, SubsystemKind};
 pub use state::{DaemonHsm, StatigLifecycle};
 pub use subsystems::{
-    DbSubsystem, HttpSubsystem, MockAllSubsystems, SubsystemBootstrap,
-    SubsystemHealth, SyncSubsystem, WorkerMgrSubsystem,
+    DbSubsystem, HttpSubsystem, MockAllSubsystems, SubsystemBootstrap, SubsystemHealth,
+    SyncSubsystem, WorkerMgrSubsystem,
 };
 
 use tokio::sync::broadcast;

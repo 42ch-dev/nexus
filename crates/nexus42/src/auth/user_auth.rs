@@ -289,24 +289,24 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
     }
 
     if status >= 400 {
-        return Err(CliError::Api { status, message: text });
+        return Err(CliError::Api {
+            status,
+            message: text,
+        });
     }
 
     // Parse success response
     let envelope: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| CliError::Other(format!("Parse error: {e}")))?;
-    let data = envelope
-        .get("data")
-        .cloned()
-        .unwrap_or(envelope);
+    let data = envelope.get("data").cloned().unwrap_or(envelope);
 
     // Reuse DeviceTokenResponse for parsing (it now has refresh fields)
     let token_response: nexus_sync::device_flow_client::DeviceTokenResponse =
         serde_json::from_value(data)
             .map_err(|e| CliError::Other(format!("Failed to parse token response: {e}")))?;
 
-    let expires_at = chrono::Utc::now()
-        + chrono::Duration::seconds(token_response.expires_in as i64);
+    let expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(token_response.expires_in as i64);
 
     // Get the existing user_id from the current store
     let store = AuthStore::load()?;
@@ -340,12 +340,9 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
 pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
     let store = AuthStore::load()?;
 
-    let token = store
-        .user_token
-        .as_ref()
-        .ok_or_else(|| {
-            CliError::Other("Not authenticated. Run `nexus42 auth login` first.".into())
-        })?;
+    let token = store.user_token.as_ref().ok_or_else(|| {
+        CliError::Other("Not authenticated. Run `nexus42 auth login` first.".into())
+    })?;
 
     // Check if access token is still valid (with 60s buffer)
     let expires_at = chrono::DateTime::parse_from_rfc3339(&token.expires_at)
@@ -369,9 +366,7 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
             .user_token
             .as_ref()
             .map(|t| t.access_token.clone())
-            .ok_or_else(|| {
-                CliError::Other("Token refresh succeeded but token is missing".into())
-            });
+            .ok_or_else(|| CliError::Other("Token refresh succeeded but token is missing".into()));
     }
 
     // No refresh token available
@@ -867,6 +862,9 @@ mod tests {
         }
 
         let store = AuthStore::load().unwrap_or_default();
-        assert!(store.user_token.is_none(), "Expected user_token to be None after logout");
+        assert!(
+            store.user_token.is_none(),
+            "Expected user_token to be None after logout"
+        );
     }
 }

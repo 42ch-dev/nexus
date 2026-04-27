@@ -183,6 +183,9 @@ mod tests {
         );
 
         let path = nexus_home_layout::device_id_path(&deep);
-        assert!(path.exists(), "device-id file should be created in nested directory");
+        assert!(
+            path.exists(),
+            "device-id file should be created in nested directory"
+        );
     }
 }

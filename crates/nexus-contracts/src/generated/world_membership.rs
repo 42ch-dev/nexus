@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source world-membership.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{MembershipRole, MembershipStatus};
+use serde::{Deserialize, Serialize};
 
 /// WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source fork-branch.schema.json
 
-use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{ForkBranchStatus, VerificationStatus};
+use serde::{Deserialize, Serialize};
 
 /// ForkBranch - describes a world branch forked from a parent world at a specific event. Aligned with data-model-v1.md §5.7.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
