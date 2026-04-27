@@ -1,0 +1,12 @@
+{
+  "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
+  "title": "V1.11 \u2014 Daemon Stub Cleanup + DeviceID TOCTOU Fix",
+  "status": "Done",
+  "done_at": "2026-04-28T15:00:00Z",
+  "working_branch": "feature/v1.11",
+  "qc_reports": [
+    ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc1.md",
+    ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc2.md",
+    ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
+  ]
+}

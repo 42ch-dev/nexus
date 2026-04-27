@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-27T23:59:00Z",
+  "updated_at": "2026-04-28T15:00:00Z",
   "plans": [
     {
       "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
@@ -491,6 +491,20 @@
       "done_at": "2026-04-27T23:59:00Z",
       "plan_file": ".agents/plans/2026-04-27-v1.10-device-flow-login.md",
       "archived_record": ".agents/archived/plans/2026-04-27-v1.10-device-flow-login.json"
+    },
+    {
+      "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
+      "title": "V1.11 \u2014 Daemon Stub Cleanup + DeviceID TOCTOU Fix",
+      "done_at": "2026-04-28T15:00:00Z",
+      "plan_file": ".agents/plans/2026-04-27-v1.11-daemon-cleanup-toctou.md",
+      "archived_record": ".agents/archived/plans/2026-04-27-v1.11-daemon-cleanup-toctou.json"
+    },
+    {
+      "plan_id": "2026-04-28-v1.11-cli-refresh-token",
+      "title": "V1.11 \u2014 CLI refresh_token Support",
+      "done_at": "2026-04-28T15:00:00Z",
+      "plan_file": ".agents/plans/2026-04-28-v1.11-cli-refresh-token.md",
+      "archived_record": ".agents/archived/plans/2026-04-28-v1.11-cli-refresh-token.json"
     }
   ]
 }
