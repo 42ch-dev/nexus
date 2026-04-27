@@ -28,6 +28,7 @@ pub mod canonical_hash;
 pub mod command;
 pub mod conflict;
 pub mod delta_bundle;
+pub mod device_flow_client;
 pub mod errors;
 pub mod outbox;
 pub mod partial_apply;
