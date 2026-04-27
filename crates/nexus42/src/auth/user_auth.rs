@@ -43,7 +43,10 @@ pub async fn login(config: &CliConfig) -> Result<()> {
     for attempt in 1..=max_attempts {
         tokio::time::sleep(interval).await;
 
-        match client.poll_device_token(&auth_response.device_code, None).await {
+        match client
+            .poll_device_token(&auth_response.device_code, None)
+            .await
+        {
             Ok(token_response) => {
                 // Success — compute expires_at and store in AuthStore
                 let expires_at = chrono::Utc::now()
@@ -93,15 +96,11 @@ pub async fn login(config: &CliConfig) -> Result<()> {
             }
             Err(DeviceFlowError::ExpiredToken) => {
                 eprintln!("\u{2717} Device code expired. Please try again.");
-                return Err(CliError::Other(
-                    "Device authorization expired".into(),
-                ));
+                return Err(CliError::Other("Device authorization expired".into()));
             }
             Err(DeviceFlowError::AccessDenied) => {
                 eprintln!("\u{2717} Authorization denied by user.");
-                return Err(CliError::Other(
-                    "Authorization denied".into(),
-                ));
+                return Err(CliError::Other("Authorization denied".into()));
             }
             Err(DeviceFlowError::Other(msg)) => {
                 if attempt % 6 == 0 {
@@ -142,7 +141,10 @@ pub async fn login_with_token(
     let store = AuthStore::load()?;
     if let Some(t) = &store.user_token {
         println!("  User: {}", t.user_id);
-        println!("  Token: {}...", &t.access_token[..t.access_token.len().min(16)]);
+        println!(
+            "  Token: {}...",
+            &t.access_token[..t.access_token.len().min(16)]
+        );
         println!("  Expires: {}", t.expires_at);
     }
 
@@ -224,8 +226,8 @@ mod tests {
     fn extract_user_id_falls_back_to_sub() {
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(r#"{"alg":"HS256","typ":"JWT"}"#);
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(r#"{"sub":"usr_sub_only"}"#);
+        let payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"usr_sub_only"}"#);
         let token = format!("{}.{}.fake_sig", header, payload);
 
         let user_id = extract_user_id_from_jwt(&token).expect("extract");
@@ -286,7 +288,7 @@ mod tests {
         // Either success or IO error (can't write auth.json in test) is acceptable.
         // The important thing is it doesn't panic or loop infinitely.
         match result {
-            Ok(()) => {} // Full success
+            Ok(()) => {}               // Full success
             Err(CliError::Io(_)) => {} // Expected in sandboxed env
             Err(e) => panic!("Unexpected error: {e}"),
         }
@@ -336,7 +338,10 @@ mod tests {
         let result = login(&config).await;
         match result {
             Err(CliError::Other(msg)) => {
-                assert!(msg.contains("expired"), "Expected 'expired' in error, got: {msg}");
+                assert!(
+                    msg.contains("expired"),
+                    "Expected 'expired' in error, got: {msg}"
+                );
             }
             other => panic!("Expected CliError::Other with expired, got: {other:?}"),
         }
@@ -385,7 +390,10 @@ mod tests {
         let result = login(&config).await;
         match result {
             Err(CliError::Other(msg)) => {
-                assert!(msg.contains("denied"), "Expected 'denied' in error, got: {msg}");
+                assert!(
+                    msg.contains("denied"),
+                    "Expected 'denied' in error, got: {msg}"
+                );
             }
             other => panic!("Expected CliError::Other with denied, got: {other:?}"),
         }

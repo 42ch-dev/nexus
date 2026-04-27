@@ -151,11 +151,9 @@ impl DeviceFlowClient {
         let envelope: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
-        let data = envelope
-            .get("data")
-            .ok_or_else(|| {
-                SyncError::Serialization("Missing 'data' field in device code response".to_string())
-            })?;
+        let data = envelope.get("data").ok_or_else(|| {
+            SyncError::Serialization("Missing 'data' field in device code response".to_string())
+        })?;
 
         serde_json::from_value::<DeviceCodeResponse>(data.clone())
             .map_err(|e| SyncError::Serialization(e.to_string()))
@@ -220,9 +218,7 @@ impl DeviceFlowClient {
                     });
                 }
             }
-            return Err(DeviceFlowError::Other(format!(
-                "Bad request (400): {text}"
-            )));
+            return Err(DeviceFlowError::Other(format!("Bad request (400): {text}")));
         }
 
         if status >= 400 {
@@ -238,9 +234,8 @@ impl DeviceFlowClient {
 
         let data = envelope.get("data").cloned().unwrap_or(envelope);
 
-        serde_json::from_value::<DeviceTokenResponse>(data).map_err(|e| {
-            DeviceFlowError::Other(format!("Failed to parse token response: {e}"))
-        })
+        serde_json::from_value::<DeviceTokenResponse>(data)
+            .map_err(|e| DeviceFlowError::Other(format!("Failed to parse token response: {e}")))
     }
 
     /// Get the base URL (for testing).

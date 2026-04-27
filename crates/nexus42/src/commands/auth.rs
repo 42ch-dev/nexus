@@ -42,8 +42,7 @@ pub async fn run(cmd: AuthCommand, config: &CliConfig) -> Result<()> {
             expires_in,
             user_id,
         } => {
-            let uid =
-                user_id.unwrap_or_else(|| format!("usr_dev_{}", uuid::Uuid::new_v4()));
+            let uid = user_id.unwrap_or_else(|| format!("usr_dev_{}", uuid::Uuid::new_v4()));
             auth::user_auth::login_with_token(config, access_token, uid, expires_in).await
         }
         AuthCommand::Logout => auth::user_auth::logout(config).await,
