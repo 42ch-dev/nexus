@@ -127,11 +127,11 @@ pub async fn require_auth(
 #[cfg(test)]
 mod tests {
     use crate::api::handlers;
+    use crate::test_utils::{seed_expired_token, seed_valid_token};
     use crate::workspace::WorkspaceState;
     use axum::routing::{get, post};
     use axum::Router;
     use axum_test::TestServer;
-    use chrono::Utc;
     use serde_json::Value;
 
     struct TestApp {
@@ -282,7 +282,7 @@ mod tests {
         let app = create_test_app().await;
 
         // Seed a valid token in the database
-        seed_valid_token(&app.state, "usr_test", "valid-access-token").await;
+        seed_valid_token(&app.state, "usr_test", "valid-access-token", "rt_mock").await;
 
         let response = app
             .get("/v1/local/creators")
@@ -332,7 +332,7 @@ mod tests {
         let app = create_test_app().await;
 
         // Seed an expired token
-        seed_expired_token(&app.state, "usr_expired", "expired-token").await;
+        seed_expired_token(&app.state, "usr_expired", "expired-token", "rt_mock").await;
 
         let response = app
             .get("/v1/local/creators")
@@ -346,46 +346,6 @@ mod tests {
     }
 
     // --- Helpers ---
-
-    // SAFETY: test-only data setup — inserts mock auth_tokens for middleware tests.
-    // Uses dynamic bind values (expires_at computed at runtime).
-    async fn seed_valid_token(state: &WorkspaceState, user_id: &str, access_token: &str) {
-        let expires_at = (Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
-        let created_at = Utc::now().to_rfc3339();
-
-        sqlx::query(
-            "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-             VALUES (?, ?, ?, ?, ?)"
-        )
-        .bind(user_id)
-        .bind(access_token)
-        .bind("rt_mock")
-        .bind(&expires_at)
-        .bind(&created_at)
-        .execute(state.pool())
-        .await
-        .unwrap();
-    }
-
-    // SAFETY: test-only data setup — inserts mock auth_tokens for middleware tests.
-    // Uses dynamic bind values (expires_at computed at runtime).
-    async fn seed_expired_token(state: &WorkspaceState, user_id: &str, access_token: &str) {
-        let expires_at = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
-        let created_at = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
-
-        sqlx::query(
-            "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
-             VALUES (?, ?, ?, ?, ?)"
-        )
-        .bind(user_id)
-        .bind(access_token)
-        .bind("rt_mock")
-        .bind(&expires_at)
-        .bind(&created_at)
-        .execute(state.pool())
-        .await
-        .unwrap();
-    }
 
     fn assert_auth_error_body(response: &axum_test::TestResponse) {
         let body: Value = response.json();

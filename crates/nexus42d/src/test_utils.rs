@@ -121,6 +121,69 @@ pub async fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, Path
     (tmp, nexus_home, db_path, workspace_dir)
 }
 
+/// Seed a valid (non-expired) auth token for testing.
+///
+/// Inserts a row into `auth_tokens` with the given `user_id`, `access_token`,
+/// and `refresh_token`. The token will expire 1 hour from now.
+#[cfg(test)]
+pub async fn seed_valid_token(
+    state: &crate::workspace::WorkspaceState,
+    user_id: &str,
+    access_token: &str,
+    refresh_token: &str,
+) {
+    use chrono::Utc;
+
+    let expires_at = (Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let created_at = Utc::now().to_rfc3339();
+
+    // SAFETY: test-only data setup — inserts mock auth_tokens for middleware tests.
+    // Uses dynamic bind values (expires_at computed at runtime).
+    sqlx::query(
+        "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(access_token)
+    .bind(refresh_token)
+    .bind(&expires_at)
+    .bind(&created_at)
+    .execute(state.pool())
+    .await
+    .unwrap();
+}
+
+/// Seed an expired auth token for testing.
+///
+/// Inserts a row into `auth_tokens` that expired 1 hour ago.
+#[cfg(test)]
+pub async fn seed_expired_token(
+    state: &crate::workspace::WorkspaceState,
+    user_id: &str,
+    access_token: &str,
+    refresh_token: &str,
+) {
+    use chrono::Utc;
+
+    let expires_at = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let created_at = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+
+    // SAFETY: test-only data setup — inserts mock auth_tokens for middleware tests.
+    // Uses dynamic bind values (expires_at computed at runtime).
+    sqlx::query(
+        "INSERT OR REPLACE INTO auth_tokens (user_id, access_token, refresh_token, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(access_token)
+    .bind(refresh_token)
+    .bind(&expires_at)
+    .bind(&created_at)
+    .execute(state.pool())
+    .await
+    .unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
