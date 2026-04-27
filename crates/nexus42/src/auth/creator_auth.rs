@@ -61,13 +61,8 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
 /// Get the current user access token from AuthStore.
 ///
 /// Reads the platform JWT from the local auth store.
+/// Calls `ensure_valid_token()` to auto-refresh if the token is expiring.
 /// Returns an error if the user is not authenticated.
-async fn get_user_token(_config: &CliConfig) -> Result<String> {
-    let store = AuthStore::load()?;
-    match &store.user_token {
-        Some(token) if !token.access_token.is_empty() => Ok(token.access_token.clone()),
-        _ => Err(CliError::Other(
-            "Not authenticated. Run `nexus42 auth login` first.".into(),
-        )),
-    }
+async fn get_user_token(config: &CliConfig) -> Result<String> {
+    super::user_auth::ensure_valid_token(config).await
 }
