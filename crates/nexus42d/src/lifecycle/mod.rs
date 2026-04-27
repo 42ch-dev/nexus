@@ -15,7 +15,7 @@ pub use actions::*;
 pub use events::{Event, SubsystemKind};
 pub use state::{DaemonHsm, StatigLifecycle};
 pub use subsystems::{
-    DbSubsystem, EngineSubsystem, HttpSubsystem, MockAllSubsystems, SubsystemBootstrap,
+    DbSubsystem, HttpSubsystem, MockAllSubsystems, SubsystemBootstrap,
     SubsystemHealth, SyncSubsystem, WorkerMgrSubsystem,
 };
 
