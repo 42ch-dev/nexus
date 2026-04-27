@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "updated_at": "2026-04-28T12:00:00Z",
+  "updated_at": "2026-04-28T13:00:00Z",
   "plans": [
     {
       "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
-      "status": "Todo",
+      "status": "InProgress",
       "title": "V1.11 \u2014 Daemon Stub Cleanup + DeviceID TOCTOU Fix",
       "created_at": "2026-04-27",
       "owner": "project-manager",
@@ -14,7 +14,7 @@
     },
     {
       "plan_id": "2026-04-28-v1.11-cli-refresh-token",
-      "status": "Todo",
+      "status": "InProgress",
       "title": "V1.11 \u2014 CLI refresh_token Support",
       "created_at": "2026-04-28",
       "owner": "project-manager",

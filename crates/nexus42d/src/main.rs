@@ -468,14 +468,13 @@ fn create_subsystems(
     port: u16,
 ) -> Vec<Arc<dyn nexus42d::lifecycle::SubsystemBootstrap>> {
     use nexus42d::lifecycle::{
-        DbSubsystem, EngineSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem,
+        DbSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem,
     };
 
     vec![
         Arc::new(HttpSubsystem::new(port)),
         Arc::new(DbSubsystem::new(Some(state.database_path()))),
         Arc::new(SyncSubsystem::new()),
-        Arc::new(EngineSubsystem::new()), // Mock - WS2 will provide real impl
         Arc::new(WorkerMgrSubsystem::new()), // Mock - WS2 will provide real impl
     ]
 }

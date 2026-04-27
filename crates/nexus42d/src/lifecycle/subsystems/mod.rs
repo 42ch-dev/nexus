@@ -5,14 +5,12 @@
 //! mock stubs for WS2 components (Engine, WorkerMgr) not yet available.
 
 mod db;
-mod engine;
 mod http;
 mod mock_all;
 mod sync;
 mod worker_mgr;
 
 pub use db::DbSubsystem;
-pub use engine::EngineSubsystem;
 pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
 pub use sync::SyncSubsystem;
