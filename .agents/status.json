@@ -1,46 +1,25 @@
 {
   "version": 1,
-  "updated_at": "2026-04-28T13:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
-      "status": "InProgress",
-      "title": "V1.11 \u2014 Daemon Stub Cleanup + DeviceID TOCTOU Fix",
-      "created_at": "2026-04-27",
-      "owner": "project-manager",
-      "plan_file": ".agents/plans/2026-04-27-v1.11-daemon-cleanup-toctou.md",
-      "primary_spec": ".agents/knowledge/v1.11-delivery-compass-v1.md",
-      "working_branch": "feature/v1.11"
-    },
-    {
-      "plan_id": "2026-04-28-v1.11-cli-refresh-token",
-      "status": "InProgress",
-      "title": "V1.11 \u2014 CLI refresh_token Support",
-      "created_at": "2026-04-28",
-      "owner": "project-manager",
-      "plan_file": ".agents/plans/2026-04-28-v1.11-cli-refresh-token.md",
-      "primary_spec": ".agents/knowledge/v1.11-delivery-compass-v1.md",
-      "working_branch": "feature/v1.11"
-    }
-  ],
+  "updated_at": "2026-04-28T15:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-27T23:59:00Z",
-      "total_open": 15,
+      "updated_at": "2026-04-28T15:00:00Z",
+      "total_open": 17,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 9,
-        "warning": 5,
-        "nit": 1
+        "low": 10,
+        "warning": 6,
+        "nit": 2
       },
       "by_target": {
-        "backlog": 15
+        "backlog": 17
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
@@ -48,7 +27,7 @@
         "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
         "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
         "2026-04-24-v1.9-m1": 7,
-        "2026-04-27-v1.10-device-flow-login": 2
+        "2026-04-27-v1.11-daemon-cleanup-toctou": 5
       },
       "in_flight": {},
       "cross_cutting": [
@@ -216,28 +195,62 @@
           "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
         }
       ],
-      "2026-04-27-v1.10-device-flow-login": [
+      "2026-04-27-v1.10-device-flow-login": [],
+      "2026-04-27-v1.11-daemon-cleanup-toctou": [
         {
-          "id": "R-V110-003",
-          "title": "login() error message inaccuracy on token store failure (QC2 notes: code path unreachable)",
+          "id": "R-V111-W01",
+          "title": "Integration test concurrent isolation edge case",
+          "severity": "warning",
+          "source": "QC3 W-1",
+          "scope": "crates/nexus42d/tests/integration.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
+        },
+        {
+          "id": "R-V111-S01",
+          "title": "device_id retry loop has no max retry count",
           "severity": "low",
-          "source": "QC2 W-QC2-003",
+          "source": "QC3 S-1",
+          "scope": "crates/nexus-sync/src/device_id.rs",
+          "decision": "defer",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
+        },
+        {
+          "id": "R-V111-S02",
+          "title": "refresh_access_token multiple AuthStore reloads",
+          "severity": "low",
+          "source": "QC3 S-4",
           "scope": "crates/nexus42/src/auth/user_auth.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.10-device-flow-login/2026-04-27-v1.10-device-flow-login-qc2.md"
+          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
         },
         {
-          "id": "R-V110-004",
-          "title": "TOCTOU race in get_or_create_device_id file permissions",
-          "severity": "warning",
-          "source": "QC2 W-QC2-004",
-          "scope": "crates/nexus-sync/src/device_id.rs",
+          "id": "R-V111-S03",
+          "title": "API error body disclosure in non-invalid_grant 400s",
+          "severity": "low",
+          "source": "QC2 S-1",
+          "scope": "crates/nexus42/src/auth/user_auth.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
-          "target_date": "V1.11",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.10-device-flow-login/2026-04-27-v1.10-device-flow-login-qc2.md"
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc2.md"
+        },
+        {
+          "id": "R-V111-S04",
+          "title": "_ prefix on struct fields for sqlx-only columns",
+          "severity": "nit",
+          "source": "QC1 F-001",
+          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+          "decision": "accept",
+          "owner": "fullstack-dev",
+          "target_date": "backlog",
+          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc1.md"
         }
       ]
     },
