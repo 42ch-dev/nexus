@@ -490,16 +490,6 @@ pub async fn push(
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let placeholder = LocalDelta {
-        delta_type: DeltaType::StoryManifest,
-        operation: DeltaOperation::Update,
-        target_entity_type: None,
-        target_entity_id: None,
-        payload: serde_json::json!({ "nexus": "sync_push_heartbeat" }),
-        source_anchor: None,
-        local_timestamp: command.created_at.clone(),
-    };
-
     let idempotency_key = format!("idk_{}", uuid::Uuid::new_v4().simple());
 
     let bundle = BundleBuilder::new(&req.workspace_id, &req.world_id, &req.creator_id)
@@ -508,7 +498,15 @@ pub async fn push(
         .output_manuscript(false)
         .command_id(&command.command_id)
         .idempotency_key(&idempotency_key)
-        .add_delta(placeholder)
+        .add_delta(LocalDelta {
+            delta_type: DeltaType::StoryManifest,
+            operation: DeltaOperation::Update,
+            target_entity_type: None,
+            target_entity_id: None,
+            payload: serde_json::Value::Object(Default::default()),
+            source_anchor: None,
+            local_timestamp: command.created_at.clone(),
+        })
         .build()
         .map_err(|e| NexusApiError::Internal {
             code: "BUNDLE_BUILD_ERROR".into(),

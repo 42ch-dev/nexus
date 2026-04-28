@@ -10,7 +10,6 @@ use crate::lifecycle::SubsystemKind;
 
 /// DB subsystem state.
 #[derive(Debug)]
-#[allow(dead_code)] // Degraded variant will be used for health monitoring
 enum DbState {
     /// Not yet started.
     NotStarted,
@@ -18,8 +17,6 @@ enum DbState {
     Running,
     /// Shutdown (pool closed).
     Shutdown,
-    /// Connection errors detected.
-    Degraded { reason: String },
 }
 
 /// DB subsystem implementation.
@@ -74,7 +71,6 @@ impl SubsystemBootstrap for DbSubsystem {
         match &*state {
             DbState::Running => SubsystemHealth::Up,
             DbState::NotStarted | DbState::Shutdown => SubsystemHealth::Down,
-            DbState::Degraded { .. } => SubsystemHealth::Degraded,
         }
     }
 

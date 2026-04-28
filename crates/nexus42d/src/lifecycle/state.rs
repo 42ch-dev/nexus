@@ -105,7 +105,9 @@ impl DaemonHsm {
                     Transition(State::failed())
                 } else {
                     tracing::warn!("retryable subsystem failure: {} ({:?})", err, kind);
-                    Handled // TODO: retry logic beyond T4
+                    // Retry logic for recoverable subsystem failures is deferred
+                    // past V1.11 — see delivery compass v1.11 §5 WS-A Group 2.
+                    Handled
                 }
             }
             Event::HealthDegraded { kind, reason } => {

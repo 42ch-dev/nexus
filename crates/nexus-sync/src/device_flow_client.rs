@@ -71,7 +71,9 @@ pub struct DeviceCodeResponse {
 ///   "data": {
 ///     "access_token": "...",
 ///     "token_type": "Bearer",
-///     "expires_in": 3600
+///     "expires_in": 3600,
+///     "refresh_token": "...",
+///     "refresh_expires_at": "2026-05-28T12:00:00Z"
 ///   }
 /// }
 /// ```
@@ -80,6 +82,12 @@ pub struct DeviceTokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
+    /// OAuth2 refresh token (optional — platform delivers in V1.11+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    /// ISO 8601 expiry timestamp for the refresh token (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_expires_at: Option<String>,
 }
 
 /// Client for RFC 8628 Device Authorization Grant against the Nexus platform.
@@ -504,5 +512,36 @@ mod tests {
         assert_eq!(resp.access_token, "tok_abc");
         assert_eq!(resp.token_type, "Bearer");
         assert_eq!(resp.expires_in, 1800);
+    }
+
+    #[tokio::test]
+    async fn device_token_response_backward_compat_without_refresh() {
+        // Pre-V1.11 response without refresh_token fields
+        let json = serde_json::json!({
+            "access_token": "tok_old",
+            "token_type": "Bearer",
+            "expires_in": 3600
+        });
+        let resp: DeviceTokenResponse = serde_json::from_value(json).expect("parse");
+        assert_eq!(resp.access_token, "tok_old");
+        assert!(resp.refresh_token.is_none());
+        assert!(resp.refresh_expires_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn device_token_response_with_refresh_fields() {
+        let json = serde_json::json!({
+            "access_token": "tok_new",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "refresh_token": "rt_abc123",
+            "refresh_expires_at": "2026-05-28T12:00:00Z"
+        });
+        let resp: DeviceTokenResponse = serde_json::from_value(json).expect("parse");
+        assert_eq!(resp.refresh_token, Some("rt_abc123".to_string()));
+        assert_eq!(
+            resp.refresh_expires_at,
+            Some("2026-05-28T12:00:00Z".to_string())
+        );
     }
 }

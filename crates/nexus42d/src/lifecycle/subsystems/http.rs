@@ -10,12 +10,11 @@ use crate::lifecycle::SubsystemKind;
 
 /// HTTP subsystem state.
 #[derive(Debug)]
-#[allow(dead_code)] // Variants will be used in T6 when wiring to main.rs
 enum HttpState {
     /// Not yet started.
     NotStarted,
     /// Listener bound and serving.
-    Running { port: u16 },
+    Running { _port: u16 },
     /// Shutdown in progress or completed.
     Shutdown,
 }
@@ -48,7 +47,7 @@ impl SubsystemBootstrap for HttpSubsystem {
         // happens in main.rs before lifecycle dispatch.
         // In a full implementation, this would bind the listener here.
         let mut state = self.state.lock().await;
-        *state = HttpState::Running { port: self.port };
+        *state = HttpState::Running { _port: self.port };
         tracing::info!("HTTP subsystem started on port {}", self.port);
         Ok(())
     }
