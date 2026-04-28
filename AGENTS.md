@@ -69,6 +69,13 @@ docs/                   # User & contributor docs
 
 ## Development Workflow
 
+**Formatting (cargo fmt):**
+
+- `cargo fmt` must use the **nightly** toolchain: `cargo +nightly fmt --all`
+- The workspace `.rustfmt.toml` uses the `ignore` field (nightly-only) to skip `crates/nexus-contracts/src/generated/`
+- Stable `cargo fmt` will print warnings and **incorrectly reformat** generated code — always use nightly
+- If nightly is not installed: `rustup toolchain install nightly --component rustfmt`
+
 **Git worktrees:**
 
 - Put every additional `git worktree` checkout under **this repository root** at `.worktrees/<name>/` only.
