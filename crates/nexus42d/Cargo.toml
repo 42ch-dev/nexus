@@ -49,6 +49,7 @@ async-trait = "0.1"
 axum-test = "15"
 graph-flow = "=0.2.3"
 nexus-orchestration = { path = "../nexus-orchestration" }
+serial_test = "3"
 
 [features]
 test-support = []

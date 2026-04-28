@@ -446,6 +446,10 @@ async fn memory_create_pending_review_rejects_empty_pending_id() {
 }
 
 /// Test: count pending reviews endpoint
+///
+/// Marked serial because it opens a second DB connection to seed data,
+/// which can trigger SQLITE_BUSY under concurrent test execution.
+#[serial_test::serial]
 #[tokio::test]
 async fn memory_count_pending_reviews_endpoint() {
     let (state, _tmp) = create_test_state().await;
@@ -470,6 +474,9 @@ async fn memory_count_pending_reviews_endpoint() {
 }
 
 /// Test: delete pending review endpoint
+///
+/// Marked serial because it opens a second DB connection to seed data.
+#[serial_test::serial]
 #[tokio::test]
 async fn memory_delete_pending_review_endpoint() {
     let (state, _tmp) = create_test_state().await;
@@ -514,6 +521,9 @@ async fn memory_delete_pending_review_not_found() {
 // ---------------------------------------------------------------------------
 
 /// Test: list ACP sessions endpoint
+///
+/// Marked serial because it opens a second DB connection to seed sessions.
+#[serial_test::serial]
 #[tokio::test]
 async fn acp_sessions_list_endpoint() {
     let (state, _tmp) = create_test_state().await;
@@ -556,6 +566,9 @@ async fn acp_sessions_list_empty() {
 }
 
 /// Test: delete ACP session endpoint
+///
+/// Marked serial because it opens a second DB connection to seed a session.
+#[serial_test::serial]
 #[tokio::test]
 async fn acp_sessions_delete_endpoint() {
     let (state, _tmp) = create_test_state().await;
