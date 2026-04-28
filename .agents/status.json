@@ -9,13 +9,13 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-04-28T15:00:00Z",
-      "total_open": 17,
+      "total_open": 16,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
         "low": 10,
-        "warning": 6,
+        "warning": 5,
         "nit": 2
       },
       "by_target": {
@@ -27,7 +27,7 @@
         "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
         "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
         "2026-04-24-v1.9-m1": 7,
-        "2026-04-27-v1.11-daemon-cleanup-toctou": 5
+        "2026-04-27-v1.11-daemon-cleanup-toctou": 4
       },
       "in_flight": {},
       "cross_cutting": [
@@ -197,17 +197,6 @@
       ],
       "2026-04-27-v1.10-device-flow-login": [],
       "2026-04-27-v1.11-daemon-cleanup-toctou": [
-        {
-          "id": "R-V111-W01",
-          "title": "Integration test concurrent isolation edge case",
-          "severity": "warning",
-          "source": "QC3 W-1",
-          "scope": "crates/nexus42d/tests/integration.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
-        },
         {
           "id": "R-V111-S01",
           "title": "device_id retry loop has no max retry count",
