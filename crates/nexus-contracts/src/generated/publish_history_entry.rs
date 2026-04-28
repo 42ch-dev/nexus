@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source publish-history-entry.schema.json
 
-use crate::generated::common_types::PublishStoryOutcome;
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{PublishStoryOutcome};
 
 /// Single publish history row (platform Publish API).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

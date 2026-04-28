@@ -5,8 +5,8 @@
 //! @schema_version 1
 //! @source explore-creator-card.schema.json
 
-use crate::generated::common_types::Visibility;
 use serde::{Deserialize, Serialize};
+use crate::generated::common_types::{Visibility};
 
 /// Public creator projection for Explore / creator-profile read APIs (platform plan 16 / W3 slice). Field tiers follow v1-spec visibility; omit sensitive fields at the edge.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

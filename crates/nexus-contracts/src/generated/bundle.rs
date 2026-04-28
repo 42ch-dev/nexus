@@ -5,9 +5,9 @@
 //! @schema_version 1
 //! @source bundle.schema.json
 
+use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{BundleType, ManuscriptPhase};
 use crate::generated::delta::Delta;
-use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
