@@ -58,6 +58,20 @@
       "closed_at": "2026-04-28",
       "lifecycle": "resolved",
       "closure_note": "Fixed: Atomic file creation via OpenOptions::new().write(true).create_new(true). AlreadyExists falls back to reading."
+    },
+    {
+      "id": "R-V111-W01",
+      "title": "Integration test concurrent isolation edge case",
+      "severity": "warning",
+      "source": "QC3 W-1",
+      "scope": "crates/nexus42d/tests/integration.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target": "V1.11",
+      "closure_evidence": "Commit 505ea06: Added serial_test dependency and marked 4 tests that open second DB connections as #[serial_test::serial].",
+      "closed_at": "2026-04-28",
+      "lifecycle": "resolved",
+      "closure_note": "Fixed: Tests that seed data via a second DB connection now run serially to prevent SQLITE_BUSY."
     }
   ]
 }
