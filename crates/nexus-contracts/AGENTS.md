@@ -5,6 +5,7 @@ Monorepo-internal crate — **not published to crates.io**. All types are genera
 ## Strict Rules
 
 - **Do NOT hand-edit** any file under `src/generated/` — always regenerate from schemas.
+- **Do NOT format generated code with stable rustfmt** — `cargo fmt` (stable) ignores `.rustfmt.toml` `ignore` and will incorrectly reformat generated output. Always use `cargo +nightly fmt`.
 - **Do NOT add handwritten types** that duplicate generated DTOs. If a type is needed beyond what codegen produces, add it in `src/` (outside `generated/`) and reference generated types by re-export.
 - After any schema change in `schemas/`, run `pnpm run codegen` and commit the updated `src/generated/` output.
 
