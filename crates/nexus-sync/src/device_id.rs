@@ -18,38 +18,53 @@ pub enum DeviceIdError {
 
 /// Get the existing device ID or create a new one.
 ///
-/// If `~/.nexus42/device-id` exists, reads and returns the UUID string.
-/// If not, generates a new UUID v4, writes it to the file (with 0600
-/// permissions on Unix), and returns it.
+/// Uses atomic file creation (`create_new`) to eliminate the TOCTOU race
+/// between the existence check and the write. If the file already exists,
+/// its contents are read and returned unchanged.
 pub fn get_or_create_device_id(nexus_home: &Path) -> Result<String, DeviceIdError> {
     let path = nexus_home_layout::device_id_path(nexus_home);
 
-    if path.exists() {
-        let existing = std::fs::read_to_string(&path)?;
-        let trimmed = existing.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
-        // File exists but is empty — regenerate below.
-    }
-
-    // Ensure parent directory exists
+    // Ensure parent directory exists.
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    let new_id = uuid::Uuid::new_v4().to_string();
-    std::fs::write(&path, &new_id)?;
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let new_id = uuid::Uuid::new_v4().to_string();
+                use std::io::Write;
+                file.write_all(new_id.as_bytes())?;
 
-    // Set 0600 permissions on Unix
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&path, permissions)?;
+                // Set 0600 permissions on Unix.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let permissions = std::fs::Permissions::from_mode(0o600);
+                    std::fs::set_permissions(&path, permissions)?;
+                }
+
+                return Ok(new_id);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let existing = std::fs::read_to_string(&path)?;
+                let trimmed = existing.trim();
+                if trimmed.is_empty() {
+                    // Empty file — another thread may be writing.
+                    // Wait briefly and retry rather than removing,
+                    // to avoid NotFound races for concurrent readers.
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                }
+                return Ok(trimmed.to_string());
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
-
-    Ok(new_id)
 }
 
 #[cfg(test)]
@@ -116,6 +131,61 @@ mod tests {
             0o600,
             "device-id file should have 0600 permissions, got {:o}",
             mode & 0o777
+        );
+    }
+
+    #[test]
+    fn concurrent_calls_produce_consistent_result() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_path_buf();
+
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                let p = path.clone();
+                std::thread::spawn(move || get_or_create_device_id(&p).unwrap())
+            })
+            .collect();
+
+        let results: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let first = &results[0];
+        for r in &results {
+            assert_eq!(
+                r, first,
+                "all concurrent calls should return the same device ID"
+            );
+        }
+    }
+
+    #[test]
+    fn existing_file_is_preserved_not_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = nexus_home_layout::device_id_path(tmp.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "pre-existing-uuid").unwrap();
+
+        let id = get_or_create_device_id(tmp.path()).unwrap();
+        assert_eq!(id, "pre-existing-uuid");
+
+        // Ensure the file was not overwritten with a new UUID.
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "pre-existing-uuid");
+    }
+
+    #[test]
+    fn parent_directory_created_automatically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let deep = tmp.path().join("a/b/c");
+
+        let id = get_or_create_device_id(&deep).unwrap();
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "created ID should be a valid UUID"
+        );
+
+        let path = nexus_home_layout::device_id_path(&deep);
+        assert!(
+            path.exists(),
+            "device-id file should be created in nested directory"
         );
     }
 }

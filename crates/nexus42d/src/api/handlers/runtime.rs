@@ -71,7 +71,15 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         _ => LifecycleState::Failed, // fallback
     };
 
-    // Build subsystem health (stub for now - real subsystems will populate in T6)
+    // Build subsystem health from actual workspace state
+    let db_status = match sqlx::query_scalar!("SELECT 1 as \"count!\"")
+        .fetch_one(state.pool())
+        .await
+    {
+        Ok(_) => HealthStatus::Up,
+        Err(_) => HealthStatus::Down,
+    };
+
     let make_entry = |status: HealthStatus| SubsystemHealthEntry {
         status,
         last_check_ms: Some(0),
@@ -79,26 +87,43 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         active_workers: None,
         cache_age_ms: None,
     };
+
     let subsystems = SubsystemHealth {
         http: Some(make_entry(HealthStatus::Up)),
-        db: Some(make_entry(HealthStatus::Up)),
-        sync: Some(make_entry(HealthStatus::Up)),
+        db: Some(make_entry(db_status)),
+        sync: Some(make_entry(if state.outbox().is_some() {
+            HealthStatus::Up
+        } else {
+            HealthStatus::Down
+        })),
         engine: Some(SubsystemHealthEntry {
-            status: HealthStatus::Up,
+            status: if state.engine().is_some() {
+                HealthStatus::Up
+            } else {
+                HealthStatus::Down
+            },
             last_check_ms: Some(0),
-            active_sessions: Some(0),
+            active_sessions: None,
             active_workers: None,
             cache_age_ms: None,
         }),
         worker_mgr: Some(SubsystemHealthEntry {
-            status: HealthStatus::Up,
+            status: if state.worker_manager().is_some() {
+                HealthStatus::Up
+            } else {
+                HealthStatus::Down
+            },
             last_check_ms: Some(0),
             active_sessions: None,
-            active_workers: Some(0),
+            active_workers: None,
             cache_age_ms: None,
         }),
         acp_registry: Some(SubsystemHealthEntry {
-            status: HealthStatus::Up,
+            status: if state.capability_registry().is_some() {
+                HealthStatus::Up
+            } else {
+                HealthStatus::Down
+            },
             last_check_ms: Some(0),
             active_sessions: None,
             active_workers: None,

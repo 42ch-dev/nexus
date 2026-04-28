@@ -30,6 +30,48 @@
       "closed_at": "2026-04-27",
       "lifecycle": "resolved",
       "closure_note": "Fixed: JWT extraction fallback now logs a warning via tracing::warn! for debugging."
+    },
+    {
+      "id": "R-V110-003",
+      "title": "login() error message inaccuracy on token store failure (QC2 notes: code path unreachable)",
+      "severity": "low",
+      "source": "QC2 W-QC2-003",
+      "scope": "crates/nexus42/src/auth/user_auth.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target": "V1.11",
+      "closure_evidence": "V1.11 Batch 3 (commit c81b356): login() rewritten to persist refresh_token/refresh_expires_at; error handling updated.",
+      "closed_at": "2026-04-28",
+      "lifecycle": "resolved",
+      "closure_note": "Superseded by V1.11 refresh_token implementation which rewrote login() flow."
+    },
+    {
+      "id": "R-V110-004",
+      "title": "TOCTOU race in get_or_create_device_id file permissions",
+      "severity": "warning",
+      "source": "QC2 W-QC2-004",
+      "scope": "crates/nexus-sync/src/device_id.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target": "V1.11",
+      "closure_evidence": "V1.11 Batch 2 (commit 86ac950): Rewrote get_or_create_device_id() with atomic create_new(true) + retry loop.",
+      "closed_at": "2026-04-28",
+      "lifecycle": "resolved",
+      "closure_note": "Fixed: Atomic file creation via OpenOptions::new().write(true).create_new(true). AlreadyExists falls back to reading."
+    },
+    {
+      "id": "R-V111-W01",
+      "title": "Integration test concurrent isolation edge case",
+      "severity": "warning",
+      "source": "QC3 W-1",
+      "scope": "crates/nexus42d/tests/integration.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target": "V1.11",
+      "closure_evidence": "Commit 505ea06: Added serial_test dependency and marked 4 tests that open second DB connections as #[serial_test::serial].",
+      "closed_at": "2026-04-28",
+      "lifecycle": "resolved",
+      "closure_note": "Fixed: Tests that seed data via a second DB connection now run serially to prevent SQLITE_BUSY."
     }
   ]
 }

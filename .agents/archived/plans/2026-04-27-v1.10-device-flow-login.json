@@ -1,0 +1,11 @@
+{
+  "plan_id": "2026-04-27-v1.10-device-flow-login",
+  "status": "Done",
+  "title": "V1.10 \u2014 Device Flow Login + DeviceID Header + Daemon Cleanup",
+  "created_at": "2026-04-27",
+  "done_at": "2026-04-27T23:59:00Z",
+  "owner": "project-manager",
+  "plan_file": ".agents/plans/2026-04-27-v1.10-device-flow-login.md",
+  "primary_spec": ".agents/knowledge/v1.10-delivery-compass-v1.md",
+  "working_branch": "feature/v1.10"
+}

@@ -584,7 +584,7 @@ pub async fn signal_schedule(
         },
         "advance" => {
             // Advance is a pass-through signal for the session engine;
-            // for now just confirm the schedule is running.
+            // confirm the schedule is running.
             match current_status_str.as_str() {
                 "running" => {
                     return Ok((
@@ -865,8 +865,8 @@ struct InspectRow {
     created_at: i64,
     updated_at: i64,
     concurrency_kind: String,
-    #[allow(dead_code)]
-    concurrency_whitelist: Option<String>,
+    #[sqlx(rename = "concurrency_whitelist")]
+    _concurrency_whitelist: Option<String>,
 }
 
 impl InspectRow {
@@ -888,8 +888,8 @@ impl InspectRow {
 struct HistoryRow {
     version: i64,
     payload_kind: String,
-    #[allow(dead_code)]
-    content: Vec<u8>,
+    #[sqlx(rename = "content")]
+    _content: Vec<u8>,
     derivation_kind: String,
     created_at: i64,
 }

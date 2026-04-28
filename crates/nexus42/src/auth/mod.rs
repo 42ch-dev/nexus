@@ -28,6 +28,13 @@ pub struct UserTokenState {
     pub expires_at: String,
     /// Platform user ID extracted from JWT claims (`sub` / `userId`).
     pub user_id: String,
+    /// OAuth2 refresh token (optional — present when platform delivers it).
+    /// `#[serde(default)]` ensures backward compat with existing auth.json files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    /// ISO 8601 expiry timestamp for the refresh token (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_expires_at: Option<String>,
 }
 
 fn default_token_type() -> String {
@@ -351,6 +358,8 @@ mod tests {
             token_type: "Bearer".to_string(),
             expires_at: "2026-04-27T12:00:00Z".to_string(),
             user_id: "usr_abc123".to_string(),
+            refresh_token: None,
+            refresh_expires_at: None,
         };
         let json = serde_json::to_string(&token).expect("serialize");
         assert!(json.contains("eyJhbGciOiJIUzI1NiJ9.test"));
@@ -381,6 +390,8 @@ mod tests {
             token_type: "Bearer".to_string(),
             expires_at: "2026-12-31T23:59:59Z".to_string(),
             user_id: "usr_roundtrip".to_string(),
+            refresh_token: None,
+            refresh_expires_at: None,
         };
 
         let mut store = AuthStore::default();
@@ -399,6 +410,8 @@ mod tests {
             token_type: "Bearer".to_string(),
             expires_at: "2099-01-01T00:00:00Z".to_string(),
             user_id: "usr_clear".to_string(),
+            refresh_token: None,
+            refresh_expires_at: None,
         };
 
         let mut store = AuthStore::default();
@@ -440,5 +453,56 @@ mod tests {
         let store = AuthStore::default();
         assert!(store.user_token.is_none());
         assert!(!store.is_user_authenticated());
+    }
+
+    // ── Refresh token backward compat tests (T1) ──────────────────────
+
+    #[test]
+    fn user_token_backward_compat_without_refresh_fields() {
+        // Pre-V1.11 auth.json without refresh_token fields must deserialize
+        let json = r#"{
+            "access_token": "old_tok",
+            "token_type": "Bearer",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "user_id": "usr_old"
+        }"#;
+        let parsed: UserTokenState = serde_json::from_str(json).expect("parse");
+        assert_eq!(parsed.access_token, "old_tok");
+        assert!(parsed.refresh_token.is_none());
+        assert!(parsed.refresh_expires_at.is_none());
+    }
+
+    #[test]
+    fn user_token_roundtrip_with_refresh_fields() {
+        let token = UserTokenState {
+            access_token: "tok_rt".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2026-04-28T12:00:00Z".to_string(),
+            user_id: "usr_rt".to_string(),
+            refresh_token: Some("refresh_abc".to_string()),
+            refresh_expires_at: Some("2026-05-28T12:00:00Z".to_string()),
+        };
+        let json = serde_json::to_string(&token).expect("serialize");
+        let parsed: UserTokenState = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed.refresh_token, Some("refresh_abc".to_string()));
+        assert_eq!(
+            parsed.refresh_expires_at,
+            Some("2026-05-28T12:00:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn user_token_serialization_omits_none_refresh_fields() {
+        let token = UserTokenState {
+            access_token: "tok_no_rt".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2026-04-28T12:00:00Z".to_string(),
+            user_id: "usr_no_rt".to_string(),
+            refresh_token: None,
+            refresh_expires_at: None,
+        };
+        let json = serde_json::to_string(&token).expect("serialize");
+        assert!(!json.contains("refresh_token"));
+        assert!(!json.contains("refresh_expires_at"));
     }
 }
