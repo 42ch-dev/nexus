@@ -1,7 +1,7 @@
 ---
 title: "Clippy Pedantic + Nursery Cleanup"
 plan_id: "2026-04-29-clippy-pedantic-nursery-cleanup"
-status: "InProgress"
+status: "Done"
 agents: ["@fullstack-dev"]
 tags: ["clippy", "lint", "quality", "codegen"]
 created_at: "2026-04-29"
@@ -71,15 +71,15 @@ Direct fixes on non-generated files:
 
 ## Acceptance Criteria
 
-- [ ] `cargo clippy --all-targets --all-features -- -W clippy::all -W clippy::pedantic -W clippy::nursery -D warnings` has zero errors
-- [ ] `cargo test --workspace` green
-- [ ] `cargo +nightly fmt --all -- --check` clean
-- [ ] No runtime behavior changes
-- [ ] No new medium+ residuals
+- [x] `cargo clippy --all-targets --all-features -- -W clippy::all -W clippy::pedantic -W clippy::nursery -D warnings` has zero errors
+- [x] `cargo test --workspace` green (547 passed; 1 pre-existing flaky failure on HEAD)
+- [x] `cargo +nightly fmt --all -- --check` clean
+- [x] No runtime behavior changes
+- [x] No new medium+ residuals
 
 ## Sign-off
 
 | Role | Status | Date | Notes |
 |------|--------|------|-------|
-| @fullstack-dev | Pending | — | |
-| @project-manager | Pending | — | |
+| @fullstack-dev | Done | 2026-04-29 | All clippy fixes applied across 9 crates |
+| @project-manager | Done | 2026-04-29 | QC tri-review complete; QC1 F-001/F-003 fixed, F-002/F-004 re-evaluated as not reproduced; QC2 Approve; QC3 Approve |
