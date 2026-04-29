@@ -74,9 +74,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        let tables: Vec<String> = tables_raw.into_iter().flatten().collect();
-
-        assert!(tables.contains(&"workspace_meta".to_string()));
+        assert!(tables_raw.into_iter().flatten().any(|x| x == "workspace_meta"));
     }
 
     #[tokio::test]

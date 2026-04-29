@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Metadata for a manuscript, stored alongside the manuscript file
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManuscriptMetadata {
     /// Manuscript title
     pub title: String,
@@ -30,17 +30,18 @@ fn default_phase() -> String {
     "brainstorm".to_string()
 }
 
-fn default_schema_version() -> u32 {
+const fn default_schema_version() -> u32 {
     1
 }
 
 impl ManuscriptMetadata {
     /// Create new manuscript metadata
+    #[must_use] 
     pub fn new(title: &str, world_id: Option<&str>) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         Self {
             title: title.to_string(),
-            world_id: world_id.map(|s| s.to_string()),
+            world_id: world_id.map(std::string::ToString::to_string),
             phase: default_phase(),
             created_at: now.clone(),
             updated_at: now,

@@ -1,14 +1,29 @@
+//! Complex HTTP handlers with orchestration logic exceed line limits.
+#![allow(clippy::too_many_lines)]
 //! Schedule HTTP handlers: 8 endpoints per WS7 §9.
 //!
 //! Endpoints:
 //! - POST   /schedules — Add schedule
 //! - GET    /schedules — List schedules (optional filters)
 //! - GET    /schedules/{id} — Inspect schedule
-//! - PATCH  /schedules/{id}/core-context — Apply EditOp
+//! - PATCH  /schedules/{id}/core-context — Apply `EditOp`
 //! - GET    /schedules/{id}/core-context — Current content
 //! - GET    /schedules/{id}/core-context-history — Version history
 //! - POST   /schedules/{id}/signal — Pause/Resume/Cancel/Start/Advance
 //! - DELETE /schedules/{id} — Remove (terminal only)
+//!
+//! # Error Documentation
+//!
+//! All handlers return `(StatusCode, String)` errors with consistent patterns:
+//! - `NOT_FOUND` for missing schedules
+//! - `CONFLICT` for state conflicts
+//! - `INTERNAL_SERVER_ERROR` for database failures
+//! - `BAD_REQUEST` for invalid input
+//!
+//! Due to this consistent pattern across all handlers, `missing_errors_doc`
+//! is suppressed for this module.
+
+#![allow(clippy::missing_errors_doc)]
 
 use crate::workspace::WorkspaceState;
 use axum::{
@@ -16,9 +31,9 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use nexus_contracts::local::schedule::http::*;
+use nexus_contracts::local::schedule::http::{AddScheduleRequest, AddScheduleResponse, ScheduleConcurrencyRequest, ListSchedulesQuery, ListSchedulesResponse, InspectScheduleResponse, EditCoreContextRequest, EditCoreContextResponse, CoreContextResponse, CoreContextHistoryResponse, CoreContextHistoryEntry, SignalScheduleRequest, SignalScheduleResponse, DeleteScheduleResponse, ScheduleSummary};
 use nexus_contracts::local::schedule::{
-    CoreContextAuthor, EditOp, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
 use std::sync::Arc;
 
@@ -75,7 +90,6 @@ pub async fn add_schedule(
         .map(|s| ScheduleId(s.clone()))
         .collect();
 
-    use nexus_contracts::local::schedule::{CoreContextVersion, Schedule};
     let schedule = Schedule {
         id: ScheduleId(schedule_id.clone()),
         creator_id: body.creator_id.clone(),
@@ -189,7 +203,7 @@ pub async fn list_schedules(
         )
     })?;
 
-    let schedules = rows.into_iter().map(|r| r.into_summary()).collect();
+    let schedules = rows.into_iter().map(ListRow::into_summary).collect();
 
     Ok((StatusCode::OK, Json(ListSchedulesResponse { schedules })))
 }
@@ -265,7 +279,7 @@ pub async fn inspect_schedule(
 // PATCH /schedules/{id}/core-context — Apply EditOp
 // ---------------------------------------------------------------------------
 
-/// `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` — apply EditOp.
+/// `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` — apply `EditOp`.
 pub async fn edit_core_context(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -409,6 +423,8 @@ pub async fn get_core_context_history(
     let entries: Vec<CoreContextHistoryEntry> = rows
         .iter()
         .map(|r| CoreContextHistoryEntry {
+            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             version: r.version as u32,
             payload_kind: r.payload_kind.clone(),
             content: None,
@@ -775,7 +791,7 @@ pub async fn delete_schedule(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Parse the HTTP EditCoreContextRequest into an EditOp.
+/// Parse the HTTP `EditCoreContextRequest` into an `EditOp`.
 fn parse_edit_op(body: &EditCoreContextRequest) -> Result<EditOp, (StatusCode, String)> {
     match body.op.as_str() {
         "append" => {
@@ -847,6 +863,8 @@ impl ListRow {
             preset_id: self.preset_id,
             status: self.status,
             label: self.label,
+            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             current_core_context_version: self.current_core_context_version as u32,
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),
@@ -877,6 +895,8 @@ impl InspectRow {
             preset_id: self.preset_id,
             status: self.status,
             label: self.label,
+            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             current_core_context_version: self.current_core_context_version as u32,
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),

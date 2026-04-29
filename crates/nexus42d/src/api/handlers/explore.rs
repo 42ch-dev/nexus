@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Explore read-only proxy — `SyncClient` + platform `NEXUS_SYNC_PLATFORM_*` credentials.
 //!
 //! `POST /v1/local/explore/browse` → `POST /v1/explore/browse`

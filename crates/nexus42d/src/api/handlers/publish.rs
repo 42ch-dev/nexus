@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Publish workflow — platform proxy via `SyncClient`.
 //!
 //! `POST /v1/local/publish/story` → `POST /v1/publish/story`
@@ -27,7 +29,7 @@ fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
     }
 }
 
-fn nonempty(s: &str) -> bool {
+const fn nonempty(s: &str) -> bool {
     !s.is_empty()
 }
 

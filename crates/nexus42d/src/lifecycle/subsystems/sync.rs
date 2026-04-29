@@ -1,3 +1,5 @@
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening)]
 //! Sync subsystem — wraps nexus-sync outbox reader.
 //!
 //! Real implementation that manages the sync queue.
@@ -32,6 +34,7 @@ impl SyncSubsystem {
     /// Create a new Sync subsystem.
     ///
     /// The actual outbox initialization happens via `nexus-sync::OutboxPool`.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(SyncState::NotStarted)),

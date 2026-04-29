@@ -67,7 +67,7 @@ pub struct ExploreLocalResponse {
     pub error: Option<String>,
 }
 
-fn is_json_output(output_format: &str) -> bool {
+const fn is_json_output(output_format: &str) -> bool {
     output_format.eq_ignore_ascii_case("json")
 }
 
@@ -88,6 +88,13 @@ fn print_feed_text(feed: &ExploreFeedResponse) -> Result<()> {
 }
 
 /// Run explore subcommands
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Platform connectivity is required but unavailable
+/// - Daemon is not running
+/// - Explore API calls fail
 pub async fn run(cmd: ExploreCommand, config: &CliConfig, output_format: &str) -> Result<()> {
     runtime_guard::require_platform(&config.runtime_mode(), "explore")?;
     let client = DaemonClient::from_config(config);

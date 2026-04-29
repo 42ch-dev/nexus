@@ -128,7 +128,7 @@ pub struct PublishHistoryLocalResponse {
     pub error: Option<String>,
 }
 
-fn is_json_output(output_format: &str) -> bool {
+const fn is_json_output(output_format: &str) -> bool {
     output_format.eq_ignore_ascii_case("json")
 }
 
@@ -209,11 +209,11 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
                             println!("Publish completed (no result body).");
                         }
                     } else if let Some(err) = resp.error {
-                        eprintln!("Publish story failed: {}", err);
+                        eprintln!("Publish story failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Publish story request failed: {}", e);
+                    eprintln!("Publish story request failed: {e}");
                     return Err(e);
                 }
             }
@@ -273,11 +273,11 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
                             println!("History completed (no body).");
                         }
                     } else if let Some(err) = resp.error {
-                        eprintln!("Publish history failed: {}", err);
+                        eprintln!("Publish history failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Publish history request failed: {}", e);
+                    eprintln!("Publish history request failed: {e}");
                     return Err(e);
                 }
             }

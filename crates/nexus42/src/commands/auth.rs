@@ -31,6 +31,13 @@ pub enum AuthCommand {
 }
 
 /// Run auth command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Platform connectivity fails during login
+/// - The auth store cannot be read or written
+/// - Token refresh fails
 pub async fn run(cmd: AuthCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         AuthCommand::Login => {
@@ -43,9 +50,9 @@ pub async fn run(cmd: AuthCommand, config: &CliConfig) -> Result<()> {
             user_id,
         } => {
             let uid = user_id.unwrap_or_else(|| format!("usr_dev_{}", uuid::Uuid::new_v4()));
-            auth::user_auth::login_with_token(config, access_token, uid, expires_in).await
+            auth::user_auth::login_with_token(config, access_token, uid, expires_in)
         }
-        AuthCommand::Logout => auth::user_auth::logout(config).await,
-        AuthCommand::Status => auth::user_auth::status(config).await,
+        AuthCommand::Logout => auth::user_auth::logout(config),
+        AuthCommand::Status => auth::user_auth::status(config),
     }
 }

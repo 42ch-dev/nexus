@@ -1,6 +1,6 @@
 //! Context Assembly Local API client.
 //!
-//! Calls POST /v1/local/context/assemble through the DaemonClient (nexus42d loopback).
+//! Calls POST /v1/local/context/assemble through the `DaemonClient` (nexus42d loopback).
 //!
 //! TODO(V1.10): This client wraps the daemon context endpoint which has been removed.
 //! The client and its tests are retained for reference but are dead code.
@@ -19,8 +19,9 @@ pub struct ContextClient {
 }
 
 impl ContextClient {
-    /// Create a new context client from a DaemonClient.
-    pub fn new(daemon: DaemonClient) -> Self {
+    /// Create a new context client from a `DaemonClient`.
+    #[must_use] 
+    pub const fn new(daemon: DaemonClient) -> Self {
         Self { daemon }
     }
 

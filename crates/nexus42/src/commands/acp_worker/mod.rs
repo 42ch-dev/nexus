@@ -90,6 +90,11 @@ impl MultiplexedWorkerState {
 ///
 /// Reads newline-delimited JSON from stdin, dispatches to handler functions,
 /// writes responses to stdout. Uses `tokio::task::LocalSet` for `!Send` compat.
+///
+/// # Errors
+///
+/// Returns I/O errors if stdin/stdout communication fails.
+/// Returns JSON parsing errors if malformed JSON-RPC requests are received.
 pub async fn run(args: AcpWorkerArgs) -> Result<()> {
     let agent_ref = args
         .agent
@@ -199,7 +204,7 @@ async fn run_ipc_loop(state: Arc<MultiplexedWorkerState>) -> Result<()> {
                     id.as_ref(),
                     -32601,
                     "Method not found",
-                    &format!("unknown method: {}", method),
+                    &format!("unknown method: {method}"),
                 )
                 .await?;
             }
@@ -227,7 +232,7 @@ fn session_summary_json(slot: &AgentSlot) -> Value {
 }
 
 /// Convert `AgentSlotState` to a string for JSON serialization.
-fn state_to_string(state: &AgentSlotState) -> &str {
+const fn state_to_string(state: &AgentSlotState) -> &str {
     match state {
         AgentSlotState::Initializing => "initializing",
         AgentSlotState::Ready => "ready",
@@ -273,7 +278,7 @@ async fn emit_session_event(
         "method": "worker/agent_session_event",
         "params": params,
     });
-    let bytes = format!("{}\n", notification);
+    let bytes = format!("{notification}\n");
     stdout.write_all(bytes.as_bytes()).await?;
     stdout.flush().await?;
     Ok(())
@@ -351,7 +356,7 @@ async fn handle_initialize(
             let config = AgentConfig::new(session_id.clone(), agent_ref.to_string());
             let slot = AgentSlot::new(config);
             slot.mark_ready();
-            sessions.insert(session_id.clone(), slot);
+            sessions.insert(session_id, slot);
         } else {
             // No agent info provided — create a default session.
             let session_id = "default".to_string();
@@ -359,7 +364,7 @@ async fn handle_initialize(
                 AgentConfig::new(session_id.clone(), "claude-sonnet-4-20250514".to_string());
             let slot = AgentSlot::new(config);
             slot.mark_ready();
-            sessions.insert(session_id.clone(), slot);
+            sessions.insert(session_id, slot);
         }
 
         // Build session summaries.
@@ -408,6 +413,7 @@ async fn handle_acp_prompt(
         .to_string();
 
     // Synchronous lock scope: validate and transition state, collect what we need.
+    // Define PromptCheck before the lock scope.
     enum PromptCheck {
         Ok { request_id: u64 },
         SessionNotFound,
@@ -472,7 +478,7 @@ async fn handle_acp_prompt(
             "text": prompt,
         }
     });
-    let chunk_bytes = format!("{}\n", chunk);
+    let chunk_bytes = format!("{chunk}\n");
     stdout.write_all(chunk_bytes.as_bytes()).await?;
     stdout.flush().await?;
 
@@ -564,6 +570,7 @@ async fn handle_agent_start(
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    // Define StartResult before the lock scope.
     // Synchronous lock scope.
     enum StartResult {
         Created(Value),
@@ -794,7 +801,7 @@ async fn handle_agent_crash(
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
         if let Some(slot) = sessions.get(session_id) {
-            slot.mark_crashed(reason.to_string());
+            slot.mark_crashed(reason);
             true
         } else {
             false
@@ -829,7 +836,7 @@ async fn write_jsonrpc_response(
         "id": id,
         "result": result
     });
-    let bytes = format!("{}\n", response);
+    let bytes = format!("{response}\n");
     stdout.write_all(bytes.as_bytes()).await?;
     stdout.flush().await?;
     Ok(())
@@ -851,7 +858,7 @@ async fn write_jsonrpc_error(
             "message": message,
         }
     });
-    let bytes = format!("{}\n", response);
+    let bytes = format!("{response}\n");
     stdout.write_all(bytes.as_bytes()).await?;
     stdout.flush().await?;
     Ok(())
@@ -1263,10 +1270,8 @@ mod tests {
             let has_agents = params.get("agents").and_then(|v| v.as_array()).is_some();
             let has_agent_ref = params.get("agent_ref").and_then(|v| v.as_str()).is_some();
 
-            if has_agents {
-                // ...
-            } else if has_agent_ref {
-                // ...
+            if has_agents || has_agent_ref {
+                // Test placeholder: agents/agent_ref path not exercised
             } else {
                 let session_id = "default".to_string();
                 let config =

@@ -4,7 +4,7 @@
 //! Subcommands: list, create, use, link, unlink.
 //!
 //! Anonymous identities (`ctr_anon*`) are ephemeral.
-//! Persistent identities (`ctr_local*`) are stored in SQLite.
+//! Persistent identities (`ctr_local*`) are stored in `SQLite`.
 
 use crate::config::{self, CliConfig};
 use crate::errors::{CliError, Result};
@@ -24,7 +24,7 @@ pub enum IdentityCommand {
 
     /// Create a new local identity
     Create {
-        /// Identity type: anonymous (ephemeral) or persistent (stored in SQLite)
+        /// Identity type: anonymous (ephemeral) or persistent (stored in `SQLite`)
         #[arg(long, value_enum, default_value = "persistent")]
         kind: IdentityKindArg,
 
@@ -62,6 +62,12 @@ pub enum IdentityKindArg {
 }
 
 /// Run identity command.
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Identity database operations fail
+/// - Configuration cannot be loaded
 pub async fn run(cmd: IdentityCommand, _config: &CliConfig) -> Result<()> {
     match cmd {
         IdentityCommand::List => list_identities().await,
@@ -111,14 +117,13 @@ async fn list_identities() -> Result<()> {
     for identity in &identities {
         let active_mark = active_id
             .as_deref()
-            .map(|a| {
+            .map_or("", |a| {
                 if a == identity.creator_id {
                     " (active)"
                 } else {
                     ""
                 }
-            })
-            .unwrap_or("");
+            });
 
         let linked_mark = if identity.platform_linked {
             format!(
@@ -149,7 +154,7 @@ async fn list_identities() -> Result<()> {
 /// Create a new local identity.
 async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
     // R3(identity): Validate display_name — reject empty or whitespace-only
-    let trimmed_name = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+    let trimmed_name = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
     if let Some(raw) = &name {
         if raw.trim().is_empty() {
             return Err(CliError::Other(
@@ -184,7 +189,7 @@ async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<
         identity.creator_id
     );
     if let Some(ref name) = identity.display_name {
-        println!("  Name: {}", name);
+        println!("  Name: {name}");
     }
     if is_persistent {
         println!("  Stored in ~/.nexus42/state.db");
@@ -212,8 +217,7 @@ async fn use_identity(creator_id: String) -> Result<()> {
     let pool = open_global_db().await?;
     let _identity = get_local_identity(&pool, &creator_id).await?.ok_or_else(|| {
         CliError::Other(format!(
-            "Local identity '{}' not found. Run `nexus42 identity list` to see available identities.",
-            creator_id
+            "Local identity '{creator_id}' not found. Run `nexus42 identity list` to see available identities."
         ))
     })?;
 
@@ -234,7 +238,7 @@ async fn use_identity(creator_id: String) -> Result<()> {
         }
         None => {
             // Should not happen since we just set it, but handle gracefully
-            println!("Active identity set to: {}", creator_id);
+            println!("Active identity set to: {creator_id}");
         }
     }
     Ok(())
@@ -244,8 +248,7 @@ async fn use_identity(creator_id: String) -> Result<()> {
 async fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
     if !is_valid_creator_id(&platform_id) {
         return Err(DomainError::InvalidIdFormat(format!(
-            "platform_id '{}' does not match CreatorId pattern (expected: ctr_ followed by alphanumeric characters)",
-            platform_id
+            "platform_id '{platform_id}' does not match CreatorId pattern (expected: ctr_ followed by alphanumeric characters)"
         ))
         .into());
     }
@@ -253,7 +256,7 @@ async fn link_identity(creator_id: String, platform_id: String) -> Result<()> {
     let pool = open_global_db().await?;
     link_to_platform(&pool, &creator_id, &platform_id).await?;
 
-    println!("Linked {} to platform creator: {}", creator_id, platform_id);
+    println!("Linked {creator_id} to platform creator: {platform_id}");
     Ok(())
 }
 
@@ -262,7 +265,7 @@ async fn unlink_identity(creator_id: String) -> Result<()> {
     let pool = open_global_db().await?;
     unlink_from_platform(&pool, &creator_id).await?;
 
-    println!("Unlinked {} from platform creator.", creator_id);
+    println!("Unlinked {creator_id} from platform creator.");
     Ok(())
 }
 
@@ -270,7 +273,7 @@ async fn unlink_identity(creator_id: String) -> Result<()> {
 ///
 /// Resolution order:
 /// 1. Check `active_creator_id` from CLI config
-/// 2. If set, verify it exists in local_identities (for persistent) or accept as-is (for anonymous)
+/// 2. If set, verify it exists in `local_identities` (for persistent) or accept as-is (for anonymous)
 /// 3. If no identity is set, return `None` (caller should prompt to create one)
 ///
 /// This is the single source of truth for active identity resolution (R4).
@@ -347,13 +350,15 @@ pub struct ResolvedIdentity {
 impl ResolvedIdentity {
     /// Check if this is an ephemeral (anonymous) identity.
     #[allow(dead_code)]
-    pub fn is_ephemeral(&self) -> bool {
+    #[must_use] 
+    pub const fn is_ephemeral(&self) -> bool {
         self.is_anonymous
     }
 
     /// Warning message for anonymous identities.
     #[allow(dead_code)]
-    pub fn ephemeral_warning(&self) -> Option<&'static str> {
+    #[must_use] 
+    pub const fn ephemeral_warning(&self) -> Option<&'static str> {
         if self.is_anonymous {
             Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 identity create --persistent` for a saved identity.")
         } else {
@@ -362,7 +367,7 @@ impl ResolvedIdentity {
     }
 }
 
-fn kind_label(kind: &IdentityKindArg) -> &'static str {
+const fn kind_label(kind: &IdentityKindArg) -> &'static str {
     match kind {
         IdentityKindArg::Anonymous => "anonymous",
         IdentityKindArg::Persistent => "persistent",
@@ -393,26 +398,26 @@ mod tests {
     #[test]
     fn test_identity_kind_arg_variants() {
         // Verify all enum variants are accessible
-        let _anon = IdentityKindArg::Anonymous;
-        let _persist = IdentityKindArg::Persistent;
+        let _ = IdentityKindArg::Anonymous;
+        let _ = IdentityKindArg::Persistent;
     }
 
     #[test]
     fn test_identity_command_enum_exhaustive() {
         // Verify all command variants can be constructed
-        let _list = IdentityCommand::List;
-        let _create = IdentityCommand::Create {
+        let _ = IdentityCommand::List;
+        let _ = IdentityCommand::Create {
             kind: IdentityKindArg::Anonymous,
             name: None,
         };
-        let _use_cmd = IdentityCommand::Use {
+        let _ = IdentityCommand::Use {
             creator_id: "ctr_test123".to_string(),
         };
-        let _link = IdentityCommand::Link {
+        let _ = IdentityCommand::Link {
             creator_id: "ctr_local1".to_string(),
             platform_id: "ctr_Platform1".to_string(),
         };
-        let _unlink = IdentityCommand::Unlink {
+        let _ = IdentityCommand::Unlink {
             creator_id: "ctr_local1".to_string(),
         };
     }
@@ -461,8 +466,8 @@ mod tests {
             platform_creator_id: None,
         };
         // This compiles only if identity_type is LocalIdentityType
-        let _type_str: &str = resolved.identity_type.as_str();
-        assert_eq!(_type_str, "anonymous");
+        let type_str: &str = resolved.identity_type.as_str();
+        assert_eq!(type_str, "anonymous");
     }
 
     // ── R3(identity): display_name validation tests ────────────────────
@@ -473,16 +478,14 @@ mod tests {
         let name = Some("   ".to_string());
         assert!(name
             .as_deref()
-            .map(|n| n.trim())
-            .filter(|n| !n.is_empty())
-            .is_none());
+            .map(str::trim).as_ref().is_none_or(|n| n.is_empty()));
     }
 
     #[test]
     fn test_display_name_should_be_trimmed() {
         // Names with leading/trailing whitespace should be trimmed
         let name = Some("  Alice  ".to_string());
-        let trimmed = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+        let trimmed = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         assert_eq!(trimmed, Some("Alice"));
     }
 
@@ -490,14 +493,14 @@ mod tests {
     fn test_display_name_none_is_valid() {
         // No name provided is fine
         let name: Option<String> = None;
-        let trimmed = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+        let trimmed = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         assert!(trimmed.is_none());
     }
 
     #[test]
     fn test_display_name_valid_name_passes() {
         let name = Some("Alice".to_string());
-        let trimmed = name.as_deref().map(|n| n.trim()).filter(|n| !n.is_empty());
+        let trimmed = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         assert_eq!(trimmed, Some("Alice"));
     }
 }

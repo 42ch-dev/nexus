@@ -42,7 +42,7 @@ pub async fn reload_preset(
         nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps).map_err(|e| {
             (
                 StatusCode::NOT_FOUND,
-                format!("preset '{}' not found: {}", preset_id, e),
+                format!("preset '{preset_id}' not found: {e}"),
             )
         })?;
 
@@ -56,7 +56,7 @@ pub async fn reload_preset(
     Ok((
         StatusCode::OK,
         Json(ReloadPresetResponse {
-            preset_id: preset_id.clone(),
+            preset_id,
             source_hash: hash_hex,
         }),
     ))

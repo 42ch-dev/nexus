@@ -5,6 +5,7 @@ pub use nexus_home_layout::{
 };
 
 /// Workspace `state.db` path (alias for plan/ADR naming).
+#[must_use] 
 pub fn state_db_path(
     home: &std::path::Path,
     creator_id: &str,

@@ -7,7 +7,7 @@
 //! # Wiring (TD-1)
 //!
 //! CLI sync commands call daemon HTTP endpoints backed by `nexus-sync` (**Outbox**,
-//! **BundleBuilder**, **precheck**). Push builds a bundle (including `canonical_hash`),
+//! **`BundleBuilder`**, **precheck**). Push builds a bundle (including `canonical_hash`),
 //! runs precheck, then **`Outbox::stage`** (`ready`). HTTP upload to the platform via
 //! **`SyncClient`** is offline-first (queued locally; optional daemon follow-up).
 //! Pull calls **`POST /v1/local/sync/pull`**, which uses **`SyncClient::pull_bundles`**
@@ -195,6 +195,7 @@ pub struct OutboxEntrySummaryResponse {
 ///
 /// In non-interactive (no TTY) contexts, confirmation defaults to `false`
 /// unless `force` is set.
+#[must_use] 
 pub fn confirm_auto_reject(force: bool) -> bool {
     if force {
         return true;
@@ -202,16 +203,12 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 
     // dialoguer::Confirm returns Err when there is no TTY (non-interactive).
     // In that case, default to false (reject the destructive action).
-    match dialoguer::Confirm::new()
+    if let Ok(confirmed) = dialoguer::Confirm::new()
         .with_prompt("Auto-reject will discard all conflicting server changes. Continue?")
         .default(false)
-        .interact()
-    {
-        Ok(confirmed) => confirmed,
-        Err(_) => {
-            eprintln!("Non-interactive terminal: auto-reject requires --force flag.");
-            false
-        }
+        .interact() { confirmed } else {
+        eprintln!("Non-interactive terminal: auto-reject requires --force flag.");
+        false
     }
 }
 
@@ -235,30 +232,21 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
 
             let mut default_id_fields: Vec<&'static str> = Vec::new();
 
-            let workspace_id = match workspace_id {
-                Some(s) => s,
-                None => {
-                    default_id_fields.push("workspace_id");
-                    "local".to_string()
-                }
+            let workspace_id = if let Some(s) = workspace_id { s } else {
+                default_id_fields.push("workspace_id");
+                "local".to_string()
             };
 
-            let world_id = match world_id {
-                Some(s) => s,
-                None => {
-                    default_id_fields.push("world_id");
-                    "unknown".to_string()
-                }
+            let world_id = if let Some(s) = world_id { s } else {
+                default_id_fields.push("world_id");
+                "unknown".to_string()
             };
 
             let creator_id = match creator_id {
                 Some(s) => s,
-                None => match config.active_creator_id.as_deref() {
-                    Some(s) => s.to_string(),
-                    None => {
-                        default_id_fields.push("creator_id");
-                        "unknown".to_string()
-                    }
+                None => if let Some(s) = config.active_creator_id.as_deref() { s.to_string() } else {
+                    default_id_fields.push("creator_id");
+                    "unknown".to_string()
                 },
             };
 
@@ -284,10 +272,10 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 Ok(response) => {
                     println!("Sync push staged successfully.");
                     if let Some(entry_id) = &response.outbox_entry_id {
-                        println!("  Entry ID:  {}", entry_id);
+                        println!("  Entry ID:  {entry_id}");
                     }
                     if let Some(bundle_id) = &response.bundle_id {
-                        println!("  Bundle ID: {}", bundle_id);
+                        println!("  Bundle ID: {bundle_id}");
                     }
                     if let Some(precheck) = &response.precheck_result {
                         if precheck.valid {
@@ -302,12 +290,12 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                     }
                     if !response.success {
                         if let Some(error) = &response.error {
-                            eprintln!("Error: {}", error);
+                            eprintln!("Error: {error}");
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Sync push failed: {}", e);
+                    eprintln!("Sync push failed: {e}");
                     return Err(e);
                 }
             }
@@ -321,16 +309,13 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
 
-            let world_id = match world_id {
-                Some(s) => s,
-                None => {
-                    eprintln!(
-                        "Warning: sync pull without --world-id uses placeholder \"unknown\". \
-Set --world-id for real platform sync (and ensure it matches workspace sync binding if set)."
-                    );
-                    "unknown".to_string()
-                }
-            };
+            let world_id = if let Some(s) = world_id { s } else {
+                                eprintln!(
+                                    "Warning: sync pull without --world-id uses placeholder \"unknown\". \
+            Set --world-id for real platform sync (and ensure it matches workspace sync binding if set)."
+                                );
+                                "unknown".to_string()
+                            };
 
             let request = SyncPullRequest {
                 schema_version: 1,
@@ -356,17 +341,17 @@ Set --world-id for real platform sync (and ensure it matches workspace sync bind
                             println!("  Skipped (already local): {}", resp.skipped_known_bundles);
                         }
                         if let Some(up) = resp.is_up_to_date {
-                            println!("  Server up-to-date flag:   {}", up);
+                            println!("  Server up-to-date flag:   {up}");
                         }
                         for id in &resp.entries_staged {
-                            println!("    - {}", id);
+                            println!("    - {id}");
                         }
                     } else if let Some(err) = &resp.error {
-                        eprintln!("Sync pull failed: {}", err);
+                        eprintln!("Sync pull failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Sync pull request failed: {}", e);
+                    eprintln!("Sync pull request failed: {e}");
                     return Err(e);
                 }
             }
@@ -394,7 +379,7 @@ Set --world-id for real platform sync (and ensure it matches workspace sync bind
                     println!("  Failed:    {}", status.failed_count);
 
                     match &status.last_sync_at {
-                        Some(ts) => println!("  Last sync: {}", ts),
+                        Some(ts) => println!("  Last sync: {ts}"),
                         None => println!("  Last sync: never"),
                     }
 
@@ -421,7 +406,7 @@ Set --world-id for real platform sync (and ensure it matches workspace sync bind
                 }
                 Err(e) => {
                     println!("Sync Status:");
-                    println!("  Error: {}", e);
+                    println!("  Error: {e}");
                 }
             }
         }
@@ -454,23 +439,21 @@ Set --world-id for real platform sync (and ensure it matches workspace sync bind
                 Ok(response) => {
                     if response.success {
                         println!(
-                            "Resolved entry {} with strategy: {}",
-                            outbox_entry_id, resolution
+                            "Resolved entry {outbox_entry_id} with strategy: {resolution}"
                         );
                         if let Some(state) = &response.delivery_state {
-                            println!("  New state: {}", state);
+                            println!("  New state: {state}");
                         }
                     } else if let Some(error) = &response.error {
-                        eprintln!("Resolution failed: {}", error);
+                        eprintln!("Resolution failed: {error}");
                         if let Some(state) = &response.delivery_state {
-                            eprintln!("  Current state: {}", state);
+                            eprintln!("  Current state: {state}");
                         }
                     }
                 }
                 Err(e) => {
                     eprintln!(
-                        "Resolve request failed for entry {}: {}",
-                        outbox_entry_id, e
+                        "Resolve request failed for entry {outbox_entry_id}: {e}"
                     );
                     return Err(e);
                 }

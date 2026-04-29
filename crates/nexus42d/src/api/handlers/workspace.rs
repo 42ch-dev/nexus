@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Workspace handlers
 
 use crate::api::errors::NexusApiError;
@@ -18,7 +20,7 @@ pub struct WorkspaceInfo {
 pub async fn info(State(state): State<WorkspaceState>) -> Json<WorkspaceInfo> {
     info!("Handling workspace info request");
     Json(WorkspaceInfo {
-        initialized: state.is_initialized().await,
+        initialized: state.is_initialized(),
         workspace_path: state.workspace_path(),
         database_path: state.database_path(),
     })

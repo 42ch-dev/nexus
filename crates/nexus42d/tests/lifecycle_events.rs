@@ -1,4 +1,4 @@
-//! Tests for lifecycle Event enum and LifecycleState.
+//! Tests for lifecycle Event enum and `LifecycleState`.
 //!
 //! Per plan §Task 2: ensure all variants match spec §3.
 

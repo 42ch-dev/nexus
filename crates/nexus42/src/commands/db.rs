@@ -14,6 +14,12 @@ pub enum DbCommand {
 }
 
 /// Run db command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Database connection fails
+/// - Schema validation fails
 pub async fn run(cmd: DbCommand, _config: &CliConfig) -> Result<()> {
     match cmd {
         DbCommand::Status => status().await,
@@ -23,7 +29,7 @@ pub async fn run(cmd: DbCommand, _config: &CliConfig) -> Result<()> {
 /// Show database status
 ///
 /// Prints:
-/// - Schema versions (db_schema_version and schema_version)
+/// - Schema versions (`db_schema_version` and `schema_version`)
 /// - Health check result
 /// - Existing tables
 async fn status() -> Result<()> {
@@ -55,7 +61,7 @@ async fn status() -> Result<()> {
         }
         Err(e) => {
             println!("Schema Versions: ERROR");
-            println!("  {}", e);
+            println!("  {e}");
             println!();
         }
     }
@@ -68,7 +74,7 @@ async fn status() -> Result<()> {
         }
         Err(e) => {
             println!("Health Check: FAILED");
-            println!("  {}", e);
+            println!("  {e}");
             println!();
         }
     }
@@ -85,7 +91,7 @@ async fn status() -> Result<()> {
         println!("  (none)");
     } else {
         for table in tables {
-            println!("  - {}", table);
+            println!("  - {table}");
         }
     }
     println!();
@@ -96,7 +102,7 @@ async fn status() -> Result<()> {
     let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
         .fetch_one(&pool)
         .await?;
-    println!("  journal_mode: {}", journal_mode);
+    println!("  journal_mode: {journal_mode}");
 
     // SAFETY: PRAGMA statement — no table schema to validate against.
     let foreign_keys: i32 = sqlx::query_scalar("PRAGMA foreign_keys")

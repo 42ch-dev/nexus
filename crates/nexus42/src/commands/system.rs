@@ -60,7 +60,7 @@ async fn list_system_presets(config: &CliConfig) -> Result<()> {
     } else {
         println!("System presets:");
         for id in &system_presets {
-            println!("  {}", id);
+            println!("  {id}");
         }
         println!("\n{} system preset(s)", system_presets.len());
     }

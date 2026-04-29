@@ -2,8 +2,8 @@
 //!
 //! Per plan §Task 4: verify subsystem bootstrap trait and lifecycle behavior.
 //!
-//! Note: Tests that involve subsystem spawning use new_for_test() with manual
-//! SubsystemUp dispatch, because new_with_subsystems() has deferred initialization
+//! Note: Tests that involve subsystem spawning use `new_for_test()` with manual
+//! `SubsystemUp` dispatch, because `new_with_subsystems()` has deferred initialization
 //! that requires careful coordination (used in production main.rs, not tests).
 
 use std::time::Duration;
@@ -12,7 +12,7 @@ use nexus42d::lifecycle::{
     Event, Lifecycle, LifecycleState, MockAllSubsystems, StatigLifecycle, SubsystemKind,
 };
 
-/// Test: SubsystemBootstrap trait implementations.
+/// Test: `SubsystemBootstrap` trait implementations.
 ///
 /// Verify that mock subsystems implement the trait correctly.
 #[tokio::test]
@@ -41,8 +41,8 @@ async fn subsystem_bootstrap_trait_works() {
 
 /// Test: Test mode lifecycle (no subsystem tasks spawned).
 ///
-/// Verify that new_for_test() does not spawn subsystem tasks,
-/// and tests can manually dispatch SubsystemUp events.
+/// Verify that `new_for_test()` does not spawn subsystem tasks,
+/// and tests can manually dispatch `SubsystemUp` events.
 #[tokio::test]
 async fn test_mode_no_subsystem_tasks_spawned() {
     let lifecycle = StatigLifecycle::new_for_test();

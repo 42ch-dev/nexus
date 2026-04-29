@@ -14,7 +14,7 @@ pub struct RuntimeStatus {
     pub workspace_initialized: bool,
     /// ACP status information (V1.1)
     pub acp: AcpStatusInfo,
-    /// Current runtime mode (local_only / local_first / cloud_enhanced)
+    /// Current runtime mode (`local_only` / `local_first` / `cloud_enhanced`)
     #[serde(default)]
     #[allow(dead_code)]
     pub runtime_mode: Option<RuntimeMode>,

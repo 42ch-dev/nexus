@@ -37,7 +37,7 @@ const MAX_VERIFY_ATTEMPTS: u32 = 2;
 pub enum CreatorCommand {
     /// Register a new Creator entity
     ///
-    /// Usage: nexus42 creator register --name "My Agent" [--source cli|web_agent] [--handle <handle>]
+    /// Usage: nexus42 creator register --name "My Agent" [--source `cli|web_agent`] [--handle <handle>]
     Register {
         /// Display name for the Creator (required)
         #[arg(long)]
@@ -123,6 +123,13 @@ pub enum CredentialsAction {
 }
 
 /// Run creator command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Platform API calls fail (registration, credential rotation)
+/// - Configuration cannot be read or written
+/// - Creator authentication fails
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         CreatorCommand::Register {
@@ -130,11 +137,17 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             source,
             handle,
         } => register_creator(config, name, source, handle).await,
-        CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
-        CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref).await,
-        CreatorCommand::List => list_creators(config).await,
-        CreatorCommand::Pair { creator_id } => pair_creator(config, creator_id).await,
-        CreatorCommand::Unpair { creator_id } => unpair_creator(config, creator_id).await,
+        CreatorCommand::Status { creator_id } => creator_status(config, creator_id),
+        CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()),
+        CreatorCommand::List => list_creators(config),
+        CreatorCommand::Pair { creator_id } => {
+            pair_creator(config, creator_id.as_str());
+            Ok(())
+        }
+        CreatorCommand::Unpair { creator_id } => {
+            unpair_creator(config, creator_id.as_str());
+            Ok(())
+        }
         CreatorCommand::Credentials { action } => match action {
             CredentialsAction::Rotate { creator_id } => {
                 rotate_credentials(config, creator_id).await
@@ -185,9 +198,9 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 );
                 return Ok(());
             }
-            println!("Workspaces for creator {}:", creator_id);
+            println!("Workspaces for creator {creator_id}:");
             let mut names: Vec<String> = std::fs::read_dir(&root)?
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|e| e.path().is_dir())
                 .filter_map(|e| e.file_name().into_string().ok())
                 .collect();
@@ -195,7 +208,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             let active = config.workspace_slug_for_creator(creator_id);
             for n in names {
                 let mark = if n == active { " (active)" } else { "" };
-                println!("  {}{}", n, mark);
+                println!("  {n}{mark}");
             }
             Ok(())
         }
@@ -209,8 +222,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 .join("meta.json");
             if op_meta.exists() {
                 return Err(CliError::Other(format!(
-                    "Workspace {:?} already exists for creator {}.",
-                    workspace_slug, creator_id
+                    "Workspace {workspace_slug:?} already exists for creator {creator_id}."
                 )));
             }
             let current_dir = std::env::current_dir()?;
@@ -234,8 +246,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 workspace_slug.clone(),
             )?;
             println!(
-                "✓ Workspace {:?} created for creator {}.",
-                workspace_slug, creator_id
+                "✓ Workspace {workspace_slug:?} created for creator {creator_id}."
             );
             println!("  Creative root: {}", creative_root.display());
             println!("  state.db: {}", db_path.display());
@@ -257,8 +268,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 .insert(creator_id.to_string(), workspace_slug.clone());
             cli.save()?;
             println!(
-                "✓ Active workspace slug for {} set to: {}",
-                creator_id, workspace_slug
+                "✓ Active workspace slug for {creator_id} set to: {workspace_slug}"
             );
             Ok(())
         }
@@ -280,8 +290,7 @@ async fn register_creator(
     // WS-B T4: validate name length (cheap check before regex)
     if name.len() > MAX_CREATOR_NAME_LENGTH {
         return Err(CliError::Other(format!(
-            "Creator name exceeds maximum length ({} characters)",
-            MAX_CREATOR_NAME_LENGTH
+            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} characters)"
         )));
     }
     // Validate handle if provided
@@ -301,7 +310,7 @@ async fn register_creator(
     let auth_token = obtain_auth_token(&auth_store)?;
 
     // --- Step 2: Create platform client and call register ---
-    println!("Registering creator \"{}\"...", name);
+    println!("Registering creator \"{name}\"...");
 
     let client = PlatformClient::new(&config.platform_url, &auth_token, &config.device_id)?;
 
@@ -313,7 +322,7 @@ async fn register_creator(
     let pending_api_key = &register_response.creator_api_key;
     let verification = &register_response.verification;
 
-    println!("  Creator ID: {}", creator_id);
+    println!("  Creator ID: {creator_id}");
     println!(
         "  Verification code: {}",
         &verification.verification_code[..verification.verification_code.len().min(16)]
@@ -332,7 +341,7 @@ async fn register_creator(
     }
 
     let remaining_secs = (expires_at.timestamp() - now.timestamp()).max(0);
-    println!("  Challenge expires in {}s", remaining_secs);
+    println!("  Challenge expires in {remaining_secs}s");
 
     // --- Step 4: Solve challenge ---
     println!("Solving challenge...");
@@ -342,7 +351,7 @@ async fn register_creator(
             .await
         {
             Ok(answer) => {
-                println!("  Answer computed: {}", answer);
+                println!("  Answer computed: {answer}");
                 answer
             }
             Err(challenge_err) => {
@@ -390,7 +399,7 @@ async fn register_creator(
 
             println!();
             println!("✓ Verification successful!");
-            println!("  Creator ID: {}", creator_id);
+            println!("  Creator ID: {creator_id}");
             println!("  API key stored to local credentials.");
             println!();
 
@@ -401,8 +410,7 @@ async fn register_creator(
             Err(CliError::CreatorVerificationFailed {
                 status: "wrong_answer".to_string(),
                 message: format!(
-                    "Incorrect answer after auto-retry. {} attempts remaining.",
-                    remaining
+                    "Incorrect answer after auto-retry. {remaining} attempts remaining."
                 ),
             })
         }
@@ -432,8 +440,7 @@ async fn submit_with_retry(
     for attempt in 1..=max_attempts {
         if attempt > 1 {
             println!(
-                "  Retrying verification (attempt {}/{})...",
-                attempt, max_attempts
+                "  Retrying verification (attempt {attempt}/{max_attempts})..."
             );
         }
 
@@ -445,8 +452,7 @@ async fn submit_with_retry(
             Ok(resp) => resp,
             Err(CliError::Network(_)) if attempt < max_attempts => {
                 eprintln!(
-                    "  Network error during verification (attempt {}/{}). Retrying...",
-                    attempt, max_attempts
+                    "  Network error during verification (attempt {attempt}/{max_attempts}). Retrying..."
                 );
                 continue;
             }
@@ -460,8 +466,7 @@ async fn submit_with_retry(
                 last_response = Some(response);
                 if attempt < max_attempts {
                     eprintln!(
-                        "  Wrong answer. {} attempts remaining. Retrying...",
-                        remaining
+                        "  Wrong answer. {remaining} attempts remaining. Retrying..."
                     );
                 }
             }
@@ -499,7 +504,7 @@ fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
 }
 
 /// Show Creator status
-async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
+fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
     let id = creator_id.unwrap_or_else(|| {
         config
             .active_creator_id
@@ -516,7 +521,7 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
     let store = crate::auth::AuthStore::load()?;
 
     // Try to get from local cache first
-    println!("Creator: {}", id);
+    println!("Creator: {id}");
 
     if store.is_creator_authenticated(&id) {
         println!("  Auth: ✓ Token cached");
@@ -531,25 +536,24 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
 }
 
 /// Switch active Creator
-async fn use_creator(_config: &CliConfig, creator_ref: String) -> Result<()> {
+fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
     let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(creator_ref.clone());
+    cli_config.active_creator_id = Some(creator_ref.to_string());
     // New active creator uses default workspace slug until `creator workspace use`.
     cli_config
         .active_workspace_slug_by_creator
-        .remove(&creator_ref);
+        .remove(creator_ref);
     cli_config.save()?;
 
-    println!("✓ Active Creator set to: {}", creator_ref);
+    println!("✓ Active Creator set to: {creator_ref}");
     println!(
-        "  Workspace slug: {} (use `nexus42 creator workspace use <slug>` after the directory exists)",
-        DEFAULT_WORKSPACE_SLUG
+        "  Workspace slug: {DEFAULT_WORKSPACE_SLUG} (use `nexus42 creator workspace use <slug>` after the directory exists)"
     );
     Ok(())
 }
 
 /// List all registered Creators
-async fn list_creators(_config: &CliConfig) -> Result<()> {
+fn list_creators(_config: &CliConfig) -> Result<()> {
     // In V1.0, list from local cache
     // In production, also fetch from platform
     let config = CliConfig::load()?;
@@ -558,7 +562,7 @@ async fn list_creators(_config: &CliConfig) -> Result<()> {
     println!();
 
     if let Some(active_id) = &config.active_creator_id {
-        println!("  {} (active)", active_id);
+        println!("  {active_id} (active)");
     }
 
     println!();
@@ -568,19 +572,17 @@ async fn list_creators(_config: &CliConfig) -> Result<()> {
 }
 
 /// Initiate pairing flow
-async fn pair_creator(_config: &CliConfig, creator_id: String) -> Result<()> {
+fn pair_creator(_config: &CliConfig, creator_id: &str) {
     // Platform API integration not yet available
     println!("⚠ V1.0 skeleton: Creator pairing requires platform API.");
-    println!("  Creator: {}", creator_id);
-    Ok(())
+    println!("  Creator: {creator_id}");
 }
 
 /// Remove pairing
-async fn unpair_creator(_config: &CliConfig, creator_id: String) -> Result<()> {
+fn unpair_creator(_config: &CliConfig, creator_id: &str) {
     // Platform API integration not yet available
     println!("⚠ V1.0 skeleton: Creator unpairing requires platform API.");
-    println!("  Creator: {}", creator_id);
-    Ok(())
+    println!("  Creator: {creator_id}");
 }
 
 /// Rotate Creator credentials
@@ -596,7 +598,7 @@ async fn rotate_credentials(config: &CliConfig, creator_id: Option<String>) -> R
     auth::creator_auth::rotate_credentials(config, &id).await
 }
 
-/// Cache a Creator locally in SQLite
+/// Cache a Creator locally in `SQLite`
 #[allow(dead_code)]
 async fn cache_creator_locally(creator: &Creator) -> Result<()> {
     use crate::config::state_db_path;
@@ -633,7 +635,7 @@ mod tests {
     use crate::auth::{AuthStore, CreatorAuthState};
     use nexus_sync::platform_client::VerifyStatus;
 
-    /// Helper: create an AuthStore with a known access token.
+    /// Helper: create an `AuthStore` with a known access token.
     fn store_with_token(creator_id: &str, token: &str) -> AuthStore {
         let mut store = AuthStore::default();
         store.creators = Some({
@@ -702,7 +704,7 @@ mod tests {
         let err = CliError::ChallengeFailed {
             reason: "could not parse math problem".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("Challenge solving failed"));
         assert!(display.contains("could not parse math problem"));
         assert!(display.contains("Suggestion:"));
@@ -715,7 +717,7 @@ mod tests {
             status: 500,
             message: "internal server error".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("500"));
         assert!(display.contains("internal server error"));
         assert!(display.contains("Suggestion:"));
@@ -728,7 +730,7 @@ mod tests {
             status: "wrong_answer".to_string(),
             message: "0 attempts remaining".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("wrong_answer"));
         assert!(display.contains("auto-retry has been exhausted"));
     }
@@ -739,7 +741,7 @@ mod tests {
             status: "expired".to_string(),
             message: "timed out".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("expired"));
         assert!(display.contains("timed out"));
     }
@@ -750,7 +752,7 @@ mod tests {
             status: "locked".to_string(),
             message: "permanently locked".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("locked"));
         assert!(display.contains("permanently locked"));
         assert!(display.contains("Contact support"));
@@ -761,7 +763,7 @@ mod tests {
         let err = CliError::ChallengeExpired {
             expires_at: "2026-04-16T00:05:00.000Z".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("expired"));
         assert!(display.contains("2026-04-16T00:05:00.000Z"));
     }
@@ -993,7 +995,7 @@ mod tests {
         let result = validate_handle("AB");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("4"));
+        assert!(display.contains('4'));
         assert!(display.contains("15"));
     }
 
@@ -1002,7 +1004,7 @@ mod tests {
         let result = validate_handle("abc");
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("4"));
+        assert!(display.contains('4'));
         assert!(display.contains("15"));
     }
 
@@ -1011,7 +1013,7 @@ mod tests {
         let result = validate_handle("abcdefghijklmnop"); // 16 chars
         assert!(result.is_err());
         let display = format!("{}", result.unwrap_err());
-        assert!(display.contains("4"));
+        assert!(display.contains('4'));
         assert!(display.contains("15"));
     }
 

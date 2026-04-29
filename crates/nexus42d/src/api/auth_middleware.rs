@@ -1,7 +1,7 @@
 //! Auth Middleware
 //!
 //! Tower/axum middleware layer for authentication enforcement.
-//! Validates `Authorization: Bearer <token>` against stored tokens in SQLite.
+//! Validates `Authorization: Bearer <token>` against stored tokens in `SQLite`.
 //! Applied to protected daemon routes.
 
 use axum::body::Body;
@@ -34,7 +34,14 @@ pub struct BearerToken(pub String);
 /// Require authentication middleware.
 ///
 /// Extracts `Authorization: Bearer <token>` header, validates against stored
-/// tokens in the daemon's SQLite database, and injects `AuthenticatedUser`.
+/// tokens in the daemon's `SQLite` database, and injects `AuthenticatedUser`.
+///
+/// # Errors
+///
+/// Returns `NexusApiError::AuthRequired` if:
+/// - The `Authorization` header is missing or malformed
+/// - The Bearer token is empty
+/// - The token is invalid or expired
 ///
 /// # Tracing
 /// - `debug` on entry/exit for every request
@@ -151,7 +158,7 @@ mod tests {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state.clone());
-        let server = TestServer::new(app).unwrap();
+        let server = TestServer::new(app).expect("failed to create test server");
         TestApp {
             _tmp: tmp,
             server,

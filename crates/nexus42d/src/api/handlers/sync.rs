@@ -1,6 +1,10 @@
+//! Complex HTTP handlers with orchestration logic exceed line limits.
+#![allow(clippy::too_many_lines)]
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Sync handler — sync status, push, and resolve endpoints
 //!
-//! Uses `nexus-sync` **Outbox**, **BundleBuilder**, and **precheck** on the push path:
+//! Uses `nexus-sync` **Outbox**, **`BundleBuilder`**, and **precheck** on the push path:
 //! builds a minimal bundle (with `canonical_hash`), runs `precheck_bundle_with_auth`,
 //! then persists via **`Outbox::stage`** (`ready`). This is **offline-first** by default.
 //!
@@ -35,7 +39,7 @@ use tracing::{debug, info, warn};
 
 // ── Response types ───────────────────────────────────────────────
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct SyncStatusResponse {
     /// Number of staged entries (ready to be staged, have command but no bundle yet)
     pub staged_count: u64,
@@ -100,7 +104,7 @@ pub struct PrecheckSummary {
 pub struct SyncResolveRequest {
     /// Outbox entry ID to resolve
     pub outbox_entry_id: String,
-    /// Resolution strategy: auto_accept, auto_reject, manual_review
+    /// Resolution strategy: `auto_accept`, `auto_reject`, `manual_review`
     pub resolution: String,
     /// Skip confirmation (for automation)
     #[serde(default)]
@@ -168,7 +172,7 @@ pub(crate) async fn optional_sync_push_binding(
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Database error: {}", e),
+                message: format!("Database error: {e}"),
             })?;
 
     let world_id: Option<String> =
@@ -177,7 +181,7 @@ pub(crate) async fn optional_sync_push_binding(
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Database error: {}", e),
+                message: format!("Database error: {e}"),
             })?;
 
     let creator_id: Option<String> =
@@ -186,7 +190,7 @@ pub(crate) async fn optional_sync_push_binding(
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Database error: {}", e),
+                message: format!("Database error: {e}"),
             })?;
 
     match (workspace_id, world_id, creator_id) {
@@ -341,64 +345,61 @@ pub async fn pull(
 
 /// GET /v1/local/sync/status
 ///
-/// Returns real outbox state counts using nexus-sync::Outbox.
+/// Returns real outbox state counts using `nexus-sync::Outbox`.
 pub async fn status(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<SyncStatusResponse>, NexusApiError> {
     info!("Handling sync status request");
 
-    match state.outbox() {
-        Some(outbox) => {
-            let staged_count = outbox.count_by_state("staged").await.unwrap_or(0) as u64;
-            let ready_count = outbox.count_by_state("ready").await.unwrap_or(0) as u64;
-            let sent_count = outbox.count_by_state("sent").await.unwrap_or(0) as u64;
-            let acked_count = outbox.count_by_state("acked").await.unwrap_or(0) as u64;
-            let conflicted_count = outbox.count_by_state("conflicted").await.unwrap_or(0) as u64;
-            let failed_count = outbox.count_by_state("failed").await.unwrap_or(0) as u64;
+    if let Some(outbox) = state.outbox() {
+        let staged_count = outbox.count_by_state("staged").await.unwrap_or(0) as u64;
+        let ready_count = outbox.count_by_state("ready").await.unwrap_or(0) as u64;
+        let sent_count = outbox.count_by_state("sent").await.unwrap_or(0) as u64;
+        let acked_count = outbox.count_by_state("acked").await.unwrap_or(0) as u64;
+        let conflicted_count = outbox.count_by_state("conflicted").await.unwrap_or(0) as u64;
+        let failed_count = outbox.count_by_state("failed").await.unwrap_or(0) as u64;
 
-            // Get last sync timestamp from workspace_meta
-            let last_sync_row =
-                sqlx::query!("SELECT value FROM workspace_meta WHERE key = 'last_sync_at'")
-                    .fetch_optional(state.pool())
-                    .await
-                    .ok()
-                    .flatten();
-            let last_sync_at = last_sync_row.map(|r| r.value);
+        // Get last sync timestamp from workspace_meta
+        let last_sync_row =
+            sqlx::query!("SELECT value FROM workspace_meta WHERE key = 'last_sync_at'")
+                .fetch_optional(state.pool())
+                .await
+                .ok()
+                .flatten();
+        let last_sync_at = last_sync_row.map(|r| r.value);
 
-            debug!(
-                staged_count,
-                ready_count,
-                sent_count,
-                acked_count,
-                conflicted_count,
-                failed_count,
-                last_sync_at = ?last_sync_at,
-                "Sync status retrieved from outbox"
-            );
+        debug!(
+            staged_count,
+            ready_count,
+            sent_count,
+            acked_count,
+            conflicted_count,
+            failed_count,
+            last_sync_at = ?last_sync_at,
+            "Sync status retrieved from outbox"
+        );
 
-            Ok(Json(SyncStatusResponse {
-                staged_count,
-                ready_count,
-                sent_count,
-                acked_count,
-                conflicted_count,
-                failed_count,
-                last_sync_at,
-            }))
-        }
-        None => {
-            // Outbox not initialized — return zeroed status
-            warn!("Sync outbox not initialized, returning empty status");
-            Ok(Json(SyncStatusResponse {
-                staged_count: 0,
-                ready_count: 0,
-                sent_count: 0,
-                acked_count: 0,
-                conflicted_count: 0,
-                failed_count: 0,
-                last_sync_at: None,
-            }))
-        }
+        Ok(Json(SyncStatusResponse {
+            staged_count,
+            ready_count,
+            sent_count,
+            acked_count,
+            conflicted_count,
+            failed_count,
+            last_sync_at,
+        }))
+    } else {
+        // Outbox not initialized — return zeroed status
+        warn!("Sync outbox not initialized, returning empty status");
+        Ok(Json(SyncStatusResponse {
+            staged_count: 0,
+            ready_count: 0,
+            sent_count: 0,
+            acked_count: 0,
+            conflicted_count: 0,
+            failed_count: 0,
+            last_sync_at: None,
+        }))
     }
 }
 
@@ -510,7 +511,7 @@ pub async fn push(
         .build()
         .map_err(|e| NexusApiError::Internal {
             code: "BUNDLE_BUILD_ERROR".into(),
-            message: format!("Failed to build sync bundle: {}", e),
+            message: format!("Failed to build sync bundle: {e}"),
         })?;
 
     let local_state = LocalState::new(0);
@@ -544,7 +545,7 @@ pub async fn push(
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "OUTBOX_STAGE_ERROR".into(),
-            message: format!("Failed to stage bundle in outbox: {}", e),
+            message: format!("Failed to stage bundle in outbox: {e}"),
         })?;
 
     info!(
@@ -602,7 +603,7 @@ pub async fn push(
 /// POST /v1/local/sync/resolve
 ///
 /// Apply a conflict resolution strategy to an outbox entry.
-/// Supports auto_accept, auto_reject, and marks entries accordingly.
+/// Supports `auto_accept`, `auto_reject`, and marks entries accordingly.
 pub async fn resolve(
     State(state): State<WorkspaceState>,
     Json(req): Json<SyncResolveRequest>,
@@ -623,7 +624,7 @@ pub async fn resolve(
     let entry = outbox
         .get(&req.outbox_entry_id)
         .await
-        .map_err(|e| NexusApiError::NotFound(format!("Outbox entry not found: {}", e)))?;
+        .map_err(|e| NexusApiError::NotFound(format!("Outbox entry not found: {e}")))?;
 
     match req.resolution.as_str() {
         "auto_accept" => {
@@ -635,7 +636,7 @@ pub async fn resolve(
                     outbox.mark_acked(&req.outbox_entry_id).await.map_err(|e| {
                         NexusApiError::Internal {
                             code: "OUTBOX_RESOLVE_ERROR".into(),
-                            message: format!("Failed to resolve entry as auto_accept: {}", e),
+                            message: format!("Failed to resolve entry as auto_accept: {e}"),
                         }
                     })?;
 
@@ -648,8 +649,7 @@ pub async fn resolve(
                 }
                 state_str => {
                     let msg = format!(
-                        "Cannot auto_accept entry in '{}' state (requires 'conflicted' or 'sent')",
-                        state_str
+                        "Cannot auto_accept entry in '{state_str}' state (requires 'conflicted' or 'sent')"
                     );
                     Ok(Json(SyncResolveResponse {
                         success: false,
@@ -672,7 +672,7 @@ pub async fn resolve(
                         .await
                         .map_err(|e| NexusApiError::Internal {
                             code: "OUTBOX_RESOLVE_ERROR".into(),
-                            message: format!("Failed to resolve entry as auto_reject: {}", e),
+                            message: format!("Failed to resolve entry as auto_reject: {e}"),
                         })?;
 
                     info!(outbox_entry_id = %req.outbox_entry_id, "Resolved as auto_reject (failed/no retry)");
@@ -685,7 +685,7 @@ pub async fn resolve(
                     }))
                 }
                 state_str => {
-                    let msg = format!("Cannot auto_reject entry in '{}' state", state_str);
+                    let msg = format!("Cannot auto_reject entry in '{state_str}' state");
                     Ok(Json(SyncResolveResponse {
                         success: false,
                         delivery_state: Some(entry.delivery_state.as_str().to_string()),
@@ -705,7 +705,7 @@ pub async fn resolve(
         other => Ok(Json(SyncResolveResponse {
             success: false,
             delivery_state: Some(entry.delivery_state.as_str().to_string()),
-            error: Some(format!("Unknown resolution strategy: {}", other)),
+            error: Some(format!("Unknown resolution strategy: {other}")),
         })),
     }
 }
@@ -725,7 +725,7 @@ pub async fn replay(
 
     let entries = outbox.replay().await.map_err(|e| NexusApiError::Internal {
         code: "OUTBOX_REPLAY_ERROR".into(),
-        message: format!("Failed to replay outbox entries: {}", e),
+        message: format!("Failed to replay outbox entries: {e}"),
     })?;
 
     let summaries: Vec<OutboxEntrySummary> = entries

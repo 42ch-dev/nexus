@@ -52,7 +52,7 @@ pub enum CliError {
 
     /// Operation requires platform connectivity but current mode prohibits it.
     PlatformOperationProhibited {
-        /// Runtime mode that blocked the operation (e.g. "local_only")
+        /// Runtime mode that blocked the operation (e.g. "`local_only`")
         mode: String,
         /// Operation that was blocked (e.g. "sync push")
         operation: String,
@@ -74,7 +74,7 @@ pub enum CliError {
 
     /// Creator verification failed.
     CreatorVerificationFailed {
-        /// Verification status from the platform (e.g. "wrong_answer", "expired", "locked").
+        /// Verification status from the platform (e.g. "`wrong_answer`", "expired", "locked").
         status: String,
         /// Human-readable message with next steps.
         message: String,
@@ -157,18 +157,16 @@ impl fmt::Display for CliError {
             Self::ChallengeFailed { reason } => {
                 write!(
                     f,
-                    "Challenge solving failed: {}\n\n  Suggestion: \
+                    "Challenge solving failed: {reason}\n\n  Suggestion: \
                      Try registering again with `nexus42 creator register <name>`. \
-                     If the problem persists, the challenge format may be unsupported.",
-                    reason
+                     If the problem persists, the challenge format may be unsupported."
                 )
             }
             Self::CreatorRegistrationFailed { status, message } => {
                 write!(
                     f,
-                    "Creator registration failed (HTTP {}): {}\n\n  Suggestion: \
-                     Check your authentication with `nexus42 auth status` and try again.",
-                    status, message
+                    "Creator registration failed (HTTP {status}): {message}\n\n  Suggestion: \
+                     Check your authentication with `nexus42 auth status` and try again."
                 )
             }
             Self::CreatorVerificationFailed { status, message } => {
@@ -188,58 +186,49 @@ impl fmt::Display for CliError {
             Self::ChallengeExpired { expires_at } => {
                 write!(
                     f,
-                    "Challenge expired at {}. Register again with `nexus42 creator register <name>`.",
-                    expires_at
+                    "Challenge expired at {expires_at}. Register again with `nexus42 creator register <name>`."
                 )
             }
             Self::InvalidHandle { handle, reason } => {
                 write!(
                     f,
-                    "Invalid handle {:?}: {}\n\n  Suggestion: \
+                    "Invalid handle {handle:?}: {reason}\n\n  Suggestion: \
                      Handle must be 4–15 characters, start and end with a lowercase letter or digit, \
-                     and contain only lowercase letters, digits, dots, hyphens, and underscores.",
-                    handle, reason
+                     and contain only lowercase letters, digits, dots, hyphens, and underscores."
                 )
             }
-            Self::DaemonNotReachable { message, suggestion } => {
-                write!(f, "{}\n\n  Suggestion: {}", message, suggestion)
-            }
-            Self::AgentNotFound { message, suggestion, .. } => {
-                write!(f, "{}\n\n  Suggestion: {}", message, suggestion)
-            }
-            Self::SessionExpired { message, suggestion, .. } => {
-                write!(f, "{}\n\n  Suggestion: {}", message, suggestion)
-            }
-            Self::PermissionDenied { message, suggestion, .. } => {
-                write!(f, "{}\n\n  Suggestion: {}", message, suggestion)
+            Self::DaemonNotReachable { message, suggestion }
+            | Self::AgentNotFound { message, suggestion, .. }
+            | Self::SessionExpired { message, suggestion, .. }
+            | Self::PermissionDenied { message, suggestion, .. } => {
+                write!(f, "{message}\n\n  Suggestion: {suggestion}")
             }
 
             // Use #[error] messages for other variants
-            Self::Daemon { message } => write!(f, "Daemon error: {}", message),
-            Self::Network(err) => write!(f, "Network error: {}", err),
-            Self::Database(err) => write!(f, "Database error: {}", err),
-            Self::Io(err) => write!(f, "IO error: {}", err),
-            Self::Json(err) => write!(f, "JSON error: {}", err),
-            Self::Config(msg) => write!(f, "Configuration error: {}", msg),
-            Self::Api { status, message } => write!(f, "API error: {} — {}", status, message),
-            Self::Acp(err) => write!(f, "ACP error: {}", err),
+            Self::Daemon { message } => write!(f, "Daemon error: {message}"),
+            Self::Network(err) => write!(f, "Network error: {err}"),
+            Self::Database(err) => write!(f, "Database error: {err}"),
+            Self::Io(err) => write!(f, "IO error: {err}"),
+            Self::Json(err) => write!(f, "JSON error: {err}"),
+            Self::Config(msg) => write!(f, "Configuration error: {msg}"),
+            Self::Api { status, message } => write!(f, "API error: {status} — {message}"),
+            Self::Acp(err) => write!(f, "ACP error: {err}"),
             Self::PlatformOperationProhibited { mode, operation } => {
                 write!(
                     f,
-                    "Operation '{}' is not available in {} mode.\n\n  Suggestion: \
+                    "Operation '{operation}' is not available in {mode} mode.\n\n  Suggestion: \
                      This operation requires platform connectivity. Switch to \
-                     `local_first` or `cloud_enhanced` mode with `nexus42 config set runtime_mode <mode>`.",
-                    operation, mode
+                     `local_first` or `cloud_enhanced` mode with `nexus42 config set runtime_mode <mode>`."
                 )
             }
-            Self::Other(msg) => write!(f, "{}", msg),
+            Self::Other(msg) => write!(f, "{msg}"),
         }
     }
 }
 
 // Helper constructors for enhanced error variants
 impl CliError {
-    /// Create a DaemonNotReachable error with suggestion
+    /// Create a `DaemonNotReachable` error with suggestion
     #[allow(dead_code)]
     pub fn daemon_not_reachable(suggestion: impl Into<String>) -> Self {
         Self::DaemonNotReachable {
@@ -248,29 +237,29 @@ impl CliError {
         }
     }
 
-    /// Create an AgentNotFound error with agent ID
+    /// Create an `AgentNotFound` error with agent ID
     #[allow(dead_code)]
     pub fn agent_not_found(agent_id: impl Into<String>) -> Self {
         let agent_id = agent_id.into();
         Self::AgentNotFound {
             agent_id: agent_id.clone(),
-            message: format!("Agent '{}' not found.", agent_id),
+            message: format!("Agent '{agent_id}' not found."),
             suggestion: "List available agents with `nexus42 agent list`.".to_string(),
         }
     }
 
-    /// Create a SessionExpired error with session ID
+    /// Create a `SessionExpired` error with session ID
     #[allow(dead_code)]
     pub fn session_expired(session_id: impl Into<String>) -> Self {
         let session_id = session_id.into();
         Self::SessionExpired {
             session_id: session_id.clone(),
-            message: format!("Session '{}' has expired.", session_id),
+            message: format!("Session '{session_id}' has expired."),
             suggestion: "Create a new session with `nexus42 agent connect <agent>`.".to_string(),
         }
     }
 
-    /// Create a PermissionDenied error for tool execution
+    /// Create a `PermissionDenied` error for tool execution
     #[allow(dead_code)]
     pub fn permission_denied(tool: impl Into<String>, reason: impl Into<String>) -> Self {
         let tool = tool.into();
@@ -278,7 +267,7 @@ impl CliError {
         Self::PermissionDenied {
             tool: tool.clone(),
             reason,
-            message: format!("Permission denied for tool: {}", tool),
+            message: format!("Permission denied for tool: {tool}"),
             suggestion: "Check your permissions with `nexus42 auth status`.".to_string(),
         }
     }
@@ -286,13 +275,13 @@ impl CliError {
 
 impl From<anyhow::Error> for CliError {
     fn from(err: anyhow::Error) -> Self {
-        CliError::Other(err.to_string())
+        Self::Other(err.to_string())
     }
 }
 
 impl From<chrono::ParseError> for CliError {
     fn from(err: chrono::ParseError) -> Self {
-        CliError::Other(format!("Date parse error: {}", err))
+        Self::Other(format!("Date parse error: {err}"))
     }
 }
 
@@ -300,46 +289,46 @@ impl From<nexus_domain::errors::DomainError> for CliError {
     fn from(err: nexus_domain::errors::DomainError) -> Self {
         match err {
             nexus_domain::errors::DomainError::PlatformOperationProhibited { mode, operation } => {
-                CliError::PlatformOperationProhibited { mode, operation }
+                Self::PlatformOperationProhibited { mode, operation }
             }
-            other => CliError::Other(format!("Domain error: {}", other)),
+            other => Self::Other(format!("Domain error: {other}")),
         }
     }
 }
 
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
-        CliError::Network(err)
+        Self::Network(err)
     }
 }
 
 impl From<sqlx::Error> for CliError {
     fn from(err: sqlx::Error) -> Self {
-        CliError::Database(err)
+        Self::Database(err)
     }
 }
 
 impl From<std::io::Error> for CliError {
     fn from(err: std::io::Error) -> Self {
-        CliError::Io(err)
+        Self::Io(err)
     }
 }
 
 impl From<serde_json::Error> for CliError {
     fn from(err: serde_json::Error) -> Self {
-        CliError::Json(err)
+        Self::Json(err)
     }
 }
 
 impl From<AcpError> for CliError {
     fn from(err: AcpError) -> Self {
-        CliError::Acp(err)
+        Self::Acp(err)
     }
 }
 
 impl From<nexus_local_db::LocalDbError> for CliError {
     fn from(err: nexus_local_db::LocalDbError) -> Self {
-        CliError::Other(format!("local database error: {}", err))
+        Self::Other(format!("local database error: {err}"))
     }
 }
 
@@ -347,14 +336,14 @@ impl From<nexus_sync::errors::SyncError> for CliError {
     fn from(err: nexus_sync::errors::SyncError) -> Self {
         match err {
             nexus_sync::errors::SyncError::PlatformError { status, body } => {
-                CliError::CreatorRegistrationFailed {
+                Self::CreatorRegistrationFailed {
                     status,
                     message: body,
                 }
             }
-            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => CliError::Config(msg),
-            nexus_sync::errors::SyncError::HttpError(e) => CliError::Network(e),
-            other => CliError::Other(format!("sync error: {}", other)),
+            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => Self::Config(msg),
+            nexus_sync::errors::SyncError::HttpError(e) => Self::Network(e),
+            other => Self::Other(format!("sync error: {other}")),
         }
     }
 }
@@ -365,17 +354,18 @@ impl CliError {
     /// Use this instead of `SyncError::into()` when the error occurs during
     /// the verification step (as opposed to registration), so callers can
     /// distinguish registration failures from verification failures.
+    #[must_use] 
     pub fn verify_creator_error(err: nexus_sync::errors::SyncError) -> Self {
         match err {
             nexus_sync::errors::SyncError::PlatformError { status, body } => {
-                CliError::CreatorVerificationFailed {
+                Self::CreatorVerificationFailed {
                     status: status.to_string(),
                     message: body,
                 }
             }
-            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => CliError::Config(msg),
-            nexus_sync::errors::SyncError::HttpError(e) => CliError::Network(e),
-            other => CliError::Other(format!("sync error: {}", other)),
+            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => Self::Config(msg),
+            nexus_sync::errors::SyncError::HttpError(e) => Self::Network(e),
+            other => Self::Other(format!("sync error: {other}")),
         }
     }
 }
@@ -421,7 +411,7 @@ mod tests {
     #[test]
     fn daemon_not_reachable_error_with_suggestion() {
         let err = CliError::daemon_not_reachable("Check if the daemon process is running");
-        let display = format!("{}", err);
+        let display = format!("{err}");
 
         assert!(display.contains("daemon is not reachable"));
         assert!(display.contains("Suggestion:"));
@@ -431,7 +421,7 @@ mod tests {
     #[test]
     fn agent_not_found_error_with_suggestion() {
         let err = CliError::agent_not_found("agent-123");
-        let display = format!("{}", err);
+        let display = format!("{err}");
 
         assert!(display.contains("Agent 'agent-123' not found"));
         assert!(display.contains("Suggestion:"));
@@ -441,7 +431,7 @@ mod tests {
     #[test]
     fn session_expired_error_with_suggestion() {
         let err = CliError::session_expired("sess-abc");
-        let display = format!("{}", err);
+        let display = format!("{err}");
 
         assert!(display.contains("Session 'sess-abc' has expired"));
         assert!(display.contains("Suggestion:"));
@@ -451,7 +441,7 @@ mod tests {
     #[test]
     fn permission_denied_error_with_suggestion() {
         let err = CliError::permission_denied("file_write", "Workspace policy denies write");
-        let display = format!("{}", err);
+        let display = format!("{err}");
 
         assert!(display.contains("Permission denied for tool: file_write"));
         assert!(display.contains("Suggestion:"));
@@ -461,7 +451,7 @@ mod tests {
     #[test]
     fn workspace_not_initialized_with_suggestion() {
         let err = CliError::WorkspaceNotInitialized;
-        let display = format!("{}", err);
+        let display = format!("{err}");
 
         assert!(display.contains("Workspace not initialized"));
         assert!(display.contains("Suggestion:"));
@@ -471,7 +461,7 @@ mod tests {
     #[test]
     fn daemon_not_running_with_suggestion() {
         let err = CliError::DaemonNotRunning;
-        let display = format!("{}", err);
+        let display = format!("{err}");
 
         assert!(display.contains("Daemon not running"));
         assert!(display.contains("Suggestion:"));
@@ -484,7 +474,7 @@ mod tests {
             mode: "local_only".to_string(),
             operation: "sync push".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("not available in local_only mode"));
         assert!(display.contains("sync push"));
         assert!(display.contains("Suggestion:"));

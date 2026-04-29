@@ -1,10 +1,12 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! ACP tool execution handlers — daemon-mediated agent tool access (ACP-R8)
 //!
 //! This module provides the `/v1/local/acp/tool/execute` endpoint that routes
 //! agent tool calls through the daemon for:
 //! - Permission checking (against configurable policy)
 //! - Workspace path validation (reject paths outside workspace root)
-//! - Audit logging (all tool executions recorded in SQLite)
+//! - Audit logging (all tool executions recorded in `SQLite`)
 //!
 //! # Architecture
 //!
@@ -43,7 +45,7 @@ use std::path::Path;
 /// Request for executing an ACP tool through the daemon.
 #[derive(Debug, Deserialize)]
 pub struct ToolExecuteRequest {
-    /// Tool name (e.g., "fs/read_text_file", "fs/write_text_file")
+    /// Tool name (e.g., "`fs/read_text_file`", "`fs/write_text_file`")
     pub tool_name: String,
     /// Tool-specific parameters (JSON object)
     pub parameters: serde_json::Value,
@@ -81,7 +83,7 @@ fn load_permission_policy(workspace_path: &str) -> Option<std::collections::Hash
     let granted = policy.get("grant")?;
     granted
         .as_table()
-        .map(|obj| obj.keys().map(|k| k.to_string()).collect())
+        .map(|obj| obj.keys().cloned().collect())
 }
 
 /// POST /v1/local/acp/tool/execute
@@ -149,7 +151,7 @@ fn validate_file_path(
             .canonicalize()
             .map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.path".into(),
-                reason: format!("path cannot be resolved: {}", e),
+                reason: format!("path cannot be resolved: {e}"),
             })?
     } else {
         // For non-existent paths, check if the path starts with workspace root
@@ -161,7 +163,7 @@ fn validate_file_path(
                 .map(|cwd| cwd.join(requested_path))
                 .map_err(|e| NexusApiError::Internal {
                     code: "CURRENT_DIR_ERROR".into(),
-                    message: format!("failed to get current directory: {}", e),
+                    message: format!("failed to get current directory: {e}"),
                 })?
         };
 
@@ -185,7 +187,7 @@ fn validate_file_path(
                 .canonicalize()
                 .map_err(|e| NexusApiError::Internal {
                     code: "WORKSPACE_PATH_INVALID".into(),
-                    message: format!("workspace root cannot be resolved: {}", e),
+                    message: format!("workspace root cannot be resolved: {e}"),
                 })?;
 
         // Security check: path must start with workspace root
@@ -216,7 +218,7 @@ fn execute_tool(
         "fs/write_text_file" => execute_write_file(req, state),
         other => Err(NexusApiError::InvalidInput {
             field: "tool_name".into(),
-            reason: format!("unsupported tool: {}", other),
+            reason: format!("unsupported tool: {other}"),
         }),
     }
 }
@@ -235,7 +237,7 @@ fn execute_read_file(
 
     let content = std::fs::read_to_string(path_str).map_err(|e| NexusApiError::Internal {
         code: "FILE_READ_FAILED".into(),
-        message: format!("failed to read file {}: {}", path_str, e),
+        message: format!("failed to read file {path_str}: {e}"),
     })?;
 
     Ok(serde_json::json!({
@@ -274,7 +276,7 @@ fn execute_write_file(
 
     std::fs::write(path, content).map_err(|e| NexusApiError::Internal {
         code: "FILE_WRITE_FAILED".into(),
-        message: format!("failed to write file {}: {}", path_str, e),
+        message: format!("failed to write file {path_str}: {e}"),
     })?;
 
     Ok(serde_json::json!({
@@ -282,7 +284,7 @@ fn execute_write_file(
     }))
 }
 
-/// Log tool execution to audit trail in SQLite.
+/// Log tool execution to audit trail in `SQLite`.
 ///
 /// Records:
 /// - Tool name
@@ -314,7 +316,7 @@ async fn log_tool_execution(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "AUDIT_LOG_FAILED".into(),
-        message: format!("failed to write audit log: {}", e),
+        message: format!("failed to write audit log: {e}"),
     })?;
 
     Ok(())

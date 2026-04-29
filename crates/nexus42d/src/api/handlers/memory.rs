@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Memory pending review handlers — session-end capture for review pipeline.
 
 use crate::api::errors::NexusApiError;
@@ -64,8 +66,8 @@ pub struct CountPendingReviewsResponse {
 ///
 /// ## Idempotency
 ///
-/// Uses `INSERT OR IGNORE` to handle retries gracefully. If a pending_id or
-/// session_id already exists, the insert is silently skipped, returning success.
+/// Uses `INSERT OR IGNORE` to handle retries gracefully. If a `pending_id` or
+/// `session_id` already exists, the insert is silently skipped, returning success.
 /// This prevents 500 errors when the CLI retries on network failures.
 pub async fn create_pending_review(
     State(state): State<WorkspaceState>,
@@ -107,7 +109,7 @@ pub async fn create_pending_review(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
-        message: format!("failed to create pending review: {}", e),
+        message: format!("failed to create pending review: {e}"),
     })?;
 
     debug!(pending_id = %req.pending_id, "Pending review entry created (or ignored on duplicate)");
@@ -118,7 +120,7 @@ pub async fn create_pending_review(
     }))
 }
 
-/// Validate input fields for create_pending_review.
+/// Validate input fields for `create_pending_review`.
 ///
 /// Returns 400 Bad Request with field-level detail on validation failure.
 fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(), NexusApiError> {
@@ -223,7 +225,7 @@ pub async fn list_pending_reviews(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
-        message: format!("failed to list pending reviews: {}", e),
+        message: format!("failed to list pending reviews: {e}"),
     })?;
 
     debug!(count = pending_reviews.len(), "Pending reviews retrieved");
@@ -263,7 +265,7 @@ pub async fn count_pending_reviews(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
-        message: format!("failed to count pending reviews: {}", e),
+        message: format!("failed to count pending reviews: {e}"),
     })?;
 
     Ok(Json(CountPendingReviewsResponse {
@@ -317,14 +319,13 @@ pub async fn delete_pending_review(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
-        message: format!("failed to lookup pending review: {}", e),
+        message: format!("failed to lookup pending review: {e}"),
     })?;
 
     match review {
         None => {
             return Err(NexusApiError::NotFound(format!(
-                "pending review '{}' not found",
-                pending_id
+                "pending review '{pending_id}' not found"
             )));
         }
         Some(ref r) if r.creator_id != params.creator_id => {
@@ -349,7 +350,7 @@ pub async fn delete_pending_review(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
-        message: format!("failed to delete pending review: {}", e),
+        message: format!("failed to delete pending review: {e}"),
     })?;
 
     debug_assert!(

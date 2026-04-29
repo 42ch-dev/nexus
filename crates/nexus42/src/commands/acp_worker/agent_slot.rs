@@ -1,7 +1,7 @@
-//! AgentSlot — state machine for a single ACP agent subprocess within a worker.
+//! `AgentSlot` — state machine for a single ACP agent subprocess within a worker.
 //!
 //! In V1.7, the actual ACP connection is stubbed. T3 will wire up the real
-//! AcpSdkAdapter. This module provides the state machine and channel-based
+//! `AcpSdkAdapter`. This module provides the state machine and channel-based
 //! communication pattern.
 //!
 //! Design: `orchestration-engine-v1.md` §6.3.
@@ -29,7 +29,8 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     /// Create a minimal config with required fields.
-    pub fn new(session_id: String, acp_agent_id: String) -> Self {
+    #[must_use] 
+    pub const fn new(session_id: String, acp_agent_id: String) -> Self {
         Self {
             session_id,
             acp_agent_id,
@@ -40,18 +41,21 @@ impl AgentConfig {
     }
 
     /// Builder-style role assignment.
+    #[must_use] 
     pub fn with_role(mut self, role: String) -> Self {
         self.role = Some(role);
         self
     }
 
     /// Builder-style model override.
+    #[must_use] 
     pub fn with_model(mut self, model: String) -> Self {
         self.model = Some(model);
         self
     }
 
     /// Builder-style system prompt (T8).
+    #[must_use] 
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
         self
@@ -62,7 +66,7 @@ impl AgentConfig {
 ///
 /// Represents the lifecycle of an ACP agent subprocess managed by the worker.
 /// Transitions are driven by IPC commands from the daemon and internal events.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSlotState {
     /// Slot created, awaiting initialization.
     Initializing,
@@ -80,23 +84,27 @@ pub enum AgentSlotState {
 
 impl AgentSlotState {
     /// Check if the slot is in an error state.
-    pub fn is_error(&self) -> bool {
-        matches!(self, AgentSlotState::Error(_))
+    #[must_use] 
+    pub const fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_))
     }
 
     /// Check if the slot is ready to accept prompts.
-    pub fn is_ready(&self) -> bool {
-        matches!(self, AgentSlotState::Ready)
+    #[must_use] 
+    pub const fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
     }
 
     /// Check if the slot is currently prompting.
-    pub fn is_prompting(&self) -> bool {
-        matches!(self, AgentSlotState::Prompting)
+    #[must_use] 
+    pub const fn is_prompting(&self) -> bool {
+        matches!(self, Self::Prompting)
     }
 
     /// Check if the slot is stopped or stopping.
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, AgentSlotState::Stopping | AgentSlotState::Stopped)
+    #[must_use] 
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Stopping | Self::Stopped)
     }
 }
 
@@ -113,7 +121,8 @@ pub struct SlotHealth {
 
 impl SlotHealth {
     /// Create health info from a slot.
-    pub fn new(state: AgentSlotState, uptime_ms: u64, last_error: Option<String>) -> Self {
+    #[must_use] 
+    pub const fn new(state: AgentSlotState, uptime_ms: u64, last_error: Option<String>) -> Self {
         Self {
             state,
             uptime_ms,
@@ -122,15 +131,16 @@ impl SlotHealth {
     }
 
     /// Check if the slot is healthy (Ready or Prompting).
-    pub fn is_healthy(&self) -> bool {
+    #[must_use] 
+    pub const fn is_healthy(&self) -> bool {
         self.state.is_ready() || self.state.is_prompting()
     }
 }
 
-/// AgentSlot manages one ACP agent subprocess within a worker.
+/// `AgentSlot` manages one ACP agent subprocess within a worker.
 ///
 /// In V1.7, the actual ACP connection is stubbed. T3 will wire up
-/// the real AcpSdkAdapter. This abstraction provides the state machine
+/// the real `AcpSdkAdapter`. This abstraction provides the state machine
 /// and channel-based communication pattern.
 ///
 /// # State Transitions
@@ -157,7 +167,7 @@ pub struct AgentSlot {
     start_time: Instant,
     /// Last error message (if any).
     last_error: Arc<Mutex<Option<String>>>,
-    /// Shutdown flag set by request_shutdown or Drop.
+    /// Shutdown flag set by `request_shutdown` or Drop.
     shutdown_requested: AtomicBool,
 }
 
@@ -166,6 +176,7 @@ impl AgentSlot {
     ///
     /// The slot starts in `Initializing` state. Call `mark_ready()` after
     /// the agent subprocess is confirmed ready.
+    #[must_use] 
     pub fn new(config: AgentConfig) -> Self {
         Self {
             config,
@@ -182,9 +193,7 @@ impl AgentSlot {
     /// `mark_*` methods.
     pub fn state(&self) -> AgentSlotState {
         self.state
-            .lock()
-            .map(|s| s.clone())
-            .unwrap_or_else(|_| AgentSlotState::Error("state lock poisoned".to_string()))
+            .lock().map_or_else(|_| AgentSlotState::Error("state lock poisoned".to_string()), |s| s.clone())
     }
 
     /// Get health info for this slot.
@@ -192,8 +201,11 @@ impl AgentSlot {
     /// Combines state, uptime, and last error for `worker/health` response.
     pub fn health(&self) -> SlotHealth {
         let state = self.state();
+        // Uptime in milliseconds — cast is safe since uptime from start_time
+        // is bounded by process lifetime (max ~584 years for u64 milliseconds)
+        #[allow(clippy::cast_possible_truncation)]
         let uptime_ms = self.start_time.elapsed().as_millis() as u64;
-        let last_error = self.last_error.lock().map(|e| e.clone()).unwrap_or(None);
+        let last_error = self.last_error.lock().map_or(None, |e| e.clone());
         SlotHealth::new(state, uptime_ms, last_error)
     }
 
@@ -262,7 +274,7 @@ impl AgentSlot {
     /// # Errors
     ///
     /// If either lock is poisoned, silently returns without change.
-    pub fn mark_crashed(&self, error_msg: String) {
+    pub fn mark_crashed(&self, error_msg: &str) {
         let msg = format!("[crash] {error_msg}");
         if let Ok(mut state) = self.state.lock() {
             *state = AgentSlotState::Error(msg.clone());
@@ -344,7 +356,7 @@ impl AgentSlot {
     /// without spawning real child processes.
     #[cfg(test)]
     pub fn simulate_crash(&self, error_msg: &str) {
-        self.mark_crashed(error_msg.to_string());
+        self.mark_crashed(error_msg);
     }
 }
 
@@ -463,8 +475,7 @@ mod tests {
         // but we can check the state was set to Stopping via the arc.
         let state = state_arc
             .lock()
-            .map(|s| s.clone())
-            .unwrap_or(AgentSlotState::Stopped);
+            .map_or(AgentSlotState::Stopped, |s| s.clone());
         assert!(state.is_terminal());
     }
 
@@ -531,11 +542,10 @@ mod tests {
         assert!(slot.is_shutdown_requested());
     }
 
-    #[test]
-    fn mark_crashed_transitions_to_error() {
-        let slot = AgentSlot::new(test_config());
-        slot.mark_ready();
-        slot.mark_crashed("segfault in agent subprocess".to_string());
+#[test]
+fn mark_crashed_transitions_to_error() {
+    let slot = AgentSlot::new(test_config());
+        slot.mark_crashed("segfault in agent subprocess");
         let state = slot.state();
         assert!(state.is_error());
         // The error message should be prefixed with [crash].

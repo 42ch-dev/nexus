@@ -11,13 +11,13 @@ use clap::Subcommand;
 pub enum ConfigCommand {
     /// Get a configuration value
     Get {
-        /// Configuration key (e.g., runtime_mode, platform_url)
+        /// Configuration key (e.g., `runtime_mode`, `platform_url`)
         key: String,
     },
 
     /// Set a configuration value
     Set {
-        /// Configuration key (e.g., runtime_mode, platform_url)
+        /// Configuration key (e.g., `runtime_mode`, `platform_url`)
         key: String,
         /// Configuration value
         value: String,
@@ -34,7 +34,13 @@ pub enum ConfigCommand {
 }
 
 /// Run config command
-pub async fn run(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - The configuration key is invalid
+/// - The configuration file cannot be read or written
+pub fn run(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ConfigCommand::Get { key } => get(config, &key),
         ConfigCommand::Set { key, value } => set(config, &key, &value),
@@ -46,9 +52,9 @@ pub async fn run(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
 fn get(config: &CliConfig, key: &str) -> Result<()> {
     let value = config.get(key)?;
     if value.is_empty() {
-        println!("{}: (unset)", key);
+        println!("{key}: (unset)");
     } else {
-        println!("{}: {}", key, value);
+        println!("{key}: {value}");
     }
     Ok(())
 }
@@ -58,7 +64,7 @@ fn set(config: &CliConfig, key: &str, value: &str) -> Result<()> {
     updated.set(key, value)?;
     updated.save()?;
 
-    println!("Set {} = {}", key, value);
+    println!("Set {key} = {value}");
     Ok(())
 }
 
@@ -67,7 +73,7 @@ fn unset(config: &CliConfig, key: &str) -> Result<()> {
     updated.unset(key)?;
     updated.save()?;
 
-    println!("Unset {} (reverted to default)", key);
+    println!("Unset {key} (reverted to default)");
     Ok(())
 }
 

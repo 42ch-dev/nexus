@@ -45,7 +45,7 @@ pub struct SummaryConfig {
     pub max_file_size: usize,
     /// Maximum recursion depth for directory scanning (default: 10).
     pub max_depth: usize,
-    /// File extensions to include (default: ["md", "txt"]).
+    /// File extensions to include (default: `["md", "txt"]`).
     pub include_extensions: Vec<String>,
 }
 
@@ -56,7 +56,7 @@ impl Default for SummaryConfig {
             max_depth: DEFAULT_MAX_DEPTH,
             include_extensions: DEFAULT_INCLUDE_EXTENSIONS
                 .iter()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
         }
     }
@@ -117,7 +117,7 @@ pub enum SummaryError {
 
 impl From<std::io::Error> for SummaryError {
     fn from(source: std::io::Error) -> Self {
-        SummaryError::IoError { source }
+        Self::IoError { source }
     }
 }
 
@@ -141,7 +141,7 @@ pub struct GeneratedSummary {
     pub word_count: usize,
     /// Opening excerpt (first N chars of first chapter body).
     pub opening_excerpt: String,
-    /// Final summary text suitable for StoryManifest.summary_text.
+    /// Final summary text suitable for `StoryManifest.summary_text`.
     pub summary_text: String,
 }
 
@@ -162,6 +162,7 @@ pub struct SummaryGenerator {
 
 impl SummaryGenerator {
     /// Create a new summary generator for the given manuscript root.
+    #[must_use] 
     pub fn new(manuscript_root: PathBuf) -> Self {
         Self {
             manuscript_root,
@@ -172,7 +173,8 @@ impl SummaryGenerator {
     }
 
     /// Create a new summary generator with custom configuration.
-    pub fn with_config(manuscript_root: PathBuf, config: SummaryConfig) -> Self {
+    #[must_use] 
+    pub const fn with_config(manuscript_root: PathBuf, config: SummaryConfig) -> Self {
         Self {
             manuscript_root,
             max_summary_chars: MAX_SUMMARY_CHARS,
@@ -186,10 +188,11 @@ impl SummaryGenerator {
     /// This is a convenience builder method that modifies the config.
     /// Deprecated: prefer using `with_config()` instead.
     #[deprecated(note = "Use with_config() instead")]
+    #[must_use]
     pub fn with_max_file_size(self, max_file_size: Option<u64>) -> Self {
         Self {
             config: SummaryConfig {
-                max_file_size: max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE as u64) as usize,
+                max_file_size: usize::try_from(max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE as u64)).unwrap_or(usize::MAX),
                 ..self.config
             },
             ..self
@@ -257,7 +260,7 @@ impl SummaryGenerator {
 
                 // V1.1 safety: check file size limit (CTX-R2)
                 let metadata = fs::metadata(&validated_path)?;
-                let file_size = metadata.len() as usize;
+                let file_size = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
                 if file_size > self.config.max_file_size {
                     let relative = validated_path
                         .strip_prefix(&self.manuscript_root)
@@ -314,7 +317,7 @@ impl SummaryGenerator {
         // Build summary text
         let mut summary_parts: Vec<String> = Vec::new();
         if let Some(t) = &title {
-            summary_parts.push(format!("Title: {}", t));
+            summary_parts.push(format!("Title: {t}"));
         }
         if !chapters.is_empty() {
             let chapter_list: Vec<String> = chapters
@@ -325,9 +328,9 @@ impl SummaryGenerator {
             summary_parts.push("Chapters:".to_string());
             summary_parts.extend(chapter_list);
         }
-        summary_parts.push(format!("Word count: {}", total_words));
+        summary_parts.push(format!("Word count: {total_words}"));
         if let Some(excerpt) = &first_body_excerpt {
-            summary_parts.push(format!("Opening: {}", excerpt));
+            summary_parts.push(format!("Opening: {excerpt}"));
         }
 
         let mut summary_text = summary_parts.join("\n");
@@ -385,6 +388,7 @@ pub fn validate_path_within_base(path: &Path, base: &Path) -> Result<PathBuf, Su
 ///
 /// Walks backwards from `max_bytes` to find the last valid character boundary.
 /// If the string is shorter than `max_bytes`, returns the entire string.
+#[must_use] 
 pub fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
@@ -688,7 +692,7 @@ mod tests {
         let result = validate_path_within_base(&valid_path, base);
         assert!(result.is_ok());
         let canonical = result.expect("should succeed");
-        assert!(canonical.starts_with(&base.canonicalize().expect("canonicalize base")));
+        assert!(canonical.starts_with(base.canonicalize().expect("canonicalize base")));
     }
 
     #[test]
@@ -714,7 +718,7 @@ mod tests {
             }) => {
                 assert!(attempted_path.contains("outside"));
             }
-            Err(e) => panic!("Expected PathTraversal error, got {:?}", e),
+            Err(e) => panic!("Expected PathTraversal error, got {e:?}"),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -740,7 +744,7 @@ mod tests {
             assert!(result.is_err());
             match result {
                 Err(SummaryError::PathTraversal { .. }) => {}
-                Err(e) => panic!("Expected PathTraversal error, got {:?}", e),
+                Err(e) => panic!("Expected PathTraversal error, got {e:?}"),
                 Ok(_) => panic!("Expected error, got success"),
             }
         }
@@ -762,7 +766,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(SummaryError::InvalidPath(_)) => {}
-            Err(e) => panic!("Expected InvalidPath error, got {:?}", e),
+            Err(e) => panic!("Expected InvalidPath error, got {e:?}"),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -810,7 +814,7 @@ mod tests {
                 }
                 Err(e) => {
                     // Other errors are acceptable
-                    eprintln!("Scan returned error (acceptable): {}", e);
+                    eprintln!("Scan returned error (acceptable): {e}");
                 }
             }
         }
@@ -990,7 +994,7 @@ mod tests {
     #[test]
     fn opening_excerpt_truncation_with_emoji() {
         let emoji_body = "😊🎉🎊".repeat(200);
-        let content = format!("# Title\n\n{}", emoji_body);
+        let content = format!("# Title\n\n{emoji_body}");
         let excerpt = extract_opening_excerpt(&content, 100).expect("should have excerpt");
         assert!(excerpt.len() <= 103);
         assert!(excerpt.is_char_boundary(excerpt.len()));
@@ -999,7 +1003,7 @@ mod tests {
     #[test]
     fn opening_excerpt_truncation_with_cjk() {
         let cjk_body = "中文测试".repeat(100);
-        let content = format!("# 标题\n\n{}", cjk_body);
+        let content = format!("# 标题\n\n{cjk_body}");
         let excerpt = extract_opening_excerpt(&content, 50).expect("should have excerpt");
         assert!(excerpt.len() <= 53);
         assert!(excerpt.is_char_boundary(excerpt.len()));
@@ -1106,7 +1110,7 @@ mod tests {
     #[test]
     fn extract_opening_excerpt_truncates() {
         let long_body = "a".repeat(1000);
-        let content = format!("# Title\n\n{}", long_body);
+        let content = format!("# Title\n\n{long_body}");
         let excerpt = extract_opening_excerpt(&content, 50).expect("should have excerpt");
         assert!(excerpt.len() <= 53); // 50 + "..."
     }
@@ -1184,14 +1188,12 @@ mod tests {
                 Ok(scan_result) => {
                     assert!(
                         scan_result.is_err(),
-                        "Expected error for permission-denied file, got {:?}",
-                        scan_result
+                        "Expected error for permission-denied file, got {scan_result:?}"
                     );
                 }
                 Err(panic_info) => {
                     panic!(
-                        "scan_manuscript_dir panicked on permission-denied file: {:?}",
-                        panic_info
+                        "scan_manuscript_dir panicked on permission-denied file: {panic_info:?}"
                     );
                 }
             }
@@ -1235,17 +1237,17 @@ mod tests {
             Ok(scan_result) => match scan_result {
                 Ok(files) => {
                     assert!(
-                        files.len() >= 1 && files.len() <= 2,
+                        !files.is_empty() && files.len() <= 2,
                         "Expected 1-2 files, got {}",
                         files.len()
                     );
                 }
                 Err(e) => {
-                    eprintln!("scan returned error for symlink (acceptable): {}", e);
+                    eprintln!("scan returned error for symlink (acceptable): {e}");
                 }
             },
             Err(panic_info) => {
-                panic!("scan_manuscript_dir panicked on symlink: {:?}", panic_info);
+                panic!("scan_manuscript_dir panicked on symlink: {panic_info:?}");
             }
         }
     }
@@ -1285,22 +1287,20 @@ mod tests {
             Ok(scan_result) => match scan_result {
                 Ok(files) => {
                     assert!(
-                        files.len() >= 1,
+                        !files.is_empty(),
                         "Expected at least 1 file from symlinked directory, got {}",
                         files.len()
                     );
                 }
                 Err(e) => {
                     eprintln!(
-                        "scan returned error for symlinked directory (acceptable): {}",
-                        e
+                        "scan returned error for symlinked directory (acceptable): {e}"
                     );
                 }
             },
             Err(panic_info) => {
                 panic!(
-                    "scan_manuscript_dir panicked on symlinked directory: {:?}",
-                    panic_info
+                    "scan_manuscript_dir panicked on symlinked directory: {panic_info:?}"
                 );
             }
         }
@@ -1346,13 +1346,12 @@ mod tests {
                     );
                 }
                 Err(e) => {
-                    eprintln!("scan returned error for broken symlink (acceptable): {}", e);
+                    eprintln!("scan returned error for broken symlink (acceptable): {e}");
                 }
             },
             Err(panic_info) => {
                 panic!(
-                    "scan_manuscript_dir panicked on broken symlink: {:?}",
-                    panic_info
+                    "scan_manuscript_dir panicked on broken symlink: {panic_info:?}"
                 );
             }
         }
@@ -1383,14 +1382,12 @@ mod tests {
                 Ok(gen_result) => {
                     assert!(
                         gen_result.is_err(),
-                        "Expected error for permission-denied file in generate(), got {:?}",
-                        gen_result
+                        "Expected error for permission-denied file in generate(), got {gen_result:?}"
                     );
                 }
                 Err(panic_info) => {
                     panic!(
-                        "generate() panicked on permission-denied file: {:?}",
-                        panic_info
+                        "generate() panicked on permission-denied file: {panic_info:?}"
                     );
                 }
             }

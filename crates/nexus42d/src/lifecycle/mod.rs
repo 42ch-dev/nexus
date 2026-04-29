@@ -38,19 +38,20 @@ pub enum LifecycleState {
 impl std::fmt::Display for LifecycleState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LifecycleState::Starting => write!(f, "starting"),
-            LifecycleState::Running => write!(f, "running"),
-            LifecycleState::Degraded => write!(f, "degraded"),
-            LifecycleState::Stopping => write!(f, "stopping"),
-            LifecycleState::Failed => write!(f, "failed"),
+            Self::Starting => write!(f, "starting"),
+            Self::Running => write!(f, "running"),
+            Self::Degraded => write!(f, "degraded"),
+            Self::Stopping => write!(f, "stopping"),
+            Self::Failed => write!(f, "failed"),
         }
     }
 }
 
 impl LifecycleState {
     /// Returns true if this state is terminal (no further transitions).
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, LifecycleState::Failed)
+    #[must_use] 
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Failed)
     }
 }
 
