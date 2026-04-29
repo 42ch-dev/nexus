@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Minimum remaining time before expiry that triggers proactive refresh.
-pub const REFRESH_THRESHOLD: Duration = Duration::from_secs(300); // 5 minutes
+pub const REFRESH_THRESHOLD: Duration = Duration::from_mins(5);
 
 /// Stored auth token record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
