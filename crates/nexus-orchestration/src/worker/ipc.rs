@@ -107,7 +107,7 @@ impl IpcClient {
     ///
     /// The transport is split into read and write halves internally.
     /// A background reader task is spawned to dispatch responses.
-    #[must_use] 
+    #[must_use]
     pub fn new(transport: Box<dyn RpcTransport>) -> Self {
         let (reader, writer) = transport.split();
         Self::from_split(reader, writer)
@@ -116,7 +116,7 @@ impl IpcClient {
     /// Create a new `IpcClient` from pre-split transport halves.
     ///
     /// This is useful when the caller already has separate read/write halves.
-    #[must_use] 
+    #[must_use]
     pub fn from_split(
         mut reader: Box<dyn RpcTransportRead>,
         writer: Box<dyn RpcTransportWrite>,
@@ -344,7 +344,10 @@ async fn dispatch_response(line: &str, pending: &SharedPending) {
     let result = val.get("error").map_or_else(
         || Ok(val.get("result").cloned().unwrap_or(Value::Null)),
         |error| {
-            let code = error.get("code").and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let code = error
+                .get("code")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(-1);
             let message = error
                 .get("message")
                 .and_then(|m| m.as_str())
@@ -367,17 +370,17 @@ async fn dispatch_response(line: &str, pending: &SharedPending) {
 // Backward-compatible one-shot call_json_rpc helpers
 // ---------------------------------------------------------------------------
 
-    /// Send a JSON-RPC request and await the response.
-    ///
-    /// Uses a 30-second default timeout.
-    ///
-    /// **Note:** For concurrent multiplexed requests, prefer [`IpcClient`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IpcError`] if the transport write or read fails, or the
-    /// response indicates an error.
-    pub async fn call_json_rpc(
+/// Send a JSON-RPC request and await the response.
+///
+/// Uses a 30-second default timeout.
+///
+/// **Note:** For concurrent multiplexed requests, prefer [`IpcClient`].
+///
+/// # Errors
+///
+/// Returns [`IpcError`] if the transport write or read fails, or the
+/// response indicates an error.
+pub async fn call_json_rpc(
     transport: &mut dyn RpcTransport,
     method: &str,
     params: Value,
@@ -392,13 +395,13 @@ async fn dispatch_response(line: &str, pending: &SharedPending) {
     .await
 }
 
-    /// Send a JSON-RPC request with explicit timeout.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IpcError`] if the transport write/read fails, timeout is
-    /// reached, or the response indicates an error.
-    pub async fn call_json_rpc_with_timeout(
+/// Send a JSON-RPC request with explicit timeout.
+///
+/// # Errors
+///
+/// Returns [`IpcError`] if the transport write/read fails, timeout is
+/// reached, or the response indicates an error.
+pub async fn call_json_rpc_with_timeout(
     transport: &mut dyn RpcTransport,
     method: &str,
     params: Value,
@@ -414,13 +417,13 @@ async fn dispatch_response(line: &str, pending: &SharedPending) {
     .await
 }
 
-    /// Send a JSON-RPC request with explicit timeout and cancellation token.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IpcError`] if the transport write/read fails, timeout is
-    /// reached, cancellation is requested, or the response indicates an error.
-    pub async fn call_json_rpc_with_timeout_and_cancel(
+/// Send a JSON-RPC request with explicit timeout and cancellation token.
+///
+/// # Errors
+///
+/// Returns [`IpcError`] if the transport write/read fails, timeout is
+/// reached, cancellation is requested, or the response indicates an error.
+pub async fn call_json_rpc_with_timeout_and_cancel(
     transport: &mut dyn RpcTransport,
     method: &str,
     params: Value,

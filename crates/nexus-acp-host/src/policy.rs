@@ -608,7 +608,11 @@ impl PermissionPolicy {
     /// List all agents that have rules configured.
     #[must_use]
     pub fn list_agents(&self) -> Vec<&str> {
-        let mut agents: Vec<&str> = self.agents.keys().map(std::string::String::as_str).collect();
+        let mut agents: Vec<&str> = self
+            .agents
+            .keys()
+            .map(std::string::String::as_str)
+            .collect();
         agents.sort_unstable();
         agents
     }

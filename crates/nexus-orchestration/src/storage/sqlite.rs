@@ -43,7 +43,7 @@ impl SqliteSessionStorage {
     /// The pool must already have migrations applied (including the
     /// `orchestration_sessions` table). Call
     /// [`nexus_local_db::run_migrations`] before constructing this.
-    #[must_use] 
+    #[must_use]
     pub const fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
         Self { pool }
     }

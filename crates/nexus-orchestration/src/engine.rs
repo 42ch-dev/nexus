@@ -40,7 +40,7 @@ pub struct SessionKey {
 
 impl SessionKey {
     /// Deterministic key for tests (and integration tests).
-    #[must_use] 
+    #[must_use]
     pub fn test_fixture() -> Self {
         Self {
             creator_id: "test-creator".into(),
@@ -79,13 +79,13 @@ pub enum SessionStatus {
 
 impl SessionStatus {
     /// Returns `true` if the session is in a terminal state.
-    #[must_use] 
+    #[must_use]
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Completed | Self::Failed)
     }
 
     /// Returns `true` if the session has completed successfully.
-    #[must_use] 
+    #[must_use]
     pub const fn is_completed(&self) -> bool {
         matches!(self, Self::Completed)
     }
@@ -109,7 +109,7 @@ pub enum StepOutcome {
 
 impl StepOutcome {
     /// Returns `true` if the outcome requires user input.
-    #[must_use] 
+    #[must_use]
     pub const fn is_waiting_for_input(&self) -> bool {
         matches!(self, Self::WaitingForInput { .. })
     }
@@ -145,7 +145,7 @@ pub struct Context {
 }
 
 impl Context {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: graph_flow::Context::new(),
@@ -594,11 +594,8 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset::loader::build_wired_outer_graph(
-            &loaded,
-            &engine_proxy,
-            &self.caps,
-        );
+        let wired =
+            crate::preset::loader::build_wired_outer_graph(&loaded, &engine_proxy, &self.caps);
 
         // Step 3: Create FlowRunner with the wired graph and existing storage.
         // The storage already contains the persisted session data, so the
@@ -622,7 +619,7 @@ impl GraphFlowEngine {
     }
 
     /// Get a reference to the shared state for use in preset loader (WS3 R1).
-    #[must_use] 
+    #[must_use]
     pub fn shared_state(&self) -> Arc<EngineSharedState> {
         self.state.clone()
     }
@@ -841,11 +838,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
-        let wired = crate::preset::loader::build_wired_outer_graph(
-            loaded,
-            &proxy,
-            &self.caps,
-        );
+        let wired = crate::preset::loader::build_wired_outer_graph(loaded, &proxy, &self.caps);
         self.start_session(&loaded.id, Arc::new(wired)).await
     }
 }
@@ -987,7 +980,12 @@ mod tests {
         // No runner should have been reconstructed for the terminal session.
         // The runners map should not contain the terminal session ID.
         assert!(
-            !engine.state.runners.read().await.contains_key(&terminal_summary.session_id.0),
+            !engine
+                .state
+                .runners
+                .read()
+                .await
+                .contains_key(&terminal_summary.session_id.0),
             "terminal session should not have a reconstructed runner"
         );
     }

@@ -37,7 +37,7 @@ impl DbSubsystem {
     ///
     /// The actual pool initialization happens via `nexus_local_db::open_pool()`
     /// which is called from `WorkspaceState::initialize()`.
-    #[must_use] 
+    #[must_use]
     pub fn new(db_path: Option<String>) -> Self {
         Self {
             state: Arc::new(Mutex::new(DbState::NotStarted)),

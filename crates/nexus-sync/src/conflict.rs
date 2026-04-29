@@ -32,7 +32,7 @@ pub enum ConflictType {
 }
 
 impl ConflictType {
-    #[must_use] 
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
             Self::VersionMismatch => "version_mismatch",
@@ -78,7 +78,7 @@ pub enum ConflictResolution {
 }
 
 impl ConflictResolution {
-    #[must_use] 
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
             Self::AutoAccept => "auto_accept",
@@ -103,7 +103,7 @@ impl ConflictResolution {
     }
 
     /// Whether this resolution requires user interaction.
-    #[must_use] 
+    #[must_use]
     pub const fn requires_manual_review(&self) -> bool {
         matches!(self, Self::ManualReview)
     }
@@ -183,7 +183,9 @@ impl ConflictResponse {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
-        let server_delta_sequence = val.get("server_delta_sequence").and_then(serde_json::Value::as_u64);
+        let server_delta_sequence = val
+            .get("server_delta_sequence")
+            .and_then(serde_json::Value::as_u64);
 
         let retry_after = val.get("retry_after").and_then(serde_json::Value::as_u64);
 
@@ -198,7 +200,7 @@ impl ConflictResponse {
     }
 
     /// Whether this conflict is a hard failure (blocking).
-    #[must_use] 
+    #[must_use]
     pub const fn is_hard_failure(&self) -> bool {
         matches!(
             self.conflict_type,
@@ -207,7 +209,7 @@ impl ConflictResponse {
     }
 
     /// Whether this conflict is a soft warning (non-blocking).
-    #[must_use] 
+    #[must_use]
     pub const fn is_soft_warning(&self) -> bool {
         matches!(self.conflict_type, ConflictType::SoftValidationWarning)
     }
@@ -215,7 +217,7 @@ impl ConflictResponse {
     /// Get the suggested resolution for this conflict.
     ///
     /// Defaults to `ManualReview` for hard failures, `AutoAccept` for soft warnings.
-    #[must_use] 
+    #[must_use]
     pub const fn suggested_resolution(&self) -> ConflictResolution {
         if self.is_soft_warning() {
             ConflictResolution::AutoAccept
@@ -225,7 +227,7 @@ impl ConflictResponse {
     }
 
     /// Build a human-readable conflict summary for user review.
-    #[must_use] 
+    #[must_use]
     pub fn summary(&self) -> String {
         let mut lines = vec![format!("Conflict: {}", self.conflict_type.as_str())];
         lines.push(format!(
@@ -258,7 +260,7 @@ impl ConflictResponse {
     /// Returns `RetryAfterPolicy::AfterSeconds` if `retry_after` is set, or
     /// `RetryAfterPolicy::None` otherwise. The caller is responsible for storing
     /// this in the outbox entry (SYNC-R11).
-    #[must_use] 
+    #[must_use]
     pub const fn retry_after_policy(&self) -> crate::outbox::RetryAfterPolicy {
         match self.retry_after {
             Some(secs) if secs > 0 => crate::outbox::RetryAfterPolicy::AfterSeconds(secs),
@@ -308,7 +310,7 @@ pub struct ConflictResolver;
 
 impl ConflictResolver {
     /// Determine the resolution strategy for a conflict response.
-    #[must_use] 
+    #[must_use]
     pub fn resolve(conflict: &ConflictResponse) -> ConflictResolution {
         // Use per-conflict hints if all agree
         let hints: Vec<&ConflictResolution> = conflict

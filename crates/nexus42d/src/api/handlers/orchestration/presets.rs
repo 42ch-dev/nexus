@@ -58,7 +58,9 @@ pub async fn reload_preset(
     let mut hash_hex = String::with_capacity(64);
     for b in &loaded.source_hash {
         use std::fmt::Write;
-        hash_hex.write_fmt(format_args!("{b:02x}")).expect("write to String should succeed");
+        hash_hex
+            .write_fmt(format_args!("{b:02x}"))
+            .expect("write to String should succeed");
     }
 
     Ok((
@@ -105,7 +107,8 @@ mod tests {
         let path = Path("novel-writing".to_string());
         let result = reload_preset(path).await;
         assert!(result.is_ok());
-        let (status, Json(resp)) = result.expect("reload_preset should succeed for novel-writing preset");
+        let (status, Json(resp)) =
+            result.expect("reload_preset should succeed for novel-writing preset");
         assert_eq!(status, StatusCode::OK);
         assert_eq!(resp.preset_id, "novel-writing");
         assert!(!resp.source_hash.is_empty());

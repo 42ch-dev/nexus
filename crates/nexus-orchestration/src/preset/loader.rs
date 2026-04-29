@@ -96,7 +96,7 @@ pub enum PresetLoadError {
 
 impl PresetLoadError {
     /// Borrow the list of validation problems (if this is a validation error).
-    #[must_use] 
+    #[must_use]
     pub fn problems(&self) -> &[ValidationProblem] {
         match self {
             Self::Validation { problems, .. } => problems,
@@ -119,15 +119,15 @@ pub struct ValidationProblem {
 // ---------------------------------------------------------------------------
 
 /// Load a preset from a YAML string.
- ///
- /// Validates all §7.6 rules. Does NOT validate template file paths against a
- /// filesystem root (use [`load_preset`] for that).
- ///
- /// `source_hash` is blake3 over the YAML string.
- ///
- /// # Errors
- /// Returns [`PresetLoadError`] if YAML parsing, validation, or graph construction fails.
- pub fn load_preset_from_str(
+///
+/// Validates all §7.6 rules. Does NOT validate template file paths against a
+/// filesystem root (use [`load_preset`] for that).
+///
+/// `source_hash` is blake3 over the YAML string.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if YAML parsing, validation, or graph construction fails.
+pub fn load_preset_from_str(
     yaml: &str,
     caps: &CapabilityRegistry,
 ) -> Result<LoadedPreset, PresetLoadError> {
@@ -181,14 +181,14 @@ pub struct ValidationProblem {
 }
 
 /// Load a preset from a bundle directory on disk.
- ///
- /// Reads `preset.yaml` from the bundle root and delegates to
- /// [`load_preset_from_str`]. Adds filesystem-level sandbox validation
- /// that `template_file` paths resolve within the bundle root.
- ///
- /// # Errors
- /// Returns [`PresetLoadError`] if file reading, parsing, or validation fails.
- pub fn load_preset(
+///
+/// Reads `preset.yaml` from the bundle root and delegates to
+/// [`load_preset_from_str`]. Adds filesystem-level sandbox validation
+/// that `template_file` paths resolve within the bundle root.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if file reading, parsing, or validation fails.
+pub fn load_preset(
     bundle_root: &Path,
     caps: &CapabilityRegistry,
 ) -> Result<LoadedPreset, PresetLoadError> {
@@ -220,19 +220,19 @@ pub struct ValidationProblem {
 // ---------------------------------------------------------------------------
 
 /// Assert that a `template_file` value does not contain path-traversal patterns.
- ///
- /// Returns `Ok(())` for safe relative paths, `Err(String)` with a descriptive
- /// message for dangerous patterns.
- ///
- /// Rejected patterns (consistent with `nexus-home-layout::assert_creator_id_safe`):
- /// - `..` (directory traversal)
- /// - `/` prefix (absolute path)
- /// - null bytes
- /// - control characters
- ///
- /// # Errors
- /// Returns [`LoaderError`] if the template file path is invalid (contains `..`, is absolute, or parent traversal).
- pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
+///
+/// Returns `Ok(())` for safe relative paths, `Err(String)` with a descriptive
+/// message for dangerous patterns.
+///
+/// Rejected patterns (consistent with `nexus-home-layout::assert_creator_id_safe`):
+/// - `..` (directory traversal)
+/// - `/` prefix (absolute path)
+/// - null bytes
+/// - control characters
+///
+/// # Errors
+/// Returns [`LoaderError`] if the template file path is invalid (contains `..`, is absolute, or parent traversal).
+pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
     if path.starts_with('/') {
         return Err(format!(
             "template_file must be a relative path: {path:?} (absolute paths are not allowed)"
@@ -289,10 +289,7 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
         for (name, ig) in inner_graphs {
             for (k, node) in ig.nodes.iter().enumerate() {
                 if let Some(ref tf) = node.template_file {
-                    entries.push((
-                        format!("inner_graphs.{name}.nodes[{k}].template_file"),
-                        tf,
-                    ));
+                    entries.push((format!("inner_graphs.{name}.nodes[{k}].template_file"), tf));
                 }
             }
         }
@@ -364,13 +361,13 @@ fn validate_template_files_in_sandbox(
 // ---------------------------------------------------------------------------
 
 /// Run all §7.6 validation rules against a parsed manifest.
- ///
- /// Returns a list of problems (empty = valid).
- ///
-  /// # Errors
-  /// This function does not return errors, it returns validation problems.
-  #[allow(clippy::too_many_lines)]
-  fn validate_manifest(
+///
+/// Returns a list of problems (empty = valid).
+///
+/// # Errors
+/// This function does not return errors, it returns validation problems.
+#[allow(clippy::too_many_lines)]
+fn validate_manifest(
     manifest: &PresetManifest,
     caps: &CapabilityRegistry,
 ) -> Vec<ValidationProblem> {
@@ -490,9 +487,7 @@ fn validate_template_files_in_sandbox(
                     if caps.get(capability).is_none() {
                         problems.push(ValidationProblem {
                             path: format!("{state_path}.context_update.op.capability"),
-                            error: format!(
-                                "unknown capability for llm_summarize: '{capability}'"
-                            ),
+                            error: format!("unknown capability for llm_summarize: '{capability}'"),
                         });
                     }
                 }
@@ -689,8 +684,10 @@ fn dfs_cycle2<'a>(
             if gray.contains(next) {
                 // Found a cycle: path from next to node to next.
                 let cycle_start = path.iter().position(|&n| n == *next).unwrap_or(0);
-                let mut parts: Vec<String> =
-                    path[cycle_start..].iter().map(std::string::ToString::to_string).collect();
+                let mut parts: Vec<String> = path[cycle_start..]
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect();
                 parts.push(next.to_string());
                 return Some(parts.join(" → "));
             }

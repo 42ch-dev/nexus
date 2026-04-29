@@ -190,9 +190,7 @@ async fn init_workspace(
     let op_meta = crate::paths::operational_workspace_dir(&user_home, &creator_id, &workspace_slug)
         .join("meta.json");
     if op_meta.exists() {
-        println!(
-            "Workspace already registered for creator {creator_id} / {workspace_slug}."
-        );
+        println!("Workspace already registered for creator {creator_id} / {workspace_slug}.");
         return Ok(());
     }
 
@@ -213,8 +211,10 @@ async fn init_workspace(
     };
 
     let workspace_name = name.unwrap_or_else(|| {
-        creative_root
-            .file_name().map_or_else(|| "unnamed".to_string(), |n| n.to_string_lossy().to_string())
+        creative_root.file_name().map_or_else(
+            || "unnamed".to_string(),
+            |n| n.to_string_lossy().to_string(),
+        )
     });
 
     let db_path = materialize_adr014_workspace(

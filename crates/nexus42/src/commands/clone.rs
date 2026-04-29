@@ -73,9 +73,7 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
         CloneSourceArg::Local => "local",
     };
     dialoguer::Confirm::new()
-        .with_prompt(format!(
-            "Clone world '{world_ref}' from {source_label}?"
-        ))
+        .with_prompt(format!("Clone world '{world_ref}' from {source_label}?"))
         .default(false)
         .interact()
         .unwrap_or_else(|_| {

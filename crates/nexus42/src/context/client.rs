@@ -20,7 +20,7 @@ pub struct ContextClient {
 
 impl ContextClient {
     /// Create a new context client from a `DaemonClient`.
-    #[must_use] 
+    #[must_use]
     pub const fn new(daemon: DaemonClient) -> Self {
         Self { daemon }
     }

@@ -51,7 +51,7 @@ pub struct MockClock {
 
 impl MockClock {
     /// Create a mock clock starting at the given Unix timestamp.
-    #[must_use] 
+    #[must_use]
     pub const fn new(initial: i64) -> Self {
         Self {
             now: std::sync::atomic::AtomicI64::new(initial),
@@ -87,7 +87,7 @@ impl Scheduler {
     }
 
     /// Create a scheduler with production system clock.
-    #[must_use] 
+    #[must_use]
     pub fn with_system_clock(pool: Arc<SqlitePool>) -> Self {
         Self::new(pool, Arc::new(SystemClock))
     }

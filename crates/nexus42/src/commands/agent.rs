@@ -274,7 +274,8 @@ fn print_show_details(agent: &AgentEntry) {
         "npx" => agent
             .distribution
             .npx
-            .as_ref().map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
+            .as_ref()
+            .map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
         "binary" => "binary".to_string(),
         _ => "unknown".to_string(),
     };
@@ -321,7 +322,10 @@ async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>)
     let (child, _stdin, _stdout) = spawner
         .spawn(
             &program,
-            &args.iter().map(std::string::String::as_str).collect::<Vec<_>>(),
+            &args
+                .iter()
+                .map(std::string::String::as_str)
+                .collect::<Vec<_>>(),
         )
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
 
@@ -456,7 +460,8 @@ async fn wait_for_agent_exit(
                     "Agent {} exited with {}",
                     agent_id,
                     status
-                        .code().map_or_else(|| "signal".to_string(), |c| format!("code {c}"))
+                        .code()
+                        .map_or_else(|| "signal".to_string(), |c| format!("code {c}"))
                 ))
             }
         }
@@ -606,7 +611,10 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
     let (child, _stdin, _stdout) = spawner
         .spawn(
             &program,
-            &args.iter().map(std::string::String::as_str).collect::<Vec<_>>(),
+            &args
+                .iter()
+                .map(std::string::String::as_str)
+                .collect::<Vec<_>>(),
         )
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
 
@@ -670,7 +678,8 @@ fn describe_distribution(agent: &AgentEntry) -> String {
         "npx" => agent
             .distribution
             .npx
-            .as_ref().map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
+            .as_ref()
+            .map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
         "binary" => agent.distribution.binary.as_ref().map_or_else(
             || "binary".to_string(),
             |binary| {

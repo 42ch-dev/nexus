@@ -60,7 +60,7 @@ impl OutboxPool {
     }
 
     /// Get the underlying `SqlitePool` reference
-    #[must_use] 
+    #[must_use]
     pub const fn inner(&self) -> &nexus_local_db::SqlitePool {
         &self.pool
     }

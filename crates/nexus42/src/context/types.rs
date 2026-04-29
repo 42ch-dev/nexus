@@ -23,7 +23,7 @@ pub type ContextAssembleResponse = ContextAssembleResponseV1;
 /// Helper: check whether a context assembly response indicates an error.
 #[cfg(test)]
 #[inline]
-#[must_use] 
+#[must_use]
 pub const fn is_error(resp: &ContextAssembleResponse) -> bool {
     !resp.success
 }
@@ -31,7 +31,7 @@ pub const fn is_error(resp: &ContextAssembleResponse) -> bool {
 /// Helper: get the error code from a context assembly response, if any.
 #[cfg(test)]
 #[inline]
-#[must_use] 
+#[must_use]
 pub fn error_code(resp: &ContextAssembleResponse) -> Option<&str> {
     resp.error_code.as_deref()
 }

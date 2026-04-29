@@ -142,7 +142,7 @@ pub fn resolve_preset(
 ///
 /// Returns the names of all subdirectories under `embedded-presets/`
 /// that contain a `preset.yaml` file.
-#[must_use] 
+#[must_use]
 pub fn list_embedded_presets() -> Vec<String> {
     EMBEDDED_PRESETS
         .dirs()
@@ -412,7 +412,6 @@ states:
     #[test]
     fn resolve_preset_finds_system_preset() {
         use crate::system_preset_dir::ensure_maintenance_preset;
-        
 
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();

@@ -36,7 +36,7 @@ const fn default_schema_version() -> u32 {
 
 impl ManuscriptMetadata {
     /// Create new manuscript metadata
-    #[must_use] 
+    #[must_use]
     pub fn new(title: &str, world_id: Option<&str>) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         Self {

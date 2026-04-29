@@ -31,9 +31,15 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use nexus_contracts::local::schedule::http::{AddScheduleRequest, AddScheduleResponse, ScheduleConcurrencyRequest, ListSchedulesQuery, ListSchedulesResponse, InspectScheduleResponse, EditCoreContextRequest, EditCoreContextResponse, CoreContextResponse, CoreContextHistoryResponse, CoreContextHistoryEntry, SignalScheduleRequest, SignalScheduleResponse, DeleteScheduleResponse, ScheduleSummary};
+use nexus_contracts::local::schedule::http::{
+    AddScheduleRequest, AddScheduleResponse, CoreContextHistoryEntry, CoreContextHistoryResponse,
+    CoreContextResponse, DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
+    InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
+    ScheduleSummary, SignalScheduleRequest, SignalScheduleResponse,
+};
 use nexus_contracts::local::schedule::{
-    CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId,
+    ScheduleStatus,
 };
 use std::sync::Arc;
 
@@ -67,7 +73,10 @@ pub async fn add_schedule(
     // Generate a schedule ID (simple timestamp-based for pre-1.0)
     let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
 
-    let concurrency = body.concurrency.as_ref().map_or(ScheduleConcurrency::Serial, |c| match c {
+    let concurrency = body
+        .concurrency
+        .as_ref()
+        .map_or(ScheduleConcurrency::Serial, |c| match c {
             ScheduleConcurrencyRequest::Serial => ScheduleConcurrency::Serial,
             ScheduleConcurrencyRequest::ParallelWith { schedule_ids } => {
                 ScheduleConcurrency::ParallelWith(
@@ -927,7 +936,8 @@ mod tests {
                 signal: signal.to_string(),
             };
             let json = serde_json::to_string(&req).expect("SignalScheduleRequest should serialize");
-            let back: SignalScheduleRequest = serde_json::from_str(&json).expect("SignalScheduleRequest should deserialize");
+            let back: SignalScheduleRequest =
+                serde_json::from_str(&json).expect("SignalScheduleRequest should deserialize");
             assert_eq!(back.signal, *signal);
         }
     }

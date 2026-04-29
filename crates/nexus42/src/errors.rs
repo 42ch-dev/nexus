@@ -354,7 +354,7 @@ impl CliError {
     /// Use this instead of `SyncError::into()` when the error occurs during
     /// the verification step (as opposed to registration), so callers can
     /// distinguish registration failures from verification failures.
-    #[must_use] 
+    #[must_use]
     pub fn verify_creator_error(err: nexus_sync::errors::SyncError) -> Self {
         match err {
             nexus_sync::errors::SyncError::PlatformError { status, body } => {

@@ -34,7 +34,7 @@ impl SyncSubsystem {
     /// Create a new Sync subsystem.
     ///
     /// The actual outbox initialization happens via `nexus-sync::OutboxPool`.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(SyncState::NotStarted)),

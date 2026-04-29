@@ -12,7 +12,7 @@
       "primary_spec": "",
       "spec_refs": [],
       "progress": 100,
-      "notes": "All workspace crates clippy clean (0 errors). Commits: c2f02a9 (7 crates), be435d3 (nexus42 partial), 6a961d9 (nexus42+nexus42d final). Pre-existing flaky test: auth::tests::get_returns_none_for_unknown_creator (fails on HEAD too)"
+      "notes": "QC tri-review complete. QC1 Request Changes -> F-001 fixed (indentation), F-002/F-004 re-evaluated by QC2 as not reproduced, F-003 fixed (newline). QC2 Approve, QC3 Approve. All workspace crates clippy clean. 5 commits: c2f02a9, be435d3, 6a961d9, 1094b4d, db55277. Pre-existing flaky test unrelated."
     }
   ],
   "metadata": {

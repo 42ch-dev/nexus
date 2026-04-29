@@ -67,7 +67,11 @@ async fn get_capabilities_returns_list() {
     let caps = v["capabilities"].as_array().unwrap();
     assert!(!caps.is_empty(), "should have at least one capability");
     assert!(
-        caps.iter().map(|c| c["name"].as_str().expect("capability name should be string")).any(|x| x == "sync.pull"),
+        caps.iter()
+            .map(|c| c["name"]
+                .as_str()
+                .expect("capability name should be string"))
+            .any(|x| x == "sync.pull"),
         "expected sync.pull in capabilities"
     );
 }

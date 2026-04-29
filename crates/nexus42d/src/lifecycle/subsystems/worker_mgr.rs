@@ -41,7 +41,7 @@ pub struct WorkerMgrSubsystem {
 
 impl WorkerMgrSubsystem {
     /// Create a new Worker Manager subsystem with default capacity.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_MAX_WORKERS)
     }
@@ -51,7 +51,7 @@ impl WorkerMgrSubsystem {
     /// # Arguments
     ///
     /// * `max_workers` — maximum concurrent worker processes.
-    #[must_use] 
+    #[must_use]
     pub fn with_capacity(max_workers: usize) -> Self {
         let manager = Arc::new(Mutex::new(WorkerManager::new()));
         let spawner = WorkerManagerSpawner::new(manager);
@@ -69,7 +69,7 @@ impl WorkerMgrSubsystem {
     /// - Spawn workers for new creators.
     /// - Look up existing workers by creator ID.
     /// - Send IPC commands to workers.
-    #[must_use] 
+    #[must_use]
     pub fn registry(&self) -> Arc<Mutex<WorkerRegistry<WorkerManagerSpawner>>> {
         self.registry.clone()
     }

@@ -127,7 +127,7 @@ pub struct SyncClientBuilder {
 
 impl SyncClientBuilder {
     /// Create a new builder with default configuration.
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             body_max_size: DEFAULT_BODY_MAX_SIZE,
@@ -142,7 +142,7 @@ impl SyncClientBuilder {
     ///
     /// This limit applies to HTTP response bodies to prevent memory exhaustion.
     /// Requests with bodies larger than this limit will fail with an error.
-    #[must_use] 
+    #[must_use]
     pub const fn body_max_size(mut self, size: usize) -> Self {
         self.body_max_size = size;
         self
@@ -151,7 +151,7 @@ impl SyncClientBuilder {
     /// Set the request timeout in seconds.
     ///
     /// Default: 30 seconds.
-    #[must_use] 
+    #[must_use]
     pub const fn timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self
@@ -160,7 +160,7 @@ impl SyncClientBuilder {
     /// Set the maximum number of retries for transient errors.
     ///
     /// Default: 3.
-    #[must_use] 
+    #[must_use]
     pub const fn max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
         self
@@ -264,7 +264,7 @@ impl SyncClient {
     }
 
     /// Create a builder for custom client configuration.
-    #[must_use] 
+    #[must_use]
     pub const fn builder() -> SyncClientBuilder {
         SyncClientBuilder::new()
     }
@@ -290,14 +290,14 @@ impl SyncClient {
 
     /// Get the base URL (for testing).
     #[cfg(test)]
-    #[must_use] 
+    #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
     /// Get the configured body max size.
     #[cfg(test)]
-    #[must_use] 
+    #[must_use]
     pub const fn body_max_size(&self) -> usize {
         self.body_max_size
     }
@@ -385,7 +385,8 @@ impl SyncClient {
         let body: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
-        if status == 200 && body.get("success").and_then(serde_json::Value::as_bool) == Some(false) {
+        if status == 200 && body.get("success").and_then(serde_json::Value::as_bool) == Some(false)
+        {
             let conflict = ConflictResponse::from_json(&text)?;
             tracing::warn!(
                 conflict_type = %conflict.conflict_type,
@@ -686,17 +687,14 @@ impl SyncClient {
             }
             Some("failed") => Err(SyncError::AllDeltasFailed {
                 // SAFETY: map_or provides default when delta_results is None.
-                failed_count: push_response
-                    .delta_results
-                    .as_ref()
-                    .map_or(1, |r| {
-                        r.iter()
-                            .filter(|d| {
-                                d.get("delta_apply_status")
-                                    .is_some_and(|s| s.as_str() == Some("rejected"))
-                            })
-                            .count()
-                    }),
+                failed_count: push_response.delta_results.as_ref().map_or(1, |r| {
+                    r.iter()
+                        .filter(|d| {
+                            d.get("delta_apply_status")
+                                .is_some_and(|s| s.as_str() == Some("rejected"))
+                        })
+                        .count()
+                }),
                 total_count: push_response
                     .delta_results
                     .as_ref()

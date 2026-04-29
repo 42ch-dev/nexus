@@ -97,13 +97,13 @@ pub struct ManuscriptManager {
 
 impl ManuscriptManager {
     /// Create a new manuscript manager for the given workspace root
-    #[must_use] 
+    #[must_use]
     pub const fn new(workspace_root: PathBuf) -> Self {
         Self { workspace_root }
     }
 
     /// Get the Stories directory path
-    #[must_use] 
+    #[must_use]
     pub fn stories_dir(&self) -> PathBuf {
         self.workspace_root.join("Stories")
     }
@@ -236,9 +236,7 @@ impl ManuscriptManager {
     pub fn write_content(&self, title: &str, content: &str) -> Result<()> {
         let path = self.manuscript_file(title)?;
         if !path.exists() {
-            return Err(CliError::Config(format!(
-                "Manuscript '{title}' not found."
-            )));
+            return Err(CliError::Config(format!("Manuscript '{title}' not found.")));
         }
         // Validate UTF-8 safety
         let _ = std::str::from_utf8(content.as_bytes())

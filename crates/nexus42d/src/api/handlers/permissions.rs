@@ -37,7 +37,9 @@ fn tool_to_permission_category(tool_name: &str) -> Option<&'static str> {
         "fs/read_text_file" | "fs/list_directory" | "fs/read_directory" => Some("file_system.read"),
         "fs/delete_file" => Some("file_system.delete"),
         "fs/write_text_file" | "fs/create_directory" | "fs/move_file" => Some("file_system.write"),
-        "terminal/create" | "terminal/output" | "terminal/release" | "terminal/kill" => Some("terminal.execute"),
+        "terminal/create" | "terminal/output" | "terminal/release" | "terminal/kill" => {
+            Some("terminal.execute")
+        }
         _ => None,
     }
 }
@@ -126,7 +128,10 @@ mod tests {
 
     #[test]
     fn no_enforcement_allows_all_tools() {
-        let result = check_tool_permission::<std::collections::hash_map::RandomState>("fs/read_text_file", None);
+        let result = check_tool_permission::<std::collections::hash_map::RandomState>(
+            "fs/read_text_file",
+            None,
+        );
         assert!(result.is_ok());
     }
 

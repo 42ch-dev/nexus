@@ -13,7 +13,7 @@ use nexus_contracts::Delta;
 use sha2::{Digest, Sha256};
 
 /// Returns true if `s` is `sha256:` followed by 64 lowercase hex digits.
-#[must_use] 
+#[must_use]
 pub fn is_well_formed_canonical_hash(s: &str) -> bool {
     let rest = s.strip_prefix("sha256:");
     let Some(hex_digits) = rest else {

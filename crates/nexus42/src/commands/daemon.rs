@@ -446,10 +446,7 @@ mod tests {
         // Use a path that definitely doesn't exist by mocking
         let result = read_pid_file();
         // In CI/test this may or may not exist, just check it doesn't error
-        assert!(
-            result.is_ok(),
-            "read_pid_file should not error: {result:?}"
-        );
+        assert!(result.is_ok(), "read_pid_file should not error: {result:?}");
     }
 
     #[cfg(unix)]

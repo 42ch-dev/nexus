@@ -136,13 +136,13 @@ pub fn scan_system_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> Syst
 }
 
 /// Load a single system preset from a bundle directory.
- ///
- /// Reads `preset.yaml`, validates it, and returns a [`SystemPresetEntry`]
- /// with the `_system.` prefix applied.
- ///
- /// # Errors
- /// Returns [`SystemPresetWarning`] if the preset directory is missing, YAML parsing fails, or validation fails.
- pub fn load_system_preset_from_dir(
+///
+/// Reads `preset.yaml`, validates it, and returns a [`SystemPresetEntry`]
+/// with the `_system.` prefix applied.
+///
+/// # Errors
+/// Returns [`SystemPresetWarning`] if the preset directory is missing, YAML parsing fails, or validation fails.
+pub fn load_system_preset_from_dir(
     bundle_dir: &Path,
     dir_name: &str,
     caps: &CapabilityRegistry,
@@ -205,19 +205,19 @@ pub fn scan_system_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> Syst
 }
 
 /// Get the system preset base directory path: `<nexus_home>/presets/_system/`.
-#[must_use] 
+#[must_use]
 pub fn system_preset_base_dir(nexus_home: &Path) -> PathBuf {
     nexus_home.join("presets").join(SYSTEM_PRESET_DIR_NAME)
 }
 
 /// Get the path to a specific system preset's bundle directory.
-#[must_use] 
+#[must_use]
 pub fn system_preset_bundle_dir(nexus_home: &Path, name: &str) -> PathBuf {
     system_preset_base_dir(nexus_home).join(name)
 }
 
 /// Return the qualified system preset IDs from a scan result.
-#[must_use] 
+#[must_use]
 pub fn list_system_preset_ids(result: &SystemPresetScanResult) -> Vec<String> {
     result
         .presets
@@ -227,7 +227,7 @@ pub fn list_system_preset_ids(result: &SystemPresetScanResult) -> Vec<String> {
 }
 
 /// Find a system preset entry by qualified ID.
-#[must_use] 
+#[must_use]
 pub fn find_system_preset<'a>(
     result: &'a SystemPresetScanResult,
     qualified_id: &str,
@@ -286,14 +286,14 @@ states:
 "#;
 
 /// Auto-create the `_system/maintenance/` directory from embedded content
- /// if it doesn't exist (first-start fallback for backward compatibility).
- ///
- /// Returns `true` if the directory was created (first start),
- /// `false` if it already existed.
- ///
- /// # Errors
- /// Returns an I/O error if filesystem operations fail.
- pub fn ensure_maintenance_preset(nexus_home: &Path) -> std::io::Result<bool> {
+/// if it doesn't exist (first-start fallback for backward compatibility).
+///
+/// Returns `true` if the directory was created (first start),
+/// `false` if it already existed.
+///
+/// # Errors
+/// Returns an I/O error if filesystem operations fail.
+pub fn ensure_maintenance_preset(nexus_home: &Path) -> std::io::Result<bool> {
     let bundle_dir = system_preset_bundle_dir(nexus_home, "maintenance");
     let preset_yaml = bundle_dir.join("preset.yaml");
 

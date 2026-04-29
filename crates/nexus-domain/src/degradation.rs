@@ -489,7 +489,11 @@ impl DegradationGuard {
         }
 
         // Only upgrade if platform is healthy
-        if self.last_health_check.as_ref().is_some_and(|h| h.is_healthy) {
+        if self
+            .last_health_check
+            .as_ref()
+            .is_some_and(|h| h.is_healthy)
+        {
             let upgraded = match self.degradation_state {
                 DegradationState::DegradedLevel2 => {
                     if let Some(up) = self.current_mode.upgrade() {

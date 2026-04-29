@@ -24,9 +24,7 @@ use nexus_domain::DegradationPolicy;
 pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
     // Check prefix
     if !s.starts_with("wld_") {
-        return Err(format!(
-            "WorldId must start with 'wld_' prefix (got '{s}')"
-        ));
+        return Err(format!("WorldId must start with 'wld_' prefix (got '{s}')"));
     }
 
     // Check that there's content after prefix
@@ -149,7 +147,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 }
 
 /// Create a `DegradationGuard` from config, restoring from persisted snapshot if available.
-#[must_use] 
+#[must_use]
 pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
     let mode = config.runtime_mode();
 
@@ -252,16 +250,14 @@ pub async fn assemble_context(
             if let Some(response) = platform_result {
                 guard.record_platform_result(true, None);
                 let stage0 =
-                    build_stage0_from_local(config, hint, max_tokens, include_fragments)
-                        .await?;
+                    build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
                 let two_stage = build_two_stage_from_local(&stage0, response, mode);
                 Ok(two_stage.assemble())
             } else {
                 // Platform failed — record and fall back to Stage0
                 guard.record_platform_result(false, Some("assemble unavailable".to_string()));
                 let stage0 =
-                    build_stage0_from_local(config, hint, max_tokens, include_fragments)
-                        .await?;
+                    build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
                 Ok(if max_tokens.is_some() {
                     stage0.assemble_with_truncation()
                 } else {
@@ -326,10 +322,7 @@ async fn build_stage0_from_local(
 /// Returns `Some(AssembleResponse)` if the platform call succeeds,
 /// or `None` if the daemon is unavailable or the call fails.
 /// This is used for two-stage assembly in `local_first`/`cloud_enhanced` modes.
-async fn try_platform_assemble(
-    config: &CliConfig,
-    hint: Option<&str>,
-) -> Option<AssembleResponse> {
+async fn try_platform_assemble(config: &CliConfig, hint: Option<&str>) -> Option<AssembleResponse> {
     let client = DaemonClient::from_config(config);
 
     // Use call_assemble which sends the request shape the daemon expects
@@ -497,7 +490,9 @@ mod tests {
     fn validate_world_id_rejects_only_prefix() {
         let result = validate_world_id("wld_");
         assert!(result.is_err());
-        assert!(result.expect_err("validation should fail").contains("alphanumeric characters"));
+        assert!(result
+            .expect_err("validation should fail")
+            .contains("alphanumeric characters"));
     }
 
     /// Test that `AssembleLocal` variant exists with new hint field

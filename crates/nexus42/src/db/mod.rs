@@ -78,7 +78,10 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert!(tables_raw.into_iter().flatten().any(|x| x == "workspace_meta"));
+        assert!(tables_raw
+            .into_iter()
+            .flatten()
+            .any(|x| x == "workspace_meta"));
     }
 
     #[tokio::test]

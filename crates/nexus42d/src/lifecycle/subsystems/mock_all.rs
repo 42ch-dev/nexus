@@ -88,7 +88,7 @@ pub struct MockAllSubsystems {
 
 impl MockAllSubsystems {
     /// Create mock subsystems where all succeed on startup.
-    #[must_use] 
+    #[must_use]
     pub fn all_succeed() -> Self {
         Self {
             http: MockSubsystem::new(SubsystemKind::Http, true),
@@ -100,7 +100,7 @@ impl MockAllSubsystems {
     }
 
     /// Create mock subsystems where one fails on startup.
-    #[must_use] 
+    #[must_use]
     pub fn one_fails(failing_kind: SubsystemKind) -> Self {
         Self {
             http: MockSubsystem::new(SubsystemKind::Http, failing_kind != SubsystemKind::Http),
@@ -118,7 +118,7 @@ impl MockAllSubsystems {
     }
 
     /// Get all subsystems as a vector of trait objects.
-    #[must_use] 
+    #[must_use]
     pub fn as_bootstraps(&self) -> Vec<Arc<dyn SubsystemBootstrap>> {
         vec![
             Arc::new(self.http.clone()),
@@ -130,31 +130,31 @@ impl MockAllSubsystems {
     }
 
     /// Get the HTTP mock subsystem.
-    #[must_use] 
+    #[must_use]
     pub const fn http(&self) -> &MockSubsystem {
         &self.http
     }
 
     /// Get the DB mock subsystem.
-    #[must_use] 
+    #[must_use]
     pub const fn db(&self) -> &MockSubsystem {
         &self.db
     }
 
     /// Get the Sync mock subsystem.
-    #[must_use] 
+    #[must_use]
     pub const fn sync(&self) -> &MockSubsystem {
         &self.sync
     }
 
     /// Get the Engine mock subsystem.
-    #[must_use] 
+    #[must_use]
     pub const fn engine(&self) -> &MockSubsystem {
         &self.engine
     }
 
     /// Get the `WorkerMgr` mock subsystem.
-    #[must_use] 
+    #[must_use]
     pub const fn worker_mgr(&self) -> &MockSubsystem {
         &self.worker_mgr
     }

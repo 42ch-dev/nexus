@@ -136,7 +136,7 @@ impl SyncError {
     ///
     /// Error codes are standardized across the nexus codebase for
     /// consistent error tracking and monitoring.
-    #[must_use] 
+    #[must_use]
     pub const fn error_code(&self) -> &str {
         match self {
             // Outbox errors

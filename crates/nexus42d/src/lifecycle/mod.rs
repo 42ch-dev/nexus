@@ -49,7 +49,7 @@ impl std::fmt::Display for LifecycleState {
 
 impl LifecycleState {
     /// Returns true if this state is terminal (no further transitions).
-    #[must_use] 
+    #[must_use]
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Failed)
     }

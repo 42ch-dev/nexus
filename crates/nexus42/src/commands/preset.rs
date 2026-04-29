@@ -257,7 +257,8 @@ mod tests {
         assert!(bundle_dir.join("prompts/start.md").exists());
 
         // Verify preset.yaml content includes the name.
-        let content = std::fs::read_to_string(bundle_dir.join("preset.yaml")).expect("read preset.yaml");
+        let content =
+            std::fs::read_to_string(bundle_dir.join("preset.yaml")).expect("read preset.yaml");
         assert!(content.contains("id: test-strat"));
     }
 
@@ -270,7 +271,8 @@ mod tests {
         init_preset_at(nexus_home, "existing-strat").expect("first init");
 
         // Second init should fail.
-        let err = init_preset_at(nexus_home, "existing-strat").expect_err("second init should fail");
+        let err =
+            init_preset_at(nexus_home, "existing-strat").expect_err("second init should fail");
         let display = format!("{err}");
         assert!(
             display.contains("already exists"),

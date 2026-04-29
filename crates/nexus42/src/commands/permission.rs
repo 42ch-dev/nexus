@@ -208,7 +208,8 @@ fn print_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> Res
 fn build_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> serde_json::Value {
     let mut agents_json = serde_json::Map::new();
 
-    let agent_ids: Vec<&str> = agent_filter.map_or_else(|| policy.list_agents(), |filter| vec![filter]);
+    let agent_ids: Vec<&str> =
+        agent_filter.map_or_else(|| policy.list_agents(), |filter| vec![filter]);
 
     for agent_id in &agent_ids {
         let (granted, denied, asked) = policy.list_agent_rules(agent_id);

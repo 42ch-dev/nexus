@@ -162,7 +162,7 @@ pub struct SummaryGenerator {
 
 impl SummaryGenerator {
     /// Create a new summary generator for the given manuscript root.
-    #[must_use] 
+    #[must_use]
     pub fn new(manuscript_root: PathBuf) -> Self {
         Self {
             manuscript_root,
@@ -173,7 +173,7 @@ impl SummaryGenerator {
     }
 
     /// Create a new summary generator with custom configuration.
-    #[must_use] 
+    #[must_use]
     pub const fn with_config(manuscript_root: PathBuf, config: SummaryConfig) -> Self {
         Self {
             manuscript_root,
@@ -192,7 +192,10 @@ impl SummaryGenerator {
     pub fn with_max_file_size(self, max_file_size: Option<u64>) -> Self {
         Self {
             config: SummaryConfig {
-                max_file_size: usize::try_from(max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE as u64)).unwrap_or(usize::MAX),
+                max_file_size: usize::try_from(
+                    max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE as u64),
+                )
+                .unwrap_or(usize::MAX),
                 ..self.config
             },
             ..self
@@ -401,7 +404,7 @@ pub fn validate_path_within_base(path: &Path, base: &Path) -> Result<PathBuf, Su
 ///
 /// Walks backwards from `max_bytes` to find the last valid character boundary.
 /// If the string is shorter than `max_bytes`, returns the entire string.
-#[must_use] 
+#[must_use]
 pub fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
@@ -1306,15 +1309,11 @@ mod tests {
                     );
                 }
                 Err(e) => {
-                    eprintln!(
-                        "scan returned error for symlinked directory (acceptable): {e}"
-                    );
+                    eprintln!("scan returned error for symlinked directory (acceptable): {e}");
                 }
             },
             Err(panic_info) => {
-                panic!(
-                    "scan_manuscript_dir panicked on symlinked directory: {panic_info:?}"
-                );
+                panic!("scan_manuscript_dir panicked on symlinked directory: {panic_info:?}");
             }
         }
     }
@@ -1363,9 +1362,7 @@ mod tests {
                 }
             },
             Err(panic_info) => {
-                panic!(
-                    "scan_manuscript_dir panicked on broken symlink: {panic_info:?}"
-                );
+                panic!("scan_manuscript_dir panicked on broken symlink: {panic_info:?}");
             }
         }
     }
@@ -1399,9 +1396,7 @@ mod tests {
                     );
                 }
                 Err(panic_info) => {
-                    panic!(
-                        "generate() panicked on permission-denied file: {panic_info:?}"
-                    );
+                    panic!("generate() panicked on permission-denied file: {panic_info:?}");
                 }
             }
 

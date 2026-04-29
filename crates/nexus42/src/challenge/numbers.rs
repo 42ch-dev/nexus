@@ -58,7 +58,7 @@ fn number_map() -> &'static HashMap<&'static str, u32> {
 /// - Compound tens + units: "thirty five" → "35"
 ///
 /// Text is assumed to be lowercase and noise-free.
-#[must_use] 
+#[must_use]
 pub fn convert_number_words(text: &str) -> String {
     let map = number_map();
     let words: Vec<&str> = text.split_whitespace().collect();

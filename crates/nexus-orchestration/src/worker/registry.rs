@@ -57,7 +57,7 @@ impl WorkerManagerSpawner {
     }
 
     /// Create a spawner with a fresh `WorkerManager`.
-    #[must_use] 
+    #[must_use]
     pub fn fresh() -> Self {
         Self::new(Arc::new(Mutex::new(WorkerManager::new())))
     }
@@ -240,13 +240,13 @@ pub struct MockSpawner {
 
 impl MockSpawner {
     /// Create a mock spawner that successfully creates handles.
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self { fail: false }
     }
 
     /// Create a mock spawner that fails all spawn requests.
-    #[must_use] 
+    #[must_use]
     pub const fn failing() -> Self {
         Self { fail: true }
     }
@@ -295,7 +295,6 @@ impl WorkerSpawner for MockSpawner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn worker_manager_spawner_creates_fresh() {

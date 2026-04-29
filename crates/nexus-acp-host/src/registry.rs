@@ -543,10 +543,7 @@ mod tests {
 
         assert_eq!(registry.version, "1.0.0");
         assert_eq!(registry.agents.len(), 3);
-        assert_eq!(
-            registry.extensions.as_ref().map_or(0, Vec::len),
-            0
-        );
+        assert_eq!(registry.extensions.as_ref().map_or(0, Vec::len), 0);
     }
 
     #[test]
@@ -653,8 +650,8 @@ mod tests {
                 }
              ]
          }"#;
-         let (_client, _tmp) = make_test_client();
-         let result = RegistryClient::parse_registry_json(json);
+        let (_client, _tmp) = make_test_client();
+        let result = RegistryClient::parse_registry_json(json);
         assert!(result.is_err());
     }
 

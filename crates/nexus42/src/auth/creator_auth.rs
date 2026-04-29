@@ -66,9 +66,9 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
     rotate_credentials(config, creator_id).await?;
     let store = AuthStore::load()?;
     let creators = store.creators.as_ref().and_then(|c| c.get(creator_id));
-    creators.map(|s| s.access_token.clone()).ok_or_else(|| {
-        CliError::Other(format!("Failed to obtain token for creator {creator_id}"))
-    })
+    creators
+        .map(|s| s.access_token.clone())
+        .ok_or_else(|| CliError::Other(format!("Failed to obtain token for creator {creator_id}")))
 }
 
 /// Get the current user access token from `AuthStore`.

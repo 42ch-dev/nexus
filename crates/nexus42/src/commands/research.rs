@@ -171,9 +171,7 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
         println!("  {}", "-".repeat(80));
 
         for (id, source_type, uri, title, status, _created_at) in &rows {
-            println!(
-                "  {id:<20} {source_type:<10} {uri:<30} {status:<10} {title}"
-            );
+            println!("  {id:<20} {source_type:<10} {uri:<30} {status:<10} {title}");
         }
     }
 
@@ -583,8 +581,7 @@ mod tests {
     /// Test HTML tag stripping removes script content
     #[test]
     fn test_strip_html_removes_scripts() {
-        let html =
-            r"<html><body><script>alert('evil');</script><p>Safe content</p></body></html>";
+        let html = r"<html><body><script>alert('evil');</script><p>Safe content</p></body></html>";
         let text = strip_html_tags(html);
 
         assert!(!text.contains("script"));

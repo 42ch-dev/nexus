@@ -63,14 +63,8 @@ pub async fn fork(
     let child = req.child_world_id.as_deref().unwrap_or("");
     info!(parent = %parent, child = %child, "Handling world fork request");
 
-    let parent_nonempty = req
-        .parent_world_id
-        .as_ref()
-        .is_some_and(|s| nonempty(s));
-    let child_nonempty = req
-        .child_world_id
-        .as_ref()
-        .is_some_and(|s| nonempty(s));
+    let parent_nonempty = req.parent_world_id.as_ref().is_some_and(|s| nonempty(s));
+    let child_nonempty = req.child_world_id.as_ref().is_some_and(|s| nonempty(s));
     let fork_evt_nonempty = req
         .forked_from_event_id
         .as_ref()

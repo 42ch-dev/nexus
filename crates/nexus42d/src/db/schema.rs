@@ -36,7 +36,9 @@ mod tests {
     async fn schema_init_creates_all_tables() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
+        let pool = Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — queries sqlite_master metadata table.
         let tables: Vec<(String,)> =
@@ -75,15 +77,21 @@ mod tests {
     async fn schema_init_is_idempotent() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        Schema::init(&db_path).await.expect("Schema::init should succeed");
-        Schema::init(&db_path).await.expect("Schema::init should be idempotent"); // second call should not fail
+        Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
+        Schema::init(&db_path)
+            .await
+            .expect("Schema::init should be idempotent"); // second call should not fail
     }
 
     #[tokio::test]
     async fn schema_versions_seeded_correctly() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
+        let pool = Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — reads seeded version from workspace_meta.
         let db_version: (String,) =
@@ -106,7 +114,9 @@ mod tests {
     async fn reference_sources_has_content_column() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
+        let pool = Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — inserts and reads back reference_sources row.
         sqlx::query(
@@ -132,7 +142,9 @@ mod tests {
     async fn creators_table_has_default_status() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
+        let pool = Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — inserts and reads back creators row.
         sqlx::query(
@@ -156,7 +168,9 @@ mod tests {
     async fn reference_sources_table_has_tags_and_content_hash() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
+        let pool = Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — inserts and reads back reference_sources row
         // with nullable columns (tags, content_hash).
@@ -184,7 +198,9 @@ mod tests {
     async fn pragmas_are_set() {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
+        let pool = Schema::init(&db_path)
+            .await
+            .expect("Schema::init should succeed");
 
         // SAFETY: PRAGMA statement — not supported by compile-time checked macros.
         let jm: (String,) = sqlx::query_as("PRAGMA journal_mode")

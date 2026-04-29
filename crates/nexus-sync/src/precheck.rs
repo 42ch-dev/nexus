@@ -32,7 +32,7 @@ pub struct AuthContext {
 
 impl AuthContext {
     /// Create an auth context for a multi-creator world with an authenticated creator.
-    #[must_use] 
+    #[must_use]
     pub fn multi_creator(authenticated_creator_id: &str) -> Self {
         Self {
             authenticated_creator_id: Some(authenticated_creator_id.to_string()),
@@ -41,7 +41,7 @@ impl AuthContext {
     }
 
     /// Create an auth context for a single-creator world (auth validation skipped).
-    #[must_use] 
+    #[must_use]
     pub const fn single_creator() -> Self {
         Self {
             authenticated_creator_id: None,
@@ -50,7 +50,7 @@ impl AuthContext {
     }
 
     /// Create an unauthenticated context (no auth available).
-    #[must_use] 
+    #[must_use]
     pub const fn unauthenticated() -> Self {
         Self {
             authenticated_creator_id: None,
@@ -77,7 +77,7 @@ pub struct PrecheckReport {
 
 impl PrecheckReport {
     /// Create a new empty report.
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self { issues: Vec::new() }
     }
@@ -88,13 +88,13 @@ impl PrecheckReport {
     }
 
     /// Whether the report has any issues.
-    #[must_use] 
+    #[must_use]
     pub const fn has_issues(&self) -> bool {
         !self.issues.is_empty()
     }
 
     /// Whether any issue is a hard error (prevents upload).
-    #[must_use] 
+    #[must_use]
     pub fn has_errors(&self) -> bool {
         self.issues
             .iter()
@@ -102,13 +102,13 @@ impl PrecheckReport {
     }
 
     /// Whether any issue is a warning only.
-    #[must_use] 
+    #[must_use]
     pub fn has_warnings_only(&self) -> bool {
         self.has_issues() && !self.has_errors()
     }
 
     /// Get a human-readable summary.
-    #[must_use] 
+    #[must_use]
     pub fn summary(&self) -> String {
         if self.issues.is_empty() {
             return "No issues found.".to_string();
@@ -147,7 +147,7 @@ pub enum PrecheckSeverity {
 }
 
 impl PrecheckSeverity {
-    #[must_use] 
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
             Self::Error => "ERROR",
@@ -171,7 +171,7 @@ pub struct PrecheckIssue {
 
 impl PrecheckIssue {
     /// Create a new error-level issue.
-    #[must_use] 
+    #[must_use]
     pub fn error(message: &str) -> Self {
         Self {
             severity: PrecheckSeverity::Error,
@@ -182,7 +182,7 @@ impl PrecheckIssue {
     }
 
     /// Create a new error-level issue with fix hint.
-    #[must_use] 
+    #[must_use]
     pub fn error_with_hint(message: &str, hint: &str) -> Self {
         Self {
             severity: PrecheckSeverity::Error,
@@ -193,7 +193,7 @@ impl PrecheckIssue {
     }
 
     /// Create a new warning-level issue.
-    #[must_use] 
+    #[must_use]
     pub fn warning(message: &str) -> Self {
         Self {
             severity: PrecheckSeverity::Warning,
@@ -217,7 +217,7 @@ pub struct LocalState {
 
 impl LocalState {
     /// Create a new local state snapshot.
-    #[must_use] 
+    #[must_use]
     pub const fn new(world_revision: u64) -> Self {
         Self {
             world_revision,
@@ -227,14 +227,14 @@ impl LocalState {
     }
 
     /// Set the last confirmed delta sequence.
-    #[must_use] 
+    #[must_use]
     pub const fn with_delta_sequence(mut self, seq: u64) -> Self {
         self.last_confirmed_delta_sequence = Some(seq);
         self
     }
 
     /// Set the timeline head ID.
-    #[must_use] 
+    #[must_use]
     pub fn with_timeline_head(mut self, id: &str) -> Self {
         self.timeline_head_id = Some(id.to_string());
         self
@@ -253,7 +253,7 @@ impl LocalState {
 ///
 /// This overload skips auth match validation. Use [`precheck_bundle_with_auth`]
 /// for multi-creator worlds.
-#[must_use] 
+#[must_use]
 pub fn precheck_bundle(bundle: &Bundle, local_state: &LocalState) -> PrecheckResult {
     precheck_bundle_with_auth(bundle, local_state, &AuthContext::unauthenticated())
 }

@@ -330,18 +330,20 @@ impl Task for InnerGraphTask {
             .await;
 
         last_error.map_or_else(
-            || Ok(TaskResult::new(
-                Some(format!(
-                    "inner graph '{}' completed, output: {}",
-                    self.inner_graph.id,
-                    if output_value.len() > 80 {
-                        format!("{}...", &output_value[..80])
-                    } else {
-                        output_value.clone()
-                    }
-                )),
-                NextAction::Continue,
-            )),
+            || {
+                Ok(TaskResult::new(
+                    Some(format!(
+                        "inner graph '{}' completed, output: {}",
+                        self.inner_graph.id,
+                        if output_value.len() > 80 {
+                            format!("{}...", &output_value[..80])
+                        } else {
+                            output_value.clone()
+                        }
+                    )),
+                    NextAction::Continue,
+                ))
+            },
             |err| {
                 Ok(TaskResult::new_with_status(
                     Some(format!(
@@ -441,7 +443,7 @@ impl StateCompositeTask {
     /// Build a composite task from a manifest state definition (basic, no engine).
     ///
     /// Inner graph actions will fail at runtime if no engine is set.
-    #[must_use] 
+    #[must_use]
     pub fn from_manifest(state: &StateDefinition) -> Self {
         Self {
             id: state.id.clone(),
@@ -463,7 +465,7 @@ impl StateCompositeTask {
     }
 
     /// Set the inner graphs map.
-    #[must_use] 
+    #[must_use]
     pub fn with_inner_graphs(
         mut self,
         graphs: std::collections::HashMap<String, Arc<Graph>>,
@@ -473,7 +475,7 @@ impl StateCompositeTask {
     }
 
     /// Set the output bindings map.
-    #[must_use] 
+    #[must_use]
     pub fn with_output_bindings(
         mut self,
         bindings: std::collections::HashMap<String, String>,
@@ -483,7 +485,7 @@ impl StateCompositeTask {
     }
 
     /// Set the shared capability registry.
-    #[must_use] 
+    #[must_use]
     pub fn with_registry(mut self, registry: std::sync::Arc<CapabilityRegistry>) -> Self {
         self.registry = Some(registry);
         self
@@ -661,7 +663,7 @@ impl InnerGraphNodeTask {
     ///
     /// Used by preset loader for initial graph construction. The real task
     /// is wired at runtime when `worker_handle` and `session_routes` are available.
-    #[must_use] 
+    #[must_use]
     pub fn new(id: &str) -> Self {
         Self {
             id: id.to_string(),
@@ -688,7 +690,7 @@ impl InnerGraphNodeTask {
     }
 
     /// Builder-style `worker_handle` setter.
-    #[must_use] 
+    #[must_use]
     pub fn with_worker_handle(
         mut self,
         handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
@@ -705,7 +707,7 @@ impl InnerGraphNodeTask {
     }
 
     /// Builder-style `tool_policy` setter.
-    #[must_use] 
+    #[must_use]
     pub const fn with_tool_policy(mut self, tool_policy: ToolPolicy) -> Self {
         self.tool_policy = tool_policy;
         self
@@ -814,7 +816,7 @@ pub enum ToolPolicy {
 impl std::str::FromStr for ToolPolicy {
     type Err = String;
 
-fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "auto_grant_all" => Ok(Self::AutoGrantAll),
             "deny_all" => Ok(Self::DenyAll),
@@ -826,7 +828,7 @@ fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
 
 impl ToolPolicy {
     /// Serialize to the string form used in IPC.
-    #[must_use] 
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::AutoGrantAll => "auto_grant_all",

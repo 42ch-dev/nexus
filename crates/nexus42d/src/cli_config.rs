@@ -61,7 +61,7 @@ impl CliConfigSnapshot {
         Ok(Self::default())
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> String {
         self.active_workspace_slug_by_creator
             .get(creator_id)
