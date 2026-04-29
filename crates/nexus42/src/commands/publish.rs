@@ -132,7 +132,18 @@ const fn is_json_output(output_format: &str) -> bool {
     output_format.eq_ignore_ascii_case("json")
 }
 
-/// Run publish subcommands
+/// Run publish subcommands.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Platform connectivity is required but unavailable
+/// - Daemon is not running
+/// - Publish API calls fail
+/// - Invalid `world_id` or manuscript parameters
+///
+/// Note: This function is 145 lines; splitting would break the coherent command dispatch flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -> Result<()> {
     runtime_guard::require_platform(&config.runtime_mode(), "publish")?;
     let client = DaemonClient::from_config(config);

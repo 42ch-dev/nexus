@@ -117,16 +117,27 @@ fn confirm_fork(yes: bool) -> bool {
     if yes {
         return true;
     }
-    if let Ok(v) = dialoguer::Confirm::new()
+    dialoguer::Confirm::new()
         .with_prompt("Create a new forked world on the platform?")
         .default(false)
-        .interact() { v } else {
-        eprintln!("Non-interactive terminal: pass --yes to confirm fork.");
-        false
-    }
+        .interact()
+        .unwrap_or_else(|_| {
+            eprintln!("Non-interactive terminal: pass --yes to confirm fork.");
+            false
+        })
 }
 
-/// Run world subcommands
+/// Run world subcommands.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Daemon API calls fail
+/// - Invalid `world_id` or `creator_id` parameters
+/// - Fork creation fails
+///
+/// Note: This function is 129 lines; splitting would break the coherent world command flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config);
 
@@ -269,6 +280,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

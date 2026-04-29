@@ -1,6 +1,11 @@
 //! Integration Tests — Daemon HTTP API
 //!
 //! E9: Integration tests for daemon HTTP endpoints
+//!
+//! Note: `future_not_send` allowed because `axum_test::TestServer` uses non-Send futures,
+//! which is a limitation of the test framework, not our code.
+
+#![allow(clippy::future_not_send)]
 
 use axum::http::StatusCode;
 use axum::Router;

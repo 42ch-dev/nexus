@@ -61,6 +61,14 @@ struct PresetCli {
 }
 
 /// Run the preset command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Nexus home directory cannot be resolved
+/// - Preset name validation fails
+/// - File I/O operations fail
+/// - Daemon API calls fail
 pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         PresetCommand::Init { name } => {

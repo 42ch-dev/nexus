@@ -203,18 +203,30 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 
     // dialoguer::Confirm returns Err when there is no TTY (non-interactive).
     // In that case, default to false (reject the destructive action).
-    if let Ok(confirmed) = dialoguer::Confirm::new()
+    dialoguer::Confirm::new()
         .with_prompt("Auto-reject will discard all conflicting server changes. Continue?")
         .default(false)
-        .interact() { confirmed } else {
-        eprintln!("Non-interactive terminal: auto-reject requires --force flag.");
-        false
-    }
+        .interact()
+        .unwrap_or_else(|_| {
+            eprintln!("Non-interactive terminal: auto-reject requires --force flag.");
+            false
+        })
 }
 
 // ── Command runner ────────────────────────────────────────────────
 
-/// Run sync command
+/// Run sync command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Platform connectivity is required but unavailable
+/// - Daemon is not running
+/// - Sync API calls fail
+/// - Invalid `world_id` or `creator_id` parameters
+///
+/// Note: This function is 229 lines; splitting would break the coherent sync flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config);
 
@@ -232,23 +244,25 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
 
             let mut default_id_fields: Vec<&'static str> = Vec::new();
 
-            let workspace_id = if let Some(s) = workspace_id { s } else {
-                default_id_fields.push("workspace_id");
-                "local".to_string()
-            };
+            let workspace_id = workspace_id.unwrap_or_else(|| {
+                    default_id_fields.push("workspace_id");
+                    "local".to_string()
+                });
 
-            let world_id = if let Some(s) = world_id { s } else {
-                default_id_fields.push("world_id");
-                "unknown".to_string()
-            };
-
-            let creator_id = match creator_id {
-                Some(s) => s,
-                None => if let Some(s) = config.active_creator_id.as_deref() { s.to_string() } else {
-                    default_id_fields.push("creator_id");
+            let world_id = world_id.unwrap_or_else(|| {
+                    default_id_fields.push("world_id");
                     "unknown".to_string()
-                },
-            };
+                });
+
+            let creator_id = creator_id.unwrap_or_else(|| {
+                    config.active_creator_id.as_deref().map_or_else(
+                        || {
+                            default_id_fields.push("creator_id");
+                            "unknown".to_string()
+                        },
+                        ToString::to_string,
+                    )
+                });
 
             if !default_id_fields.is_empty() {
                 eprintln!(
@@ -309,13 +323,13 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
 
-            let world_id = if let Some(s) = world_id { s } else {
-                                eprintln!(
-                                    "Warning: sync pull without --world-id uses placeholder \"unknown\". \
+let world_id = world_id.unwrap_or_else(|| {
+                eprintln!(
+                    "Warning: sync pull without --world-id uses placeholder \"unknown\". \
             Set --world-id for real platform sync (and ensure it matches workspace sync binding if set)."
-                                );
-                                "unknown".to_string()
-                            };
+                );
+                "unknown".to_string()
+            });
 
             let request = SyncPullRequest {
                 schema_version: 1,
@@ -465,6 +479,7 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

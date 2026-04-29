@@ -82,6 +82,12 @@ impl CliConfig {
     /// Migration: if `config.toml` does not exist but `config.json` does,
     /// the JSON file is read, converted to TOML, and the original is renamed
     /// to `config.json.migrated`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Nexus home directory cannot be resolved
+    /// - File read operations fail
     pub fn load() -> anyhow::Result<Self> {
         let config_path = Self::config_path()?;
         let nexus = nexus_home()?;
@@ -160,7 +166,15 @@ impl CliConfig {
         self.degradation_snapshot.as_ref()
     }
 
-    /// Save configuration to the standard location
+    /// Save configuration to the standard location.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Config file path cannot be resolved
+    /// - Directory creation fails
+    /// - TOML serialization fails
+    /// - File write operation fails
     pub fn save(&self) -> anyhow::Result<()> {
         let config_path = Self::config_path()?;
         if let Some(parent) = config_path.parent() {
@@ -171,12 +185,20 @@ impl CliConfig {
         Ok(())
     }
 
-    /// Path to the configuration file
+    /// Path to the configuration file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     fn config_path() -> anyhow::Result<PathBuf> {
         Ok(nexus_home()?.join("config.toml"))
     }
 
-    /// Public path to the configuration file (for `config path` command)
+    /// Public path to the configuration file (for `config path` command).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     pub fn path() -> anyhow::Result<PathBuf> {
         Self::config_path()
     }
@@ -195,6 +217,10 @@ impl CliConfig {
     /// Returns the value as a JSON string representation.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
     /// For fields with defaults (`platform_url`, `daemon_url`), returns the default if empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is not in [`VALID_CONFIG_KEYS`] or is unsupported.
     pub fn get(&self, key: &str) -> anyhow::Result<String> {
         Self::validate_key(key)?;
         match key {
@@ -221,6 +247,12 @@ impl CliConfig {
 
     /// Set a configuration value by key name.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The key is not in [`VALID_CONFIG_KEYS`]
+    /// - The value is invalid for the key (e.g., invalid `runtime_mode`)
     pub fn set(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
         Self::validate_key(key)?;
         match key {
@@ -256,6 +288,10 @@ impl CliConfig {
     /// Unset (remove) a configuration key.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
     /// For string fields, clears to empty/default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is not in [`VALID_CONFIG_KEYS`].
     pub fn unset(&mut self, key: &str) -> anyhow::Result<()> {
         Self::validate_key(key)?;
         match key {
@@ -1063,6 +1099,10 @@ impl UserAgentsConfig {
     ///
     /// Returns a default (empty) config if the file does not exist.
     /// Logs a warning and returns defaults if the file exists but cannot be parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     pub fn load() -> anyhow::Result<Self> {
         let path = Self::config_path()?;
         if !path.exists() {
@@ -1084,6 +1124,10 @@ impl UserAgentsConfig {
     }
 
     /// Return the path to `~/.nexus42/agents.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     pub fn config_path() -> anyhow::Result<PathBuf> {
         Ok(nexus_home()?.join(Self::FILENAME))
     }
@@ -1205,7 +1249,11 @@ pub fn resolve_agent_model<S: std::hash::BuildHasher>(
     (None, None)
 }
 
-/// Get the nexus42 home directory (`$HOME/.nexus42`)
+/// Get the nexus42 home directory (`$HOME/.nexus42`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be resolved.
 pub fn nexus_home() -> anyhow::Result<PathBuf> {
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
@@ -1213,11 +1261,21 @@ pub fn nexus_home() -> anyhow::Result<PathBuf> {
 }
 
 /// User home directory (`$HOME`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be resolved.
 pub fn user_home_dir() -> anyhow::Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
 }
 
 /// Resolve workspace `state.db` under ADR-014 (`creators/<creator_id>/workspaces/<slug>/state.db`).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The home directory cannot be resolved
+/// - No active creator is configured
 pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     let user_home = user_home_dir()?;
     let cid = config.active_creator_id.as_deref().ok_or_else(|| {
@@ -1230,11 +1288,21 @@ pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
 }
 
 /// Load config and resolve the local `SQLite` database path.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - CLI configuration cannot be loaded
+/// - State DB path cannot be resolved
 pub fn state_db_path() -> anyhow::Result<PathBuf> {
     resolve_state_db_path(&CliConfig::load()?)
 }
 
-/// Get the path to the auth storage file
+/// Get the path to the auth storage file.
+///
+/// # Errors
+///
+/// Returns an error if the Nexus home directory cannot be resolved.
 pub fn auth_store_path() -> anyhow::Result<PathBuf> {
     Ok(nexus_home()?.join("auth.json"))
 }

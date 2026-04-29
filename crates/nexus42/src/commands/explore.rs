@@ -95,6 +95,9 @@ fn print_feed_text(feed: &ExploreFeedResponse) -> Result<()> {
 /// - Platform connectivity is required but unavailable
 /// - Daemon is not running
 /// - Explore API calls fail
+///
+/// Note: This function is 113 lines; splitting would break the coherent command dispatch flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: ExploreCommand, config: &CliConfig, output_format: &str) -> Result<()> {
     runtime_guard::require_platform(&config.runtime_mode(), "explore")?;
     let client = DaemonClient::from_config(config);
@@ -219,6 +222,7 @@ pub async fn run(cmd: ExploreCommand, config: &CliConfig, output_format: &str) -
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

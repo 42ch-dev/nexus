@@ -269,7 +269,8 @@ pub async fn count_pending_reviews(
     })?;
 
     Ok(Json(CountPendingReviewsResponse {
-        count: row as usize,
+        // SAFETY: SQLite COUNT(*) result fits in usize; unwrap_or(0) handles theoretical overflow
+        count: usize::try_from(row).unwrap_or(0),
     }))
 }
 

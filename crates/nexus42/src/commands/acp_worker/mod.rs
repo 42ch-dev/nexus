@@ -378,6 +378,7 @@ async fn handle_initialize(
 
         // Collect IDs for event emission.
         let ids: Vec<String> = sessions.keys().cloned().collect();
+        drop(sessions);
 
         // Write response while still holding the lock (stdout is not async-guarded).
         // We must NOT await here — write_jsonrpc_response is sync internally but
@@ -401,6 +402,13 @@ async fn handle_acp_prompt(
     id: Option<&Value>,
     params: &Value,
 ) -> Result<()> {
+    // Define PromptCheck before any statements (clippy::items_after_statements).
+    enum PromptCheck {
+        Ok { request_id: u64 },
+        SessionNotFound,
+        NotReady { state_str: String },
+    }
+
     let session_id = params
         .get("session_id")
         .and_then(|v| v.as_str())
@@ -413,13 +421,6 @@ async fn handle_acp_prompt(
         .to_string();
 
     // Synchronous lock scope: validate and transition state, collect what we need.
-    // Define PromptCheck before the lock scope.
-    enum PromptCheck {
-        Ok { request_id: u64 },
-        SessionNotFound,
-        NotReady { state_str: String },
-    }
-
     let check = {
         let sessions = state
             .sessions
@@ -427,21 +428,19 @@ async fn handle_acp_prompt(
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
         let slot = sessions.get(&session_id);
-        let check = match slot {
-            None => PromptCheck::SessionNotFound,
-            Some(slot) => {
-                let current_state = slot.state();
-                if !current_state.is_ready() && !current_state.is_prompting() {
-                    PromptCheck::NotReady {
-                        state_str: state_to_string(&current_state).to_string(),
-                    }
-                } else {
-                    let request_id = state.request_counter.fetch_add(1, Ordering::Relaxed);
-                    slot.mark_prompting();
-                    PromptCheck::Ok { request_id }
+        let check = slot.map_or(PromptCheck::SessionNotFound, |slot| {
+            let current_state = slot.state();
+            if !current_state.is_ready() && !current_state.is_prompting() {
+                PromptCheck::NotReady {
+                    state_str: state_to_string(&current_state).to_string(),
                 }
+            } else {
+                let request_id = state.request_counter.fetch_add(1, Ordering::Relaxed);
+                slot.mark_prompting();
+                PromptCheck::Ok { request_id }
             }
-        };
+        });
+        drop(sessions);
         check
     };
 
@@ -537,6 +536,12 @@ async fn handle_agent_start(
     id: Option<&Value>,
     params: &Value,
 ) -> Result<()> {
+    // Define StartResult before any statements (clippy::items_after_statements).
+    enum StartResult {
+        Created(Value),
+        Duplicate(String),
+    }
+
     let session_id = match params.get("session_id").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
         None => {
@@ -570,13 +575,7 @@ async fn handle_agent_start(
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    // Define StartResult before the lock scope.
     // Synchronous lock scope.
-    enum StartResult {
-        Created(Value),
-        Duplicate(String),
-    }
-
     let start_result = {
         let mut sessions = state
             .sessions
@@ -584,6 +583,7 @@ async fn handle_agent_start(
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
         if sessions.contains_key(&session_id) {
+            drop(sessions);
             StartResult::Duplicate(session_id.clone())
         } else {
             let config = AgentConfig {
@@ -597,6 +597,7 @@ async fn handle_agent_start(
             slot.mark_ready();
             let summary = session_summary_json(&slot);
             sessions.insert(session_id.clone(), slot);
+            drop(sessions);
             StartResult::Created(summary)
         }
     };
@@ -651,13 +652,11 @@ async fn handle_agent_stop(
             .write()
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
-        if let Some(slot) = sessions.remove(&session_id) {
+        sessions.remove(&session_id).is_some_and(|slot| {
             slot.request_shutdown();
             slot.mark_stopped();
             true
-        } else {
-            false
-        }
+        })
     };
 
     if !found {
@@ -712,23 +711,21 @@ async fn handle_health(
     let uptime_ms = state.start_time.elapsed().as_millis();
 
     // Synchronous lock scope: collect per-session health.
-    let (creator_id, session_health) = {
+    let session_health = {
         let sessions = state
             .sessions
             .read()
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
-        let health: Vec<Value> = sessions
+        sessions
             .iter()
             .map(|(sid, slot)| slot_health_json(sid, &slot.health()))
-            .collect();
-
-        (state.creator_id.clone(), health)
+            .collect::<Vec<Value>>()
     };
 
     let result = json!({
         "uptime_ms": uptime_ms,
-        "creator_id": creator_id,
+        "creator_id": state.creator_id,
         "session_count": session_health.len(),
         "sessions": session_health,
     });
@@ -800,12 +797,10 @@ async fn handle_agent_crash(
             .read()
             .map_err(|e| crate::errors::CliError::Other(format!("sessions lock poisoned: {e}")))?;
 
-        if let Some(slot) = sessions.get(session_id) {
+        sessions.get(session_id).is_some_and(|slot| {
             slot.mark_crashed(reason);
             true
-        } else {
-            false
-        }
+        })
     };
 
     if found {
@@ -869,6 +864,8 @@ async fn write_jsonrpc_error(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::significant_drop_tightening)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -880,8 +877,7 @@ mod tests {
         assert!(!state.shutdown_requested.load(Ordering::Relaxed));
         assert_eq!(state.creator_id, "test-creator");
         // No sessions initially.
-        let sessions = state.sessions.read().expect("lock ok");
-        assert!(sessions.is_empty());
+        assert!(state.sessions.read().expect("lock ok").is_empty());
     }
 
     // --- State string conversion ---
@@ -973,12 +969,14 @@ mod tests {
             }
         }
 
-        let sessions = state.sessions.read().expect("lock ok");
-        assert_eq!(sessions.len(), 1);
-        assert!(sessions.contains_key("default"));
-        let slot = sessions.get("default").expect("exists");
-        assert_eq!(slot.acp_agent_id(), "claude-sonnet-4-20250514");
-        assert_eq!(slot.state(), AgentSlotState::Ready);
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            assert_eq!(sessions.len(), 1);
+            assert!(sessions.contains_key("default"));
+            let slot = sessions.get("default").expect("exists");
+            assert_eq!(slot.acp_agent_id(), "claude-sonnet-4-20250514");
+            assert_eq!(slot.state(), AgentSlotState::Ready);
+        }
     }
 
     // --- Initialize with new agents array ---
@@ -1047,22 +1045,24 @@ mod tests {
             }
         }
 
-        let sessions = state.sessions.read().expect("lock ok");
-        assert_eq!(sessions.len(), 2);
-        assert!(sessions.contains_key("writer_1"));
-        assert!(sessions.contains_key("editor_1"));
+        {
+            let sessions = state.sessions.read().expect("lock ok");
+            assert_eq!(sessions.len(), 2);
+            assert!(sessions.contains_key("writer_1"));
+            assert!(sessions.contains_key("editor_1"));
 
-        let writer = sessions.get("writer_1").expect("exists");
-        assert_eq!(writer.role(), Some("writer"));
-        assert_eq!(writer.model(), Some("claude-3"));
-        // T8: system_prompt stored correctly
-        assert_eq!(writer.system_prompt(), Some("You are a creative writer."));
+            let writer = sessions.get("writer_1").expect("exists");
+            assert_eq!(writer.role(), Some("writer"));
+            assert_eq!(writer.model(), Some("claude-3"));
+            // T8: system_prompt stored correctly
+            assert_eq!(writer.system_prompt(), Some("You are a creative writer."));
 
-        let editor = sessions.get("editor_1").expect("exists");
-        assert_eq!(editor.role(), Some("editor"));
-        assert!(editor.model().is_none());
-        // T8: editor has no system_prompt in params
-        assert!(editor.system_prompt().is_none());
+            let editor = sessions.get("editor_1").expect("exists");
+            assert_eq!(editor.role(), Some("editor"));
+            assert!(editor.model().is_none());
+            // T8: editor has no system_prompt in params
+            assert!(editor.system_prompt().is_none());
+        }
     }
 
     // --- Agent start / stop lifecycle ---

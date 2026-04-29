@@ -68,6 +68,13 @@ pub enum PermissionCommand {
 }
 
 /// Run permission management commands.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Not in a Nexus workspace
+/// - Permission policy file cannot be loaded or saved
+/// - Invalid capability format
 pub fn run(command: PermissionCommand) -> Result<()> {
     let workspace_root = find_workspace_root().ok_or_else(|| {
         anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
@@ -142,18 +149,19 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
     }
 
     // Agent rules
-    let agents: Vec<&str> = if let Some(filter) = agent_filter {
-        if policy.list_agent_rules(filter).0.is_empty()
-            && policy.list_agent_rules(filter).1.is_empty()
-            && policy.list_agent_rules(filter).2.is_empty()
-        {
-            vec![]
-        } else {
-            vec![filter]
-        }
-    } else {
-        policy.list_agents()
-    };
+    let agents: Vec<&str> = agent_filter.map_or_else(
+        || policy.list_agents(),
+        |filter| {
+            if policy.list_agent_rules(filter).0.is_empty()
+                && policy.list_agent_rules(filter).1.is_empty()
+                && policy.list_agent_rules(filter).2.is_empty()
+            {
+                vec![]
+            } else {
+                vec![filter]
+            }
+        },
+    );
 
     if agents.is_empty() {
         if let Some(filter) = agent_filter {
@@ -200,11 +208,7 @@ fn print_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> Res
 fn build_list_json(policy: &PermissionPolicy, agent_filter: Option<&str>) -> serde_json::Value {
     let mut agents_json = serde_json::Map::new();
 
-    let agent_ids: Vec<&str> = if let Some(filter) = agent_filter {
-        vec![filter]
-    } else {
-        policy.list_agents()
-    };
+    let agent_ids: Vec<&str> = agent_filter.map_or_else(|| policy.list_agents(), |filter| vec![filter]);
 
     for agent_id in &agent_ids {
         let (granted, denied, asked) = policy.list_agent_rules(agent_id);
@@ -387,6 +391,7 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
 // -- toml_edit helpers are now in policy.rs as PermissionPolicy methods --
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

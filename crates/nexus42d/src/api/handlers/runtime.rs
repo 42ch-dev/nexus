@@ -69,8 +69,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         "running" => LifecycleState::Running,
         "degraded" => LifecycleState::Degraded,
         "stopping" => LifecycleState::Stopping,
-        "failed" => LifecycleState::Failed,
-        _ => LifecycleState::Failed, // fallback
+        _ => LifecycleState::Failed, // "failed" or unknown fallback
     };
 
     // Build subsystem health from actual workspace state
@@ -188,7 +187,8 @@ async fn gather_acp_status(state: &WorkspaceState) -> AcpStatusInfo {
         .fetch_one(pool)
         .await
     {
-        status.active_sessions = row as usize;
+        // SAFETY: SQLite COUNT(*) result fits in usize; unwrap_or handles theoretical overflow
+        status.active_sessions = usize::try_from(row).unwrap_or(0);
     }
 
     // Count total tool executions
@@ -196,7 +196,8 @@ async fn gather_acp_status(state: &WorkspaceState) -> AcpStatusInfo {
         .fetch_one(pool)
         .await
     {
-        status.total_tool_executions = row as u64;
+        // SAFETY: SQLite COUNT(*) is non-negative; cast_unsigned preserves value
+        status.total_tool_executions = row.cast_unsigned();
     }
 
     status

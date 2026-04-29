@@ -112,6 +112,9 @@ pub struct DaemonArgs {
     shutdown_grace_ms: u64,
 }
 
+// Main function is daemon entry point with orchestrated initialization sequence.
+// 253 lines is typical for such supervisor binaries; extraction would obscure flow.
+#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = DaemonArgs::parse();
@@ -323,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
 
             // Cancel all active engine sessions.
             if let Some(engine) = state_for_shutdown.engine() {
-                match engine.list_active(Default::default()).await {
+                match engine.list_active(nexus_orchestration::engine::SessionFilter::default()).await {
                     Ok(sessions) => {
                         let count = sessions.len();
                         for s in sessions {

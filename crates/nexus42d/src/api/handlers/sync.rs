@@ -223,7 +223,7 @@ pub(crate) fn try_platform_sync_credentials_from_env() -> Option<(String, String
     Some((base, token))
 }
 
-fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
@@ -307,18 +307,18 @@ pub async fn pull(
         }
     })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
 
     let remote = client
         .pull_bundles(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
     let bundles_received = remote.bundles.len();
     let is_up_to_date = remote.is_up_to_date;
 
     let summary = apply_pull_response_to_outbox(outbox, &remote)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     let ts = chrono::Utc::now().to_rfc3339();
     if let Err(e) = sqlx::query!(
@@ -504,7 +504,7 @@ pub async fn push(
             operation: DeltaOperation::Update,
             target_entity_type: None,
             target_entity_id: None,
-            payload: serde_json::Value::Object(Default::default()),
+            payload: serde_json::Value::Object(serde_json::Map::default()),
             source_anchor: None,
             local_timestamp: command.created_at.clone(),
         })
@@ -734,7 +734,7 @@ pub async fn replay(
             outbox_entry_id: e.outbox_entry_id.clone(),
             bundle_id: e.bundle_id.clone(),
             delivery_state: e.delivery_state.as_str().to_string(),
-            retry_count: e.retry_count.unwrap_or(0u64) as i64,
+            retry_count: e.retry_count.unwrap_or(0u64).cast_signed(),
             last_error: e.last_error.clone(),
             created_at: e.created_at.clone(),
         })
@@ -763,7 +763,7 @@ mod tests {
             failed_count: 1,
             last_sync_at: Some("2026-04-07T00:00:00Z".to_string()),
         };
-        let json = serde_json::to_string(&resp).unwrap();
+        let json = serde_json::to_string(&resp).expect("SyncStatusResponse should serialize");
         assert!(json.contains("\"staged_count\":2"));
         assert!(json.contains("\"ready_count\":1"));
         assert!(json.contains("\"conflicted_count\":3"));
@@ -782,7 +782,7 @@ mod tests {
             failed_count: 0,
             last_sync_at: None,
         };
-        let json = serde_json::to_string(&resp).unwrap();
+        let json = serde_json::to_string(&resp).expect("SyncStatusResponse should serialize");
         assert!(json.contains("\"last_sync_at\":null"));
     }
 
@@ -794,7 +794,7 @@ mod tests {
             "creator_id": "ctr_test",
             "force": true
         }"#;
-        let req: SyncPushRequest = serde_json::from_str(json).unwrap();
+        let req: SyncPushRequest = serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
         assert_eq!(req.workspace_id, "wrk_test");
         assert_eq!(req.world_id, "wld_test");
         assert_eq!(req.creator_id, "ctr_test");
@@ -808,7 +808,7 @@ mod tests {
             "world_id": "wld_test",
             "creator_id": "ctr_test"
         }"#;
-        let req: SyncPushRequest = serde_json::from_str(json).unwrap();
+        let req: SyncPushRequest = serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
         assert!(!req.force);
     }
 
@@ -819,7 +819,7 @@ mod tests {
             "world_id": "wld_x",
             "after_confirmed_delta_sequence": 4
         }"#;
-        let req: SyncPullRequest = serde_json::from_str(json).unwrap();
+        let req: SyncPullRequest = serde_json::from_str(json).expect("SyncPullRequest should deserialize from valid JSON");
         assert_eq!(req.schema_version, 1);
         assert_eq!(req.world_id, "wld_x");
         assert_eq!(req.after_confirmed_delta_sequence, Some(4));
@@ -832,7 +832,7 @@ mod tests {
             "resolution": "auto_accept",
             "force": false
         }"#;
-        let req: SyncResolveRequest = serde_json::from_str(json).unwrap();
+        let req: SyncResolveRequest = serde_json::from_str(json).expect("SyncResolveRequest should deserialize from valid JSON");
         assert_eq!(req.outbox_entry_id, "obe_abc123");
         assert_eq!(req.resolution, "auto_accept");
         assert!(!req.force);
@@ -849,7 +849,7 @@ mod tests {
         // Initially, all counts should be 0
         let result = status(State(state)).await;
         assert!(result.is_ok());
-        let body = result.unwrap();
+        let body = result.expect("status should return Ok for initialized workspace");
         assert_eq!(body.staged_count, 0);
         assert_eq!(body.ready_count, 0);
         assert_eq!(body.conflicted_count, 0);
@@ -873,7 +873,7 @@ mod tests {
 
         let result = push(State(state), Json(req)).await;
         assert!(result.is_ok());
-        let resp = result.unwrap();
+        let resp = result.expect("push should succeed for valid request");
         assert!(resp.success);
         assert!(resp.outbox_entry_id.is_some());
         assert!(resp.bundle_id.is_some());
@@ -894,12 +894,12 @@ mod tests {
             creator_id: "ctr_test".to_string(),
             force: false,
         };
-        let _ = push(State(state.clone()), Json(req)).await.unwrap();
+        let _ = push(State(state.clone()), Json(req)).await.expect("push should succeed in test");
 
         // Check status
         let result = status(State(state)).await;
         assert!(result.is_ok());
-        let body = result.unwrap();
+        let body = result.expect("status should return Ok for initialized workspace");
         // Push uses Outbox::stage → delivery_state `ready` (not `staged`)
         assert_eq!(body.ready_count, 1);
         assert_eq!(body.staged_count, 0);
@@ -913,7 +913,7 @@ mod tests {
             warning_count: 1,
             summary: "All checks passed.".to_string(),
         };
-        let json = serde_json::to_string(&summary).unwrap();
+        let json = serde_json::to_string(&summary).expect("PrecheckSummary should serialize");
         assert!(json.contains("\"valid\":true"));
         assert!(json.contains("\"warning_count\":1"));
     }

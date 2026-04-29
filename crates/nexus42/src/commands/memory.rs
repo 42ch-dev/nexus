@@ -54,6 +54,14 @@ pub enum MemoryCommand {
     Fragments,
 }
 
+/// Run memory command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No active creator is set
+/// - Database operations fail
+/// - File I/O operations fail
 pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(

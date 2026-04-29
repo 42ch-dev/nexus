@@ -39,7 +39,8 @@ pub fn error_code(resp: &ContextAssembleResponse) -> Option<&str> {
 /// Helper: get the error message from a context assembly response, if any.
 #[cfg(test)]
 #[inline]
-#[must_use] 
+#[must_use]
+#[allow(dead_code)]
 pub fn error_message(resp: &ContextAssembleResponse) -> Option<&str> {
     resp.error_message.as_deref()
 }

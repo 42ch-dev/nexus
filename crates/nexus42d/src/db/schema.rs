@@ -34,16 +34,16 @@ mod tests {
 
     #[tokio::test]
     async fn schema_init_creates_all_tables() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
+        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — queries sqlite_master metadata table.
         let tables: Vec<(String,)> =
             sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&pool)
                 .await
-                .unwrap();
+                .expect("SELECT should succeed");
 
         let table_names: Vec<&str> = tables.iter().map(|t| t.0.as_str()).collect();
 
@@ -73,24 +73,24 @@ mod tests {
 
     #[tokio::test]
     async fn schema_init_is_idempotent() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        Schema::init(&db_path).await.unwrap();
-        Schema::init(&db_path).await.unwrap(); // second call should not fail
+        Schema::init(&db_path).await.expect("Schema::init should succeed");
+        Schema::init(&db_path).await.expect("Schema::init should be idempotent"); // second call should not fail
     }
 
     #[tokio::test]
     async fn schema_versions_seeded_correctly() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
+        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — reads seeded version from workspace_meta.
         let db_version: (String,) =
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'db_schema_version'")
                 .fetch_one(&pool)
                 .await
-                .unwrap();
+                .expect("SELECT should succeed");
         assert_eq!(db_version.0, nexus_local_db::DB_SCHEMA_VERSION.to_string());
 
         // SAFETY: test-only DDL verification — reads seeded version from workspace_meta.
@@ -98,15 +98,15 @@ mod tests {
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'schema_version'")
                 .fetch_one(&pool)
                 .await
-                .unwrap();
+                .expect("SELECT should succeed");
         assert_eq!(schema_version.0, SCHEMA_VERSION.to_string());
     }
 
     #[tokio::test]
     async fn reference_sources_has_content_column() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
+        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — inserts and reads back reference_sources row.
         sqlx::query(
@@ -116,23 +116,23 @@ mod tests {
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("INSERT should succeed");
 
         let content: (Option<String>,) = sqlx::query_as(
             "SELECT content FROM reference_sources WHERE reference_source_id = 'ref_test'",
         )
         .fetch_one(&pool)
         .await
-        .unwrap();
+        .expect("SELECT should succeed");
 
         assert_eq!(content.0, Some("Extracted text".to_string()));
     }
 
     #[tokio::test]
     async fn creators_table_has_default_status() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
+        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — inserts and reads back creators row.
         sqlx::query(
@@ -141,22 +141,22 @@ mod tests {
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("INSERT should succeed");
 
         let status: (String,) =
             sqlx::query_as("SELECT status FROM creators WHERE creator_id = 'ctr_test'")
                 .fetch_one(&pool)
                 .await
-                .unwrap();
+                .expect("SELECT should succeed");
 
         assert_eq!(status.0, "active");
     }
 
     #[tokio::test]
     async fn reference_sources_table_has_tags_and_content_hash() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
+        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
 
         // SAFETY: test-only DDL verification — inserts and reads back reference_sources row
         // with nullable columns (tags, content_hash).
@@ -167,14 +167,14 @@ mod tests {
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("INSERT should succeed");
 
         let row: (Option<String>, Option<String>) = sqlx::query_as(
             "SELECT tags, content_hash FROM reference_sources WHERE reference_source_id = 'ref_test'"
         )
         .fetch_one(&pool)
         .await
-        .unwrap();
+        .expect("SELECT should succeed");
 
         assert_eq!(row.0, Some("tag1,tag2".to_string()));
         assert_eq!(row.1, Some("abc123".to_string()));
@@ -182,22 +182,22 @@ mod tests {
 
     #[tokio::test]
     async fn pragmas_are_set() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
-        let pool = Schema::init(&db_path).await.unwrap();
+        let pool = Schema::init(&db_path).await.expect("Schema::init should succeed");
 
         // SAFETY: PRAGMA statement — not supported by compile-time checked macros.
         let jm: (String,) = sqlx::query_as("PRAGMA journal_mode")
             .fetch_one(&pool)
             .await
-            .unwrap();
+            .expect("PRAGMA should succeed");
         assert_eq!(jm.0.to_lowercase(), "wal");
 
         // SAFETY: PRAGMA statement — not supported by compile-time checked macros.
         let fk: (i32,) = sqlx::query_as("PRAGMA foreign_keys")
             .fetch_one(&pool)
             .await
-            .unwrap();
+            .expect("PRAGMA should succeed");
         assert_eq!(fk.0, 1);
     }
 }

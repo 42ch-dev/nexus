@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 const MAX_TITLE_LENGTH: usize = 255;
 
 /// Sanitize a manuscript title to prevent path traversal attacks.
+/// Sanitize a manuscript title for safe filesystem use.
+///
+/// # Errors
 ///
 /// Returns an error if the title:
 /// - Is empty after stripping whitespace
@@ -56,7 +59,11 @@ pub fn sanitize_title(title: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-/// Validate that a world ID has the `wld_` prefix
+/// Validate that a world ID has the `wld_` prefix.
+///
+/// # Errors
+///
+/// Returns an error if the world ID does not start with `wld_`.
 pub fn validate_world_id(world_id: &str) -> Result<()> {
     if !world_id.starts_with("wld_") {
         return Err(CliError::Config(format!(
@@ -101,31 +108,52 @@ impl ManuscriptManager {
         self.workspace_root.join("Stories")
     }
 
-    /// Get the path to a specific manuscript's directory
+    /// Get the path to a specific manuscript's directory.
     ///
     /// Title is sanitized to prevent path traversal attacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if title sanitization fails.
     pub fn manuscript_dir(&self, title: &str) -> Result<PathBuf> {
         let safe = sanitize_title(title)?;
         Ok(self.stories_dir().join(safe))
     }
 
-    /// Get the path to a manuscript's main file
+    /// Get the path to a manuscript's main file.
     ///
     /// Title is sanitized to prevent path traversal attacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if title sanitization fails.
     pub fn manuscript_file(&self, title: &str) -> Result<PathBuf> {
         let safe = sanitize_title(title)?;
         Ok(self.manuscript_dir(&safe)?.join("manuscript.md"))
     }
 
-    /// Get the path to a manuscript's metadata file
+    /// Get the path to a manuscript's metadata file.
     ///
     /// Title is sanitized to prevent path traversal attacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if title sanitization fails.
     pub fn metadata_file(&self, title: &str) -> Result<PathBuf> {
         let safe = sanitize_title(title)?;
         Ok(self.manuscript_dir(&safe)?.join("metadata.json"))
     }
 
-    /// Create a new manuscript with the given title
+    /// Create a new manuscript with the given title.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - World ID validation fails
+    /// - Title sanitization fails
+    /// - Manuscript already exists
+    /// - Directory creation fails
+    /// - File write operations fail
     pub fn create(&self, title: &str, world_id: Option<&str>) -> Result<PathBuf> {
         validate_world_id(world_id.unwrap_or("wld_default"))?;
 
@@ -156,7 +184,14 @@ impl ManuscriptManager {
         Ok(dir)
     }
 
-    /// Read the content of a manuscript
+    /// Read the content of a manuscript.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Title sanitization fails
+    /// - Manuscript file does not exist
+    /// - File read operation fails
     pub fn read_content(&self, title: &str) -> Result<String> {
         let path = self.manuscript_file(title)?;
         if !path.exists() {
@@ -168,7 +203,15 @@ impl ManuscriptManager {
         Ok(content)
     }
 
-    /// Read metadata for a manuscript
+    /// Read metadata for a manuscript.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Title sanitization fails
+    /// - Metadata file does not exist
+    /// - File read operation fails
+    /// - JSON parsing fails
     pub fn read_metadata(&self, title: &str) -> Result<ManuscriptMetadata> {
         let path = self.metadata_file(title)?;
         if !path.exists() {
@@ -181,7 +224,15 @@ impl ManuscriptManager {
         Ok(metadata)
     }
 
-    /// Write content to a manuscript
+    /// Write content to a manuscript.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Title sanitization fails
+    /// - Manuscript file does not exist
+    /// - Content contains invalid UTF-8
+    /// - File write operation fails
     pub fn write_content(&self, title: &str, content: &str) -> Result<()> {
         let path = self.manuscript_file(title)?;
         if !path.exists() {
@@ -196,7 +247,13 @@ impl ManuscriptManager {
         Ok(())
     }
 
-    /// Export manuscript content in the specified format
+    /// Export manuscript content in the specified format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Manuscript read fails
+    /// - Unknown export format is specified
     pub fn export(&self, title: &str, format: &str) -> Result<String> {
         let content = self.read_content(title)?;
 
@@ -241,7 +298,11 @@ impl ManuscriptManager {
         }
     }
 
-    /// List all manuscripts
+    /// List all manuscripts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Stories directory cannot be read.
     pub fn list(&self) -> Result<Vec<String>> {
         let stories_dir = self.stories_dir();
         if !stories_dir.exists() {
@@ -264,8 +325,17 @@ impl ManuscriptManager {
         Ok(manuscripts)
     }
 
-    /// Set the manuscript phase in `SQLite`
-    pub async fn set_phase(
+    /// Set the manuscript phase in `SQLite`.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Phase parsing fails
+/// - Phase consistency validation fails
+/// - Invalid phase transition
+/// - Database query fails
+/// - Metadata file update fails
+pub async fn set_phase(
         &self,
         title: &str,
         phase: &str,
@@ -325,7 +395,11 @@ impl ManuscriptManager {
         Ok(target_phase)
     }
 
-    /// Get the current manuscript phase from `SQLite`
+    /// Get the current manuscript phase from `SQLite`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn get_phase(pool: &SqlitePool) -> Result<Option<String>> {
         let phase: Option<String> =
             sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
@@ -334,7 +408,11 @@ impl ManuscriptManager {
         Ok(phase)
     }
 
-    /// Get the current manuscript phase from the workspace database (convenience method)
+    /// Get the current manuscript phase from the workspace database (convenience method).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if database initialization or query fails.
     pub async fn get_from_db(workspace_root: &Path) -> Result<Option<String>> {
         let nexus_dir = crate::config::workspace_nexus_dir(workspace_root);
         let db_path = nexus_dir.join("state.db");
@@ -345,12 +423,20 @@ impl ManuscriptManager {
         Self::get_phase(&pool).await
     }
 
-    /// Promote manuscript to the next phase
+    /// Promote manuscript to the next phase.
     ///
     /// In strict mode (V1.1), additional validations are performed:
     /// - Manuscript phase is appropriate for promotion
     /// - `StoryManifest` status is valid
     /// - Sync state is clean (no pending conflicts)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Phase parsing fails
+    /// - Invalid phase transition
+    /// - Database query fails
+    /// - Strict mode validation fails
     pub async fn promote(
         &self,
         title: &str,
@@ -475,6 +561,13 @@ impl ManuscriptManager {
     /// Verify manuscript consistency using domain rules
     ///
     /// In content check mode (V1.1), also verifies file integrity using SHA256.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Title sanitization fails
+    /// - Manuscript file read fails
+    /// - Database query fails
     pub async fn verify(
         &self,
         title: &str,
@@ -645,7 +738,11 @@ fn set_phase_on_state(state: &mut ManuscriptState, target: ManuscriptPhase) -> R
     }
 }
 
-/// Validate UTF-8 safety for content handling (CTX-R5)
+/// Validate UTF-8 safety for content handling (CTX-R5).
+///
+/// # Errors
+///
+/// Returns an error if content contains invalid UTF-8 or round-trip mismatch.
 #[allow(dead_code)]
 pub fn validate_utf8_content(content: &str) -> Result<()> {
     // Ensure content is valid UTF-8 (it should be since it's a &str, but

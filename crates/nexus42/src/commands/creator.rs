@@ -281,6 +281,9 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
 /// register → solve challenge → verify → store credentials.
 ///
 /// On wrong answer, auto-retries once (D4). On second failure, reports error.
+///
+/// Note: This function is 103 lines; splitting would break the coherent registration flow.
+#[allow(clippy::too_many_lines)]
 async fn register_creator(
     config: &CliConfig,
     name: String,
@@ -630,6 +633,8 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::auth::{AuthStore, CreatorAuthState};

@@ -25,7 +25,7 @@ const fn nonempty(s: &str) -> bool {
     !s.is_empty()
 }
 
-fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
@@ -123,11 +123,11 @@ pub async fn fork(
             reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN".into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let remote = client
         .fork_world(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(WorldForkLocalResponse {
         success: true,
@@ -205,11 +205,11 @@ pub async fn snapshot(
             reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN".into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let remote = client
         .snapshot_world(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(WorldSnapshotLocalResponse {
         success: true,
@@ -232,7 +232,7 @@ mod tests {
             fork_branch: None,
             error: Some("bad".into()),
         };
-        let j = serde_json::to_string(&r).unwrap();
+        let j = serde_json::to_string(&r).expect("WorldForkLocalResponse should serialize");
         assert!(j.contains("\"success\":false"));
     }
 
@@ -246,7 +246,7 @@ mod tests {
             captured_at: Some("2026-04-10T00:00:00Z".into()),
             error: None,
         };
-        let j = serde_json::to_string(&r).unwrap();
+        let j = serde_json::to_string(&r).expect("WorldSnapshotLocalResponse should serialize");
         assert!(j.contains("\"world_revision\":7"));
     }
 }
