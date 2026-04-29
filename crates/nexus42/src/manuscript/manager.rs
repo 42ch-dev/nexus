@@ -326,16 +326,16 @@ impl ManuscriptManager {
     }
 
     /// Set the manuscript phase in `SQLite`.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Phase parsing fails
-/// - Phase consistency validation fails
-/// - Invalid phase transition
-/// - Database query fails
-/// - Metadata file update fails
-pub async fn set_phase(
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Phase parsing fails
+    /// - Phase consistency validation fails
+    /// - Invalid phase transition
+    /// - Database query fails
+    /// - Metadata file update fails
+    pub async fn set_phase(
         &self,
         title: &str,
         phase: &str,
