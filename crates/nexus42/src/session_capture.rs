@@ -201,13 +201,13 @@ impl SessionCapture {
         digest: &SessionDigest,
         pending_id: Option<&str>,
     ) -> (bool, String) {
-        let pending_id = match pending_id {
-            Some(id) => id.to_string(),
-            None => format!(
+        let pending_id = pending_id.map_or_else(
+            || format!(
                 "pending_{}",
                 uuid::Uuid::new_v4().to_string().replace('-', "")
             ),
-        };
+            ToString::to_string,
+        );
         let task_kind = self.detect_task_kind();
         let raw_digest = digest.to_json();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -298,6 +298,10 @@ pub struct PendingCaptureFile {
 ///
 /// Creates the directory if it doesn't exist.
 /// Returns `Ok(path)` on success, `Err` if file I/O fails.
+///
+/// # Errors
+///
+/// Returns an I/O error if directory creation or file write fails.
 pub fn save_capture_to_dir(
     dir: &std::path::Path,
     pending_id: &str,
@@ -328,6 +332,10 @@ pub fn save_capture_to_dir(
 ///
 /// Creates `~/.nexus42/pending_captures/` directory if it doesn't exist.
 /// Returns `Ok(path)` on success, `Err` if file I/O fails.
+///
+/// # Errors
+///
+/// Returns an I/O error if nexus home cannot be resolved or file write fails.
 pub fn save_capture_locally(
     pending_id: &str,
     capture: &SessionCapture,

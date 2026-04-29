@@ -280,6 +280,13 @@ async fn unlink_identity(creator_id: String) -> Result<()> {
 /// All commands that need the active identity should call this function.
 ///
 /// Returns the resolved identity info or `None` if no identity is configured.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - CLI configuration cannot be loaded
+/// - Database connection fails
+/// - Database query fails
 pub async fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
     let cli_config = CliConfig::load()?;
     let creator_id = match &cli_config.active_creator_id {

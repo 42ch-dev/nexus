@@ -84,6 +84,8 @@ fn path() -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::config::VALID_CONFIG_KEYS;

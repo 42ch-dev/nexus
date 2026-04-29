@@ -177,6 +177,13 @@ struct ScheduleCli {
 }
 
 /// Run the schedule command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Daemon API calls fail
+/// - Invalid schedule parameters
+/// - CLI configuration cannot be loaded/saved
 pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 

@@ -91,7 +91,7 @@ mod tests {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state);
-        let server = TestServer::new(app).unwrap();
+        let server = TestServer::new(app).expect("TestServer should initialize");
         TestApp { _tmp: tmp, server }
     }
 
@@ -108,7 +108,7 @@ mod tests {
         .await;
 
         let app = build_router(state);
-        let server = TestServer::new(app).unwrap();
+        let server = TestServer::new(app).expect("TestServer should initialize");
         TestApp { _tmp: tmp, server }
     }
 

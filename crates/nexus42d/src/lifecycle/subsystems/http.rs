@@ -66,8 +66,7 @@ impl SubsystemBootstrap for HttpSubsystem {
         let state = self.state.lock().await;
         match &*state {
             HttpState::Running { .. } => SubsystemHealth::Up,
-            HttpState::NotStarted => SubsystemHealth::Down,
-            HttpState::Shutdown => SubsystemHealth::Down,
+            HttpState::NotStarted | HttpState::Shutdown => SubsystemHealth::Down,
         }
     }
 

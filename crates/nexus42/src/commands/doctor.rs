@@ -240,8 +240,22 @@ async fn database_check(config: &CliConfig) -> HealthCheck {
 
 /// Check workspace directory structure.
 fn workspace_check(config: &CliConfig) -> HealthCheck {
-    match &config.workspace_path {
-        Some(path) => {
+    config.workspace_path.as_ref().map_or_else(
+        || {
+            crate::config::find_workspace_root().map_or_else(
+                || HealthCheck {
+                    name: "Workspace directory".to_string(),
+                    status: HealthStatus::Warning,
+                    detail: "no workspace configured or detected".to_string(),
+                },
+                |root| HealthCheck {
+                    name: "Workspace directory".to_string(),
+                    status: HealthStatus::Ok,
+                    detail: format!("detected at {}", root.display()),
+                },
+            )
+        },
+        |path| {
             if path.exists() {
                 if path.is_dir() {
                     // Check for .nexus42 subdirectory
@@ -275,23 +289,8 @@ fn workspace_check(config: &CliConfig) -> HealthCheck {
                     detail: format!("path does not exist: {}", path.display()),
                 }
             }
-        }
-        None => {
-            // Check if we're inside a workspace by walking up
-            match crate::config::find_workspace_root() {
-                Some(root) => HealthCheck {
-                    name: "Workspace directory".to_string(),
-                    status: HealthStatus::Ok,
-                    detail: format!("detected at {}", root.display()),
-                },
-                None => HealthCheck {
-                    name: "Workspace directory".to_string(),
-                    status: HealthStatus::Warning,
-                    detail: "no workspace configured or detected".to_string(),
-                },
-            }
-        }
-    }
+        },
+    )
 }
 
 /// Check version compatibility between CLI and daemon.
@@ -355,6 +354,8 @@ async fn version_check(config: &CliConfig) -> HealthCheck {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

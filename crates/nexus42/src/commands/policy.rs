@@ -42,6 +42,12 @@ pub enum PolicyCommand {
 }
 
 /// Run policy management commands.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Not in a Nexus workspace
+/// - Permission policy file cannot be loaded or saved
 pub fn run(command: PolicyCommand) -> Result<()> {
     let workspace_root = find_workspace_root().ok_or_else(|| {
         anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")

@@ -26,6 +26,15 @@ pub enum SoulCommand {
     PushPersonality,
 }
 
+/// Run soul command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No active creator is set
+/// - Database operations fail
+/// - File I/O operations fail
+/// - Daemon API calls fail
 pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(

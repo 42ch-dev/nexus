@@ -72,18 +72,27 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
         CloneSourceArg::Platform => "platform",
         CloneSourceArg::Local => "local",
     };
-    if let Ok(v) = dialoguer::Confirm::new()
+    dialoguer::Confirm::new()
         .with_prompt(format!(
             "Clone world '{world_ref}' from {source_label}?"
         ))
         .default(false)
-        .interact() { v } else {
-        eprintln!("Non-interactive terminal: pass --yes to confirm clone.");
-        false
-    }
+        .interact()
+        .unwrap_or_else(|_| {
+            eprintln!("Non-interactive terminal: pass --yes to confirm clone.");
+            false
+        })
 }
 
 /// Run the clone command.
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - World reference validation fails
+/// - Clone from platform is requested in local-only runtime mode
+/// - Daemon API call fails
+/// - Clone operation fails (platform or local)
 pub async fn run(args: CloneArgs, config: &CliConfig) -> Result<()> {
     let world_ref = validate_world_ref(&args.world_ref).map_err(CliError::Other)?;
 

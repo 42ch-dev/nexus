@@ -39,7 +39,15 @@ pub enum ResearchCommand {
     },
 }
 
-/// Run research command
+/// Run research command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Scan path does not exist
+/// - Database operations fail
+/// - File I/O operations fail
+/// - Daemon API calls fail
 pub async fn run(cmd: ResearchCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ResearchCommand::Scan { path, extract_text } => {
@@ -543,6 +551,7 @@ fn compute_content_hash(content: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

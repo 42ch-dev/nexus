@@ -48,6 +48,13 @@ pub enum SessionCommand {
 // ── Command runner ──────────────────────────────────────────────────
 
 /// Run a session command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Session file I/O operations fail
+/// - Session validation fails
+/// - Session cannot be found
 pub fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
     let sessions_file = SessionManager::default_sessions_file();
     let manager = SessionManager::new(sessions_file);

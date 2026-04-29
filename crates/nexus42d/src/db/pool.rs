@@ -206,12 +206,12 @@ mod tests {
 
     /// Helper to create a test database with schema via `nexus_local_db`
     async fn create_test_pool() -> (tempfile::TempDir, std::path::PathBuf, DbPool) {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
 
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
-        nexus_local_db::seed_versions(&pool).await.unwrap();
+        let pool = nexus_local_db::open_pool(&db_path).await.expect("open_pool should succeed");
+        nexus_local_db::run_migrations(&pool).await.expect("run_migrations should succeed");
+        nexus_local_db::seed_versions(&pool).await.expect("seed_versions should succeed");
 
         let db_pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
             .await
@@ -249,7 +249,7 @@ mod tests {
                     )
                     .execute(p.pool())
                     .await
-                    .unwrap();
+                    .expect("INSERT should succeed");
 
                     let creator_id = format!("ctr-{i}");
                     let row: Option<String> = sqlx::query_scalar!(
@@ -258,7 +258,7 @@ mod tests {
                     )
                     .fetch_optional(p.pool())
                     .await
-                    .unwrap();
+                    .expect("SELECT should succeed");
                     format!("got: {row:?}")
                 })
             })
@@ -266,7 +266,7 @@ mod tests {
 
         let mut results = Vec::new();
         for handle in handles {
-            results.push(handle.await.unwrap());
+            results.push(handle.await.expect("task should complete successfully"));
         }
         assert_eq!(results.len(), 4);
         for r in &results {

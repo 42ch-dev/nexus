@@ -102,10 +102,7 @@ impl TokenManager {
         .await
         .map_err(db_error)?;
 
-        let row = match row {
-            Some(r) => r,
-            None => return Ok(None),
-        };
+        let Some(row) = row else { return Ok(None) };
 
         let expires_at = DateTime::parse_from_rfc3339(&row.expires_at)
             .map_err(|e| NexusApiError::Internal {
@@ -172,7 +169,7 @@ mod tests {
         // Keep `tmp` alive (it owns the temp dir containing the DB file).
         // create_test_workspace already ran migrations & seeded the schema,
         // so we just open a new pool on the same file.
-        let pool = DbPool::with_defaults(&db_path).await.unwrap();
+        let pool = DbPool::with_defaults(&db_path).await.expect("DbPool::with_defaults should succeed");
         (tmp, db_path, pool)
     }
 
@@ -185,9 +182,9 @@ mod tests {
 
         mgr.store_tokens("usr_test123", "at_abc", "rt_def", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed");
 
-        let token = mgr.get_token().await.unwrap().unwrap();
+        let token = mgr.get_token().await.expect("get_token should succeed").expect("token should exist");
         assert_eq!(token.user_id, "usr_test123");
         assert_eq!(token.access_token, "at_abc");
         assert_eq!(token.refresh_token, "rt_def");
@@ -198,7 +195,7 @@ mod tests {
         let (_tmp, _db_path, pool) = create_test_db().await;
         let mgr = TokenManager::new(pool);
 
-        let token = mgr.get_token().await.unwrap();
+        let token = mgr.get_token().await.expect("get_token should succeed");
         assert!(token.is_none());
     }
 
@@ -211,9 +208,9 @@ mod tests {
         let expires_at = Utc::now() - chrono::Duration::hours(1);
         mgr.store_tokens("usr_test", "at_old", "rt_old", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed for expired token");
 
-        let valid = mgr.get_valid_token().await.unwrap();
+        let valid = mgr.get_valid_token().await.expect("get_valid_token should succeed");
         assert!(valid.is_none());
     }
 
@@ -225,11 +222,11 @@ mod tests {
         let expires_at = Utc::now() + chrono::Duration::hours(1);
         mgr.store_tokens("usr_test", "at_valid", "rt_valid", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed");
 
-        let valid = mgr.get_valid_token().await.unwrap();
+        let valid = mgr.get_valid_token().await.expect("get_valid_token should succeed");
         assert!(valid.is_some());
-        assert_eq!(valid.unwrap().access_token, "at_valid");
+        assert_eq!(valid.expect("valid token should exist").access_token, "at_valid");
     }
 
     #[tokio::test]
@@ -240,13 +237,13 @@ mod tests {
         let expires_at = Utc::now() + chrono::Duration::hours(1);
         mgr.store_tokens("usr_test", "at_abc", "rt_def", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed");
 
-        assert!(mgr.get_token().await.unwrap().is_some());
+        assert!(mgr.get_token().await.expect("get_token should succeed").is_some());
 
-        mgr.clear_tokens().await.unwrap();
+        mgr.clear_tokens().await.expect("clear_tokens should succeed");
 
-        assert!(mgr.get_token().await.unwrap().is_none());
+        assert!(mgr.get_token().await.expect("get_token should succeed").is_none());
     }
 
     #[tokio::test]
@@ -257,10 +254,10 @@ mod tests {
         let expires_at = Utc::now() + chrono::Duration::hours(1);
         mgr.store_tokens("usr_test", "at_abc", "rt_def", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed");
 
-        assert!(mgr.validate_token("at_abc").await.unwrap());
-        assert!(!mgr.validate_token("at_wrong").await.unwrap());
+        assert!(mgr.validate_token("at_abc").await.expect("validate_token should succeed"));
+        assert!(!mgr.validate_token("at_wrong").await.expect("validate_token should succeed"));
     }
 
     #[tokio::test]
@@ -271,9 +268,9 @@ mod tests {
         let expires_at = Utc::now() - chrono::Duration::hours(1);
         mgr.store_tokens("usr_test", "at_expired", "rt_old", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed for expired token");
 
-        assert!(!mgr.validate_token("at_expired").await.unwrap());
+        assert!(!mgr.validate_token("at_expired").await.expect("validate_token should succeed"));
     }
 
     #[tokio::test]
@@ -284,14 +281,14 @@ mod tests {
         let expires_at = Utc::now() + chrono::Duration::hours(1);
         mgr.store_tokens("usr_test", "at_old", "rt_old", expires_at)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed");
 
         let expires_at2 = Utc::now() + chrono::Duration::hours(2);
         mgr.store_tokens("usr_test", "at_new", "rt_new", expires_at2)
             .await
-            .unwrap();
+            .expect("store_tokens should succeed");
 
-        let token = mgr.get_token().await.unwrap().unwrap();
+        let token = mgr.get_token().await.expect("get_token should succeed").expect("token should exist");
         assert_eq!(token.access_token, "at_new");
         assert_eq!(token.refresh_token, "rt_new");
     }

@@ -73,7 +73,18 @@ pub enum ManuscriptCommand {
     List,
 }
 
-/// Run manuscript command
+/// Run manuscript command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Workspace is not initialized
+/// - Manuscript validation fails (invalid title, `world_id` format)
+/// - File I/O operations fail (create, read, write, delete)
+/// - Database operations fail (phase persistence)
+///
+/// Note: This function is 110 lines; splitting would break the coherent command dispatch flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
     // Find workspace root
     let workspace_root =
@@ -214,6 +225,7 @@ async fn open_workspace_db(workspace_root: &std::path::Path) -> Result<nexus_loc
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

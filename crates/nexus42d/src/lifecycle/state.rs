@@ -1,5 +1,6 @@
 //! Statig callbacks require `unused_self` for introspection methods.
-#![allow(clippy::unused_self, clippy::missing_panics_doc)]
+//! Mutex guard must be held for entire state machine operation scope.
+#![allow(clippy::unused_self, clippy::missing_panics_doc, clippy::significant_drop_tightening)]
 //! HTTP handlers have consistent error patterns.
 #![allow(clippy::missing_errors_doc)]
 //! HSM state machine implementation using statig.
@@ -270,7 +271,7 @@ impl DaemonHsm {
     async fn enter_starting(&self) {
         tracing::info!("entering Starting state");
         if let Some(ctx) = &self.context {
-            enter_starting(Arc::clone(ctx));
+            enter_starting(ctx);
         } else {
             tracing::debug!("Starting.entry: no context (test mode) — subsystems not spawned");
         }
@@ -280,7 +281,7 @@ impl DaemonHsm {
     async fn exit_starting(&self) {
         tracing::info!("exiting Starting state");
         if let Some(ctx) = &self.context {
-            exit_starting(Arc::clone(ctx));
+            exit_starting(ctx);
         }
     }
 
@@ -288,7 +289,7 @@ impl DaemonHsm {
     async fn enter_running(&self) {
         tracing::info!("entering Running state");
         if let Some(ctx) = &self.context {
-            enter_running(Arc::clone(ctx));
+            enter_running(ctx);
         }
     }
 
@@ -296,7 +297,7 @@ impl DaemonHsm {
     async fn exit_running(&self) {
         tracing::info!("exiting Running state");
         if let Some(ctx) = &self.context {
-            exit_running(Arc::clone(ctx));
+            exit_running(ctx);
         }
     }
 
@@ -304,7 +305,7 @@ impl DaemonHsm {
     async fn enter_degraded(&self) {
         tracing::info!("entering Degraded state");
         if let Some(ctx) = &self.context {
-            enter_degraded(Arc::clone(ctx));
+            enter_degraded(ctx);
         }
     }
 
@@ -319,7 +320,7 @@ impl DaemonHsm {
     async fn enter_stopping(&self) {
         tracing::info!("entering Stopping state");
         if let Some(ctx) = &self.context {
-            enter_stopping(Arc::clone(ctx));
+            enter_stopping(ctx);
         }
     }
 
@@ -352,6 +353,9 @@ impl DaemonHsm {
         tracing::debug!("transition: {:?} → {:?}", source, target);
     }
 
+    /// Statig callback for dispatch events.
+    /// Note: Signature is dictated by statig macro; cannot take state by reference.
+    #[allow(clippy::needless_pass_by_value)]
     fn on_dispatch(&mut self, state: statig::StateOrSuperstate<Self>, event: &Event) {
         tracing::trace!("dispatch: {:?} → {:?}", event, state);
     }
@@ -518,7 +522,7 @@ impl Lifecycle for StatigLifecycle {
             let mut m = machine.lock().await;
 
             // Check if machine is initialized
-            let machine_ref = if let Some(machine) = m.as_mut() { machine } else {
+            let Some(machine_ref) = m.as_mut() else {
                 tracing::warn!("dispatch called on uninitialized lifecycle");
                 return;
             };

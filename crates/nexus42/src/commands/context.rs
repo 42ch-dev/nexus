@@ -13,7 +13,14 @@ use nexus_domain::{
 #[cfg(test)]
 use nexus_domain::DegradationPolicy;
 
-/// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters
+/// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
+///
+/// # Errors
+///
+/// Returns an error string if:
+/// - The input does not start with 'wld_' prefix
+/// - The suffix after 'wld_' is empty
+/// - The suffix contains non-alphanumeric characters
 pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
     // Check prefix
     if !s.starts_with("wld_") {
@@ -211,6 +218,13 @@ async fn assemble_local_with_routing(
 /// runtime mode (which may have been downgraded by the degradation guard).
 /// In non-local-only modes, attempts a platform call and falls back to
 /// `Stage0Assembly` if the platform is unavailable.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Local file scanning or reading fails during Stage-0 assembly
+/// - Configuration cannot be accessed
+/// - Degradation guard state cannot be persisted
 pub async fn assemble_context(
     config: &CliConfig,
     guard: &mut DegradationGuard,
@@ -427,6 +441,8 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

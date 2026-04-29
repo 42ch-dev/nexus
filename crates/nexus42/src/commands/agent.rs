@@ -671,38 +671,38 @@ fn describe_distribution(agent: &AgentEntry) -> String {
             .distribution
             .npx
             .as_ref().map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
-        "binary" => {
-            if let Some(ref binary) = agent.distribution.binary {
-                if let Some(platform) = nexus_acp_host::transport::Platform::current() {
-                    let has_platform = match platform {
-                        nexus_acp_host::transport::Platform::DarwinAarch64 => {
-                            binary.darwin_aarch64.is_some()
+        "binary" => agent.distribution.binary.as_ref().map_or_else(
+            || "binary".to_string(),
+            |binary| {
+                nexus_acp_host::transport::Platform::current().map_or_else(
+                    || "binary (unsupported platform)".to_string(),
+                    |platform| {
+                        let has_platform = match platform {
+                            nexus_acp_host::transport::Platform::DarwinAarch64 => {
+                                binary.darwin_aarch64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::DarwinX86_64 => {
+                                binary.darwin_x86_64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::LinuxAarch64 => {
+                                binary.linux_aarch64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::LinuxX86_64 => {
+                                binary.linux_x86_64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::WindowsX86_64 => {
+                                binary.windows_x86_64.is_some()
+                            }
+                        };
+                        if has_platform {
+                            format!("binary ({})", platform.as_str())
+                        } else {
+                            "binary (no current platform build)".to_string()
                         }
-                        nexus_acp_host::transport::Platform::DarwinX86_64 => {
-                            binary.darwin_x86_64.is_some()
-                        }
-                        nexus_acp_host::transport::Platform::LinuxAarch64 => {
-                            binary.linux_aarch64.is_some()
-                        }
-                        nexus_acp_host::transport::Platform::LinuxX86_64 => {
-                            binary.linux_x86_64.is_some()
-                        }
-                        nexus_acp_host::transport::Platform::WindowsX86_64 => {
-                            binary.windows_x86_64.is_some()
-                        }
-                    };
-                    if has_platform {
-                        format!("binary ({})", platform.as_str())
-                    } else {
-                        "binary (no current platform build)".to_string()
-                    }
-                } else {
-                    "binary (unsupported platform)".to_string()
-                }
-            } else {
-                "binary".to_string()
-            }
-        }
+                    },
+                )
+            },
+        ),
         _ => "unknown".to_string(),
     }
 }
@@ -846,6 +846,7 @@ fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

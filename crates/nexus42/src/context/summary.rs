@@ -204,6 +204,10 @@ impl SummaryGenerator {
     /// Walks `Stories/<world_ref>/` for files matching configured extensions.
     /// Ignores `References/` tree and non-recognized extensions.
     /// Enforces file size limit and path traversal validation (V1.1 safety).
+    ///
+    /// # Errors
+    ///
+    /// Returns a `SummaryError` if directory traversal fails or path validation fails.
     pub fn scan_manuscript_dir(&self) -> Result<Vec<ManuscriptFile>, SummaryError> {
         let mut files = Vec::new();
         if !self.manuscript_root.exists() {
@@ -289,6 +293,10 @@ impl SummaryGenerator {
     }
 
     /// Generate a basic summary from manuscript files.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `SummaryError` if scanning fails.
     pub fn generate(&self) -> Result<GeneratedSummary, SummaryError> {
         let files = self.scan_manuscript_dir()?;
         let mut title = None;
@@ -360,6 +368,11 @@ impl SummaryGenerator {
 ///
 /// Returns the canonicalized path on success, or `SummaryError::PathTraversal`
 /// if the resolved path escapes the base directory.
+///
+/// # Errors
+///
+/// Returns `SummaryError::InvalidPath` if path canonicalization fails.
+/// Returns `SummaryError::PathTraversal` if the path escapes the base directory.
 pub fn validate_path_within_base(path: &Path, base: &Path) -> Result<PathBuf, SummaryError> {
     // Canonicalize both paths to resolve symlinks and normalize
     let canonical_path = path

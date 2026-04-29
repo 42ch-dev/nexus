@@ -386,8 +386,10 @@ mod tests {
 
     #[test]
     fn test_from_config_uses_daemon_url() {
-        let mut config = CliConfig::default();
-        config.daemon_url = "http://127.0.0.1:9000".to_string();
+        let config = CliConfig {
+            daemon_url: "http://127.0.0.1:9000".to_string(),
+            ..Default::default()
+        };
         let client = DaemonClient::from_config(&config);
         assert_eq!(client.base_url, "http://127.0.0.1:9000");
     }

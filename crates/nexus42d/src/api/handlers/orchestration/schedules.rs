@@ -67,8 +67,7 @@ pub async fn add_schedule(
     // Generate a schedule ID (simple timestamp-based for pre-1.0)
     let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
 
-    let concurrency = match &body.concurrency {
-        Some(c) => match c {
+    let concurrency = body.concurrency.as_ref().map_or(ScheduleConcurrency::Serial, |c| match c {
             ScheduleConcurrencyRequest::Serial => ScheduleConcurrency::Serial,
             ScheduleConcurrencyRequest::ParallelWith { schedule_ids } => {
                 ScheduleConcurrency::ParallelWith(
@@ -78,9 +77,7 @@ pub async fn add_schedule(
                 )
             }
             ScheduleConcurrencyRequest::ParallelAny => ScheduleConcurrency::ParallelAny,
-        },
-        None => ScheduleConcurrency::Serial,
-    };
+        });
 
     let depends_on: Vec<ScheduleId> = body
         .depends_on
@@ -127,8 +124,7 @@ pub async fn add_schedule(
     })?;
 
     // Seed core context v0 if seed is provided
-    let mut core_version: u32 = 0;
-    if let Some(seed) = &body.seed {
+    let core_version = if let Some(seed) = &body.seed {
         let mgr = supervisor.core_context_manager();
         let sid = ScheduleId(schedule_id.clone());
         let _record = mgr
@@ -146,8 +142,10 @@ pub async fn add_schedule(
                     format!("failed to seed core context: {e}"),
                 )
             })?;
-        core_version = 0;
-    }
+        0
+    } else {
+        0
+    };
 
     Ok((
         StatusCode::CREATED,
@@ -928,8 +926,8 @@ mod tests {
             let req = SignalScheduleRequest {
                 signal: signal.to_string(),
             };
-            let json = serde_json::to_string(&req).unwrap();
-            let back: SignalScheduleRequest = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(&req).expect("SignalScheduleRequest should serialize");
+            let back: SignalScheduleRequest = serde_json::from_str(&json).expect("SignalScheduleRequest should deserialize");
             assert_eq!(back.signal, *signal);
         }
     }
@@ -942,7 +940,7 @@ mod tests {
             patch: None,
             path: None,
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::Append { .. }));
     }
 
@@ -954,7 +952,7 @@ mod tests {
             patch: None,
             path: None,
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::Replace { .. }));
     }
 
@@ -966,7 +964,7 @@ mod tests {
             patch: Some(serde_json::json!({"key": "val"})),
             path: None,
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::StructMerge { .. }));
     }
 
@@ -978,7 +976,7 @@ mod tests {
             patch: None,
             path: Some("key".to_string()),
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::StructRemove { .. }));
     }
 

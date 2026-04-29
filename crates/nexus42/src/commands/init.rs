@@ -57,6 +57,9 @@ pub async fn run(cmd: InitCommand) -> Result<()> {
     }
 }
 
+/// # Errors
+///
+/// Returns an error if the Documents directory cannot be resolved.
 pub fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<PathBuf> {
     let docs = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Documents")))
@@ -64,6 +67,9 @@ pub fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<P
     Ok(docs.join("nexus").join(creator_id).join(workspace_slug))
 }
 
+/// # Errors
+///
+/// Returns an error if the value is empty, contains path separators, or is "." or "..".
 pub fn validate_slug(label: &str, value: &str) -> Result<()> {
     if value.is_empty()
         || value.contains('/')
@@ -79,6 +85,14 @@ pub fn validate_slug(label: &str, value: &str) -> Result<()> {
 }
 
 /// Writes creative tree, `meta.json`, and initializes workspace `state.db` (ADR-014).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Directory creation fails
+/// - File write operations fail
+/// - JSON serialization fails
+/// - Database initialization fails
 pub async fn materialize_adr014_workspace(
     user_home: &std::path::Path,
     creator_id: &str,
@@ -137,6 +151,11 @@ pub async fn materialize_adr014_workspace(
     Ok(db_path)
 }
 
+/// # Errors
+///
+/// Returns an error if:
+/// - CLI configuration cannot be loaded
+/// - CLI configuration cannot be saved
 pub fn persist_cli_workspace_selection(
     creative_root: PathBuf,
     creator_id: String,

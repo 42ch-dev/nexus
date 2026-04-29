@@ -116,7 +116,7 @@ impl ActionContext {
 ///
 /// Each subsystem is a tokio task that dispatches `SubsystemUp` or
 /// `SubsystemFailed` on completion.
-pub fn enter_starting(ctx: Arc<ActionContext>) {
+pub fn enter_starting(ctx: &Arc<ActionContext>) {
     tracing::info!("entering Starting state — spawning subsystem tasks");
 
     // Emit diagnostic tracing event.
@@ -169,7 +169,7 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
 /// Note (RISK-WSC-02): `abort()` cancels the tokio task but does not guarantee
 /// full resource cleanup (file handles, sockets). Full cleanup requires
 /// `SubsystemBootstrap` to implement an `abort()` method (WS7+ work).
-pub fn exit_starting(ctx: Arc<ActionContext>) {
+pub fn exit_starting(ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Starting state — cancelling in-flight subsystem starts");
 
     let mut handles = ctx
@@ -192,7 +192,7 @@ pub fn exit_starting(ctx: Arc<ActionContext>) {
 /// - `_system.maintenance` Session started in main.rs before lifecycle begins.
 /// - Resume any paused sessions with `daemon_restart` reason (stub).
 /// - Emit `tracing` event `daemon_lifecycle.running`.
-pub fn enter_running(_ctx: Arc<ActionContext>) {
+pub fn enter_running(_ctx: &Arc<ActionContext>) {
     tracing::info!("entering Running state — daemon fully operational");
 
     // Engine sessions (including _system.maintenance) are started in main.rs
@@ -212,7 +212,7 @@ pub fn enter_running(_ctx: Arc<ActionContext>) {
 /// Exit action for `Running` state.
 ///
 /// Per spec §5.6: No action needed (engine keeps running across Running ↔ Degraded).
-pub fn exit_running(_ctx: Arc<ActionContext>) {
+pub fn exit_running(_ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Running state");
     // No action: engine keeps running. Only Stopping.entry stops it.
 }
@@ -223,7 +223,7 @@ pub fn exit_running(_ctx: Arc<ActionContext>) {
 /// - Record degraded subsystems in state-local storage (done in state.rs)
 /// - Set HTTP endpoint `lifecycle_state` to "degraded"
 /// - Keep orchestration engine running
-pub fn enter_degraded(_ctx: Arc<ActionContext>) {
+pub fn enter_degraded(_ctx: &Arc<ActionContext>) {
     tracing::info!("entering Degraded state — daemon partially operational");
 
     tracing::info!(
@@ -236,7 +236,7 @@ pub fn enter_degraded(_ctx: Arc<ActionContext>) {
 /// Exit action for `Degraded` state.
 ///
 /// Per spec §5.3: Clear `degraded_subsystems` tracking (done in state.rs).
-pub fn exit_degraded(_ctx: Arc<ActionContext>) {
+pub fn exit_degraded(_ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Degraded state — all subsystems restored");
 }
 
@@ -250,7 +250,7 @@ pub fn exit_degraded(_ctx: Arc<ActionContext>) {
 /// - Flush outbox, close DB pool, close HTTP listener
 /// - Emit `ShutdownDrained` when complete
 /// - Start watchdog for `ShutdownTimeout`
-pub fn enter_stopping(ctx: Arc<ActionContext>) {
+pub fn enter_stopping(ctx: &Arc<ActionContext>) {
     tracing::info!("entering Stopping state — graceful shutdown in progress");
 
     let grace_ms = ctx.shutdown_grace_ms();
@@ -295,15 +295,14 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
         // All subsystems shutdown — dispatch ShutdownDrained.
         if success_count == subsystems.len() {
             tracing::info!("all subsystems shutdown — dispatching ShutdownDrained");
-            lc_shutdown.dispatch(Event::ShutdownDrained);
         } else {
             tracing::warn!(
                 "shutdown incomplete ({}/{}) — dispatching ShutdownDrained anyway",
                 success_count,
                 subsystems.len()
             );
-            lc_shutdown.dispatch(Event::ShutdownDrained);
         }
+        lc_shutdown.dispatch(Event::ShutdownDrained);
     });
 
     // Clone for watchdog
@@ -328,6 +327,10 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
 /// - Set HTTP endpoint `lifecycle_state` to "failed"
 /// - Log final tracing event
 /// - Call `std::process::exit(exit_code)` after 100ms pause
+///
+/// Note: Takes `last_error: Option<String>` to allow natural `unwrap_or("none")` usage
+/// in tracing macro; reference type would require more complex deref handling.
+#[allow(clippy::needless_pass_by_value)]
 pub fn enter_failed(exit_code: i32, last_error: Option<String>) {
     tracing::error!(
         target: "daemon_lifecycle",

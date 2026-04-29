@@ -55,16 +55,13 @@ pub async fn list_sessions(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListSessionsQuery>,
 ) -> (StatusCode, Json<ListSessionsResponse>) {
-    let engine = match state.engine() {
-        Some(e) => e,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ListSessionsResponse {
-                    sessions: Vec::new(),
-                }),
-            );
-        }
+    let Some(engine) = state.engine() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ListSessionsResponse {
+                sessions: Vec::new(),
+            }),
+        );
     };
 
     let filter = nexus_orchestration::engine::SessionFilter {
@@ -72,16 +69,13 @@ pub async fn list_sessions(
         preset_id: None,
     };
 
-    let sessions = match engine.list_active(filter).await {
-        Ok(s) => s,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ListSessionsResponse {
-                    sessions: Vec::new(),
-                }),
-            );
-        }
+    let Ok(sessions) = engine.list_active(filter).await else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ListSessionsResponse {
+                sessions: Vec::new(),
+            }),
+        );
     };
 
     let mapped: Vec<SessionSummary> = sessions
@@ -90,7 +84,7 @@ pub async fn list_sessions(
             session_id: s.session_id.0,
             creator_id: s.creator_id,
             preset_id: s.preset_id,
-            status: session_status_to_str(s.status),
+            status: session_status_to_str(&s.status),
             current_task_id: s.current_task_id,
         })
         .collect();
@@ -129,7 +123,7 @@ pub async fn get_session(
             session_id: session.session_id.0,
             creator_id: session.creator_id,
             preset_id: session.preset_id,
-            status: session_status_to_str(session.status),
+            status: session_status_to_str(&session.status),
             current_task_id: session.current_task_id,
         },
     }))
@@ -181,7 +175,7 @@ pub async fn signal_session(
 ///
 /// `Debug` formatting produces `WaitingForInput` → `waitingforinput` (no separator).
 /// This function maps each variant explicitly to the correct `snake_case` form.
-fn session_status_to_str(status: SessionStatus) -> String {
+fn session_status_to_str(status: &SessionStatus) -> String {
     match status {
         SessionStatus::Running => "running".to_string(),
         SessionStatus::Paused => "paused".to_string(),

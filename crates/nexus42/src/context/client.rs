@@ -29,6 +29,10 @@ impl ContextClient {
     ///
     /// Sends `POST /v1/local/context/assemble` through nexus42d.
     /// The daemon proxies this request to the platform's Context Assembly service.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the daemon HTTP request fails.
     pub async fn assemble(
         &self,
         request: &ContextAssembleRequestV1,

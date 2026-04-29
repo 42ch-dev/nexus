@@ -16,6 +16,13 @@ pub enum RuntimeModeCommand {
     },
 }
 
+/// Run `runtime_mode` command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Invalid runtime mode value
+/// - CLI configuration cannot be saved
 pub fn run(command: RuntimeModeCommand, config: &CliConfig) -> Result<()> {
     match command {
         RuntimeModeCommand::Show => {

@@ -20,6 +20,10 @@ impl Schema {
     ///
     /// Opens a pool via nexus-local-db, runs migrations, and seeds version keys.
     /// Safe to call on an existing database — migrations are idempotent.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `LocalDbError` if pool creation, migrations, or seeding fails.
     pub async fn init(db_path: &Path) -> Result<SqlitePool, nexus_local_db::LocalDbError> {
         let pool = local_db_open_pool(db_path).await?;
         run_migrations(&pool).await?;

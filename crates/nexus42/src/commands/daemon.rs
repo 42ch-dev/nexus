@@ -54,7 +54,18 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Start the daemon process
+/// Start the daemon process.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Health check fails to communicate with existing daemon
+/// - Daemon process cannot be spawned
+/// - PID file operations fail
+/// - Process management fails
+///
+/// Note: This function is 102 lines; splitting would break the coherent daemon startup flow.
+#[allow(clippy::too_many_lines)]
 async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
     // Check if already running
     let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
@@ -411,6 +422,7 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
