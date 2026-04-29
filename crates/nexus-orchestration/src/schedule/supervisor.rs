@@ -190,9 +190,7 @@ impl ScheduleSupervisor {
                         (Some(_cutoff), None) => true, // no scheduled_at: on-demand schedule
                         (Some(cutoff), Some(scheduled_str)) => {
                             // Parse scheduled_at string (Unix timestamp as string)
-                            scheduled_str
-                                .parse::<i64>()
-                                .is_ok_and(|t| t <= cutoff)
+                            scheduled_str.parse::<i64>().is_ok_and(|t| t <= cutoff)
                         }
                     };
                     if due {
