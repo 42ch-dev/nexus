@@ -55,7 +55,7 @@ pub const REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
 /// Maximum cache age before stale-while-revalidate kicks in.
-const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
+const CACHE_MAX_AGE: Duration = Duration::from_hours(24);
 
 /// Cache file name for the full registry JSON.
 const CACHE_FILE: &str = "cache.json";
@@ -369,7 +369,7 @@ impl RegistryClient {
         http: reqwest::Client,
         cache_dir: &Path,
     ) -> anyhow::Result<(String, usize)> {
-        let response = tokio::time::timeout(Duration::from_secs(60), http.get(REGISTRY_URL).send())
+        let response = tokio::time::timeout(Duration::from_mins(1), http.get(REGISTRY_URL).send())
             .await
             .context("Background fetch timed out after 60s")?
             .context("Background fetch failed")?;

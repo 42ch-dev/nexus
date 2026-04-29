@@ -192,8 +192,7 @@ impl ScheduleSupervisor {
                             // Parse scheduled_at string (Unix timestamp as string)
                             scheduled_str
                                 .parse::<i64>()
-                                .map(|t| t <= cutoff)
-                                .unwrap_or(false)
+                                .is_ok_and(|t| t <= cutoff)
                         }
                     };
                     if due {
