@@ -1,6 +1,10 @@
 //! Statig callbacks require `unused_self` for introspection methods.
 //! Mutex guard must be held for entire state machine operation scope.
-#![allow(clippy::unused_self, clippy::missing_panics_doc, clippy::significant_drop_tightening)]
+#![allow(
+    clippy::unused_self,
+    clippy::missing_panics_doc,
+    clippy::significant_drop_tightening
+)]
 //! HTTP handlers have consistent error patterns.
 #![allow(clippy::missing_errors_doc)]
 //! HSM state machine implementation using statig.
@@ -411,7 +415,7 @@ impl StatigLifecycle {
     /// 2. Subsystems can be started manually or via a follow-up refactoring
     ///
     /// See: QC2-C2 critical finding — machine must be `Some()` to avoid dropping first dispatch.
-    #[must_use] 
+    #[must_use]
     pub fn new_with_subsystems(
         _subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
         _shutdown_grace_ms: u64,
@@ -439,7 +443,7 @@ impl StatigLifecycle {
     ///
     /// Entry actions will log but not spawn subsystem tasks.
     /// Tests dispatch `SubsystemUp` events manually.
-    #[must_use] 
+    #[must_use]
     pub fn new_for_test() -> Self {
         let (transition_tx, _) = broadcast::channel(16);
         let daemon_hsm = DaemonHsm::default(); // No context
@@ -456,7 +460,7 @@ impl StatigLifecycle {
     }
 
     /// Create a new lifecycle with default settings (alias for `new_for_test`).
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::new_for_test()
     }

@@ -57,7 +57,7 @@ pub enum SyncCommandVariant {
 
 impl SyncCommandVariant {
     /// Get the `command_type` string matching the generated `SyncCommand` schema.
-    #[must_use] 
+    #[must_use]
     pub const fn command_type_str(&self) -> &str {
         match self {
             Self::AdvanceWorld { .. } => "advance_world",
@@ -71,7 +71,7 @@ impl SyncCommandVariant {
     }
 
     /// Get the `world_id` from this command variant.
-    #[must_use] 
+    #[must_use]
     pub fn world_id(&self) -> &str {
         match self {
             Self::AdvanceWorld { world_id, .. }
@@ -85,7 +85,7 @@ impl SyncCommandVariant {
     }
 
     /// Get the `creator_id` from this command variant.
-    #[must_use] 
+    #[must_use]
     pub fn creator_id(&self) -> &str {
         match self {
             Self::AdvanceWorld { creator_id, .. }
@@ -155,7 +155,7 @@ impl SyncCommandVariant {
     ///
     /// # Panics
     /// Panics if `command_type_str` or `origin` does not parse correctly.
-    #[must_use] 
+    #[must_use]
     pub fn to_sync_command(
         &self,
         command_id: &str,
@@ -197,7 +197,7 @@ pub enum CommandOrigin {
 }
 
 impl CommandOrigin {
-    #[must_use] 
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         match self {
             Self::LocalUser => "local_user",

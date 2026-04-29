@@ -212,7 +212,9 @@ mod tests {
 
         assert!(workspace_dir.exists(), "workspace_dir should exist");
 
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open_pool should succeed");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open_pool should succeed");
         // SAFETY: test-only — read-back verification of seeded test data.
         let phase: (String,) =
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")

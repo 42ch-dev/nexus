@@ -27,7 +27,7 @@ pub struct StoredToken {
 
 impl StoredToken {
     /// Check if the token is expired or within the refresh threshold.
-    #[must_use] 
+    #[must_use]
     pub fn needs_refresh(&self) -> bool {
         let now = Utc::now();
         let threshold = self.expires_at
@@ -36,7 +36,7 @@ impl StoredToken {
     }
 
     /// Check if the token is fully expired (past `expires_at`).
-    #[must_use] 
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         Utc::now() >= self.expires_at
     }
@@ -56,7 +56,7 @@ fn db_error(e: impl std::fmt::Display) -> NexusApiError {
 
 impl TokenManager {
     /// Create a new `TokenManager` backed by the given connection pool.
-    #[must_use] 
+    #[must_use]
     pub const fn new(db: DbPool) -> Self {
         Self { db }
     }
@@ -169,7 +169,9 @@ mod tests {
         // Keep `tmp` alive (it owns the temp dir containing the DB file).
         // create_test_workspace already ran migrations & seeded the schema,
         // so we just open a new pool on the same file.
-        let pool = DbPool::with_defaults(&db_path).await.expect("DbPool::with_defaults should succeed");
+        let pool = DbPool::with_defaults(&db_path)
+            .await
+            .expect("DbPool::with_defaults should succeed");
         (tmp, db_path, pool)
     }
 
@@ -184,7 +186,11 @@ mod tests {
             .await
             .expect("store_tokens should succeed");
 
-        let token = mgr.get_token().await.expect("get_token should succeed").expect("token should exist");
+        let token = mgr
+            .get_token()
+            .await
+            .expect("get_token should succeed")
+            .expect("token should exist");
         assert_eq!(token.user_id, "usr_test123");
         assert_eq!(token.access_token, "at_abc");
         assert_eq!(token.refresh_token, "rt_def");
@@ -210,7 +216,10 @@ mod tests {
             .await
             .expect("store_tokens should succeed for expired token");
 
-        let valid = mgr.get_valid_token().await.expect("get_valid_token should succeed");
+        let valid = mgr
+            .get_valid_token()
+            .await
+            .expect("get_valid_token should succeed");
         assert!(valid.is_none());
     }
 
@@ -224,9 +233,15 @@ mod tests {
             .await
             .expect("store_tokens should succeed");
 
-        let valid = mgr.get_valid_token().await.expect("get_valid_token should succeed");
+        let valid = mgr
+            .get_valid_token()
+            .await
+            .expect("get_valid_token should succeed");
         assert!(valid.is_some());
-        assert_eq!(valid.expect("valid token should exist").access_token, "at_valid");
+        assert_eq!(
+            valid.expect("valid token should exist").access_token,
+            "at_valid"
+        );
     }
 
     #[tokio::test]
@@ -239,11 +254,21 @@ mod tests {
             .await
             .expect("store_tokens should succeed");
 
-        assert!(mgr.get_token().await.expect("get_token should succeed").is_some());
+        assert!(mgr
+            .get_token()
+            .await
+            .expect("get_token should succeed")
+            .is_some());
 
-        mgr.clear_tokens().await.expect("clear_tokens should succeed");
+        mgr.clear_tokens()
+            .await
+            .expect("clear_tokens should succeed");
 
-        assert!(mgr.get_token().await.expect("get_token should succeed").is_none());
+        assert!(mgr
+            .get_token()
+            .await
+            .expect("get_token should succeed")
+            .is_none());
     }
 
     #[tokio::test]
@@ -256,8 +281,14 @@ mod tests {
             .await
             .expect("store_tokens should succeed");
 
-        assert!(mgr.validate_token("at_abc").await.expect("validate_token should succeed"));
-        assert!(!mgr.validate_token("at_wrong").await.expect("validate_token should succeed"));
+        assert!(mgr
+            .validate_token("at_abc")
+            .await
+            .expect("validate_token should succeed"));
+        assert!(!mgr
+            .validate_token("at_wrong")
+            .await
+            .expect("validate_token should succeed"));
     }
 
     #[tokio::test]
@@ -270,7 +301,10 @@ mod tests {
             .await
             .expect("store_tokens should succeed for expired token");
 
-        assert!(!mgr.validate_token("at_expired").await.expect("validate_token should succeed"));
+        assert!(!mgr
+            .validate_token("at_expired")
+            .await
+            .expect("validate_token should succeed"));
     }
 
     #[tokio::test]
@@ -288,7 +322,11 @@ mod tests {
             .await
             .expect("store_tokens should succeed");
 
-        let token = mgr.get_token().await.expect("get_token should succeed").expect("token should exist");
+        let token = mgr
+            .get_token()
+            .await
+            .expect("get_token should succeed")
+            .expect("token should exist");
         assert_eq!(token.access_token, "at_new");
         assert_eq!(token.refresh_token, "rt_new");
     }

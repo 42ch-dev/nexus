@@ -119,7 +119,8 @@ async fn spawn_mock_multi_agent_worker(
                     if state.shutdown_requested.load(Ordering::Relaxed)
                         && method != "worker/shutdown"
                     {
-                        send_jsonrpc_error(&server, id.as_ref(), -32000, "Worker shutting down").await;
+                        send_jsonrpc_error(&server, id.as_ref(), -32000, "Worker shutting down")
+                            .await;
                         continue;
                     }
 
@@ -178,7 +179,8 @@ async fn spawn_mock_multi_agent_worker(
                             break;
                         }
                         _ => {
-                            send_jsonrpc_error(&server, id.as_ref(), -32601, "Method not found").await;
+                            send_jsonrpc_error(&server, id.as_ref(), -32601, "Method not found")
+                                .await;
                         }
                     }
                 }
@@ -372,7 +374,13 @@ async fn handle_agent_stop(state: &Arc<MockWorkerState>, params: &Value) -> Hand
 }
 
 async fn handle_agent_list(state: &Arc<MockWorkerState>) -> Value {
-    let summaries: Vec<Value> = state.sessions.read().await.values().map(MockSlot::to_summary).collect();
+    let summaries: Vec<Value> = state
+        .sessions
+        .read()
+        .await
+        .values()
+        .map(MockSlot::to_summary)
+        .collect();
     json!({ "sessions": summaries })
 }
 
@@ -666,7 +674,9 @@ async fn crash_isolation_error_slot_no_impact() {
     // Verify all 3 are initially ready.
     let list = handle.agent_list().await.expect("agent_list");
     assert_eq!(list.len(), 3);
-    assert!(list.iter().all(nexus_orchestration::worker::AgentSessionSummary::is_ready));
+    assert!(list
+        .iter()
+        .all(nexus_orchestration::worker::AgentSessionSummary::is_ready));
 
     // Prompt s1 and s3 concurrently — both should succeed independently.
     let ipc_client = handle.ipc_client();

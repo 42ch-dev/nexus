@@ -60,7 +60,7 @@ impl ScheduleSupervisor {
     ///
     /// The pool must already have migrations applied (including the
     /// `creator_schedules` table).
-    #[must_use] 
+    #[must_use]
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
             pool,

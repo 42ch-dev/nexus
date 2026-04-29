@@ -285,7 +285,7 @@ impl PlatformClient {
 
     /// Get the base URL (for testing).
     #[cfg(test)]
-    #[must_use] 
+    #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }

@@ -125,9 +125,7 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             let status = std::process::Command::new(&editor)
                 .arg(&tmp_path)
                 .status()
-                .map_err(|e| {
-                    CliError::Other(format!("Failed to open editor '{editor}': {e}"))
-                })?;
+                .map_err(|e| CliError::Other(format!("Failed to open editor '{editor}': {e}")))?;
 
             if status.success() {
                 let edited = std::fs::read_to_string(&tmp_path)?;

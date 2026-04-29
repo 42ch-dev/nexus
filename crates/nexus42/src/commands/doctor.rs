@@ -95,9 +95,7 @@ async fn run_checks(config: &CliConfig) -> Result<()> {
     }
 
     println!("{}", "-".repeat(80));
-    println!(
-        "Summary: {ok_count} OK, {warn_count} warnings, {fail_count} failures"
-    );
+    println!("Summary: {ok_count} OK, {warn_count} warnings, {fail_count} failures");
 
     if fail_count > 0 {
         println!();
@@ -209,7 +207,10 @@ async fn database_check(config: &CliConfig) -> HealthCheck {
                             .await
                             .ok()
                             .map(|v| format!("(schema v{})", v.schema_version));
-                        let detail = version_info.map_or_else(|| format!("found at {}", db_path.display()), |v| format!("found at {} {}", db_path.display(), v));
+                        let detail = version_info.map_or_else(
+                            || format!("found at {}", db_path.display()),
+                            |v| format!("found at {} {}", db_path.display(), v),
+                        );
                         HealthCheck {
                             name: "Database".to_string(),
                             status: HealthStatus::Ok,

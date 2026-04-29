@@ -25,8 +25,10 @@ pub fn create_workspace_structure(path: &str) -> Result<()> {
     // Create workspace config
     let config_path = nexus_dir.join("workspace.json");
     if !config_path.exists() {
-        let name = base
-            .file_name().map_or_else(|| "unnamed".to_string(), |n| n.to_string_lossy().to_string());
+        let name = base.file_name().map_or_else(
+            || "unnamed".to_string(),
+            |n| n.to_string_lossy().to_string(),
+        );
 
         let config = serde_json::json!({
             "name": name,

@@ -267,8 +267,7 @@ impl Drop for LocalSetBridge {
                     .lock()
                     .expect("bridge shutdown: mutex poisoned — unrecoverable")
                     .take();
-                if let Some(handle) = value
-                {
+                if let Some(handle) = value {
                     // Use channel to implement timeout on join
                     let (done_tx, done_rx) = std_mpsc::channel();
 

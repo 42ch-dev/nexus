@@ -81,9 +81,7 @@ fn load_permission_policy(workspace_path: &str) -> Option<std::collections::Hash
 
     // Extract the grant list
     let granted = policy.get("grant")?;
-    granted
-        .as_table()
-        .map(|obj| obj.keys().cloned().collect())
+    granted.as_table().map(|obj| obj.keys().cloned().collect())
 }
 
 /// POST /v1/local/acp/tool/execute

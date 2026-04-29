@@ -33,7 +33,7 @@ pub struct SessionDigest {
 
 impl SessionDigest {
     /// Create a new session digest with collected metrics.
-    #[must_use] 
+    #[must_use]
     pub fn new(
         duration_secs: u64,
         message_count: usize,
@@ -57,7 +57,7 @@ impl SessionDigest {
     }
 
     /// Render digest as JSON string for storage in `raw_digest` field.
-    #[must_use] 
+    #[must_use]
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
@@ -107,7 +107,7 @@ pub struct SessionCapture {
 
 impl SessionCapture {
     /// Create a new session capture tracker.
-    #[must_use] 
+    #[must_use]
     pub fn new(
         session_id: String,
         agent_id: String,
@@ -144,7 +144,7 @@ impl SessionCapture {
     /// Capture session-end data and build a `PendingReviewRecord`.
     ///
     /// Returns the structured digest ready for submission to daemon.
-    #[must_use] 
+    #[must_use]
     pub fn capture_session_end(&self) -> SessionDigest {
         let duration_secs = self.start_time.elapsed().as_secs();
 
@@ -165,7 +165,7 @@ impl SessionCapture {
     /// - "research" → "research"
     ///
     /// Default is "unknown".
-    #[must_use] 
+    #[must_use]
     pub fn detect_task_kind(&self) -> String {
         let agent_lower = self.agent_id.to_lowercase();
 
@@ -202,10 +202,12 @@ impl SessionCapture {
         pending_id: Option<&str>,
     ) -> (bool, String) {
         let pending_id = pending_id.map_or_else(
-            || format!(
-                "pending_{}",
-                uuid::Uuid::new_v4().to_string().replace('-', "")
-            ),
+            || {
+                format!(
+                    "pending_{}",
+                    uuid::Uuid::new_v4().to_string().replace('-', "")
+                )
+            },
             ToString::to_string,
         );
         let task_kind = self.detect_task_kind();
@@ -260,13 +262,13 @@ impl SessionCapture {
     }
 
     /// Get the session ID.
-    #[must_use] 
+    #[must_use]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
     /// Get the creator ID.
-    #[must_use] 
+    #[must_use]
     pub fn creator_id(&self) -> &str {
         &self.creator_id
     }
@@ -351,7 +353,7 @@ pub fn save_capture_locally(
 /// Resolve the pending captures directory path.
 ///
 /// Returns `None` if nexus home cannot be determined.
-#[must_use] 
+#[must_use]
 pub fn pending_captures_dir() -> Option<PathBuf> {
     crate::config::nexus_home()
         .ok()

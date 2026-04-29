@@ -266,14 +266,8 @@ async fn concurrent_handler_requests_succeed() {
     assert_eq!(health, 200, "health endpoint returned {health}");
     assert_eq!(workspace, 200, "workspace endpoint returned {workspace}");
     assert_eq!(creators, 200, "creators endpoint returned {creators}");
-    assert_eq!(
-        manuscript, 200,
-        "manuscript endpoint returned {manuscript}"
-    );
-    assert_eq!(
-        references, 200,
-        "references endpoint returned {references}"
-    );
+    assert_eq!(manuscript, 200, "manuscript endpoint returned {manuscript}");
+    assert_eq!(references, 200, "references endpoint returned {references}");
 }
 
 // =============================================================================

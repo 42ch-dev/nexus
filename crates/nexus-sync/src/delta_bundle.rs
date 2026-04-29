@@ -103,7 +103,7 @@ pub struct BundleBuilder {
 
 impl BundleBuilder {
     /// Create a new bundle builder for a world/workspace context.
-    #[must_use] 
+    #[must_use]
     pub fn new(workspace_id: &str, world_id: &str, creator_id: &str) -> Self {
         Self {
             workspace_id: workspace_id.to_string(),
@@ -124,91 +124,91 @@ impl BundleBuilder {
     }
 
     /// Set the submitting creator ID (required for V1.0).
-    #[must_use] 
+    #[must_use]
     pub fn submitting_creator_id(mut self, id: &str) -> Self {
         self.submitting_creator_id = Some(id.to_string());
         self
     }
 
     /// Set the manuscript phase (optional but recommended).
-    #[must_use] 
+    #[must_use]
     pub const fn manuscript_phase(mut self, phase: ManuscriptPhase) -> Self {
         self.manuscript_phase = Some(phase);
         self
     }
 
     /// Set whether this execution requires manuscript output.
-    #[must_use] 
+    #[must_use]
     pub const fn output_manuscript(mut self, output: bool) -> Self {
         self.output_manuscript = Some(output);
         self
     }
 
     /// Set the bundle type.
-    #[must_use] 
+    #[must_use]
     pub const fn bundle_type(mut self, bundle_type: BundleType) -> Self {
         self.bundle_type = bundle_type;
         self
     }
 
     /// Associate a command with this bundle.
-    #[must_use] 
+    #[must_use]
     pub fn command(mut self, _command: &SyncCommandVariant) -> Self {
         self.command_id = Some(format!("cmd_{}", Uuid::new_v4().simple()));
         self
     }
 
     /// Set command ID explicitly.
-    #[must_use] 
+    #[must_use]
     pub fn command_id(mut self, id: &str) -> Self {
         self.command_id = Some(id.to_string());
         self
     }
 
     /// Set the idempotency key.
-    #[must_use] 
+    #[must_use]
     pub fn idempotency_key(mut self, key: &str) -> Self {
         self.idempotency_key = Some(key.to_string());
         self
     }
 
     /// Add a delta to the bundle.
-    #[must_use] 
+    #[must_use]
     pub fn add_delta(mut self, delta: LocalDelta) -> Self {
         self.deltas.push(delta);
         self
     }
 
     /// Add multiple deltas to the bundle.
-    #[must_use] 
+    #[must_use]
     pub fn add_deltas(mut self, deltas: Vec<LocalDelta>) -> Self {
         self.deltas.extend(deltas);
         self
     }
 
     /// Set the base world revision for optimistic concurrency.
-    #[must_use] 
+    #[must_use]
     pub const fn base_world_revision(mut self, revision: u64) -> Self {
         self.base_world_revision = Some(revision);
         self
     }
 
     /// Set the base timeline head ID.
-    #[must_use] 
+    #[must_use]
     pub fn base_timeline_head_id(mut self, id: &str) -> Self {
         self.base_timeline_head_id = Some(id.to_string());
         self
     }
 
     /// Set the base canon revision.
-    #[must_use] 
+    #[must_use]
     pub const fn base_canon_revision(mut self, revision: u64) -> Self {
         self.base_canon_revision = Some(revision);
         self
     }
 
     /// Set the last confirmed delta sequence.
-    #[must_use] 
+    #[must_use]
     pub const fn last_confirmed_delta_sequence(mut self, seq: u64) -> Self {
         self.last_confirmed_delta_sequence = Some(seq);
         self
@@ -366,7 +366,7 @@ impl BundleBuilder {
 }
 
 /// Create a `story_manifest` delta.
-#[must_use] 
+#[must_use]
 pub fn story_manifest_delta(
     summary_text: &str,
     story_manifest_id: &str,
@@ -389,7 +389,6 @@ pub fn story_manifest_delta(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     fn make_test_delta() -> LocalDelta {
         LocalDelta {

@@ -794,7 +794,8 @@ mod tests {
             "creator_id": "ctr_test",
             "force": true
         }"#;
-        let req: SyncPushRequest = serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
+        let req: SyncPushRequest =
+            serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
         assert_eq!(req.workspace_id, "wrk_test");
         assert_eq!(req.world_id, "wld_test");
         assert_eq!(req.creator_id, "ctr_test");
@@ -808,7 +809,8 @@ mod tests {
             "world_id": "wld_test",
             "creator_id": "ctr_test"
         }"#;
-        let req: SyncPushRequest = serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
+        let req: SyncPushRequest =
+            serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
         assert!(!req.force);
     }
 
@@ -819,7 +821,8 @@ mod tests {
             "world_id": "wld_x",
             "after_confirmed_delta_sequence": 4
         }"#;
-        let req: SyncPullRequest = serde_json::from_str(json).expect("SyncPullRequest should deserialize from valid JSON");
+        let req: SyncPullRequest =
+            serde_json::from_str(json).expect("SyncPullRequest should deserialize from valid JSON");
         assert_eq!(req.schema_version, 1);
         assert_eq!(req.world_id, "wld_x");
         assert_eq!(req.after_confirmed_delta_sequence, Some(4));
@@ -832,7 +835,8 @@ mod tests {
             "resolution": "auto_accept",
             "force": false
         }"#;
-        let req: SyncResolveRequest = serde_json::from_str(json).expect("SyncResolveRequest should deserialize from valid JSON");
+        let req: SyncResolveRequest = serde_json::from_str(json)
+            .expect("SyncResolveRequest should deserialize from valid JSON");
         assert_eq!(req.outbox_entry_id, "obe_abc123");
         assert_eq!(req.resolution, "auto_accept");
         assert!(!req.force);
@@ -894,7 +898,9 @@ mod tests {
             creator_id: "ctr_test".to_string(),
             force: false,
         };
-        let _ = push(State(state.clone()), Json(req)).await.expect("push should succeed in test");
+        let _ = push(State(state.clone()), Json(req))
+            .await
+            .expect("push should succeed in test");
 
         // Check status
         let result = status(State(state)).await;

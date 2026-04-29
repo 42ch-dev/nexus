@@ -39,19 +39,19 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     /// Create a new daemon client from config with default timeouts
-    #[must_use] 
+    #[must_use]
     pub fn from_config(config: &CliConfig) -> Self {
         Self::new(&config.daemon_url)
     }
 
     /// Create a new daemon client with a custom base URL and default timeouts
-    #[must_use] 
+    #[must_use]
     pub fn new(base_url: &str) -> Self {
         Self::with_timeouts(base_url, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
     }
 
     /// Create a new daemon client with custom timeouts
-    #[must_use] 
+    #[must_use]
     pub fn with_timeouts(
         base_url: &str,
         connect_timeout: Duration,
@@ -73,7 +73,7 @@ impl DaemonClient {
 
     /// Get the base URL for this daemon client.
     #[allow(dead_code)]
-    #[must_use] 
+    #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -89,7 +89,11 @@ impl DaemonClient {
     /// This function never returns an error; it absorbs all failures and returns `Ok(false)`.
     pub async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/v1/local/runtime/health", self.base_url);
-        self.http.get(&url).send().await.map_or_else(|_| Ok(false), |resp| Ok(resp.status().is_success()))
+        self.http
+            .get(&url)
+            .send()
+            .await
+            .map_or_else(|_| Ok(false), |resp| Ok(resp.status().is_success()))
     }
 
     /// Get runtime status from the daemon.

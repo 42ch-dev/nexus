@@ -52,7 +52,7 @@ impl Transport {
     /// 3. `--port` / `--host` CLI flags (HTTP)
     /// 4. `NEXUS_DAEMON_PORT` environment variable (HTTP fallback)
     /// 5. Default: HTTP on 127.0.0.1:8420
-    #[must_use] 
+    #[must_use]
     pub fn from_args(args: &DaemonArgs) -> Self {
         // Unix socket takes priority
         if let Some(ref path) = args.socket_path {
@@ -326,7 +326,10 @@ async fn main() -> anyhow::Result<()> {
 
             // Cancel all active engine sessions.
             if let Some(engine) = state_for_shutdown.engine() {
-                match engine.list_active(nexus_orchestration::engine::SessionFilter::default()).await {
+                match engine
+                    .list_active(nexus_orchestration::engine::SessionFilter::default())
+                    .await
+                {
                     Ok(sessions) => {
                         let count = sessions.len();
                         for s in sessions {

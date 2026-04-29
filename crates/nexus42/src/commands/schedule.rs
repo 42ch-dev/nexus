@@ -8,7 +8,12 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::{Parser, Subcommand};
-use nexus_contracts::local::schedule::http::{ScheduleConcurrencyRequest, AddScheduleRequest, AddScheduleResponse, EditCoreContextRequest, EditCoreContextResponse, DeleteScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, InspectScheduleResponse, CoreContextResponse, CoreContextHistoryResponse, SignalScheduleRequest, SignalScheduleResponse};
+use nexus_contracts::local::schedule::http::{
+    AddScheduleRequest, AddScheduleResponse, CoreContextHistoryResponse, CoreContextResponse,
+    DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
+    InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
+    SignalScheduleRequest, SignalScheduleResponse,
+};
 
 // Base path for all schedule endpoints
 const SCHEDULE_BASE: &str = "/v1/local/orchestration/schedules";
@@ -296,9 +301,7 @@ async fn add_schedule(
         chrono::DateTime::parse_from_rfc3339(&dt_str)
             .map(|dt| dt.timestamp().to_string())
             .map_err(|e| {
-                crate::errors::CliError::Other(format!(
-                    "invalid ISO-8601 datetime '{dt_str}': {e}"
-                ))
+                crate::errors::CliError::Other(format!("invalid ISO-8601 datetime '{dt_str}': {e}"))
             })?
             .into()
     } else {
@@ -471,9 +474,10 @@ async fn get_context_history(client: &crate::api::DaemonClient, id: &str) -> Res
     );
     println!("{}", "-".repeat(60));
     for e in &resp.entries {
-        let content = e
-            .content
-            .as_ref().map_or_else(|| "(meta only)".to_string(), |c| serde_json::to_string(c).unwrap_or_else(|_| "-".to_string()));
+        let content = e.content.as_ref().map_or_else(
+            || "(meta only)".to_string(),
+            |c| serde_json::to_string(c).unwrap_or_else(|_| "-".to_string()),
+        );
         // Truncate content for readability
         let content_display = if content.len() > 40 {
             format!("{}...", &content[..40])
@@ -524,7 +528,10 @@ async fn timeline(client: &crate::api::DaemonClient, creator: &str, days: u32) -
 
     for s in &sorted {
         let ts = s.created_at.parse::<i64>().unwrap_or(0);
-        let dt = chrono::DateTime::from_timestamp(ts, 0).map_or_else(|| s.created_at.clone(), |dt| dt.format("%Y-%m-%d %H:%M").to_string());
+        let dt = chrono::DateTime::from_timestamp(ts, 0).map_or_else(
+            || s.created_at.clone(),
+            |dt| dt.format("%Y-%m-%d %H:%M").to_string(),
+        );
 
         let is_recent = ts >= cutoff.timestamp();
 
@@ -716,7 +723,8 @@ mod tests {
 
     #[test]
     fn inspect_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "inspect", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "inspect", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Inspect { id } => {
@@ -728,7 +736,8 @@ mod tests {
 
     #[test]
     fn context_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "context", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "context", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Context { id } => {
@@ -759,7 +768,8 @@ mod tests {
 
     #[test]
     fn start_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "start", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "start", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Start { id } => {
@@ -771,7 +781,8 @@ mod tests {
 
     #[test]
     fn pause_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "pause", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "pause", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Pause { id } => {
@@ -783,7 +794,8 @@ mod tests {
 
     #[test]
     fn resume_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "resume", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "resume", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Resume { id } => {
@@ -795,7 +807,8 @@ mod tests {
 
     #[test]
     fn cancel_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "cancel", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "cancel", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Cancel { id } => {
@@ -807,7 +820,8 @@ mod tests {
 
     #[test]
     fn advance_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "advance", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "advance", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Advance { id } => {
@@ -819,7 +833,8 @@ mod tests {
 
     #[test]
     fn remove_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "remove", "SCH001"]).expect("parse command");
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "remove", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Remove { id } => {

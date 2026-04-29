@@ -29,7 +29,7 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     /// Create a minimal config with required fields.
-    #[must_use] 
+    #[must_use]
     pub const fn new(session_id: String, acp_agent_id: String) -> Self {
         Self {
             session_id,
@@ -41,21 +41,21 @@ impl AgentConfig {
     }
 
     /// Builder-style role assignment.
-    #[must_use] 
+    #[must_use]
     pub fn with_role(mut self, role: String) -> Self {
         self.role = Some(role);
         self
     }
 
     /// Builder-style model override.
-    #[must_use] 
+    #[must_use]
     pub fn with_model(mut self, model: String) -> Self {
         self.model = Some(model);
         self
     }
 
     /// Builder-style system prompt (T8).
-    #[must_use] 
+    #[must_use]
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
         self
@@ -84,25 +84,25 @@ pub enum AgentSlotState {
 
 impl AgentSlotState {
     /// Check if the slot is in an error state.
-    #[must_use] 
+    #[must_use]
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error(_))
     }
 
     /// Check if the slot is ready to accept prompts.
-    #[must_use] 
+    #[must_use]
     pub const fn is_ready(&self) -> bool {
         matches!(self, Self::Ready)
     }
 
     /// Check if the slot is currently prompting.
-    #[must_use] 
+    #[must_use]
     pub const fn is_prompting(&self) -> bool {
         matches!(self, Self::Prompting)
     }
 
     /// Check if the slot is stopped or stopping.
-    #[must_use] 
+    #[must_use]
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Stopping | Self::Stopped)
     }
@@ -121,7 +121,7 @@ pub struct SlotHealth {
 
 impl SlotHealth {
     /// Create health info from a slot.
-    #[must_use] 
+    #[must_use]
     pub const fn new(state: AgentSlotState, uptime_ms: u64, last_error: Option<String>) -> Self {
         Self {
             state,
@@ -131,7 +131,7 @@ impl SlotHealth {
     }
 
     /// Check if the slot is healthy (Ready or Prompting).
-    #[must_use] 
+    #[must_use]
     pub const fn is_healthy(&self) -> bool {
         self.state.is_ready() || self.state.is_prompting()
     }
@@ -176,7 +176,7 @@ impl AgentSlot {
     ///
     /// The slot starts in `Initializing` state. Call `mark_ready()` after
     /// the agent subprocess is confirmed ready.
-    #[must_use] 
+    #[must_use]
     pub fn new(config: AgentConfig) -> Self {
         Self {
             config,
@@ -192,8 +192,10 @@ impl AgentSlot {
     /// Returns a clone of the state. For atomic operations, use
     /// `mark_*` methods.
     pub fn state(&self) -> AgentSlotState {
-        self.state
-            .lock().map_or_else(|_| AgentSlotState::Error("state lock poisoned".to_string()), |s| s.clone())
+        self.state.lock().map_or_else(
+            |_| AgentSlotState::Error("state lock poisoned".to_string()),
+            |s| s.clone(),
+        )
     }
 
     /// Get health info for this slot.
@@ -542,9 +544,9 @@ mod tests {
         assert!(slot.is_shutdown_requested());
     }
 
-#[test]
-fn mark_crashed_transitions_to_error() {
-    let slot = AgentSlot::new(test_config());
+    #[test]
+    fn mark_crashed_transitions_to_error() {
+        let slot = AgentSlot::new(test_config());
         slot.mark_crashed("segfault in agent subprocess");
         let state = slot.state();
         assert!(state.is_error());

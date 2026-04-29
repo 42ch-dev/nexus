@@ -195,7 +195,7 @@ pub struct OutboxEntrySummaryResponse {
 ///
 /// In non-interactive (no TTY) contexts, confirmation defaults to `false`
 /// unless `force` is set.
-#[must_use] 
+#[must_use]
 pub fn confirm_auto_reject(force: bool) -> bool {
     if force {
         return true;
@@ -245,24 +245,24 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             let mut default_id_fields: Vec<&'static str> = Vec::new();
 
             let workspace_id = workspace_id.unwrap_or_else(|| {
-                    default_id_fields.push("workspace_id");
-                    "local".to_string()
-                });
+                default_id_fields.push("workspace_id");
+                "local".to_string()
+            });
 
             let world_id = world_id.unwrap_or_else(|| {
-                    default_id_fields.push("world_id");
-                    "unknown".to_string()
-                });
+                default_id_fields.push("world_id");
+                "unknown".to_string()
+            });
 
             let creator_id = creator_id.unwrap_or_else(|| {
-                    config.active_creator_id.as_deref().map_or_else(
-                        || {
-                            default_id_fields.push("creator_id");
-                            "unknown".to_string()
-                        },
-                        ToString::to_string,
-                    )
-                });
+                config.active_creator_id.as_deref().map_or_else(
+                    || {
+                        default_id_fields.push("creator_id");
+                        "unknown".to_string()
+                    },
+                    ToString::to_string,
+                )
+            });
 
             if !default_id_fields.is_empty() {
                 eprintln!(
@@ -323,7 +323,7 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 return Err(crate::errors::CliError::DaemonNotRunning);
             }
 
-let world_id = world_id.unwrap_or_else(|| {
+            let world_id = world_id.unwrap_or_else(|| {
                 eprintln!(
                     "Warning: sync pull without --world-id uses placeholder \"unknown\". \
             Set --world-id for real platform sync (and ensure it matches workspace sync binding if set)."
@@ -452,9 +452,7 @@ let world_id = world_id.unwrap_or_else(|| {
             {
                 Ok(response) => {
                     if response.success {
-                        println!(
-                            "Resolved entry {outbox_entry_id} with strategy: {resolution}"
-                        );
+                        println!("Resolved entry {outbox_entry_id} with strategy: {resolution}");
                         if let Some(state) = &response.delivery_state {
                             println!("  New state: {state}");
                         }
@@ -466,9 +464,7 @@ let world_id = world_id.unwrap_or_else(|| {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Resolve request failed for entry {outbox_entry_id}: {e}"
-                    );
+                    eprintln!("Resolve request failed for entry {outbox_entry_id}: {e}");
                     return Err(e);
                 }
             }

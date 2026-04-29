@@ -106,7 +106,7 @@ pub struct WorkerAgentConfig {
 
 impl WorkerAgentConfig {
     /// Create a minimal config with required fields.
-    #[must_use] 
+    #[must_use]
     pub const fn new(session_id: String, acp_agent_id: String) -> Self {
         Self {
             session_id,
@@ -120,28 +120,28 @@ impl WorkerAgentConfig {
     }
 
     /// Builder-style role assignment.
-    #[must_use] 
+    #[must_use]
     pub fn with_role(mut self, role: String) -> Self {
         self.role = Some(role);
         self
     }
 
     /// Builder-style model override.
-    #[must_use] 
+    #[must_use]
     pub fn with_model(mut self, model: String) -> Self {
         self.model = Some(model);
         self
     }
 
     /// Builder-style ACP session ID for resume.
-    #[must_use] 
+    #[must_use]
     pub fn with_acp_session_id(mut self, acp_session_id: String) -> Self {
         self.acp_session_id = Some(acp_session_id);
         self
     }
 
     /// Builder-style tool policy override.
-    #[must_use] 
+    #[must_use]
     pub fn with_tool_policy(mut self, tool_policy: String) -> Self {
         self.tool_policy = Some(tool_policy);
         self
@@ -149,7 +149,7 @@ impl WorkerAgentConfig {
 
     /// Builder-style system prompt (T8).
     /// Daemon reads from preset's `system_prompt_file` and passes here.
-    #[must_use] 
+    #[must_use]
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
         self
@@ -159,7 +159,7 @@ impl WorkerAgentConfig {
     ///
     /// Format: `role:acp_agent_id[:model]` (matches WS-E §7.6).
     /// If `role` is absent, uses the `session_id` as the key prefix.
-    #[must_use] 
+    #[must_use]
     pub fn to_agent_ref_arg(&self) -> String {
         let role_key = self.role.as_ref().unwrap_or(&self.session_id);
         let mut parts = vec![role_key.clone(), self.acp_agent_id.clone()];
@@ -214,7 +214,7 @@ impl WorkerSpec {
     }
 
     /// Test helper — creates a spec for a shell script at the given path.
-    #[must_use] 
+    #[must_use]
     pub fn test_stub(path: &str) -> Self {
         Self::from_program("bash").with_arg(path)
     }
@@ -248,14 +248,14 @@ impl WorkerSpec {
     }
 
     /// Set the agents list for multi-agent workers (WS-E T4).
-    #[must_use] 
+    #[must_use]
     pub fn with_agents(mut self, agents: Vec<WorkerAgentConfig>) -> Self {
         self.agents = agents;
         self
     }
 
     /// Add a single agent config (builder-style, WS-E T4).
-    #[must_use] 
+    #[must_use]
     pub fn with_agent(mut self, agent: WorkerAgentConfig) -> Self {
         self.agents.push(agent);
         self
@@ -267,9 +267,12 @@ impl WorkerSpec {
     /// in the format `role:acp_agent_id[:model]` (WS-E §7.6).
     ///
     /// Returns an empty vector if `self.agents` is empty.
-    #[must_use] 
+    #[must_use]
     pub fn build_agent_ref_args(&self) -> Vec<String> {
-        self.agents.iter().map(WorkerAgentConfig::to_agent_ref_arg).collect()
+        self.agents
+            .iter()
+            .map(WorkerAgentConfig::to_agent_ref_arg)
+            .collect()
     }
 }
 
@@ -572,13 +575,13 @@ pub struct AgentSessionSummary {
 
 impl AgentSessionSummary {
     /// Check if this session is in a ready state.
-    #[must_use] 
+    #[must_use]
     pub fn is_ready(&self) -> bool {
         self.state == "ready"
     }
 
     /// Check if this session is in an error state.
-    #[must_use] 
+    #[must_use]
     pub fn is_error(&self) -> bool {
         self.state == "error"
     }
@@ -612,7 +615,7 @@ pub struct WorkerManager {
 
 impl WorkerManager {
     /// Create a new worker manager.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel(64);
         Self { event_tx }
@@ -777,7 +780,7 @@ impl WorkerManager {
     }
 
     /// Subscribe to worker lifecycle events.
-    #[must_use] 
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<WorkerEvent> {
         self.event_tx.subscribe()
     }

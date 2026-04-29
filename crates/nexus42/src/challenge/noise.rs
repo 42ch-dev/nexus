@@ -10,7 +10,7 @@ const NOISE_SYMBOLS: &[char] = &[']', '^', '*', '|', '-', '~', '/', '['];
 ///
 /// Returns a new string with all 8 noise characters removed.
 /// This is the first step in the challenge-solving pipeline.
-#[must_use] 
+#[must_use]
 pub fn strip_noise(text: &str) -> String {
     text.chars()
         .filter(|c| !NOISE_SYMBOLS.contains(c))
@@ -37,10 +37,7 @@ mod tests {
         );
         // None of the noise symbols should remain
         for sym in NOISE_SYMBOLS {
-            assert!(
-                !result.contains(*sym),
-                "noise symbol '{sym}' still present"
-            );
+            assert!(!result.contains(*sym), "noise symbol '{sym}' still present");
         }
     }
 

@@ -62,7 +62,10 @@ fn show(config: &CliConfig) {
         println!("Failure count: {}", snapshot.failure_count);
         if let Some(hc) = &snapshot.last_health_check {
             // Parse ISO 8601 back to a displayable time; fall back to raw string on parse error.
-            let time_str = chrono::DateTime::parse_from_rfc3339(&hc.checked_at).map_or_else(|_| hc.checked_at.clone(), |dt| dt.format("%H:%M:%S").to_string());
+            let time_str = chrono::DateTime::parse_from_rfc3339(&hc.checked_at).map_or_else(
+                |_| hc.checked_at.clone(),
+                |dt| dt.format("%H:%M:%S").to_string(),
+            );
             println!(
                 "Last health check: {} ({})",
                 time_str,
@@ -104,9 +107,7 @@ fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
 
     // Warn about platform requirements
     if new_mode.allows_platform() {
-        println!(
-            "Note: {new_mode} mode requires platform connectivity for some operations."
-        );
+        println!("Note: {new_mode} mode requires platform connectivity for some operations.");
     }
 
     // Persist
@@ -221,7 +222,10 @@ mod tests {
             writeln!(w, "State: {}", snapshot.state.display_label())?;
             writeln!(w, "Failure count: {}", snapshot.failure_count)?;
             if let Some(hc) = &snapshot.last_health_check {
-                let time_str = chrono::DateTime::parse_from_rfc3339(&hc.checked_at).map_or_else(|_| hc.checked_at.clone(), |dt| dt.format("%H:%M:%S").to_string());
+                let time_str = chrono::DateTime::parse_from_rfc3339(&hc.checked_at).map_or_else(
+                    |_| hc.checked_at.clone(),
+                    |dt| dt.format("%H:%M:%S").to_string(),
+                );
                 writeln!(
                     w,
                     "Last health check: {} ({})",

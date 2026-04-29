@@ -245,9 +245,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 creator_id.to_string(),
                 workspace_slug.clone(),
             )?;
-            println!(
-                "✓ Workspace {workspace_slug:?} created for creator {creator_id}."
-            );
+            println!("✓ Workspace {workspace_slug:?} created for creator {creator_id}.");
             println!("  Creative root: {}", creative_root.display());
             println!("  state.db: {}", db_path.display());
             Ok(())
@@ -267,9 +265,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             cli.active_workspace_slug_by_creator
                 .insert(creator_id.to_string(), workspace_slug.clone());
             cli.save()?;
-            println!(
-                "✓ Active workspace slug for {creator_id} set to: {workspace_slug}"
-            );
+            println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
             Ok(())
         }
     }
@@ -442,9 +438,7 @@ async fn submit_with_retry(
 
     for attempt in 1..=max_attempts {
         if attempt > 1 {
-            println!(
-                "  Retrying verification (attempt {attempt}/{max_attempts})..."
-            );
+            println!("  Retrying verification (attempt {attempt}/{max_attempts})...");
         }
 
         let response = match client
@@ -468,9 +462,7 @@ async fn submit_with_retry(
                 let remaining = response.remaining_attempts.unwrap_or(0);
                 last_response = Some(response);
                 if attempt < max_attempts {
-                    eprintln!(
-                        "  Wrong answer. {remaining} attempts remaining. Retrying..."
-                    );
+                    eprintln!("  Wrong answer. {remaining} attempts remaining. Retrying...");
                 }
             }
             VerifyStatus::Expired | VerifyStatus::Locked => {

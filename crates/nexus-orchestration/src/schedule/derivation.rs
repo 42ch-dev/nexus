@@ -53,7 +53,7 @@ pub struct CoreContextManager {
 
 impl CoreContextManager {
     /// Create a new manager backed by the given shared `SQLite` pool.
-    #[must_use] 
+    #[must_use]
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
             pool,
@@ -578,7 +578,8 @@ impl CoreContextVersionRow {
         let content: CoreContextPayload =
             serde_json::from_slice(&self.content).map_err(CoreContextError::Serde)?;
 
-        let derivation = reconstruct_derivation(&self.derivation_kind, self.derivation_detail.as_deref())?;
+        let derivation =
+            reconstruct_derivation(&self.derivation_kind, self.derivation_detail.as_deref())?;
 
         let created_by = match self.created_by_kind.as_str() {
             "user" => CoreContextAuthor::User {
@@ -604,53 +605,49 @@ fn reconstruct_derivation(
     detail: Option<&[u8]>,
 ) -> Result<DerivationStep, CoreContextError> {
     match kind {
-        "seed" => {
-            detail.map_or_else(
-                || Ok(DerivationStep::Seed { raw: String::new() }),
-                |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
-            )
-        }
-        "user_edit" => {
-            detail.map_or_else(
-                || Ok(DerivationStep::UserEdit {
+        "seed" => detail.map_or_else(
+            || Ok(DerivationStep::Seed { raw: String::new() }),
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
+        "user_edit" => detail.map_or_else(
+            || {
+                Ok(DerivationStep::UserEdit {
                     op: EditOp::Append {
                         body: String::new(),
                     },
                     source_user: None,
-                }),
-                |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
-            )
-        }
-        "preset_hook" => {
-            detail.map_or_else(
-                || Ok(DerivationStep::PresetHook {
+                })
+            },
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
+        "preset_hook" => detail.map_or_else(
+            || {
+                Ok(DerivationStep::PresetHook {
                     state_id: String::new(),
                     hook_name: String::new(),
-                }),
-                |bytes| {
-                    let json: serde_json::Value =
-                        serde_json::from_slice(bytes).map_err(CoreContextError::Serde)?;
-                    Ok(DerivationStep::PresetHook {
-                        state_id: json["state_id"].as_str().unwrap_or("").to_string(),
-                        hook_name: json["hook_name"].as_str().unwrap_or("").to_string(),
-                    })
-                },
-            )
-        }
-        "preset_seed_expansion" => {
-            detail.map_or_else(
-                || Ok(DerivationStep::PresetSeedExpansion {
+                })
+            },
+            |bytes| {
+                let json: serde_json::Value =
+                    serde_json::from_slice(bytes).map_err(CoreContextError::Serde)?;
+                Ok(DerivationStep::PresetHook {
+                    state_id: json["state_id"].as_str().unwrap_or("").to_string(),
+                    hook_name: json["hook_name"].as_str().unwrap_or("").to_string(),
+                })
+            },
+        ),
+        "preset_seed_expansion" => detail.map_or_else(
+            || {
+                Ok(DerivationStep::PresetSeedExpansion {
                     capability: String::new(),
-                }),
-                |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
-            )
-        }
-        "llm_summarize" => {
-            detail.map_or_else(
-                || Ok(DerivationStep::llm_summarize(String::new(), [0u8; 32])),
-                |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
-            )
-        }
+                })
+            },
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
+        "llm_summarize" => detail.map_or_else(
+            || Ok(DerivationStep::llm_summarize(String::new(), [0u8; 32])),
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
         other => Err(CoreContextError::Serde(serde_json::Error::custom(format!(
             "unknown derivation_kind: {other}"
         )))),

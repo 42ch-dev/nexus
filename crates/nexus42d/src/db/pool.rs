@@ -77,7 +77,7 @@ impl PoolConfig {
     ///
     /// See the [struct-level documentation](PoolConfig) for the variable names
     /// and fallback behaviour.
-    #[must_use] 
+    #[must_use]
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
 
@@ -97,14 +97,14 @@ impl PoolConfig {
     }
 
     /// Set the pool wait timeout.
-    #[must_use] 
+    #[must_use]
     pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Set the maximum number of connections.
-    #[must_use] 
+    #[must_use]
     pub const fn with_max_connections(mut self, max_connections: u32) -> Self {
         self.max_connections = max_connections;
         self
@@ -174,7 +174,7 @@ impl DbPool {
     }
 
     /// Get a reference to the underlying sqlx pool.
-    #[must_use] 
+    #[must_use]
     pub const fn pool(&self) -> &sqlx::SqlitePool {
         &self.pool
     }
@@ -182,7 +182,7 @@ impl DbPool {
     /// Returns pool status information.
     ///
     /// Provides observability for database connection pool metrics.
-    #[must_use] 
+    #[must_use]
     pub fn status(&self) -> PoolStatus {
         PoolStatus {
             max_size: self.max_connections as usize,
@@ -209,9 +209,15 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
 
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open_pool should succeed");
-        nexus_local_db::run_migrations(&pool).await.expect("run_migrations should succeed");
-        nexus_local_db::seed_versions(&pool).await.expect("seed_versions should succeed");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open_pool should succeed");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run_migrations should succeed");
+        nexus_local_db::seed_versions(&pool)
+            .await
+            .expect("seed_versions should succeed");
 
         let db_pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
             .await

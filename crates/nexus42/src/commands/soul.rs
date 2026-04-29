@@ -169,9 +169,7 @@ fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let memory =
         nexus_domain::personality_sync::push_personality_to_memory(&home, creator_id, &soul)?;
 
-    println!(
-        "Personality pushed to long-term memory for creator '{creator_id}'."
-    );
+    println!("Personality pushed to long-term memory for creator '{creator_id}'.");
     println!("  Memory ID: {}", memory.frontmatter.memory_id);
     println!("  Kind: {}", memory.frontmatter.memory_kind);
     if let Some(path) = &memory.source_path {

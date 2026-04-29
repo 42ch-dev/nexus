@@ -149,9 +149,7 @@ impl WorldMembership {
 
     /// Get `can_sync_kb` permission.
     pub fn can_sync_kb(&self) -> bool {
-        self.permissions
-            .as_ref()
-            .is_some_and(|p| p.can_sync_kb)
+        self.permissions.as_ref().is_some_and(|p| p.can_sync_kb)
     }
 }
 
@@ -246,10 +244,12 @@ mod enum_alignment_tests {
 
     #[test]
     fn membership_role_matches_spec() {
-        let roles = [MembershipRole::Owner,
+        let roles = [
+            MembershipRole::Owner,
             MembershipRole::Maintainer,
             MembershipRole::Collaborator,
-            MembershipRole::OfficialCreator];
+            MembershipRole::OfficialCreator,
+        ];
         assert_eq!(roles.len(), 4);
     }
 

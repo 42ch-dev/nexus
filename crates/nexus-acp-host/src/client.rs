@@ -870,8 +870,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         {
                             let mut guard = connection.write().await;
                             if let Some(conn) = guard.as_mut() {
-                                conn.sessions
-                                    .insert(session_id_str.clone(), session_result);
+                                conn.sessions.insert(session_id_str.clone(), session_result);
                             }
                         }
 
@@ -921,11 +920,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                 .execute(move || {
                     let connection = connection.clone();
 
-                    Box::pin(Self::run_prompt(
-                        connection,
-                        session_id_str,
-                        prompt_text,
-                    ))
+                    Box::pin(Self::run_prompt(connection, session_id_str, prompt_text))
                 })
                 .await
                 .and_then(|r| r)
@@ -1375,10 +1370,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_new_creates_bridge() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         assert_eq!(adapter.agent_id(), "test-agent");
         assert_eq!(adapter.agent_path(), Path::new("/usr/bin/test-agent"));
@@ -1389,10 +1381,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_initialize_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         let request = NexusInitializeRequest::new();
 
@@ -1402,10 +1391,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_create_session_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         let request = NexusNewSessionRequest::new("/tmp/workspace");
         let result = adapter.create_session(request).await;
@@ -1414,10 +1400,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_prompt_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         let request = NexusPromptRequest::new(NexusSessionId::new("nonexistent"), vec![]);
         let result = adapter.prompt(request).await;
@@ -1426,10 +1409,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_cancel_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         let result = adapter.cancel(NexusSessionId::new("nonexistent")).await;
         assert!(result.is_err());
@@ -1437,10 +1417,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_prompt_nonexistent_session_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         // Manually verify the error path when connection exists but session doesn't.
         // We can't easily create a real ConnectionTo without a transport,
@@ -1464,10 +1441,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_list_sessions_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         let request = NexusListSessionsRequest::new();
         let result = adapter.list_sessions(request).await;
@@ -1687,10 +1661,7 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_set_config_option_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new(
-            "test-agent",
-            PathBuf::from("/usr/bin/test-agent"),
-        );
+        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
 
         let request = NexusSetConfigOptionRequest::new(
             NexusSessionId::new("nonexistent"),

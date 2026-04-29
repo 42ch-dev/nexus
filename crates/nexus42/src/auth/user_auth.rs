@@ -60,7 +60,9 @@ pub async fn login(config: &CliConfig) -> Result<()> {
             Ok(token_response) => {
                 // Success — compute expires_at and store in AuthStore
                 let expires_at = chrono::Utc::now()
-                    + chrono::Duration::seconds(i64::try_from(token_response.expires_in).unwrap_or(0));
+                    + chrono::Duration::seconds(
+                        i64::try_from(token_response.expires_in).unwrap_or(0),
+                    );
 
                 // Extract user_id from JWT claims (decode without verification
                 // — the token came from the platform over HTTPS).
@@ -143,7 +145,8 @@ pub fn login_with_token(
     user_id: String,
     expires_in_secs: u64,
 ) -> Result<()> {
-    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(i64::try_from(expires_in_secs).unwrap_or(0));
+    let expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(i64::try_from(expires_in_secs).unwrap_or(0));
 
     let user_token = UserTokenState {
         access_token,
@@ -329,14 +332,15 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
         serde_json::from_value(data)
             .map_err(|e| CliError::Other(format!("Failed to parse token response: {e}")))?;
 
-    let expires_at =
-        chrono::Utc::now() + chrono::Duration::seconds(i64::try_from(token_response.expires_in).unwrap_or(0));
+    let expires_at = chrono::Utc::now()
+        + chrono::Duration::seconds(i64::try_from(token_response.expires_in).unwrap_or(0));
 
     // Get the existing user_id from the current store
     let store = AuthStore::load()?;
     let user_id = store
         .user_token
-        .as_ref().map_or_else(|| "unknown".to_string(), |t| t.user_id.clone());
+        .as_ref()
+        .map_or_else(|| "unknown".to_string(), |t| t.user_id.clone());
 
     let new_token = UserTokenState {
         access_token: token_response.access_token,

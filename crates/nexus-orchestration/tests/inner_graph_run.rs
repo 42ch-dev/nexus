@@ -90,7 +90,10 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
             }
         }
 
-        assert!(steps <= 32, "did not reach terminal state after {steps} steps");
+        assert!(
+            steps <= 32,
+            "did not reach terminal state after {steps} steps"
+        );
     }
 
     // Verify completion.

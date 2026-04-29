@@ -119,7 +119,7 @@ impl Task for PresetCapabilityTask {
 ///
 /// Each node is a [`PresetCapabilityTask`] wrapping the corresponding
 /// built-in capability. The terminal `End` node returns `NextAction::End`.
-#[must_use] 
+#[must_use]
 pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
     let sync_pull = PresetCapabilityTask::new("sync.pull", "sync_pull", registry.clone());
     let outbox_flush = PresetCapabilityTask::new("outbox.flush", "outbox_flush", registry.clone());

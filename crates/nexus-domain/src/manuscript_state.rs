@@ -118,7 +118,10 @@ impl ManuscriptState {
     /// Validate provisional cleanup before finalize/published gate.
     /// Per consistency-rules-v1.md §3.3: provisional records must be promoted
     /// or cleaned before entering finalize/published.
-    pub const fn validate_pre_gate_cleanup(&self, provisional_count: usize) -> Result<(), DomainError> {
+    pub const fn validate_pre_gate_cleanup(
+        &self,
+        provisional_count: usize,
+    ) -> Result<(), DomainError> {
         match &self.manuscript_phase {
             ManuscriptPhase::Finalize | ManuscriptPhase::Published if provisional_count > 0 => {
                 return Err(DomainError::ProvisionalRecordsExist {

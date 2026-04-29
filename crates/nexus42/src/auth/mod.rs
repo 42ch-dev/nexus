@@ -109,7 +109,7 @@ impl AuthStore {
     }
 
     /// Check if a specific creator is authenticated
-    #[must_use] 
+    #[must_use]
     pub fn is_creator_authenticated(&self, creator_id: &str) -> bool {
         self.creators
             .as_ref()
@@ -217,7 +217,7 @@ impl AuthStore {
     /// AND the token has not yet expired according to its `expires_at` timestamp.
     /// If the `expires_at` field cannot be parsed, the token is conservatively
     /// treated as already expired (returns `false`).
-    #[must_use] 
+    #[must_use]
     pub fn is_user_authenticated(&self) -> bool {
         self.user_token.as_ref().is_some_and(|t| {
             if t.access_token.is_empty() {

@@ -106,9 +106,7 @@ mod tests {
 
     #[test]
     fn parse_go_response() {
-        assert!(
-            parse_judge_response("Yes, proceed with the next step").0
-        );
+        assert!(parse_judge_response("Yes, proceed with the next step").0);
         assert!(parse_judge_response("Go ahead!").0);
         assert!(parse_judge_response("APPROVE").0);
     }

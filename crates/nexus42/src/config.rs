@@ -155,13 +155,13 @@ impl CliConfig {
     }
 
     /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
-    #[must_use] 
+    #[must_use]
     pub const fn runtime_mode(&self) -> DomainRuntimeMode {
         self.runtime_mode
     }
 
     /// Persisted degradation guard snapshot, if available.
-    #[must_use] 
+    #[must_use]
     pub const fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
         self.degradation_snapshot.as_ref()
     }
@@ -204,7 +204,7 @@ impl CliConfig {
     }
 
     /// Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
-    #[must_use] 
+    #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> &str {
         self.active_workspace_slug_by_creator
             .get(creator_id)
@@ -441,8 +441,14 @@ mod tests {
             active_creator_id: Some("ctr_test".to_string()),
             ..Default::default()
         };
-        assert_eq!(c.get("workspace_path").expect("get workspace_path"), "/test/path");
-        assert_eq!(c.get("active_creator_id").expect("get active_creator_id"), "ctr_test");
+        assert_eq!(
+            c.get("workspace_path").expect("get workspace_path"),
+            "/test/path"
+        );
+        assert_eq!(
+            c.get("active_creator_id").expect("get active_creator_id"),
+            "ctr_test"
+        );
     }
 
     #[test]
@@ -485,14 +491,17 @@ mod tests {
         c.set("workspace_path", "").expect("set workspace_path");
         assert!(c.workspace_path.is_none());
         c.active_creator_id = Some("ctr_old".to_string());
-        c.set("active_creator_id", "").expect("set active_creator_id");
+        c.set("active_creator_id", "")
+            .expect("set active_creator_id");
         assert!(c.active_creator_id.is_none());
     }
 
     #[test]
     fn set_invalid_key_returns_error() {
         let mut c = CliConfig::default();
-        let err = c.set("invalid_key", "value").expect_err("set invalid_key should fail");
+        let err = c
+            .set("invalid_key", "value")
+            .expect_err("set invalid_key should fail");
         assert!(err.to_string().contains("Invalid config key"));
     }
 
@@ -505,7 +514,8 @@ mod tests {
         c.unset("workspace_path").expect("unset workspace_path");
         assert!(c.workspace_path.is_none());
         c.active_creator_id = Some("ctr_test".to_string());
-        c.unset("active_creator_id").expect("unset active_creator_id");
+        c.unset("active_creator_id")
+            .expect("unset active_creator_id");
         assert!(c.active_creator_id.is_none());
     }
 
@@ -1055,7 +1065,7 @@ pub struct RoleOverride {
 #[allow(dead_code)]
 impl RoleOverride {
     /// Create a new override with both agent and model.
-    #[must_use] 
+    #[must_use]
     pub const fn new(agent: Option<String>, model: Option<String>) -> Self {
         Self { agent, model }
     }
@@ -1135,7 +1145,7 @@ impl UserAgentsConfig {
     /// Look up a role override for a given strategy.
     ///
     /// Returns `None` if the strategy or role is not configured.
-    #[must_use] 
+    #[must_use]
     pub fn get_role_override(&self, strategy_id: &str, role_id: &str) -> Option<&RoleOverride> {
         self.strategies
             .get(strategy_id)
@@ -1146,7 +1156,7 @@ impl UserAgentsConfig {
     ///
     /// Checks the specified strategy first, then falls back to a
     /// `"default"` strategy if it exists.
-    #[must_use] 
+    #[must_use]
     pub fn resolve_role(&self, strategy_id: &str, role_id: &str) -> Option<&RoleOverride> {
         self.get_role_override(strategy_id, role_id)
             .or_else(|| self.get_role_override("default", role_id))
@@ -1178,14 +1188,10 @@ pub fn parse_agent_ref(ref_str: &str) -> anyhow::Result<(String, String, Option<
     let acp_agent_id = segments[1];
 
     if role_id.is_empty() {
-        anyhow::bail!(
-            "invalid --agent-ref '{ref_str}': role ID must not be empty"
-        );
+        anyhow::bail!("invalid --agent-ref '{ref_str}': role ID must not be empty");
     }
     if acp_agent_id.is_empty() {
-        anyhow::bail!(
-            "invalid --agent-ref '{ref_str}': agent ID must not be empty"
-        );
+        anyhow::bail!("invalid --agent-ref '{ref_str}': agent ID must not be empty");
     }
 
     // Third segment (model) is optional.
@@ -1308,7 +1314,7 @@ pub fn auth_store_path() -> anyhow::Result<PathBuf> {
 }
 
 /// Check if the current directory (or any parent) contains a workspace
-#[must_use] 
+#[must_use]
 pub fn find_workspace_root() -> Option<PathBuf> {
     let mut current = std::env::current_dir().ok()?;
     loop {
@@ -1323,13 +1329,13 @@ pub fn find_workspace_root() -> Option<PathBuf> {
 }
 
 /// Get the workspace directory path for a given root
-#[must_use] 
+#[must_use]
 pub fn workspace_nexus_dir(workspace_root: &Path) -> PathBuf {
     workspace_root.join(NEXUS_DIR)
 }
 
 /// Get workspace config file path
-#[must_use] 
+#[must_use]
 pub fn workspace_config_path(workspace_root: &Path) -> PathBuf {
     workspace_nexus_dir(workspace_root).join("workspace.json")
 }

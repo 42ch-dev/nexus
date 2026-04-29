@@ -51,7 +51,7 @@ impl std::fmt::Debug for ActionContext {
 
 impl ActionContext {
     /// Create a new action context.
-    #[must_use] 
+    #[must_use]
     pub fn new(
         lifecycle: Arc<StatigLifecycle>,
         subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
@@ -69,7 +69,7 @@ impl ActionContext {
     }
 
     /// Create an action context for testing with mock subsystems.
-    #[must_use] 
+    #[must_use]
     pub fn new_for_test(lifecycle: Arc<StatigLifecycle>) -> Self {
         let mocks = super::subsystems::MockAllSubsystems::all_succeed();
         Self::new(

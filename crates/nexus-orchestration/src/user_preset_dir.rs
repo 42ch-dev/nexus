@@ -140,12 +140,12 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
 }
 
 /// Load a single user preset from a bundle directory.
- ///
- /// Reads `preset.yaml`, validates it, and returns a [`UserPresetEntry`].
- ///
- /// # Errors
- /// Returns [`UserPresetWarning`] if the preset directory is missing, YAML parsing fails, or validation fails.
- pub fn load_user_preset_from_dir(
+///
+/// Reads `preset.yaml`, validates it, and returns a [`UserPresetEntry`].
+///
+/// # Errors
+/// Returns [`UserPresetWarning`] if the preset directory is missing, YAML parsing fails, or validation fails.
+pub fn load_user_preset_from_dir(
     bundle_dir: &Path,
     dir_name: &str,
     caps: &CapabilityRegistry,
@@ -205,13 +205,13 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
 }
 
 /// Return the user preset IDs from a scan result.
-#[must_use] 
+#[must_use]
 pub fn list_user_preset_ids(result: &UserPresetScanResult) -> Vec<String> {
     result.presets.iter().map(|e| e.id.clone()).collect()
 }
 
 /// Find a user preset entry by ID.
-#[must_use] 
+#[must_use]
 pub fn find_user_preset<'a>(
     result: &'a UserPresetScanResult,
     id: &str,
@@ -226,7 +226,7 @@ pub fn find_user_preset<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use std::fs;
 
     /// Minimal valid YAML for testing.

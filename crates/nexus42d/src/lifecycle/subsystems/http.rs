@@ -34,7 +34,7 @@ pub struct HttpSubsystem {
 
 impl HttpSubsystem {
     /// Create a new HTTP subsystem with the given port.
-    #[must_use] 
+    #[must_use]
     pub fn new(port: u16) -> Self {
         Self {
             port,

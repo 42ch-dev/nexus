@@ -115,15 +115,13 @@ async fn list_identities() -> Result<()> {
     println!();
 
     for identity in &identities {
-        let active_mark = active_id
-            .as_deref()
-            .map_or("", |a| {
-                if a == identity.creator_id {
-                    " (active)"
-                } else {
-                    ""
-                }
-            });
+        let active_mark = active_id.as_deref().map_or("", |a| {
+            if a == identity.creator_id {
+                " (active)"
+            } else {
+                ""
+            }
+        });
 
         let linked_mark = if identity.platform_linked {
             format!(
@@ -357,14 +355,14 @@ pub struct ResolvedIdentity {
 impl ResolvedIdentity {
     /// Check if this is an ephemeral (anonymous) identity.
     #[allow(dead_code)]
-    #[must_use] 
+    #[must_use]
     pub const fn is_ephemeral(&self) -> bool {
         self.is_anonymous
     }
 
     /// Warning message for anonymous identities.
     #[allow(dead_code)]
-    #[must_use] 
+    #[must_use]
     pub const fn ephemeral_warning(&self) -> Option<&'static str> {
         if self.is_anonymous {
             Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 identity create --persistent` for a saved identity.")
@@ -485,7 +483,9 @@ mod tests {
         let name = Some("   ".to_string());
         assert!(name
             .as_deref()
-            .map(str::trim).as_ref().is_none_or(|n| n.is_empty()));
+            .map(str::trim)
+            .as_ref()
+            .is_none_or(|n| n.is_empty()));
     }
 
     #[test]

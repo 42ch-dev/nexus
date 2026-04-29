@@ -141,25 +141,25 @@ impl PartialApplyResult {
     }
 
     /// Whether all deltas were applied (not a partial result).
-    #[must_use] 
+    #[must_use]
     pub const fn is_full_success(&self) -> bool {
         self.failed_count == 0
     }
 
     /// Whether all deltas failed (total failure).
-    #[must_use] 
+    #[must_use]
     pub const fn is_total_failure(&self) -> bool {
         self.succeeded_count == 0 && self.failed_count > 0
     }
 
     /// Get indices of failed deltas for retry.
-    #[must_use] 
+    #[must_use]
     pub fn failed_delta_indices(&self) -> Vec<usize> {
         self.failed_deltas.iter().map(|d| d.delta_index).collect()
     }
 
     /// Get a summary string for logging.
-    #[must_use] 
+    #[must_use]
     pub fn summary(&self) -> String {
         let mut lines = vec![format!(
             "Partial apply: {}/{} deltas succeeded",
@@ -208,7 +208,7 @@ pub struct PartialApplyState {
 
 impl PartialApplyState {
     /// Create a new partial apply state record.
-    #[must_use] 
+    #[must_use]
     pub fn new(bundle_id: &str, world_id: &str, result: PartialApplyResult) -> Self {
         Self {
             bundle_id: bundle_id.to_string(),
