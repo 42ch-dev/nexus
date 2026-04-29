@@ -218,16 +218,16 @@ function generateRustEnumFile(schema: LoadedSchema, outputDir: string): void {
     return `${docComment}    #[serde(rename = "${v}")]\n    ${pascal},`;
   });
 
-  const content = `//! ${backtickDocIdentifiers(schema.schemaContent.title || schema.typeName)}
+  const content = `//! ${backtickDocIdentifiers(String(schema.schemaContent.title || schema.typeName))}
 //!
-//! ${backtickDocIdentifiers(schema.schemaContent.description || 'Generated from JSON Schema')}
+//! ${backtickDocIdentifiers(String(schema.schemaContent.description || 'Generated from JSON Schema'))}
 //!
 //! \`@schema_version\` ${schema.schemaVersion}
 //! \`@source\` ${schema.fileName}
 
 use serde::{Deserialize, Serialize};
 
-/// ${backtickDocIdentifiers(schema.schemaContent.description || schema.typeName)}
+/// ${backtickDocIdentifiers(String(schema.schemaContent.description || schema.typeName))}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ${schema.typeName} {
@@ -289,9 +289,9 @@ function generateRustTypeFile(
   }
 
   // Build file content
-  let content = `//! ${backtickDocIdentifiers(schema.schemaContent.title || schema.typeName)}
+  let content = `//! ${backtickDocIdentifiers(String(schema.schemaContent.title || schema.typeName))}
 //!
-//! ${backtickDocIdentifiers(schema.schemaContent.description || 'Generated from JSON Schema')}
+//! ${backtickDocIdentifiers(String(schema.schemaContent.description || 'Generated from JSON Schema'))}
 //!
 //! \`@schema_version\` ${schema.schemaVersion}
 //! \`@source\` ${schema.fileName}
