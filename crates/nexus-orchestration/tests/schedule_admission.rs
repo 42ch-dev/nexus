@@ -3,7 +3,7 @@
 //! Admission rules per spec §5.1:
 //! - Serial: blocks if ANY running schedule exists for the creator
 //! - ParallelWith(ids): admits only if ALL listed IDs are in the running set
-//! - ParallelAny: always admits (ACP serialization at dispatch site, not here)
+//! - `ParallelAny`: always admits (ACP serialization at dispatch site, not here)
 //! - Dependencies: `depends_on` must all be in Completed/Cancelled status
 
 use std::sync::Arc;
@@ -54,7 +54,7 @@ fn parallel_with_admits_when_all_running_are_whitelisted() {
     let pending = sched(
         "01A",
         ScheduleConcurrency::ParallelWith(ParallelWithIds {
-            schedule_ids: vec![running_id.clone()],
+            schedule_ids: vec![running_id],
         }),
         vec![],
     );
@@ -175,7 +175,7 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
     );
 }
 
-/// Helper: create a [`ScheduleSupervisor`] backed by a fresh temp SQLite DB
+/// Helper: create a [`ScheduleSupervisor`] backed by a fresh temp `SQLite` DB
 /// with the WS7 migration applied.
 async fn test_supervisor_with_inmemory_db() -> Arc<ScheduleSupervisor> {
     let dir = tempfile::tempdir().unwrap();

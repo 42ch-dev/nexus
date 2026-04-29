@@ -67,7 +67,7 @@ pub struct ExploreLocalResponse {
     pub error: Option<String>,
 }
 
-fn is_json_output(output_format: &str) -> bool {
+const fn is_json_output(output_format: &str) -> bool {
     output_format.eq_ignore_ascii_case("json")
 }
 
@@ -88,6 +88,16 @@ fn print_feed_text(feed: &ExploreFeedResponse) -> Result<()> {
 }
 
 /// Run explore subcommands
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Platform connectivity is required but unavailable
+/// - Daemon is not running
+/// - Explore API calls fail
+///
+/// Note: This function is 113 lines; splitting would break the coherent command dispatch flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: ExploreCommand, config: &CliConfig, output_format: &str) -> Result<()> {
     runtime_guard::require_platform(&config.runtime_mode(), "explore")?;
     let client = DaemonClient::from_config(config);
@@ -212,6 +222,7 @@ pub async fn run(cmd: ExploreCommand, config: &CliConfig, output_format: &str) -
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

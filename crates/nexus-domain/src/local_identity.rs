@@ -2,9 +2,9 @@
 //!
 //! Supports two identity types:
 //! - **Anonymous**: ephemeral, generated on-the-fly, no persistence required
-//! - **Persistent**: stored in SQLite, survives restarts, full creator workspace
+//! - **Persistent**: stored in `SQLite`, survives restarts, full creator workspace
 //!
-//! See ADR-017 (local_only registration), ADR-014 (local FS layout).
+//! See ADR-017 (`local_only` registration), ADR-014 (local FS layout).
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
@@ -15,13 +15,14 @@ use serde::{Deserialize, Serialize};
 pub enum LocalIdentityType {
     /// Ephemeral identity — no persistent storage, disposable
     Anonymous,
-    /// Persistent identity — stored in SQLite, survives restarts
+    /// Persistent identity — stored in `SQLite`, survives restarts
     Persistent,
 }
 
 impl LocalIdentityType {
+    #[must_use]
     /// String representation matching JSON Schema enum values.
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Anonymous => "anonymous",
             Self::Persistent => "persistent",
@@ -70,6 +71,7 @@ impl LocalIdentity {
     ///
     /// Generates a `ctr_anon` + random hex ID. The caller may choose
     /// not to persist this identity — it is designed for disposable use.
+    #[must_use]
     pub fn create_anonymous() -> Self {
         let id = generate_anonymous_id();
         Self {
@@ -86,7 +88,8 @@ impl LocalIdentity {
     /// Create a persistent local identity.
     ///
     /// Generates a `ctr_local` + random hex ID. The caller should persist
-    /// this identity in the local SQLite database.
+    /// this identity in the local `SQLite` database.
+    #[must_use]
     pub fn create_persistent(display_name: Option<&str>) -> Self {
         let id = generate_local_id();
         Self {
@@ -99,7 +102,9 @@ impl LocalIdentity {
             platform_creator_id: None,
         }
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Link this local identity to a platform Creator.
     ///
     /// Once linked, the identity has a corresponding platform Creator
@@ -118,19 +123,20 @@ impl LocalIdentity {
         self.platform_creator_id = Some(platform_creator_id.to_string());
         Ok(())
     }
-
+    #[must_use]
     /// Check if this identity is anonymous (ephemeral).
     pub fn is_anonymous(&self) -> bool {
         self.identity_type == LocalIdentityType::Anonymous
     }
 
     /// Check if this identity is persistent.
+    #[must_use]
     pub fn is_persistent(&self) -> bool {
         self.identity_type == LocalIdentityType::Persistent
     }
 
     /// Check if this identity is linked to a platform Creator.
-    pub fn is_linked(&self) -> bool {
+    pub const fn is_linked(&self) -> bool {
         self.platform_linked
     }
 }
@@ -184,7 +190,7 @@ impl From<LocalIdentity> for nexus_contracts::local::domain::LocalIdentity {
 
 /// Generate an anonymous identity ID: `ctr_anon` + 12 random hex chars.
 ///
-/// Format: `ctr_anonA1b2C3d4E5f6` (within CreatorId `^ctr_[a-zA-Z0-9]+$` pattern).
+/// Format: `ctr_anonA1b2C3d4E5f6` (within `CreatorId` `^ctr_[a-zA-Z0-9]+$` pattern).
 fn generate_anonymous_id() -> String {
     let random: String = uuid::Uuid::new_v4()
         .to_string()
@@ -197,7 +203,7 @@ fn generate_anonymous_id() -> String {
 
 /// Generate a persistent local identity ID: `ctr_local` + 12 random hex chars.
 ///
-/// Format: `ctr_localA1b2C3d4E5f6` (within CreatorId `^ctr_[a-zA-Z0-9]+$` pattern).
+/// Format: `ctr_localA1b2C3d4E5f6` (within `CreatorId` `^ctr_[a-zA-Z0-9]+$` pattern).
 fn generate_local_id() -> String {
     let random: String = uuid::Uuid::new_v4()
         .to_string()
@@ -208,7 +214,7 @@ fn generate_local_id() -> String {
     format!("ctr_local{}", random)
 }
 
-/// Validate a string matches the CreatorId pattern `^ctr_[a-zA-Z0-9]+$`.
+/// Validate a string matches the `CreatorId` pattern `^ctr_[a-zA-Z0-9]+$`.
 pub fn is_valid_creator_id(s: &str) -> bool {
     s.starts_with("ctr_") && s.len() > 4 && s[4..].chars().all(|c| c.is_ascii_alphanumeric())
 }

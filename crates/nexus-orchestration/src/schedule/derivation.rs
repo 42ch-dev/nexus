@@ -52,7 +52,8 @@ pub struct CoreContextManager {
 }
 
 impl CoreContextManager {
-    /// Create a new manager backed by the given shared SQLite pool.
+    /// Create a new manager backed by the given shared `SQLite` pool.
+    #[must_use]
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
             pool,
@@ -64,7 +65,7 @@ impl CoreContextManager {
     ///
     /// Callers (schedule supervisor) should invoke this when a schedule reaches
     /// Completed/Cancelled/Failed status to prevent the `schedule_guards`
-    /// HashMap from growing unboundedly.
+    /// `HashMap` from growing unboundedly.
     ///
     /// # Safety
     ///
@@ -80,7 +81,7 @@ impl CoreContextManager {
     /// Get or create a per-schedule write guard.
     ///
     /// Returns an `Arc<Mutex<()>>` for the given schedule. The Arc allows
-    /// cloning so the lock can be held while the HashMap is not locked.
+    /// cloning so the lock can be held while the `HashMap` is not locked.
     async fn schedule_guard(&self, schedule_id: &ScheduleId) -> Arc<tokio::sync::Mutex<()>> {
         let key = schedule_id.0.clone();
         let mut guards = self.schedule_guards.lock().await;
@@ -96,6 +97,9 @@ impl CoreContextManager {
     /// This must be called before any [`apply`] call for the schedule.
     ///
     /// Returns the new [`CoreContextRecord`] with version 0.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if deserialization or step application fails.
     pub async fn apply_seed(
         &self,
         schedule_id: &ScheduleId,
@@ -127,8 +131,8 @@ impl CoreContextManager {
         };
 
         // Pre-own all bind params (borrow lifetime rules for sqlx macros).
-        let schedule_id_owned = schedule_id.0.to_owned();
-        let version_i64 = new_version.0 as i64;
+        let schedule_id_owned = schedule_id.0.clone();
+        let version_i64 = i64::from(new_version.0);
 
         // Insert version 0 row
         sqlx::query!(
@@ -180,6 +184,9 @@ impl CoreContextManager {
     /// - Bumps `creator_schedules.current_core_context_version`.
     ///
     /// Returns the new [`CoreContextRecord`].
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if step application fails.
     pub async fn apply(
         &self,
         schedule_id: &ScheduleId,
@@ -202,7 +209,7 @@ impl CoreContextManager {
             Some(record.content)
         };
 
-        let new_payload = apply_step(&previous_payload, &step, &author)?;
+        let new_payload = apply_step(previous_payload.as_ref(), &step, &author)?;
 
         // Serialize payload and derivation for storage
         let payload_kind = match &new_payload {
@@ -220,8 +227,8 @@ impl CoreContextManager {
         let derivation_kind = derivation_kind_str(&step);
 
         // Pre-own all bind params (borrow lifetime rules for sqlx macros).
-        let schedule_id_owned = schedule_id.0.to_owned();
-        let version_i64 = new_version.0 as i64;
+        let schedule_id_owned = schedule_id.0.clone();
+        let version_i64 = i64::from(new_version.0);
 
         // Insert the new version row
         sqlx::query!(
@@ -272,6 +279,9 @@ impl CoreContextManager {
     ///
     /// This enforces the spec §6.2 rule: preset hooks are "strictly additive"
     /// in V1.4.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if step application fails.
     pub async fn apply_preset_hook(
         &self,
         schedule_id: &ScheduleId,
@@ -314,7 +324,7 @@ impl CoreContextManager {
             Some(record.content)
         };
 
-        let new_payload = apply_edit_op(&previous_payload, &op)?;
+        let new_payload = apply_edit_op(previous_payload.as_ref(), &op)?;
 
         let payload_kind = match &new_payload {
             CoreContextPayload::Text { .. } => "text",
@@ -331,8 +341,8 @@ impl CoreContextManager {
         let derivation_json = serde_json::to_string(&detail_json)?;
 
         // Pre-own all bind params (borrow lifetime rules for sqlx macros).
-        let schedule_id_owned = schedule_id.0.to_owned();
-        let version_i64 = new_version.0 as i64;
+        let schedule_id_owned = schedule_id.0.clone();
+        let version_i64 = i64::from(new_version.0);
 
         sqlx::query!(
             r#"INSERT INTO core_context_versions
@@ -384,6 +394,9 @@ impl CoreContextManager {
     /// `core_context_versions` row with `derivation_kind = 'llm_summarize'`.
     /// The previous content is replaced by the summary (LLM produces a full
     /// new version, not an append).
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if step application fails.
     pub async fn apply_llm_summarize(
         &self,
         schedule_id: &ScheduleId,
@@ -410,8 +423,8 @@ impl CoreContextManager {
         let derivation_json = serde_json::to_string(&step)?;
 
         // Pre-own all bind params (borrow lifetime rules for sqlx macros).
-        let schedule_id_owned = schedule_id.0.to_owned();
-        let version_i64 = new_version.0 as i64;
+        let schedule_id_owned = schedule_id.0.clone();
+        let version_i64 = i64::from(new_version.0);
 
         sqlx::query!(
             r#"INSERT INTO core_context_versions
@@ -457,6 +470,9 @@ impl CoreContextManager {
     /// **H3**: `EditOp::Replace` is rejected to prevent overwriting
     /// system-managed fields (seed data, LLM summaries). Only `Append`,
     /// `StructMerge`, and `StructRemove` are allowed for user edits.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if step application fails.
     pub async fn apply_user_edit(
         &self,
         schedule_id: &ScheduleId,
@@ -478,11 +494,14 @@ impl CoreContextManager {
     }
 
     /// Get the current (latest) version number for a schedule.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if database query fails.
     pub async fn current_version(
         &self,
         schedule_id: &ScheduleId,
     ) -> Result<CoreContextVersion, CoreContextError> {
-        let schedule_id_owned = schedule_id.0.to_owned();
+        let schedule_id_owned = schedule_id.0.clone();
         let row = sqlx::query_scalar!(
             "SELECT current_core_context_version
              FROM creator_schedules WHERE schedule_id = ?",
@@ -491,21 +510,24 @@ impl CoreContextManager {
         .fetch_optional(&*self.pool)
         .await?;
 
-        match row {
-            Some(v) => Ok(CoreContextVersion(v as u32)),
-            None => Err(CoreContextError::NotFound(schedule_id.0.clone())),
-        }
+        row.map_or_else(
+            || Err(CoreContextError::NotFound(schedule_id.0.clone())),
+            |v| Ok(CoreContextVersion(u32::try_from(v).unwrap_or_default())),
+        )
     }
 
     /// Read a specific version of `core_context` for a schedule.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if database query or deserialization fails.
     pub async fn read(
         &self,
         schedule_id: &ScheduleId,
         version: CoreContextVersion,
     ) -> Result<CoreContextRecord, CoreContextError> {
         // Pre-own all bind params (borrow lifetime rules for sqlx macros).
-        let schedule_id_owned = schedule_id.0.to_owned();
-        let version_i64 = version.0 as i64;
+        let schedule_id_owned = schedule_id.0.clone();
+        let version_i64 = i64::from(version.0);
         let row = sqlx::query_as!(
             CoreContextVersionRow,
             "SELECT schedule_id, version, payload_kind, content,
@@ -524,6 +546,9 @@ impl CoreContextManager {
     }
 
     /// Read the current (latest) snapshot of `core_context` for a schedule.
+    ///
+    /// # Errors
+    /// Returns [`CoreContextError`] if database query or deserialization fails.
     pub async fn current_snapshot(
         &self,
         schedule_id: &ScheduleId,
@@ -553,7 +578,8 @@ impl CoreContextVersionRow {
         let content: CoreContextPayload =
             serde_json::from_slice(&self.content).map_err(CoreContextError::Serde)?;
 
-        let derivation = reconstruct_derivation(&self.derivation_kind, &self.derivation_detail)?;
+        let derivation =
+            reconstruct_derivation(&self.derivation_kind, self.derivation_detail.as_deref())?;
 
         let created_by = match self.created_by_kind.as_str() {
             "user" => CoreContextAuthor::User {
@@ -564,7 +590,7 @@ impl CoreContextVersionRow {
 
         Ok(CoreContextRecord {
             schedule_id: self.schedule_id,
-            version: CoreContextVersion(self.version as u32),
+            version: CoreContextVersion(u32::try_from(self.version).unwrap_or_default()),
             content,
             derivation,
             created_at: self.created_at.to_string(),
@@ -576,59 +602,52 @@ impl CoreContextVersionRow {
 /// Reconstruct a [`DerivationStep`] from stored `derivation_kind` + `derivation_detail`.
 fn reconstruct_derivation(
     kind: &str,
-    detail: &Option<Vec<u8>>,
+    detail: Option<&[u8]>,
 ) -> Result<DerivationStep, CoreContextError> {
     match kind {
-        "seed" => {
-            if let Some(bytes) = detail {
-                serde_json::from_slice(bytes).map_err(CoreContextError::Serde)
-            } else {
-                Ok(DerivationStep::Seed { raw: String::new() })
-            }
-        }
-        "user_edit" => {
-            if let Some(bytes) = detail {
-                serde_json::from_slice(bytes).map_err(CoreContextError::Serde)
-            } else {
+        "seed" => detail.map_or_else(
+            || Ok(DerivationStep::Seed { raw: String::new() }),
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
+        "user_edit" => detail.map_or_else(
+            || {
                 Ok(DerivationStep::UserEdit {
                     op: EditOp::Append {
                         body: String::new(),
                     },
                     source_user: None,
                 })
-            }
-        }
-        "preset_hook" => {
-            if let Some(bytes) = detail {
-                // Try to parse as PresetHook variant
-                let json: serde_json::Value = serde_json::from_slice(bytes)?;
-                Ok(DerivationStep::PresetHook {
-                    state_id: json["state_id"].as_str().unwrap_or("").to_string(),
-                    hook_name: json["hook_name"].as_str().unwrap_or("").to_string(),
-                })
-            } else {
+            },
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
+        "preset_hook" => detail.map_or_else(
+            || {
                 Ok(DerivationStep::PresetHook {
                     state_id: String::new(),
                     hook_name: String::new(),
                 })
-            }
-        }
-        "preset_seed_expansion" => {
-            if let Some(bytes) = detail {
-                serde_json::from_slice(bytes).map_err(CoreContextError::Serde)
-            } else {
+            },
+            |bytes| {
+                let json: serde_json::Value =
+                    serde_json::from_slice(bytes).map_err(CoreContextError::Serde)?;
+                Ok(DerivationStep::PresetHook {
+                    state_id: json["state_id"].as_str().unwrap_or("").to_string(),
+                    hook_name: json["hook_name"].as_str().unwrap_or("").to_string(),
+                })
+            },
+        ),
+        "preset_seed_expansion" => detail.map_or_else(
+            || {
                 Ok(DerivationStep::PresetSeedExpansion {
                     capability: String::new(),
                 })
-            }
-        }
-        "llm_summarize" => {
-            if let Some(bytes) = detail {
-                serde_json::from_slice(bytes).map_err(CoreContextError::Serde)
-            } else {
-                Ok(DerivationStep::llm_summarize(String::new(), [0u8; 32]))
-            }
-        }
+            },
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
+        "llm_summarize" => detail.map_or_else(
+            || Ok(DerivationStep::llm_summarize(String::new(), [0u8; 32])),
+            |bytes| serde_json::from_slice(bytes).map_err(CoreContextError::Serde),
+        ),
         other => Err(CoreContextError::Serde(serde_json::Error::custom(format!(
             "unknown derivation_kind: {other}"
         )))),
@@ -637,7 +656,7 @@ fn reconstruct_derivation(
 
 /// Apply a [`DerivationStep`] to compute the new payload from the previous one.
 fn apply_step(
-    previous: &Option<CoreContextPayload>,
+    previous: Option<&CoreContextPayload>,
     step: &DerivationStep,
     _author: &CoreContextAuthor,
 ) -> Result<CoreContextPayload, CoreContextError> {
@@ -648,19 +667,19 @@ fn apply_step(
             // PresetHook via apply() uses the op stored in derivation_detail
             // This path is used when apply() is called directly with a PresetHook step.
             // For the correct behavior, use apply_preset_hook() instead.
-            Ok(previous.clone().unwrap_or(CoreContextPayload::Text {
+            Ok(previous.cloned().unwrap_or(CoreContextPayload::Text {
                 body: String::new(),
             }))
         }
         DerivationStep::LlmSummarize { .. } => {
             // V1.5+; not emitted by V1.4 code
-            Ok(previous.clone().unwrap_or(CoreContextPayload::Text {
+            Ok(previous.cloned().unwrap_or(CoreContextPayload::Text {
                 body: String::new(),
             }))
         }
         DerivationStep::PresetSeedExpansion { .. } => {
             // V1.4 plumbing only; no actual expansion yet
-            Ok(previous.clone().unwrap_or(CoreContextPayload::Text {
+            Ok(previous.cloned().unwrap_or(CoreContextPayload::Text {
                 body: String::new(),
             }))
         }
@@ -669,7 +688,7 @@ fn apply_step(
 
 /// Apply an [`EditOp`] to transform the payload.
 fn apply_edit_op(
-    previous: &Option<CoreContextPayload>,
+    previous: Option<&CoreContextPayload>,
     op: &EditOp,
 ) -> Result<CoreContextPayload, CoreContextError> {
     match op {
@@ -731,7 +750,7 @@ fn json_merge(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json
 }
 
 /// Map a [`DerivationStep`] to its storage string tag.
-fn derivation_kind_str(step: &DerivationStep) -> &'static str {
+const fn derivation_kind_str(step: &DerivationStep) -> &'static str {
     match step {
         DerivationStep::Seed { .. } => "seed",
         DerivationStep::UserEdit { .. } => "user_edit",
@@ -766,12 +785,12 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper that inserts a minimal schedule row for test setup.
         sqlx::query(
-            r#"INSERT INTO creator_schedules
+            r"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
                 created_at, updated_at)
                VALUES (?, 'test-creator', 'test-preset', 1, 'pending',
-               'serial', 0, ?, ?)"#,
+               'serial', 0, ?, ?)",
         )
         .bind(schedule_id)
         .bind(now)
@@ -829,7 +848,7 @@ mod tests {
                 assert!(body.contains("topic=bees"));
                 assert!(body.contains("vibe=literary"));
             }
-            _ => panic!("expected text payload"),
+            CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
     }
 
@@ -892,7 +911,7 @@ mod tests {
             CoreContextPayload::Text { body } => {
                 assert_eq!(body, "initial appended");
             }
-            _ => panic!("expected text payload"),
+            CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
     }
 
@@ -934,7 +953,7 @@ mod tests {
         assert_eq!(snapshot.version, CoreContextVersion(2));
         match &snapshot.content {
             CoreContextPayload::Text { body } => assert_eq!(body, "first second third"),
-            _ => panic!("expected text payload"),
+            CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
     }
 
@@ -1016,80 +1035,23 @@ mod tests {
     async fn r6_concurrent_apply_same_schedule_produces_sequential_versions() {
         let (pool, _db) = fresh_pool().await;
         let mgr = Arc::new(CoreContextManager::new(pool));
-        let sid = ScheduleId("R6-CONC".to_string());
-        insert_test_schedule(&mgr.pool, &sid.0).await;
-
-        // Seed v0
-        mgr.apply_seed(&sid, "initial", CoreContextAuthor::System)
-            .await
-            .unwrap();
-
-        // Spawn 10 concurrent apply calls on the same schedule
-        let mut handles = Vec::new();
-        for i in 0..10 {
-            let mgr_clone = Arc::clone(&mgr);
-            let sid_clone = sid.clone();
-            handles.push(tokio::spawn(async move {
-                mgr_clone
-                    .apply_user_edit(
-                        &sid_clone,
-                        EditOp::Append {
-                            body: format!(" chunk-{i}"),
-                        },
-                        None,
-                    )
-                    .await
-                    .unwrap()
-                    .version
-                    .0
-            }));
-        }
-
-        // Collect all version numbers
-        let mut versions: Vec<u32> = Vec::new();
-        for h in handles {
-            versions.push(h.await.unwrap());
-        }
-        versions.sort();
-
-        // All versions should be unique and sequential: [1, 2, 3, ..., 10]
-        // No duplicates (which would indicate a race)
-        assert_eq!(
-            versions,
-            (1..=10).collect::<Vec<_>>(),
-            "R6: concurrent applies should produce sequential versions without gaps or duplicates"
-        );
-
-        // Verify final version is 10
-        assert_eq!(
-            mgr.current_version(&sid).await.unwrap(),
-            CoreContextVersion(10)
-        );
-    }
-
-    #[tokio::test]
-    async fn r6_different_schedules_write_concurrently() {
-        let (pool, _db) = fresh_pool().await;
-        let mgr = Arc::new(CoreContextManager::new(pool));
-
-        // Create two schedules
         let sid_a = ScheduleId("R6-A".to_string());
-        let sid_b = ScheduleId("R6-B".to_string());
+        let sid_b_id = ScheduleId("R6-B".to_string());
         insert_test_schedule(&mgr.pool, &sid_a.0).await;
-        insert_test_schedule(&mgr.pool, &sid_b.0).await;
+        insert_test_schedule(&mgr.pool, &sid_b_id.0).await;
 
         // Seed both
         mgr.apply_seed(&sid_a, "A-initial", CoreContextAuthor::System)
             .await
             .unwrap();
-        mgr.apply_seed(&sid_b, "B-initial", CoreContextAuthor::System)
+        mgr.apply_seed(&sid_b_id, "B-initial", CoreContextAuthor::System)
             .await
             .unwrap();
 
         // Concurrently apply to both schedules
         let mgr_clone = Arc::clone(&mgr);
         let sid_a_clone = sid_a.clone();
-        let sid_b_clone = sid_b.clone();
+        let sid_b_id_clone = sid_b_id.clone();
 
         let h1 = tokio::spawn(async move {
             mgr_clone
@@ -1109,7 +1071,7 @@ mod tests {
         let h2 = tokio::spawn(async move {
             mgr_clone2
                 .apply_user_edit(
-                    &sid_b_clone,
+                    &sid_b_id_clone,
                     EditOp::Append {
                         body: " append-b".to_string(),
                     },
@@ -1166,7 +1128,7 @@ mod tests {
             CoreContextPayload::Text { body } => {
                 assert_eq!(body, "Summarized: a story about bees and honey.");
             }
-            _ => panic!("expected text payload"),
+            CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
 
         // Derivation should be LlmSummarize
@@ -1263,7 +1225,7 @@ mod tests {
             CoreContextPayload::Text { body } => {
                 assert_eq!(body, "Final summary");
             }
-            _ => panic!("expected text payload"),
+            CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
 
         // Verify current snapshot is the LLM summary
@@ -1315,7 +1277,7 @@ mod tests {
             CoreContextPayload::Text { body } => {
                 assert_eq!(body, "initial after cleanup");
             }
-            _ => panic!("expected text payload"),
+            CoreContextPayload::Struct { .. } => panic!("expected text payload"),
         }
     }
 

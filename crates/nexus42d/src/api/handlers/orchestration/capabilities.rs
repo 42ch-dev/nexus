@@ -8,16 +8,13 @@ use nexus_contracts::local::orchestration::http::{CapabilityInfo, ListCapabiliti
 pub async fn list_capabilities(
     State(state): State<WorkspaceState>,
 ) -> (StatusCode, Json<ListCapabilitiesResponse>) {
-    let registry = match state.capability_registry() {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ListCapabilitiesResponse {
-                    capabilities: Vec::new(),
-                }),
-            );
-        }
+    let Some(registry) = state.capability_registry() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ListCapabilitiesResponse {
+                capabilities: Vec::new(),
+            }),
+        );
     };
 
     let capabilities: Vec<CapabilityInfo> = registry

@@ -52,30 +52,31 @@ impl Transport {
     /// 3. `--port` / `--host` CLI flags (HTTP)
     /// 4. `NEXUS_DAEMON_PORT` environment variable (HTTP fallback)
     /// 5. Default: HTTP on 127.0.0.1:8420
+    #[must_use]
     pub fn from_args(args: &DaemonArgs) -> Self {
         // Unix socket takes priority
         if let Some(ref path) = args.socket_path {
-            return Transport::UnixSocket { path: path.clone() };
+            return Self::UnixSocket { path: path.clone() };
         }
 
         if let Ok(path) = std::env::var("NEXUS_DAEMON_SOCKET_PATH") {
-            return Transport::UnixSocket {
+            return Self::UnixSocket {
                 path: PathBuf::from(path),
             };
         }
 
         // HTTP fallback
-        let port = if args.port != 8420 {
-            // User explicitly set a non-default port via CLI
-            args.port
-        } else {
+        let port = if args.port == 8420 {
             std::env::var("NEXUS_DAEMON_PORT")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(args.port)
+        } else {
+            // User explicitly set a non-default port via CLI
+            args.port
         };
 
-        Transport::Http {
+        Self::Http {
             port,
             host: args.host.clone(),
         }
@@ -111,6 +112,9 @@ pub struct DaemonArgs {
     shutdown_grace_ms: u64,
 }
 
+// Main function is daemon entry point with orchestrated initialization sequence.
+// 253 lines is typical for such supervisor binaries; extraction would obscure flow.
+#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = DaemonArgs::parse();
@@ -179,8 +183,8 @@ async fn main() -> anyhow::Result<()> {
         // Build the outer graph from the loaded system preset with engine wiring.
         let graph = nexus_orchestration::preset::loader::build_wired_outer_graph(
             &entry.loaded,
-            engine_ref.clone(),
-            capabilities.clone(),
+            &engine_ref.clone(),
+            &capabilities.clone(),
         );
         let graph = Arc::new(graph);
 
@@ -322,7 +326,10 @@ async fn main() -> anyhow::Result<()> {
 
             // Cancel all active engine sessions.
             if let Some(engine) = state_for_shutdown.engine() {
-                match engine.list_active(Default::default()).await {
+                match engine
+                    .list_active(nexus_orchestration::engine::SessionFilter::default())
+                    .await
+                {
                     Ok(sessions) => {
                         let count = sessions.len();
                         for s in sessions {
@@ -360,7 +367,7 @@ async fn main() -> anyhow::Result<()> {
     let _server_result = tokio::spawn(async move {
         match transport {
             Transport::Http { port, host } => {
-                let addr = format!("{}:{}", host, port);
+                let addr = format!("{host}:{port}");
                 let listener = tokio::net::TcpListener::bind(&addr).await?;
 
                 tracing::info!("Local API listening on http://{}", addr);
@@ -407,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 }
                             }
-                            _ = shutdown_notify.notified() => {
+                            () = shutdown_notify.notified() => {
                                 // Graceful shutdown triggered
                                 tracing::info!("Shutdown signal received");
                                 break;
@@ -460,9 +467,9 @@ async fn main() -> anyhow::Result<()> {
 
 /// Create subsystem bootstraps for lifecycle.
 ///
-/// Engine and WorkerMgr subsystems are mock implementations for lifecycle
-/// health reporting only. The real engine is instantiated directly in main()
-/// and wired via WorkspaceState (WS2).
+/// Engine and `WorkerMgr` subsystems are mock implementations for lifecycle
+/// health reporting only. The real engine is instantiated directly in `main()`
+/// and wired via `WorkspaceState` (WS2).
 fn create_subsystems(
     state: &WorkspaceState,
     port: u16,

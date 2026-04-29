@@ -1,7 +1,7 @@
 //! Degradation policy for runtime mode fallback behavior.
 //!
 //! When platform becomes unavailable, the system gracefully degrades
-//! from cloud_enhanced → local_first → local_only.
+//! from `cloud_enhanced` → `local_first` → local_only.
 //!
 //! Spec reference: `local-first-runtime-policy-v1.md` §5.3, §6
 //!
@@ -20,7 +20,7 @@ use nexus_contracts::local::domain::RuntimeMode;
 /// Degradation policy for runtime mode fallback behavior.
 ///
 /// When platform becomes unavailable, the system gracefully degrades
-/// from cloud_enhanced → local_first → local_only.
+/// from `cloud_enhanced` → `local_first` → local_only.
 ///
 /// Spec reference: `local-first-runtime-policy-v1.md` §5.3, §6
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -43,7 +43,7 @@ pub struct DegradationPolicy {
 
     /// Maximum degradation depth (how many levels can degrade).
     /// 0 = no degradation allowed, 1 = one level down, 2 = two levels down.
-    /// Default: 2 (cloud_enhanced → local_first → local_only)
+    /// Default: 2 (`cloud_enhanced` → `local_first` → local_only)
     pub max_degradation_depth: u32,
 }
 
@@ -60,8 +60,9 @@ impl Default for DegradationPolicy {
 }
 
 impl DegradationPolicy {
+    #[must_use]
     /// Create a policy with all fields explicitly specified.
-    pub fn new(
+    pub const fn new(
         health_check_timeout_ms: u64,
         failure_threshold: u32,
         failure_window_secs: u64,
@@ -78,6 +79,7 @@ impl DegradationPolicy {
     }
 
     /// Create a policy that disables degradation entirely.
+    #[must_use]
     pub fn no_degradation() -> Self {
         Self {
             max_degradation_depth: 0,
@@ -91,37 +93,39 @@ impl DegradationPolicy {
 pub enum DegradationState {
     /// Operating at configured mode (no degradation).
     Normal,
-    /// Degraded one level (e.g., cloud_enhanced → local_first).
+    /// Degraded one level (e.g., `cloud_enhanced` → `local_first`).
     DegradedLevel1,
-    /// Degraded two levels (e.g., cloud_enhanced → local_only).
+    /// Degraded two levels (e.g., `cloud_enhanced` → `local_only`).
     DegradedLevel2,
-    /// Platform unreachable, forced to local_only.
+    /// Platform unreachable, forced to `local_only`.
     ForcedLocalOnly,
 }
 
 impl DegradationState {
     /// Returns the numeric depth of this degradation state.
-    /// 0 = Normal, 1 = DegradedLevel1, 2 = DegradedLevel2/ForcedLocalOnly.
-    pub fn depth(&self) -> u32 {
+    /// 0 = Normal, 1 = `DegradedLevel1`, 2 = DegradedLevel2/ForcedLocalOnly.
+    #[must_use]
+    pub const fn depth(&self) -> u32 {
         match self {
             DegradationState::Normal => 0,
             DegradationState::DegradedLevel1 => 1,
             DegradationState::DegradedLevel2 | DegradationState::ForcedLocalOnly => 2,
         }
     }
-
+    #[must_use]
     /// Check if further degradation is possible given the max depth.
     pub fn can_degrade_more(&self, max_depth: u32) -> bool {
         self.depth() < max_depth
     }
 
     /// Whether this state represents any form of degradation.
-    pub fn is_degraded(&self) -> bool {
+    #[must_use]
+    pub const fn is_degraded(&self) -> bool {
         !matches!(self, DegradationState::Normal)
     }
 
     /// Human-readable label for CLI output.
-    pub fn display_label(&self) -> &'static str {
+    pub const fn display_label(&self) -> &'static str {
         match self {
             DegradationState::Normal => "Normal",
             DegradationState::DegradedLevel1 => "Degraded (Level 1)",
@@ -208,7 +212,7 @@ pub struct HealthCheckSnapshot {
 
 impl DegradationSnapshot {
     /// Create a new snapshot with the given state and failure count.
-    pub fn new(state: DegradationState, failure_count: u32) -> Self {
+    pub const fn new(state: DegradationState, failure_count: u32) -> Self {
         Self {
             state,
             failure_count,
@@ -217,8 +221,8 @@ impl DegradationSnapshot {
         }
     }
 
-    /// Create a new snapshot with an explicit last_upgrade_attempt.
-    pub fn with_upgrade_attempt(
+    /// Create a new snapshot with an explicit `last_upgrade_attempt`.
+    pub const fn with_upgrade_attempt(
         state: DegradationState,
         failure_count: u32,
         last_upgrade_attempt: Option<String>,
@@ -247,10 +251,10 @@ impl DegradationSnapshot {
 
 /// Guard that monitors platform health and triggers degradation.
 ///
-/// S-003: DegradationGuard is Send + Sync because all its fields are
-/// thread-safe: DegradationPolicy (primitive types), DomainRuntimeMode (Copy),
-/// DegradationState (Copy enum), chrono::DateTime<chrono::Utc> (Send+Sync),
-/// and HealthCheckResult (Send+Sync). The guard is designed to be shared
+/// S-003: `DegradationGuard` is Send + Sync because all its fields are
+/// thread-safe: `DegradationPolicy` (primitive types), `DomainRuntimeMode` (Copy),
+/// `DegradationState` (Copy enum), `chrono::DateTime`<chrono::Utc> (Send+Sync),
+/// and `HealthCheckResult` (Send+Sync). The guard is designed to be shared
 /// across async tasks (e.g., in a tokio runtime) via Arc<Mutex<DegradationGuard>>.
 pub struct DegradationGuard {
     policy: DegradationPolicy,
@@ -271,7 +275,7 @@ const _: () = {
 
 impl DegradationGuard {
     /// Create a new guard with the given policy and initial runtime mode.
-    pub fn new(policy: DegradationPolicy, initial_mode: DomainRuntimeMode) -> Self {
+    pub const fn new(policy: DegradationPolicy, initial_mode: DomainRuntimeMode) -> Self {
         Self {
             policy,
             current_mode: initial_mode,
@@ -295,6 +299,7 @@ impl DegradationGuard {
     /// The `effective_mode` is computed from `original_mode` by applying
     /// `state.depth()` downgrades. Cooldown and health-check timestamps
     /// are intentionally cleared so the system can re-evaluate health.
+    #[must_use]
     pub fn restore_from_snapshot(
         snap: &DegradationSnapshot,
         original_mode: DomainRuntimeMode,
@@ -334,46 +339,48 @@ impl DegradationGuard {
     }
 
     /// Access the current runtime mode (may have been downgraded by degradation).
-    pub fn current_mode(&self) -> &DomainRuntimeMode {
+    pub const fn current_mode(&self) -> &DomainRuntimeMode {
         &self.current_mode
     }
 
     /// Access the current degradation state.
-    pub fn degradation_state(&self) -> DegradationState {
+    pub const fn degradation_state(&self) -> DegradationState {
         self.degradation_state
     }
 
     /// Access the current degradation state (convenience alias).
-    pub fn state(&self) -> DegradationState {
+    pub const fn state(&self) -> DegradationState {
         self.degradation_state
     }
 
     /// Access the degradation policy.
-    pub fn policy(&self) -> &DegradationPolicy {
+    pub const fn policy(&self) -> &DegradationPolicy {
         &self.policy
     }
 
     /// Access the last health check result (if any).
-    pub fn last_health_check(&self) -> Option<&HealthCheckResult> {
+    pub const fn last_health_check(&self) -> Option<&HealthCheckResult> {
         self.last_health_check.as_ref()
     }
 
     /// Access the last upgrade attempt timestamp (if any).
-    pub fn last_upgrade_attempt(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+    pub const fn last_upgrade_attempt(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.last_upgrade_attempt
     }
 
     /// Access the current failure count (number of timestamps in window).
-    pub fn failure_count(&self) -> u32 {
+    pub const fn failure_count(&self) -> u32 {
         self.failure_timestamps.len() as u32
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Check if operation requires platform and if degradation allows it.
     /// Returns error if operation is blocked by degradation state.
     ///
     /// This combines the existing `runtime_guard` classification with
     /// degradation-awareness: platform-required operations are blocked
-    /// when the current (possibly degraded) mode is local_only.
+    /// when the current (possibly degraded) mode is `local_only`.
     pub fn check_operation(&self, operation: &str) -> Result<(), DomainError> {
         crate::runtime_guard::check_operation(&self.current_mode, operation)
     }
@@ -459,7 +466,7 @@ impl DegradationGuard {
         }
     }
 
-    /// Force immediate degradation to local_only regardless of threshold.
+    /// Force immediate degradation to `local_only` regardless of threshold.
     pub fn force_local_only(&mut self) {
         self.degradation_state = DegradationState::ForcedLocalOnly;
         self.current_mode = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
@@ -482,7 +489,11 @@ impl DegradationGuard {
         }
 
         // Only upgrade if platform is healthy
-        if self.last_health_check.as_ref().map(|h| h.is_healthy) == Some(true) {
+        if self
+            .last_health_check
+            .as_ref()
+            .is_some_and(|h| h.is_healthy)
+        {
             let upgraded = match self.degradation_state {
                 DegradationState::DegradedLevel2 => {
                     if let Some(up) = self.current_mode.upgrade() {

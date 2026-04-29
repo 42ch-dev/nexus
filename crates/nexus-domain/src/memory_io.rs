@@ -28,7 +28,7 @@ fn validate_creator_id(creator_id: &str) -> Result<(), DomainError> {
         )))
     }
 }
-
+#[must_use]
 /// Resolve the memory directory path for a creator.
 ///
 /// Returns: `<home>/.nexus42/creators/<creator_id>/memory/long-term/`
@@ -48,6 +48,7 @@ pub fn memory_dir(home: &Path, creator_id: &str) -> PathBuf {
 /// Does not validate `creator_id` or `slug` on its own — callers should
 /// validate before calling. If called with malicious input, the path
 /// may resolve outside the expected directory.
+#[must_use]
 pub fn memory_path(home: &Path, creator_id: &str, slug: &str) -> PathBuf {
     memory_dir(home, creator_id).join(format!("{slug}.md"))
 }
@@ -86,11 +87,13 @@ pub fn list_memories(home: &Path, creator_id: &str) -> Result<Vec<String>, Domai
     slugs.sort();
     Ok(slugs)
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Load and parse a long-term memory file.
 ///
 /// The file is read from `<memory_dir>/<slug>.md`, frontmatter is parsed,
-/// and a `LongTermMemory` with the source_path set is returned.
+/// and a `LongTermMemory` with the `source_path` set is returned.
 pub fn load_memory(
     home: &Path,
     creator_id: &str,
@@ -117,7 +120,9 @@ pub fn load_memory(
     memory.source_path = Some(path);
     Ok(memory)
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Save a long-term memory file to disk.
 ///
 /// Creates the memory directory if it doesn't exist. Serializes the
@@ -143,7 +148,9 @@ pub fn save_memory(
         .map_err(|e| DomainError::ValidationError(format!("cannot write memory file: {e}")))?;
     Ok(())
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Delete a long-term memory file.
 pub fn delete_memory(home: &Path, creator_id: &str, slug: &str) -> Result<(), DomainError> {
     validate_creator_id(creator_id)?;
@@ -168,10 +175,16 @@ pub fn delete_memory(home: &Path, creator_id: &str, slug: &str) -> Result<(), Do
 /// Check if a slug is path-safe (no `..`, `/`, `\`, null bytes, or control chars).
 ///
 /// Re-exported from `long_term_memory::slug_is_safe` for convenience.
+#[must_use]
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 pub fn slug_is_safe(slug: &str) -> bool {
     crate::long_term_memory::slug_is_safe(slug)
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Ensure the memory directory exists for a creator.
 ///
 /// Creates `<home>/.nexus42/creators/<creator_id>/memory/long-term/`

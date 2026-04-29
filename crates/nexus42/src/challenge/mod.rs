@@ -35,7 +35,7 @@ pub const CHALLENGE_SOLVER_SYSTEM_PROMPT: &str =
     include_str!("../skills/challenge-solver-skill.md");
 
 /// Errors that can occur during challenge solving.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum ChallengeError {
     /// Challenge text is empty or contains only whitespace.
     #[error("challenge text is empty")]
@@ -111,6 +111,14 @@ const LLM_FALLBACK_TIMEOUT_SECS: u64 = 30;
 ///
 /// The computed answer as a string (e.g. `"47"`), or a `ChallengeError`.
 ///
+/// # Errors
+///
+/// Returns `ChallengeError::InvalidInput` if the text is empty or whitespace.
+/// Returns `ChallengeError::ParseError` if no math problem can be extracted.
+/// Returns `ChallengeError::DivisionByZero` if division by zero is attempted.
+/// Returns `ChallengeError::NegativeResult` if subtraction produces a negative.
+/// Returns `ChallengeError::NonIntegerResult` if division produces a non-integer.
+///
 /// # Example
 ///
 /// ```
@@ -162,6 +170,12 @@ pub fn solve_challenge(text: &str) -> Result<String> {
 /// # Returns
 ///
 /// The computed answer as a string, or a `ChallengeError`.
+///
+/// # Errors
+///
+/// Returns the same errors as `solve_challenge`, except `ParseError` may be
+/// resolved by the LLM fallback. If LLM fallback fails or times out,
+/// `ParseError` is returned.
 pub async fn solve_challenge_with_fallback<L>(text: &str, llm: &L) -> Result<String>
 where
     L: LlmSolver,
@@ -406,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn fallback_returns_parse_error_on_timeout() {
         let llm = SlowLlmSolver {
-            delay: std::time::Duration::from_secs(60), // longer than 30s timeout
+            delay: std::time::Duration::from_mins(1), // longer than 30s timeout
         };
         let result = solve_challenge_with_fallback("hello world", &llm).await;
         assert!(

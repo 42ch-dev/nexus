@@ -39,7 +39,15 @@ pub enum ResearchCommand {
     },
 }
 
-/// Run research command
+/// Run research command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Scan path does not exist
+/// - Database operations fail
+/// - File I/O operations fail
+/// - Daemon API calls fail
 pub async fn run(cmd: ResearchCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ResearchCommand::Scan { path, extract_text } => {
@@ -57,12 +65,12 @@ async fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> 
     let scan_path = std::path::Path::new(path);
 
     if !scan_path.exists() {
-        println!("Directory '{}' not found.", path);
-        println!("Create it with: mkdir -p {}", path);
+        println!("Directory '{path}' not found.");
+        println!("Create it with: mkdir -p {path}");
         return Ok(());
     }
 
-    println!("Scanning '{}' for reference sources...", path);
+    println!("Scanning '{path}' for reference sources...");
     if extract_text {
         println!("Content extraction enabled (--extract-text)");
     }
@@ -88,7 +96,7 @@ async fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> 
     } else {
         println!("  Found {} reference source(s):", found.len());
         for (name, _, _) in &found {
-            println!("    • {}", name);
+            println!("    • {name}");
         }
 
         // Cache to local SQLite
@@ -105,7 +113,7 @@ async fn scan_references(path: &str, extract_text: bool, config: &CliConfig) -> 
     Ok(())
 }
 
-/// List discovered reference sources from SQLite
+/// List discovered reference sources from `SQLite`
 async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Result<()> {
     println!("Reference Sources:");
 
@@ -121,7 +129,7 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
     let rows: Vec<(String, String, String, String, String, String)> = if let Some(filter) =
         status_filter
     {
-        println!("  Filter: status={}", filter);
+        println!("  Filter: status={filter}");
         // SAFETY: dynamic WHERE clause built from user-provided filter set.
         sqlx::query_as(
             "SELECT reference_source_id, source_type, uri, title, scan_status, created_at FROM reference_sources WHERE scan_status = ? ORDER BY created_at DESC",
@@ -159,14 +167,11 @@ async fn list_references(status_filter: Option<&str>, _config: &CliConfig) -> Re
             "  {:<20} {:<10} {:<30} {:<10} {}",
             "ID", "TYPE", "URI", "STATUS", "TITLE"
         );
-        println!("{}", header);
+        println!("{header}");
         println!("  {}", "-".repeat(80));
 
         for (id, source_type, uri, title, status, _created_at) in &rows {
-            println!(
-                "  {:<20} {:<10} {:<30} {:<10} {}",
-                id, source_type, uri, status, title
-            );
+            println!("  {id:<20} {source_type:<10} {uri:<30} {status:<10} {title}");
         }
     }
 
@@ -203,20 +208,20 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
                 let tags = r.tags;
                 let content_hash = r.content_hash;
                 let content = r.content;
-                println!("Reference Source: {}", ref_id);
-                println!("  Title:       {}", title);
-                println!("  Type:        {}", source_type);
-                println!("  URI:         {}", uri);
-                println!("  Status:      {}", status);
-                println!("  Created:     {}", created_at);
+                println!("Reference Source: {ref_id}");
+                println!("  Title:       {title}");
+                println!("  Type:        {source_type}");
+                println!("  URI:         {uri}");
+                println!("  Status:      {status}");
+                println!("  Created:     {created_at}");
                 if let Some(t) = tags {
-                    println!("  Tags:        {}", t);
+                    println!("  Tags:        {t}");
                 }
                 if let Some(h) = content_hash {
-                    println!("  Content Hash: {}", h);
+                    println!("  Content Hash: {h}");
                 }
+                println!();
                 if let Some(c) = content {
-                    println!();
                     println!("  Extracted Content ({} chars):", c.len());
                     println!("  {}", "-".repeat(60));
                     // Print first 500 chars of content
@@ -226,20 +231,18 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
                         c.clone()
                     };
                     for line in preview.lines() {
-                        println!("  {}", line);
+                        println!("  {line}");
                     }
                     if c.len() > 500 {
                         println!("  ... (truncated, use database query for full content)");
                     }
                 } else {
-                    println!();
                     println!("  No content extracted. Run: nexus42 research scan --extract-text");
                 }
             }
             None => {
                 return Err(CliError::Config(format!(
-                    "Reference source '{}' not found in local cache.",
-                    id
+                    "Reference source '{id}' not found in local cache."
                 )));
             }
         }
@@ -259,8 +262,8 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
                 .unwrap_or(0);
 
         println!("Reference Sources Summary:");
-        println!("  Total scanned: {}", count);
-        println!("  With content:  {}", with_content);
+        println!("  Total scanned: {count}");
+        println!("  With content:  {with_content}");
 
         if count == 0 {
             println!();
@@ -274,7 +277,7 @@ async fn extract_references(source_id: Option<&str>, _config: &CliConfig) -> Res
     Ok(())
 }
 
-/// Cache scan results to local SQLite (uses configured workspace `state.db`).
+/// Cache scan results to local `SQLite` (uses configured workspace `state.db`).
 async fn cache_scan_results(
     files: &[(String, String, std::path::PathBuf)],
     extract_text: bool,
@@ -302,10 +305,7 @@ async fn cache_scan_results_at(
         let id = format!("ref_{}", &hex[..12]);
         let source_type = match ext.as_str() {
             "pdf" => "pdf",
-            "md" => "file",
-            "txt" => "file",
             "url" => "url",
-            "html" => "file",
             _ => "file",
         };
 
@@ -317,7 +317,7 @@ async fn cache_scan_results_at(
                     (Some(extracted), Some(hash), "scanned")
                 }
                 Err(e) => {
-                    eprintln!("  ⚠ Failed to extract content from '{}': {}", file, e);
+                    eprintln!("  ⚠ Failed to extract content from '{file}': {e}");
                     (None, None, "failed")
                 }
             }
@@ -376,7 +376,7 @@ fn extract_pdf_content(path: &std::path::Path) -> Result<String> {
         .arg(path)
         .arg("-") // Output to stdout
         .output()
-        .map_err(|e| CliError::Other(format!("Failed to run pdftotext: {}", e)))?;
+        .map_err(|e| CliError::Other(format!("Failed to run pdftotext: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -387,7 +387,7 @@ fn extract_pdf_content(path: &std::path::Path) -> Result<String> {
     }
 
     let text = String::from_utf8(output.stdout)
-        .map_err(|e| CliError::Other(format!("pdftotext output is not valid UTF-8: {}", e)))?;
+        .map_err(|e| CliError::Other(format!("pdftotext output is not valid UTF-8: {e}")))?;
 
     if text.trim().is_empty() {
         return Err(CliError::Other(
@@ -402,14 +402,13 @@ fn extract_pdf_content(path: &std::path::Path) -> Result<String> {
 fn extract_url_content(path: &std::path::Path) -> Result<String> {
     // Read the URL from the file
     let url_str = std::fs::read_to_string(path)
-        .map_err(|e| CliError::Other(format!("Failed to read URL file: {}", e)))?;
+        .map_err(|e| CliError::Other(format!("Failed to read URL file: {e}")))?;
     let url = url_str.trim();
 
     // Validate URL
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(CliError::Other(format!(
-            "Invalid URL format: '{}'. Must start with http:// or https://",
-            url
+            "Invalid URL format: '{url}'. Must start with http:// or https://"
         )));
     }
 
@@ -429,7 +428,7 @@ fn extract_url_content(path: &std::path::Path) -> Result<String> {
         .arg("30") // 30 seconds timeout
         .arg(url)
         .output()
-        .map_err(|e| CliError::Other(format!("Failed to run curl: {}", e)))?;
+        .map_err(|e| CliError::Other(format!("Failed to run curl: {e}")))?;
 
     if !output.status.success() {
         return Err(CliError::Other(format!(
@@ -439,7 +438,7 @@ fn extract_url_content(path: &std::path::Path) -> Result<String> {
     }
 
     let html = String::from_utf8(output.stdout)
-        .map_err(|e| CliError::Other(format!("Response is not valid UTF-8: {}", e)))?;
+        .map_err(|e| CliError::Other(format!("Response is not valid UTF-8: {e}")))?;
 
     // Strip HTML tags for a simple text extraction
     // Note: This is a basic implementation. For better results, consider using
@@ -535,7 +534,7 @@ fn strip_html_tags(html: &str) -> String {
     // Normalize whitespace
     cleaned
         .lines()
-        .map(|line| line.trim())
+        .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
@@ -550,6 +549,7 @@ fn compute_content_hash(content: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -581,8 +581,7 @@ mod tests {
     /// Test HTML tag stripping removes script content
     #[test]
     fn test_strip_html_removes_scripts() {
-        let html =
-            r#"<html><body><script>alert('evil');</script><p>Safe content</p></body></html>"#;
+        let html = r"<html><body><script>alert('evil');</script><p>Safe content</p></body></html>";
         let text = strip_html_tags(html);
 
         assert!(!text.contains("script"));
@@ -626,14 +625,14 @@ mod tests {
         // Test without extraction
         let result = cache_scan_results_at(&db_path, &files, false).await;
         if let Err(ref e) = result {
-            eprintln!("Error in cache_scan_results (no extraction): {:?}", e);
+            eprintln!("Error in cache_scan_results (no extraction): {e:?}");
         }
         assert!(result.is_ok());
 
         // Test with extraction
         let result = cache_scan_results_at(&db_path, &files, true).await;
         if let Err(ref e) = result {
-            eprintln!("Error in cache_scan_results (with extraction): {:?}", e);
+            eprintln!("Error in cache_scan_results (with extraction): {e:?}");
         }
         assert!(result.is_ok());
     }

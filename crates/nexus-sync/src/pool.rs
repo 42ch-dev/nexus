@@ -1,4 +1,4 @@
-//! SQLite connection pool for nexus-sync
+//! `SQLite` connection pool for nexus-sync
 //!
 //! Provides async connection pooling via `sqlx::SqlitePool`, re-exported from
 //! `nexus-local-db`. The pool uses WAL mode for better concurrent read/write
@@ -18,7 +18,7 @@ use std::path::Path;
 /// Default pool size for nexus-sync
 pub const DEFAULT_POOL_SIZE: usize = 4;
 
-/// Connection pool wrapper for SQLite outbox operations
+/// Connection pool wrapper for `SQLite` outbox operations
 ///
 /// Wraps `sqlx::SqlitePool` and provides the same pool interface.
 #[derive(Clone)]
@@ -30,7 +30,7 @@ impl OutboxPool {
     /// Create a new connection pool for the given database path
     ///
     /// # Arguments
-    /// * `db_path` - Path to the SQLite database file
+    /// * `db_path` - Path to the `SQLite` database file
     /// * `max_size` - Maximum number of connections in the pool
     ///
     /// # Errors
@@ -40,6 +40,9 @@ impl OutboxPool {
         max_size: usize,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
         let url = format!("sqlite://{}?mode=rwc", db_path.display());
+        // SAFETY: max_size is clamped to a small positive value (DEFAULT_POOL_SIZE = 4 or less),
+        // so it fits safely in u32.
+        #[allow(clippy::cast_possible_truncation)]
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(max_size as u32)
             .connect(&url)
@@ -57,7 +60,8 @@ impl OutboxPool {
     }
 
     /// Get the underlying `SqlitePool` reference
-    pub fn inner(&self) -> &nexus_local_db::SqlitePool {
+    #[must_use]
+    pub const fn inner(&self) -> &nexus_local_db::SqlitePool {
         &self.pool
     }
 }
@@ -141,7 +145,7 @@ mod tests {
             .map(|i| {
                 let pool = pool.clone();
                 tokio::spawn(async move {
-                    let task_val = format!("task-{}", i);
+                    let task_val = format!("task-{i}");
                     // SAFETY: test-only DML — compile-time macro not applicable. Inserts test data.
                     sqlx::query("INSERT INTO test (val) VALUES (?)")
                         .bind(&task_val)

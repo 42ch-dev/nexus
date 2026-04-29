@@ -1,14 +1,14 @@
-//! Nexus SocialGraphRelationshipResponse
+//! `Nexus` `SocialGraphRelationshipResponse`
 //!
-//! Response envelope for social graph mutation endpoints (platform plan 17).
+//! `Response` envelope for social graph mutation endpoints (platform plan 17).
 //!
-//! @schema_version 1
-//! @source social-graph-relationship-response.schema.json
+//! `@schema_version` 1
+//! `@source` social-graph-relationship-response.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Response envelope for social graph mutation endpoints (platform plan 17).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Response` envelope for social graph mutation endpoints (platform plan 17).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphRelationshipResponse {
     pub schema_version: u32,

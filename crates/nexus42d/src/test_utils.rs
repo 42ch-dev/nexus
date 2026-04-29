@@ -1,3 +1,5 @@
+//! Test utilities use expect() which is acceptable in test contexts.
+#![allow(clippy::missing_panics_doc)]
 //! Shared test utilities for nexus42d
 //!
 //! This module provides common helpers for setting up test workspaces,
@@ -21,7 +23,7 @@ impl Deref for TestTempRoot {
 const TEST_CREATOR_ID: &str = "test_creator";
 const TEST_WORKSPACE_SLUG: &str = "default";
 
-/// Create a temporary workspace directory with an initialized SQLite database (ADR-014 layout).
+/// Create a temporary workspace directory with an initialized `SQLite` database (ADR-014 layout).
 ///
 /// Returns a tuple of `(temp_dir, nexus_home, db_path)` where:
 /// - `temp_dir` is the [`TestTempRoot`] that owns the temporary directory. **The caller
@@ -65,8 +67,7 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
 
     // Write as TOML so daemon reads config.toml natively
     let toml_str = format!(
-        "active_creator_id = \"{}\"\n[active_workspace_slug_by_creator]\n\"{}\" = \"{}\"",
-        TEST_CREATOR_ID, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG
+        "active_creator_id = \"{TEST_CREATOR_ID}\"\n[active_workspace_slug_by_creator]\n\"{TEST_CREATOR_ID}\" = \"{TEST_WORKSPACE_SLUG}\""
     );
     std::fs::write(nexus_home.join("config.toml"), toml_str).expect("config.toml");
 
@@ -87,7 +88,7 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     (tmp, nexus_home, db_path)
 }
 
-/// Create a temporary workspace directory with an initialized SQLite database
+/// Create a temporary workspace directory with an initialized `SQLite` database
 /// and a pre-seeded workspace path (marking the workspace as "initialized").
 ///
 /// Returns a tuple of `(temp_dir, nexus_home, db_path, workspace_dir)` where:
@@ -150,7 +151,7 @@ pub async fn seed_valid_token(
     .bind(&created_at)
     .execute(state.pool())
     .await
-    .unwrap();
+    .expect("INSERT should succeed for test setup");
 }
 
 /// Seed an expired auth token for testing.
@@ -181,7 +182,7 @@ pub async fn seed_expired_token(
     .bind(&created_at)
     .execute(state.pool())
     .await
-    .unwrap();
+    .expect("INSERT should succeed for test setup");
 }
 
 #[cfg(test)]
@@ -199,7 +200,7 @@ mod tests {
             "nexus_home should be inside temp dir"
         );
         assert_eq!(
-            db_path.file_name().unwrap(),
+            db_path.file_name().expect("db_path should have filename"),
             std::ffi::OsStr::new("state.db"),
             "db_path should end with state.db"
         );
@@ -211,13 +212,15 @@ mod tests {
 
         assert!(workspace_dir.exists(), "workspace_dir should exist");
 
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open_pool should succeed");
         // SAFETY: test-only — read-back verification of seeded test data.
         let phase: (String,) =
             sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
                 .fetch_one(&pool)
                 .await
-                .unwrap();
+                .expect("SELECT should succeed");
         assert_eq!(phase.0, "brainstorm");
     }
 }

@@ -22,7 +22,7 @@ struct EndTask;
 
 #[async_trait]
 impl Task for EndTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "end"
     }
 
@@ -119,6 +119,7 @@ impl Task for PresetCapabilityTask {
 ///
 /// Each node is a [`PresetCapabilityTask`] wrapping the corresponding
 /// built-in capability. The terminal `End` node returns `NextAction::End`.
+#[must_use]
 pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
     let sync_pull = PresetCapabilityTask::new("sync.pull", "sync_pull", registry.clone());
     let outbox_flush = PresetCapabilityTask::new("outbox.flush", "outbox_flush", registry.clone());
@@ -176,7 +177,7 @@ mod tests {
         let graph = build(registry);
         // Verify all expected task IDs exist.
         for id in &["sync_pull", "outbox_flush", "registry_refresh", "end"] {
-            assert!(graph.get_task(*id).is_some(), "expected task '{id}'");
+            assert!(graph.get_task(id).is_some(), "expected task '{id}'");
         }
         // Verify a nonexistent task returns None.
         assert!(graph.get_task("nonexistent").is_none());

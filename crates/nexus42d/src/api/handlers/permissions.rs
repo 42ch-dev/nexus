@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Permission enforcement for ACP tool execution.
 //!
 //! This module provides a simple permission checker that validates tool
@@ -32,17 +34,12 @@ use crate::api::errors::NexusApiError;
 /// which means the tool is unrestricted (or should be denied by default).
 fn tool_to_permission_category(tool_name: &str) -> Option<&'static str> {
     match tool_name {
-        "fs/read_text_file" => Some("file_system.read"),
-        "fs/write_text_file" => Some("file_system.write"),
-        "fs/list_directory" => Some("file_system.read"),
-        "fs/read_directory" => Some("file_system.read"),
-        "fs/create_directory" => Some("file_system.write"),
+        "fs/read_text_file" | "fs/list_directory" | "fs/read_directory" => Some("file_system.read"),
         "fs/delete_file" => Some("file_system.delete"),
-        "fs/move_file" => Some("file_system.write"),
-        "terminal/create" => Some("terminal.execute"),
-        "terminal/output" => Some("terminal.execute"),
-        "terminal/release" => Some("terminal.execute"),
-        "terminal/kill" => Some("terminal.execute"),
+        "fs/write_text_file" | "fs/create_directory" | "fs/move_file" => Some("file_system.write"),
+        "terminal/create" | "terminal/output" | "terminal/release" | "terminal/kill" => {
+            Some("terminal.execute")
+        }
         _ => None,
     }
 }
@@ -55,26 +52,31 @@ fn tool_to_permission_category(tool_name: &str) -> Option<&'static str> {
 ///
 /// # Arguments
 ///
-/// * `tool_name` - The ACP tool name (e.g., "fs/read_text_file")
+/// * `tool_name` - The ACP tool name (e.g., "`fs/read_text_file`")
 /// * `granted_permissions` - Set of granted permission categories, or None for no enforcement
 ///
 /// # Returns
 ///
 /// `Ok(())` if the tool is permitted, or an error with details.
-pub fn check_tool_permission(
+pub fn check_tool_permission<S: std::hash::BuildHasher>(
     tool_name: &str,
-    granted_permissions: Option<&std::collections::HashSet<String>>,
+    granted_permissions: Option<&std::collections::HashSet<String, S>>,
 ) -> Result<(), NexusApiError> {
     // No enforcement if no permission set provided
-    let permissions = match granted_permissions {
-        Some(perms) => perms,
-        None => return Ok(()),
+    let Some(permissions) = granted_permissions else {
+        return Ok(());
     };
 
     let category = tool_to_permission_category(tool_name);
 
-    match category {
-        Some(cat) => {
+    category.map_or_else(
+        || {
+            // Unknown tool: deny by default for safety
+            Err(NexusApiError::InsufficientPermissions {
+                required: vec![format!("tool:{tool_name}")],
+            })
+        },
+        |cat| {
             if permissions.contains(cat) {
                 Ok(())
             } else {
@@ -82,14 +84,8 @@ pub fn check_tool_permission(
                     required: vec![cat.to_string()],
                 })
             }
-        }
-        None => {
-            // Unknown tool: deny by default for safety
-            Err(NexusApiError::InsufficientPermissions {
-                required: vec![format!("tool:{}", tool_name)],
-            })
-        }
-    }
+        },
+    )
 }
 
 #[cfg(test)]
@@ -132,7 +128,10 @@ mod tests {
 
     #[test]
     fn no_enforcement_allows_all_tools() {
-        let result = check_tool_permission("fs/read_text_file", None);
+        let result = check_tool_permission::<std::collections::hash_map::RandomState>(
+            "fs/read_text_file",
+            None,
+        );
         assert!(result.is_ok());
     }
 

@@ -56,7 +56,7 @@ pub enum TaskKind {
     Unknown,
 }
 
-/// Error type for TaskKind parsing (always succeeds, Unknown is fallback).
+/// Error type for `TaskKind` parsing (always succeeds, Unknown is fallback).
 #[derive(Debug, Clone)]
 pub struct ParseTaskKindError(());
 
@@ -91,8 +91,9 @@ impl FromStr for TaskKind {
 }
 
 impl TaskKind {
+    #[must_use]
     /// Convert to string representation.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Brainstorm => "brainstorm",
             Self::Outline => "outline",
@@ -103,6 +104,7 @@ impl TaskKind {
     }
 
     /// Parse task kind from string (convenience wrapper that never fails).
+    #[must_use]
     pub fn parse_fallible(s: &str) -> Self {
         s.parse().unwrap_or(Self::Unknown)
     }
@@ -127,13 +129,13 @@ pub struct PendingReviewInput {
 ///
 /// # Classification Rules (§7.2)
 ///
-/// - **Drop**: Very short digest (< 50 chars) or task_kind is diagnostic/noise.
-/// - **FragmentOnly**: Medium-length digest, no clear long-term value.
+/// - **Drop**: Very short digest (< 50 chars) or `task_kind` is diagnostic/noise.
+/// - **`FragmentOnly`**: Medium-length digest, no clear long-term value.
 ///   Task kinds: "research", "exploration" (informational only).
-/// - **PromoteToLongTerm**: Substantial digest with clear experience value.
+/// - **`PromoteToLongTerm`**: Substantial digest with clear experience value.
 ///   Task kinds: "chapter", "outline", "brainstorm" with rich content.
-/// - **MergeIntoExisting**: Content overlaps with existing memory (Phase 2 feature).
-/// - **TriggerSoulExperienceOnly**: Metadata-only update, no new content.
+/// - **`MergeIntoExisting`**: Content overlaps with existing memory (Phase 2 feature).
+/// - **`TriggerSoulExperienceOnly`**: Metadata-only update, no new content.
 ///
 /// # Example
 ///
@@ -271,7 +273,7 @@ pub struct MemoryFragment {
 /// - Filter stop words
 /// - Take top N keywords by frequency
 ///
-/// Summary is truncated raw_digest or first N chars.
+/// Summary is truncated `raw_digest` or first N chars.
 ///
 /// # Example
 ///
@@ -291,6 +293,7 @@ pub struct MemoryFragment {
 /// let fragment = create_fragment_from_review(&input);
 /// assert!(!fragment.keywords.is_empty());
 /// ```
+#[must_use]
 pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragment {
     // Generate fragment ID (derived from pending_id with frag_ prefix)
     let fragment_id = format!("frag_{}", record.pending_id);
@@ -336,6 +339,7 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
 /// - Filter common stop words
 /// - Lowercase and dedupe
 /// - Limit to top 10 keywords
+#[allow(clippy::too_many_lines)]
 fn extract_keywords(text: &str) -> Vec<String> {
     // Common English stop words to filter out
     const STOP_WORDS: &[&str] = &[
@@ -532,6 +536,9 @@ pub trait SessionDigestSummarizer: Send + Sync {
 // V1.2 residual R7 (pipeline, nit): O(N) idempotency check on promotion
 // O(N) file scan acceptable at current scale; optimize if review count exceeds ~1000
 ///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+///
 /// Returns `true` if the session is already present in any memory's
 /// `source_session_ids` list.
 ///
@@ -578,13 +585,13 @@ pub fn check_session_already_promoted(
 /// 2. Calls the summarizer to generate memory content
 /// 3. Creates a `LongTermMemory` with the summarized content
 /// 4. Saves the memory via `memory_io::save_memory`
-/// 5. Adds the session_id to `source_session_ids`
+/// 5. Adds the `session_id` to `source_session_ids`
 ///
 /// The `memory_kind` is determined from `task_kind`:
-/// - "brainstorm" → "story_summary"
-/// - "outline" → "plot_outline"
-/// - "chapter" → "story_summary"
-/// - "research" → "research_material"
+/// - "brainstorm" → "`story_summary`"
+/// - "outline" → "`plot_outline`"
+/// - "chapter" → "`story_summary`"
+/// - "research" → "`research_material`"
 /// - default → "custom"
 ///
 /// Returns the created `LongTermMemory` with its `memory_id`.
@@ -669,7 +676,7 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     Ok(memory)
 }
 
-/// Map task_kind to memory_kind for promotion.
+/// Map `task_kind` to `memory_kind` for promotion.
 ///
 /// This determines the appropriate `memory_kind` field in the
 /// long-term memory frontmatter based on the session's task type.

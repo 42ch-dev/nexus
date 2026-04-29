@@ -1,6 +1,6 @@
-//! OutboxEntry — local-only outbox send queue item.
+//! `OutboxEntry` — local-only outbox send queue item.
 //!
-//! OutboxEntry entity representing a local send queue item.
+//! `OutboxEntry` entity representing a local send queue item.
 //! Platform does not observe this type directly (it's internal to
 //! the CLI sync mechanism). Aligned with data-model-v1.md §5.13.
 
@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::generated::common_types::DeliveryState;
 
-/// OutboxEntry entity representing a local send queue item.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// `OutboxEntry` entity representing a local send queue item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct OutboxEntry {
     pub schema_version: u32,

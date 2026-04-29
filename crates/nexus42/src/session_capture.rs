@@ -1,7 +1,7 @@
 //! Session-end capture for memory pipeline.
 //!
 //! Collects session context when an ACP session ends and submits
-//! a PendingReviewRecord to the daemon API for later review/promotion.
+//! a `PendingReviewRecord` to the daemon API for later review/promotion.
 //!
 //! See creator-memory-soul-lifecycle-v1.md §6.2.
 
@@ -33,6 +33,7 @@ pub struct SessionDigest {
 
 impl SessionDigest {
     /// Create a new session digest with collected metrics.
+    #[must_use]
     pub fn new(
         duration_secs: u64,
         message_count: usize,
@@ -42,7 +43,7 @@ impl SessionDigest {
         // Truncate last_context to 200 chars (char-safe for UTF-8)
         let last_context = if last_context.chars().count() > 200 {
             let truncated: String = last_context.chars().take(197).collect();
-            format!("{}...", truncated)
+            format!("{truncated}...")
         } else {
             last_context.to_string()
         };
@@ -55,7 +56,8 @@ impl SessionDigest {
         }
     }
 
-    /// Render digest as JSON string for storage in raw_digest field.
+    /// Render digest as JSON string for storage in `raw_digest` field.
+    #[must_use]
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
@@ -87,7 +89,7 @@ struct CreatePendingReviewResponse {
 pub struct SessionCapture {
     /// Session ID.
     session_id: String,
-    /// Agent ID (used for task_kind heuristic).
+    /// Agent ID (used for `task_kind` heuristic).
     agent_id: String,
     /// Creator ID.
     creator_id: String,
@@ -105,6 +107,7 @@ pub struct SessionCapture {
 
 impl SessionCapture {
     /// Create a new session capture tracker.
+    #[must_use]
     pub fn new(
         session_id: String,
         agent_id: String,
@@ -124,12 +127,12 @@ impl SessionCapture {
     }
 
     /// Record a message exchange.
-    pub fn record_message(&mut self) {
+    pub const fn record_message(&mut self) {
         self.message_count += 1;
     }
 
     /// Record a tool call.
-    pub fn record_tool_call(&mut self) {
+    pub const fn record_tool_call(&mut self) {
         self.tool_calls += 1;
     }
 
@@ -138,9 +141,10 @@ impl SessionCapture {
         self.last_context = context.to_string();
     }
 
-    /// Capture session-end data and build a PendingReviewRecord.
+    /// Capture session-end data and build a `PendingReviewRecord`.
     ///
     /// Returns the structured digest ready for submission to daemon.
+    #[must_use]
     pub fn capture_session_end(&self) -> SessionDigest {
         let duration_secs = self.start_time.elapsed().as_secs();
 
@@ -152,7 +156,7 @@ impl SessionCapture {
         )
     }
 
-    /// Determine task kind heuristic from agent_id.
+    /// Determine task kind heuristic from `agent_id`.
     ///
     /// Agent IDs may contain hints like:
     /// - "brainstorm-agent" → "brainstorm"
@@ -161,6 +165,7 @@ impl SessionCapture {
     /// - "research" → "research"
     ///
     /// Default is "unknown".
+    #[must_use]
     pub fn detect_task_kind(&self) -> String {
         let agent_lower = self.agent_id.to_lowercase();
 
@@ -196,13 +201,15 @@ impl SessionCapture {
         digest: &SessionDigest,
         pending_id: Option<&str>,
     ) -> (bool, String) {
-        let pending_id = match pending_id {
-            Some(id) => id.to_string(),
-            None => format!(
-                "pending_{}",
-                uuid::Uuid::new_v4().to_string().replace('-', "")
-            ),
-        };
+        let pending_id = pending_id.map_or_else(
+            || {
+                format!(
+                    "pending_{}",
+                    uuid::Uuid::new_v4().to_string().replace('-', "")
+                )
+            },
+            ToString::to_string,
+        );
         let task_kind = self.detect_task_kind();
         let raw_digest = digest.to_json();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -255,11 +262,13 @@ impl SessionCapture {
     }
 
     /// Get the session ID.
+    #[must_use]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
     /// Get the creator ID.
+    #[must_use]
     pub fn creator_id(&self) -> &str {
         &self.creator_id
     }
@@ -291,6 +300,10 @@ pub struct PendingCaptureFile {
 ///
 /// Creates the directory if it doesn't exist.
 /// Returns `Ok(path)` on success, `Err` if file I/O fails.
+///
+/// # Errors
+///
+/// Returns an I/O error if directory creation or file write fails.
 pub fn save_capture_to_dir(
     dir: &std::path::Path,
     pending_id: &str,
@@ -321,6 +334,10 @@ pub fn save_capture_to_dir(
 ///
 /// Creates `~/.nexus42/pending_captures/` directory if it doesn't exist.
 /// Returns `Ok(path)` on success, `Err` if file I/O fails.
+///
+/// # Errors
+///
+/// Returns an I/O error if nexus home cannot be resolved or file write fails.
 pub fn save_capture_locally(
     pending_id: &str,
     capture: &SessionCapture,
@@ -336,6 +353,7 @@ pub fn save_capture_locally(
 /// Resolve the pending captures directory path.
 ///
 /// Returns `None` if nexus home cannot be determined.
+#[must_use]
 pub fn pending_captures_dir() -> Option<PathBuf> {
     crate::config::nexus_home()
         .ok()

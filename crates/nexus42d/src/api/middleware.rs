@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! API Middleware
 //!
 //! Tower/axum middleware layers for request validation and lifecycle observability.
@@ -37,7 +39,7 @@ pub async fn require_workspace(
         "Checking workspace initialization",
     );
 
-    if !state.is_initialized().await {
+    if !state.is_initialized() {
         tracing::info!(
             method = %request.method(),
             path = %request.uri().path(),
@@ -84,12 +86,12 @@ mod tests {
         }
     }
 
-    /// Build a test app with an uninitialized workspace (workspace_path = None).
+    /// Build a test app with an uninitialized workspace (`workspace_path` = None).
     async fn create_uninitialized_app() -> TestApp {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state);
-        let server = TestServer::new(app).unwrap();
+        let server = TestServer::new(app).expect("TestServer should initialize");
         TestApp { _tmp: tmp, server }
     }
 
@@ -106,7 +108,7 @@ mod tests {
         .await;
 
         let app = build_router(state);
-        let server = TestServer::new(app).unwrap();
+        let server = TestServer::new(app).expect("TestServer should initialize");
         TestApp { _tmp: tmp, server }
     }
 

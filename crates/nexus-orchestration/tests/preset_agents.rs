@@ -1,7 +1,7 @@
 //! Tests for multi-agent preset role definitions (WS-E T6).
 //!
 //! Covers:
-//! - Role parsing and recommended_models format
+//! - Role parsing and `recommended_models` format
 //! - Agent reference validation
 //! - Backward compatibility (no roles = single-agent mode)
 //! - Rejection of invalid configurations
@@ -66,6 +66,7 @@ roles:
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn recommended_models_format_validation() {
     // Valid format: "agent:model"
     let yaml_valid = r#"

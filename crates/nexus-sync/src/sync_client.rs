@@ -54,7 +54,7 @@ const MIN_AUTH_TOKEN_LENGTH: usize = 64;
 /// Validate auth token format.
 ///
 /// Token must:
-/// - Not be empty (handled separately in with_config)
+/// - Not be empty (handled separately in `with_config`)
 /// - Be at least 64 characters long
 /// - Contain only characters typical of opaque bearer tokens: ASCII alphanumeric,
 ///   `-`, `_`, `.`, and standard Base64 alphabet (`+`, `/`, `=`) so platform-issued
@@ -71,8 +71,7 @@ fn validate_auth_token(token: &str) -> SyncResult<()> {
     for c in token.chars() {
         if !is_auth_token_char(c) {
             return Err(SyncError::AuthTokenInvalid(format!(
-                "token contains invalid character '{}'; allowed: ASCII alphanumeric, - _ . + / =",
-                c
+                "token contains invalid character '{c}'; allowed: ASCII alphanumeric, - _ . + / ="
             )));
         }
     }
@@ -81,16 +80,16 @@ fn validate_auth_token(token: &str) -> SyncResult<()> {
 }
 
 #[inline]
-fn is_auth_token_char(c: char) -> bool {
+const fn is_auth_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '/' | '=')
 }
 
 /// Successful push response from the platform.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PushResponse {
     /// Whether the bundle was fully applied.
     pub success: bool,
-    /// Bundle apply status: all_success, partial, or failed.
+    /// Bundle apply status: `all_success`, partial, or failed.
     pub bundle_apply_status: Option<String>,
     /// Server-side world revision after apply.
     pub world_revision: Option<u64>,
@@ -105,7 +104,7 @@ pub struct PushResponse {
 }
 
 /// Pull response from the platform.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullResponse {
     /// Current world revision on the server.
     pub world_revision: u64,
@@ -119,7 +118,7 @@ pub struct PullResponse {
     pub latest_bundle_id: Option<String>,
 }
 
-/// Builder for creating a SyncClient with custom configuration.
+/// Builder for creating a `SyncClient` with custom configuration.
 pub struct SyncClientBuilder {
     body_max_size: usize,
     timeout_secs: u64,
@@ -128,7 +127,8 @@ pub struct SyncClientBuilder {
 
 impl SyncClientBuilder {
     /// Create a new builder with default configuration.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             body_max_size: DEFAULT_BODY_MAX_SIZE,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
@@ -142,7 +142,8 @@ impl SyncClientBuilder {
     ///
     /// This limit applies to HTTP response bodies to prevent memory exhaustion.
     /// Requests with bodies larger than this limit will fail with an error.
-    pub fn body_max_size(mut self, size: usize) -> Self {
+    #[must_use]
+    pub const fn body_max_size(mut self, size: usize) -> Self {
         self.body_max_size = size;
         self
     }
@@ -150,7 +151,8 @@ impl SyncClientBuilder {
     /// Set the request timeout in seconds.
     ///
     /// Default: 30 seconds.
-    pub fn timeout_secs(mut self, secs: u64) -> Self {
+    #[must_use]
+    pub const fn timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self
     }
@@ -158,16 +160,20 @@ impl SyncClientBuilder {
     /// Set the maximum number of retries for transient errors.
     ///
     /// Default: 3.
-    pub fn max_retries(mut self, retries: u32) -> Self {
+    #[must_use]
+    pub const fn max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
         self
     }
 
-    /// Build a SyncClient with the configured settings.
+    /// Build a `SyncClient` with the configured settings.
     ///
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform sync API
     /// * `auth_token` - Bearer token for authentication
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn build(self, platform_base_url: &str, auth_token: &str) -> SyncResult<SyncClient> {
         SyncClient::with_config(
             platform_base_url,
@@ -203,6 +209,9 @@ impl SyncClient {
     ///
     /// # Body Size Limit
     /// Default: 10MB. Use `SyncClient::builder()` for custom configuration.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn new(platform_base_url: &str, auth_token: &str) -> SyncResult<Self> {
         Self::with_config(
             platform_base_url,
@@ -255,11 +264,15 @@ impl SyncClient {
     }
 
     /// Create a builder for custom client configuration.
-    pub fn builder() -> SyncClientBuilder {
+    #[must_use]
+    pub const fn builder() -> SyncClientBuilder {
         SyncClientBuilder::new()
     }
 
     /// Create a new sync client with custom configuration for testing.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     #[cfg(test)]
     pub fn new_with_config(
         platform_base_url: &str,
@@ -277,13 +290,15 @@ impl SyncClient {
 
     /// Get the base URL (for testing).
     #[cfg(test)]
+    #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
     /// Get the configured body max size.
     #[cfg(test)]
-    pub fn body_max_size(&self) -> usize {
+    #[must_use]
+    pub const fn body_max_size(&self) -> usize {
         self.body_max_size
     }
 
@@ -320,6 +335,9 @@ impl SyncClient {
     ///
     /// Returns either a successful `PushResponse` or a `ConflictResponse`.
     /// Transient HTTP errors are retried automatically.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn push_bundle(&self, bundle: &Bundle) -> SyncResult<PushResponse> {
         let url = format!("{}/v1/sync/push", self.base_url);
         tracing::info!(
@@ -367,7 +385,8 @@ impl SyncClient {
         let body: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
-        if status == 200 && body.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        if status == 200 && body.get("success").and_then(serde_json::Value::as_bool) == Some(false)
+        {
             let conflict = ConflictResponse::from_json(&text)?;
             tracing::warn!(
                 conflict_type = %conflict.conflict_type,
@@ -398,6 +417,9 @@ impl SyncClient {
     /// Pull current sync state from the platform.
     ///
     /// Returns server-side world revision and delta sequence for comparison.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn pull_sync_state(&self, world_id: &str) -> SyncResult<PullResponse> {
         let url = format!("{}/v1/sync/state/{world_id}", self.base_url);
         tracing::debug!(world_id = %world_id, "Pulling sync state from platform");
@@ -442,6 +464,9 @@ impl SyncClient {
     ///
     /// Calls `POST /v1/sync/pull` with [`SyncPullRequest`]. Applies the same body-size
     /// limits and retry policy as [`Self::push_bundle`].
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn pull_bundles(&self, req: &SyncPullRequest) -> SyncResult<SyncPullResponse> {
         let url = format!("{}/v1/sync/pull", self.base_url);
         tracing::info!(
@@ -461,6 +486,9 @@ impl SyncClient {
     }
 
     /// Fork a world on the platform (`POST /v1/worlds/fork`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn fork_world(&self, req: &WorldForkRequest) -> SyncResult<WorldForkResponse> {
         let url = format!("{}/v1/worlds/fork", self.base_url);
         tracing::info!(
@@ -472,6 +500,9 @@ impl SyncClient {
     }
 
     /// Capture a world snapshot cursor on the platform (`POST /v1/worlds/snapshot`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn snapshot_world(
         &self,
         req: &WorldSnapshotRequest,
@@ -482,6 +513,9 @@ impl SyncClient {
     }
 
     /// Read-only Explore browse (`POST /v1/explore/browse`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn explore_browse(
         &self,
         req: &ExploreBrowseRequest,
@@ -492,6 +526,9 @@ impl SyncClient {
     }
 
     /// Read-only Explore search (`POST /v1/explore/search`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn explore_search(
         &self,
         req: &ExploreSearchRequest,
@@ -502,6 +539,9 @@ impl SyncClient {
     }
 
     /// Publish a manuscript story on the platform (`POST /v1/publish/story`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn publish_story(
         &self,
         req: &PublishStoryRequest,
@@ -516,6 +556,9 @@ impl SyncClient {
     }
 
     /// Paginated publish history for a manuscript (`POST /v1/publish/history`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn publish_history(
         &self,
         req: &PublishHistoryRequest,
@@ -530,6 +573,7 @@ impl SyncClient {
     }
 
     /// POST JSON body, enforce body limits, map HTTP errors — shared by pull-style endpoints.
+    #[allow(clippy::future_not_send)]
     async fn post_platform_json<Req: Serialize + ?Sized, Resp: DeserializeOwned>(
         &self,
         url: &str,
@@ -565,6 +609,7 @@ impl SyncClient {
     }
 
     /// Execute an HTTP request with automatic retry for transient errors.
+    #[allow(clippy::future_not_send)]
     async fn execute_with_retry<T: Serialize + ?Sized>(
         &self,
         method: Method,
@@ -574,7 +619,7 @@ impl SyncClient {
         let mut last_error = None;
 
         for attempt in 0..=self.max_retries {
-            let request = self.build_request(method.clone(), url, body)?;
+            let request = self.build_request(method.clone(), url, body);
 
             match request.send().await {
                 Ok(response) => return Ok(response),
@@ -613,7 +658,7 @@ impl SyncClient {
         method: Method,
         url: &str,
         body: Option<&T>,
-    ) -> SyncResult<RequestBuilder> {
+    ) -> RequestBuilder {
         let mut request = self
             .client
             .request(method, url)
@@ -625,10 +670,13 @@ impl SyncClient {
             request = request.json(b);
         }
 
-        Ok(request)
+        request
     }
 
     /// Parse a push response body into a partial apply result, if applicable.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn parse_partial_apply(
         push_response: &PushResponse,
     ) -> SyncResult<Option<PartialApplyResult>> {
@@ -638,24 +686,19 @@ impl SyncClient {
                 Ok(Some(partial))
             }
             Some("failed") => Err(SyncError::AllDeltasFailed {
-                failed_count: push_response
-                    .delta_results
-                    .as_ref()
-                    .map(|r| {
-                        r.iter()
-                            .filter(|d| {
-                                d.get("delta_apply_status")
-                                    .map(|s| s.as_str() == Some("rejected"))
-                                    .unwrap_or(false)
-                            })
-                            .count()
-                    })
-                    .unwrap_or(1),
+                // SAFETY: map_or provides default when delta_results is None.
+                failed_count: push_response.delta_results.as_ref().map_or(1, |r| {
+                    r.iter()
+                        .filter(|d| {
+                            d.get("delta_apply_status")
+                                .is_some_and(|s| s.as_str() == Some("rejected"))
+                        })
+                        .count()
+                }),
                 total_count: push_response
                     .delta_results
                     .as_ref()
-                    .map(|r| r.len())
-                    .unwrap_or(1),
+                    .map_or(1, std::vec::Vec::len),
             }),
             _ => Ok(None),
         }
@@ -720,7 +763,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Platform tokens may use standard Base64 (+ / =); previously rejected by validate_auth_token.
+    /// Platform tokens may use standard Base64 (+ / =); previously rejected by `validate_auth_token`.
     #[test]
     fn client_creation_accepts_base64_alphabet_token() {
         let token = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ab";
@@ -773,7 +816,7 @@ mod tests {
             .build("https://api.example.com", VALID_TOKEN)
             .expect("build");
         // Timeout is internal to client, we trust it's set correctly
-        assert!(client.base_url().len() > 0);
+        assert!(!client.base_url().is_empty());
     }
 
     #[test]

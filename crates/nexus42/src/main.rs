@@ -181,13 +181,13 @@ enum Commands {
         command: PresetCommand,
     },
 
-    /// Local identity management (local_only mode)
+    /// Local identity management (`local_only` mode)
     Identity {
         #[command(subcommand)]
         command: IdentityCommand,
     },
 
-    /// Runtime mode management (local_only / local_first / cloud_enhanced)
+    /// Runtime mode management (`local_only` / `local_first` / `cloud_enhanced`)
     RuntimeMode {
         #[command(subcommand)]
         command: RuntimeModeCommand,
@@ -240,8 +240,7 @@ async fn main() {
                     // IP-based rate limiting when X-Device-ID is absent.
                     // Still visible to the user so they understand degraded mode.
                     eprintln!(
-                        "nexus42: device identity unavailable — {} (platform rate-limit will use IP-based identification)",
-                        e
+                        "nexus42: device identity unavailable — {e} (platform rate-limit will use IP-based identification)"
                     );
                 }
             }
@@ -259,7 +258,7 @@ async fn main() {
         Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
         Some(Commands::World { command }) => commands::world::run(command, &config).await,
         Some(Commands::Clone { args }) => commands::clone::run(args, &config).await,
-        Some(Commands::Config { command }) => commands::config::run(command, &config).await,
+        Some(Commands::Config { command }) => commands::config::run(command, &config),
         Some(Commands::Explore { command }) => {
             commands::explore::run(command, &config, &cli.output_format).await
         }
@@ -272,14 +271,12 @@ async fn main() {
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
         Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,
-        Some(Commands::Session { command }) => commands::session::run(command, &config).await,
-        Some(Commands::Policy { command }) => commands::policy::run(command).await,
-        Some(Commands::Permission { command }) => commands::permission::run(command).await,
+        Some(Commands::Session { command }) => commands::session::run(command, &config),
+        Some(Commands::Policy { command }) => commands::policy::run(command),
+        Some(Commands::Permission { command }) => commands::permission::run(command),
         Some(Commands::Preset { command }) => commands::preset::run(command, &config).await,
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
-        Some(Commands::RuntimeMode { command }) => {
-            commands::runtime_mode::run(command, &config).await
-        }
+        Some(Commands::RuntimeMode { command }) => commands::runtime_mode::run(command, &config),
         Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
         Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
         Some(Commands::Schedule { command }) => commands::schedule::run(command, &config).await,
@@ -291,7 +288,7 @@ async fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("Error: {}", e);
+        eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }

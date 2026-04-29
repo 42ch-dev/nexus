@@ -39,6 +39,13 @@ pub enum DaemonCommand {
 }
 
 /// Run daemon command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Daemon process cannot be started or stopped
+/// - Health check fails
+/// - PID file operations fail
 pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         DaemonCommand::Start { port, foreground } => start_daemon(port, foreground).await,
@@ -47,16 +54,27 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Start the daemon process
+/// Start the daemon process.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Health check fails to communicate with existing daemon
+/// - Daemon process cannot be spawned
+/// - PID file operations fail
+/// - Process management fails
+///
+/// Note: This function is 102 lines; splitting would break the coherent daemon startup flow.
+#[allow(clippy::too_many_lines)]
 async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
     // Check if already running
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{}", port));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
     if client.health_check().await? {
-        println!("Daemon is already running on port {}", port);
+        println!("Daemon is already running on port {port}");
         return Ok(());
     }
 
-    println!("Starting nexus42d daemon on port {}...", port);
+    println!("Starting nexus42d daemon on port {port}...");
 
     // Spawn nexus42d as a detached background process.
     // In development, we use `cargo run -p nexus42d`.
@@ -117,7 +135,7 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
             .process_group(0)
             .spawn()
             .map_err(|e| crate::errors::CliError::Daemon {
-                message: format!("Failed to spawn daemon process '{}': {}", program, e),
+                message: format!("Failed to spawn daemon process '{program}': {e}"),
             })?;
 
         // Write the PID file so stop_daemon() can find the process
@@ -155,14 +173,13 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
         for i in 1..=max_retries {
             tokio::time::sleep(retry_delay).await;
             if client.health_check().await? {
-                println!("✓ Daemon started successfully on port {}", port);
-                println!("  PID: {}", child_pid);
+                println!("✓ Daemon started successfully on port {port}");
+                println!("  PID: {child_pid}");
                 return Ok(());
             }
             if i == max_retries {
                 println!(
-                    "⚠ Daemon process was spawned but health check failed after {} retries.",
-                    max_retries
+                    "⚠ Daemon process was spawned but health check failed after {max_retries} retries."
                 );
                 println!("  The daemon may still be starting. Check with: nexus42 daemon status");
                 println!("  Or check logs: journalctl --user -u nexus42d");
@@ -231,6 +248,8 @@ fn remove_pid_file() -> Result<()> {
 /// Check if a process with the given PID is running
 #[cfg(unix)]
 #[allow(dead_code)]
+// PID cast is safe: Unix PIDs are always positive and within i32 range (max ~4M on Linux)
+#[allow(clippy::cast_possible_wrap)]
 fn is_process_running(pid: u32) -> bool {
     // Sending signal 0 checks if the process exists without actually sending a signal
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
@@ -240,9 +259,9 @@ fn is_process_running(pid: u32) -> bool {
 /// Stop the daemon by reading PID from file and sending SIGTERM, then SIGKILL
 async fn stop_daemon(port: u16) -> Result<()> {
     // First check if daemon is actually running via health check
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{}", port));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
     if !client.health_check().await? {
-        println!("Daemon is not running on port {}.", port);
+        println!("Daemon is not running on port {port}.");
 
         // Clean up stale PID file if it exists
         if read_pid_file()?.is_some() {
@@ -255,93 +274,90 @@ async fn stop_daemon(port: u16) -> Result<()> {
 
     // Try to stop via PID file
     let pid = read_pid_file()?;
-    match pid {
-        Some(pid) => {
-            println!("Stopping daemon (PID: {})...", pid);
+    if let Some(pid) = pid {
+        println!("Stopping daemon (PID: {pid})...");
 
-            // Send SIGTERM
-            let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
-            if let Err(e) = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM) {
-                if e == nix::errno::Errno::ESRCH {
-                    // Process doesn't exist — clean up PID file
-                    remove_pid_file()?;
-                    println!("  Process {} not found (already stopped).", pid);
-                    return Ok(());
-                }
-                return Err(CliError::Daemon {
-                    message: format!("Failed to send SIGTERM to PID {}: {}", pid, e),
-                });
-            }
-
-            // Wait up to 2 seconds for graceful shutdown
-            let timeout = std::time::Duration::from_secs(2);
-            let start = std::time::Instant::now();
-            let mut stopped = false;
-
-            while start.elapsed() < timeout {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                match nix::sys::signal::kill(nix_pid, Signal::SIGTERM) {
-                    Err(nix::errno::Errno::ESRCH) => {
-                        // Process no longer exists
-                        stopped = true;
-                        break;
-                    }
-                    _ => {
-                        // Still running, continue waiting
-                    }
-                }
-            }
-
-            if !stopped {
-                // Force kill with SIGKILL
-                println!("  Daemon did not stop gracefully, sending SIGKILL...");
-                if let Err(e) = nix::sys::signal::kill(nix_pid, Signal::SIGKILL) {
-                    // If ESRCH, process already dead
-                    if e != nix::errno::Errno::ESRCH {
-                        return Err(CliError::Daemon {
-                            message: format!("Failed to send SIGKILL to PID {}: {}", pid, e),
-                        });
-                    }
-                }
-                // Brief wait for SIGKILL to take effect
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            }
-
-            remove_pid_file()?;
-            println!("✓ Daemon stopped.");
-        }
-        None => {
-            // No PID file — try to stop via lsof
-            println!("No PID file found. Trying port-based stop...");
-            let output = std::process::Command::new("lsof")
-                .args(["-ti", &format!(":{}", port)])
-                .output()
-                .map_err(|e| CliError::Daemon {
-                    message: format!("Failed to run lsof: {}", e),
-                })?;
-
-            let pids_str = String::from_utf8_lossy(&output.stdout);
-            if pids_str.trim().is_empty() {
-                println!("No process found on port {}.", port);
+        // Send SIGTERM
+        // PID cast is safe: Unix PIDs are always positive and within i32 range
+        #[allow(clippy::cast_possible_wrap)]
+        let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+        if let Err(e) = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM) {
+            if e == nix::errno::Errno::ESRCH {
+                // Process doesn't exist — clean up PID file
+                remove_pid_file()?;
+                println!("  Process {pid} not found (already stopped).");
                 return Ok(());
             }
+            return Err(CliError::Daemon {
+                message: format!("Failed to send SIGTERM to PID {pid}: {e}"),
+            });
+        }
 
-            for pid_str in pids_str.lines() {
-                if let Ok(pid_num) = pid_str.trim().parse::<u32>() {
-                    let nix_pid = nix::unistd::Pid::from_raw(pid_num as i32);
-                    let _ = nix::sys::signal::kill(nix_pid, Signal::SIGTERM);
-                    println!("  Sent SIGTERM to PID {}.", pid_num);
+        // Wait up to 2 seconds for graceful shutdown
+        let timeout = std::time::Duration::from_secs(2);
+        let start = std::time::Instant::now();
+        let mut stopped = false;
+
+        while start.elapsed() < timeout {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            if nix::sys::signal::kill(nix_pid, Signal::SIGTERM) == Err(nix::errno::Errno::ESRCH) {
+                // Process no longer exists
+                stopped = true;
+                break;
+            }
+            // Still running, continue waiting
+        }
+
+        if !stopped {
+            // Force kill with SIGKILL
+            println!("  Daemon did not stop gracefully, sending SIGKILL...");
+            if let Err(e) = nix::sys::signal::kill(nix_pid, Signal::SIGKILL) {
+                // If ESRCH, process already dead
+                if e != nix::errno::Errno::ESRCH {
+                    return Err(CliError::Daemon {
+                        message: format!("Failed to send SIGKILL to PID {pid}: {e}"),
+                    });
                 }
             }
+            // Brief wait for SIGKILL to take effect
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
 
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        remove_pid_file()?;
+        println!("✓ Daemon stopped.");
+    } else {
+        // No PID file — try to stop via lsof
+        println!("No PID file found. Trying port-based stop...");
+        let output = std::process::Command::new("lsof")
+            .args(["-ti", &format!(":{port}")])
+            .output()
+            .map_err(|e| CliError::Daemon {
+                message: format!("Failed to run lsof: {e}"),
+            })?;
 
-            // Verify daemon is stopped
-            if client.health_check().await? {
-                println!("  ⚠ Daemon may still be running. Check with: nexus42 daemon status");
-            } else {
-                println!("✓ Daemon stopped.");
+        let pids_str = String::from_utf8_lossy(&output.stdout);
+        if pids_str.trim().is_empty() {
+            println!("No process found on port {port}.");
+            return Ok(());
+        }
+
+        for pid_str in pids_str.lines() {
+            if let Ok(pid_num) = pid_str.trim().parse::<u32>() {
+                // PID cast is safe: Unix PIDs are always positive and within i32 range
+                #[allow(clippy::cast_possible_wrap)]
+                let nix_pid = nix::unistd::Pid::from_raw(pid_num as i32);
+                let _ = nix::sys::signal::kill(nix_pid, Signal::SIGTERM);
+                println!("  Sent SIGTERM to PID {pid_num}.");
             }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Verify daemon is stopped
+        if client.health_check().await? {
+            println!("  ⚠ Daemon may still be running. Check with: nexus42 daemon status");
+        } else {
+            println!("✓ Daemon stopped.");
         }
     }
 
@@ -367,11 +383,11 @@ async fn stop_daemon(port: u16) -> Result<()> {
 
 /// Check daemon status
 async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
-    let daemon_url = format!("http://127.0.0.1:{}", port);
+    let daemon_url = format!("http://127.0.0.1:{port}");
     let client = DaemonClient::new(&daemon_url);
 
     println!("Daemon Status:");
-    println!("  URL: {}", daemon_url);
+    println!("  URL: {daemon_url}");
 
     if client.health_check().await? {
         println!("  Status: ✓ Running");
@@ -381,15 +397,15 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
             .await
         {
             if let Some(version) = status.get("version") {
-                println!("  Version: {}", version);
+                println!("  Version: {version}");
             }
             if let Some(uptime) = status.get("uptime_seconds") {
-                println!("  Uptime: {}s", uptime);
+                println!("  Uptime: {uptime}s");
             }
         }
         // Show PID if available
         if let Ok(Some(pid)) = read_pid_file() {
-            println!("  PID: {}", pid);
+            println!("  PID: {pid}");
         }
     } else {
         println!("  Status: ✗ Not running");
@@ -406,6 +422,7 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -415,13 +432,11 @@ mod tests {
         let path_str = path.to_string_lossy();
         assert!(
             path_str.contains(".nexus42"),
-            "Path should contain .nexus42: {}",
-            path_str
+            "Path should contain .nexus42: {path_str}"
         );
         assert!(
             path_str.ends_with("daemon.pid"),
-            "Path should end with daemon.pid: {}",
-            path_str
+            "Path should end with daemon.pid: {path_str}"
         );
     }
 
@@ -431,18 +446,14 @@ mod tests {
         // Use a path that definitely doesn't exist by mocking
         let result = read_pid_file();
         // In CI/test this may or may not exist, just check it doesn't error
-        assert!(
-            result.is_ok(),
-            "read_pid_file should not error: {:?}",
-            result
-        );
+        assert!(result.is_ok(), "read_pid_file should not error: {result:?}");
     }
 
     #[cfg(unix)]
     #[test]
     fn test_is_process_running_with_invalid_pid() {
-        // PID 999999 is very unlikely to exist
-        assert!(!is_process_running(999999));
+        // PID 999_999 is very unlikely to exist
+        assert!(!is_process_running(999_999));
     }
 
     #[cfg(unix)]

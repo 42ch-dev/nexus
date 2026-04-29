@@ -43,7 +43,8 @@ impl SqliteSessionStorage {
     /// The pool must already have migrations applied (including the
     /// `orchestration_sessions` table). Call
     /// [`nexus_local_db::run_migrations`] before constructing this.
-    pub fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
+    #[must_use]
+    pub const fn new(pool: Arc<sqlx::SqlitePool>) -> Self {
         Self { pool }
     }
 
@@ -54,6 +55,9 @@ impl SqliteSessionStorage {
     /// the in-memory session tracker.
     ///
     /// Returns `SessionSummary` structs suitable for engine recovery.
+    ///
+    /// # Errors
+    /// Returns a graph-flow error if the database query fails.
     pub async fn list_non_terminal_sessions(&self) -> graph_flow::Result<Vec<SessionSummary>> {
         #[derive(sqlx::FromRow)]
         struct SummaryRow {
@@ -81,7 +85,6 @@ impl SqliteSessionStorage {
             .into_iter()
             .map(|row| {
                 let status = match row.status.as_str() {
-                    "running" => SessionStatus::Running,
                     "paused" => SessionStatus::Paused,
                     "waiting_for_input" => SessionStatus::WaitingForInput,
                     // Fallback for any other non-terminal values in DB
@@ -153,7 +156,7 @@ impl SessionStorage for SqliteSessionStorage {
         .execute(&*self.pool)
         .await
         .map_err(|e| {
-            graph_flow::GraphError::StorageError(format!("save session '{}': {e}", session_id))
+            graph_flow::GraphError::StorageError(format!("save session '{session_id}': {e}"))
         })?;
 
         Ok(())
@@ -220,7 +223,7 @@ struct SessionRow {
 mod tests {
     use super::*;
 
-    /// Helper: open a fresh on-disk temp SQLite pool with migrations applied.
+    /// Helper: open a fresh on-disk temp `SQLite` pool with migrations applied.
     async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::NamedTempFile) {
         let db = tempfile::NamedTempFile::new().unwrap();
         let pool = nexus_local_db::open_pool(db.path())

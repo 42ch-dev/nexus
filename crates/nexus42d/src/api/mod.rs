@@ -1,3 +1,5 @@
+//! Complex HTTP handlers with orchestration logic exceed line limits.
+#![allow(clippy::too_many_lines)]
 //! Local API — HTTP JSON endpoints for CLI communication
 //!
 //! Endpoints:

@@ -1,14 +1,14 @@
-//! Nexus ExploreAiAnswerRequest
+//! `Nexus` `ExploreAiAnswerRequest`
 //!
-//! Request body for Explore AI grounded Q&A over world / corpus context (platform plan 19). Boundary with context assembly: this is platform-side retrieval + generation; wire shape only.
+//! `Request` body for `Explore` `AI` grounded `Q`&`A` over world / corpus context (platform plan 19). `Boundary` with context assembly: this is platform-side retrieval + generation; wire shape only.
 //!
-//! @schema_version 1
-//! @source explore-ai-answer-request.schema.json
+//! `@schema_version` 1
+//! `@source` explore-ai-answer-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for Explore AI grounded Q&A over world / corpus context (platform plan 19). Boundary with context assembly: this is platform-side retrieval + generation; wire shape only.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for `Explore` `AI` grounded `Q`&`A` over world / corpus context (platform plan 19). `Boundary` with context assembly: this is platform-side retrieval + generation; wire shape only.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiAnswerRequest {
     pub schema_version: u32,

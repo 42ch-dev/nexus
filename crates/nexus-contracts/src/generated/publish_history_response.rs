@@ -1,15 +1,15 @@
-//! Nexus PublishHistoryResponse
+//! `Nexus` `PublishHistoryResponse`
 //!
-//! Response body for POST /v1/publish/history.
+//! `Response` body for `POST` /v1/publish/history.
 //!
-//! @schema_version 1
-//! @source publish-history-response.schema.json
+//! `@schema_version` 1
+//! `@source` publish-history-response.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::publish_history_entry::PublishHistoryEntry;
 
-/// Response body for POST /v1/publish/history.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Response` body for `POST` /v1/publish/history.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PublishHistoryResponse {
     pub schema_version: u32,

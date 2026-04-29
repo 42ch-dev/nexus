@@ -142,6 +142,7 @@ pub fn resolve_preset(
 ///
 /// Returns the names of all subdirectories under `embedded-presets/`
 /// that contain a `preset.yaml` file.
+#[must_use]
 pub fn list_embedded_presets() -> Vec<String> {
     EMBEDDED_PRESETS
         .dirs()
@@ -298,7 +299,7 @@ mod tests {
                     manifest::EnterAction::Capability { args, .. } => {
                         args.as_ref()?.get("prompt_file")?.as_str()
                     }
-                    _ => None,
+                    manifest::EnterAction::InnerGraph { .. } => None,
                 })
             })
             .collect();
@@ -411,7 +412,6 @@ states:
     #[test]
     fn resolve_preset_finds_system_preset() {
         use crate::system_preset_dir::ensure_maintenance_preset;
-        use std::fs;
 
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();

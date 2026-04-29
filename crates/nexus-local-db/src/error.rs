@@ -7,9 +7,9 @@ use std::fmt;
 /// Local database errors with actionable descriptions
 #[derive(Debug)]
 pub enum LocalDbError {
-    /// workspace_meta table does not exist
+    /// `workspace_meta` table does not exist
     MissingWorkspaceMetaTable,
-    /// Required version key is missing from workspace_meta
+    /// Required version key is missing from `workspace_meta`
     MissingVersionKey { key: String },
     /// Version value is not a valid u32 integer
     InvalidVersionValue {
@@ -41,43 +41,38 @@ impl fmt::Display for LocalDbError {
             Self::MissingVersionKey { key } => {
                 write!(
                     f,
-                    "required key '{}' is missing from workspace_meta - database schema may be incomplete or corrupted; call seed_versions() to seed version keys",
-                    key
+                    "required key '{key}' is missing from workspace_meta - database schema may be incomplete or corrupted; call seed_versions() to seed version keys",
                 )
             }
             Self::InvalidVersionValue { key, value, reason } => {
                 write!(
                     f,
-                    "version key '{}' has invalid value '{}' - {}; database schema may be corrupted, consider re-initializing",
-                    key, value, reason
+                    "version key '{key}' has invalid value '{value}' - {reason}; database schema may be corrupted, consider re-initializing",
                 )
             }
             Self::IdentityNotFound { creator_id } => {
                 write!(
                     f,
-                    "local identity '{}' not found; run `nexus42 identity create --persistent` to create one or `nexus42 identity list` to see available identities",
-                    creator_id
+                    "local identity '{creator_id}' not found; run `nexus42 identity create --persistent` to create one or `nexus42 identity list` to see available identities",
                 )
             }
             Self::IdentityAlreadyLinked { creator_id } => {
                 write!(
                     f,
-                    "local identity '{}' is already linked to a platform creator; cannot link again",
-                    creator_id
+                    "local identity '{creator_id}' is already linked to a platform creator; cannot link again",
                 )
             }
             Self::IdentityNotLinked { creator_id } => {
                 write!(
                     f,
-                    "local identity '{}' is not linked to any platform creator; nothing to unlink",
-                    creator_id
+                    "local identity '{creator_id}' is not linked to any platform creator; nothing to unlink",
                 )
             }
             Self::Sqlx(err) => {
-                write!(f, "database operation failed: {}", err)
+                write!(f, "database operation failed: {err}")
             }
             Self::Migrate(err) => {
-                write!(f, "database migration failed: {}", err)
+                write!(f, "database migration failed: {err}")
             }
         }
     }

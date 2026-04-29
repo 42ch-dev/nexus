@@ -1,12 +1,14 @@
-//! SQLite connection pool wrapper using sqlx
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
+//! `SQLite` connection pool wrapper using sqlx
 //!
 //! Provides async connection pooling for concurrent handler access
-//! to the daemon's SQLite database (WAL mode enabled).
+//! to the daemon's `SQLite` database (WAL mode enabled).
 
 use std::path::Path;
 use std::time::Duration;
 
-/// Configuration for the SQLite connection pool.
+/// Configuration for the `SQLite` connection pool.
 ///
 /// Controls pool sizing and timeout behaviour. Defaults match the previous
 /// hard-coded values (`max_connections: 8`, `timeout: 30 s`).
@@ -22,14 +24,14 @@ use std::time::Duration;
 ///
 /// - **`timeout`** — maximum time to wait for an available connection.
 ///   Increase under heavy concurrent load; decrease to fail fast.
-/// - **`max_connections`** — upper bound on open SQLite connections.
-///   SQLite is file-level-locked, so very high values rarely improve
+/// - **`max_connections`** — upper bound on open `SQLite` connections.
+///   `SQLite` is file-level-locked, so very high values rarely improve
 ///   throughput; 8–16 is usually sufficient for the daemon.
 ///
 /// # Pool Tuning Guidance
 ///
 /// The default pool configuration is suitable for single-user local development:
-/// - `max_connections: 8` — SQLite WAL mode supports 1 writer + N readers
+/// - `max_connections: 8` — `SQLite` WAL mode supports 1 writer + N readers
 /// - `timeout: 30s` — connection timeout for pool checkout
 ///
 /// For embedded daemon use, reduce `max_connections` to 2–4.
@@ -75,6 +77,7 @@ impl PoolConfig {
     ///
     /// See the [struct-level documentation](PoolConfig) for the variable names
     /// and fallback behaviour.
+    #[must_use]
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
 
@@ -94,26 +97,28 @@ impl PoolConfig {
     }
 
     /// Set the pool wait timeout.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Set the maximum number of connections.
-    pub fn with_max_connections(mut self, max_connections: u32) -> Self {
+    #[must_use]
+    pub const fn with_max_connections(mut self, max_connections: u32) -> Self {
         self.max_connections = max_connections;
         self
     }
 }
 
-/// Wrapper around sqlx SQLite connection pool
+/// Wrapper around sqlx `SQLite` connection pool
 ///
 /// Provides async connection retrieval for concurrent handler access
-/// to the daemon's SQLite database (WAL mode enabled).
+/// to the daemon's `SQLite` database (WAL mode enabled).
 #[derive(Clone)]
 pub struct DbPool {
     pool: sqlx::SqlitePool,
-    /// Stored max_connections value for monitoring (sqlx doesn't expose a getter).
+    /// Stored `max_connections` value for monitoring (sqlx doesn't expose a getter).
     max_connections: u32,
 }
 
@@ -121,12 +126,12 @@ impl DbPool {
     /// Create a new connection pool with the given configuration.
     ///
     /// # Arguments
-    /// * `db_path` - Path to the SQLite database file
+    /// * `db_path` - Path to the `SQLite` database file
     /// * `config`  - Pool sizing and timeout configuration
     ///
-    /// # SQLite Locking Strategy
+    /// # `SQLite` Locking Strategy
     ///
-    /// This pool uses SQLite in WAL (Write-Ahead Logging) mode, which allows:
+    /// This pool uses `SQLite` in WAL (Write-Ahead Logging) mode, which allows:
     /// - Concurrent reads while a write is in progress
     /// - Better performance for read-heavy workloads
     ///
@@ -169,13 +174,15 @@ impl DbPool {
     }
 
     /// Get a reference to the underlying sqlx pool.
-    pub fn pool(&self) -> &sqlx::SqlitePool {
+    #[must_use]
+    pub const fn pool(&self) -> &sqlx::SqlitePool {
         &self.pool
     }
 
     /// Returns pool status information.
     ///
     /// Provides observability for database connection pool metrics.
+    #[must_use]
     pub fn status(&self) -> PoolStatus {
         PoolStatus {
             max_size: self.max_connections as usize,
@@ -197,14 +204,20 @@ pub struct PoolStatus {
 mod tests {
     use super::*;
 
-    /// Helper to create a test database with schema via nexus_local_db
+    /// Helper to create a test database with schema via `nexus_local_db`
     async fn create_test_pool() -> (tempfile::TempDir, std::path::PathBuf, DbPool) {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tempfile::TempDir::new().expect("TempDir creation should succeed");
         let db_path = tmp.path().join("test.db");
 
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
-        nexus_local_db::seed_versions(&pool).await.unwrap();
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open_pool should succeed");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run_migrations should succeed");
+        nexus_local_db::seed_versions(&pool)
+            .await
+            .expect("seed_versions should succeed");
 
         let db_pool = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
             .await
@@ -234,32 +247,32 @@ mod tests {
             .map(|i| {
                 let p = pool.clone();
                 tokio::spawn(async move {
-                    let cid = format!("ctr-{}", i);
-                    let display_name = format!("Creator {}", i);
+                    let cid = format!("ctr-{i}");
+                    let display_name = format!("Creator {i}");
                     sqlx::query!(
                         "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', '2026-01-01T00:00:00Z', '{}')",
                         cid, display_name
                     )
                     .execute(p.pool())
                     .await
-                    .unwrap();
+                    .expect("INSERT should succeed");
 
-                    let creator_id = format!("ctr-{}", i);
+                    let creator_id = format!("ctr-{i}");
                     let row: Option<String> = sqlx::query_scalar!(
                         "SELECT display_name FROM creators WHERE creator_id = ?",
                         creator_id
                     )
                     .fetch_optional(p.pool())
                     .await
-                    .unwrap();
-                    format!("got: {:?}", row)
+                    .expect("SELECT should succeed");
+                    format!("got: {row:?}")
                 })
             })
             .collect();
 
         let mut results = Vec::new();
         for handle in handles {
-            results.push(handle.await.unwrap());
+            results.push(handle.await.expect("task should complete successfully"));
         }
         assert_eq!(results.len(), 4);
         for r in &results {

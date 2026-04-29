@@ -79,19 +79,19 @@ fn parse_judge_response(text: &str) -> (bool, String) {
 
     for word in GO_WORDS {
         if lower.contains(word) {
-            return (true, format!("judge.llm: go (matched '{}')", word));
+            return (true, format!("judge.llm: go (matched '{word}')"));
         }
     }
 
     for word in NOGO_WORDS {
         if lower.contains(word) {
-            return (false, format!("judge.llm: nogo (matched '{}')", word));
+            return (false, format!("judge.llm: nogo (matched '{word}')"));
         }
     }
 
     (
         false,
-        format!("judge.llm: ambiguous response — '{:.50}'", lower),
+        format!("judge.llm: ambiguous response — '{lower:.50}'"),
     )
 }
 
@@ -106,24 +106,21 @@ mod tests {
 
     #[test]
     fn parse_go_response() {
-        assert_eq!(
-            parse_judge_response("Yes, proceed with the next step").0,
-            true
-        );
-        assert_eq!(parse_judge_response("Go ahead!").0, true);
-        assert_eq!(parse_judge_response("APPROVE").0, true);
+        assert!(parse_judge_response("Yes, proceed with the next step").0);
+        assert!(parse_judge_response("Go ahead!").0);
+        assert!(parse_judge_response("APPROVE").0);
     }
 
     #[test]
     fn parse_nogo_response() {
-        assert_eq!(parse_judge_response("No, wait for more input").0, false);
-        assert_eq!(parse_judge_response("Stop here").0, false);
+        assert!(!parse_judge_response("No, wait for more input").0);
+        assert!(!parse_judge_response("Stop here").0);
     }
 
     #[test]
     fn parse_ambiguous_response() {
         let (result, reason) = parse_judge_response("maybe we should think about it");
-        assert_eq!(result, false);
+        assert!(!result);
         assert!(reason.contains("ambiguous"));
     }
 

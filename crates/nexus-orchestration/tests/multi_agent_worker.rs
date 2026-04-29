@@ -1,9 +1,9 @@
 //! Integration tests for multi-agent worker feature (WS-E T4b).
 //!
 //! Tests exercise the full IPC roundtrip between daemon-side code
-//! (WorkerHandle / IpcClient) and a mock worker that implements the
-//! multi-agent JSON-RPC protocol (worker/initialize, worker/agent_start,
-//! worker/agent_stop, worker/agent_list, worker/acp_prompt, worker/shutdown).
+//! (`WorkerHandle` / `IpcClient`) and a mock worker that implements the
+//! multi-agent JSON-RPC protocol (worker/initialize, `worker/agent_start`,
+//! `worker/agent_stop`, `worker/agent_list`, `worker/acp_prompt`, worker/shutdown).
 //!
 //! The mock worker runs as a tokio task behind a [`DuplexTransport`] pair,
 //! faithfully reproducing the request routing and state management of the
@@ -52,7 +52,7 @@ impl MockSlot {
             "role": self.role,
             "model": self.model,
             "state": self.state,
-            "uptime_ms": self.created_at.elapsed().as_millis() as u64,
+            "uptime_ms": u64::try_from(self.created_at.elapsed().as_millis()).unwrap_or(u64::MAX),
         })
     }
 }
@@ -85,6 +85,7 @@ type HandlerResult = Result<Value, (i64, String)>;
 /// Spawn a mock multi-agent worker server task.
 ///
 /// Returns the client-side `IpcClient` and the server task handle.
+#[allow(clippy::unused_async)]
 async fn spawn_mock_multi_agent_worker(
     creator_id: &str,
 ) -> (IpcClient, tokio::task::JoinHandle<()>) {
@@ -118,38 +119,39 @@ async fn spawn_mock_multi_agent_worker(
                     if state.shutdown_requested.load(Ordering::Relaxed)
                         && method != "worker/shutdown"
                     {
-                        send_jsonrpc_error(&server, &id, -32000, "Worker shutting down").await;
+                        send_jsonrpc_error(&server, id.as_ref(), -32000, "Worker shutting down")
+                            .await;
                         continue;
                     }
 
                     match method.as_str() {
                         "worker/initialize" => match handle_initialize(&state, &params).await {
                             Ok(result) => {
-                                send_jsonrpc_result(&server, &id, &result).await;
+                                send_jsonrpc_result(&server, id.as_ref(), &result).await;
                             }
                             Err((code, msg)) => {
-                                send_jsonrpc_error(&server, &id, code, &msg).await;
+                                send_jsonrpc_error(&server, id.as_ref(), code, &msg).await;
                             }
                         },
                         "worker/agent_start" => match handle_agent_start(&state, &params).await {
                             Ok(result) => {
-                                send_jsonrpc_result(&server, &id, &result).await;
+                                send_jsonrpc_result(&server, id.as_ref(), &result).await;
                             }
                             Err((code, msg)) => {
-                                send_jsonrpc_error(&server, &id, code, &msg).await;
+                                send_jsonrpc_error(&server, id.as_ref(), code, &msg).await;
                             }
                         },
                         "worker/agent_stop" => match handle_agent_stop(&state, &params).await {
                             Ok(result) => {
-                                send_jsonrpc_result(&server, &id, &result).await;
+                                send_jsonrpc_result(&server, id.as_ref(), &result).await;
                             }
                             Err((code, msg)) => {
-                                send_jsonrpc_error(&server, &id, code, &msg).await;
+                                send_jsonrpc_error(&server, id.as_ref(), code, &msg).await;
                             }
                         },
                         "worker/agent_list" => {
                             let result = handle_agent_list(&state).await;
-                            send_jsonrpc_result(&server, &id, &result).await;
+                            send_jsonrpc_result(&server, id.as_ref(), &result).await;
                         }
                         "worker/acp_prompt" => {
                             let (handler_result, maybe_notification) =
@@ -160,24 +162,25 @@ async fn spawn_mock_multi_agent_worker(
                             }
                             match handler_result {
                                 Ok(result) => {
-                                    send_jsonrpc_result(&server, &id, &result).await;
+                                    send_jsonrpc_result(&server, id.as_ref(), &result).await;
                                 }
                                 Err((code, msg)) => {
-                                    send_jsonrpc_error(&server, &id, code, &msg).await;
+                                    send_jsonrpc_error(&server, id.as_ref(), code, &msg).await;
                                 }
                             }
                         }
                         "worker/health" => {
                             let result = handle_health(&state).await;
-                            send_jsonrpc_result(&server, &id, &result).await;
+                            send_jsonrpc_result(&server, id.as_ref(), &result).await;
                         }
                         "worker/shutdown" => {
                             state.shutdown_requested.store(true, Ordering::Relaxed);
-                            send_jsonrpc_result(&server, &id, &json!({})).await;
+                            send_jsonrpc_result(&server, id.as_ref(), &json!({})).await;
                             break;
                         }
                         _ => {
-                            send_jsonrpc_error(&server, &id, -32601, "Method not found").await;
+                            send_jsonrpc_error(&server, id.as_ref(), -32601, "Method not found")
+                                .await;
                         }
                     }
                 }
@@ -200,7 +203,7 @@ async fn spawn_mock_multi_agent_worker(
 /// Send a JSON-RPC success response.
 async fn send_jsonrpc_result(
     server: &Arc<Mutex<DuplexTransport>>,
-    id: &Option<Value>,
+    id: Option<&Value>,
     result: &Value,
 ) {
     let response = json!({
@@ -214,7 +217,7 @@ async fn send_jsonrpc_result(
 /// Send a JSON-RPC error response.
 async fn send_jsonrpc_error(
     server: &Arc<Mutex<DuplexTransport>>,
-    id: &Option<Value>,
+    id: Option<&Value>,
     code: i64,
     message: &str,
 ) {
@@ -229,8 +232,7 @@ async fn send_jsonrpc_error(
 /// Send a raw JSON line (for notifications).
 async fn send_line(server: &Arc<Mutex<DuplexTransport>>, value: &Value) {
     let line = serde_json::to_string(value).expect("serialize reply");
-    let mut s = server.lock().await;
-    let _ = s.send(line).await;
+    let _ = server.lock().await.send(line).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +301,8 @@ async fn handle_initialize(state: &Arc<MockWorkerState>, params: &Value) -> Hand
         sessions.insert("default".to_string(), slot);
     }
 
-    let summaries: Vec<Value> = sessions.values().map(|s| s.to_summary()).collect();
+    let summaries: Vec<Value> = sessions.values().map(MockSlot::to_summary).collect();
+    drop(sessions);
 
     Ok(json!({
         "capabilities": ["acp.prompt", "acp.session_load", "agent.start", "agent.stop", "agent.list"],
@@ -346,6 +349,7 @@ async fn handle_agent_start(state: &Arc<MockWorkerState>, params: &Value) -> Han
     };
     let summary = slot.to_summary();
     sessions.insert(session_id, slot);
+    drop(sessions);
 
     Ok(json!({ "session": summary }))
 }
@@ -357,9 +361,12 @@ async fn handle_agent_stop(state: &Arc<MockWorkerState>, params: &Value) -> Hand
         .map(String::from)
         .ok_or_else(|| (-32007, "Missing session_id".to_string()))?;
 
-    let mut sessions = state.sessions.write().await;
+    let removed = {
+        let mut sessions = state.sessions.write().await;
+        sessions.remove(&session_id)
+    };
 
-    if sessions.remove(&session_id).is_none() {
+    if removed.is_none() {
         return Err((-32008, format!("session '{session_id}' not found")));
     }
 
@@ -367,12 +374,17 @@ async fn handle_agent_stop(state: &Arc<MockWorkerState>, params: &Value) -> Hand
 }
 
 async fn handle_agent_list(state: &Arc<MockWorkerState>) -> Value {
-    let sessions = state.sessions.read().await;
-    let summaries: Vec<Value> = sessions.values().map(|s| s.to_summary()).collect();
+    let summaries: Vec<Value> = state
+        .sessions
+        .read()
+        .await
+        .values()
+        .map(MockSlot::to_summary)
+        .collect();
     json!({ "sessions": summaries })
 }
 
-/// Returns (handler_result, optional_notification).
+/// Returns (`handler_result`, `optional_notification`).
 async fn handle_acp_prompt(
     state: &Arc<MockWorkerState>,
     params: &Value,
@@ -429,23 +441,25 @@ async fn handle_acp_prompt(
 
 async fn handle_health(state: &Arc<MockWorkerState>) -> Value {
     let sessions = state.sessions.read().await;
+    let session_count = sessions.len();
     let session_health: Vec<Value> = sessions
         .iter()
         .map(|(sid, slot)| {
             json!({
                 "session_id": sid,
                 "state": slot.state,
-                "uptime_ms": slot.created_at.elapsed().as_millis() as u64,
+                "uptime_ms": u64::try_from(slot.created_at.elapsed().as_millis()).unwrap_or(u64::MAX),
                 "healthy": slot.state == "ready" || slot.state == "prompting",
                 "last_error": null,
             })
         })
         .collect();
+    drop(sessions);
 
     json!({
         "uptime_ms": 42,
         "creator_id": state.creator_id,
-        "session_count": sessions.len(),
+        "session_count": session_count,
         "sessions": session_health,
     })
 }
@@ -543,8 +557,8 @@ async fn multi_agent_initialize_two_sessions() {
 // Step 2: Concurrent prompts
 // ===========================================================================
 
-/// Send `worker/acp_prompt` to both agents concurrently (different session_ids);
-/// verify responses are routed correctly by session_id.
+/// Send `worker/acp_prompt` to both agents concurrently (different `session_ids`);
+/// verify responses are routed correctly by `session_id`.
 #[tokio::test]
 async fn concurrent_prompts_routed_correctly() {
     let (ipc, _server) = spawn_mock_multi_agent_worker("creator-step2").await;
@@ -660,7 +674,9 @@ async fn crash_isolation_error_slot_no_impact() {
     // Verify all 3 are initially ready.
     let list = handle.agent_list().await.expect("agent_list");
     assert_eq!(list.len(), 3);
-    assert!(list.iter().all(|s| s.is_ready()));
+    assert!(list
+        .iter()
+        .all(nexus_orchestration::worker::AgentSessionSummary::is_ready));
 
     // Prompt s1 and s3 concurrently — both should succeed independently.
     let ipc_client = handle.ipc_client();
@@ -881,8 +897,7 @@ async fn shutdown_with_multiple_agents() {
     let shutdown_result = handle.shutdown().await;
     assert!(
         shutdown_result.is_ok(),
-        "shutdown should succeed: {:?}",
-        shutdown_result
+        "shutdown should succeed: {shutdown_result:?}"
     );
 
     // After shutdown, subsequent calls should fail (transport closed or
@@ -916,7 +931,7 @@ async fn initialize_with_no_params_creates_default() {
     assert_eq!(sessions[0]["session_id"], "default");
 }
 
-/// Verify health returns per-session info with correct session_count.
+/// Verify health returns per-session info with correct `session_count`.
 #[tokio::test]
 async fn health_returns_per_session_info() {
     let (ipc, _server) = spawn_mock_multi_agent_worker("creator-edge2").await;
@@ -955,7 +970,7 @@ async fn health_returns_per_session_info() {
     }
 }
 
-/// Verify agent_start without required session_id fails.
+/// Verify `agent_start` without required `session_id` fails.
 #[tokio::test]
 async fn agent_start_missing_session_id_fails() {
     let (ipc, _server) = spawn_mock_multi_agent_worker("creator-edge3").await;

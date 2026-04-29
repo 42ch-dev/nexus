@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 ///
 /// In WS3 this capability is a thin stub that stores the prompt in context.
 /// The full implementation dispatches to the Worker Manager IPC (see T4
-/// AcpPromptTask for the actual worker call).
+/// `AcpPromptTask` for the actual worker call).
 pub struct AcpPrompt;
 
 #[async_trait]

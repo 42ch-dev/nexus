@@ -7,7 +7,7 @@
 //!
 //! This module follows a two-tier error code strategy:
 //!
-//! 1. **`error_code()`** returns a **public, stable** error code in UPPER_SNAKE_CASE
+//! 1. **`error_code()`** returns a **public, stable** error code in `UPPER_SNAKE_CASE`
 //!    (e.g., `"INTERNAL"`, `"INVALID_INPUT"`). These codes are sent to API clients
 //!    and must remain stable across versions. They intentionally group error categories
 //!    at a coarse level to avoid leaking implementation details.
@@ -23,20 +23,20 @@
 //!
 //! If finer-grained public error codes are needed in the future, `error_code()` should be
 //! updated to return the specific code rather than a generic one. See also:
-//! `crates/nexus-sync/src/errors.rs` for the SyncError pattern which returns variant-specific codes.
+//! `crates/nexus-sync/src/errors.rs` for the `SyncError` pattern which returns variant-specific codes.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
 /// Standardized API error response body
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ApiErrorResponse {
     pub success: bool,
     pub error: ApiErrorDetail,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ApiErrorDetail {
     pub code: String,
     pub message: String,
@@ -97,41 +97,42 @@ pub enum NexusApiError {
 }
 
 impl NexusApiError {
-    /// Get the HTTP status code for this error variant
-    pub fn status_code(&self) -> StatusCode {
+    /// Get the HTTP status code for this error variant.
+    #[must_use]
+    pub const fn status_code(&self) -> StatusCode {
         match self {
-            NexusApiError::Uninitialized => StatusCode::CONFLICT,
-            NexusApiError::InvalidInput { .. } => StatusCode::BAD_REQUEST,
-            NexusApiError::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            NexusApiError::AuthRequired => StatusCode::UNAUTHORIZED,
-            NexusApiError::NotFound(_) => StatusCode::NOT_FOUND,
-            NexusApiError::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
-            NexusApiError::Forbidden { .. } => StatusCode::FORBIDDEN,
-            NexusApiError::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
-            NexusApiError::ApiKeyExpired => StatusCode::UNAUTHORIZED,
-            NexusApiError::InsufficientPermissions { .. } => StatusCode::FORBIDDEN,
-            NexusApiError::SessionExpired => StatusCode::UNAUTHORIZED,
+            Self::Uninitialized => StatusCode::CONFLICT,
+            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
+            Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::AuthRequired | Self::ApiKeyExpired | Self::SessionExpired => {
+                StatusCode::UNAUTHORIZED
+            }
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
+            Self::Forbidden { .. } | Self::InsufficientPermissions { .. } => StatusCode::FORBIDDEN,
         }
     }
 
-    /// Get the error code string (UPPER_SNAKE_CASE)
-    pub fn error_code(&self) -> &str {
+    /// Get the error code string (`UPPER_SNAKE_CASE`).
+    #[must_use]
+    pub const fn error_code(&self) -> &str {
         match self {
-            NexusApiError::Uninitialized => "UNINITIALIZED",
-            NexusApiError::InvalidInput { .. } => "INVALID_INPUT",
-            NexusApiError::Internal { .. } => "INTERNAL",
-            NexusApiError::AuthRequired => "AUTH_REQUIRED",
-            NexusApiError::NotFound(_) => "NOT_FOUND",
-            NexusApiError::NotImplemented(_) => "NOT_IMPLEMENTED",
-            NexusApiError::Forbidden { .. } => "FORBIDDEN",
-            NexusApiError::InvalidApiKeyFormat => "INVALID_API_KEY",
-            NexusApiError::ApiKeyExpired => "API_KEY_EXPIRED",
-            NexusApiError::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
-            NexusApiError::SessionExpired => "SESSION_EXPIRED",
+            Self::Uninitialized => "UNINITIALIZED",
+            Self::InvalidInput { .. } => "INVALID_INPUT",
+            Self::Internal { .. } => "INTERNAL",
+            Self::AuthRequired => "AUTH_REQUIRED",
+            Self::NotFound(_) => "NOT_FOUND",
+            Self::NotImplemented(_) => "NOT_IMPLEMENTED",
+            Self::Forbidden { .. } => "FORBIDDEN",
+            Self::InvalidApiKeyFormat => "INVALID_API_KEY",
+            Self::ApiKeyExpired => "API_KEY_EXPIRED",
+            Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
+            Self::SessionExpired => "SESSION_EXPIRED",
         }
     }
 
-    /// Build the full error response body
+    /// Build the full error response body.
+    #[must_use]
     pub fn to_response_body(&self) -> ApiErrorResponse {
         ApiErrorResponse {
             success: false,
@@ -158,11 +159,11 @@ impl From<anyhow::Error> for NexusApiError {
             [single] => single.to_string(),
             multiple => multiple
                 .iter()
-                .map(|e| e.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(": "),
         };
-        NexusApiError::Internal {
+        Self::Internal {
             code: "INTERNAL_ERROR".into(),
             message,
         }
@@ -171,7 +172,7 @@ impl From<anyhow::Error> for NexusApiError {
 
 impl From<sqlx::Error> for NexusApiError {
     fn from(err: sqlx::Error) -> Self {
-        NexusApiError::Internal {
+        Self::Internal {
             code: "DATABASE_ERROR".into(),
             message: err.to_string(),
         }
@@ -372,7 +373,7 @@ mod tests {
 
     /// Integration test: GET /v1/local/creators when no workspace → returns empty list.
     ///
-    /// The workspace initialization guard is enforced by middleware (require_workspace),
+    /// The workspace initialization guard is enforced by middleware (`require_workspace`),
     /// not by the handler itself. Calling the handler directly without middleware
     /// simply queries the database and returns results.
     #[tokio::test]
@@ -390,7 +391,7 @@ mod tests {
             result.is_ok(),
             "Handler should succeed when called directly (no middleware)"
         );
-        let body = result.unwrap();
+        let body = result.expect("result should be Ok");
         assert!(body.creators.is_empty());
     }
 
@@ -412,7 +413,7 @@ mod tests {
             result.is_ok(),
             "Handler should succeed when called directly (no middleware)"
         );
-        let body = result.unwrap();
+        let body = result.expect("result should be Ok");
         assert!(body.references.is_empty());
     }
 
@@ -420,9 +421,9 @@ mod tests {
     ///
     /// Workspace initialization is enforced by middleware, not by the handler.
     /// Calling the handler directly (bypassing middleware) returns Ok with None fields
-    /// because sqlx::query_as fetch_optional returns Ok(None) when no rows match.
+    /// because `sqlx::query_as` `fetch_optional` returns Ok(None) when no rows match.
     ///
-    /// Middleware-level rejection is tested in api::middleware::tests.
+    /// Middleware-level rejection is tested in `api::middleware::tests`.
     #[tokio::test]
     async fn manuscript_without_workspace_returns_ok_when_called_directly() {
         use crate::api::handlers::manuscript::status;
@@ -438,7 +439,7 @@ mod tests {
             result.is_ok(),
             "Handler should succeed when called directly (no middleware)"
         );
-        let body = result.unwrap();
+        let body = result.expect("result should be Ok");
         assert!(body.phase.is_none());
         assert!(body.active_manifest_id.is_none());
     }

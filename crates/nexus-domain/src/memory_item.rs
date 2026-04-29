@@ -1,6 +1,6 @@
-//! MemoryItem aggregate — structured memory for creator experience and world context.
+//! `MemoryItem` aggregate — structured memory for creator experience and world context.
 //!
-//! MemoryItem carries canon, working, and experience memories with provenance
+//! `MemoryItem` carries canon, working, and experience memories with provenance
 //! tracking. See data-model-v1.md §5.8, consistency-rules-v1.md §3.6.
 
 use crate::errors::DomainError;
@@ -18,7 +18,8 @@ pub enum MemoryStatus {
 }
 
 impl MemoryStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Active => "active",
             Self::Superseded => "superseded",
@@ -28,8 +29,9 @@ impl MemoryStatus {
 }
 
 /// Memory kind enum - matches v1-spec §5.8 and ADR-001.
-/// Schema defines: story_summary, research_material, review_note, character_note,
-/// world_building, plot_outline, theme_analysis, personality_core, custom.
+///
+/// Schema defines: `story_summary`, `research_material`, review_note, character_note,
+/// `world_building`, `plot_outline`, theme_analysis, personality_core, custom.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, strum::Display)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -48,7 +50,8 @@ pub enum MemoryKind {
 
 impl MemoryKind {
     /// Get the string representation (same as Display via strum).
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::StorySummary => "story_summary",
             Self::ResearchMaterial => "research_material",
@@ -61,7 +64,7 @@ impl MemoryKind {
             Self::Custom => "custom",
         }
     }
-
+    #[must_use]
     /// Get all valid memory kinds as strings.
     pub fn all_as_strings() -> Vec<String> {
         vec![
@@ -78,7 +81,7 @@ impl MemoryKind {
     }
 }
 
-/// Error type for MemoryKind parsing.
+/// Error type for `MemoryKind` parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseMemoryKindError(String);
 
@@ -134,7 +137,7 @@ impl Default for CreatorQuota {
     }
 }
 
-/// MemoryItem aggregate — structured memory entity.
+/// `MemoryItem` aggregate — structured memory entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemoryItem {
     pub schema_version: u32,
@@ -163,6 +166,7 @@ pub struct MemoryItem {
 impl MemoryItem {
     /// Create a new memory item.
     /// Precondition: creator must have active pairing (for persistence).
+    #[must_use]
     pub fn new(
         creator_id: &str,
         world_id: &str,
@@ -200,7 +204,9 @@ impl MemoryItem {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Archive this memory item.
     pub fn archive(&mut self) -> Result<(), DomainError> {
         if self.status == MemoryStatus::Archived.as_str() {
@@ -210,7 +216,9 @@ impl MemoryItem {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Record access for decay/reinforcement weighting.
     pub fn record_access(&mut self) {
         self.last_accessed_at = Some(chrono::Utc::now().to_rfc3339());
@@ -231,7 +239,9 @@ impl MemoryItem {
             });
         }
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Validate creator/world scope and quota.
     /// Per consistency-rules-v1.md §3.6.
     pub fn validate_scope(&self, _creator_quota: &CreatorQuota) -> Result<(), DomainError> {
@@ -248,6 +258,7 @@ impl MemoryItem {
     }
 
     /// Check if this memory is active and accessible.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.status == MemoryStatus::Active.as_str()
     }
@@ -295,6 +306,7 @@ impl From<nexus_contracts::Memory> for MemoryItem {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<MemoryItem> for nexus_contracts::Memory {
     fn from(d: MemoryItem) -> Self {
         Self {
@@ -375,7 +387,7 @@ mod tests {
             MemoryType::Experience,
         ];
         for mt in types {
-            let mi = MemoryItem::new("ctr_test", "wld_test", mt.clone(), None);
+            let mi = MemoryItem::new("ctr_test", "wld_test", mt, None);
             let json = serde_json::to_string(&mi).unwrap();
             let deserialized: MemoryItem = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized.memory_type, mt);

@@ -73,6 +73,7 @@ impl CapabilityRegistry {
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
     /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`,
     /// `context.summarize`.
+    #[must_use]
     pub fn with_builtins() -> Self {
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
@@ -95,6 +96,7 @@ impl CapabilityRegistry {
     }
 
     /// Create an empty registry (for testing).
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             capabilities: Vec::new(),
@@ -102,24 +104,27 @@ impl CapabilityRegistry {
     }
 
     /// Look up a capability by its dot-separated name.
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&dyn Capability> {
         self.capabilities
             .iter()
             .find(|c| c.name() == name)
-            .map(|c| c.as_ref())
+            .map(std::convert::AsRef::as_ref)
     }
 
     /// Iterate over all registered capabilities.
     pub fn iter(&self) -> impl Iterator<Item = &dyn Capability> {
-        self.capabilities.iter().map(|c| c.as_ref())
+        self.capabilities.iter().map(std::convert::AsRef::as_ref)
     }
 
     /// Return the number of registered capabilities.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.capabilities.len()
     }
 
     /// Return whether the registry is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.capabilities.is_empty()
     }
@@ -171,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
-        let names: Vec<&str> = reg.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
         assert_eq!(names.len(), 15);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));

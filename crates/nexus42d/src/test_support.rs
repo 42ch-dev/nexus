@@ -3,7 +3,7 @@
 //! Provides helpers for building Axum app instances wired to ephemeral
 //! orchestration engines (in-memory storage, no DB needed for smoke tests).
 //!
-//! Gated behind `#[cfg(any(test, feature = "test-support"))]`.
+//! Gated behind `#[cfg(test)]` because it uses dev-dependencies.
 
 use crate::api;
 use crate::workspace::WorkspaceState;

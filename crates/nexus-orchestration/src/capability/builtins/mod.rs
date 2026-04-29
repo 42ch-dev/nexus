@@ -1,7 +1,7 @@
 //! Built-in capability implementations.
 //!
 //! One module per built-in. Includes both non-ACP capabilities (sync,
-//! workspace, etc.) and ACP-touching capabilities (acp.prompt, acp.session_load,
+//! workspace, etc.) and ACP-touching capabilities (acp.prompt, `acp.session_load`,
 //! judge.llm) added in WS3.
 
 mod acp_prompt;

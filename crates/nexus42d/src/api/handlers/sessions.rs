@@ -1,10 +1,12 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! ACP session management endpoints.
 //!
 //! Provides daemon-side API endpoints for managing ACP sessions:
 //! - `GET /v1/local/acp/sessions` — List active ACP sessions
 //! - `DELETE /v1/local/acp/sessions/{id}` — Delete an ACP session
 //!
-//! Sessions are stored in SQLite via the `acp_sessions` table.
+//! Sessions are stored in `SQLite` via the `acp_sessions` table.
 //! This enables the CLI to discover and manage sessions across invocations.
 
 use axum::extract::{Path, State};
@@ -47,7 +49,7 @@ pub async fn list_sessions(
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "SESSION_LIST_FAILED".into(),
-        message: format!("failed to list sessions: {}", e),
+        message: format!("failed to list sessions: {e}"),
     })?;
 
     let total = sessions.len();
@@ -79,7 +81,7 @@ pub async fn delete_session(
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "SESSION_DELETE_FAILED".into(),
-            message: format!("failed to delete session: {}", e),
+            message: format!("failed to delete session: {e}"),
         })?;
 
     Ok(Json(DeleteSessionResponse {
@@ -100,7 +102,7 @@ pub async fn cleanup_expired_sessions(state: &WorkspaceState) -> Result<u64, Nex
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "SESSION_CLEANUP_FAILED".into(),
-        message: format!("failed to cleanup expired sessions: {}", e),
+        message: format!("failed to cleanup expired sessions: {e}"),
     })?;
 
     Ok(result.rows_affected())

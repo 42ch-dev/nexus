@@ -1,6 +1,11 @@
 //! Integration Tests — Daemon HTTP API
 //!
 //! E9: Integration tests for daemon HTTP endpoints
+//!
+//! Note: `future_not_send` allowed because `axum_test::TestServer` uses non-Send futures,
+//! which is a limitation of the test framework, not our code.
+
+#![allow(clippy::future_not_send)]
 
 use axum::http::StatusCode;
 use axum::Router;
@@ -173,7 +178,7 @@ async fn daemon_status_endpoint() {
     let body: serde_json::Value = response.json();
     assert_eq!(body["lifecycle_state"], "running");
     assert_eq!(body["version"], "0.1.0");
-    assert!(body["implementation_scope"].as_str().unwrap().len() > 0);
+    assert!(!body["implementation_scope"].as_str().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -258,19 +263,11 @@ async fn concurrent_handler_requests_succeed() {
         async { server.get("/v1/local/references").await.status_code() },
     );
 
-    assert_eq!(health, 200, "health endpoint returned {}", health);
-    assert_eq!(workspace, 200, "workspace endpoint returned {}", workspace);
-    assert_eq!(creators, 200, "creators endpoint returned {}", creators);
-    assert_eq!(
-        manuscript, 200,
-        "manuscript endpoint returned {}",
-        manuscript
-    );
-    assert_eq!(
-        references, 200,
-        "references endpoint returned {}",
-        references
-    );
+    assert_eq!(health, 200, "health endpoint returned {health}");
+    assert_eq!(workspace, 200, "workspace endpoint returned {workspace}");
+    assert_eq!(creators, 200, "creators endpoint returned {creators}");
+    assert_eq!(manuscript, 200, "manuscript endpoint returned {manuscript}");
+    assert_eq!(references, 200, "references endpoint returned {references}");
 }
 
 // =============================================================================
@@ -278,7 +275,7 @@ async fn concurrent_handler_requests_succeed() {
 // =============================================================================
 
 /// Create a test app with all E9-relevant routes for basic endpoint tests.
-/// Uses WorkspaceState without outbox (sync operations will return SYNC_NOT_CONFIGURED).
+/// Uses `WorkspaceState` without outbox (sync operations will return `SYNC_NOT_CONFIGURED`).
 fn build_extended_test_app(state: WorkspaceState) -> Router {
     Router::new()
         .route(
@@ -370,7 +367,7 @@ async fn memory_create_pending_review_endpoint() {
     assert_eq!(body["pending_id"], "mem_test_001");
 }
 
-/// Test: create pending review with idempotent retry (same pending_id)
+/// Test: create pending review with idempotent retry (same `pending_id`)
 #[tokio::test]
 async fn memory_create_pending_review_idempotent_retry() {
     let (state, _tmp) = create_test_state().await;
@@ -400,7 +397,7 @@ async fn memory_create_pending_review_idempotent_retry() {
     response2.assert_status_ok();
 }
 
-/// Test: create pending review rejects invalid creator_id (must match ctr_<alphanumeric>)
+/// Test: create pending review rejects invalid `creator_id` (must match ctr_<alphanumeric>)
 #[tokio::test]
 async fn memory_create_pending_review_rejects_invalid_creator_id() {
     let (state, _tmp) = create_test_state().await;
@@ -423,7 +420,7 @@ async fn memory_create_pending_review_rejects_invalid_creator_id() {
     response.assert_status(StatusCode::BAD_REQUEST);
 }
 
-/// Test: create pending review rejects empty pending_id
+/// Test: create pending review rejects empty `pending_id`
 #[tokio::test]
 async fn memory_create_pending_review_rejects_empty_pending_id() {
     let (state, _tmp) = create_test_state().await;
@@ -448,7 +445,7 @@ async fn memory_create_pending_review_rejects_empty_pending_id() {
 /// Test: count pending reviews endpoint
 ///
 /// Marked serial because it opens a second DB connection to seed data,
-/// which can trigger SQLITE_BUSY under concurrent test execution.
+/// which can trigger `SQLITE_BUSY` under concurrent test execution.
 #[serial_test::serial]
 #[tokio::test]
 async fn memory_count_pending_reviews_endpoint() {
@@ -617,7 +614,7 @@ async fn acp_sessions_delete_not_found() {
 // Note: ACP tool execute path validation tests are covered in internal unit tests
 // (crates/nexus42d/tests/acp_tool.rs). The external integration tests here use
 // temp paths outside workspace which correctly return 403 Forbidden.
-/// Test: ACP tool execute endpoint - fs/read_text_file success
+/// Test: ACP tool execute endpoint - `fs/read_text_file` success
 /// Uses workspace-safe fixture path (under workspace root) to pass path validation.
 #[tokio::test]
 async fn acp_tool_execute_read_file_success() {
@@ -655,7 +652,7 @@ async fn acp_tool_execute_read_file_success() {
     std::fs::remove_file(&test_file).ok();
 }
 
-/// Test: ACP tool execute endpoint - fs/write_text_file success
+/// Test: ACP tool execute endpoint - `fs/write_text_file` success
 /// Uses workspace-safe fixture path (under workspace root) to pass path validation.
 #[tokio::test]
 async fn acp_tool_execute_write_file_success() {

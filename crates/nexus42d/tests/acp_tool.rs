@@ -76,7 +76,7 @@ async fn test_tool_execute_endpoint_exists() {
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     // We expect this to return 200 OK after implementation
-    assert_eq!(status, StatusCode::OK, "Response body: {}", body_str);
+    assert_eq!(status, StatusCode::OK, "Response body: {body_str}");
 }
 
 // RED: Test 2 - Workspace path validation rejects paths outside workspace

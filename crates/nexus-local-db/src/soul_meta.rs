@@ -1,4 +1,4 @@
-//! SOUL metadata persistence (local SQLite).
+//! SOUL metadata persistence (local `SQLite`).
 //!
 //! Tracks per-creator SOUL.md metadata for fast lookups without file I/O.
 
@@ -12,7 +12,7 @@ pub struct SoulMeta {
     pub creator_id: String,
     pub file_path: String,
     /// Schema version of the soul's data. Changed from `u32` to `i64` during
-    /// the WS8 sqlx migration (rusqlite → sqlx) for SQLx type compatibility.
+    /// the WS8 sqlx migration (rusqlite → sqlx) for `SQLx` type compatibility.
     pub schema_version: i64,
     pub personality_hash: Option<String>,
     pub experience_hash: Option<String>,
@@ -21,6 +21,10 @@ pub struct SoulMeta {
 }
 
 /// Upsert SOUL metadata (insert or update).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn upsert(pool: &SqlitePool, meta: &SoulMeta) -> Result<(), LocalDbError> {
     sqlx::query!(
         "INSERT INTO soul_meta (creator_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at)
@@ -45,6 +49,10 @@ pub async fn upsert(pool: &SqlitePool, meta: &SoulMeta) -> Result<(), LocalDbErr
 }
 
 /// Get SOUL metadata for a creator.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn get(pool: &SqlitePool, creator_id: &str) -> Result<Option<SoulMeta>, LocalDbError> {
     let row = sqlx::query_as!(
         SoulMeta,
@@ -61,6 +69,10 @@ pub async fn get(pool: &SqlitePool, creator_id: &str) -> Result<Option<SoulMeta>
 }
 
 /// Delete SOUL metadata for a creator.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn delete(pool: &SqlitePool, creator_id: &str) -> Result<bool, LocalDbError> {
     let result = sqlx::query!("DELETE FROM soul_meta WHERE creator_id = ?", creator_id)
         .execute(pool)

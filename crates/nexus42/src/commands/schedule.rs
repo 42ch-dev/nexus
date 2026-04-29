@@ -1,6 +1,6 @@
 //! Schedule command — full 13-subcommand surface per WS7 §8.
 //!
-//! Each subcommand is a thin clap::Args that calls the daemon HTTP endpoint.
+//! Each subcommand is a thin `clap::Args` that calls the daemon HTTP endpoint.
 //! WS3 shipped `start/status/advance`; WS7 adds the remaining 10.
 
 #![allow(clippy::print_literal)]
@@ -8,7 +8,12 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::{Parser, Subcommand};
-use nexus_contracts::local::schedule::http::*;
+use nexus_contracts::local::schedule::http::{
+    AddScheduleRequest, AddScheduleResponse, CoreContextHistoryResponse, CoreContextResponse,
+    DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
+    InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
+    SignalScheduleRequest, SignalScheduleResponse,
+};
 
 // Base path for all schedule endpoints
 const SCHEDULE_BASE: &str = "/v1/local/orchestration/schedules";
@@ -25,7 +30,7 @@ pub enum ScheduleCommand {
         #[arg(long)]
         creator: String,
 
-        /// Seed text for core_context v0
+        /// Seed text for `core_context` v0
         #[arg(long)]
         seed: Option<String>,
 
@@ -65,20 +70,20 @@ pub enum ScheduleCommand {
         agent_ref: Vec<String>,
     },
 
-    /// Edit core_context of a schedule
+    /// Edit `core_context` of a schedule
     Edit {
         /// Schedule ID to edit
         id: String,
 
-        /// Append text to core_context
+        /// Append text to `core_context`
         #[arg(long, group = "edit_op")]
         append: Option<String>,
 
-        /// Replace core_context entirely
+        /// Replace `core_context` entirely
         #[arg(long, group = "edit_op")]
         replace: Option<String>,
 
-        /// Path to JSON file for struct_merge
+        /// Path to JSON file for `struct_merge`
         #[arg(long, group = "edit_op")]
         struct_merge_file: Option<String>,
 
@@ -110,13 +115,13 @@ pub enum ScheduleCommand {
         id: String,
     },
 
-    /// Show current core_context content
+    /// Show current `core_context` content
     Context {
         /// Schedule ID
         id: String,
     },
 
-    /// Show core_context version history
+    /// Show `core_context` version history
     ContextHistory {
         /// Schedule ID
         id: String,
@@ -177,6 +182,13 @@ struct ScheduleCli {
 }
 
 /// Run the schedule command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Daemon API calls fail
+/// - Invalid schedule parameters
+/// - CLI configuration cannot be loaded/saved
 pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
@@ -289,10 +301,7 @@ async fn add_schedule(
         chrono::DateTime::parse_from_rfc3339(&dt_str)
             .map(|dt| dt.timestamp().to_string())
             .map_err(|e| {
-                crate::errors::CliError::Other(format!(
-                    "invalid ISO-8601 datetime '{}': {}",
-                    dt_str, e
-                ))
+                crate::errors::CliError::Other(format!("invalid ISO-8601 datetime '{dt_str}': {e}"))
             })?
             .into()
     } else {
@@ -325,7 +334,7 @@ async fn edit_schedule(
     struct_merge_file: Option<String>,
     struct_remove: Option<String>,
 ) -> Result<()> {
-    let (op, body, patch, path) = if let Some(text) = append {
+    let (op, body, merge_patch, remove_path) = if let Some(text) = append {
         ("append".to_string(), Some(text), None, None)
     } else if let Some(text) = replace {
         ("replace".to_string(), Some(text), None, None)
@@ -345,11 +354,11 @@ async fn edit_schedule(
     let body_req = EditCoreContextRequest {
         op,
         body,
-        patch,
-        path,
+        patch: merge_patch,
+        path: remove_path,
     };
-    let path = format!("{SCHEDULE_BASE}/{id}/core-context");
-    let resp: EditCoreContextResponse = client.patch(&path, &body_req).await?;
+    let url_path = format!("{SCHEDULE_BASE}/{id}/core-context");
+    let resp: EditCoreContextResponse = client.patch(&url_path, &body_req).await?;
 
     println!("new_version: {}", resp.new_version);
     Ok(())
@@ -465,11 +474,10 @@ async fn get_context_history(client: &crate::api::DaemonClient, id: &str) -> Res
     );
     println!("{}", "-".repeat(60));
     for e in &resp.entries {
-        let content = e
-            .content
-            .as_ref()
-            .map(|c| serde_json::to_string(c).unwrap_or_else(|_| "-".to_string()))
-            .unwrap_or_else(|| "(meta only)".to_string());
+        let content = e.content.as_ref().map_or_else(
+            || "(meta only)".to_string(),
+            |c| serde_json::to_string(c).unwrap_or_else(|_| "-".to_string()),
+        );
         // Truncate content for readability
         let content_display = if content.len() > 40 {
             format!("{}...", &content[..40])
@@ -510,7 +518,7 @@ async fn timeline(client: &crate::api::DaemonClient, creator: &str, days: u32) -
         return Ok(());
     }
 
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
 
     println!("Creator: {creator} (last {days} days)\n");
 
@@ -520,9 +528,10 @@ async fn timeline(client: &crate::api::DaemonClient, creator: &str, days: u32) -
 
     for s in &sorted {
         let ts = s.created_at.parse::<i64>().unwrap_or(0);
-        let dt = chrono::DateTime::from_timestamp(ts, 0)
-            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-            .unwrap_or_else(|| s.created_at.clone());
+        let dt = chrono::DateTime::from_timestamp(ts, 0).map_or_else(
+            || s.created_at.clone(),
+            |dt| dt.format("%Y-%m-%d %H:%M").to_string(),
+        );
 
         let is_recent = ts >= cutoff.timestamp();
 
@@ -557,7 +566,7 @@ mod tests {
             "--seed",
             "test-seed",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add {
@@ -586,7 +595,7 @@ mod tests {
             "--after",
             "SCH001",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { after, .. } => {
@@ -607,7 +616,7 @@ mod tests {
             "c1",
             "--parallel-any",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { parallel_any, .. } => {
@@ -629,7 +638,7 @@ mod tests {
             "--scheduled-at",
             "2099-01-01T00:00:00Z",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { scheduled_at, .. } => {
@@ -651,7 +660,7 @@ mod tests {
             "--scheduled-at",
             "2099-01-01T00:00:00+08:00",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { scheduled_at, .. } => {
@@ -665,7 +674,7 @@ mod tests {
     fn edit_append_parses() {
         let cmd =
             ScheduleCli::try_parse_from(["schedule", "edit", "SCH001", "--append", "more text"])
-                .unwrap();
+                .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Edit { id, append, .. } => {
@@ -680,7 +689,7 @@ mod tests {
     fn edit_replace_parses() {
         let cmd =
             ScheduleCli::try_parse_from(["schedule", "edit", "SCH001", "--replace", "new content"])
-                .unwrap();
+                .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Edit { id, replace, .. } => {
@@ -701,7 +710,7 @@ mod tests {
             "--status",
             "pending",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::List { creator, status } => {
@@ -714,7 +723,8 @@ mod tests {
 
     #[test]
     fn inspect_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "inspect", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "inspect", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Inspect { id } => {
@@ -726,7 +736,8 @@ mod tests {
 
     #[test]
     fn context_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "context", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "context", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Context { id } => {
@@ -744,7 +755,7 @@ mod tests {
             "SCH001",
             "--show-content",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::ContextHistory { id, show_content } => {
@@ -757,7 +768,8 @@ mod tests {
 
     #[test]
     fn start_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "start", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "start", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Start { id } => {
@@ -769,7 +781,8 @@ mod tests {
 
     #[test]
     fn pause_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "pause", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "pause", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Pause { id } => {
@@ -781,7 +794,8 @@ mod tests {
 
     #[test]
     fn resume_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "resume", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "resume", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Resume { id } => {
@@ -793,7 +807,8 @@ mod tests {
 
     #[test]
     fn cancel_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "cancel", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "cancel", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Cancel { id } => {
@@ -805,7 +820,8 @@ mod tests {
 
     #[test]
     fn advance_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "advance", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "advance", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Advance { id } => {
@@ -817,7 +833,8 @@ mod tests {
 
     #[test]
     fn remove_command_parses() {
-        let cmd = ScheduleCli::try_parse_from(["schedule", "remove", "SCH001"]).unwrap();
+        let cmd =
+            ScheduleCli::try_parse_from(["schedule", "remove", "SCH001"]).expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Remove { id } => {
@@ -837,7 +854,7 @@ mod tests {
             "--days",
             "14",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Timeline { creator, days } => {
@@ -862,7 +879,7 @@ mod tests {
             "--model",
             "claude-3-opus",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { model, .. } => {
@@ -884,7 +901,7 @@ mod tests {
             "--role",
             "writer",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { role, .. } => {
@@ -906,7 +923,7 @@ mod tests {
             "--agent-ref",
             "writer:claude-acp",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { agent_ref, .. } => {
@@ -929,7 +946,7 @@ mod tests {
             "--agent-ref",
             "reviewer:codex-acp:o3",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { agent_ref, .. } => {
@@ -956,7 +973,7 @@ mod tests {
             "--agent-ref",
             "editor:claude-acp:claude-3-opus",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add { agent_ref, .. } => {
@@ -984,7 +1001,7 @@ mod tests {
             "--agent-ref",
             "reviewer:codex-acp:o3",
         ])
-        .unwrap();
+        .expect("parse command");
 
         match cmd.command {
             ScheduleCommand::Add {

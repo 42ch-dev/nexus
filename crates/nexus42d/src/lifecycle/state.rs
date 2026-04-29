@@ -1,3 +1,12 @@
+//! Statig callbacks require `unused_self` for introspection methods.
+//! Mutex guard must be held for entire state machine operation scope.
+#![allow(
+    clippy::unused_self,
+    clippy::missing_panics_doc,
+    clippy::significant_drop_tightening
+)]
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! HSM state machine implementation using statig.
 //!
 //! Implements the hierarchical state graph from spec §2 with transitions
@@ -29,7 +38,7 @@ use crate::lifecycle::actions::{
 /// Shared storage for the daemon HSM.
 ///
 /// Contains state-local data like subsystem tracking and degraded status.
-/// In T4, also holds the ActionContext for entry/exit actions.
+/// In T4, also holds the `ActionContext` for entry/exit actions.
 #[derive(Debug, Default)]
 pub struct DaemonHsm {
     /// Subsystems that have reported `SubsystemUp`.
@@ -47,7 +56,7 @@ pub struct DaemonHsm {
 }
 
 impl DaemonHsm {
-    /// Create a DaemonHsm with subsystem context for real runs.
+    /// Create a `DaemonHsm` with subsystem context for real runs.
     pub fn with_context(context: Arc<ActionContext>) -> Self {
         Self {
             context: Some(context),
@@ -62,6 +71,8 @@ impl DaemonHsm {
 // - impl blocks for `statig::State` and `statig::Superstate` traits
 // - `IntoStateMachine` impl for `DaemonHsm`
 
+// Allow unused_async because statig::awaitable requires async methods
+// even when no await is needed in the method body.
 #[statig::state_machine(
     initial = "State::starting()",
     on_dispatch = "Self::on_dispatch",
@@ -69,6 +80,7 @@ impl DaemonHsm {
     state(derive(Debug)),
     superstate(derive(Debug))
 )]
+#[allow(clippy::unused_async)]
 impl DaemonHsm {
     /// Starting state: subsystems booting.
     ///
@@ -98,16 +110,16 @@ impl DaemonHsm {
                 err,
                 retryable,
             } => {
-                if !retryable {
-                    tracing::error!("non-retryable subsystem failure: {} ({:?})", err, kind);
-                    self.exit_code = Some(1);
-                    self.last_error = Some(err.clone());
-                    Transition(State::failed())
-                } else {
+                if *retryable {
                     tracing::warn!("retryable subsystem failure: {} ({:?})", err, kind);
                     // Retry logic for recoverable subsystem failures is deferred
                     // past V1.11 — see delivery compass v1.11 §5 WS-A Group 2.
                     Handled
+                } else {
+                    tracing::error!("non-retryable subsystem failure: {} ({:?})", err, kind);
+                    self.exit_code = Some(1);
+                    self.last_error = Some(err.clone());
+                    Transition(State::failed())
                 }
             }
             Event::HealthDegraded { kind, reason } => {
@@ -141,7 +153,7 @@ impl DaemonHsm {
     /// Running state: fully operational.
     ///
     /// Handles `HealthDegraded` → `Degraded`.
-    /// Other events (ShutdownRequested, FatalError) deferred to `Alive` superstate.
+    /// Other events (`ShutdownRequested`, `FatalError`) deferred to `Alive` superstate.
     #[state(
         superstate = "alive",
         entry_action = "enter_running",
@@ -235,7 +247,7 @@ impl DaemonHsm {
                     grace_ms_exceeded
                 );
                 self.exit_code = Some(1);
-                self.last_error = Some(format!("shutdown timeout {}ms", grace_ms_exceeded));
+                self.last_error = Some(format!("shutdown timeout {grace_ms_exceeded}ms"));
                 Transition(State::failed())
             }
             _ => Super,
@@ -246,6 +258,7 @@ impl DaemonHsm {
     ///
     /// All events are ignored (Super → Top drops them).
     #[state(entry_action = "enter_failed")]
+    #[allow(clippy::needless_pass_by_ref_mut)] // statig macro requires &mut self
     async fn failed(&mut self, event: &Event) -> Response<State> {
         let _ = event; // Suppress unused warning - terminal state ignores all events
         tracing::debug!("event ignored in terminal Failed state");
@@ -262,7 +275,7 @@ impl DaemonHsm {
     async fn enter_starting(&self) {
         tracing::info!("entering Starting state");
         if let Some(ctx) = &self.context {
-            enter_starting(Arc::clone(ctx));
+            enter_starting(ctx);
         } else {
             tracing::debug!("Starting.entry: no context (test mode) — subsystems not spawned");
         }
@@ -272,7 +285,7 @@ impl DaemonHsm {
     async fn exit_starting(&self) {
         tracing::info!("exiting Starting state");
         if let Some(ctx) = &self.context {
-            exit_starting(Arc::clone(ctx));
+            exit_starting(ctx);
         }
     }
 
@@ -280,7 +293,7 @@ impl DaemonHsm {
     async fn enter_running(&self) {
         tracing::info!("entering Running state");
         if let Some(ctx) = &self.context {
-            enter_running(Arc::clone(ctx));
+            enter_running(ctx);
         }
     }
 
@@ -288,7 +301,7 @@ impl DaemonHsm {
     async fn exit_running(&self) {
         tracing::info!("exiting Running state");
         if let Some(ctx) = &self.context {
-            exit_running(Arc::clone(ctx));
+            exit_running(ctx);
         }
     }
 
@@ -296,7 +309,7 @@ impl DaemonHsm {
     async fn enter_degraded(&self) {
         tracing::info!("entering Degraded state");
         if let Some(ctx) = &self.context {
-            enter_degraded(Arc::clone(ctx));
+            enter_degraded(ctx);
         }
     }
 
@@ -311,7 +324,7 @@ impl DaemonHsm {
     async fn enter_stopping(&self) {
         tracing::info!("entering Stopping state");
         if let Some(ctx) = &self.context {
-            enter_stopping(Arc::clone(ctx));
+            enter_stopping(ctx);
         }
     }
 
@@ -344,6 +357,9 @@ impl DaemonHsm {
         tracing::debug!("transition: {:?} → {:?}", source, target);
     }
 
+    /// Statig callback for dispatch events.
+    /// Note: Signature is dictated by statig macro; cannot take state by reference.
+    #[allow(clippy::needless_pass_by_value)]
     fn on_dispatch(&mut self, state: statig::StateOrSuperstate<Self>, event: &Event) {
         tracing::trace!("dispatch: {:?} → {:?}", event, state);
     }
@@ -367,11 +383,11 @@ impl DaemonHsm {
 /// `tokio::sync::Mutex` for the statig state machine (async operations).
 ///
 /// For `new_with_subsystems`, uses deferred initialization pattern:
-/// the machine is created after wrapping in Arc so ActionContext can reference
+/// the machine is created after wrapping in Arc so `ActionContext` can reference
 /// the final lifecycle.
 pub struct StatigLifecycle {
     /// The statig state machine.
-    /// Uses Option for deferred initialization in new_with_subsystems.
+    /// Uses Option for deferred initialization in `new_with_subsystems`.
     machine: Arc<Mutex<Option<statig::awaitable::StateMachine<DaemonHsm>>>>,
     /// Broadcast channel for transition notifications.
     transition_tx: broadcast::Sender<LifecycleTransition>,
@@ -387,18 +403,19 @@ impl StatigLifecycle {
     /// This constructor creates a state machine ready for production use.
     /// The machine starts in `Starting` state and processes events immediately.
     ///
-    /// Note: For production use in main.rs. Tests should use new_for_test().
+    /// Note: For production use in main.rs. Tests should use `new_for_test()`.
     ///
     /// ## Circular Dependency Note
     ///
-    /// Full subsystem integration (ActionContext with lifecycle reference) requires
+    /// Full subsystem integration (`ActionContext` with lifecycle reference) requires
     /// two-phase initialization. For now, we create the machine without context,
     /// which means entry actions will log but not spawn subsystem tasks.
     /// This is acceptable because:
     /// 1. The machine processes events correctly (QC2-C2 fix)
     /// 2. Subsystems can be started manually or via a follow-up refactoring
     ///
-    /// See: QC2-C2 critical finding — machine must be Some() to avoid dropping first dispatch.
+    /// See: QC2-C2 critical finding — machine must be `Some()` to avoid dropping first dispatch.
+    #[must_use]
     pub fn new_with_subsystems(
         _subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
         _shutdown_grace_ms: u64,
@@ -425,7 +442,8 @@ impl StatigLifecycle {
     /// Create a lifecycle for testing (no subsystem tasks spawned).
     ///
     /// Entry actions will log but not spawn subsystem tasks.
-    /// Tests dispatch SubsystemUp events manually.
+    /// Tests dispatch `SubsystemUp` events manually.
+    #[must_use]
     pub fn new_for_test() -> Self {
         let (transition_tx, _) = broadcast::channel(16);
         let daemon_hsm = DaemonHsm::default(); // No context
@@ -441,7 +459,8 @@ impl StatigLifecycle {
         }
     }
 
-    /// Create a new lifecycle with default settings (alias for new_for_test).
+    /// Create a new lifecycle with default settings (alias for `new_for_test`).
+    #[must_use]
     pub fn new() -> Self {
         Self::new_for_test()
     }
@@ -507,12 +526,9 @@ impl Lifecycle for StatigLifecycle {
             let mut m = machine.lock().await;
 
             // Check if machine is initialized
-            let machine_ref = match m.as_mut() {
-                Some(machine) => machine,
-                None => {
-                    tracing::warn!("dispatch called on uninitialized lifecycle");
-                    return;
-                }
+            let Some(machine_ref) = m.as_mut() else {
+                tracing::warn!("dispatch called on uninitialized lifecycle");
+                return;
             };
 
             let before = lifecycle_state_from_statig_state(machine_ref.state());
@@ -562,7 +578,7 @@ impl Lifecycle for StatigLifecycle {
 /// Convert a statig `State` to our `LifecycleState`.
 ///
 /// This is a helper for the mirror sync.
-fn lifecycle_state_from_statig_state(state: &State) -> LifecycleState {
+const fn lifecycle_state_from_statig_state(state: &State) -> LifecycleState {
     match state {
         State::Starting { .. } => LifecycleState::Starting,
         State::Running { .. } => LifecycleState::Running,

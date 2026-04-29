@@ -43,7 +43,9 @@ pub fn validate_envelope_integrity(
     }
     Ok(())
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Validate global hard invariant G4: Schema and enum closure.
 /// Ensures all enum values are valid.
 pub fn validate_block_type(block_type: &str) -> Result<(), DomainError> {
@@ -67,7 +69,9 @@ pub fn validate_memory_type(memory_type: &str) -> Result<(), DomainError> {
         ))),
     }
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Validate manuscript phase enum closure.
 pub fn validate_manuscript_phase(phase: &str) -> Result<(), DomainError> {
     match phase {
@@ -78,9 +82,11 @@ pub fn validate_manuscript_phase(phase: &str) -> Result<(), DomainError> {
         ))),
     }
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Validate global hard invariant G6: Sync boundary — excerpt length.
-pub fn validate_excerpt_length(excerpt: &str) -> Result<(), DomainError> {
+pub const fn validate_excerpt_length(excerpt: &str) -> Result<(), DomainError> {
     if excerpt.len() > MAX_EXCERPT_LENGTH {
         return Err(DomainError::ExcerptTooLong {
             actual: excerpt.len(),
@@ -89,8 +95,10 @@ pub fn validate_excerpt_length(excerpt: &str) -> Result<(), DomainError> {
     }
     Ok(())
 }
-
-/// Validate KeyBlock provisional → confirmed gate (consistency-rules-v1.md §3.2).
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+/// Validate `KeyBlock` provisional → confirmed gate (consistency-rules-v1.md §3.2).
 pub fn validate_kb_confirm_gate(
     kb: &KeyBlock,
     has_permission: bool,
@@ -125,8 +133,13 @@ pub fn validate_kb_confirm_gate(
     }
     Ok(())
 }
-
-/// Validate TimelineEvent provisional → canon gate (consistency-rules-v1.md §3.3).
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+/// Validate `TimelineEvent` provisional → canon gate (consistency-rules-v1.md §3.3).
 pub fn validate_timeline_promote_gate(
     event: &TimelineEvent,
     has_permission: bool,
@@ -144,7 +157,9 @@ pub fn validate_timeline_promote_gate(
     }
     Ok(())
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Validate Fork creation (consistency-rules-v1.md §3.4).
 pub fn validate_fork_creation(
     parent_world_id: &str,
@@ -168,7 +183,12 @@ pub fn validate_fork_creation(
     }
     Ok(())
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Validate Memory scope (consistency-rules-v1.md §3.6).
 pub fn validate_memory_scope(
     memory_type: &str,
@@ -193,7 +213,7 @@ pub fn validate_memory_scope(
     validate_memory_type(memory_type)?;
     Ok(())
 }
-
+#[must_use]
 /// Check if a provisional record has exceeded its TTL.
 pub fn is_provisional_expired(created_at: &str) -> bool {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(created_at) {

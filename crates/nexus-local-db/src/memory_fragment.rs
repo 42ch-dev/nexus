@@ -28,7 +28,11 @@ pub struct MemoryFragmentRecord {
 
 /// Create a new memory fragment.
 ///
-/// Inserts the fragment into the memory_fragments table.
+/// Inserts the fragment into the `memory_fragments` table.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn create_fragment(
     pool: &SqlitePool,
     fragment: &MemoryFragmentRecord,
@@ -51,7 +55,11 @@ pub async fn create_fragment(
 
 /// List all fragments for a creator.
 ///
-/// Returns records ordered by created_at descending (most recent first).
+/// Returns records ordered by `created_at` descending (most recent first).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn list_fragments(
     pool: &SqlitePool,
     creator_id: &str,
@@ -82,7 +90,11 @@ pub async fn list_fragments(
 
 /// List all fragments for a specific session.
 ///
-/// Returns records for a given session_id (useful for session-level review).
+/// Returns records for a given `session_id` (useful for session-level review).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn list_fragments_by_session(
     pool: &SqlitePool,
     session_id: &str,
@@ -114,6 +126,10 @@ pub async fn list_fragments_by_session(
 /// Delete a fragment by ID.
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn delete_fragment(pool: &SqlitePool, fragment_id: &str) -> Result<bool, LocalDbError> {
     let result = sqlx::query!(
         "DELETE FROM memory_fragments WHERE fragment_id = ?",
@@ -128,6 +144,10 @@ pub async fn delete_fragment(pool: &SqlitePool, fragment_id: &str) -> Result<boo
 ///
 /// Returns a union of all keywords from all fragments for this creator.
 /// Used for context assembly §9.2 fragment keywords block.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn get_all_keywords(
     pool: &SqlitePool,
     creator_id: &str,

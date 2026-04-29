@@ -22,11 +22,11 @@ enum HealthStatus {
 }
 
 impl HealthStatus {
-    fn label(&self) -> &str {
+    const fn label(&self) -> &str {
         match self {
-            HealthStatus::Ok => "OK",
-            HealthStatus::Warning => "WARN",
-            HealthStatus::Error => "FAIL",
+            Self::Ok => "OK",
+            Self::Warning => "WARN",
+            Self::Error => "FAIL",
         }
     }
 }
@@ -38,6 +38,12 @@ pub enum DoctorCommand {
 }
 
 /// Run doctor command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Health checks fail critically
+/// - Configuration cannot be loaded
 pub async fn run(cmd: DoctorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         DoctorCommand::Check => run_checks(config).await,
@@ -89,10 +95,7 @@ async fn run_checks(config: &CliConfig) -> Result<()> {
     }
 
     println!("{}", "-".repeat(80));
-    println!(
-        "Summary: {} OK, {} warnings, {} failures",
-        ok_count, warn_count, fail_count
-    );
+    println!("Summary: {ok_count} OK, {warn_count} warnings, {fail_count} failures");
 
     if fail_count > 0 {
         println!();
@@ -143,7 +146,7 @@ async fn daemon_check(config: &CliConfig) -> HealthCheck {
         Err(e) => HealthCheck {
             name: "Daemon connectivity".to_string(),
             status: HealthStatus::Error,
-            detail: format!("connection error: {}", e),
+            detail: format!("connection error: {e}"),
         },
     }
 }
@@ -172,7 +175,7 @@ fn config_check() -> HealthCheck {
                     Err(e) => HealthCheck {
                         name: "Config file".to_string(),
                         status: HealthStatus::Error,
-                        detail: format!("not readable: {}", e),
+                        detail: format!("not readable: {e}"),
                     },
                 }
             } else {
@@ -186,12 +189,12 @@ fn config_check() -> HealthCheck {
         Err(e) => HealthCheck {
             name: "Config file".to_string(),
             status: HealthStatus::Error,
-            detail: format!("cannot determine config path: {}", e),
+            detail: format!("cannot determine config path: {e}"),
         },
     }
 }
 
-/// Check SQLite database file.
+/// Check `SQLite` database file.
 async fn database_check(config: &CliConfig) -> HealthCheck {
     match crate::config::resolve_state_db_path(config) {
         Ok(db_path) => {
@@ -204,9 +207,10 @@ async fn database_check(config: &CliConfig) -> HealthCheck {
                             .await
                             .ok()
                             .map(|v| format!("(schema v{})", v.schema_version));
-                        let detail = version_info
-                            .map(|v| format!("found at {} {}", db_path.display(), v))
-                            .unwrap_or_else(|| format!("found at {}", db_path.display()));
+                        let detail = version_info.map_or_else(
+                            || format!("found at {}", db_path.display()),
+                            |v| format!("found at {} {}", db_path.display(), v),
+                        );
                         HealthCheck {
                             name: "Database".to_string(),
                             status: HealthStatus::Ok,
@@ -216,7 +220,7 @@ async fn database_check(config: &CliConfig) -> HealthCheck {
                     Err(e) => HealthCheck {
                         name: "Database".to_string(),
                         status: HealthStatus::Error,
-                        detail: format!("schema init failed: {}", e),
+                        detail: format!("schema init failed: {e}"),
                     },
                 }
             } else {
@@ -230,15 +234,29 @@ async fn database_check(config: &CliConfig) -> HealthCheck {
         Err(e) => HealthCheck {
             name: "Database".to_string(),
             status: HealthStatus::Warning,
-            detail: format!("path not resolvable: {}", e),
+            detail: format!("path not resolvable: {e}"),
         },
     }
 }
 
 /// Check workspace directory structure.
 fn workspace_check(config: &CliConfig) -> HealthCheck {
-    match &config.workspace_path {
-        Some(path) => {
+    config.workspace_path.as_ref().map_or_else(
+        || {
+            crate::config::find_workspace_root().map_or_else(
+                || HealthCheck {
+                    name: "Workspace directory".to_string(),
+                    status: HealthStatus::Warning,
+                    detail: "no workspace configured or detected".to_string(),
+                },
+                |root| HealthCheck {
+                    name: "Workspace directory".to_string(),
+                    status: HealthStatus::Ok,
+                    detail: format!("detected at {}", root.display()),
+                },
+            )
+        },
+        |path| {
             if path.exists() {
                 if path.is_dir() {
                     // Check for .nexus42 subdirectory
@@ -272,23 +290,8 @@ fn workspace_check(config: &CliConfig) -> HealthCheck {
                     detail: format!("path does not exist: {}", path.display()),
                 }
             }
-        }
-        None => {
-            // Check if we're inside a workspace by walking up
-            match crate::config::find_workspace_root() {
-                Some(root) => HealthCheck {
-                    name: "Workspace directory".to_string(),
-                    status: HealthStatus::Ok,
-                    detail: format!("detected at {}", root.display()),
-                },
-                None => HealthCheck {
-                    name: "Workspace directory".to_string(),
-                    status: HealthStatus::Warning,
-                    detail: "no workspace configured or detected".to_string(),
-                },
-            }
-        }
-    }
+        },
+    )
 }
 
 /// Check version compatibility between CLI and daemon.
@@ -313,15 +316,14 @@ async fn version_check(config: &CliConfig) -> HealthCheck {
                         HealthCheck {
                             name: "Version compatibility".to_string(),
                             status: HealthStatus::Ok,
-                            detail: format!("CLI v{} == Daemon v{}", cli_version, daemon_version),
+                            detail: format!("CLI v{cli_version} == Daemon v{daemon_version}"),
                         }
                     } else {
                         HealthCheck {
                             name: "Version compatibility".to_string(),
                             status: HealthStatus::Warning,
                             detail: format!(
-                                "CLI v{} != Daemon v{} (may cause issues)",
-                                cli_version, daemon_version
+                                "CLI v{cli_version} != Daemon v{daemon_version} (may cause issues)"
                             ),
                         }
                     }
@@ -330,8 +332,7 @@ async fn version_check(config: &CliConfig) -> HealthCheck {
                     name: "Version compatibility".to_string(),
                     status: HealthStatus::Warning,
                     detail: format!(
-                        "CLI v{} (daemon version unknown — status endpoint failed)",
-                        cli_version
+                        "CLI v{cli_version} (daemon version unknown — status endpoint failed)"
                     ),
                 },
             }
@@ -340,22 +341,22 @@ async fn version_check(config: &CliConfig) -> HealthCheck {
             name: "Version compatibility".to_string(),
             status: HealthStatus::Warning,
             detail: format!(
-                "CLI v{} (daemon not running, cannot compare — run `nexus42 daemon start`)",
-                cli_version
+                "CLI v{cli_version} (daemon not running, cannot compare — run `nexus42 daemon start`)"
             ),
         },
         Err(_) => HealthCheck {
             name: "Version compatibility".to_string(),
             status: HealthStatus::Warning,
             detail: format!(
-                "CLI v{} (daemon not reachable, cannot compare — check daemon status)",
-                cli_version
+                "CLI v{cli_version} (daemon not reachable, cannot compare — check daemon status)"
             ),
         },
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

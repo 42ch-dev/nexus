@@ -1,14 +1,14 @@
-//! Nexus SocialGraphFeedResponse
+//! `Nexus` `SocialGraphFeedResponse`
 //!
-//! Paginated personalized feed for social graph (platform plan 17). Entries are activity rows; shape may evolve per v1-spec.
+//! `Paginated` personalized feed for social graph (platform plan 17). `Entries` are activity rows; shape may evolve per v1-spec.
 //!
-//! @schema_version 1
-//! @source social-graph-feed-response.schema.json
+//! `@schema_version` 1
+//! `@source` social-graph-feed-response.schema.json
 
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphFeedResponseEntry {
     pub edge_id: String,
@@ -23,8 +23,8 @@ pub struct SocialGraphFeedResponseEntry {
     pub title: Option<String>,
     pub occurred_at: String,
 }
-/// Paginated personalized feed for social graph (platform plan 17). Entries are activity rows; shape may evolve per v1-spec.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Paginated` personalized feed for social graph (platform plan 17). `Entries` are activity rows; shape may evolve per v1-spec.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphFeedResponse {
     pub schema_version: u32,

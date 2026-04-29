@@ -59,11 +59,13 @@ impl NexusProtocolVersion {
     }
 
     /// Protocol version "1" (current ACP spec).
+    #[must_use]
     pub fn v1() -> Self {
         Self(String::from("1"))
     }
 
     /// The latest supported protocol version.
+    #[must_use]
     pub fn latest() -> Self {
         Self::v1()
     }
@@ -334,7 +336,7 @@ pub struct NexusPromptRequest {
 impl NexusPromptRequest {
     /// Create a new prompt request.
     #[must_use]
-    pub fn new(session_id: NexusSessionId, prompt: Vec<NexusContentBlock>) -> Self {
+    pub const fn new(session_id: NexusSessionId, prompt: Vec<NexusContentBlock>) -> Self {
         Self { session_id, prompt }
     }
 }
@@ -342,7 +344,7 @@ impl NexusPromptRequest {
 // ── Response DTOs ───────────────────────────────────────────────────
 
 /// Response from the ACP `initialize` handshake.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusInitializeResponse {
     /// Negotiated protocol version.
@@ -518,7 +520,7 @@ pub struct NexusSetConfigOptionResponse {
 impl NexusSetConfigOptionResponse {
     /// Create a new set-config-option response.
     #[must_use]
-    pub fn new(config_options: Vec<NexusConfigOption>) -> Self {
+    pub const fn new(config_options: Vec<NexusConfigOption>) -> Self {
         Self { config_options }
     }
 }
@@ -641,7 +643,7 @@ pub struct NexusListSessionsResponse {
 impl NexusListSessionsResponse {
     /// Create a new list sessions response.
     #[must_use]
-    pub fn new(sessions: Vec<NexusSessionInfo>) -> Self {
+    pub const fn new(sessions: Vec<NexusSessionInfo>) -> Self {
         Self {
             sessions,
             next_cursor: None,
@@ -1060,7 +1062,7 @@ mod tests {
             NexusSessionInfo::new(NexusSessionId::new("sess-1"), "/tmp/a"),
             NexusSessionInfo::new(NexusSessionId::new("sess-2"), "/tmp/b"),
         ];
-        let resp = NexusListSessionsResponse::new(sessions.clone());
+        let resp = NexusListSessionsResponse::new(sessions);
         assert_eq!(resp.sessions.len(), 2);
         assert_eq!(resp.sessions[0].session_id.0, "sess-1");
         assert!(resp.next_cursor.is_none());

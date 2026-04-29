@@ -28,7 +28,11 @@ pub struct PendingReviewRecord {
 
 /// Create a new pending review record.
 ///
-/// Inserts the record into the memory_pending_review table.
+/// Inserts the record into the `memory_pending_review` table.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn create_pending_review(
     pool: &SqlitePool,
     record: &PendingReviewRecord,
@@ -51,7 +55,11 @@ pub async fn create_pending_review(
 
 /// List all pending reviews for a creator.
 ///
-/// Returns records ordered by created_at descending (most recent first).
+/// Returns records ordered by `created_at` descending (most recent first).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn list_pending_reviews(
     pool: &SqlitePool,
     creator_id: &str,
@@ -84,6 +92,10 @@ pub async fn list_pending_reviews(
 /// Get a specific pending review by ID.
 ///
 /// Returns None if the record doesn't exist.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn get_pending_review(
     pool: &SqlitePool,
     pending_id: &str,
@@ -113,6 +125,10 @@ pub async fn get_pending_review(
 /// Delete a pending review by ID.
 ///
 /// Returns true if a record was deleted, false if it didn't exist.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn delete_pending_review(
     pool: &SqlitePool,
     pending_id: &str,
@@ -129,6 +145,14 @@ pub async fn delete_pending_review(
 /// Count pending reviews for a creator.
 ///
 /// Used for queue depth monitoring and review scheduling.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+///
+/// # Panics
+///
+/// Panics if the count is negative (database invariant violation).
 pub async fn count_pending_reviews(
     pool: &SqlitePool,
     creator_id: &str,
@@ -139,7 +163,7 @@ pub async fn count_pending_reviews(
     )
     .fetch_one(pool)
     .await?;
-    Ok(count as usize)
+    Ok(usize::try_from(count).expect("count is non-negative and fits in usize"))
 }
 
 #[cfg(test)]
@@ -158,7 +182,7 @@ mod tests {
     fn sample_record(pending_id: &str) -> PendingReviewRecord {
         PendingReviewRecord {
             pending_id: pending_id.to_string(),
-            session_id: format!("sess_{}", pending_id),
+            session_id: format!("sess_{pending_id}"),
             creator_id: "ctr_test".to_string(),
             world_id: Some("wld_test".to_string()),
             task_kind: "brainstorm".to_string(),

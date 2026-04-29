@@ -21,17 +21,19 @@ pub enum SubsystemKind {
 
 impl SubsystemKind {
     /// Returns all mandatory subsystems (required for `Running` transition).
-    pub fn mandatory() -> &'static [SubsystemKind] {
+    #[must_use]
+    pub const fn mandatory() -> &'static [Self] {
         &[
-            SubsystemKind::Http,
-            SubsystemKind::Db,
-            SubsystemKind::Sync,
-            SubsystemKind::Engine,
-            SubsystemKind::WorkerMgr,
+            Self::Http,
+            Self::Db,
+            Self::Sync,
+            Self::Engine,
+            Self::WorkerMgr,
         ]
     }
 
     /// Returns true if this subsystem is mandatory.
+    #[must_use]
     pub fn is_mandatory(&self) -> bool {
         Self::mandatory().contains(self)
     }
@@ -77,11 +79,12 @@ pub enum Event {
 
 impl Event {
     /// Returns true if this is a fatal event that should transition to `Failed`.
-    pub fn is_fatal(&self) -> bool {
+    #[must_use]
+    pub const fn is_fatal(&self) -> bool {
         matches!(
             self,
-            Event::FatalError { .. }
-                | Event::SubsystemFailed {
+            Self::FatalError { .. }
+                | Self::SubsystemFailed {
                     retryable: false,
                     ..
                 }

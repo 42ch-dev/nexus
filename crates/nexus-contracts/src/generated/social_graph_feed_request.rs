@@ -1,14 +1,14 @@
-//! Nexus SocialGraphFeedRequest
+//! `Nexus` `SocialGraphFeedRequest`
 //!
-//! Request body for personalized social / activity feed listing (platform plan 17).
+//! `Request` body for personalized social / activity feed listing (platform plan 17).
 //!
-//! @schema_version 1
-//! @source social-graph-feed-request.schema.json
+//! `@schema_version` 1
+//! `@source` social-graph-feed-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for personalized social / activity feed listing (platform plan 17).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for personalized social / activity feed listing (platform plan 17).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphFeedRequest {
     pub schema_version: u32,

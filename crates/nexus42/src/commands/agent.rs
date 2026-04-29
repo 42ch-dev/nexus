@@ -41,9 +41,9 @@ impl std::str::FromStr for OutputFormat {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "table" | "text" => Ok(OutputFormat::Table),
-            "json" => Ok(OutputFormat::Json),
-            _ => Err(format!("invalid format '{}'. Use 'table' or 'json'", s)),
+            "table" | "text" => Ok(Self::Table),
+            "json" => Ok(Self::Json),
+            _ => Err(format!("invalid format '{s}'. Use 'table' or 'json'")),
         }
     }
 }
@@ -104,6 +104,13 @@ pub enum AgentCommand {
 // ── Entry point ────────────────────────────────────────────────────
 
 /// Run agent command.
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - The ACP registry cannot be accessed
+/// - Agent lookup fails
+/// - The agent subprocess fails to spawn or crashes
 pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
     match cmd {
         AgentCommand::List { format } => cmd_list(&format).await,
@@ -117,7 +124,7 @@ pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
         AgentCommand::Skills {
             verbose,
             output_format,
-        } => cmd_skills(verbose, &output_format).await,
+        } => cmd_skills(verbose, &output_format),
         AgentCommand::Status => cmd_status().await,
     }
 }
@@ -253,8 +260,7 @@ async fn cmd_show(agent_ref: &str) -> Result<()> {
 
     let agent = client.find_agent(&registry, agent_ref).ok_or_else(|| {
         crate::errors::CliError::Other(format!(
-            "Agent '{}' not found. Run `nexus42 agent list` to see available agents.",
-            agent_ref
+            "Agent '{agent_ref}' not found. Run `nexus42 agent list` to see available agents."
         ))
     })?;
 
@@ -269,8 +275,7 @@ fn print_show_details(agent: &AgentEntry) {
             .distribution
             .npx
             .as_ref()
-            .map(|n| format!("npx ({})", n.package))
-            .unwrap_or_else(|| "npx".to_string()),
+            .map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
         "binary" => "binary".to_string(),
         _ => "unknown".to_string(),
     };
@@ -278,16 +283,16 @@ fn print_show_details(agent: &AgentEntry) {
     println!("Agent: {} ({})", agent.name, agent.id);
     println!("Version: {}", agent.version);
     if let Some(ref license) = agent.license {
-        println!("License: {}", license);
+        println!("License: {license}");
     }
     if let Some(ref repo) = agent.repository {
-        println!("Repository: {}", repo);
+        println!("Repository: {repo}");
     }
     println!(
         "Description: {}",
         agent.description.as_deref().unwrap_or("No description")
     );
-    println!("Source: {}", source_detail);
+    println!("Source: {source_detail}");
 }
 
 // ── `agent run` ────────────────────────────────────────────────────
@@ -298,8 +303,7 @@ async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>)
 
     let agent = client.find_agent(&registry, agent_ref).ok_or_else(|| {
         crate::errors::CliError::Other(format!(
-            "Agent '{}' not found. Run `nexus42 agent list` to see available agents.",
-            agent_ref
+            "Agent '{agent_ref}' not found. Run `nexus42 agent list` to see available agents."
         ))
     })?;
 
@@ -318,7 +322,10 @@ async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>)
     let (child, _stdin, _stdout) = spawner
         .spawn(
             &program,
-            &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            &args
+                .iter()
+                .map(std::string::String::as_str)
+                .collect::<Vec<_>>(),
         )
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
 
@@ -331,7 +338,7 @@ async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>)
         // Single-shot mode: send message, wait, exit
         eprintln!("  Mode: single-shot");
         eprintln!();
-        eprintln!("Message: {}", msg);
+        eprintln!("Message: {msg}");
         eprintln!();
 
         // Wait for the agent to finish (with timeout)
@@ -346,30 +353,28 @@ async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>)
         // Simple interactive prompt loop using stdin
         // The full ACP prompt integration (LocalSet + SDK) will be wired
         // in a follow-up task — here we handle the subprocess lifecycle.
-        interactive_prompt_loop(&mut child, &agent.id).await
+        interactive_prompt_loop(&child, &agent.id)
     };
 
     // Send cancel signal
-    if let Some(tx) = cancel_tx {
-        let _ = tx.send(());
-    }
+    let _ = cancel_tx.send(());
 
     // Wait for exit
     match result {
         Ok(()) => {
             let status = child.wait().await.map_err(|e| {
-                crate::errors::CliError::Other(format!("Failed to wait for agent: {}", e))
+                crate::errors::CliError::Other(format!("Failed to wait for agent: {e}"))
             })?;
             if let Some(code) = status.code() {
                 if code == 0 {
-                    eprintln!("Agent exited (code {}).", code);
+                    eprintln!("Agent exited (code {code}).");
                 } else {
-                    eprintln!("Agent exited with code {}.", code);
+                    eprintln!("Agent exited with code {code}.");
                 }
             }
         }
         Err(e) => {
-            eprintln!("Agent error: {}", e);
+            eprintln!("Agent error: {e}");
         }
     }
 
@@ -419,7 +424,7 @@ fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
 }
 
 /// Set up a Ctrl+C handler that sends a cancel signal.
-fn setup_cancel_handler(agent_id: String) -> Option<tokio::sync::oneshot::Sender<()>> {
+fn setup_cancel_handler(agent_id: String) -> tokio::sync::oneshot::Sender<()> {
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Spawn a task that waits for Ctrl+C and forwards it
@@ -435,7 +440,7 @@ fn setup_cancel_handler(agent_id: String) -> Option<tokio::sync::oneshot::Sender
         drop(cancel_rx);
     });
 
-    Some(cancel_tx)
+    cancel_tx
 }
 
 /// Wait for the agent subprocess to exit with a timeout.
@@ -444,7 +449,7 @@ async fn wait_for_agent_exit(
     agent_id: &str,
 ) -> std::result::Result<(), String> {
     // Use a 5-minute timeout for single-shot mode
-    let timeout_duration = std::time::Duration::from_secs(300);
+    let timeout_duration = std::time::Duration::from_mins(5);
 
     match tokio::time::timeout(timeout_duration, child.wait()).await {
         Ok(Ok(status)) => {
@@ -456,12 +461,11 @@ async fn wait_for_agent_exit(
                     agent_id,
                     status
                         .code()
-                        .map(|c| format!("code {}", c))
-                        .unwrap_or_else(|| "signal".to_string())
+                        .map_or_else(|| "signal".to_string(), |c| format!("code {c}"))
                 ))
             }
         }
-        Ok(Err(e)) => Err(format!("Failed to wait for agent: {}", e)),
+        Ok(Err(e)) => Err(format!("Failed to wait for agent: {e}")),
         Err(_) => Err(format!(
             "Agent {} timed out after {}s",
             agent_id,
@@ -473,9 +477,9 @@ async fn wait_for_agent_exit(
 /// Simple interactive prompt loop.
 ///
 /// This reads user input from stdin and forwards it. The full ACP
-/// integration (LocalSet + SDK prompt) will be wired in a follow-up.
-async fn interactive_prompt_loop(
-    child: &mut tokio::process::Child,
+/// integration (`LocalSet` + SDK prompt) will be wired in a follow-up.
+fn interactive_prompt_loop(
+    child: &tokio::process::Child,
     agent_id: &str,
 ) -> std::result::Result<(), String> {
     use std::io::{BufRead, Write};
@@ -483,7 +487,7 @@ async fn interactive_prompt_loop(
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
 
-    eprintln!("(Connected to agent: {})", agent_id);
+    eprintln!("(Connected to agent: {agent_id})");
     eprintln!();
 
     loop {
@@ -499,7 +503,8 @@ async fn interactive_prompt_loop(
 
         // Read user input
         let mut input = String::new();
-        match stdin.lock().read_line(&mut input) {
+        let read_result = stdin.lock().read_line(&mut input);
+        match read_result {
             Ok(0) => {
                 // EOF (Ctrl+D)
                 eprintln!("\nExiting (EOF).");
@@ -507,7 +512,7 @@ async fn interactive_prompt_loop(
             }
             Ok(_) => {}
             Err(e) => {
-                return Err(format!("Failed to read input: {}", e));
+                return Err(format!("Failed to read input: {e}"));
             }
         }
 
@@ -526,8 +531,7 @@ async fn interactive_prompt_loop(
         // LocalSet + SDK integration. The prompt would go through
         // AcpSdkAdapter::prompt() within a LocalSet context.
         eprintln!(
-            "  [note: ACP prompt integration pending — message '{}' not sent to agent]",
-            trimmed
+            "  [note: ACP prompt integration pending — message '{trimmed}' not sent to agent]"
         );
     }
 
@@ -562,15 +566,15 @@ async fn probe_registry() -> Result<()> {
         Ok(reg) => {
             let latency_ms = elapsed.as_millis();
             println!("✓ ACP Registry reachable");
-            println!("  URL: {}", REGISTRY_URL);
+            println!("  URL: {REGISTRY_URL}");
             println!("  Version: {}", reg.version);
             println!("  Agents: {}", reg.agents.len());
-            println!("  Latency: {}ms", latency_ms);
+            println!("  Latency: {latency_ms}ms");
         }
         Err(e) => {
             println!("✗ ACP Registry unreachable");
-            println!("  URL: {}", REGISTRY_URL);
-            println!("  Error: {}", e);
+            println!("  URL: {REGISTRY_URL}");
+            println!("  Error: {e}");
             println!();
             println!("Check your network connection and try again.");
             println!("If offline, run `nexus42 agent list` to use cached data.");
@@ -590,8 +594,7 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
 
     let agent = client.find_agent(&registry, agent_ref).ok_or_else(|| {
         crate::errors::CliError::Other(format!(
-            "Agent '{}' not found. Run `nexus42 agent list` to see available agents.",
-            agent_ref
+            "Agent '{agent_ref}' not found. Run `nexus42 agent list` to see available agents."
         ))
     })?;
 
@@ -608,7 +611,10 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
     let (child, _stdin, _stdout) = spawner
         .spawn(
             &program,
-            &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            &args
+                .iter()
+                .map(std::string::String::as_str)
+                .collect::<Vec<_>>(),
         )
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
 
@@ -632,7 +638,7 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
                 println!("  Agent: {} v{}", agent.id, agent.version);
                 println!("  Distribution: {}", agent.distribution.source_kind());
                 println!("  Spawn time: {}ms", spawn_elapsed.as_millis());
-                println!("  Total time: {}ms", latency_ms);
+                println!("  Total time: {latency_ms}ms");
                 println!("  Note: Agent exited before ACP handshake could complete.");
             } else {
                 println!("✗ Agent probe: process crashed during startup");
@@ -650,7 +656,7 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
             println!("  Agent: {} v{}", agent.id, agent.version);
             println!("  Distribution: {}", describe_distribution(agent));
             println!("  ACP initialize: OK (process alive)");
-            println!("  Latency: {}ms (includes spawn time)", latency_ms);
+            println!("  Latency: {latency_ms}ms (includes spawn time)");
             println!();
             println!(
                 "  Capabilities: V1.0 client declares [file_system.read, file_system.write, terminal.create, terminal.output, terminal.release]"
@@ -659,7 +665,7 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
         Ok(Err(e)) => {
             println!("✗ Agent probe: error waiting for process");
             println!("  Agent: {} v{}", agent.id, agent.version);
-            println!("  Error: {}", e);
+            println!("  Error: {e}");
         }
     }
 
@@ -673,40 +679,39 @@ fn describe_distribution(agent: &AgentEntry) -> String {
             .distribution
             .npx
             .as_ref()
-            .map(|n| format!("npx ({})", n.package))
-            .unwrap_or_else(|| "npx".to_string()),
-        "binary" => {
-            if let Some(ref binary) = agent.distribution.binary {
-                if let Some(platform) = nexus_acp_host::transport::Platform::current() {
-                    let has_platform = match platform {
-                        nexus_acp_host::transport::Platform::DarwinAarch64 => {
-                            binary.darwin_aarch64.is_some()
+            .map_or_else(|| "npx".to_string(), |n| format!("npx ({})", n.package)),
+        "binary" => agent.distribution.binary.as_ref().map_or_else(
+            || "binary".to_string(),
+            |binary| {
+                nexus_acp_host::transport::Platform::current().map_or_else(
+                    || "binary (unsupported platform)".to_string(),
+                    |platform| {
+                        let has_platform = match platform {
+                            nexus_acp_host::transport::Platform::DarwinAarch64 => {
+                                binary.darwin_aarch64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::DarwinX86_64 => {
+                                binary.darwin_x86_64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::LinuxAarch64 => {
+                                binary.linux_aarch64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::LinuxX86_64 => {
+                                binary.linux_x86_64.is_some()
+                            }
+                            nexus_acp_host::transport::Platform::WindowsX86_64 => {
+                                binary.windows_x86_64.is_some()
+                            }
+                        };
+                        if has_platform {
+                            format!("binary ({})", platform.as_str())
+                        } else {
+                            "binary (no current platform build)".to_string()
                         }
-                        nexus_acp_host::transport::Platform::DarwinX86_64 => {
-                            binary.darwin_x86_64.is_some()
-                        }
-                        nexus_acp_host::transport::Platform::LinuxAarch64 => {
-                            binary.linux_aarch64.is_some()
-                        }
-                        nexus_acp_host::transport::Platform::LinuxX86_64 => {
-                            binary.linux_x86_64.is_some()
-                        }
-                        nexus_acp_host::transport::Platform::WindowsX86_64 => {
-                            binary.windows_x86_64.is_some()
-                        }
-                    };
-                    if has_platform {
-                        format!("binary ({})", platform.as_str())
-                    } else {
-                        "binary (no current platform build)".to_string()
-                    }
-                } else {
-                    "binary (unsupported platform)".to_string()
-                }
-            } else {
-                "binary".to_string()
-            }
-        }
+                    },
+                )
+            },
+        ),
         _ => "unknown".to_string(),
     }
 }
@@ -728,7 +733,7 @@ async fn cmd_status() -> Result<()> {
             .get_runtime_status()
             .await
             .map_err(|e| crate::errors::CliError::Daemon {
-                message: format!("Failed to connect to daemon: {}", e),
+                message: format!("Failed to connect to daemon: {e}"),
             })?;
 
     // Daemon status
@@ -739,7 +744,7 @@ async fn cmd_status() -> Result<()> {
 
     let uptime = status.uptime_seconds;
     if uptime < 60 {
-        println!("  Uptime:   {}s", uptime);
+        println!("  Uptime:   {uptime}s");
     } else if uptime < 3600 {
         println!("  Uptime:   {}m {}s", uptime / 60, uptime % 60);
     } else {
@@ -781,7 +786,7 @@ async fn cmd_status() -> Result<()> {
 ///
 /// Skills are the capability IDs that nexus42 sends during the ACP `initialize`
 /// handshake to tell agents what client-side features are supported.
-async fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
+fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
     // V1.0 capabilities frozen in acp/skills.rs
     let capabilities = vec![
         (
@@ -829,10 +834,10 @@ async fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
 
         for (id, desc, version) in &capabilities {
             if verbose {
-                println!("  {} ({})", id, version);
-                println!("    {}", desc);
+                println!("  {id} ({version})");
+                println!("    {desc}");
             } else {
-                println!("  {} — {}", id, desc);
+                println!("  {id} — {desc}");
             }
         }
 
@@ -850,6 +855,7 @@ async fn cmd_skills(verbose: bool, output_format: &str) -> Result<()> {
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

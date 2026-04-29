@@ -128,11 +128,22 @@ pub struct PublishHistoryLocalResponse {
     pub error: Option<String>,
 }
 
-fn is_json_output(output_format: &str) -> bool {
+const fn is_json_output(output_format: &str) -> bool {
     output_format.eq_ignore_ascii_case("json")
 }
 
-/// Run publish subcommands
+/// Run publish subcommands.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Platform connectivity is required but unavailable
+/// - Daemon is not running
+/// - Publish API calls fail
+/// - Invalid `world_id` or manuscript parameters
+///
+/// Note: This function is 145 lines; splitting would break the coherent command dispatch flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -> Result<()> {
     runtime_guard::require_platform(&config.runtime_mode(), "publish")?;
     let client = DaemonClient::from_config(config);
@@ -209,11 +220,11 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
                             println!("Publish completed (no result body).");
                         }
                     } else if let Some(err) = resp.error {
-                        eprintln!("Publish story failed: {}", err);
+                        eprintln!("Publish story failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Publish story request failed: {}", e);
+                    eprintln!("Publish story request failed: {e}");
                     return Err(e);
                 }
             }
@@ -273,11 +284,11 @@ pub async fn run(cmd: PublishCommand, config: &CliConfig, output_format: &str) -
                             println!("History completed (no body).");
                         }
                     } else if let Some(err) = resp.error {
-                        eprintln!("Publish history failed: {}", err);
+                        eprintln!("Publish history failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Publish history request failed: {}", e);
+                    eprintln!("Publish history request failed: {e}");
                     return Err(e);
                 }
             }

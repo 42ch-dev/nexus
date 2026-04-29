@@ -26,6 +26,15 @@ pub enum SoulCommand {
     PushPersonality,
 }
 
+/// Run soul command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No active creator is set
+/// - Database operations fail
+/// - File I/O operations fail
+/// - Daemon API calls fail
 pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(
@@ -35,12 +44,12 @@ pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
 
     match command {
         SoulCommand::Init => init(config, creator_id).await,
-        SoulCommand::Show => show(config, creator_id).await,
+        SoulCommand::Show => show(config, creator_id),
         SoulCommand::EditPersonality { content } => {
             edit_personality(config, creator_id, content).await
         }
-        SoulCommand::Validate => validate(config, creator_id).await,
-        SoulCommand::PushPersonality => push_personality(config, creator_id).await,
+        SoulCommand::Validate => validate(config, creator_id),
+        SoulCommand::PushPersonality => push_personality(config, creator_id),
     }
 }
 
@@ -48,8 +57,7 @@ async fn init(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
     if soul_io::exists(&home, creator_id) {
         return Err(crate::errors::CliError::Other(format!(
-            "SOUL.md already exists for creator '{}'. Use `soul show` to view it.",
-            creator_id
+            "SOUL.md already exists for creator '{creator_id}'. Use `soul show` to view it."
         )));
     }
     let doc = soul_io::create(&home, creator_id)?;
@@ -73,12 +81,12 @@ async fn init(_config: &CliConfig, creator_id: &str) -> Result<()> {
         }
     }
 
-    println!("SOUL.md initialized for creator '{}'.", creator_id);
+    println!("SOUL.md initialized for creator '{creator_id}'.");
     println!("Path: {}", soul_io::soul_path(&home, creator_id).display());
     Ok(())
 }
 
-async fn show(_config: &CliConfig, creator_id: &str) -> Result<()> {
+fn show(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
     let doc = soul_io::load(&home, creator_id)?;
     println!("{}", doc.render());
@@ -132,14 +140,14 @@ async fn edit_personality(
         }
     }
 
-    println!("Personality section updated for creator '{}'.", creator_id);
+    println!("Personality section updated for creator '{creator_id}'.");
     Ok(())
 }
 
-async fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
+fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
     let doc = soul_io::validate(&home, creator_id)?;
-    println!("SOUL.md for creator '{}' is valid.", creator_id);
+    println!("SOUL.md for creator '{creator_id}' is valid.");
     println!("  Sections: Personality ✓, Experience ✓");
     if !doc.extra_sections.is_empty() {
         println!(
@@ -154,17 +162,14 @@ async fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
+fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
     let soul = soul_io::load(&home, creator_id)?;
 
     let memory =
         nexus_domain::personality_sync::push_personality_to_memory(&home, creator_id, &soul)?;
 
-    println!(
-        "Personality pushed to long-term memory for creator '{}'.",
-        creator_id
-    );
+    println!("Personality pushed to long-term memory for creator '{creator_id}'.");
     println!("  Memory ID: {}", memory.frontmatter.memory_id);
     println!("  Kind: {}", memory.frontmatter.memory_kind);
     if let Some(path) = &memory.source_path {
@@ -212,10 +217,10 @@ mod tests {
     #[test]
     fn soul_command_enum_exists() {
         // Verify the enum can be constructed (compile-time check)
-        let _cmd = SoulCommand::Init;
-        let _cmd = SoulCommand::Show;
-        let _cmd = SoulCommand::Validate;
-        let _cmd = SoulCommand::EditPersonality {
+        let _ = SoulCommand::Init;
+        let _ = SoulCommand::Show;
+        let _ = SoulCommand::Validate;
+        let _ = SoulCommand::EditPersonality {
             content: Some("test".to_string()),
         };
     }

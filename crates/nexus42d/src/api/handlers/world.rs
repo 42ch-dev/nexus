@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! World fork and snapshot — platform proxy via `SyncClient`.
 //!
 //! `POST /v1/local/world/fork` → `POST /v1/worlds/fork`
@@ -19,11 +21,11 @@ use nexus_sync::sync_client::SyncClient;
 use serde::Serialize;
 use tracing::info;
 
-fn nonempty(s: &str) -> bool {
+const fn nonempty(s: &str) -> bool {
     !s.is_empty()
 }
 
-fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
@@ -61,26 +63,16 @@ pub async fn fork(
     let child = req.child_world_id.as_deref().unwrap_or("");
     info!(parent = %parent, child = %child, "Handling world fork request");
 
-    let parent_nonempty = req
-        .parent_world_id
-        .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
-    let child_nonempty = req
-        .child_world_id
-        .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+    let parent_nonempty = req.parent_world_id.as_ref().is_some_and(|s| nonempty(s));
+    let child_nonempty = req.child_world_id.as_ref().is_some_and(|s| nonempty(s));
     let fork_evt_nonempty = req
         .forked_from_event_id
         .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+        .is_some_and(|s| nonempty(s));
     let creator_nonempty = req
         .created_by_creator_id
         .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+        .is_some_and(|s| nonempty(s));
 
     if !parent_nonempty || !child_nonempty || !fork_evt_nonempty || !creator_nonempty {
         return Ok(Json(WorldForkLocalResponse {
@@ -125,11 +117,11 @@ pub async fn fork(
             reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN".into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let remote = client
         .fork_world(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(WorldForkLocalResponse {
         success: true,
@@ -207,11 +199,11 @@ pub async fn snapshot(
             reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN".into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let remote = client
         .snapshot_world(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(WorldSnapshotLocalResponse {
         success: true,
@@ -234,7 +226,7 @@ mod tests {
             fork_branch: None,
             error: Some("bad".into()),
         };
-        let j = serde_json::to_string(&r).unwrap();
+        let j = serde_json::to_string(&r).expect("WorldForkLocalResponse should serialize");
         assert!(j.contains("\"success\":false"));
     }
 
@@ -248,7 +240,7 @@ mod tests {
             captured_at: Some("2026-04-10T00:00:00Z".into()),
             error: None,
         };
-        let j = serde_json::to_string(&r).unwrap();
+        let j = serde_json::to_string(&r).expect("WorldSnapshotLocalResponse should serialize");
         assert!(j.contains("\"world_revision\":7"));
     }
 }

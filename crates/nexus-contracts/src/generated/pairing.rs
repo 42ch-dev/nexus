@@ -1,15 +1,15 @@
-//! Nexus Pairing
+//! `Nexus` `Pairing`
 //!
-//! Pairing entity describing Creator <-> User association. Aligned with data-model-v1.md §5.2A.
+//! `Pairing` entity describing `Creator` <-> `User` association. `Aligned` with data-model-v1.md §5.2A.
 //!
-//! @schema_version 1
-//! @source pairing.schema.json
+//! `@schema_version` 1
+//! `@source` pairing.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{PairingSource, PairingStatus};
 
-/// Pairing entity describing Creator <-> User association. Aligned with data-model-v1.md §5.2A.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Pairing` entity describing `Creator` <-> `User` association. `Aligned` with data-model-v1.md §5.2A.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Pairing {
     pub schema_version: u32,

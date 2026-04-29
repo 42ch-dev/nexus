@@ -1,6 +1,6 @@
-//! KeyBlock aggregate — structured knowledge unit in a world timeline.
+//! `KeyBlock` aggregate — structured knowledge unit in a world timeline.
 //!
-//! KeyBlock is the primary knowledge container in Nexus. Each KB has a lifecycle
+//! `KeyBlock` is the primary knowledge container in Nexus. Each KB has a lifecycle
 //! from provisional → confirmed (with possible deprecation/merge/deletion).
 //! See data-model-v1.md §5.5, consistency-rules-v1.md §3.2.
 
@@ -10,7 +10,7 @@ use crate::BlockType;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// KeyBlock status enum.
+/// `KeyBlock` status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBlockStatus {
@@ -22,7 +22,8 @@ pub enum KeyBlockStatus {
 }
 
 impl KeyBlockStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Provisional => "provisional",
             Self::Confirmed => "confirmed",
@@ -33,7 +34,7 @@ impl KeyBlockStatus {
     }
 }
 
-/// KeyBlock body content.
+/// `KeyBlock` body content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KeyBlockBody {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,7 +53,8 @@ pub struct ConflictCheckResult {
 }
 
 impl ConflictCheckResult {
-    pub fn no_conflicts() -> Self {
+    #[must_use]
+    pub const fn no_conflicts() -> Self {
         Self {
             has_hard_conflicts: false,
             conflict_description: None,
@@ -68,14 +70,14 @@ impl ConflictCheckResult {
 }
 
 /// A simplified world membership reference for permission checks.
-/// Full WorldMembership is in world_membership module.
+/// Full `WorldMembership` is in `world_membership` module.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MembershipPermissionCheck {
     pub can_confirm_canon: bool,
     pub can_sync_kb: bool,
 }
 
-/// KeyBlock aggregate — a structured knowledge unit in a world timeline.
+/// `KeyBlock` aggregate — a structured knowledge unit in a world timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KeyBlock {
     pub schema_version: u32,
@@ -98,8 +100,9 @@ pub struct KeyBlock {
 }
 
 impl KeyBlock {
-    /// Create a new provisional KeyBlock.
-    /// Precondition: caller must have WorldMembership with can_sync_kb=true.
+    /// Create a new provisional `KeyBlock`.
+    /// Precondition: caller must have `WorldMembership` with `can_sync_kb=true`.
+    #[must_use]
     pub fn new(world_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
         let key_block_id = format!("kb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         Self {
@@ -121,10 +124,10 @@ impl KeyBlock {
     /// Transition provisional → confirmed.
     ///
     /// Gate requirements (consistency-rules-v1.md §3.2):
-    /// 1. Initiator must have can_confirm_canon permission on the world
-    /// 2. base_revision / revision must match server current (no version mismatch)
+    /// 1. Initiator must have `can_confirm_canon` permission on the world
+    /// 2. `base_revision` / revision must match server current (no version mismatch)
     /// 3. All required fields present and schema-valid
-    /// 4. source_anchor must satisfy minimum traceability requirements
+    /// 4. `source_anchor` must satisfy minimum traceability requirements
     /// 5. No unresolved hard conflicts
     pub fn confirm(
         &mut self,
@@ -181,8 +184,10 @@ impl KeyBlock {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
-    /// Deprecate this KeyBlock (mark as superseded).
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    /// Deprecate this `KeyBlock` (mark as superseded).
     pub fn deprecate(&mut self, _replacement_kb_id: Option<&str>) -> Result<(), DomainError> {
         if self.status == KeyBlockStatus::Deprecated.as_str() {
             return Err(DomainError::AlreadyInState("deprecated".to_string()));
@@ -192,7 +197,7 @@ impl KeyBlock {
         Ok(())
     }
 
-    /// Merge this KeyBlock into another.
+    /// Merge this `KeyBlock` into another.
     pub fn merge_into(&mut self, _target_kb_id: &str) -> Result<(), DomainError> {
         if self.status == KeyBlockStatus::Merged.as_str() {
             return Err(DomainError::AlreadyInState("merged".to_string()));
@@ -201,8 +206,10 @@ impl KeyBlock {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
-    /// Soft-delete this KeyBlock.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    /// Soft-delete this `KeyBlock`.
     pub fn delete(&mut self) -> Result<(), DomainError> {
         if self.status == KeyBlockStatus::Deleted.as_str() {
             return Err(DomainError::AlreadyInState("deleted".to_string()));
@@ -211,20 +218,27 @@ impl KeyBlock {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Check if this KB is in confirmed state.
+    #[must_use]
     pub fn is_confirmed(&self) -> bool {
         self.status == KeyBlockStatus::Confirmed.as_str()
     }
 
     /// Check if body modifications are allowed.
     /// Only provisional KBs allow body updates; confirmed KBs require fork/append.
+    #[must_use]
     pub fn can_modify_body(&self) -> bool {
         self.status == KeyBlockStatus::Provisional.as_str()
     }
 
-    /// Validate source_anchor traceability.
-    /// Per G6: source_anchor must reference visible story manifests in same world.
+    /// Validate `source_anchor` traceability.
+    /// Per G6: `source_anchor` must reference visible story manifests in same world.
     pub fn validate_source_anchor(
         &self,
         world_id: &str,
@@ -236,7 +250,9 @@ impl KeyBlock {
         }
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Set body content (only allowed for provisional KBs).
     pub fn set_body(&mut self, body: KeyBlockBody) -> Result<(), DomainError> {
         if !self.can_modify_body() {
@@ -246,7 +262,12 @@ impl KeyBlock {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Set source anchor (only allowed for provisional KBs).
     pub fn set_source_anchor(&mut self, anchor: SourceAnchor) -> Result<(), DomainError> {
         if !self.can_modify_body() {
@@ -285,6 +306,7 @@ impl From<nexus_contracts::KeyBlock> for KeyBlock {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<KeyBlock> for nexus_contracts::KeyBlock {
     fn from(d: KeyBlock) -> Self {
         Self {
@@ -411,7 +433,7 @@ mod tests {
         ];
 
         for bt in &types {
-            let kb = KeyBlock::new("wld_test", bt.clone(), "Test");
+            let kb = KeyBlock::new("wld_test", *bt, "Test");
             let json = serde_json::to_string(&kb).unwrap();
             let deserialized: KeyBlock = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized.block_type, *bt);

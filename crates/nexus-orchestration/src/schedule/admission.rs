@@ -26,6 +26,7 @@ pub struct RunningSet {
 
 impl RunningSet {
     /// Empty running set — no schedules are running.
+    #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
@@ -34,6 +35,7 @@ impl RunningSet {
     ///
     /// Only the IDs are retained; callers are responsible for filtering to
     /// `ScheduleStatus::Running` before calling this.
+    #[must_use]
     pub fn from(schedules: Vec<Schedule>) -> Self {
         let mut by_creator: HashMap<String, HashSet<ScheduleId>> = HashMap::new();
         let mut all_ids: HashSet<ScheduleId> = HashSet::new();
@@ -70,18 +72,21 @@ impl RunningSet {
     }
 
     /// Returns `true` if no schedules are running for the given creator.
+    #[must_use]
     pub fn is_empty_for_creator(&self, creator_id: &str) -> bool {
         self.by_creator
             .get(creator_id)
-            .is_none_or(|ids| ids.is_empty())
+            .is_none_or(std::collections::HashSet::is_empty)
     }
 
     /// Returns `true` if no schedules are running at all.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.all_ids.is_empty()
     }
 
     /// Returns `true` if the given schedule ID is currently running.
+    #[must_use]
     pub fn contains(&self, id: &ScheduleId) -> bool {
         self.all_ids.contains(id)
     }
@@ -108,11 +113,13 @@ pub struct CompletedSet {
 
 impl CompletedSet {
     /// Empty completed set — no schedules have completed.
+    #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
     /// Build from a list of completed schedule IDs.
+    #[must_use]
     pub fn from(ids: Vec<ScheduleId>) -> Self {
         Self {
             ids: ids.into_iter().collect(),
@@ -120,6 +127,7 @@ impl CompletedSet {
     }
 
     /// Returns `true` if the given schedule ID is completed/cancelled.
+    #[must_use]
     pub fn contains(&self, id: &ScheduleId) -> bool {
         self.ids.contains(id)
     }
@@ -140,6 +148,7 @@ impl CompletedSet {
 ///
 /// 3. No other constraints at this layer — spec §5.2 ACP single-worker
 ///    constraint is enforced at the `AcpPromptTask` dispatch site.
+#[must_use]
 pub fn admit(candidate: &Schedule, running: &RunningSet, completed: &CompletedSet) -> bool {
     // 1. Concurrency gate
     if !check_concurrency(candidate, running) {

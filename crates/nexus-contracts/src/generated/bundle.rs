@@ -1,16 +1,16 @@
-//! Nexus DeltaBundle Envelope
+//! `Nexus` `DeltaBundle` `Envelope`
 //!
-//! DeltaBundle envelope containing delta operations for world synchronization. Aligned with bundle-envelope-schema-v1.md §5.
+//! `DeltaBundle` envelope containing delta operations for world synchronization. `Aligned` with bundle-envelope-schema-v1.md §5.
 //!
-//! @schema_version 1
-//! @source bundle.schema.json
+//! `@schema_version` 1
+//! `@source` bundle.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{BundleType, ManuscriptPhase};
 use crate::generated::delta::Delta;
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct BundleDeltaResult {
     pub delta_index: u64,
@@ -20,8 +20,8 @@ pub struct BundleDeltaResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied_entity_revision: Option<i64>,
 }
-/// DeltaBundle envelope containing delta operations for world synchronization. Aligned with bundle-envelope-schema-v1.md §5.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `DeltaBundle` envelope containing delta operations for world synchronization. `Aligned` with bundle-envelope-schema-v1.md §5.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Bundle {
     pub schema_version: u32,

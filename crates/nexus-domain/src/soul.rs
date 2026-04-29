@@ -49,6 +49,7 @@ pub struct SoulDocument {
 }
 
 impl SoulDocument {
+    #[must_use]
     /// Create a new empty SOUL document with default frontmatter.
     pub fn new() -> Self {
         Self {
@@ -60,14 +61,15 @@ impl SoulDocument {
         }
     }
 
-    /// Create with a specific creator_id in frontmatter.
+    /// Create with a specific `creator_id` in frontmatter.
+    #[must_use]
     pub fn for_creator(creator_id: &str) -> Self {
         let mut doc = Self::new();
         doc.frontmatter.creator_id = Some(creator_id.to_string());
         doc.frontmatter.schema_version = Some(1);
         doc
     }
-
+    #[must_use]
     /// Render the full SOUL.md content (frontmatter + sections).
     pub fn render(&self) -> String {
         let mut parts = Vec::new();
@@ -121,8 +123,13 @@ impl SoulDocument {
         }
         Ok(())
     }
-
-    /// Parse markdown content into a SoulDocument.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    /// Parse markdown content into a `SoulDocument`.
     /// Extracts frontmatter (YAML) and H2 sections by exact heading text.
     pub fn parse(content: &str) -> Result<Self, DomainError> {
         let mut doc = SoulDocument::new();
@@ -186,7 +193,7 @@ fn extract_frontmatter(content: &str) -> String {
 }
 
 /// Extract all H2 (`## Title`) sections from markdown content.
-/// Returns vec of (heading_name, body_between_headings).
+/// Returns vec of (`heading_name`, `body_between_headings`).
 fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
     let mut sections = Vec::new();
     let mut current_heading: Option<String> = None;
@@ -218,12 +225,12 @@ fn extract_h2_sections(content: &str) -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    const MINIMAL_SOUL: &str = r#"## Personality
+    const MINIMAL_SOUL: &str = "## Personality
 A creative writer.
 
 ## Experience
 None yet.
-"#;
+";
 
     #[test]
     fn parse_minimal_soul() {
@@ -238,16 +245,7 @@ None yet.
 
     #[test]
     fn parse_soul_with_frontmatter() {
-        let content = r#"---
-creator_id: ctr_test
-schema_version: 1
-description: Test creator SOUL
----
-## Personality
-Creative.
-
-## Experience
-"#
+        let content = "---\ncreator_id: ctr_test\nschema_version: 1\ndescription: Test creator SOUL\n---\n## Personality\nCreative.\n\n## Experience\n"
         .to_string();
         let doc = SoulDocument::parse(&content).unwrap();
         assert_eq!(doc.frontmatter.creator_id.as_deref().unwrap(), "ctr_test");

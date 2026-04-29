@@ -2,8 +2,8 @@
 //!
 //! Handles sync conflicts detected by the platform during bundle push.
 //! Implements conflict types from hard-vs-soft-validation-v1.md §7:
-//! - `version_mismatch`: Client world_revision is stale
-//! - `sequence_conflict`: Client delta_sequence has gaps
+//! - `version_mismatch`: Client `world_revision` is stale
+//! - `sequence_conflict`: Client `delta_sequence` has gaps
 //! - `hard_validation_failure`: Schema/contract violations
 //! - `soft_validation_warning`: Non-blocking validation warnings
 //!
@@ -21,9 +21,9 @@ use crate::errors::{SyncError, SyncResult};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictType {
-    /// Client world_revision is stale compared to server.
+    /// Client `world_revision` is stale compared to server.
     VersionMismatch,
-    /// Client delta_sequence has gaps or overlaps.
+    /// Client `delta_sequence` has gaps or overlaps.
     SequenceConflict,
     /// Hard validation failure — schema/contract violation (blocking).
     HardValidationFailure,
@@ -32,7 +32,8 @@ pub enum ConflictType {
 }
 
 impl ConflictType {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::VersionMismatch => "version_mismatch",
             Self::SequenceConflict => "sequence_conflict",
@@ -41,6 +42,10 @@ impl ConflictType {
         }
     }
 
+    /// Parse a conflict type from a string.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn parse(s: &str) -> SyncResult<Self> {
         match s {
             "version_mismatch" => Ok(Self::VersionMismatch),
@@ -73,7 +78,8 @@ pub enum ConflictResolution {
 }
 
 impl ConflictResolution {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::AutoAccept => "auto_accept",
             Self::AutoReject => "auto_reject",
@@ -81,6 +87,10 @@ impl ConflictResolution {
         }
     }
 
+    /// Parse a resolution strategy from a string.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn parse(s: &str) -> SyncResult<Self> {
         match s {
             "auto_accept" => Ok(Self::AutoAccept),
@@ -93,13 +103,14 @@ impl ConflictResolution {
     }
 
     /// Whether this resolution requires user interaction.
-    pub fn requires_manual_review(&self) -> bool {
+    #[must_use]
+    pub const fn requires_manual_review(&self) -> bool {
         matches!(self, Self::ManualReview)
     }
 }
 
 /// A single conflict detail within a conflict response.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConflictDetail {
     /// Machine-readable conflict code.
     pub code: String,
@@ -116,7 +127,7 @@ pub struct ConflictDetail {
 }
 
 /// Parsed conflict response from the platform.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConflictResponse {
     /// Always false for conflict responses.
     pub success: bool,
@@ -134,12 +145,15 @@ pub struct ConflictResponse {
 
 impl ConflictResponse {
     /// Parse a conflict response from a JSON body.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn from_json(json_str: &str) -> SyncResult<Self> {
         let val: Value = serde_json::from_str(json_str)?;
 
         let success = val
             .get("success")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .ok_or_else(|| {
                 SyncError::Serialization(
                     "missing or invalid 'success' field in conflict response".into(),
@@ -161,17 +175,19 @@ impl ConflictResponse {
         let conflicts = val
             .get("conflicts")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(parse_conflict_detail).collect())
+            .map(|arr| arr.iter().map(parse_conflict_detail).collect())
             .unwrap_or_default();
 
         let server_world_revision = val
             .get("server_world_revision")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
-        let server_delta_sequence = val.get("server_delta_sequence").and_then(|v| v.as_u64());
+        let server_delta_sequence = val
+            .get("server_delta_sequence")
+            .and_then(serde_json::Value::as_u64);
 
-        let retry_after = val.get("retry_after").and_then(|v| v.as_u64());
+        let retry_after = val.get("retry_after").and_then(serde_json::Value::as_u64);
 
         Ok(Self {
             success: false,
@@ -184,7 +200,8 @@ impl ConflictResponse {
     }
 
     /// Whether this conflict is a hard failure (blocking).
-    pub fn is_hard_failure(&self) -> bool {
+    #[must_use]
+    pub const fn is_hard_failure(&self) -> bool {
         matches!(
             self.conflict_type,
             ConflictType::HardValidationFailure | ConflictType::VersionMismatch
@@ -192,14 +209,16 @@ impl ConflictResponse {
     }
 
     /// Whether this conflict is a soft warning (non-blocking).
-    pub fn is_soft_warning(&self) -> bool {
+    #[must_use]
+    pub const fn is_soft_warning(&self) -> bool {
         matches!(self.conflict_type, ConflictType::SoftValidationWarning)
     }
 
     /// Get the suggested resolution for this conflict.
     ///
     /// Defaults to `ManualReview` for hard failures, `AutoAccept` for soft warnings.
-    pub fn suggested_resolution(&self) -> ConflictResolution {
+    #[must_use]
+    pub const fn suggested_resolution(&self) -> ConflictResolution {
         if self.is_soft_warning() {
             ConflictResolution::AutoAccept
         } else {
@@ -208,6 +227,7 @@ impl ConflictResponse {
     }
 
     /// Build a human-readable conflict summary for user review.
+    #[must_use]
     pub fn summary(&self) -> String {
         let mut lines = vec![format!("Conflict: {}", self.conflict_type.as_str())];
         lines.push(format!(
@@ -240,7 +260,8 @@ impl ConflictResponse {
     /// Returns `RetryAfterPolicy::AfterSeconds` if `retry_after` is set, or
     /// `RetryAfterPolicy::None` otherwise. The caller is responsible for storing
     /// this in the outbox entry (SYNC-R11).
-    pub fn retry_after_policy(&self) -> crate::outbox::RetryAfterPolicy {
+    #[must_use]
+    pub const fn retry_after_policy(&self) -> crate::outbox::RetryAfterPolicy {
         match self.retry_after {
             Some(secs) if secs > 0 => crate::outbox::RetryAfterPolicy::AfterSeconds(secs),
             _ => crate::outbox::RetryAfterPolicy::None,
@@ -248,21 +269,25 @@ impl ConflictResponse {
     }
 }
 
-fn parse_conflict_detail(val: &Value) -> Option<ConflictDetail> {
+/// Parse a conflict detail from a JSON value.
+///
+/// # Errors
+/// Returns the specific error type if the operation fails.
+fn parse_conflict_detail(val: &Value) -> ConflictDetail {
     let code = val
         .get("code")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .unwrap_or_default();
     let message = val
         .get("message")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .unwrap_or_default();
     let delta_index = val
         .get("delta_index")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize);
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok());
     let expected = val.get("expected").cloned();
     let actual = val.get("actual").cloned();
     let resolution_hint = val
@@ -270,14 +295,14 @@ fn parse_conflict_detail(val: &Value) -> Option<ConflictDetail> {
         .and_then(|v| v.as_str())
         .and_then(|s| ConflictResolution::parse(s).ok());
 
-    Some(ConflictDetail {
+    ConflictDetail {
         code,
         message,
         delta_index,
         expected,
         actual,
         resolution_hint,
-    })
+    }
 }
 
 /// Conflict resolver that determines the appropriate resolution strategy.
@@ -285,6 +310,7 @@ pub struct ConflictResolver;
 
 impl ConflictResolver {
     /// Determine the resolution strategy for a conflict response.
+    #[must_use]
     pub fn resolve(conflict: &ConflictResponse) -> ConflictResolution {
         // Use per-conflict hints if all agree
         let hints: Vec<&ConflictResolution> = conflict

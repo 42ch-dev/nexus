@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "Orchestration engine (graph-flow adapter + capability registry + worker manager)."
 
+[lints]
+workspace = true
+
 [dependencies]
 graph-flow = "=0.2.3"                                    # rig feature NOT enabled (per best-practices §1.2 pin policy)
 async-trait = { workspace = true }

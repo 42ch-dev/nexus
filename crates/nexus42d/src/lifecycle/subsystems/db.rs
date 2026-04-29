@@ -1,6 +1,8 @@
-//! DB subsystem — wraps SQLite pool + migrations.
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening)]
+//! DB subsystem — wraps `SQLite` pool + migrations.
 //!
-//! Real implementation that manages the local SQLite database.
+//! Real implementation that manages the local `SQLite` database.
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -21,12 +23,12 @@ enum DbState {
 
 /// DB subsystem implementation.
 ///
-/// Manages the SQLite pool via `nexus-local-db`.
+/// Manages the `SQLite` pool via `nexus-local-db`.
 #[derive(Debug)]
 pub struct DbSubsystem {
     /// Current state (behind Mutex for async access).
     state: Arc<Mutex<DbState>>,
-    /// Path to the SQLite database (for logging).
+    /// Path to the `SQLite` database (for logging).
     db_path: Option<String>,
 }
 
@@ -35,6 +37,7 @@ impl DbSubsystem {
     ///
     /// The actual pool initialization happens via `nexus_local_db::open_pool()`
     /// which is called from `WorkspaceState::initialize()`.
+    #[must_use]
     pub fn new(db_path: Option<String>) -> Self {
         Self {
             state: Arc::new(Mutex::new(DbState::NotStarted)),

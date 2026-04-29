@@ -17,10 +17,10 @@ pub enum OperationCategory {
     LocalOnly,
     /// Requires platform connectivity (sync, publish, auth login, context assemble, explore).
     PlatformRequired,
-    /// Available in local_only but enhanced by platform (creator manage, world fork, manuscript read).
+    /// Available in `local_only` but enhanced by platform (creator manage, world fork, manuscript read).
     LocalWithPlatformEnhancement,
 }
-
+#[must_use]
 /// Classify a named operation into its category.
 /// This is the single source of truth for what requires platform.
 pub fn classify_operation(operation: &str) -> OperationCategory {
@@ -61,7 +61,12 @@ pub fn require_platform(mode: &DomainRuntimeMode, operation: &str) -> Result<(),
     }
     Ok(())
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Check that the current mode allows an operation by its category.
 pub fn check_operation(mode: &DomainRuntimeMode, operation: &str) -> Result<(), DomainError> {
     match classify_operation(operation) {
@@ -72,6 +77,7 @@ pub fn check_operation(mode: &DomainRuntimeMode, operation: &str) -> Result<(), 
 }
 
 /// Returns a list of operation categories that are blocked under the given mode.
+#[must_use]
 pub fn blocked_categories(mode: &DomainRuntimeMode) -> Vec<OperationCategory> {
     if mode.is_local_only() {
         vec![OperationCategory::PlatformRequired]

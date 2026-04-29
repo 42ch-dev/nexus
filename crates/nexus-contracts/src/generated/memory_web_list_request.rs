@@ -1,15 +1,15 @@
-//! Nexus MemoryWebListRequest
+//! `Nexus` `MemoryWebListRequest`
 //!
-//! Request body for memory web read — list / filter MemoryItem rows for a world (platform plan 18). Aligns with domain memory.schema.json field semantics.
+//! `Request` body for memory web read — list / filter `MemoryItem` rows for a world (platform plan 18). `Aligns` with domain memory.schema.json field semantics.
 //!
-//! @schema_version 1
-//! @source memory-web-list-request.schema.json
+//! `@schema_version` 1
+//! `@source` memory-web-list-request.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{MemoryKind, MemoryStatus, MemoryType};
 
-/// Request body for memory web read — list / filter MemoryItem rows for a world (platform plan 18). Aligns with domain memory.schema.json field semantics.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for memory web read — list / filter `MemoryItem` rows for a world (platform plan 18). `Aligns` with domain memory.schema.json field semantics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct MemoryWebListRequest {
     pub schema_version: u32,

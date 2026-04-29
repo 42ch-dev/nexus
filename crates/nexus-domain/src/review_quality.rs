@@ -17,7 +17,7 @@ pub struct QualitySignal {
     /// High values indicate repetition.
     pub repeated_token_ratio: f32,
 }
-
+#[must_use]
 /// Tokenize text on whitespace and compute quality signal metrics.
 ///
 /// This is a pure function with no I/O or external dependencies.
@@ -73,6 +73,7 @@ pub fn quality_signal(input: &str) -> QualitySignal {
 /// - At least 35% unique tokens (rejects >65% repetition)
 /// - At least 65% alphabetic characters (rejects symbol-heavy noise)
 /// - No single token exceeds 45% of all tokens (rejects single-word spam)
+#[must_use]
 pub fn is_high_signal(input: &str) -> bool {
     let q = quality_signal(input);
     q.unique_ratio >= 0.35 && q.alpha_ratio >= 0.65 && q.repeated_token_ratio <= 0.45

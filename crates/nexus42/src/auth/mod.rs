@@ -28,7 +28,7 @@ pub struct UserTokenState {
     pub expires_at: String,
     /// Platform user ID extracted from JWT claims (`sub` / `userId`).
     pub user_id: String,
-    /// OAuth2 refresh token (optional — present when platform delivers it).
+    /// `OAuth2` refresh token (optional — present when platform delivers it).
     /// `#[serde(default)]` ensures backward compat with existing auth.json files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
@@ -52,7 +52,7 @@ pub struct AuthStore {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_token: Option<UserTokenState>,
 
-    /// Creator authentication states (keyed by creator_id)
+    /// Creator authentication states (keyed by `creator_id`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creators: Option<std::collections::HashMap<String, CreatorAuthState>>,
 }
@@ -71,6 +71,11 @@ pub struct CreatorAuthState {
 
 impl AuthStore {
     /// Load auth store from disk
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors if the auth store file cannot be read.
+    /// Returns JSON parsing errors if the file content is malformed.
     pub fn load() -> Result<Self> {
         let path = auth_store_path()?;
         if !path.exists() {
@@ -81,6 +86,11 @@ impl AuthStore {
     }
 
     /// Save auth store to disk (owner-only: 0600 on Unix).
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors if the auth store file cannot be written
+    /// or if permissions cannot be set on Unix systems.
     #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let path = auth_store_path()?;
@@ -99,6 +109,7 @@ impl AuthStore {
     }
 
     /// Check if a specific creator is authenticated
+    #[must_use]
     pub fn is_creator_authenticated(&self, creator_id: &str) -> bool {
         self.creators
             .as_ref()
@@ -108,7 +119,7 @@ impl AuthStore {
 
     /// Store a creator API key.
     ///
-    /// If an entry already exists for the given creator_id, the API key field
+    /// If an entry already exists for the given `creator_id`, the API key field
     /// is updated in place. Otherwise, a new entry is created with the API key
     /// and placeholder token fields (the token is populated separately during
     /// authentication).
@@ -117,6 +128,10 @@ impl AuthStore {
     /// Acceptable for pre-1.0 — per AGENTS.md, local persistence
     /// is not treated as a long-term migration contract.
     /// Future: encrypt at rest or use platform-managed credentials.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors if the auth store cannot be saved to disk.
     #[allow(dead_code)]
     pub fn store_creator_api_key(&mut self, creator_id: &str, api_key: &str) -> Result<()> {
         let creators = self
@@ -145,6 +160,10 @@ impl AuthStore {
     /// If the creator entry is not found in memory, reloads from disk.
     /// Distinguishes `NotFound` (legitimate `None`) from other I/O errors
     /// (which propagate as errors).
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors (other than `NotFound`) when reloading from disk.
     #[allow(dead_code)]
     pub fn get_creator_api_key(&self, creator_id: &str) -> Result<Option<String>> {
         // Check in-memory state
@@ -157,7 +176,7 @@ impl AuthStore {
 
         // Entry not in memory — fall back to disk.
         // Only treat NotFound as "key not found"; propagate other errors.
-        match AuthStore::load() {
+        match Self::load() {
             Ok(store) => Ok(store
                 .creators
                 .as_ref()
@@ -173,12 +192,20 @@ impl AuthStore {
     }
 
     /// Store a platform user token from device flow login.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors if the auth store cannot be saved to disk.
     pub fn store_user_token(&mut self, token: UserTokenState) -> Result<()> {
         self.user_token = Some(token);
         self.save()
     }
 
     /// Clear the platform user token (logout).
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors if the auth store cannot be saved to disk.
     pub fn clear_user_token(&mut self) -> Result<()> {
         self.user_token = None;
         self.save()
@@ -190,18 +217,14 @@ impl AuthStore {
     /// AND the token has not yet expired according to its `expires_at` timestamp.
     /// If the `expires_at` field cannot be parsed, the token is conservatively
     /// treated as already expired (returns `false`).
+    #[must_use]
     pub fn is_user_authenticated(&self) -> bool {
         self.user_token.as_ref().is_some_and(|t| {
             if t.access_token.is_empty() {
                 return false;
             }
             // Parse ISO 8601 expiry; treat unparseable dates as expired.
-            match DateTime::parse_from_rfc3339(&t.expires_at) {
-                Ok(expiry) => expiry > Utc::now(),
-                // If the timestamp doesn't parse, conservatively consider expired.
-                // This prevents a malformed token from being treated as valid.
-                Err(_) => false,
-            }
+            DateTime::parse_from_rfc3339(&t.expires_at).is_ok_and(|expiry| expiry > Utc::now())
         })
     }
 }

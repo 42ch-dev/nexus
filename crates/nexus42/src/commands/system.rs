@@ -34,6 +34,12 @@ struct SystemPresetCli {
 }
 
 /// Run the system preset command.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Daemon API calls fail
+/// - Invalid preset parameters
 pub async fn run(cmd: SystemPresetCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         SystemPresetCommand::Preset { command } => match command {
@@ -60,7 +66,7 @@ async fn list_system_presets(config: &CliConfig) -> Result<()> {
     } else {
         println!("System presets:");
         for id in &system_presets {
-            println!("  {}", id);
+            println!("  {id}");
         }
         println!("\n{} system preset(s)", system_presets.len());
     }
@@ -73,6 +79,7 @@ async fn list_system_presets(config: &CliConfig) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

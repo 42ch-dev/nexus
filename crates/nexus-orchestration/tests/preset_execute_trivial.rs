@@ -1,10 +1,10 @@
-//! T3 test: Linear two-state preset with ManualWait executes to terminal.
+//! T3 test: Linear two-state preset with `ManualWait` executes to terminal.
 //!
 //! Validates:
 //! - §8.2 mapping: capability→CapabilityTask, manual→ManualWaitTask, terminal→End
 //! - `start_session_with_graph` trait method
 //! - `run_step` correctly drives the state machine
-//! - `signal(Resume)` unblocks WaitForInput
+//! - `signal(Resume)` unblocks `WaitForInput`
 
 use nexus_orchestration::engine::StepOutcome;
 use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 /// Minimal two-state preset: `start` → `end`.
 ///
-/// - `start`: exit_when=manual (WaitForInput), next=end
-/// - `end`: terminal (NextAction::End)
+/// - `start`: `exit_when=manual` (`WaitForInput`), next=end
+/// - `end`: terminal (`NextAction::End`)
 const TWO_STATE_MANUAL_YAML: &str = r#"
 preset:
   id: trivial
@@ -53,8 +53,7 @@ async fn linear_two_state_preset_executes_to_terminal() {
     let out = engine.run_step(&sid).await.expect("run_step 1");
     assert!(
         out.is_waiting_for_input(),
-        "first step should WaitForInput (manual exit_when): {:?}",
-        out
+        "first step should WaitForInput (manual exit_when): {out:?}"
     );
 
     // Signal Resume to unblock the manual wait.
@@ -77,8 +76,7 @@ async fn linear_two_state_preset_executes_to_terminal() {
     let final_status = engine.get_status(&sid).await.expect("get_status");
     assert!(
         final_status.is_completed(),
-        "preset should reach terminal state: {:?}",
-        final_status
+        "preset should reach terminal state: {final_status:?}"
     );
 }
 
@@ -126,8 +124,7 @@ async fn capability_enter_state_composites_correctly() {
     let out = engine.run_step(&sid).await.expect("run_step 1");
     assert!(
         out.is_waiting_for_input(),
-        "first step should WaitForInput: {:?}",
-        out
+        "first step should WaitForInput: {out:?}"
     );
 
     // Resume to unblock.
@@ -147,8 +144,7 @@ async fn capability_enter_state_composites_correctly() {
     let final_status = engine.get_status(&sid).await.expect("get_status");
     assert!(
         final_status.is_completed(),
-        "capability-enter preset should complete: {:?}",
-        final_status
+        "capability-enter preset should complete: {final_status:?}"
     );
 }
 

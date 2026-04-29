@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Meta schema defining schema versioning and structure rules.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Meta {
     #[serde(rename = "$schema")]
