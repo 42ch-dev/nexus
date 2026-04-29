@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Manuscript handler
 
 use crate::api::errors::NexusApiError;

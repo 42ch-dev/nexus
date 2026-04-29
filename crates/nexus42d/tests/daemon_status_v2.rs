@@ -1,4 +1,4 @@
-//! Tests for daemon_status v2 endpoint.
+//! Tests for `daemon_status` v2 endpoint.
 //!
 //! Per plan §Task 5: verify v2 response shape and v1 wire-compat.
 
@@ -16,7 +16,7 @@ async fn spawn_test_daemon() -> (TestServer, WorkspaceState) {
     (server, state)
 }
 
-/// Test: Happy path returns schema_version=2 and lifecycle_state=running.
+/// Test: Happy path returns `schema_version=2` and `lifecycle_state=running`.
 #[tokio::test]
 async fn status_endpoint_returns_schema_version_2_and_running_in_happy_path() {
     let (server, _state) = spawn_test_daemon().await;
@@ -37,7 +37,7 @@ async fn status_endpoint_returns_schema_version_2_and_running_in_happy_path() {
         .is_empty());
 }
 
-/// Test: v1 clients still see lifecycle_state field (wire-compat).
+/// Test: v1 clients still see `lifecycle_state` field (wire-compat).
 #[tokio::test]
 async fn v1_client_still_sees_lifecycle_state_running() {
     let (server, _state) = spawn_test_daemon().await;
@@ -92,8 +92,7 @@ async fn subsystems_section_has_all_entries() {
     for (name, entry) in subsystems {
         assert!(
             entry["status"].is_string(),
-            "subsystem {} missing status",
-            name
+            "subsystem {name} missing status"
         );
     }
 }

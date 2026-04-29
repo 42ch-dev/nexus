@@ -28,7 +28,7 @@ pub struct MathProblem {
 /// - Division by zero is attempted
 /// - The result is negative (for subtraction)
 /// - The result is not a clean integer (for division)
-pub fn evaluate(problem: &MathProblem) -> Result<u32, crate::challenge::ChallengeError> {
+pub const fn evaluate(problem: &MathProblem) -> Result<u32, crate::challenge::ChallengeError> {
     match problem.op {
         Operation::Add => Ok(problem.n1.saturating_add(problem.n2)),
         Operation::Subtract => {

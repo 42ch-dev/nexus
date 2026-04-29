@@ -1,7 +1,7 @@
 //! Math problem extraction
 //!
 //! Extracts two numbers and one operation from the cleaned challenge text.
-//! The text format is: "{scene} has {N1} {item} and someone {op_keyword} {N2} more, how many {item} total"
+//! The text format is: "{scene} has {N1} {item} and someone {`op_keyword`} {N2} more, how many {item} total"
 
 use super::eval::{MathProblem, Operation};
 
@@ -37,6 +37,7 @@ const OP_MAPPINGS: &[OpMapping] = &[
 ///
 /// Expected pattern: "... has <N1> <item> and someone <op> <N2> more, how many ..."
 /// where N1 and N2 are now digit strings after number conversion.
+#[must_use] 
 pub fn extract_math_problem(text: &str) -> Option<MathProblem> {
     // Extract the two numbers from the text (they are digit strings after conversion)
     let numbers: Vec<u32> = text

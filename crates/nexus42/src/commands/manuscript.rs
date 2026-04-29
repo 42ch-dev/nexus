@@ -88,7 +88,7 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
                 validate_world_id(wid)?;
             }
             let dir = manager.create(&title, world_id.as_deref())?;
-            println!("Created manuscript: {}", title);
+            println!("Created manuscript: {title}");
             println!("  Directory: {}", dir.display());
             println!("  Files: manuscript.md, metadata.json");
             println!("  Phase: brainstorm");
@@ -101,12 +101,12 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             // Write to a temp file for editing (title sanitized to prevent path traversal).
             // W-004: Use tempfile::NamedTempFile for automatic cleanup on drop/crash.
             let safe_title = sanitize_title(&title)?;
-            let file_name = format!(".nexus42-edit-{}", safe_title);
+            let file_name = format!(".nexus42-edit-{safe_title}");
             let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name)
-                .map_err(|e| CliError::Other(format!("Failed to create temp file: {}", e)))?;
+                .map_err(|e| CliError::Other(format!("Failed to create temp file: {e}")))?;
             temp_file
                 .write_all(content.as_bytes())
-                .map_err(|e| CliError::Other(format!("Failed to write temp file: {}", e)))?;
+                .map_err(|e| CliError::Other(format!("Failed to write temp file: {e}")))?;
 
             let tmp_path = temp_file.path().to_path_buf();
 
@@ -115,13 +115,13 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
                 .arg(&tmp_path)
                 .status()
                 .map_err(|e| {
-                    CliError::Other(format!("Failed to open editor '{}': {}", editor, e))
+                    CliError::Other(format!("Failed to open editor '{editor}': {e}"))
                 })?;
 
             if status.success() {
                 let edited = std::fs::read_to_string(&tmp_path)?;
                 manager.write_content(&title, &edited)?;
-                println!("Manuscript '{}' updated.", title);
+                println!("Manuscript '{title}' updated.");
                 // NamedTempFile auto-deletes on drop
             } else {
                 println!("Editor exited with non-zero status. Changes not saved.");
@@ -132,30 +132,26 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
         }
         ManuscriptCommand::Status => {
             let phase = ManuscriptManager::get_from_db(&workspace_root).await?;
-            match phase {
-                Some(p) => {
-                    println!("Manuscript Status:");
-                    println!("  Phase: {}", p);
-                    println!("  Workspace: {}", workspace_root.display());
-                }
-                None => {
-                    println!("Manuscript Status:");
-                    println!("  Phase: not set");
-                    println!("  Set with: nexus42 manuscript phase <title> <phase>");
-                }
+            println!("Manuscript Status:");
+            if let Some(p) = phase {
+                println!("  Phase: {p}");
+                println!("  Workspace: {}", workspace_root.display());
+            } else {
+                println!("  Phase: not set");
+                println!("  Set with: nexus42 manuscript phase <title> <phase>");
             }
             Ok(())
         }
         ManuscriptCommand::Phase { title, phase } => {
             let pool = open_workspace_db(&workspace_root).await?;
             let target = manager.set_phase(&title, &phase, &pool).await?;
-            println!("Manuscript '{}' phase set to: {:?}", title, target);
+            println!("Manuscript '{title}' phase set to: {target:?}");
             Ok(())
         }
         ManuscriptCommand::Promote { title, strict } => {
             let pool = open_workspace_db(&workspace_root).await?;
             let new_phase = manager.promote(&title, strict, &pool).await?;
-            println!("Manuscript '{}' promoted to: {:?}", title, new_phase);
+            println!("Manuscript '{title}' promoted to: {new_phase:?}");
             if strict {
                 println!("  Strict mode: all validation checks passed");
             }
@@ -167,9 +163,9 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
         } => {
             let pool = open_workspace_db(&workspace_root).await?;
             let checks = manager.verify(&title, check_content, &pool).await?;
-            println!("Verifying manuscript '{}'...", title);
+            println!("Verifying manuscript '{title}'...");
             for check in &checks {
-                println!("  {}", check);
+                println!("  {check}");
             }
             let failures = checks
                 .iter()
@@ -178,13 +174,13 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             if failures == 0 {
                 println!("✓ Verification passed.");
             } else {
-                println!("✗ Verification failed: {} issue(s).", failures);
+                println!("✗ Verification failed: {failures} issue(s).");
             }
             Ok(())
         }
         ManuscriptCommand::Export { title, format } => {
             let content = manager.export(&title, &format)?;
-            println!("{}", content);
+            println!("{content}");
             Ok(())
         }
         ManuscriptCommand::List => {
@@ -195,7 +191,7 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
             } else {
                 println!("Manuscripts ({}):", manuscripts.len());
                 for m in &manuscripts {
-                    println!("  • {}", m);
+                    println!("  • {m}");
                 }
             }
             Ok(())
@@ -203,7 +199,7 @@ pub async fn run(cmd: ManuscriptCommand, _config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Open the workspace SQLite database
+/// Open the workspace `SQLite` database
 async fn open_workspace_db(workspace_root: &std::path::Path) -> Result<nexus_local_db::SqlitePool> {
     let nexus_dir = crate::config::workspace_nexus_dir(workspace_root);
     let db_path = nexus_dir.join("state.db");

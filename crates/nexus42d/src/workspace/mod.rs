@@ -27,7 +27,7 @@ use tokio::sync::Notify;
 pub struct WorkspaceState {
     db: DbPool,
     /// Nexus-sync Outbox for bundle-level sync operations.
-    /// Uses a separate SQLite database at `{nexus_home}/sync/outbox.db`
+    /// Uses a separate `SQLite` database at `{nexus_home}/sync/outbox.db`
     /// with its own connection pool for async operations.
     outbox: Arc<Option<Outbox>>,
     nexus_home: PathBuf,
@@ -59,11 +59,15 @@ pub struct WorkspaceState {
 }
 
 impl WorkspaceState {
-    /// Create a WorkspaceState for testing purposes.
+    /// Create a `WorkspaceState` for testing purposes.
     /// Not intended for production use.
     ///
     /// Creates a connection pool with a single connection for test isolation.
-    /// Does NOT initialize the Outbox (sync operations will return NotConfigured).
+    /// Does NOT initialize the Outbox (sync operations will return `NotConfigured`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the database pool cannot be created.
     pub async fn new_for_testing(
         nexus_home: PathBuf,
         db_path: PathBuf,
@@ -90,9 +94,13 @@ impl WorkspaceState {
         }
     }
 
-    /// Create a WorkspaceState for testing with an outbox.
+    /// Create a `WorkspaceState` for testing with an outbox.
     ///
     /// Initializes a temporary outbox database for testing sync operations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the database pool, sync directory, or outbox cannot be created.
     #[cfg(test)]
     pub async fn new_for_testing_with_outbox(
         nexus_home: PathBuf,
@@ -129,8 +137,17 @@ impl WorkspaceState {
         }
     }
 
-    /// Initialize workspace state — create nexus home, SQLite database,
+    /// Initialize workspace state — create nexus home, `SQLite` database,
     /// and sync outbox.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Home directory cannot be determined
+    /// - Directory creation fails
+    /// - CLI config cannot be read
+    /// - Database schema initialization fails
+    /// - Outbox initialization fails
     pub async fn initialize() -> anyhow::Result<Self> {
         let user_home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
@@ -206,28 +223,33 @@ impl WorkspaceState {
     }
 
     /// Get the orchestration engine, if set.
+    #[must_use]
     pub fn engine(&self) -> Option<Arc<dyn OrchestrationEngine>> {
-        self.engine.as_ref().as_ref().cloned()
+        self.engine.as_ref().clone()
     }
 
     /// Get the schedule supervisor, if set (WS7).
+    #[must_use]
     pub fn schedule_supervisor(&self) -> Option<Arc<ScheduleSupervisor>> {
-        self.schedule_supervisor.as_ref().as_ref().cloned()
+        self.schedule_supervisor.as_ref().clone()
     }
 
     /// Get the worker manager, if set.
+    #[must_use]
     pub fn worker_manager(&self) -> Option<Arc<WorkerManager>> {
-        self.worker_manager.as_ref().as_ref().cloned()
+        self.worker_manager.as_ref().clone()
     }
 
     /// Get the capability registry, if set.
+    #[must_use]
     pub fn capability_registry(&self) -> Option<Arc<CapabilityRegistry>> {
-        self.capability_registry.as_ref().as_ref().cloned()
+        self.capability_registry.as_ref().clone()
     }
 
     /// Get the shutdown notification handle.
     ///
     /// Callers await `.notified()` to block until the daemon enters Stopping state.
+    #[must_use]
     pub fn shutdown_notify(&self) -> Arc<Notify> {
         Arc::clone(&self.shutdown_notify)
     }
@@ -240,20 +262,23 @@ impl WorkspaceState {
     }
 
     /// Get the lifecycle, if set.
+    #[must_use]
     pub fn lifecycle(&self) -> Option<Arc<StatigLifecycle>> {
-        self.lifecycle.as_ref().as_ref().cloned()
+        self.lifecycle.as_ref().clone()
     }
 
     /// Get the current lifecycle state.
     /// Returns a default state if no lifecycle is set.
+    #[must_use]
     pub fn lifecycle_state(&self) -> LifecycleState {
-        match self.lifecycle.as_ref().as_ref() {
-            Some(lc) => lc.current_state(),
-            None => LifecycleState::Running, // Default to Running if no lifecycle
-        }
+        self.lifecycle
+            .as_ref()
+            .as_ref()
+            .map_or(LifecycleState::Running, |lc| lc.current_state())
     }
 
     /// Get exit code from lifecycle, if set.
+    #[must_use]
     pub fn lifecycle_exit_code(&self) -> Option<i32> {
         self.lifecycle
             .as_ref()
@@ -262,7 +287,8 @@ impl WorkspaceState {
     }
 
     /// Get a reference to the underlying sqlx pool.
-    pub fn pool(&self) -> &sqlx::SqlitePool {
+    #[must_use]
+    pub const fn pool(&self) -> &sqlx::SqlitePool {
         self.db.pool()
     }
 
@@ -270,12 +296,14 @@ impl WorkspaceState {
     ///
     /// Returns `None` if the outbox was not initialized (e.g., in test contexts
     /// using `new_for_testing`).
+    #[must_use]
     pub fn outbox(&self) -> Option<&Outbox> {
         self.outbox.as_ref().as_ref()
     }
 
-    /// Check if workspace is initialized
-    pub async fn is_initialized(&self) -> bool {
+    /// Check if workspace is initialized.
+    #[must_use]
+    pub fn is_initialized(&self) -> bool {
         self.workspace_path
             .lock()
             .unwrap_or_else(|poisoned| {
@@ -285,7 +313,8 @@ impl WorkspaceState {
             .is_some()
     }
 
-    /// Get workspace path
+    /// Get workspace path.
+    #[must_use]
     pub fn workspace_path(&self) -> Option<String> {
         self.workspace_path
             .lock()
@@ -296,42 +325,55 @@ impl WorkspaceState {
             .clone()
     }
 
-    /// Get database path
+    /// Get database path.
+    #[must_use]
     pub fn database_path(&self) -> String {
         self.db_path.display().to_string()
     }
 
-    /// Get nexus home directory
-    pub fn nexus_home(&self) -> &PathBuf {
+    /// Get nexus home directory.
+    #[must_use]
+    pub const fn nexus_home(&self) -> &PathBuf {
         &self.nexus_home
     }
 
-    /// Get a clone of the database pool (for TokenManager, etc.)
+    /// Get a clone of the database pool (for `TokenManager`, etc.)
+    #[must_use]
     pub fn db_pool(&self) -> DbPool {
         self.db.clone()
     }
 
-    /// Get uptime in seconds
-    pub async fn uptime_seconds(&self) -> u64 {
+    /// Get uptime in seconds.
+    #[must_use]
+    pub fn uptime_seconds(&self) -> u64 {
         self.started_at.elapsed().as_secs()
     }
 
     /// Wall-clock timestamp when the daemon started (RFC 3339).
-    pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
+    #[must_use]
+    pub const fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.started_at_wall
     }
 
     /// Current runtime mode (from CLI config at startup).
-    pub fn runtime_mode(&self) -> &RuntimeMode {
+    #[must_use]
+    pub const fn runtime_mode(&self) -> &RuntimeMode {
         &self.runtime_mode
     }
 
     /// Runtime mode as a string matching JSON Schema enum values.
-    pub fn runtime_mode_as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn runtime_mode_as_str(&self) -> &'static str {
         self.runtime_mode.as_str()
     }
 
-    /// Initialize a workspace at the given path
+    /// Initialize a workspace at the given path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Directory creation fails
+    /// - Database write fails
     pub async fn init_workspace(&self, path: &str) -> anyhow::Result<()> {
         let workspace_dir = std::path::Path::new(path);
         let nexus_dir = workspace_dir.join(".nexus42");
@@ -349,7 +391,7 @@ impl WorkspaceState {
         .bind(path)
         .execute(self.pool())
         .await
-        .map_err(|e| anyhow::anyhow!("Database error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Database error: {e}"))?;
 
         // Update in-memory state so is_initialized() returns true
         *self.workspace_path.lock().unwrap_or_else(|poisoned| {
@@ -378,17 +420,20 @@ mod tests {
 
         // Before init: is_initialized should be false
         assert!(
-            !state.is_initialized().await,
+            !state.is_initialized(),
             "is_initialized() should return false before init_workspace()"
         );
 
         // Initialize workspace
         let path_str = workspace_dir.display().to_string();
-        state.init_workspace(&path_str).await.unwrap();
+        state
+            .init_workspace(&path_str)
+            .await
+            .expect("init_workspace should succeed");
 
         // After init: is_initialized should be true
         assert!(
-            state.is_initialized().await,
+            state.is_initialized(),
             "is_initialized() should return true after init_workspace()"
         );
 

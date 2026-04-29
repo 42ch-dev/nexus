@@ -39,16 +39,19 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     /// Create a new daemon client from config with default timeouts
+    #[must_use] 
     pub fn from_config(config: &CliConfig) -> Self {
         Self::new(&config.daemon_url)
     }
 
     /// Create a new daemon client with a custom base URL and default timeouts
+    #[must_use] 
     pub fn new(base_url: &str) -> Self {
         Self::with_timeouts(base_url, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
     }
 
     /// Create a new daemon client with custom timeouts
+    #[must_use] 
     pub fn with_timeouts(
         base_url: &str,
         connect_timeout: Duration,
@@ -70,6 +73,7 @@ impl DaemonClient {
 
     /// Get the base URL for this daemon client.
     #[allow(dead_code)]
+    #[must_use] 
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -79,23 +83,34 @@ impl DaemonClient {
     /// Uses the client's configured timeout. Returns `Ok(false)` on any error
     /// (connection refused, timeout, etc.) rather than propagating errors,
     /// since "not running" is a valid state for health checks.
+    ///
+    /// # Errors
+    ///
+    /// This function never returns an error; it absorbs all failures and returns `Ok(false)`.
     pub async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/v1/local/runtime/health", self.base_url);
-        match self.http.get(&url).send().await {
-            Ok(resp) => Ok(resp.status().is_success()),
-            Err(_) => Ok(false),
-        }
+        self.http.get(&url).send().await.map_or_else(|_| Ok(false), |resp| Ok(resp.status().is_success()))
     }
 
     /// Get runtime status from the daemon.
     ///
     /// Returns information about daemon health, uptime, workspace state,
     /// and ACP session statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or `CliError::Io`/network error if the request fails.
     pub async fn get_runtime_status(&self) -> Result<crate::api::models::RuntimeStatus> {
         self.get("/v1/local/runtime/status").await
     }
 
-    /// Send a GET request
+    /// Send a GET request.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network/deserialization error if the request or parsing fails.
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.get(&url).send().await?;
@@ -109,8 +124,14 @@ impl DaemonClient {
         Ok(data)
     }
 
-    /// Send a POST request with JSON body
+    /// Send a POST request with JSON body.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network/deserialization error if the request or parsing fails.
     #[allow(dead_code)] // For upcoming sync / local API commands
+    #[allow(clippy::future_not_send)]
     pub async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.post(&url).json(body).send().await?;
@@ -124,8 +145,14 @@ impl DaemonClient {
         Ok(data)
     }
 
-    /// Send a POST request with JSON body, returning raw response
+    /// Send a POST request with JSON body, returning raw response.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network/deserialization error if the request or parsing fails.
     #[allow(dead_code)] // For upcoming sync / local API commands
+    #[allow(clippy::future_not_send)]
     pub async fn post_raw<B: Serialize>(&self, path: &str, body: &B) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.post(&url).json(body).send().await?;
@@ -139,7 +166,13 @@ impl DaemonClient {
         Ok(data)
     }
 
-    /// Send a PATCH request with JSON body
+    /// Send a PATCH request with JSON body.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network/deserialization error if the request or parsing fails.
+    #[allow(clippy::future_not_send)]
     pub async fn patch<T: DeserializeOwned, B: Serialize>(
         &self,
         path: &str,
@@ -157,7 +190,12 @@ impl DaemonClient {
         Ok(data)
     }
 
-    /// Send a DELETE request
+    /// Send a DELETE request.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network/deserialization error if the request or parsing fails.
     pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self.http.delete(&url).send().await?;
@@ -191,7 +229,7 @@ impl DaemonClient {
         // Fallback to raw body (backward compatible with old daemon versions)
         CliError::Api {
             status,
-            message: format!("GET {} → HTTP {} — {}", url, status, body),
+            message: format!("GET {url} → HTTP {status} — {body}"),
         }
     }
 
@@ -374,7 +412,7 @@ mod tests {
             "health_check should not error on connection refused"
         );
         assert!(
-            !result.unwrap(),
+            !result.expect("health_check result"),
             "health_check should return false when daemon not running"
         );
     }
@@ -396,11 +434,10 @@ mod tests {
         // Should complete within a reasonable time (well under 5s)
         assert!(
             elapsed < Duration::from_secs(5),
-            "Health check should timeout quickly, took {:?}",
-            elapsed
+            "Health check should timeout quickly, took {elapsed:?}"
         );
         // Should return Ok(false) regardless of timeout/connection error
         assert!(result.is_ok(), "health_check should absorb timeout errors");
-        assert!(!result.unwrap());
+        assert!(!result.expect("health check timeout test"));
     }
 }

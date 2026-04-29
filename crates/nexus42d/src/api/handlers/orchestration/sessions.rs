@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Session handlers: list, get, signal, create.
 
 use crate::workspace::WorkspaceState;
@@ -175,7 +177,7 @@ pub async fn signal_session(
     ))
 }
 
-/// Convert [`SessionStatus`] to the snake_case string expected by the API contract.
+/// Convert [`SessionStatus`] to the `snake_case` string expected by the API contract.
 ///
 /// `Debug` formatting produces `WaitingForInput` → `waitingforinput` (no separator).
 /// This function maps each variant explicitly to the correct `snake_case` form.

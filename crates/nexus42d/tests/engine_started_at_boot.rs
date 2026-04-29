@@ -1,6 +1,6 @@
 //! Integration test: engine wired at startup produces _system.maintenance session.
 //!
-//! This test verifies that when the daemon wires up the engine with system_preset,
+//! This test verifies that when the daemon wires up the engine with `system_preset`,
 //! the _system.maintenance session appears in the sessions list.
 //!
 //! We don't boot the full daemon (which would bind ports) but instead replicate

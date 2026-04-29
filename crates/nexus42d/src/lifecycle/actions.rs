@@ -1,3 +1,5 @@
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening, clippy::missing_panics_doc)]
 //! Entry/exit action bodies for the daemon lifecycle HSM.
 //!
 //! Per spec §5, these actions drive subsystem lifecycle.
@@ -27,7 +29,7 @@ pub struct ActionContext {
     shutdown_grace_ms: u64,
     /// Join handles for subsystem start tasks (used to cancel in-flight starts).
     start_handles: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
-    /// Reason for entering Starting state (e.g., "daemon_boot", "restart_after_failure").
+    /// Reason for entering Starting state (e.g., "`daemon_boot`", "`restart_after_failure`").
     start_reason: String,
     /// Timestamp when Starting state was entered.
     started_at: chrono::DateTime<chrono::Utc>,
@@ -49,6 +51,7 @@ impl std::fmt::Debug for ActionContext {
 
 impl ActionContext {
     /// Create a new action context.
+    #[must_use] 
     pub fn new(
         lifecycle: Arc<StatigLifecycle>,
         subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
@@ -66,6 +69,7 @@ impl ActionContext {
     }
 
     /// Create an action context for testing with mock subsystems.
+    #[must_use] 
     pub fn new_for_test(lifecycle: Arc<StatigLifecycle>) -> Self {
         let mocks = super::subsystems::MockAllSubsystems::all_succeed();
         Self::new(
@@ -81,7 +85,7 @@ impl ActionContext {
     }
 
     /// Get the shutdown grace period in ms.
-    pub fn shutdown_grace_ms(&self) -> u64 {
+    pub const fn shutdown_grace_ms(&self) -> u64 {
         self.shutdown_grace_ms
     }
 
@@ -91,7 +95,7 @@ impl ActionContext {
     }
 
     /// Get the timestamp when Starting was entered.
-    pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
+    pub const fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.started_at
     }
 
@@ -105,9 +109,9 @@ impl ActionContext {
 ///
 /// Per spec §5.1:
 /// - Bind HTTP listener (subsystem task)
-/// - Open SQLite pool + run migrations (subsystem task)
+/// - Open `SQLite` pool + run migrations (subsystem task)
 /// - Initialize sync outbox reader (subsystem task)
-/// - Instantiate OrchestrationEngine (stub, subsystem task)
+/// - Instantiate `OrchestrationEngine` (stub, subsystem task)
 /// - Start Worker Manager (stub, subsystem task)
 ///
 /// Each subsystem is a tokio task that dispatches `SubsystemUp` or
@@ -217,7 +221,7 @@ pub fn exit_running(_ctx: Arc<ActionContext>) {
 ///
 /// Per spec §5.3:
 /// - Record degraded subsystems in state-local storage (done in state.rs)
-/// - Set HTTP endpoint lifecycle_state to "degraded"
+/// - Set HTTP endpoint `lifecycle_state` to "degraded"
 /// - Keep orchestration engine running
 pub fn enter_degraded(_ctx: Arc<ActionContext>) {
     tracing::info!("entering Degraded state — daemon partially operational");
@@ -231,7 +235,7 @@ pub fn enter_degraded(_ctx: Arc<ActionContext>) {
 
 /// Exit action for `Degraded` state.
 ///
-/// Per spec §5.3: Clear degraded_subsystems tracking (done in state.rs).
+/// Per spec §5.3: Clear `degraded_subsystems` tracking (done in state.rs).
 pub fn exit_degraded(_ctx: Arc<ActionContext>) {
     tracing::info!("exiting Degraded state — all subsystems restored");
 }
@@ -239,13 +243,13 @@ pub fn exit_degraded(_ctx: Arc<ActionContext>) {
 /// Entry action for `Stopping` state.
 ///
 /// Per spec §5.4:
-/// - Set HTTP endpoint lifecycle_state to "stopping"
+/// - Set HTTP endpoint `lifecycle_state` to "stopping"
 /// - Stop accepting new sessions
-/// - Call engine.shutdown(grace_ms)
+/// - Call `engine.shutdown(grace_ms)`
 /// - Send shutdown to workers
 /// - Flush outbox, close DB pool, close HTTP listener
-/// - Emit ShutdownDrained when complete
-/// - Start watchdog for ShutdownTimeout
+/// - Emit `ShutdownDrained` when complete
+/// - Start watchdog for `ShutdownTimeout`
 pub fn enter_stopping(ctx: Arc<ActionContext>) {
     tracing::info!("entering Stopping state — graceful shutdown in progress");
 
@@ -321,7 +325,7 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
 /// Entry action for `Failed` state.
 ///
 /// Per spec §5.5:
-/// - Set HTTP endpoint lifecycle_state to "failed"
+/// - Set HTTP endpoint `lifecycle_state` to "failed"
 /// - Log final tracing event
 /// - Call `std::process::exit(exit_code)` after 100ms pause
 pub fn enter_failed(exit_code: i32, last_error: Option<String>) {

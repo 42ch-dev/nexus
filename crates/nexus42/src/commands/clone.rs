@@ -14,7 +14,7 @@ use serde::Deserialize;
 /// Clone command arguments
 #[derive(Debug, Args)]
 pub struct CloneArgs {
-    /// World reference to clone (world_id, e.g. wld_abc123)
+    /// World reference to clone (`world_id`, e.g. `wld_abc123`)
     world_ref: String,
 
     /// Clone source: platform (default) or local
@@ -72,19 +72,14 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
         CloneSourceArg::Platform => "platform",
         CloneSourceArg::Local => "local",
     };
-    match dialoguer::Confirm::new()
+    if let Ok(v) = dialoguer::Confirm::new()
         .with_prompt(format!(
-            "Clone world '{}' from {}?",
-            world_ref, source_label
+            "Clone world '{world_ref}' from {source_label}?"
         ))
         .default(false)
-        .interact()
-    {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("Non-interactive terminal: pass --yes to confirm clone.");
-            false
-        }
+        .interact() { v } else {
+        eprintln!("Non-interactive terminal: pass --yes to confirm clone.");
+        false
     }
 }
 
@@ -98,9 +93,8 @@ pub async fn run(args: CloneArgs, config: &CliConfig) -> Result<()> {
         let mode = config.runtime_mode();
         if mode.is_local_only() {
             return Err(CliError::Other(format!(
-                "Clone from platform is not available in {} mode. \
-                 Use --source local for local clone, or switch runtime mode.",
-                mode
+                "Clone from platform is not available in {mode} mode. \
+                 Use --source local for local clone, or switch runtime mode."
             )));
         }
     }
@@ -144,16 +138,16 @@ pub async fn run(args: CloneArgs, config: &CliConfig) -> Result<()> {
     if resp.success {
         println!("World clone completed.");
         if let Some(id) = resp.world_id {
-            println!("  world_id:        {}", id);
+            println!("  world_id:        {id}");
         }
         if let Some(rev) = resp.world_revision {
-            println!("  world_revision:  {}", rev);
+            println!("  world_revision:  {rev}");
         }
         if let Some(at) = &resp.cloned_at {
-            println!("  cloned_at:       {}", at);
+            println!("  cloned_at:       {at}");
         }
     } else if let Some(err) = resp.error {
-        return Err(CliError::Other(format!("World clone failed: {}", err)));
+        return Err(CliError::Other(format!("World clone failed: {err}")));
     }
 
     Ok(())

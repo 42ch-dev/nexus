@@ -46,7 +46,7 @@ pub enum PermissionCommand {
         /// Agent ID
         agent: String,
 
-        /// Capability name (e.g., "file_system.write")
+        /// Capability name (e.g., "`file_system.write`")
         capability: String,
     },
 
@@ -68,7 +68,7 @@ pub enum PermissionCommand {
 }
 
 /// Run permission management commands.
-pub async fn run(command: PermissionCommand) -> Result<()> {
+pub fn run(command: PermissionCommand) -> Result<()> {
     let workspace_root = find_workspace_root().ok_or_else(|| {
         anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
     })?;
@@ -105,7 +105,7 @@ fn run_list(
     if let Ok(doc) = PermissionPolicy::load_toml_edit(workspace_root) {
         let warnings = PermissionPolicy::validate_toml_keys(&doc);
         for warning in &warnings {
-            eprintln!("Warning: {}", warning);
+            eprintln!("Warning: {warning}");
         }
     }
 
@@ -129,13 +129,13 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
         if !global_granted.is_empty() {
             println!("  Granted:");
             for perm in &global_granted {
-                println!("    [grant] {}", perm);
+                println!("    [grant] {perm}");
             }
         }
         if !global_denied.is_empty() {
             println!("  Denied:");
             for perm in &global_denied {
-                println!("    [deny] {}", perm);
+                println!("    [deny] {perm}");
             }
         }
         println!();
@@ -157,7 +157,7 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
 
     if agents.is_empty() {
         if let Some(filter) = agent_filter {
-            println!("No rules found for agent '{}'.", filter);
+            println!("No rules found for agent '{filter}'.");
         } else if global_granted.is_empty() && global_denied.is_empty() {
             println!("No permission rules configured.");
             println!("Use 'nexus42 permission grant <agent> <capability>' to add rules.");
@@ -167,20 +167,20 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
 
     for agent_id in &agents {
         let (granted, denied, asked) = policy.list_agent_rules(agent_id);
-        println!("Agent: {}", agent_id);
+        println!("Agent: {agent_id}");
         if !granted.is_empty() {
             for cap in &granted {
-                println!("  [grant] {}", cap);
+                println!("  [grant] {cap}");
             }
         }
         if !denied.is_empty() {
             for cap in &denied {
-                println!("  [deny] {}", cap);
+                println!("  [deny] {cap}");
             }
         }
         if !asked.is_empty() {
             for cap in &asked {
-                println!("  [ask] {}", cap);
+                println!("  [ask] {cap}");
             }
         }
         if granted.is_empty() && denied.is_empty() && asked.is_empty() {
@@ -259,7 +259,7 @@ fn run_grant(workspace_root: &std::path::Path, agent: &str, capability: &str) ->
 
     PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-    println!("Granted '{}' for agent '{}'.", capability, agent);
+    println!("Granted '{capability}' for agent '{agent}'.");
     Ok(())
 }
 
@@ -276,7 +276,7 @@ fn run_deny(workspace_root: &std::path::Path, agent: &str, capability: &str) -> 
 
     PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-    println!("Denied '{}' for agent '{}'.", capability, agent);
+    println!("Denied '{capability}' for agent '{agent}'.");
     Ok(())
 }
 
@@ -293,7 +293,7 @@ fn run_ask(workspace_root: &std::path::Path, agent: &str, capability: &str) -> R
 
     PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-    println!("Set '{}' to 'ask' for agent '{}'.", capability, agent);
+    println!("Set '{capability}' to 'ask' for agent '{agent}'.");
     Ok(())
 }
 
@@ -312,8 +312,7 @@ fn run_revoke(workspace_root: &std::path::Path, agent: &str, capability: &str) -
 
     if !has_rule {
         return Err(crate::errors::CliError::Other(format!(
-            "No rule found for '{}' on agent '{}'.",
-            capability, agent
+            "No rule found for '{capability}' on agent '{agent}'."
         )));
     }
 
@@ -328,7 +327,7 @@ fn run_revoke(workspace_root: &std::path::Path, agent: &str, capability: &str) -
         PermissionPolicy::clean_empty_agent_tables_doc(&mut doc, agent);
         PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
             .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-        println!("Revoked '{}' for agent '{}'.", capability, agent);
+        println!("Revoked '{capability}' for agent '{agent}'.");
     }
 
     Ok(())
@@ -337,53 +336,49 @@ fn run_revoke(workspace_root: &std::path::Path, agent: &str, capability: &str) -
 fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()> {
     let policy = PermissionPolicy::load(workspace_root)?;
 
-    match agent {
-        Some(agent_id) => {
-            if policy.list_agent_rules(agent_id).0.is_empty()
-                && policy.list_agent_rules(agent_id).1.is_empty()
-                && policy.list_agent_rules(agent_id).2.is_empty()
-            {
-                return Err(crate::errors::CliError::Other(format!(
-                    "No rules found for agent '{}'.",
-                    agent_id
-                )));
-            }
-
-            let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
-                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-            if let Some(agents) = doc.get_mut("agents") {
-                if let Some(agent_table) = agents.get_mut(agent_id) {
-                    if let Some(t) = agent_table.as_table_like_mut() {
-                        t.clear();
-                    }
-                }
-                // Clean up empty agent entry
-                if let Some(agents_table) = agents.as_table_like_mut() {
-                    agents_table.remove(agent_id);
-                }
-            }
-            PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
-                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-            println!("Reset all rules for agent '{}'.", agent_id);
+    if let Some(agent_id) = agent {
+        if policy.list_agent_rules(agent_id).0.is_empty()
+            && policy.list_agent_rules(agent_id).1.is_empty()
+            && policy.list_agent_rules(agent_id).2.is_empty()
+        {
+            return Err(crate::errors::CliError::Other(format!(
+                "No rules found for agent '{agent_id}'."
+            )));
         }
-        None => {
-            if policy.list_agents().is_empty() {
-                return Err(crate::errors::CliError::Other(
-                    "No agent rules configured.".to_string(),
-                ));
-            }
 
-            let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
-                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-            if let Some(agents) = doc.get_mut("agents") {
-                if let Some(table) = agents.as_table_like_mut() {
-                    table.clear();
+        let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+            .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(agent_table) = agents.get_mut(agent_id) {
+                if let Some(t) = agent_table.as_table_like_mut() {
+                    t.clear();
                 }
             }
-            PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
-                .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-            println!("Reset all agent rules.");
+            // Clean up empty agent entry
+            if let Some(agents_table) = agents.as_table_like_mut() {
+                agents_table.remove(agent_id);
+            }
         }
+        PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+            .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+        println!("Reset all rules for agent '{agent_id}'.");
+    } else {
+        if policy.list_agents().is_empty() {
+            return Err(crate::errors::CliError::Other(
+                "No agent rules configured.".to_string(),
+            ));
+        }
+
+        let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
+            .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(table) = agents.as_table_like_mut() {
+                table.clear();
+            }
+        }
+        PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
+            .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+        println!("Reset all agent rules.");
     }
 
     Ok(())
@@ -600,8 +595,7 @@ mod tests {
         // Should NOT have global key when no global rules exist
         assert!(
             !parsed.contains_key("global"),
-            "JSON should NOT contain 'global' key when no global rules exist. Got: {:?}",
-            parsed
+            "JSON should NOT contain 'global' key when no global rules exist. Got: {parsed:?}"
         );
     }
 

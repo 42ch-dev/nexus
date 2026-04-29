@@ -8,9 +8,9 @@
 //! plus failure paths and idempotency behavior.
 //!
 //! Pre-flight requirements (seeded in $HOME/.nexus42/):
-//! - config.json  → platform_url pointing at wiremock server
-//! - auth.json    → a CreatorAuthState with a non-empty access_token
-//!   (obtain_auth_token scans creators for a non-empty access_token)
+//! - config.json  → `platform_url` pointing at wiremock server
+//! - auth.json    → a `CreatorAuthState` with a non-empty `access_token`
+//!   (`obtain_auth_token` scans creators for a non-empty `access_token`)
 
 use std::process::Command;
 
@@ -20,8 +20,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// Seed the temp HOME with minimal config and auth state so the CLI can
 /// reach the mock platform and find an auth token.
 ///
-/// - `$HOME/.nexus42/config.json`  → { "platform_url": "<mock_url>" }
-/// - `$HOME/.nexus42/auth.json`    → { "creators": { "crt_seed": { ... access_token } } }
+/// - `$HOME/.nexus42/config.json`  → { "`platform_url"`: "<`mock_url`>" }
+/// - `$HOME/.nexus42/auth.json`    → { "creators": { "`crt_seed"`: { ... `access_token` } } }
 fn seed_home(home: &std::path::Path, mock_url: &str) {
     let nexus_dir = home.join(".nexus42");
     std::fs::create_dir_all(&nexus_dir).expect("create .nexus42 dir");
@@ -524,7 +524,7 @@ async fn creator_register_verify_expired_challenge_exits_with_error() {
                 || creators["crt_e2e_test_12345"]["creator_api_key"].is_null()
                 || creators["crt_e2e_test_12345"]["creator_api_key"]
                     .as_str()
-                    .is_some_and(|k| k.is_empty()),
+                    .is_some_and(str::is_empty),
             "no api_key credential should be stored after expired verify failure"
         );
     }

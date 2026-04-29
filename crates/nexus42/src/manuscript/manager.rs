@@ -31,8 +31,7 @@ pub fn sanitize_title(title: &str) -> Result<String> {
 
     if trimmed.len() > MAX_TITLE_LENGTH {
         return Err(CliError::Config(format!(
-            "Manuscript title exceeds maximum length of {} characters",
-            MAX_TITLE_LENGTH
+            "Manuscript title exceeds maximum length of {MAX_TITLE_LENGTH} characters"
         )));
     }
 
@@ -61,15 +60,14 @@ pub fn sanitize_title(title: &str) -> Result<String> {
 pub fn validate_world_id(world_id: &str) -> Result<()> {
     if !world_id.starts_with("wld_") {
         return Err(CliError::Config(format!(
-            "Invalid world_id format '{}': must start with 'wld_'",
-            world_id
+            "Invalid world_id format '{world_id}': must start with 'wld_'"
         )));
     }
     Ok(())
 }
 
 /// Default manuscript template content
-const MANUSCRIPT_TEMPLATE: &str = r#"# {{title}}
+const MANUSCRIPT_TEMPLATE: &str = r"# {{title}}
 
 *Created by Nexus42*
 
@@ -83,7 +81,7 @@ const MANUSCRIPT_TEMPLATE: &str = r#"# {{title}}
 
 <!-- Add chapters as you go -->
 
-"#;
+";
 
 /// Manuscript manager for file and database operations
 pub struct ManuscriptManager {
@@ -92,11 +90,13 @@ pub struct ManuscriptManager {
 
 impl ManuscriptManager {
     /// Create a new manuscript manager for the given workspace root
-    pub fn new(workspace_root: PathBuf) -> Self {
+    #[must_use] 
+    pub const fn new(workspace_root: PathBuf) -> Self {
         Self { workspace_root }
     }
 
     /// Get the Stories directory path
+    #[must_use] 
     pub fn stories_dir(&self) -> PathBuf {
         self.workspace_root.join("Stories")
     }
@@ -161,8 +161,7 @@ impl ManuscriptManager {
         let path = self.manuscript_file(title)?;
         if !path.exists() {
             return Err(CliError::Config(format!(
-                "Manuscript '{}' not found. Create it with: nexus42 manuscript create \"{}\"",
-                title, title
+                "Manuscript '{title}' not found. Create it with: nexus42 manuscript create \"{title}\""
             )));
         }
         let content = std::fs::read_to_string(&path)?;
@@ -174,8 +173,7 @@ impl ManuscriptManager {
         let path = self.metadata_file(title)?;
         if !path.exists() {
             return Err(CliError::Config(format!(
-                "Manuscript '{}' metadata not found.",
-                title
+                "Manuscript '{title}' metadata not found."
             )));
         }
         let content = std::fs::read_to_string(&path)?;
@@ -188,13 +186,12 @@ impl ManuscriptManager {
         let path = self.manuscript_file(title)?;
         if !path.exists() {
             return Err(CliError::Config(format!(
-                "Manuscript '{}' not found.",
-                title
+                "Manuscript '{title}' not found."
             )));
         }
         // Validate UTF-8 safety
         let _ = std::str::from_utf8(content.as_bytes())
-            .map_err(|e| CliError::Config(format!("Content contains invalid UTF-8: {}", e)))?;
+            .map_err(|e| CliError::Config(format!("Content contains invalid UTF-8: {e}")))?;
         std::fs::write(&path, content)?;
         Ok(())
     }
@@ -218,9 +215,9 @@ impl ManuscriptManager {
                         // Remove bold/italic markers
                         l = l
                             .replace("**", "")
-                            .replace("*", "")
+                            .replace('*', "")
                             .replace("__", "")
-                            .replace("_", "");
+                            .replace('_', "");
                         // Remove link syntax
                         while let Some(start) = l.find('[') {
                             if let Some(end) = l[start..].find("](") {
@@ -239,8 +236,7 @@ impl ManuscriptManager {
                 Ok(plain)
             }
             _ => Err(CliError::Config(format!(
-                "Unknown export format '{}'. Supported: markdown, plain",
-                format
+                "Unknown export format '{format}'. Supported: markdown, plain"
             ))),
         }
     }
@@ -268,7 +264,7 @@ impl ManuscriptManager {
         Ok(manuscripts)
     }
 
-    /// Set the manuscript phase in SQLite
+    /// Set the manuscript phase in `SQLite`
     pub async fn set_phase(
         &self,
         title: &str,
@@ -292,7 +288,7 @@ impl ManuscriptManager {
             // Use domain ManuscriptState to validate transition
             let mut state = ManuscriptState::new("local", "wld_default", "local");
             // Set current phase
-            set_phase_on_state(&mut state, &current_parsed)?;
+            set_phase_on_state(&mut state, current_parsed)?;
             // Check if transition is valid
             if !state.can_transition_to(&target_phase) {
                 return Err(CliError::Config(format!(
@@ -300,7 +296,7 @@ impl ManuscriptManager {
                     current,
                     phase,
                     current,
-                    next_phase_name(&current_parsed)
+                    next_phase_name(current_parsed)
                 )));
             }
         }
@@ -320,7 +316,7 @@ impl ManuscriptManager {
         // Also update metadata file
         if let Ok(mut metadata) = self.read_metadata(title) {
             metadata.phase = phase.to_string();
-            metadata.updated_at = now.clone();
+            metadata.updated_at.clone_from(&now);
             if let Ok(json) = serde_json::to_string_pretty(&metadata) {
                 let _ = std::fs::write(self.metadata_file(title)?, json);
             }
@@ -329,7 +325,7 @@ impl ManuscriptManager {
         Ok(target_phase)
     }
 
-    /// Get the current manuscript phase from SQLite
+    /// Get the current manuscript phase from `SQLite`
     pub async fn get_phase(pool: &SqlitePool) -> Result<Option<String>> {
         let phase: Option<String> =
             sqlx::query_scalar!("SELECT value FROM workspace_meta WHERE key = 'manuscript_phase'")
@@ -353,7 +349,7 @@ impl ManuscriptManager {
     ///
     /// In strict mode (V1.1), additional validations are performed:
     /// - Manuscript phase is appropriate for promotion
-    /// - StoryManifest status is valid
+    /// - `StoryManifest` status is valid
     /// - Sync state is clean (no pending conflicts)
     pub async fn promote(
         &self,
@@ -381,14 +377,14 @@ impl ManuscriptManager {
 
         // Use domain ManuscriptState to perform the promotion with validation
         let mut state = ManuscriptState::new("local", "wld_default", "local");
-        set_phase_on_state(&mut state, &current_phase)?;
+        set_phase_on_state(&mut state, current_phase)?;
 
         state
             .promote()
-            .map_err(|e| CliError::Config(format!("{}", e)))?;
+            .map_err(|e| CliError::Config(format!("{e}")))?;
 
         let new_phase = *state.current_phase();
-        let phase_str = phase_to_str(&new_phase);
+        let phase_str = phase_to_str(new_phase);
 
         // Persist to SQLite
         let now = chrono::Utc::now().to_rfc3339();
@@ -405,7 +401,7 @@ impl ManuscriptManager {
         // Update metadata file
         if let Ok(mut metadata) = self.read_metadata(title) {
             metadata.phase = phase_str.to_string();
-            metadata.updated_at = now.clone();
+            metadata.updated_at.clone_from(&now);
             if let Ok(json) = serde_json::to_string_pretty(&metadata) {
                 let _ = std::fs::write(self.metadata_file(title)?, json);
             }
@@ -500,7 +496,7 @@ impl ManuscriptManager {
 
             // Content hash verification (CLI-R7)
             if check_content {
-                checks.extend(self.verify_content_integrity(title, &content)?);
+                checks.extend(self.verify_content_integrity(title, &content));
             }
         } else {
             checks.push(format!(
@@ -517,29 +513,29 @@ impl ManuscriptManager {
                 // Validate world_id format (CTX-R4)
                 if let Some(ref wid) = metadata.world_id {
                     match validate_world_id(wid) {
-                        Ok(()) => checks.push(format!("✓ World ID format: OK ({})", wid)),
-                        Err(e) => checks.push(format!("✗ World ID format: {}", e)),
+                        Ok(()) => checks.push(format!("✓ World ID format: OK ({wid})")),
+                        Err(e) => checks.push(format!("✗ World ID format: {e}")),
                     }
                 }
 
                 // Content hash comparison (CLI-R7)
                 if check_content {
                     if let Some(ref stored_hash) = metadata.content_hash {
-                        checks.push(format!("  Stored content hash: {}", stored_hash));
+                        checks.push(format!("  Stored content hash: {stored_hash}"));
                     }
                 }
             }
             Err(e) => {
-                checks.push(format!("✗ Metadata: {}", e));
+                checks.push(format!("✗ Metadata: {e}"));
             }
         }
 
         // 3. Phase consistency from SQLite
         if let Ok(Some(phase)) = Self::get_phase(pool).await {
             if consistency::validate_manuscript_phase(&phase).is_ok() {
-                checks.push(format!("✓ Phase consistency: OK ({})", phase));
+                checks.push(format!("✓ Phase consistency: OK ({phase})"));
             } else {
-                checks.push(format!("✗ Phase consistency: INVALID phase '{}'", phase));
+                checks.push(format!("✗ Phase consistency: INVALID phase '{phase}'"));
             }
         } else {
             checks.push("⚠ Phase: not set in database".to_string());
@@ -549,7 +545,7 @@ impl ManuscriptManager {
         if let Ok(content) = self.read_content(title) {
             match consistency::validate_excerpt_length(&content) {
                 Ok(()) => checks.push("✓ Excerpt length: OK".to_string()),
-                Err(e) => checks.push(format!("✗ Excerpt length: {}", e)),
+                Err(e) => checks.push(format!("✗ Excerpt length: {e}")),
             }
         }
 
@@ -557,42 +553,42 @@ impl ManuscriptManager {
     }
 
     /// Verify content integrity using SHA256 hash (CLI-R7)
-    fn verify_content_integrity(&self, title: &str, content: &str) -> Result<Vec<String>> {
+    fn verify_content_integrity(&self, title: &str, content: &str) -> Vec<String> {
         let mut checks = Vec::new();
 
         // Compute current content hash
-        let current_hash = self.compute_content_hash(content);
+        let current_hash = Self::compute_content_hash(content);
 
         // Check if metadata has a stored hash
         match self.read_metadata(title) {
             Ok(metadata) => {
                 if let Some(ref stored_hash) = metadata.content_hash {
                     if current_hash == *stored_hash {
-                        checks.push(format!("✓ Content integrity: OK ({})", current_hash));
+                        checks.push(format!("✓ Content integrity: OK ({current_hash})"));
                     } else {
                         checks.push("✗ Content integrity: MISMATCH".to_string());
-                        checks.push(format!("  Expected: {}", stored_hash));
-                        checks.push(format!("  Actual:   {}", current_hash));
+                        checks.push(format!("  Expected: {stored_hash}"));
+                        checks.push(format!("  Actual:   {current_hash}"));
                         checks.push(
                             "  File has been modified since last hash was recorded.".to_string(),
                         );
                     }
                 } else {
                     checks.push("⚠ Content integrity: No stored hash found".to_string());
-                    checks.push(format!("  Current hash: {}", current_hash));
+                    checks.push(format!("  Current hash: {current_hash}"));
                     checks.push("  Run 'nexus42 manuscript phase' to store the hash.".to_string());
                 }
             }
             Err(e) => {
-                checks.push(format!("✗ Content integrity: Cannot read metadata ({})", e));
+                checks.push(format!("✗ Content integrity: Cannot read metadata ({e})"));
             }
         }
 
-        Ok(checks)
+        checks
     }
 
     /// Compute SHA256 hash of content
-    fn compute_content_hash(&self, content: &str) -> String {
+    fn compute_content_hash(content: &str) -> String {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
@@ -601,7 +597,7 @@ impl ManuscriptManager {
     }
 }
 
-/// Parse a phase string into ManuscriptPhase
+/// Parse a phase string into `ManuscriptPhase`
 fn parse_phase(phase: &str) -> Result<ManuscriptPhase> {
     match phase.to_lowercase().as_str() {
         "brainstorm" => Ok(ManuscriptPhase::Brainstorm),
@@ -610,14 +606,13 @@ fn parse_phase(phase: &str) -> Result<ManuscriptPhase> {
         "finalize" => Ok(ManuscriptPhase::Finalize),
         "published" => Ok(ManuscriptPhase::Published),
         _ => Err(CliError::Config(format!(
-            "Unknown phase '{}'. Valid: brainstorm, draft, review, finalize, published",
-            phase
+            "Unknown phase '{phase}'. Valid: brainstorm, draft, review, finalize, published"
         ))),
     }
 }
 
-/// Convert ManuscriptPhase to string
-fn phase_to_str(phase: &ManuscriptPhase) -> &'static str {
+/// Convert `ManuscriptPhase` to string
+const fn phase_to_str(phase: ManuscriptPhase) -> &'static str {
     match phase {
         ManuscriptPhase::Brainstorm => "brainstorm",
         ManuscriptPhase::Draft => "draft",
@@ -628,7 +623,7 @@ fn phase_to_str(phase: &ManuscriptPhase) -> &'static str {
 }
 
 /// Get the next expected phase name
-fn next_phase_name(phase: &ManuscriptPhase) -> &'static str {
+const fn next_phase_name(phase: ManuscriptPhase) -> &'static str {
     match phase {
         ManuscriptPhase::Brainstorm => "draft",
         ManuscriptPhase::Draft => "review",
@@ -638,15 +633,15 @@ fn next_phase_name(phase: &ManuscriptPhase) -> &'static str {
     }
 }
 
-/// Set a phase on a ManuscriptState by cycling through promotions
-fn set_phase_on_state(state: &mut ManuscriptState, target: &ManuscriptPhase) -> Result<()> {
+/// Set a phase on a `ManuscriptState` by cycling through promotions
+fn set_phase_on_state(state: &mut ManuscriptState, target: ManuscriptPhase) -> Result<()> {
     loop {
-        if state.current_phase() == target {
+        if *state.current_phase() == target {
             return Ok(());
         }
         state
             .promote()
-            .map_err(|e| CliError::Config(format!("{}", e)))?;
+            .map_err(|e| CliError::Config(format!("{e}")))?;
     }
 }
 
@@ -657,7 +652,7 @@ pub fn validate_utf8_content(content: &str) -> Result<()> {
     // this validates that round-trip through bytes is clean)
     let bytes = content.as_bytes();
     let roundtrip = std::str::from_utf8(bytes)
-        .map_err(|e| CliError::Config(format!("Content contains invalid UTF-8: {}", e)))?;
+        .map_err(|e| CliError::Config(format!("Content contains invalid UTF-8: {e}")))?;
     if roundtrip != content {
         return Err(CliError::Config(
             "Content UTF-8 round-trip mismatch".to_string(),
@@ -1014,8 +1009,7 @@ mod tests {
         for check in &checks {
             assert!(
                 check.starts_with('✓') || check.starts_with('⚠'),
-                "Check should pass: {}",
-                check
+                "Check should pass: {check}"
             );
         }
     }
@@ -1094,11 +1088,8 @@ mod tests {
 
     #[test]
     fn test_compute_content_hash() {
-        let tmp = TempDir::new().unwrap();
-        let manager = ManuscriptManager::new(tmp.path().to_path_buf());
-
         let content = "Hello, world!";
-        let hash = manager.compute_content_hash(content);
+        let hash = ManuscriptManager::compute_content_hash(content);
 
         assert!(hash.starts_with("sha256:"));
         assert_eq!(hash.len(), 71); // "sha256:" + 64 hex chars
@@ -1164,16 +1155,16 @@ mod tests {
 
     #[test]
     fn test_phase_to_str() {
-        assert_eq!(phase_to_str(&ManuscriptPhase::Brainstorm), "brainstorm");
-        assert_eq!(phase_to_str(&ManuscriptPhase::Draft), "draft");
-        assert_eq!(phase_to_str(&ManuscriptPhase::Published), "published");
+        assert_eq!(phase_to_str(ManuscriptPhase::Brainstorm), "brainstorm");
+        assert_eq!(phase_to_str(ManuscriptPhase::Draft), "draft");
+        assert_eq!(phase_to_str(ManuscriptPhase::Published), "published");
     }
 
     #[test]
     fn test_next_phase_name() {
-        assert_eq!(next_phase_name(&ManuscriptPhase::Brainstorm), "draft");
+        assert_eq!(next_phase_name(ManuscriptPhase::Brainstorm), "draft");
         assert_eq!(
-            next_phase_name(&ManuscriptPhase::Published),
+            next_phase_name(ManuscriptPhase::Published),
             "none (already published)"
         );
     }

@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Daemon Database Schema
 //!
 //! Delegates all schema initialization to `nexus-local-db` module.

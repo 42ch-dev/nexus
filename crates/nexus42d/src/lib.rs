@@ -16,6 +16,6 @@ pub mod workspace;
 pub mod test_utils;
 
 /// Helpers for building Axum apps with ephemeral engines for integration tests.
-/// Enabled via `features = ["test-support"]` in dev-dependencies.
-#[cfg(feature = "test-support")]
+/// Gated behind `#[cfg(test)]` because it uses dev-dependencies.
+#[cfg(test)]
 pub mod test_support;

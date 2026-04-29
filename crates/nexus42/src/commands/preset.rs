@@ -12,7 +12,7 @@ use nexus_home_layout::user_preset_bundle_dir;
 
 /// The template YAML for a new user preset.
 const PRESET_INIT_TEMPLATE: &str = r#"preset:
-  id: {name}
+  id: {{name}}
   version: 1
   kind: creator
   description: "Custom orchestration strategy"
@@ -37,10 +37,10 @@ states:
 "#;
 
 /// Template for the default prompt file scaffolding.
-const PROMPT_INIT_CONTENT: &str = r#"# Start Prompt
+const PROMPT_INIT_CONTENT: &str = r"# Start Prompt
 
 {{input}}
-"#;
+";
 
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
@@ -61,13 +61,13 @@ struct PresetCli {
 }
 
 /// Run the preset command.
-pub async fn run(cmd: PresetCommand, _config: &CliConfig) -> Result<()> {
+pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         PresetCommand::Init { name } => {
             let home = nexus_home()?;
             init_preset_at(&home, &name)
         }
-        PresetCommand::List => list_presets(_config).await,
+        PresetCommand::List => list_presets(config).await,
     }
 }
 
@@ -82,9 +82,8 @@ fn init_preset_at(home: &std::path::Path, name: &str) -> Result<()> {
         || name.starts_with('_')
     {
         return Err(CliError::Other(format!(
-            "Invalid preset name {:?}. Must be a non-empty path segment without path separators, \
-             not '.', '..', and must not start with '_'.",
-            name
+            "Invalid preset name {name:?}. Must be a non-empty path segment without path separators, \
+             not '.', '..', and must not start with '_'."
         )));
     }
 
@@ -102,7 +101,7 @@ fn init_preset_at(home: &std::path::Path, name: &str) -> Result<()> {
     std::fs::create_dir_all(&prompts_dir)?;
 
     // Write preset.yaml with the name substituted in.
-    let preset_yaml = PRESET_INIT_TEMPLATE.replace("{name}", name);
+    let preset_yaml = PRESET_INIT_TEMPLATE.replace("{{name}}", name);
     std::fs::write(bundle_dir.join("preset.yaml"), preset_yaml)?;
 
     // Write a default start prompt.
@@ -161,9 +160,9 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
         for id in &embedded {
             let user_override = user_ids.iter().any(|e| e == id.as_str());
             if user_override {
-                println!("  {}  (overridden by user preset)", id);
+                println!("  {id}  (overridden by user preset)");
             } else {
-                println!("  {}", id);
+                println!("  {id}");
             }
         }
     }
@@ -174,7 +173,7 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
         println!("  (none)");
     } else {
         for id in &system {
-            println!("  {}", id);
+            println!("  {id}");
         }
     }
 
@@ -186,9 +185,9 @@ async fn list_presets(config: &CliConfig) -> Result<()> {
         for id in &user_ids {
             let embedded_override = embedded.iter().any(|e| e.as_str() == id);
             if embedded_override {
-                println!("  {}  (overrides embedded)", id);
+                println!("  {id}  (overrides embedded)");
             } else {
-                println!("  {}", id);
+                println!("  {id}");
             }
         }
     }
@@ -214,19 +213,19 @@ mod tests {
 
     #[test]
     fn preset_init_parses() {
-        let cmd = PresetCli::try_parse_from(["preset", "init", "my-strategy"]).unwrap();
+        let cmd = PresetCli::try_parse_from(["preset", "init", "my-strategy"]).expect("parse");
         match cmd.command {
             PresetCommand::Init { name } => assert_eq!(name, "my-strategy"),
-            _ => panic!("expected Init variant"),
+            PresetCommand::List => panic!("expected Init variant"),
         }
     }
 
     #[test]
     fn preset_list_parses() {
-        let cmd = PresetCli::try_parse_from(["preset", "list"]).unwrap();
+        let cmd = PresetCli::try_parse_from(["preset", "list"]).expect("parse");
         match cmd.command {
             PresetCommand::List => {} // expected
-            _ => panic!("expected List variant"),
+            PresetCommand::Init { .. } => panic!("expected List variant"),
         }
     }
 
@@ -238,7 +237,7 @@ mod tests {
 
     #[test]
     fn init_preset_creates_directory_structure() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
         let nexus_home = tmp.path();
 
         let result = init_preset_at(nexus_home, "test-strat");
@@ -250,21 +249,21 @@ mod tests {
         assert!(bundle_dir.join("prompts/start.md").exists());
 
         // Verify preset.yaml content includes the name.
-        let content = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
+        let content = std::fs::read_to_string(bundle_dir.join("preset.yaml")).expect("read preset.yaml");
         assert!(content.contains("id: test-strat"));
     }
 
     #[test]
     fn init_preset_errors_on_existing() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
         let nexus_home = tmp.path();
 
         // First init should succeed.
-        init_preset_at(nexus_home, "existing-strat").unwrap();
+        init_preset_at(nexus_home, "existing-strat").expect("first init");
 
         // Second init should fail.
-        let err = init_preset_at(nexus_home, "existing-strat").unwrap_err();
-        let display = format!("{}", err);
+        let err = init_preset_at(nexus_home, "existing-strat").expect_err("second init should fail");
+        let display = format!("{err}");
         assert!(
             display.contains("already exists"),
             "expected 'already exists' error: {display}"
@@ -273,7 +272,7 @@ mod tests {
 
     #[test]
     fn init_preset_rejects_invalid_names() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
         let nexus_home = tmp.path();
 
         let empty = init_preset_at(nexus_home, "");
@@ -294,17 +293,17 @@ mod tests {
 
     #[test]
     fn list_user_preset_ids_finds_dirs_with_preset_yaml() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
         let home = tmp.path();
         let base = nexus_home_layout::user_preset_base_dir(home);
-        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&base).expect("create base dir");
 
         // Create a valid preset dir.
-        std::fs::create_dir_all(base.join("valid-strat")).unwrap();
-        std::fs::write(base.join("valid-strat/preset.yaml"), "dummy").unwrap();
+        std::fs::create_dir_all(base.join("valid-strat")).expect("create valid-strat");
+        std::fs::write(base.join("valid-strat/preset.yaml"), "dummy").expect("write preset.yaml");
 
         // Create a dir without preset.yaml (should be skipped).
-        std::fs::create_dir_all(base.join("empty-dir")).unwrap();
+        std::fs::create_dir_all(base.join("empty-dir")).expect("create empty-dir");
 
         let result = nexus_home_layout::list_user_preset_ids(home);
         assert_eq!(result.len(), 1);

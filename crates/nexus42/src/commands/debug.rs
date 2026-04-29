@@ -24,6 +24,12 @@ pub enum DebugCommand {
 }
 
 /// Run debug command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Workspace state cannot be dumped (I/O errors, serialization failures)
+/// - Delta replay fails
 pub async fn run(cmd: DebugCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         DebugCommand::DumpWorkspace { format } => dump_workspace(config, &format).await,
@@ -153,13 +159,13 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
             // TOML does not support null values; strip them before serialization
             let cleaned = strip_nulls(&json_val);
             toml::to_string_pretty(&cleaned)
-                .map_err(|e| anyhow::anyhow!("Failed to serialize to TOML: {}", e))?
+                .map_err(|e| anyhow::anyhow!("Failed to serialize to TOML: {e}"))?
         }
         _ => serde_json::to_string_pretty(&serde_json::Value::Object(state))
-            .map_err(|e| anyhow::anyhow!("Failed to serialize to JSON: {}", e))?,
+            .map_err(|e| anyhow::anyhow!("Failed to serialize to JSON: {e}"))?,
     };
 
-    println!("{}", output);
+    println!("{output}");
     Ok(())
 }
 
@@ -175,12 +181,12 @@ async fn replay_delta(config: &CliConfig, delta_id: &str) -> Result<()> {
         return Err(crate::errors::CliError::DaemonNotRunning);
     }
 
-    println!("Replaying delta: {}", delta_id);
+    println!("Replaying delta: {delta_id}");
     println!();
 
     // Attempt to fetch delta info from daemon
     match client
-        .get::<serde_json::Value>(&format!("/v1/local/delta/{}", delta_id))
+        .get::<serde_json::Value>(&format!("/v1/local/delta/{delta_id}"))
         .await
     {
         Ok(delta) => {
@@ -191,7 +197,7 @@ async fn replay_delta(config: &CliConfig, delta_id: &str) -> Result<()> {
             );
         }
         Err(e) => {
-            println!("Could not fetch delta from daemon: {}", e);
+            println!("Could not fetch delta from daemon: {e}");
             println!();
             println!("This may mean:");
             println!("  - The delta ID does not exist");

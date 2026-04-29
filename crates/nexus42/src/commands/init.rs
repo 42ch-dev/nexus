@@ -21,7 +21,7 @@ pub enum InitCommand {
         /// Operational workspace slug (default: default)
         #[arg(long)]
         workspace_slug: Option<String>,
-        /// Creative root directory (default: ~/Documents/nexus/<creator_id>/<workspace_slug>)
+        /// Creative root directory (default: ~/Documents/nexus/<`creator_id`>/<`workspace_slug`>)
         #[arg(long)]
         creative_root: Option<PathBuf>,
     },
@@ -39,6 +39,13 @@ struct WorkspaceMeta {
 }
 
 /// Initialize a Nexus workspace
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Workspace directory cannot be created
+/// - Configuration cannot be saved
+/// - Invalid slug provided
 pub async fn run(cmd: InitCommand) -> Result<()> {
     match cmd {
         InitCommand::Workspace {
@@ -50,14 +57,14 @@ pub async fn run(cmd: InitCommand) -> Result<()> {
     }
 }
 
-pub(crate) fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<PathBuf> {
+pub fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<PathBuf> {
     let docs = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Documents")))
         .ok_or_else(|| CliError::Other("Cannot resolve Documents directory".into()))?;
     Ok(docs.join("nexus").join(creator_id).join(workspace_slug))
 }
 
-pub(crate) fn validate_slug(label: &str, value: &str) -> Result<()> {
+pub fn validate_slug(label: &str, value: &str) -> Result<()> {
     if value.is_empty()
         || value.contains('/')
         || value.contains('\\')
@@ -65,15 +72,14 @@ pub(crate) fn validate_slug(label: &str, value: &str) -> Result<()> {
         || value == ".."
     {
         return Err(CliError::Other(format!(
-            "Invalid {} {:?} (must be a single path segment)",
-            label, value
+            "Invalid {label} {value:?} (must be a single path segment)"
         )));
     }
     Ok(())
 }
 
 /// Writes creative tree, `meta.json`, and initializes workspace `state.db` (ADR-014).
-pub(crate) async fn materialize_adr014_workspace(
+pub async fn materialize_adr014_workspace(
     user_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
@@ -131,7 +137,7 @@ pub(crate) async fn materialize_adr014_workspace(
     Ok(db_path)
 }
 
-pub(crate) fn persist_cli_workspace_selection(
+pub fn persist_cli_workspace_selection(
     creative_root: PathBuf,
     creator_id: String,
     workspace_slug: String,
@@ -166,8 +172,7 @@ async fn init_workspace(
         .join("meta.json");
     if op_meta.exists() {
         println!(
-            "Workspace already registered for creator {} / {}.",
-            creator_id, workspace_slug
+            "Workspace already registered for creator {creator_id} / {workspace_slug}."
         );
         return Ok(());
     }
@@ -190,9 +195,7 @@ async fn init_workspace(
 
     let workspace_name = name.unwrap_or_else(|| {
         creative_root
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unnamed".to_string())
+            .file_name().map_or_else(|| "unnamed".to_string(), |n| n.to_string_lossy().to_string())
     });
 
     let db_path = materialize_adr014_workspace(
@@ -215,7 +218,7 @@ async fn init_workspace(
 
     let op_dir = crate::paths::operational_workspace_dir(&user_home, &creator_id, &workspace_slug);
 
-    println!("✓ Workspace initialized: {}", workspace_name);
+    println!("✓ Workspace initialized: {workspace_name}");
     println!("  Creative root: {}", creative_root.display());
     println!("  Operational: {}", op_dir.display());
     println!("  state.db: {}", db_path.display());

@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Permission enforcement for ACP tool execution.
 //!
 //! This module provides a simple permission checker that validates tool
@@ -55,7 +57,7 @@ fn tool_to_permission_category(tool_name: &str) -> Option<&'static str> {
 ///
 /// # Arguments
 ///
-/// * `tool_name` - The ACP tool name (e.g., "fs/read_text_file")
+/// * `tool_name` - The ACP tool name (e.g., "`fs/read_text_file`")
 /// * `granted_permissions` - Set of granted permission categories, or None for no enforcement
 ///
 /// # Returns

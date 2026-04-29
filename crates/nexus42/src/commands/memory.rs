@@ -23,7 +23,7 @@ pub enum MemoryCommand {
         /// Memory slug (filename, path-safe)
         slug: String,
 
-        /// Memory kind (story_summary, research_material, etc.)
+        /// Memory kind (`story_summary`, `research_material`, etc.)
         #[arg(long, default_value = "custom")]
         kind: String,
 
@@ -67,9 +67,9 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
             slug,
             kind,
             content,
-        } => create(config, creator_id, &slug, &kind, content).await,
+        } => create(config, creator_id, &slug, &kind, content),
         MemoryCommand::Show { slug } => show(config, creator_id, &slug),
-        MemoryCommand::Edit { slug } => edit(config, creator_id, &slug).await,
+        MemoryCommand::Edit { slug } => edit(config, creator_id, &slug),
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
         MemoryCommand::Review => review(config, creator_id).await,
         MemoryCommand::Fragments => fragments(config, creator_id).await,
@@ -81,11 +81,11 @@ fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let slugs = memory_io::list_memories(&home, creator_id)?;
 
     if slugs.is_empty() {
-        println!("No long-term memories for creator '{}'.", creator_id);
+        println!("No long-term memories for creator '{creator_id}'.");
         return Ok(());
     }
 
-    println!("Long-term memories for creator '{}':\n", creator_id);
+    println!("Long-term memories for creator '{creator_id}':\n");
 
     // Header
     println!("{:<30} {:<20} UPDATED_AT", "SLUG", "KIND");
@@ -96,7 +96,7 @@ fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
             Ok(mem) => {
                 let kind = &mem.frontmatter.memory_kind;
                 let updated = &mem.frontmatter.updated_at;
-                println!("{:<30} {:<20} {}", slug, kind, updated);
+                println!("{slug:<30} {kind:<20} {updated}");
             }
             Err(_) => {
                 println!("{:<30} {:<20} ", slug, "(unreadable)");
@@ -108,7 +108,7 @@ fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn create(
+fn create(
     _config: &CliConfig,
     creator_id: &str,
     slug: &str,
@@ -120,16 +120,14 @@ async fn create(
     // Validate slug
     if !nexus_domain::long_term_memory::slug_is_safe(slug) {
         return Err(crate::errors::CliError::Other(format!(
-            "Invalid slug '{}': must not contain '..', '/', '\\\\', or control characters.",
-            slug
+            "Invalid slug '{slug}': must not contain '..', '/', '\\\\', or control characters."
         )));
     }
 
     // Check if memory already exists
     if memory_io::load_memory(&home, creator_id, slug).is_ok() {
         return Err(crate::errors::CliError::Other(format!(
-            "Memory '{}' already exists for creator '{}'. Use `memory edit {}` to modify it.",
-            slug, creator_id, slug
+            "Memory '{slug}' already exists for creator '{creator_id}'. Use `memory edit {slug}` to modify it."
         )));
     }
 
@@ -152,8 +150,8 @@ async fn create(
     memory.set_body(&body);
     memory_io::save_memory(&home, creator_id, slug, &memory)?;
 
-    println!("Memory '{}' created for creator '{}'.", slug, creator_id);
-    println!("  Kind: {}", kind);
+    println!("Memory '{slug}' created for creator '{creator_id}'.");
+    println!("  Kind: {kind}");
     println!(
         "  Path: {}",
         memory_io::memory_path(&home, creator_id, slug).display()
@@ -166,7 +164,7 @@ fn show(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     let memory = memory_io::load_memory(&home, creator_id, slug)?;
 
     // Display frontmatter
-    println!("slug: {}", slug);
+    println!("slug: {slug}");
     println!("memory_id: {}", memory.frontmatter.memory_id);
     println!("memory_kind: {}", memory.frontmatter.memory_kind);
     println!("updated_at: {}", memory.frontmatter.updated_at);
@@ -183,7 +181,7 @@ fn show(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     Ok(())
 }
 
-async fn edit(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
+fn edit(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     let home = config::user_home_dir()?;
     let mut memory = memory_io::load_memory(&home, creator_id, slug)?;
 
@@ -191,7 +189,7 @@ async fn edit(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     memory.set_body(&new_body);
     memory_io::save_memory(&home, creator_id, slug, &memory)?;
 
-    println!("Memory '{}' updated.", slug);
+    println!("Memory '{slug}' updated.");
     Ok(())
 }
 
@@ -204,8 +202,7 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     if !force {
         // S-005: Confirm deletion. Empty input (just pressing Enter) = cancel.
         println!(
-            "Delete memory '{}' for creator '{}'? [y/N]",
-            slug, creator_id
+            "Delete memory '{slug}' for creator '{creator_id}'? [y/N]"
         );
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
@@ -222,7 +219,7 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     }
 
     memory_io::delete_memory(&home, creator_id, slug)?;
-    println!("Memory '{}' deleted.", slug);
+    println!("Memory '{slug}' deleted.");
     Ok(())
 }
 
@@ -280,11 +277,11 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
     // The file persists long enough for the editor to read it, but is
     // automatically deleted when the NamedTempFile goes out of scope.
     let mut temp_file = tempfile::NamedTempFile::with_prefix(file_name).map_err(|e| {
-        crate::errors::CliError::Other(format!("Failed to create temp file: {}", e))
+        crate::errors::CliError::Other(format!("Failed to create temp file: {e}"))
     })?;
     temp_file
         .write_all(initial_content.as_bytes())
-        .map_err(|e| crate::errors::CliError::Other(format!("Failed to write temp file: {}", e)))?;
+        .map_err(|e| crate::errors::CliError::Other(format!("Failed to write temp file: {e}")))?;
 
     let temp_path = temp_file.path().to_path_buf();
 
@@ -292,14 +289,13 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
         .arg(&temp_path)
         .status()
         .map_err(|e| {
-            crate::errors::CliError::Other(format!("Failed to open editor {}: {}", editor, e))
+            crate::errors::CliError::Other(format!("Failed to open editor {editor}: {e}"))
         })?;
 
     if !status.success() {
         // NamedTempFile auto-deletes on drop — no manual cleanup needed
         return Err(crate::errors::CliError::Other(format!(
-            "Editor {} exited with non-zero status.",
-            editor
+            "Editor {editor} exited with non-zero status."
         )));
     }
 
@@ -314,23 +310,23 @@ mod tests {
 
     #[test]
     fn memory_command_enum_exists() {
-        let _cmd = MemoryCommand::List;
-        let _cmd = MemoryCommand::Create {
+        let _ = MemoryCommand::List;
+        let _ = MemoryCommand::Create {
             slug: "test".to_string(),
             kind: "custom".to_string(),
             content: None,
         };
-        let _cmd = MemoryCommand::Show {
+        let _ = MemoryCommand::Show {
             slug: "test".to_string(),
         };
-        let _cmd = MemoryCommand::Edit {
+        let _ = MemoryCommand::Edit {
             slug: "test".to_string(),
         };
-        let _cmd = MemoryCommand::Delete {
+        let _ = MemoryCommand::Delete {
             slug: "test".to_string(),
             force: false,
         };
-        let _cmd = MemoryCommand::Review;
-        let _cmd = MemoryCommand::Fragments;
+        let _ = MemoryCommand::Review;
+        let _ = MemoryCommand::Fragments;
     }
 }

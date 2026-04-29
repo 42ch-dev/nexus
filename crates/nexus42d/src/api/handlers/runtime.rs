@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Runtime handlers — health check and status
 
 use crate::workspace::WorkspaceState;
@@ -31,7 +33,7 @@ pub struct StatusResponse {
     pub workspace_initialized: bool,
     /// ACP status information (V1.1)
     pub acp: AcpStatusInfo,
-    /// Current runtime mode (local_only / local_first / cloud_enhanced).
+    /// Current runtime mode (`local_only` / `local_first` / `cloud_enhanced`).
     pub runtime_mode: String,
 }
 
@@ -57,9 +59,9 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
     // Get current lifecycle state
     let lifecycle_state = state.lifecycle_state();
     // Build the v2 response
-    let uptime_seconds = state.uptime_seconds().await;
+    let uptime_seconds = state.uptime_seconds();
     let uptime_ms = uptime_seconds * 1000; // Convert to ms per spec §7.1
-    let pid = std::process::id() as i64;
+    let pid = i64::from(std::process::id());
 
     let lifecycle_state_str = lifecycle_state.to_string();
     let lifecycle_state_enum = match lifecycle_state_str.as_str() {
@@ -151,7 +153,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
             reasons: vec![],
         }),
         subsystems: Some(subsystems),
-        exit_code: exit_code.map(|c| c as i64),
+        exit_code: exit_code.map(i64::from),
         last_error: None, // Could be set from lifecycle in Failed state
     })
 }
@@ -165,8 +167,8 @@ pub async fn status(State(state): State<WorkspaceState>) -> Json<StatusResponse>
 
     Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime_seconds: state.uptime_seconds().await,
-        workspace_initialized: state.is_initialized().await,
+        uptime_seconds: state.uptime_seconds(),
+        workspace_initialized: state.is_initialized(),
         acp: acp_status,
         runtime_mode: state.runtime_mode_as_str().to_string(),
     })

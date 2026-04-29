@@ -1,7 +1,9 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Token Lifecycle Manager
 //!
 //! Manages OAuth token storage, retrieval, and refresh lifecycle.
-//! Tokens are stored in the daemon's SQLite database (`auth_tokens` table)
+//! Tokens are stored in the daemon's `SQLite` database (`auth_tokens` table)
 //! to provide centralized auth state for both CLI and daemon.
 
 use crate::api::errors::NexusApiError;
@@ -25,6 +27,7 @@ pub struct StoredToken {
 
 impl StoredToken {
     /// Check if the token is expired or within the refresh threshold.
+    #[must_use] 
     pub fn needs_refresh(&self) -> bool {
         let now = Utc::now();
         let threshold = self.expires_at
@@ -32,7 +35,8 @@ impl StoredToken {
         now >= threshold
     }
 
-    /// Check if the token is fully expired (past expires_at).
+    /// Check if the token is fully expired (past `expires_at`).
+    #[must_use] 
     pub fn is_expired(&self) -> bool {
         Utc::now() >= self.expires_at
     }
@@ -51,8 +55,9 @@ fn db_error(e: impl std::fmt::Display) -> NexusApiError {
 }
 
 impl TokenManager {
-    /// Create a new TokenManager backed by the given connection pool.
-    pub fn new(db: DbPool) -> Self {
+    /// Create a new `TokenManager` backed by the given connection pool.
+    #[must_use] 
+    pub const fn new(db: DbPool) -> Self {
         Self { db }
     }
 
@@ -80,7 +85,7 @@ impl TokenManager {
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
-            message: format!("Token storage failed: {}", e),
+            message: format!("Token storage failed: {e}"),
         })?;
 
         Ok(())
@@ -105,14 +110,14 @@ impl TokenManager {
         let expires_at = DateTime::parse_from_rfc3339(&row.expires_at)
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Invalid expires_at: {}", e),
+                message: format!("Invalid expires_at: {e}"),
             })?
             .with_timezone(&Utc);
 
         let created_at = DateTime::parse_from_rfc3339(&row.created_at)
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Invalid created_at: {}", e),
+                message: format!("Invalid created_at: {e}"),
             })?
             .with_timezone(&Utc);
 

@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! World fork and snapshot — platform proxy via `SyncClient`.
 //!
 //! `POST /v1/local/world/fork` → `POST /v1/worlds/fork`
@@ -19,7 +21,7 @@ use nexus_sync::sync_client::SyncClient;
 use serde::Serialize;
 use tracing::info;
 
-fn nonempty(s: &str) -> bool {
+const fn nonempty(s: &str) -> bool {
     !s.is_empty()
 }
 
@@ -64,23 +66,19 @@ pub async fn fork(
     let parent_nonempty = req
         .parent_world_id
         .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+        .is_some_and(|s| nonempty(s));
     let child_nonempty = req
         .child_world_id
         .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+        .is_some_and(|s| nonempty(s));
     let fork_evt_nonempty = req
         .forked_from_event_id
         .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+        .is_some_and(|s| nonempty(s));
     let creator_nonempty = req
         .created_by_creator_id
         .as_ref()
-        .map(|s| nonempty(s))
-        .unwrap_or(false);
+        .is_some_and(|s| nonempty(s));
 
     if !parent_nonempty || !child_nonempty || !fork_evt_nonempty || !creator_nonempty {
         return Ok(Json(WorldForkLocalResponse {
