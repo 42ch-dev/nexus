@@ -148,7 +148,7 @@ async fn e2e_inner_graphs_execute() {
 
     // WS3 R2: Assert that outcomes include meaningful step executions.
     assert!(
-        outcomes.len() >= 1,
+        !outcomes.is_empty(),
         "should have at least 1 step outcome (got {})",
         outcomes.len()
     );
@@ -201,8 +201,7 @@ async fn e2e_schedule_advance_past_outlining() {
                 | nexus_orchestration::engine::SessionStatus::WaitingForInput
                 | nexus_orchestration::engine::SessionStatus::Failed
         ),
-        "session should be in a non-running state after test execution (got {:?})",
-        status
+        "session should be in a non-running state after test execution (got {status:?})"
     );
 }
 

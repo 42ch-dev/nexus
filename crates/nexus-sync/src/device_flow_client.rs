@@ -53,7 +53,7 @@ pub struct DeviceCodeResponse {
     pub device_code: String,
     pub user_code: String,
     pub verification_uri: String,
-    /// Optional verification URI with user_code pre-filled.
+    /// Optional verification URI with `user_code` pre-filled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_uri_complete: Option<String>,
     /// Seconds until the device code expires.
@@ -82,7 +82,7 @@ pub struct DeviceTokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
-    /// OAuth2 refresh token (optional — platform delivers in V1.11+).
+    /// `OAuth2` refresh token (optional — platform delivers in V1.11+).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
     /// ISO 8601 expiry timestamp for the refresh token (optional).
@@ -103,6 +103,9 @@ impl DeviceFlowClient {
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform API (e.g. `https://api.nexus42.io`)
     /// * `device_id` - Persistent machine identifier for rate-limit preference
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn new(platform_base_url: &str, device_id: &str) -> SyncResult<Self> {
         if platform_base_url.is_empty() {
             return Err(SyncError::SyncNotConfigured(
@@ -126,6 +129,9 @@ impl DeviceFlowClient {
     /// Request a device authorization code.
     ///
     /// Calls `POST /api/v1/auth/device/code` with optional `client_id` and `scope`.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn request_device_code(
         &self,
         client_id: Option<&str>,
@@ -181,6 +187,9 @@ impl DeviceFlowClient {
     /// Returns `Ok(DeviceTokenResponse)` on success.
     /// Returns `Err(DeviceFlowError)` for expected polling errors — callers
     /// should match on the error to decide whether to continue polling.
+    ///
+    /// # Errors
+    /// Returns `DeviceFlowError` if the polling fails or returns an error response.
     pub async fn poll_device_token(
         &self,
         device_code: &str,
@@ -239,8 +248,7 @@ impl DeviceFlowClient {
 
         if status >= 400 {
             return Err(DeviceFlowError::Other(format!(
-                "Platform error ({}): {text}",
-                status
+                "Platform error ({status}): {text}"
             )));
         }
 
@@ -257,6 +265,7 @@ impl DeviceFlowClient {
 
     /// Get the base URL (for testing).
     #[cfg(test)]
+    #[must_use] 
     pub fn base_url(&self) -> &str {
         &self.base_url
     }

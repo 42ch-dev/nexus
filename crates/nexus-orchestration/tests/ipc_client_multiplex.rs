@@ -1,4 +1,4 @@
-//! Integration test for IpcClient multiplexed request routing.
+//! Integration test for `IpcClient` multiplexed request routing.
 //!
 //! Tests:
 //! - `three_concurrent_requests`: send 3 concurrent requests, verify responses
@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 ///
 /// Returns the client-side transport (as Box<dyn RpcTransport>) and the
 /// server task handle.
+#[allow(clippy::unused_async)]
 async fn spawn_mock_server(
     delay: Duration,
 ) -> (Box<dyn RpcTransport>, tokio::task::JoinHandle<()>) {
@@ -65,8 +66,7 @@ async fn spawn_mock_server(
 
                         let reply = serde_json::to_string(&response).expect("serialize response");
 
-                        let mut s = server.lock().await;
-                        let _ = s.send(reply).await;
+                        let _ = server.lock().await.send(reply).await;
                     }
                 }
                 None => {
@@ -173,11 +173,11 @@ async fn timeout_cancels_pending() {
     match result {
         Err(IpcError::Timeout { timeout_ms }) => {
             assert!(
-                timeout_ms >= 40 && timeout_ms <= 60,
+                (40..=60).contains(&timeout_ms),
                 "expected ~50ms timeout, got {timeout_ms}ms"
             );
         }
-        other => panic!("expected Timeout error, got {:?}", other),
+        other => panic!("expected Timeout error, got {other:?}"),
     }
 }
 

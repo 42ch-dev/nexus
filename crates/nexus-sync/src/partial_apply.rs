@@ -15,7 +15,7 @@ use crate::errors::{SyncError, SyncResult};
 use crate::sync_client::PushResponse;
 
 /// Result of a partial bundle apply.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartialApplyResult {
     /// Total number of deltas in the bundle.
     pub total_count: usize,
@@ -36,11 +36,11 @@ pub struct PartialApplyResult {
 }
 
 /// Per-delta apply information.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeltaApplyInfo {
     /// Index into the original deltas[] array.
     pub delta_index: usize,
-    /// Apply status: applied, rejected, or skipped_dependency.
+    /// Apply status: applied, rejected, or `skipped_dependency`.
     pub apply_status: String,
     /// Error code if the delta was rejected.
     pub error_code: Option<String>,
@@ -50,6 +50,9 @@ pub struct DeltaApplyInfo {
 
 impl PartialApplyResult {
     /// Parse a partial apply result from a push response.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn from_push_response(push_response: &PushResponse) -> SyncResult<Self> {
         let delta_results = push_response.delta_results.as_ref().ok_or_else(|| {
             SyncError::PartialApplyStateError(
@@ -61,11 +64,13 @@ impl PartialApplyResult {
         let mut failed_deltas = Vec::new();
 
         for result in delta_results {
+            // SAFETY: delta_index is u64 from JSON; usize::try_from preserves the value on all
+            // supported targets (32-bit and 64-bit where usize >= u32).
+            #[allow(clippy::cast_possible_truncation)]
             let delta_index = result
                 .get("delta_index")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize)
-                .unwrap_or(0);
+                .and_then(serde_json::Value::as_u64)
+                .map_or(0, |v| usize::try_from(v).unwrap_or(usize::MAX));
 
             let apply_status = result
                 .get("delta_apply_status")
@@ -76,11 +81,11 @@ impl PartialApplyResult {
             let error_code = result
                 .get("error_code")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+                .map(std::string::ToString::to_string);
 
             let applied_entity_revision = result
                 .get("applied_entity_revision")
-                .and_then(|v| v.as_u64());
+                .and_then(serde_json::Value::as_u64);
 
             let info = DeltaApplyInfo {
                 delta_index,
@@ -112,8 +117,7 @@ impl PartialApplyResult {
             d.apply_status == "skipped_dependency"
                 || d.error_code
                     .as_ref()
-                    .map(|c| RETRYABLE_ERROR_CODES.contains(&c.as_str()))
-                    .unwrap_or(false)
+                    .is_some_and(|c| RETRYABLE_ERROR_CODES.contains(&c.as_str()))
         });
 
         tracing::info!(
@@ -137,21 +141,25 @@ impl PartialApplyResult {
     }
 
     /// Whether all deltas were applied (not a partial result).
-    pub fn is_full_success(&self) -> bool {
+    #[must_use] 
+    pub const fn is_full_success(&self) -> bool {
         self.failed_count == 0
     }
 
     /// Whether all deltas failed (total failure).
-    pub fn is_total_failure(&self) -> bool {
+    #[must_use] 
+    pub const fn is_total_failure(&self) -> bool {
         self.succeeded_count == 0 && self.failed_count > 0
     }
 
     /// Get indices of failed deltas for retry.
+    #[must_use] 
     pub fn failed_delta_indices(&self) -> Vec<usize> {
         self.failed_deltas.iter().map(|d| d.delta_index).collect()
     }
 
     /// Get a summary string for logging.
+    #[must_use] 
     pub fn summary(&self) -> String {
         let mut lines = vec![format!(
             "Partial apply: {}/{} deltas succeeded",
@@ -184,7 +192,7 @@ const RETRYABLE_ERROR_CODES: &[&str] = &[
 ];
 
 /// Stored partial apply state for retry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartialApplyState {
     /// Bundle ID that had the partial apply.
     pub bundle_id: String,
@@ -200,6 +208,7 @@ pub struct PartialApplyState {
 
 impl PartialApplyState {
     /// Create a new partial apply state record.
+    #[must_use] 
     pub fn new(bundle_id: &str, world_id: &str, result: PartialApplyResult) -> Self {
         Self {
             bundle_id: bundle_id.to_string(),

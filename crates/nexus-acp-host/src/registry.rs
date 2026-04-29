@@ -112,7 +112,7 @@ impl DistributionExt for Distribution {
 // ── Cache Metadata ───────────────────────────────────────────────────
 
 /// Metadata stored alongside the cache file.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CacheMeta {
     /// ISO 8601 timestamp of when the cache was fetched.
     pub fetched_at: String,
@@ -122,6 +122,7 @@ pub struct CacheMeta {
 
 impl CacheMeta {
     /// Create a new cache metadata entry.
+    #[must_use]
     pub fn new(registry_version: &str) -> Self {
         Self {
             fetched_at: chrono::Utc::now().to_rfc3339(),
@@ -130,13 +131,15 @@ impl CacheMeta {
     }
 
     /// Parse `fetched_at` into a `SystemTime`. Returns `None` if parsing fails.
+    #[must_use]
     pub fn fetched_time(&self) -> Option<SystemTime> {
         chrono::DateTime::parse_from_rfc3339(&self.fetched_at)
             .ok()
-            .map(|dt| dt.into())
+            .map(std::convert::Into::into)
     }
 
     /// Returns the age of this cache entry, or `None` if the timestamp is invalid.
+    #[must_use]
     pub fn age(&self) -> Option<Duration> {
         self.fetched_time().map(|t| {
             SystemTime::now()
@@ -146,8 +149,9 @@ impl CacheMeta {
     }
 
     /// Returns `true` if the cache is within the max age (fresh).
+    #[must_use]
     pub fn is_fresh(&self) -> bool {
-        self.age().map(|age| age < CACHE_MAX_AGE).unwrap_or(false)
+        self.age().is_some_and(|age| age < CACHE_MAX_AGE)
     }
 }
 
@@ -170,6 +174,10 @@ impl RegistryClient {
     /// Create a new registry client with default settings.
     ///
     /// Uses `$HOME/.nexus42/registry/` as the cache directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HOME directory cannot be determined or HTTP client fails.
     pub fn new() -> anyhow::Result<Self> {
         let home =
             dirs::home_dir().context("Cannot determine HOME directory for registry cache")?;
@@ -184,6 +192,10 @@ impl RegistryClient {
     }
 
     /// Create a registry client with a custom cache directory (for testing).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client fails to build.
     pub fn with_cache_dir(cache_dir: PathBuf) -> anyhow::Result<Self> {
         Ok(Self {
             cache_dir,
@@ -195,6 +207,7 @@ impl RegistryClient {
     }
 
     /// Return the cache directory path.
+    #[must_use]
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
@@ -306,6 +319,10 @@ impl RegistryClient {
     /// - Fresh cache (< 24h): return cached data immediately
     /// - Stale cache (>= 24h): return cached data, spawn background refresh
     /// - No cache: fetch from CDN, blocking
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if fetching from CDN fails and no cache is available.
     pub async fn get_registry(&self) -> anyhow::Result<Registry> {
         // Try to load from cache
         if let Some(cached) = self.load_cached() {
@@ -388,6 +405,10 @@ impl RegistryClient {
     }
 
     /// Force a fresh fetch from the CDN, bypassing cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the fetch fails.
     pub async fn refresh(&self) -> anyhow::Result<Registry> {
         self.fetch_and_cache().await
     }
@@ -399,6 +420,7 @@ impl RegistryClient {
     /// - Exact agent ID (e.g. "claude-acp" matches "claude-acp")
     /// - Prefix of agent ID (e.g. "claude" matches "claude-acp")
     /// - Prefix of agent name (e.g. "Claude" matches "Claude Agent")
+    #[must_use]
     pub fn find_agent<'a>(&self, registry: &'a Registry, query: &str) -> Option<&'a AgentEntry> {
         let query_lower = query.to_lowercase();
         registry
@@ -431,7 +453,7 @@ impl RegistryClient {
 
     /// Fetch from raw JSON string (for testing without network).
     #[cfg(test)]
-    fn parse_registry_json(&self, json: &str) -> anyhow::Result<Registry> {
+    fn parse_registry_json(json: &str) -> anyhow::Result<Registry> {
         let registry: Registry = serde_json::from_str(json)?;
         Ok(registry)
     }
@@ -516,21 +538,21 @@ mod tests {
 
     #[test]
     fn parse_valid_registry() {
-        let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let (_client, _tmp) = make_test_client();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         assert_eq!(registry.version, "1.0.0");
         assert_eq!(registry.agents.len(), 3);
         assert_eq!(
-            registry.extensions.as_ref().map(|v| v.len()).unwrap_or(0),
+            registry.extensions.as_ref().map_or(0, Vec::len),
             0
         );
     }
 
     #[test]
     fn parse_agent_npx_distribution() {
-        let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let (_client, _tmp) = make_test_client();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let claude = &registry.agents[0];
         assert_eq!(claude.id, "claude-acp");
@@ -557,8 +579,8 @@ mod tests {
 
     #[test]
     fn parse_agent_binary_distribution() {
-        let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let (_client, _tmp) = make_test_client();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let codex = &registry.agents[1];
         assert_eq!(codex.id, "codex-acp");
@@ -575,8 +597,8 @@ mod tests {
 
     #[test]
     fn parse_npx_with_args() {
-        let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let (_client, _tmp) = make_test_client();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let gemini = &registry.agents[2];
         assert_eq!(gemini.id, "gemini");
@@ -599,8 +621,8 @@ mod tests {
                 }
             ]
         }"#;
-        let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(json).unwrap();
+        let (_client, _tmp) = make_test_client();
+        let registry = RegistryClient::parse_registry_json(json).unwrap();
 
         assert_eq!(registry.agents.len(), 1);
         let agent = &registry.agents[0];
@@ -613,8 +635,8 @@ mod tests {
 
     #[test]
     fn parse_invalid_json_fails() {
-        let (client, _tmp) = make_test_client();
-        let result = client.parse_registry_json("not json");
+        let (_client, _tmp) = make_test_client();
+        let result = RegistryClient::parse_registry_json("not json");
         assert!(result.is_err());
     }
 
@@ -629,10 +651,10 @@ mod tests {
                     "name": "Broken",
                     "version": "0.1.0"
                 }
-            ]
-        }"#;
-        let (client, _tmp) = make_test_client();
-        let result = client.parse_registry_json(json);
+             ]
+         }"#;
+         let (_client, _tmp) = make_test_client();
+         let result = RegistryClient::parse_registry_json(json);
         assert!(result.is_err());
     }
 
@@ -641,7 +663,7 @@ mod tests {
     #[test]
     fn cache_write_and_read() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         // Save to cache
         client.save_cache(&registry).expect("Failed to save cache");
@@ -658,7 +680,7 @@ mod tests {
     #[test]
     fn cache_meta_stored_and_loaded() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         client.save_cache(&registry).expect("Failed to save cache");
 
@@ -684,7 +706,7 @@ mod tests {
             RegistryClient::with_cache_dir(nested_dir.clone()).expect("Failed to create client");
 
         assert!(!nested_dir.exists());
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
         client.save_cache(&registry).expect("Failed to save cache");
         assert!(nested_dir.exists());
     }
@@ -743,7 +765,7 @@ mod tests {
     #[test]
     fn find_agent_by_exact_id() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "claude-acp");
         assert!(found.is_some());
@@ -753,7 +775,7 @@ mod tests {
     #[test]
     fn find_agent_by_prefix() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "claude");
         assert!(found.is_some());
@@ -763,7 +785,7 @@ mod tests {
     #[test]
     fn find_agent_by_name_prefix() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "Codex");
         assert!(found.is_some());
@@ -773,7 +795,7 @@ mod tests {
     #[test]
     fn find_agent_case_insensitive() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "CLAUDE-ACP");
         assert!(found.is_some());
@@ -783,7 +805,7 @@ mod tests {
     #[test]
     fn find_agent_not_found() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "nonexistent");
         assert!(found.is_none());
@@ -792,7 +814,7 @@ mod tests {
     #[test]
     fn find_agent_empty_query() {
         let (client, _tmp) = make_test_client();
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let found = client.find_agent(&registry, "");
         assert!(found.is_some()); // Empty prefix matches first agent
@@ -845,7 +867,7 @@ mod tests {
         let (client, _tmp) = make_test_client();
 
         // Pre-populate cache with fresh data
-        let registry = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let registry = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
         client.save_cache(&registry).unwrap();
 
         // get_registry should return cached data without network
@@ -867,8 +889,8 @@ mod tests {
 
     #[test]
     fn registry_serialization_roundtrip() {
-        let (client, _tmp) = make_test_client();
-        let original = client.parse_registry_json(SAMPLE_REGISTRY).unwrap();
+        let (_client, _tmp) = make_test_client();
+        let original = RegistryClient::parse_registry_json(SAMPLE_REGISTRY).unwrap();
 
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: Registry = serde_json::from_str(&json).unwrap();

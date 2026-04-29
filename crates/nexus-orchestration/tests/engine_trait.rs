@@ -1,4 +1,4 @@
-use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
+use nexus_orchestration::{engine::SessionFilter, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -10,7 +10,7 @@ async fn new_session_and_list_active_roundtrip() {
     let key = nexus_orchestration::engine::SessionKey::test_fixture();
     let sid = engine.new_session(key, ctx).await.expect("new_session");
     let listed = engine
-        .list_active(Default::default())
+        .list_active(SessionFilter::default())
         .await
         .expect("list_active");
     assert!(listed.iter().any(|s| s.session_id == sid));

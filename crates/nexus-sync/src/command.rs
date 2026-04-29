@@ -14,7 +14,7 @@ use crate::errors::{SyncError, SyncResult};
 ///
 /// These wrap the generated `SyncCommand` with domain-specific command variants
 /// that map to specific delta operations in bundles.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncCommandVariant {
     /// Advance world state with new deltas.
@@ -56,8 +56,9 @@ pub enum SyncCommandVariant {
 }
 
 impl SyncCommandVariant {
-    /// Get the command_type string matching the generated SyncCommand schema.
-    pub fn command_type_str(&self) -> &str {
+    /// Get the `command_type` string matching the generated `SyncCommand` schema.
+    #[must_use] 
+    pub const fn command_type_str(&self) -> &str {
         match self {
             Self::AdvanceWorld { .. } => "advance_world",
             Self::InjectFutureEvent { .. } => "inject_future_event",
@@ -69,7 +70,8 @@ impl SyncCommandVariant {
         }
     }
 
-    /// Get the world_id from this command variant.
+    /// Get the `world_id` from this command variant.
+    #[must_use] 
     pub fn world_id(&self) -> &str {
         match self {
             Self::AdvanceWorld { world_id, .. }
@@ -82,7 +84,8 @@ impl SyncCommandVariant {
         }
     }
 
-    /// Get the creator_id from this command variant.
+    /// Get the `creator_id` from this command variant.
+    #[must_use] 
     pub fn creator_id(&self) -> &str {
         match self {
             Self::AdvanceWorld { creator_id, .. }
@@ -96,6 +99,9 @@ impl SyncCommandVariant {
     }
 
     /// Convert a generated `SyncCommand` into a `SyncCommandVariant`.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn from_sync_command(cmd: &SyncCommand) -> SyncResult<Self> {
         let _workspace_id = cmd.workspace_id.clone();
         let creator_id = cmd.creator_id.clone();
@@ -146,6 +152,10 @@ impl SyncCommandVariant {
     }
 
     /// Convert this variant into a generated `SyncCommand`.
+    ///
+    /// # Panics
+    /// Panics if `command_type_str` or `origin` does not parse correctly.
+    #[must_use] 
     pub fn to_sync_command(
         &self,
         command_id: &str,
@@ -187,7 +197,8 @@ pub enum CommandOrigin {
 }
 
 impl CommandOrigin {
-    pub fn as_str(&self) -> &str {
+    #[must_use] 
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::LocalUser => "local_user",
             Self::LocalAgent => "local_agent",

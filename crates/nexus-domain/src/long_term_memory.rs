@@ -20,7 +20,7 @@ pub const MEMORY_FILE_VERSION: u32 = 1;
 /// Required fields:
 /// - `nexus_memory_version`: file format version (currently 1)
 /// - `memory_id`: logical ID, format `mem_<uuid>` (auto-generated on creation)
-/// - `memory_kind`: matches `MemoryKind` enum values from memory_item.rs
+/// - `memory_kind`: matches `MemoryKind` enum values from `memory_item.rs`
 /// - `updated_at`: ISO-8601 timestamp
 /// - `source_session_ids`: optional list of ACP session IDs that produced this memory
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +48,7 @@ pub struct LongTermMemory {
 }
 
 impl LongTermMemory {
+    #[must_use]
     /// Create a new long-term memory with auto-generated `memory_id`.
     ///
     /// `memory_id` format: `mem_<uuid>` (dashes stripped from UUID).
@@ -75,7 +76,7 @@ impl LongTermMemory {
     /// - `memory_id` is non-empty and starts with `mem_`
     /// - `memory_kind` is a valid `MemoryKind` enum value
     /// - `updated_at` is non-empty
-    /// - Slug (derived from source_path) is path-safe, if source_path is set
+    /// - Slug (derived from `source_path`) is path-safe, if `source_path` is set
     pub fn validate(&self) -> Result<(), DomainError> {
         if self.frontmatter.nexus_memory_version != MEMORY_FILE_VERSION {
             return Err(DomainError::ValidationError(format!(
@@ -127,6 +128,10 @@ impl LongTermMemory {
     ///
     /// Returns an empty string if `source_path` is not set or the stem
     /// cannot be extracted.
+    #[must_use]
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     pub fn slug(&self) -> String {
         self.source_path
             .as_ref()
@@ -153,7 +158,12 @@ impl LongTermMemory {
         })?;
         Ok(format!("---\n{yaml}---\n{}", self.body))
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Parse a memory file's content (frontmatter + body).
     ///
     /// Extracts the YAML frontmatter between `---` delimiters and
@@ -198,7 +208,7 @@ impl LongTermMemory {
         self.frontmatter.updated_at = chrono::Utc::now().to_rfc3339();
     }
 }
-
+#[must_use]
 /// Check if a slug is path-safe (no `..`, `/`, `\`, null bytes, or control chars).
 pub fn slug_is_safe(slug: &str) -> bool {
     if slug.is_empty() {

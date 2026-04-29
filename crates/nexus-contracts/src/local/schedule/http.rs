@@ -1,17 +1,17 @@
-//! HTTP request/response types for Schedule endpoints (WS7 §9).
+//! HTTP request/response types for Schedule endpoints (`WS7` §9).
 //!
 //! Hand-written local types — NOT generated from JSON Schema.
 //! These are local-only; `nexus-platform` never observes them.
 //!
 //! Endpoints:
-//! - POST   /v1/local/orchestration/schedules
-//! - GET    /v1/local/orchestration/schedules
-//! - GET    /v1/local/orchestration/schedules/{schedule_id}
-//! - PATCH  /v1/local/orchestration/schedules/{schedule_id}/core-context
-//! - GET    /v1/local/orchestration/schedules/{schedule_id}/core-context
-//! - GET    /v1/local/orchestration/schedules/{schedule_id}/core-context-history
-//! - POST   /v1/local/orchestration/schedules/{schedule_id}/signal
-//! - DELETE /v1/local/orchestration/schedules/{schedule_id}
+//! - `POST`   `/v1/local/orchestration/schedules`
+//! - `GET`    `/v1/local/orchestration/schedules`
+//! - `GET`    `/v1/local/orchestration/schedules/{schedule_id}`
+//! - `PATCH`  `/v1/local/orchestration/schedules/{schedule_id}/core-context`
+//! - `GET`    `/v1/local/orchestration/schedules/{schedule_id}/core-context`
+//! - `GET`    `/v1/local/orchestration/schedules/{schedule_id}/core-context-history`
+//! - `POST`   `/v1/local/orchestration/schedules/{schedule_id}/signal`
+//! - `DELETE` `/v1/local/orchestration/schedules/{schedule_id}`
 
 use serde::{Deserialize, Serialize};
 
@@ -31,8 +31,8 @@ pub struct AddScheduleRequest {
     pub depends_on: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<ScheduleConcurrencyRequest>,
-    /// V1.5 WS-D: scheduled_at as Unix timestamp (string for JSON compatibility).
-    /// Accepts ISO-8601 datetime in CLI; HTTP accepts Unix timestamp string.
+    /// `V1.5` `WS-D`: `scheduled_at` as Unix timestamp (string for JSON compatibility).
+    /// Accepts `ISO-8601` datetime in `CLI`; HTTP accepts Unix timestamp string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_at: Option<String>,
 }
@@ -98,15 +98,15 @@ pub struct InspectScheduleResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditCoreContextRequest {
-    /// Edit operation kind: append, replace, struct_merge, struct_remove.
+    /// Edit operation kind: `append`, `replace`, `struct_merge`, `struct_remove`.
     pub op: String,
-    /// Body text (for append/replace).
+    /// Body text (for `append`/`replace`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// Patch JSON (for struct_merge).
+    /// Patch JSON (for `struct_merge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch: Option<serde_json::Value>,
-    /// Key path (for struct_remove).
+    /// Key path (for `struct_remove`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }

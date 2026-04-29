@@ -1,12 +1,12 @@
-//! SourceAnchor value object — domain logic wrapper around contract SourceAnchor.
+//! `SourceAnchor` value object — domain logic wrapper around contract `SourceAnchor`.
 //!
-//! SourceAnchor is NOT an aggregate; it's a value object embedded in KeyBlock, Delta, etc.
+//! `SourceAnchor` is NOT an aggregate; it's a value object embedded in `KeyBlock`, Delta, etc.
 //! See data-model-v1.md §6.1.
 
 use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
 
-/// Domain SourceAnchor — references platform Story summary entities.
+/// Domain `SourceAnchor` — references platform Story summary entities.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SourceAnchor {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,7 +30,8 @@ pub struct SourceSummaryRef {
 pub const MAX_EXCERPT_LENGTH: usize = 1024;
 
 impl SourceAnchor {
-    /// Create SourceAnchor referencing a single story summary unit.
+    #[must_use]
+    /// Create `SourceAnchor` referencing a single story summary unit.
     pub fn new(story_manifest_id: &str, summary_unit_id: &str, unit_kind: Option<&str>) -> Self {
         Self {
             story_summary_refs: Some(vec![SourceSummaryRef {
@@ -43,7 +44,8 @@ impl SourceAnchor {
         }
     }
 
-    /// Create SourceAnchor with excerpt only (no story refs).
+    /// Create `SourceAnchor` with excerpt only (no story refs).
+    #[must_use]
     pub fn from_excerpt(excerpt: &str) -> Self {
         Self {
             story_summary_refs: None,
@@ -68,7 +70,7 @@ impl SourceAnchor {
     }
 
     /// Validate excerpt length (max 1024 chars per G6).
-    pub fn validate_excerpt(&self) -> Result<(), DomainError> {
+    pub const fn validate_excerpt(&self) -> Result<(), DomainError> {
         if let Some(ref excerpt) = self.excerpt {
             if excerpt.len() > MAX_EXCERPT_LENGTH {
                 return Err(DomainError::ExcerptTooLong {
@@ -79,8 +81,13 @@ impl SourceAnchor {
         }
         Ok(())
     }
-
-    /// Validate all story_summary_refs point to visible manifests in the given world.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    /// Validate all `story_summary_refs` point to visible manifests in the given world.
     pub fn validate_refs(
         &self,
         _world_id: &str,

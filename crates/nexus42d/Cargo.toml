@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "Nexus Daemon — local supervisor for the CLI"
 
+[lints]
+workspace = true
+
 [lib]
 name = "nexus42d"
 path = "src/lib.rs"

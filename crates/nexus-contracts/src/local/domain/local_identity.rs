@@ -1,17 +1,17 @@
-//! LocalIdentity — local-only creator identity.
+//! `LocalIdentity` — local-only creator identity.
 //!
-//! Local-only creator identity for local_only mode. Supports anonymous
+//! Local-only creator identity for `local_only` mode. Supports anonymous
 //! (ephemeral) and persistent identities without platform dependency.
-//! See ADR-017, ADR-014.
+//! See `ADR-017`, `ADR-014`.
 
 use serde::{Deserialize, Serialize};
 
 /// Local-only creator identity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct LocalIdentity {
     pub schema_version: u32,
-    /// Local creator identifier (ctr_anon* for anonymous, ctr_local* for persistent)
+    /// Local creator identifier (`ctr_anon*` for anonymous, `ctr_local*` for persistent)
     pub creator_id: String,
     /// Type of local identity.
     pub identity_type: IdentityType,
@@ -20,7 +20,7 @@ pub struct LocalIdentity {
     pub display_name: Option<String>,
     /// Identity creation timestamp.
     pub created_at: String,
-    /// Whether this local identity has been linked to a platform Creator.
+    /// Whether this local identity has been linked to a platform `Creator`.
     #[serde(default)]
     pub platform_linked: bool,
     /// Platform Creator ID after linking (null until linked).

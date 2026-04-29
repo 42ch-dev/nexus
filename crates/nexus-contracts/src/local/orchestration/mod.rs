@@ -80,7 +80,7 @@ pub struct OutboxCompactInput {
     pub retention_days: u32,
 }
 
-fn default_retention_days() -> u32 {
+const fn default_retention_days() -> u32 {
     30
 }
 
@@ -170,7 +170,7 @@ pub struct CreatorReadMemoryInput {
     pub limit: u32,
 }
 
-fn default_max_entries() -> u32 {
+const fn default_max_entries() -> u32 {
     50
 }
 

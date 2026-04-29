@@ -33,8 +33,7 @@ async fn system_preset_runs_to_terminal_state() {
     let final_status = engine.get_status(&sid).await.expect("get_status");
     assert!(
         final_status.is_completed(),
-        "system preset did not complete: {:?}",
-        final_status
+        "system preset did not complete: {final_status:?}"
     );
 }
 
@@ -77,8 +76,7 @@ async fn restart_durability_e2e() {
                 nexus_orchestration::engine::StepOutcome::Completed { .. }
                     | nexus_orchestration::engine::StepOutcome::Paused { .. }
             ),
-            "first step should complete or pause: {:?}",
-            outcome
+            "first step should complete or pause: {outcome:?}"
         );
 
         sid

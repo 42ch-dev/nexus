@@ -1,15 +1,15 @@
-//! Nexus StoryManifest
+//! `Nexus` `StoryManifest`
 //!
-//! StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9.
+//! `StoryManifest` entity for platform-side chapter/arc manifest and summary. `Aligned` with data-model-v1.md §5.9.
 //!
-//! @schema_version 1
-//! @source story-manifest.schema.json
+//! `@schema_version` 1
+//! `@source` story-manifest.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{ManifestType, ManuscriptStorage, StoryManifestStatus};
 
-/// StoryManifest entity for platform-side chapter/arc manifest and summary. Aligned with data-model-v1.md §5.9.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `StoryManifest` entity for platform-side chapter/arc manifest and summary. `Aligned` with data-model-v1.md §5.9.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct StoryManifest {
     pub schema_version: u32,

@@ -41,7 +41,7 @@ pub enum BundleValidationError {
 
 impl From<BundleValidationError> for SyncError {
     fn from(err: BundleValidationError) -> Self {
-        SyncError::BundleValidation(err.to_string())
+        Self::BundleValidation(err.to_string())
     }
 }
 
@@ -49,13 +49,13 @@ impl From<BundleValidationError> for SyncError {
 ///
 /// Uses contract enum types directly. The `source_anchor` field uses `Value`
 /// for builder convenience, converted to `SourceAnchor` when constructing `Delta`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalDelta {
     /// Target aggregate type for this delta.
     pub delta_type: DeltaType,
     /// Operation to apply.
     pub operation: DeltaOperation,
-    /// Sub-type (e.g., 'character' when delta_type='key_block').
+    /// Sub-type (e.g., 'character' when `delta_type`='`key_block`').
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_entity_type: Option<String>,
     /// Target entity ID (null for create).
@@ -63,7 +63,7 @@ pub struct LocalDelta {
     pub target_entity_id: Option<String>,
     /// Delta payload.
     pub payload: Value,
-    /// Optional source anchor for provenance (builder helper: Value → SourceAnchor).
+    /// Optional source anchor for provenance (builder helper: Value → `SourceAnchor`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_anchor: Option<Value>,
     /// Local timestamp of this delta.
@@ -103,6 +103,7 @@ pub struct BundleBuilder {
 
 impl BundleBuilder {
     /// Create a new bundle builder for a world/workspace context.
+    #[must_use] 
     pub fn new(workspace_id: &str, world_id: &str, creator_id: &str) -> Self {
         Self {
             workspace_id: workspace_id.to_string(),
@@ -123,79 +124,92 @@ impl BundleBuilder {
     }
 
     /// Set the submitting creator ID (required for V1.0).
+    #[must_use] 
     pub fn submitting_creator_id(mut self, id: &str) -> Self {
         self.submitting_creator_id = Some(id.to_string());
         self
     }
 
     /// Set the manuscript phase (optional but recommended).
-    pub fn manuscript_phase(mut self, phase: ManuscriptPhase) -> Self {
+    #[must_use] 
+    pub const fn manuscript_phase(mut self, phase: ManuscriptPhase) -> Self {
         self.manuscript_phase = Some(phase);
         self
     }
 
     /// Set whether this execution requires manuscript output.
-    pub fn output_manuscript(mut self, output: bool) -> Self {
+    #[must_use] 
+    pub const fn output_manuscript(mut self, output: bool) -> Self {
         self.output_manuscript = Some(output);
         self
     }
 
     /// Set the bundle type.
-    pub fn bundle_type(mut self, bundle_type: BundleType) -> Self {
+    #[must_use] 
+    pub const fn bundle_type(mut self, bundle_type: BundleType) -> Self {
         self.bundle_type = bundle_type;
         self
     }
 
     /// Associate a command with this bundle.
+    #[must_use] 
     pub fn command(mut self, _command: &SyncCommandVariant) -> Self {
         self.command_id = Some(format!("cmd_{}", Uuid::new_v4().simple()));
         self
     }
 
     /// Set command ID explicitly.
+    #[must_use] 
     pub fn command_id(mut self, id: &str) -> Self {
         self.command_id = Some(id.to_string());
         self
     }
 
     /// Set the idempotency key.
+    #[must_use] 
     pub fn idempotency_key(mut self, key: &str) -> Self {
         self.idempotency_key = Some(key.to_string());
         self
     }
 
     /// Add a delta to the bundle.
+    #[must_use] 
     pub fn add_delta(mut self, delta: LocalDelta) -> Self {
         self.deltas.push(delta);
         self
     }
 
     /// Add multiple deltas to the bundle.
+    #[must_use] 
     pub fn add_deltas(mut self, deltas: Vec<LocalDelta>) -> Self {
         self.deltas.extend(deltas);
         self
     }
 
     /// Set the base world revision for optimistic concurrency.
-    pub fn base_world_revision(mut self, revision: u64) -> Self {
+    #[must_use] 
+    pub const fn base_world_revision(mut self, revision: u64) -> Self {
         self.base_world_revision = Some(revision);
         self
     }
 
     /// Set the base timeline head ID.
+    #[must_use] 
     pub fn base_timeline_head_id(mut self, id: &str) -> Self {
         self.base_timeline_head_id = Some(id.to_string());
         self
     }
 
     /// Set the base canon revision.
-    pub fn base_canon_revision(mut self, revision: u64) -> Self {
+    #[must_use] 
+    pub const fn base_canon_revision(mut self, revision: u64) -> Self {
         self.base_canon_revision = Some(revision);
         self
     }
 
     /// Set the last confirmed delta sequence.
-    pub fn last_confirmed_delta_sequence(mut self, seq: u64) -> Self {
+    #[must_use] 
+    pub const fn last_confirmed_delta_sequence(mut self, seq: u64) -> Self {
         self.last_confirmed_delta_sequence = Some(seq);
         self
     }
@@ -206,10 +220,11 @@ impl BundleBuilder {
     /// - Timestamps are monotonically non-decreasing (RFC3339 order)
     /// - No duplicate target entity IDs (for deltas where `target_entity_id` is present)
     ///
-    /// # Returns
+    /// # Errors
+    /// Returns `BundleValidationError` if validation fails.
     ///
-    /// - `Ok(())` if validation passes
-    /// - `Err(BundleValidationError)` if validation fails
+    /// # Panics
+    /// Panics if a timestamp is not valid RFC3339 format.
     pub fn validate(&self) -> Result<(), BundleValidationError> {
         // Check timestamp monotonicity (non-decreasing RFC3339 timestamps)
         let mut prev_ts: Option<chrono::DateTime<chrono::Utc>> = None;
@@ -249,12 +264,18 @@ impl BundleBuilder {
     /// Runs `validate()` then [`Self::build`]. Propagates [`BundleValidationError`]
     /// and any [`SyncError`] from bundle construction (e.g. serialization for
     /// canonical hash).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn build_validated(self) -> SyncResult<Bundle> {
         self.validate()?;
         self.build()
     }
 
     /// Validate the bundle and build the final `Bundle` envelope.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn build(self) -> SyncResult<Bundle> {
         // Validate required fields
         if self.deltas.is_empty() {
@@ -301,11 +322,11 @@ impl BundleBuilder {
                 Delta {
                     delta_type: d.delta_type,
                     operation: d.operation,
-                    target_entity_type: d.target_entity_type.map(|s| s.to_string()),
-                    target_entity_id: d.target_entity_id.map(|s| s.to_string()),
+                    target_entity_type: d.target_entity_type,
+                    target_entity_id: d.target_entity_id,
                     payload: d.payload,
                     source_anchor,
-                    local_timestamp: d.local_timestamp.to_string(),
+                    local_timestamp: d.local_timestamp,
                 }
             })
             .collect();
@@ -344,7 +365,8 @@ impl BundleBuilder {
     }
 }
 
-/// Create a story_manifest delta.
+/// Create a `story_manifest` delta.
+#[must_use] 
 pub fn story_manifest_delta(
     summary_text: &str,
     story_manifest_id: &str,
@@ -367,7 +389,7 @@ pub fn story_manifest_delta(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_contracts::generated::LATEST_SCHEMA_VERSION;
+    
 
     fn make_test_delta() -> LocalDelta {
         LocalDelta {

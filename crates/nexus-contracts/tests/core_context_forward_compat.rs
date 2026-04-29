@@ -1,6 +1,6 @@
-//! Forward-compat guard test for core_context derivation kinds (WS7 T10).
+//! Forward-compat guard test for `core_context` derivation kinds (`WS7` T10).
 //!
-//! Per spec §11 / compass RISK-10: V1.4 defines `DerivationStep::LlmSummarize`
+//! Per spec §11 / compass `RISK-10`: V1.4 defines `DerivationStep::LlmSummarize`
 //! even though it doesn't emit it. This test codifies that:
 //! 1. A V1.5+ `llm_summarize` JSON blob deserializes successfully.
 //! 2. If a future version removes/renames this variant, CI will break —

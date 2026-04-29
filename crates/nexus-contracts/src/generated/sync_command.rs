@@ -1,15 +1,15 @@
-//! Nexus SyncCommand
+//! `Nexus` `SyncCommand`
 //!
-//! SyncCommand entity representing a business action with audit attribution. Aligned with data-model-v1.md §5.10.
+//! `SyncCommand` entity representing a business action with audit attribution. `Aligned` with data-model-v1.md §5.10.
 //!
-//! @schema_version 1
-//! @source sync-command.schema.json
+//! `@schema_version` 1
+//! `@source` sync-command.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{CommandOrigin, CommandStatus, CommandType};
 
-/// SyncCommand entity representing a business action with audit attribution. Aligned with data-model-v1.md §5.10.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `SyncCommand` entity representing a business action with audit attribution. `Aligned` with data-model-v1.md §5.10.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SyncCommand {
     pub schema_version: u32,

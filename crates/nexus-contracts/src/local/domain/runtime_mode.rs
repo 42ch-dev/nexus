@@ -1,7 +1,7 @@
-//! RuntimeMode — local-only enum.
+//! `RuntimeMode` — local-only enum.
 //!
 //! Creator runtime mode controlling platform dependency behavior.
-//! See ADR-015, ADR-017.
+//! See `ADR-015`, `ADR-017`.
 
 use serde::{Deserialize, Serialize};
 

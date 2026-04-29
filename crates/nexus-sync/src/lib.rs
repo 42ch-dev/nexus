@@ -1,16 +1,16 @@
 //! Nexus Sync Library
 //!
 //! Provides the sync mechanism for CLI ↔ Platform synchronization using
-//! Command, DeltaBundle, and Outbox patterns.
+//! Command, `DeltaBundle`, and Outbox patterns.
 //!
 //! # Architecture
 //!
-//! - **Command**: User-initiated operations (advance_world, sync_push, etc.)
-//! - **DeltaBundle**: Batch of deltas sent to platform in a single bundle envelope
-//! - **Outbox**: Local SQLite queue of pending operations for offline-first sync
-//! - **SyncClient**: HTTP client for platform API interactions
-//! - **ConflictResolution**: Optimistic locking with conflict detection
-//! - **PartialApply**: Handles Phase A/B partial success semantics
+//! - **Command**: User-initiated operations (`advance_world`, `sync_push`, etc.)
+//! - **`DeltaBundle`**: Batch of deltas sent to platform in a single bundle envelope
+//! - **Outbox**: Local `SQLite` queue of pending operations for offline-first sync
+//! - **`SyncClient`**: HTTP client for platform API interactions
+//! - **`ConflictResolution`**: Optimistic locking with conflict detection
+//! - **`PartialApply`**: Handles Phase A/B partial success semantics
 //! - **Precheck**: Local validation before HTTP upload to save round-trips
 //!
 //! # Modules

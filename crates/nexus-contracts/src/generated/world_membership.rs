@@ -1,15 +1,15 @@
-//! Nexus WorldMembership
+//! `Nexus` `WorldMembership`
 //!
-//! WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4.
+//! `WorldMembership` entity describing `Creator`-`World` relationship with roles and permissions. `Aligned` with data-model-v1.md §5.4.
 //!
-//! @schema_version 1
-//! @source world-membership.schema.json
+//! `@schema_version` 1
+//! `@source` world-membership.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{MembershipRole, MembershipStatus};
 
-/// WorldMembership entity describing Creator-World relationship with roles and permissions. Aligned with data-model-v1.md §5.4.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `WorldMembership` entity describing `Creator`-`World` relationship with roles and permissions. `Aligned` with data-model-v1.md §5.4.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldMembership {
     pub schema_version: u32,

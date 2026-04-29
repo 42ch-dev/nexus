@@ -1,11 +1,11 @@
 //! Nexus Local Database Module
 //!
-//! Single ownership of local SQLite (`state.db`) capabilities.
+//! Single ownership of local `SQLite` (`state.db`) capabilities.
 //! Provides unified API for CLI and daemon to initialize, migrate, and query local DB.
 //!
 //! ## Version Lines (Decoupled)
 //!
-//! - `db_schema_version`: Local SQLite structure version (managed by migrations)
+//! - `db_schema_version`: Local `SQLite` structure version (managed by migrations)
 //! - `schema_version`: Contract schema version (from nexus-contracts, network compatibility)
 //!
 //! See `.agents/plans/knowledge/local-db-refactor-v1.md` for design baseline.
@@ -71,13 +71,13 @@ pub enum RuntimeRole {
 /// Contains both version lines for observability and health checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaVersions {
-    /// Local database schema version (from workspace_meta table)
+    /// Local database schema version (from `workspace_meta` table)
     pub db_schema_version: u32,
     /// Contract schema version (from nexus-contracts generated constants)
     pub schema_version: u32,
 }
 
-/// Open a SQLite connection pool at the given path.
+/// Open a `SQLite` connection pool at the given path.
 ///
 /// Creates the database file if it does not exist (`mode=rwc`),
 /// then sets recommended pragmas (WAL journal, foreign keys enabled).
@@ -92,6 +92,10 @@ pub struct SchemaVersions {
 ///     let pool = open_pool(std::path::Path::new("state.db")).await.unwrap();
 /// }
 /// ```
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the connection pool cannot be created.
 pub async fn open_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -126,6 +130,10 @@ pub async fn open_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, Lo
 ///     run_migrations(&pool).await.unwrap();
 /// }
 /// ```
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any migration fails to apply.
 pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError> {
     sqlx::migrate!("./migrations")
         .run(pool)
@@ -138,6 +146,10 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
 ///
 /// Sets `db_schema_version` and `schema_version` (contract version) keys.
 /// Safe to call on already-seeded databases (uses INSERT OR REPLACE).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn seed_versions(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError> {
     let db_ver = DB_SCHEMA_VERSION.to_string();
     sqlx::query!(
@@ -164,6 +176,13 @@ struct WorkspaceMetaRow {
     value: String,
 }
 
+/// Read both version lines from the database.
+///
+/// Returns [`SchemaVersions`] containing `db_schema_version` and `schema_version`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if version keys are missing or have invalid values.
 pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, LocalDbError> {
     let row = sqlx::query_as!(
         WorkspaceMetaRow,
@@ -217,6 +236,10 @@ pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, Lo
 /// - `db_schema_version` matches the current expected version
 ///
 /// Returns `Ok(())` if all checks pass, or an error describing what's wrong.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if version validation fails.
 pub async fn validate(pool: &sqlx::SqlitePool, _role: RuntimeRole) -> Result<(), LocalDbError> {
     // Check workspace_meta table exists by reading a version key
     let versions = read_versions(pool).await?;
@@ -239,6 +262,10 @@ pub async fn validate(pool: &sqlx::SqlitePool, _role: RuntimeRole) -> Result<(),
 ///
 /// This is the recommended entry point for CLI and daemon initialization.
 /// Equivalent to calling `open_pool` + `run_migrations` + `seed_versions` in sequence.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any step (pool creation, migration, seeding) fails.
 pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
     let pool = open_pool(db_path).await?;
     run_migrations(&pool).await?;

@@ -1,4 +1,4 @@
-//! Schema Drift Detection (WS-D)
+//! Schema Drift Detection (`WS-D`)
 //!
 //! Detects drift between JSON Schema wire contracts in `schemas/` and their
 //! corresponding Rust struct definitions in `crates/nexus-contracts/src/`.
@@ -75,7 +75,7 @@ macro_rules! make_checker {
     }};
 }
 
-/// Build a SchemaEntry. Accepts either a single type or a list of types in brackets.
+/// Build a `SchemaEntry`. Accepts either a single type or a list of types in brackets.
 macro_rules! entry {
     ($path:expr, $mode:ident, [$($t:ty),+ $(,)?]) => {
         SchemaEntry {
@@ -101,6 +101,7 @@ macro_rules! entry {
 ///
 /// This is the single source of truth for what gets checked by drift detection.
 /// Add new entries here when you add new schemas or structs.
+#[allow(clippy::too_many_lines)]
 fn build_schema_map() -> Vec<SchemaEntry> {
     vec![
         // ── domain/ ──────────────────────────────────────────────────────
@@ -395,7 +396,7 @@ const ALL_SCHEMA_PATHS: &[&str] = &[
     "schemas/platform/world-snapshot-response.schema.json",
 ];
 
-/// Workspace root: traverse up from CARGO_MANIFEST_DIR (crates/nexus-contracts)
+/// Workspace root: traverse up from `CARGO_MANIFEST_DIR` (`crates/nexus-contracts`)
 /// to the workspace root (2 levels up).
 fn workspace_root() -> PathBuf {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -461,22 +462,19 @@ fn extract_required(schema: &Value) -> BTreeSet<String> {
 
 /// Describe a property's type for error messages.
 fn describe_type(properties: &[(String, Value)], name: &str) -> String {
-    properties
-        .iter()
-        .find(|(n, _)| n == name)
-        .map(|(_, def)| describe_schema_type(def))
-        .unwrap_or_else(|| "unknown".to_string())
+    properties.iter().find(|(n, _)| n == name).map_or_else(
+        || "unknown".to_string(),
+        |(_, def)| describe_schema_type(def),
+    )
 }
 
 /// Get a human-readable type description from a schema property definition.
 fn describe_schema_type(def: &Value) -> String {
-    if def.get("$ref").and_then(|r| r.as_str()).is_some() {
-        if let Some(ref_path) = def.get("$ref").and_then(|r| r.as_str()) {
-            // Extract the definition name from the ref path
-            if let Some(fragment) = ref_path.split('#').nth(1) {
-                if let Some(def_name) = fragment.rsplit('/').next() {
-                    return format!("ref({def_name})");
-                }
+    if let Some(ref_path) = def.get("$ref").and_then(|r| r.as_str()) {
+        // Extract the definition name from the ref path
+        if let Some(fragment) = ref_path.split('#').nth(1) {
+            if let Some(def_name) = fragment.rsplit('/').next() {
+                return format!("ref({def_name})");
             }
             return format!("ref({ref_path})");
         }
@@ -565,28 +563,33 @@ fn make_dummy_value(
         Some("boolean") => Value::Bool(false),
         Some("array") => {
             // Check for items schema
-            if let Some(items) = prop_def.get("items") {
-                // Generate a single dummy item
-                let item_val = make_dummy_value(items, schema_cache, current_dir);
-                Value::Array(vec![item_val])
-            } else {
-                Value::Array(vec![])
-            }
+            prop_def.get("items").map_or_else(
+                || Value::Array(vec![]),
+                |items| {
+                    // Generate a single dummy item
+                    let item_val = make_dummy_value(items, schema_cache, current_dir);
+                    Value::Array(vec![item_val])
+                },
+            )
         }
         Some("object") => {
             // Build a dummy from sub-properties if available
-            if let Some(sub_props) = prop_def.get("properties").and_then(|p| p.as_object()) {
-                let mut map = serde_json::Map::new();
-                for (sub_name, sub_def) in sub_props {
-                    map.insert(
-                        sub_name.clone(),
-                        make_dummy_value(sub_def, schema_cache, current_dir),
-                    );
-                }
-                Value::Object(map)
-            } else {
-                Value::Object(serde_json::Map::new())
-            }
+            prop_def
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .map_or_else(
+                    || Value::Object(serde_json::Map::new()),
+                    |sub_props| {
+                        let mut map = serde_json::Map::new();
+                        for (sub_name, sub_def) in sub_props {
+                            map.insert(
+                                sub_name.clone(),
+                                make_dummy_value(sub_def, schema_cache, current_dir),
+                            );
+                        }
+                        Value::Object(map)
+                    },
+                )
         }
         _ => {
             // Try allOf, oneOf, anyOf
@@ -610,17 +613,18 @@ fn make_dummy_from_ref(
     current_dir: &str,
 ) -> Value {
     // Split on # to separate file part from fragment
-    let (file_part, fragment) = if let Some(pos) = ref_path.find('#') {
-        let file = &ref_path[..pos];
-        let frag = &ref_path[pos + 1..];
-        if file.is_empty() {
-            ("", Some(frag))
-        } else {
-            (file, Some(frag))
-        }
-    } else {
-        (ref_path, None)
-    };
+    let (file_part, fragment) = ref_path.find('#').map_or_else(
+        || (ref_path, None),
+        |pos| {
+            let file = &ref_path[..pos];
+            let frag = &ref_path[pos + 1..];
+            if file.is_empty() {
+                ("", Some(frag))
+            } else {
+                (file, Some(frag))
+            }
+        },
+    );
 
     // Resolve the file path
     let resolved_path = resolve_ref_file(file_part, current_dir);
@@ -666,15 +670,10 @@ fn make_dummy_from_ref(
 fn resolve_ref_file(file_part: &str, current_dir: &str) -> String {
     if file_part.is_empty() || file_part.starts_with("https://") {
         // URL like https://nexus42.invalid/schemas/common/...
-        if let Some(path) = file_part
+        file_part
             .strip_prefix("https://nexus42.invalid/")
             .or_else(|| file_part.strip_prefix("https://nexus42.invalid"))
-        {
-            path.to_string()
-        } else {
-            // Could not parse URL, use as-is
-            file_part.to_string()
-        }
+            .map_or_else(|| file_part.to_string(), ToString::to_string)
     } else if file_part.starts_with('/') {
         // Absolute path in repo
         file_part.trim_start_matches('/').to_string()
@@ -817,7 +816,7 @@ fn schema_drift_detection() {
 
     if !all_errors.is_empty() {
         // Build a detailed error report
-        let unique_errors: HashSet<&str> = all_errors.iter().map(|s| s.as_str()).collect();
+        let unique_errors: HashSet<&str> = all_errors.iter().map(String::as_str).collect();
         let summary = format!(
             "\n========================================================\n\
              SCHEMA DRIFT DETECTED\n\

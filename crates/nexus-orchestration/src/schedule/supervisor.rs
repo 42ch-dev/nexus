@@ -56,10 +56,11 @@ struct Inner {
 }
 
 impl ScheduleSupervisor {
-    /// Create a new supervisor backed by the given shared SQLite pool.
+    /// Create a new supervisor backed by the given shared `SQLite` pool.
     ///
     /// The pool must already have migrations applied (including the
     /// `creator_schedules` table).
+    #[must_use] 
     pub fn new(pool: Arc<SqlitePool>) -> Self {
         Self {
             pool,
@@ -80,9 +81,12 @@ impl ScheduleSupervisor {
     /// **Idempotency guard (H4)**: If `tick()` is already in progress, this call
     /// returns immediately without doing anything.
     ///
-    /// **Per-creator scoping (H1)**: Concurrency checks (Serial, ParallelWith) only
+    /// **Per-creator scoping (H1)**: Concurrency checks (Serial, `ParallelWith`) only
     /// consider schedules belonging to the same creator. Cross-creator dependencies
     /// (`depends_on`) are still checked against the global completed set.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if schedule admission or database operations fail.
     pub async fn tick(&self) -> Result<(), SupervisorError> {
         // H4: Re-entrancy guard — if a tick is already in progress, skip.
         if self
@@ -113,6 +117,9 @@ impl ScheduleSupervisor {
     ///
     /// **Idempotency guard (H4)**: Shared with `tick()` — if either is in progress,
     /// the other returns immediately.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if schedule admission or database operations fail.
     pub async fn tick_clocked(&self, clock_now: i64) -> Result<(), SupervisorError> {
         // H4: Re-entrancy guard — shared with tick()
         if self
@@ -138,6 +145,7 @@ impl ScheduleSupervisor {
     /// - `now`: timestamp for DB updates
     /// - `scheduled_at_cutoff`: if Some, only admit schedules where
     ///   `scheduled_at IS NULL OR scheduled_at <= cutoff`. If None, admit all pending.
+    #[allow(clippy::too_many_lines)]
     async fn tick_inner(
         &self,
         now: i64,
@@ -202,7 +210,7 @@ impl ScheduleSupervisor {
         let pool_ref = &*self.pool;
         let mut pending_with_deps: Vec<Schedule> = Vec::with_capacity(pending.len());
         for schedule in pending {
-            let sid = schedule.id.0.to_owned();
+            let sid = schedule.id.0.clone();
             let dep_rows = sqlx::query_scalar!(
                 "SELECT depends_on as \"depends_on!\" FROM schedule_dependencies WHERE schedule_id = ?",
                 sid
@@ -256,9 +264,10 @@ impl ScheduleSupervisor {
         }
 
         // Update inner cache
-        let mut inner = self.inner.lock().await;
         for (creator_id, sid) in &started {
-            inner
+            self.inner
+                .lock()
+                .await
                 .running_by_creator
                 .entry(creator_id.clone())
                 .or_default()
@@ -273,6 +282,9 @@ impl ScheduleSupervisor {
     /// Flips the Schedule row to the given terminal status, removes it from
     /// the running set, and triggers a `tick()` to potentially start the
     /// next eligible schedule.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if database operations fail.
     pub async fn on_schedule_terminal(
         &self,
         schedule_id: &str,
@@ -340,6 +352,9 @@ impl ScheduleSupervisor {
     /// **R2 — Duplicate detection**: Before inserting, checks whether a schedule
     /// with the same `(creator_id, preset_id, label)` already exists. If so,
     /// returns [`SupervisorError::DuplicateSchedule`].
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if database insertion fails.
     pub async fn insert_pending(&self, schedule: Schedule) -> Result<(), SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -392,8 +407,8 @@ impl ScheduleSupervisor {
         let schedule_id = schedule.id.0;
         let creator_id = schedule.creator_id;
         let preset_id = schedule.preset_id;
-        let preset_version_i64 = schedule.preset_version as i64;
-        let context_version_i64 = schedule.current_core_context_version.0 as i64;
+        let preset_version_i64 = i64::from(schedule.preset_version);
+        let context_version_i64 = i64::from(schedule.current_core_context_version.0);
         let scheduled_at = schedule.scheduled_at;
         let label = schedule.label;
 
@@ -443,12 +458,15 @@ impl ScheduleSupervisor {
         super::derivation::CoreContextManager::new(self.pool.clone())
     }
 
-    /// Get a reference to the underlying SQLite pool.
+    /// Get a reference to the underlying `SQLite` pool.
     pub fn pool(&self) -> Arc<SqlitePool> {
         self.pool.clone()
     }
 
     /// Get the current status of a schedule by ID (for testing/inspection).
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if the schedule is not found or the status string is unrecognizable.
     pub async fn status_of(&self, schedule_id: &str) -> Result<ScheduleStatus, SupervisorError> {
         let schedule_id_owned = schedule_id.to_owned();
         let row = sqlx::query_scalar!(
@@ -458,8 +476,9 @@ impl ScheduleSupervisor {
         .fetch_optional(&*self.pool)
         .await?;
 
-        match row {
-            Some(status_str) => match status_str.as_str() {
+        row.map_or_else(
+            || Err(SupervisorError::NotFound(schedule_id.to_string())),
+            |status_str| match status_str.as_str() {
                 "pending" => Ok(ScheduleStatus::Pending),
                 "running" => Ok(ScheduleStatus::Running),
                 "paused" => Ok(ScheduleStatus::Paused),
@@ -475,8 +494,7 @@ impl ScheduleSupervisor {
                     Err(SupervisorError::NotFound(schedule_id.to_string()))
                 }
             },
-            None => Err(SupervisorError::NotFound(schedule_id.to_string())),
-        }
+        )
     }
 }
 
@@ -490,6 +508,9 @@ impl ScheduleSupervisor {
     /// On daemon boot, Running schedules are paused with the given reason so
     /// the user can explicitly resume them. This prevents stale sessions
     /// from continuing after a daemon restart.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if database update fails.
     pub async fn resume_running_as_paused(&self, reason: &str) -> Result<usize, SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -515,8 +536,7 @@ impl ScheduleSupervisor {
         if count > 0 {
             // R1/R4: Clear the running cache for all paused schedules.
             // After boot recovery, no schedules should be in the running set.
-            let mut inner = self.inner.lock().await;
-            inner.running_by_creator.clear();
+            self.inner.lock().await.running_by_creator.clear();
             tracing::info!("paused {} running schedule(s) (reason: {})", count, reason);
         }
 
@@ -538,6 +558,9 @@ impl ScheduleSupervisor {
     ///
     /// Returns `Ok(true)` if the schedule was paused, `Ok(false)` if it was
     /// already in a non-pausable state, or an error for DB issues.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if the schedule is not found or database update fails.
     pub async fn pause_schedule(&self, schedule_id: &str) -> Result<bool, SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -593,6 +616,10 @@ impl ScheduleSupervisor {
     /// so a future `tick()` can pick it up.
     ///
     /// Returns the new status as a string ("running" or "pending").
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if the schedule is not found or database operations fail.
+    #[allow(clippy::too_many_lines)]
     pub async fn resume_schedule(&self, schedule_id: &str) -> Result<String, SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -612,7 +639,6 @@ impl ScheduleSupervisor {
                 ScheduleStatus::Paused,
                 // Parse the actual status for the error message
                 match row.status.as_str() {
-                    "pending" => ScheduleStatus::Pending,
                     "running" => ScheduleStatus::Running,
                     "completed" => ScheduleStatus::Completed,
                     "cancelled" => ScheduleStatus::Cancelled,
@@ -707,8 +733,9 @@ impl ScheduleSupervisor {
             }
 
             // Add to running cache
-            let mut inner = self.inner.lock().await;
-            inner
+            self.inner
+                .lock()
+                .await
                 .running_by_creator
                 .entry(creator_id)
                 .or_default()
@@ -749,14 +776,14 @@ impl ScheduleSupervisor {
     }
 }
 
-/// Internal row for status + creator_id lookups.
+/// Internal row for status + `creator_id` lookups.
 #[derive(sqlx::FromRow)]
 struct StatusCreatorRow {
     status: String,
     creator_id: String,
 }
 
-/// Internal row mapping for reading `creator_schedules` from SQLite.
+/// Internal row mapping for reading `creator_schedules` from `SQLite`.
 #[derive(sqlx::FromRow)]
 struct ScheduleRow {
     schedule_id: String,
@@ -782,7 +809,6 @@ impl ScheduleRow {
         };
 
         let concurrency = match self.concurrency_kind.as_str() {
-            "serial" => ScheduleConcurrency::Serial,
             "parallel_with" => {
                 let ids: Vec<ScheduleId> = self
                     .concurrency_whitelist
@@ -796,7 +822,6 @@ impl ScheduleRow {
         };
 
         let status = match self.status.as_str() {
-            "pending" => ScheduleStatus::Pending,
             "running" => ScheduleStatus::Running,
             "paused" => ScheduleStatus::Paused,
             "completed" => ScheduleStatus::Completed,
@@ -809,12 +834,12 @@ impl ScheduleRow {
             id: ScheduleId(self.schedule_id.clone()),
             creator_id: self.creator_id.clone(),
             preset_id: self.preset_id.clone(),
-            preset_version: self.preset_version as u32,
+            preset_version: u32::try_from(self.preset_version).unwrap_or_default(),
             status,
             concurrency,
             depends_on: Vec::new(), // loaded separately via schedule_dependencies
             current_core_context_version: CoreContextVersion(
-                self.current_core_context_version as u32,
+                u32::try_from(self.current_core_context_version).unwrap_or_default(),
             ),
             current_session_id: self.current_session_id.clone(),
             // scheduled_at is stored as i64 (Unix timestamp) in SQLite but exposed
@@ -859,12 +884,12 @@ mod tests_t9 {
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper that inserts a minimal schedule row for test setup.
         sqlx::query(
-            r#"INSERT INTO creator_schedules
+            r"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
                 created_at, updated_at)
                VALUES (?, ?, 'test-preset', 1, ?,
-               'serial', 0, ?, ?)"#,
+               'serial', 0, ?, ?)",
         )
         .bind(id)
         .bind(creator_id)
@@ -1337,11 +1362,11 @@ mod tests_t9 {
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper for session setup.
         sqlx::query(
-            r#"INSERT INTO orchestration_sessions
+            r"INSERT INTO orchestration_sessions
                (session_id, creator_id, preset_id, preset_version, status,
                 context_json, created_at, updated_at)
                VALUES (?, 'test-creator', 'test-preset', 1, 'running',
-                '{}', ?, ?)"#,
+                '{}', ?, ?)",
         )
         .bind("R5-SESSION-1")
         .bind(now)

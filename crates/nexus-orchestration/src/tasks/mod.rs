@@ -43,7 +43,7 @@ pub struct CapabilityTask {
 
 #[async_trait]
 impl Task for CapabilityTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "capability_task"
     }
 
@@ -93,7 +93,7 @@ pub struct RuleCheckTask;
 
 #[async_trait]
 impl Task for RuleCheckTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "rule_check_task"
     }
 
@@ -138,7 +138,7 @@ pub struct ManualWaitTask;
 
 #[async_trait]
 impl Task for ManualWaitTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "manual_wait_task"
     }
 
@@ -201,6 +201,7 @@ impl InnerGraphTask {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 #[async_trait]
 impl Task for InnerGraphTask {
     fn id(&self) -> &str {
@@ -235,7 +236,7 @@ impl Task for InnerGraphTask {
             // matching keys, and set them on the child.
             if let Ok(parent_data) = serde_json::to_value(&context) {
                 if let Some(obj) = parent_data.as_object() {
-                    for (k, v) in obj.iter() {
+                    for (k, v) in obj {
                         if k.starts_with(&format!("{key_prefix}.")) || k == *key_prefix {
                             child_ctx.set(k.as_str(), v.clone()).await;
                         }
@@ -308,7 +309,7 @@ impl Task for InnerGraphTask {
             })?;
 
             // Try to read as nodes.<node_id>.text first, then as-is.
-            let node_key = format!("nodes.{}", binding);
+            let node_key = format!("nodes.{binding}");
             let direct: Option<String> = child_ctx.get(binding).await;
             let namespaced: Option<String> = child_ctx.get(&node_key).await;
             direct.or(namespaced).unwrap_or_default()
@@ -328,17 +329,8 @@ impl Task for InnerGraphTask {
             )
             .await;
 
-        if let Some(err) = last_error {
-            Ok(TaskResult::new_with_status(
-                Some(format!(
-                    "inner graph '{}' completed with error: {}",
-                    self.inner_graph.id, err
-                )),
-                NextAction::Continue,
-                Some(err),
-            ))
-        } else {
-            Ok(TaskResult::new(
+        last_error.map_or_else(
+            || Ok(TaskResult::new(
                 Some(format!(
                     "inner graph '{}' completed, output: {}",
                     self.inner_graph.id,
@@ -349,8 +341,18 @@ impl Task for InnerGraphTask {
                     }
                 )),
                 NextAction::Continue,
-            ))
-        }
+            )),
+            |err| {
+                Ok(TaskResult::new_with_status(
+                    Some(format!(
+                        "inner graph '{}' completed with error: {}",
+                        self.inner_graph.id, err
+                    )),
+                    NextAction::Continue,
+                    Some(err),
+                ))
+            },
+        )
     }
 }
 
@@ -364,7 +366,7 @@ pub struct JudgeTask;
 
 #[async_trait]
 impl Task for JudgeTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "judge_task"
     }
 
@@ -409,15 +411,15 @@ impl Task for JudgeTask {
 ///
 /// Encodes the full lifecycle of one state:
 /// 1. Run enter actions (capability calls, inner graph launch).
-/// 2. Evaluate exit_when condition.
-/// 3. Return appropriate NextAction.
+/// 2. Evaluate `exit_when` condition.
+/// 3. Return appropriate `NextAction`.
 ///
 /// §8.2 mapping:
-/// - `enter[*].kind=capability` → CapabilityTask (delegated internally).
-/// - `enter[*].kind=inner_graph` → InnerGraphTask (spawns child session).
-/// - `exit_when.kind=manual` → ManualWaitTask (returns WaitForInput).
-/// - `exit_when.kind=rule` → RuleCheckTask.
-/// - `exit_when.kind=llm_judge` → JudgeTask.
+/// - `enter[*].kind=capability` → `CapabilityTask` (delegated internally).
+/// - `enter[*].kind=inner_graph` → `InnerGraphTask` (spawns child session).
+/// - `exit_when.kind=manual` → `ManualWaitTask` (returns `WaitForInput`).
+/// - `exit_when.kind=rule` → `RuleCheckTask`.
+/// - `exit_when.kind=llm_judge` → `JudgeTask`.
 /// - `exit_when.kind=graph_complete` → Continue (inner graph handles it).
 /// - `terminal: true` → End.
 pub struct StateCompositeTask {
@@ -429,7 +431,7 @@ pub struct StateCompositeTask {
     engine: Option<Arc<dyn OrchestrationEngine>>,
     /// Named inner graphs keyed by name.
     inner_graphs: std::collections::HashMap<String, Arc<Graph>>,
-    /// Output bindings for inner graphs: inner_graph_name → binding string.
+    /// Output bindings for inner graphs: `inner_graph_name` → binding string.
     output_bindings: std::collections::HashMap<String, String>,
     /// Shared capability registry (injected by the engine; falls back to builtins if None).
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
@@ -439,6 +441,7 @@ impl StateCompositeTask {
     /// Build a composite task from a manifest state definition (basic, no engine).
     ///
     /// Inner graph actions will fail at runtime if no engine is set.
+    #[must_use] 
     pub fn from_manifest(state: &StateDefinition) -> Self {
         Self {
             id: state.id.clone(),
@@ -453,12 +456,14 @@ impl StateCompositeTask {
     }
 
     /// Set the orchestration engine reference.
+    #[must_use]
     pub fn with_engine(mut self, engine: Arc<dyn OrchestrationEngine>) -> Self {
         self.engine = Some(engine);
         self
     }
 
     /// Set the inner graphs map.
+    #[must_use] 
     pub fn with_inner_graphs(
         mut self,
         graphs: std::collections::HashMap<String, Arc<Graph>>,
@@ -468,6 +473,7 @@ impl StateCompositeTask {
     }
 
     /// Set the output bindings map.
+    #[must_use] 
     pub fn with_output_bindings(
         mut self,
         bindings: std::collections::HashMap<String, String>,
@@ -477,6 +483,7 @@ impl StateCompositeTask {
     }
 
     /// Set the shared capability registry.
+    #[must_use] 
     pub fn with_registry(mut self, registry: std::sync::Arc<CapabilityRegistry>) -> Self {
         self.registry = Some(registry);
         self
@@ -545,15 +552,14 @@ impl Task for StateCompositeTask {
                     } else if inner_graph.is_none() {
                         // Inner graph not found in the map — error.
                         return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
-                            "InnerGraphTask: inner graph '{}' not found",
-                            name
+                            "InnerGraphTask: inner graph '{name}' not found"
                         )));
                     } else {
                         // No engine set — use fallback stub behavior.
                         context.set("_inner_graph_name", name.clone()).await;
                         context
                             .set(
-                                format!("_inner_graph_error_{}", name),
+                                format!("_inner_graph_error_{name}"),
                                 "no engine reference available",
                             )
                             .await;
@@ -627,9 +633,9 @@ impl Task for StateCompositeTask {
 /// A task for a node within an inner graph.
 ///
 /// §8.2 mapping:
-/// - `kind=acp_prompt` → AcpPromptTask (full in T4; T3 stub that stores a placeholder).
+/// - `kind=acp_prompt` → `AcpPromptTask` (full in T4; T3 stub that stores a placeholder).
 ///
-/// ## WS-E T5: session_id routing
+/// ## WS-E T5: `session_id` routing
 ///
 /// The task can route prompts to different agent sessions based on:
 /// 1. Explicit `session_id` provided at construction (for preset resolution)
@@ -644,9 +650,9 @@ pub struct InnerGraphNodeTask {
     template: String,
     /// Tool policy for this node.
     tool_policy: ToolPolicy,
-    /// Explicit session_id (if preset resolution already determined it).
+    /// Explicit `session_id` (if preset resolution already determined it).
     session_id: Option<String>,
-    /// Agent role reference (if node has `agent` field — will be resolved from session_routes).
+    /// Agent role reference (if node has `agent` field — will be resolved from `session_routes`).
     agent_ref: Option<String>,
 }
 
@@ -654,7 +660,8 @@ impl InnerGraphNodeTask {
     /// Create a new inner graph node task (stub mode, no IPC).
     ///
     /// Used by preset loader for initial graph construction. The real task
-    /// is wired at runtime when worker_handle and session_routes are available.
+    /// is wired at runtime when `worker_handle` and `session_routes` are available.
+    #[must_use] 
     pub fn new(id: &str) -> Self {
         Self {
             id: id.to_string(),
@@ -666,19 +673,22 @@ impl InnerGraphNodeTask {
         }
     }
 
-    /// Builder-style session_id setter.
+    /// Builder-style `session_id` setter.
+    #[must_use]
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
 
-    /// Builder-style agent_ref setter.
+    /// Builder-style `agent_ref` setter.
+    #[must_use]
     pub fn with_agent_ref(mut self, agent_ref: impl Into<String>) -> Self {
         self.agent_ref = Some(agent_ref.into());
         self
     }
 
-    /// Builder-style worker_handle setter.
+    /// Builder-style `worker_handle` setter.
+    #[must_use] 
     pub fn with_worker_handle(
         mut self,
         handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
@@ -688,22 +698,24 @@ impl InnerGraphNodeTask {
     }
 
     /// Builder-style template setter.
+    #[must_use]
     pub fn with_template(mut self, template: impl Into<String>) -> Self {
         self.template = template.into();
         self
     }
 
-    /// Builder-style tool_policy setter.
-    pub fn with_tool_policy(mut self, tool_policy: ToolPolicy) -> Self {
+    /// Builder-style `tool_policy` setter.
+    #[must_use] 
+    pub const fn with_tool_policy(mut self, tool_policy: ToolPolicy) -> Self {
         self.tool_policy = tool_policy;
         self
     }
 
-    /// Resolve the effective session_id for this node (WS-E T5).
+    /// Resolve the effective `session_id` for this node (WS-E T5).
     ///
     /// Priority:
-    /// 1. Explicit session_id (if set at construction)
-    /// 2. Lookup from context using agent_ref (if set and session_routes present)
+    /// 1. Explicit `session_id` (if set at construction)
+    /// 2. Lookup from context using `agent_ref` (if set and `session_routes` present)
     /// 3. Default "default"
     async fn resolve_session_id(&self, context: &graph_flow::Context) -> String {
         // Priority 1: explicit session_id
@@ -802,37 +814,37 @@ pub enum ToolPolicy {
 impl std::str::FromStr for ToolPolicy {
     type Err = String;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "auto_grant_all" => Ok(ToolPolicy::AutoGrantAll),
-            "auto_grant_read_only" => Ok(ToolPolicy::AutoGrantReadOnly),
-            "deny_all" => Ok(ToolPolicy::DenyAll),
-            "request_policy" => Ok(ToolPolicy::RequestPolicy),
-            _ => Ok(ToolPolicy::AutoGrantReadOnly), // safe default
+            "auto_grant_all" => Ok(Self::AutoGrantAll),
+            "deny_all" => Ok(Self::DenyAll),
+            "request_policy" => Ok(Self::RequestPolicy),
+            _ => Ok(Self::AutoGrantReadOnly), // safe default
         }
     }
 }
 
 impl ToolPolicy {
     /// Serialize to the string form used in IPC.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use] 
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            ToolPolicy::AutoGrantAll => "auto_grant_all",
-            ToolPolicy::AutoGrantReadOnly => "auto_grant_read_only",
-            ToolPolicy::DenyAll => "deny_all",
-            ToolPolicy::RequestPolicy => "request_policy",
+            Self::AutoGrantAll => "auto_grant_all",
+            Self::AutoGrantReadOnly => "auto_grant_read_only",
+            Self::DenyAll => "deny_all",
+            Self::RequestPolicy => "request_policy",
         }
     }
 }
 
 /// A task that sends a prompt to an ACP agent via the Worker Manager IPC.
 ///
-/// Design: `orchestration-engine-v1.md` §4.4 (AcpPromptTask row) + §6.4 (IPC shapes).
+/// Design: `orchestration-engine-v1.md` §4.4 (`AcpPromptTask` row) + §6.4 (IPC shapes).
 ///
 /// `run(ctx)`:
 /// 1. Renders the template with `handlebars` against `ctx` bindings.
-/// 2. Calls `worker/acp_prompt { prompt, tool_policy, session_id }` via WorkerHandle.
-/// 3. Streams `worker/acp_prompt_chunk` notifications into ctx.chat_history.
+/// 2. Calls `worker/acp_prompt { prompt, tool_policy, session_id }` via `WorkerHandle`.
+/// 3. Streams `worker/acp_prompt_chunk` notifications into `ctx.chat_history`.
 /// 4. On final reply, stores `result.full_text` at `ctx["state.<state_id>.output"]`.
 /// 5. Returns `TaskResult { response: Some(full_text), next_action: NextAction::Continue }`.
 pub struct AcpPromptTask {
@@ -851,7 +863,7 @@ pub struct AcpPromptTask {
 }
 
 impl AcpPromptTask {
-    /// Create a new AcpPromptTask.
+    /// Create a new `AcpPromptTask`.
     ///
     /// `worker_handle`: the worker handle for IPC. Can be `None` for test mode
     /// where the task operates in stub mode.
@@ -876,7 +888,7 @@ impl AcpPromptTask {
         }
     }
 
-    /// Test helper: create an AcpPromptTask with a worker handle directly.
+    /// Test helper: create an `AcpPromptTask` with a worker handle directly.
     pub fn new_for_test(
         handle: crate::worker::WorkerHandle,
         state_id: impl Into<String>,
@@ -892,9 +904,9 @@ impl AcpPromptTask {
         }
     }
 
-    /// Create an AcpPromptTask with explicit session_id (WS-E T5).
+    /// Create an `AcpPromptTask` with explicit `session_id` (WS-E T5).
     ///
-    /// Convenience constructor for multi-agent presets where the session_id
+    /// Convenience constructor for multi-agent presets where the `session_id`
     /// is known at task creation time.
     pub fn with_session_id(
         worker_handle: Option<
@@ -1004,7 +1016,7 @@ impl Task for AcpPromptTask {
             }
         } else {
             // Stub mode: return a placeholder.
-            format!("[acp_prompt stub: {}]", prompt)
+            format!("[acp_prompt stub: {prompt}]")
         };
 
         // 3. Add to chat history.
@@ -1156,7 +1168,7 @@ mod tests {
             Some("writer_session".to_string()), // explicit session_id
         );
         let ctx = graph_flow::Context::new();
-        let result = task.run(ctx.clone()).await.unwrap();
+        let _result = task.run(ctx.clone()).await.unwrap();
         // Stub mode should still work with explicit session_id
         let stored: String = ctx.get("state.state-1.output").await.unwrap();
         assert!(stored.contains("test prompt"), "stored: {stored}");
@@ -1182,7 +1194,7 @@ mod tests {
         // WS-E T5: InnerGraphNodeTask should track session_id even in stub mode
         let task = InnerGraphNodeTask::new("n1").with_session_id("writer_session");
         let ctx = graph_flow::Context::new();
-        let result = task.run(ctx.clone()).await.unwrap();
+        let _result = task.run(ctx.clone()).await.unwrap();
 
         // Check output includes session_id
         let stored: String = ctx.get("nodes.n1.text").await.unwrap();
@@ -1212,7 +1224,7 @@ mod tests {
         )
         .await;
 
-        let result = task.run(ctx.clone()).await.unwrap();
+        let _result = task.run(ctx.clone()).await.unwrap();
 
         // Check session_id was resolved correctly
         let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
@@ -1228,7 +1240,7 @@ mod tests {
         // WS-E T5: No session_id, no agent_ref, no routes → default
         let task = InnerGraphNodeTask::new("n1");
         let ctx = graph_flow::Context::new();
-        let result = task.run(ctx.clone()).await.unwrap();
+        let _result = task.run(ctx.clone()).await.unwrap();
 
         let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
         assert_eq!(sid, "default");
@@ -1248,7 +1260,7 @@ mod tests {
         )
         .await;
 
-        let result = task.run(ctx.clone()).await.unwrap();
+        let _result = task.run(ctx.clone()).await.unwrap();
 
         let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
         assert_eq!(sid, "default");
@@ -1270,7 +1282,7 @@ mod tests {
         )
         .await;
 
-        let result = task.run(ctx.clone()).await.unwrap();
+        let _result = task.run(ctx.clone()).await.unwrap();
 
         let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
         assert_eq!(sid, "explicit_session");

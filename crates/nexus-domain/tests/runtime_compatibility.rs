@@ -2,6 +2,7 @@
 //!
 //! Integration tests for TwoStageAssembly with mocked platform responses.
 
+#![allow(clippy::manual_string_new, clippy::doc_markdown)]
 use nexus_domain::{
     AssembleMetadata, AssembleResponse, DomainRuntimeMode, KbEntry, LongTermMemory, MemoryItemRef,
     TwoStageAssembly,

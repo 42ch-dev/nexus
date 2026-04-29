@@ -18,12 +18,12 @@ use tempfile::TempDir;
 // E10: ACP session persistence tests
 // ---------------------------------------------------------------------------
 
-/// Test: SessionManager saves and loads a session correctly
+/// Test: `SessionManager` saves and loads a session correctly
 #[test]
 fn session_persistence_save_and_load() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let entry = SessionEntry {
         session_id: SessionId::new("sess_persist_001"),
@@ -42,12 +42,12 @@ fn session_persistence_save_and_load() {
     assert_eq!(sessions[0].agent_id, "claude-acp");
 }
 
-/// Test: SessionManager persists multiple sessions
+/// Test: `SessionManager` persists multiple sessions
 #[test]
 fn session_persistence_multiple_sessions() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let entry1 = SessionEntry {
         session_id: SessionId::new("sess_multi_001"),
@@ -72,12 +72,12 @@ fn session_persistence_multiple_sessions() {
     assert_eq!(sessions.len(), 2);
 }
 
-/// Test: SessionManager updates existing session
+/// Test: `SessionManager` updates existing session
 #[test]
 fn session_persistence_update_existing() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let original = SessionEntry {
         session_id: SessionId::new("sess_update_001"),
@@ -109,12 +109,12 @@ fn session_persistence_update_existing() {
 // E10: ACP session retrieval tests
 // ---------------------------------------------------------------------------
 
-/// Test: find_recent_session returns matching session by agent and workspace
+/// Test: `find_recent_session` returns matching session by agent and workspace
 #[test]
 fn session_find_recent_by_agent_and_workspace() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let entry = SessionEntry {
         session_id: SessionId::new("sess_find_001"),
@@ -134,12 +134,12 @@ fn session_find_recent_by_agent_and_workspace() {
     assert_eq!(found.unwrap().session_id, entry.session_id);
 }
 
-/// Test: find_recent_session returns None when no match
+/// Test: `find_recent_session` returns `None` when no match
 #[test]
 fn session_find_recent_no_match() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let entry = SessionEntry {
         session_id: SessionId::new("sess_nomatch_001"),
@@ -159,12 +159,12 @@ fn session_find_recent_no_match() {
     assert!(found.is_none());
 }
 
-/// Test: find_recent_session returns most recent when multiple matches
+/// Test: `find_recent_session` returns most recent when multiple matches
 #[test]
 fn session_find_recent_returns_most_recent() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let older = SessionEntry {
         session_id: SessionId::new("sess_old"),
@@ -197,12 +197,12 @@ fn session_find_recent_returns_most_recent() {
 // E10: ACP session deletion tests
 // ---------------------------------------------------------------------------
 
-/// Test: delete_session removes session by ID
+/// Test: `delete_session` removes session by ID
 #[test]
 fn session_delete_removes_by_id() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let entry = SessionEntry {
         session_id: SessionId::new("sess_del_001"),
@@ -224,12 +224,12 @@ fn session_delete_removes_by_id() {
     assert_eq!(manager.load_sessions().unwrap().len(), 0);
 }
 
-/// Test: delete_session returns None for non-existent session
+/// Test: `delete_session` returns `None` for non-existent session
 #[test]
 fn session_delete_nonexistent() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let deleted = manager
         .delete_session(&SessionId::new("nonexistent_session"))
@@ -241,12 +241,12 @@ fn session_delete_nonexistent() {
 // E10: ACP session expiration/cleanup tests
 // ---------------------------------------------------------------------------
 
-/// Test: cleanup_expired removes sessions older than 24 hours
+/// Test: `cleanup_expired` removes sessions older than 24 hours
 #[test]
 fn session_cleanup_removes_expired() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     // Create an expired session (30 hours old)
     let expired = SessionEntry {
@@ -278,12 +278,12 @@ fn session_cleanup_removes_expired() {
     assert_eq!(remaining[0].session_id, SessionId::new("sess_recent"));
 }
 
-/// Test: cleanup_expired keeps sessions at boundary (exactly 24 hours old)
+/// Test: `cleanup_expired` keeps sessions at boundary (exactly 24 hours old)
 #[test]
 fn session_cleanup_boundary_24_hours() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     // Create a session exactly at the boundary (24 hours old)
     let boundary = SessionEntry {
@@ -301,23 +301,23 @@ fn session_cleanup_boundary_24_hours() {
     assert_eq!(removed.len(), 1);
 }
 
-/// Test: cleanup_expired handles empty session list
+/// Test: `cleanup_expired` handles empty session list
 #[test]
 fn session_cleanup_empty_list() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     let removed = manager.cleanup_expired().unwrap();
     assert_eq!(removed.len(), 0);
 }
 
-/// Test: cleanup_expired handles missing file
+/// Test: `cleanup_expired` handles missing file
 #[test]
 fn session_cleanup_missing_file() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("nonexistent.json");
-    let manager = SessionManager::new(sessions_file.clone());
+    let manager = SessionManager::new(sessions_file);
 
     // Should not error, just return empty
     let removed = manager.cleanup_expired().unwrap();
@@ -328,7 +328,7 @@ fn session_cleanup_missing_file() {
 // E10: Skill/capability registration tests
 // ---------------------------------------------------------------------------
 
-/// Test: build_v1_0_capabilities creates non-empty capability set
+/// Test: `build_v1_0_capabilities` creates non-empty capability set
 #[test]
 fn capabilities_v1_0_builds_correct_set() {
     use nexus_acp_host::skills::build_v1_0_capabilities;
@@ -360,7 +360,7 @@ fn capabilities_constants_correct() {
 // E10: SessionEntry serialization tests
 // ---------------------------------------------------------------------------
 
-/// Test: SessionEntry serializes to JSON correctly
+/// Test: `SessionEntry` serializes to JSON correctly
 #[test]
 fn session_entry_serialization() {
     let entry = SessionEntry {
@@ -381,7 +381,7 @@ fn session_entry_serialization() {
     assert_eq!(decoded.agent_id, entry.agent_id);
 }
 
-/// Test: SessionEntry deserializes from valid JSON
+/// Test: `SessionEntry` deserializes from valid JSON
 #[test]
 fn session_entry_deserialization() {
     let json = r#"{
@@ -398,7 +398,7 @@ fn session_entry_deserialization() {
     assert_eq!(entry.workspace_hint, PathBuf::from("/tmp/decode_workspace"));
 }
 
-/// Test: SessionEntry deserialization handles missing optional fields
+/// Test: `SessionEntry` deserialization handles missing optional fields
 #[test]
 fn session_entry_deserialization_minimal() {
     let json = r#"{
@@ -417,7 +417,7 @@ fn session_entry_deserialization_minimal() {
 // E10: SessionManager error handling tests
 // ---------------------------------------------------------------------------
 
-/// Test: SessionManager handles corrupted JSON file gracefully
+/// Test: `SessionManager` handles corrupted JSON file gracefully
 #[test]
 fn session_manager_handles_corrupted_json() {
     let temp_dir = TempDir::new().unwrap();
@@ -433,7 +433,7 @@ fn session_manager_handles_corrupted_json() {
     assert!(result.is_err());
 }
 
-/// Test: SessionManager creates parent directory on first save
+/// Test: `SessionManager` creates parent directory on first save
 #[test]
 fn session_manager_creates_parent_dir() {
     let temp_dir = TempDir::new().unwrap();
@@ -441,7 +441,8 @@ fn session_manager_creates_parent_dir() {
 
     assert!(!sessions_file.exists());
 
-    let manager = SessionManager::new(sessions_file.clone());
+    let sessions_file_path = sessions_file.clone();
+    let manager = SessionManager::new(sessions_file);
     let entry = SessionEntry {
         session_id: SessionId::new("sess_mkdir_001"),
         agent_id: "claude-acp".to_string(),
@@ -452,14 +453,14 @@ fn session_manager_creates_parent_dir() {
 
     manager.save_session(&entry).unwrap();
 
-    assert!(sessions_file.exists());
+    assert!(sessions_file_path.exists());
 }
 
 // ---------------------------------------------------------------------------
 // E10: Default sessions file path test
 // ---------------------------------------------------------------------------
 
-/// Test: default_sessions_file returns correct path structure
+/// Test: `default_sessions_file` returns correct path structure
 #[test]
 fn session_default_file_path_structure() {
     let path = SessionManager::default_sessions_file();

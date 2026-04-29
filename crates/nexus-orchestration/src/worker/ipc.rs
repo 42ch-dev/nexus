@@ -107,6 +107,7 @@ impl IpcClient {
     ///
     /// The transport is split into read and write halves internally.
     /// A background reader task is spawned to dispatch responses.
+    #[must_use] 
     pub fn new(transport: Box<dyn RpcTransport>) -> Self {
         let (reader, writer) = transport.split();
         Self::from_split(reader, writer)
@@ -115,6 +116,7 @@ impl IpcClient {
     /// Create a new `IpcClient` from pre-split transport halves.
     ///
     /// This is useful when the caller already has separate read/write halves.
+    #[must_use] 
     pub fn from_split(
         mut reader: Box<dyn RpcTransportRead>,
         writer: Box<dyn RpcTransportWrite>,
@@ -129,19 +131,16 @@ impl IpcClient {
         let reader_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = reader_cancel.cancelled() => {
+                    () = reader_cancel.cancelled() => {
                         debug!("IpcClient reader loop cancelled");
                         break;
                     }
                     result = reader.recv() => {
-                        match result {
-                            Some(line) => {
-                                dispatch_response(&line, &reader_pending).await;
-                            }
-                            None => {
-                                debug!("IpcClient reader loop: EOF, transport closed");
-                                break;
-                            }
+                        if let Some(line) = result {
+                            dispatch_response(&line, &reader_pending).await;
+                        } else {
+                            debug!("IpcClient reader loop: EOF, transport closed");
+                            break;
                         }
                     }
                 }
@@ -169,6 +168,11 @@ impl IpcClient {
     /// gets a unique `id` and its own `oneshot` channel for the response.
     ///
     /// Uses the default 30-second timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpcError`] if the transport write fails, timeout is reached,
+    /// or the response indicates an error.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, IpcError> {
         self.call_with_timeout(
             method,
@@ -179,6 +183,11 @@ impl IpcClient {
     }
 
     /// Send a JSON-RPC request with a custom timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpcError`] if the transport write fails, timeout is reached,
+    /// or the response indicates an error.
     pub async fn call_with_timeout(
         &self,
         method: &str,
@@ -206,20 +215,18 @@ impl IpcClient {
         }
 
         // Send the request over the transport write half.
-        {
-            let mut writer = self.writer.lock().await;
-            writer
-                .send(request_str)
-                .await
-                .map_err(|e| IpcError::Transport(e.to_string()))?;
-        }
+        self.writer
+            .lock()
+            .await
+            .send(request_str)
+            .await
+            .map_err(|e| IpcError::Transport(e.to_string()))?;
 
         // Await the response with timeout and cancellation.
         tokio::select! {
-            _ = self.cancel.cancelled() => {
+            () = self.cancel.cancelled() => {
                 // Clean up pending entry.
-                let mut map = self.pending.lock().await;
-                map.remove(&id);
+                self.pending.lock().await.remove(&id);
                 Err(IpcError::Cancelled)
             }
             result = tokio::time::timeout(timeout, rx) => {
@@ -228,15 +235,15 @@ impl IpcClient {
                     Ok(Err(_)) => {
                         // oneshot sender dropped — response never dispatched.
                         // This typically means the reader task ended (EOF).
-                        let mut map = self.pending.lock().await;
-                        map.remove(&id);
+                        self.pending.lock().await.remove(&id);
                         Err(IpcError::Eof)
                     }
                     Err(_) => {
                         // Timeout.
-                        let mut map = self.pending.lock().await;
-                        map.remove(&id);
-                        Err(IpcError::Timeout { timeout_ms: timeout.as_millis() as u64 })
+                        self.pending.lock().await.remove(&id);
+                        Err(IpcError::Timeout {
+                            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                        })
                     }
                 }
             }
@@ -246,6 +253,10 @@ impl IpcClient {
     /// Send a JSON-RPC notification (no `id`, no response expected).
     ///
     /// Notifications are "fire and forget" — the server should not reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpcError`] if the transport write fails.
     pub async fn notify(&self, method: &str, params: Value) -> Result<(), IpcError> {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -256,8 +267,9 @@ impl IpcClient {
         let request_str = serde_json::to_string(&request)
             .map_err(|e| IpcError::Internal(format!("serialize notification: {e}")))?;
 
-        let mut writer = self.writer.lock().await;
-        writer
+        self.writer
+            .lock()
+            .await
             .send(request_str)
             .await
             .map_err(|e| IpcError::Transport(e.to_string()))?;
@@ -322,27 +334,25 @@ async fn dispatch_response(line: &str, pending: &SharedPending) {
     };
 
     // Extract the `id` field.
-    let id = match val.get("id").and_then(|v| v.as_u64()) {
-        Some(id) => id,
-        None => {
-            // Could be a notification from the server — ignore.
-            debug!("received JSON-RPC message without id, ignoring");
-            return;
-        }
+    let Some(id) = val.get("id").and_then(serde_json::Value::as_u64) else {
+        // Could be a notification from the server — ignore.
+        debug!("received JSON-RPC message without id, ignoring");
+        return;
     };
 
     // Build the result.
-    let result = if let Some(error) = val.get("error") {
-        let code = error.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
-        let message = error
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown error")
-            .to_string();
-        Err(IpcError::RpcError { code, message })
-    } else {
-        Ok(val.get("result").cloned().unwrap_or(Value::Null))
-    };
+    let result = val.get("error").map_or_else(
+        || Ok(val.get("result").cloned().unwrap_or(Value::Null)),
+        |error| {
+            let code = error.get("code").and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let message = error
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown error")
+                .to_string();
+            Err(IpcError::RpcError { code, message })
+        },
+    );
 
     // Remove from pending and send.
     let mut map = pending.lock().await;
@@ -357,12 +367,17 @@ async fn dispatch_response(line: &str, pending: &SharedPending) {
 // Backward-compatible one-shot call_json_rpc helpers
 // ---------------------------------------------------------------------------
 
-/// Send a JSON-RPC request and await the response.
-///
-/// Uses a 30-second default timeout.
-///
-/// **Note:** For concurrent multiplexed requests, prefer [`IpcClient`].
-pub async fn call_json_rpc(
+    /// Send a JSON-RPC request and await the response.
+    ///
+    /// Uses a 30-second default timeout.
+    ///
+    /// **Note:** For concurrent multiplexed requests, prefer [`IpcClient`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpcError`] if the transport write or read fails, or the
+    /// response indicates an error.
+    pub async fn call_json_rpc(
     transport: &mut dyn RpcTransport,
     method: &str,
     params: Value,
@@ -377,8 +392,13 @@ pub async fn call_json_rpc(
     .await
 }
 
-/// Send a JSON-RPC request with explicit timeout.
-pub async fn call_json_rpc_with_timeout(
+    /// Send a JSON-RPC request with explicit timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpcError`] if the transport write/read fails, timeout is
+    /// reached, or the response indicates an error.
+    pub async fn call_json_rpc_with_timeout(
     transport: &mut dyn RpcTransport,
     method: &str,
     params: Value,
@@ -394,8 +414,13 @@ pub async fn call_json_rpc_with_timeout(
     .await
 }
 
-/// Send a JSON-RPC request with explicit timeout and cancellation token.
-pub async fn call_json_rpc_with_timeout_and_cancel(
+    /// Send a JSON-RPC request with explicit timeout and cancellation token.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpcError`] if the transport write/read fails, timeout is
+    /// reached, cancellation is requested, or the response indicates an error.
+    pub async fn call_json_rpc_with_timeout_and_cancel(
     transport: &mut dyn RpcTransport,
     method: &str,
     params: Value,
@@ -412,7 +437,7 @@ pub async fn call_json_rpc_with_timeout_and_cancel(
         .map_err(|e| IpcError::Internal(format!("serialize request: {e}")))?;
 
     tokio::select! {
-        _ = cancel.cancelled() => {
+        () = cancel.cancelled() => {
             Err(IpcError::Cancelled)
         }
         result = async {
@@ -423,7 +448,9 @@ pub async fn call_json_rpc_with_timeout_and_cancel(
 
             let response_str = tokio::time::timeout(timeout, transport.recv())
                 .await
-                .map_err(|_| IpcError::Timeout { timeout_ms: timeout.as_millis() as u64 })?
+                .map_err(|_| IpcError::Timeout {
+                    timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                })?
                 .ok_or(IpcError::Eof)?;
 
             let val: Value = serde_json::from_str(&response_str)
@@ -431,7 +458,7 @@ pub async fn call_json_rpc_with_timeout_and_cancel(
 
             // Check for JSON-RPC error response.
             if let Some(error) = val.get("error") {
-                let code = error.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
+                let code = error.get("code").and_then(serde_json::Value::as_i64).unwrap_or(-1);
                 let message = error
                     .get("message")
                     .and_then(|m| m.as_str())

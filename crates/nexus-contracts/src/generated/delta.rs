@@ -1,15 +1,15 @@
-//! Nexus Delta
+//! `Nexus` `Delta`
 //!
-//! Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.
+//! `Single` atomic change to an entity in a manuscript world. `Aligned` with data-model-v1.md §5.12.
 //!
-//! @schema_version 1
-//! @source delta.schema.json
+//! `@schema_version` 1
+//! `@source` delta.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{DeltaOperation, DeltaType, SourceAnchor};
 
-/// Single atomic change to an entity in a manuscript world. Aligned with data-model-v1.md §5.12.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Single` atomic change to an entity in a manuscript world. `Aligned` with data-model-v1.md §5.12.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Delta {
     pub delta_type: DeltaType,

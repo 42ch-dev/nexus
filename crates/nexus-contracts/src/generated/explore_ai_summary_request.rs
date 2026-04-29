@@ -1,14 +1,14 @@
-//! Nexus ExploreAiSummaryRequest
+//! `Nexus` `ExploreAiSummaryRequest`
 //!
-//! Request body for Explore AI summarization over a world or manuscript (platform plan 19).
+//! `Request` body for `Explore` `AI` summarization over a world or manuscript (platform plan 19).
 //!
-//! @schema_version 1
-//! @source explore-ai-summary-request.schema.json
+//! `@schema_version` 1
+//! `@source` explore-ai-summary-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for Explore AI summarization over a world or manuscript (platform plan 19).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for `Explore` `AI` summarization over a world or manuscript (platform plan 19).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiSummaryRequest {
     pub schema_version: u32,

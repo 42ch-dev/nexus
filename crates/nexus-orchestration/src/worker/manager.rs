@@ -16,7 +16,7 @@
 //! from `shutdown_grace`, then escalates to SIGKILL if the worker hasn't exited.
 //! This follows the graceful shutdown pattern from §6.5 of the design spec.
 //!
-//! ## WS-E T1: Persistent IpcClient
+//! ## WS-E T1: Persistent `IpcClient`
 //!
 //! `WorkerHandle` now holds an [`IpcClient`] internally. The legacy
 //! `call_json_rpc` method is preserved for backward compatibility — it
@@ -106,7 +106,8 @@ pub struct WorkerAgentConfig {
 
 impl WorkerAgentConfig {
     /// Create a minimal config with required fields.
-    pub fn new(session_id: String, acp_agent_id: String) -> Self {
+    #[must_use] 
+    pub const fn new(session_id: String, acp_agent_id: String) -> Self {
         Self {
             session_id,
             acp_agent_id,
@@ -119,24 +120,28 @@ impl WorkerAgentConfig {
     }
 
     /// Builder-style role assignment.
+    #[must_use] 
     pub fn with_role(mut self, role: String) -> Self {
         self.role = Some(role);
         self
     }
 
     /// Builder-style model override.
+    #[must_use] 
     pub fn with_model(mut self, model: String) -> Self {
         self.model = Some(model);
         self
     }
 
     /// Builder-style ACP session ID for resume.
+    #[must_use] 
     pub fn with_acp_session_id(mut self, acp_session_id: String) -> Self {
         self.acp_session_id = Some(acp_session_id);
         self
     }
 
     /// Builder-style tool policy override.
+    #[must_use] 
     pub fn with_tool_policy(mut self, tool_policy: String) -> Self {
         self.tool_policy = Some(tool_policy);
         self
@@ -144,6 +149,7 @@ impl WorkerAgentConfig {
 
     /// Builder-style system prompt (T8).
     /// Daemon reads from preset's `system_prompt_file` and passes here.
+    #[must_use] 
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
         self
@@ -152,7 +158,8 @@ impl WorkerAgentConfig {
     /// Format this config as a `--agent-ref` CLI argument.
     ///
     /// Format: `role:acp_agent_id[:model]` (matches WS-E §7.6).
-    /// If `role` is absent, uses the session_id as the key prefix.
+    /// If `role` is absent, uses the `session_id` as the key prefix.
+    #[must_use] 
     pub fn to_agent_ref_arg(&self) -> String {
         let role_key = self.role.as_ref().unwrap_or(&self.session_id);
         let mut parts = vec![role_key.clone(), self.acp_agent_id.clone()];
@@ -207,41 +214,48 @@ impl WorkerSpec {
     }
 
     /// Test helper — creates a spec for a shell script at the given path.
+    #[must_use] 
     pub fn test_stub(path: &str) -> Self {
         Self::from_program("bash").with_arg(path)
     }
 
     /// Add an argument.
+    #[must_use]
     pub fn with_arg(mut self, arg: impl Into<String>) -> Self {
         self.args.push(arg.into());
         self
     }
 
     /// Add an environment variable.
+    #[must_use]
     pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.push((key.into(), value.into()));
         self
     }
 
     /// Add a working directory.
+    #[must_use]
     pub fn with_working_dir(mut self, dir: impl Into<String>) -> Self {
         self.working_dir = Some(dir.into());
         self
     }
 
     /// Set the creator ID for registry indexing (WS-E T4).
+    #[must_use]
     pub fn with_creator_id(mut self, creator_id: impl Into<String>) -> Self {
         self.creator_id = creator_id.into();
         self
     }
 
     /// Set the agents list for multi-agent workers (WS-E T4).
+    #[must_use] 
     pub fn with_agents(mut self, agents: Vec<WorkerAgentConfig>) -> Self {
         self.agents = agents;
         self
     }
 
     /// Add a single agent config (builder-style, WS-E T4).
+    #[must_use] 
     pub fn with_agent(mut self, agent: WorkerAgentConfig) -> Self {
         self.agents.push(agent);
         self
@@ -253,8 +267,9 @@ impl WorkerSpec {
     /// in the format `role:acp_agent_id[:model]` (WS-E §7.6).
     ///
     /// Returns an empty vector if `self.agents` is empty.
+    #[must_use] 
     pub fn build_agent_ref_args(&self) -> Vec<String> {
-        self.agents.iter().map(|a| a.to_agent_ref_arg()).collect()
+        self.agents.iter().map(WorkerAgentConfig::to_agent_ref_arg).collect()
     }
 }
 
@@ -308,12 +323,12 @@ pub struct WorkerHandle {
     pid: u32,
     /// Cancellation token — fires on shutdown or crash.
     cancel: CancellationToken,
-    /// Broadcast sender for events (used by IpcClient for notification routing in WS3).
+    /// Broadcast sender for events (used by `IpcClient` for notification routing in WS3).
     #[allow(dead_code)]
     event_tx: broadcast::Sender<WorkerEvent>,
     /// Grace period for shutdown (default: 30 seconds, configurable via spec).
     shutdown_grace: Duration,
-    /// Persistent IpcClient for multiplexed JSON-RPC communication.
+    /// Persistent `IpcClient` for multiplexed JSON-RPC communication.
     ipc: IpcClient,
     /// Whether a clean shutdown has been requested.
     shutdown_requested: bool,
@@ -353,6 +368,10 @@ impl WorkerHandle {
     ///
     /// For concurrent requests, prefer [`WorkerHandle::ipc_client`] which
     /// returns `&IpcClient` for direct use with multiple outstanding calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError`] if the IPC call fails.
     pub async fn call_json_rpc(&self, method: &str, params: Value) -> Result<Value, WorkerError> {
         self.ipc
             .call(method, params)
@@ -365,6 +384,10 @@ impl WorkerHandle {
     /// Sends a `worker/shutdown` JSON-RPC request and fires the cancellation
     /// token. The supervisor task will send SIGTERM first, wait for the grace
     /// period, then SIGKILL if needed (WS2 R4).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError`] if the IPC shutdown call fails.
     pub async fn shutdown(&mut self) -> Result<(), WorkerError> {
         self.shutdown_requested = true;
         self.cancel.cancel();
@@ -376,8 +399,13 @@ impl WorkerHandle {
         );
 
         // Try to send a shutdown RPC via IpcClient.
-        if !self.ipc.is_closed() {
-            let grace_ms = self.shutdown_grace.as_millis() as u32;
+        if self.ipc.is_closed() {
+            info!(
+                pid = self.pid,
+                "IPC client already closed — supervisor will send SIGTERM"
+            );
+        } else {
+            let grace_ms = u32::try_from(self.shutdown_grace.as_millis()).unwrap_or(u32::MAX);
             match self
                 .ipc
                 .call("worker/shutdown", serde_json::json!({"grace_ms": grace_ms}))
@@ -391,11 +419,6 @@ impl WorkerHandle {
                     warn!(pid = self.pid, error = %e, "shutdown RPC failed (worker may have already exited)");
                 }
             }
-        } else {
-            info!(
-                pid = self.pid,
-                "IPC client already closed — supervisor will send SIGTERM"
-            );
         }
 
         // Close the IpcClient to clean up the background reader.
@@ -408,12 +431,12 @@ impl WorkerHandle {
     ///
     /// Use this for concurrent multiplexed requests — multiple callers can
     /// call [`IpcClient::call`] on the returned reference simultaneously.
-    pub fn ipc_client(&self) -> &IpcClient {
+    pub const fn ipc_client(&self) -> &IpcClient {
         &self.ipc
     }
 
     /// Return the process ID.
-    pub fn pid(&self) -> u32 {
+    pub const fn pid(&self) -> u32 {
         self.pid
     }
 
@@ -423,7 +446,7 @@ impl WorkerHandle {
     }
 
     /// Return the configured shutdown grace period.
-    pub fn shutdown_grace(&self) -> Duration {
+    pub const fn shutdown_grace(&self) -> Duration {
         self.shutdown_grace
     }
 
@@ -549,11 +572,13 @@ pub struct AgentSessionSummary {
 
 impl AgentSessionSummary {
     /// Check if this session is in a ready state.
+    #[must_use] 
     pub fn is_ready(&self) -> bool {
         self.state == "ready"
     }
 
     /// Check if this session is in an error state.
+    #[must_use] 
     pub fn is_error(&self) -> bool {
         self.state == "error"
     }
@@ -587,6 +612,7 @@ pub struct WorkerManager {
 
 impl WorkerManager {
     /// Create a new worker manager.
+    #[must_use] 
     pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel(64);
         Self { event_tx }
@@ -597,6 +623,10 @@ impl WorkerManager {
     /// Returns a [`WorkerHandle`] for IPC and lifecycle management.
     /// A background supervisor task monitors the child process and emits
     /// events via the manager's broadcast channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError`] if process spawning or IPC initialization fails.
     pub async fn spawn(&self, spec: &WorkerSpec) -> Result<WorkerHandle, WorkerError> {
         self.spawn_with_grace(spec, Duration::from_secs(30)).await
     }
@@ -605,6 +635,11 @@ impl WorkerManager {
     ///
     /// WS2 R4: The grace period controls how long the supervisor waits
     /// after SIGTERM before escalating to SIGKILL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError`] if process spawning or IPC initialization fails.
+    #[allow(clippy::too_many_lines, clippy::unused_async)]
     pub async fn spawn_with_grace(
         &self,
         spec: &WorkerSpec,
@@ -650,9 +685,10 @@ impl WorkerManager {
         // Spawn the supervisor task that waits for child exit.
         tokio::spawn(async move {
             tokio::select! {
-                _ = supervisor_cancel.cancelled() => {
+                () = supervisor_cancel.cancelled() => {
                     // WS2 R4: SIGTERM → SIGKILL escalation.
                     // 1. Send SIGTERM first.
+                    #[allow(clippy::cast_possible_wrap)]
                     let nix_pid = Pid::from_raw(pid as i32);
                     if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
                         warn!(pid, error = %e, "failed to send SIGTERM to worker");
@@ -698,7 +734,11 @@ impl WorkerManager {
                 result = child.wait() => {
                     match result {
                         Ok(status) => {
-                            if !status.success() {
+                            if status.success() {
+                                // Clean exit (exit 0) — likely from a test script.
+                                debug!(pid, "worker exited with status 0");
+                                let _ = event_tx.send(WorkerEvent::Stopped { pid });
+                            } else {
                                 warn!(
                                     pid,
                                     code = ?status.code(),
@@ -708,10 +748,6 @@ impl WorkerManager {
                                     pid,
                                     exit_status: status.code(),
                                 });
-                            } else {
-                                // Clean exit (exit 0) — likely from a test script.
-                                debug!(pid, "worker exited with status 0");
-                                let _ = event_tx.send(WorkerEvent::Stopped { pid });
                             }
                         }
                         Err(e) => {
@@ -741,6 +777,7 @@ impl WorkerManager {
     }
 
     /// Subscribe to worker lifecycle events.
+    #[must_use] 
     pub fn subscribe(&self) -> broadcast::Receiver<WorkerEvent> {
         self.event_tx.subscribe()
     }

@@ -10,7 +10,7 @@
 //! Assembly ordering (spec §9.2):
 //! 1. System/policy prefix (runtime injection)
 //! 2. `## Personality` (verbatim from SOUL.md)
-//! 3. Long-term memory Markdown (sorted by memory_kind, then recency)
+//! 3. Long-term memory Markdown (sorted by `memory_kind`, then recency)
 //! 4. `### Fragment keywords (deduped)` (omitted if empty)
 //! 5. `## Experience` (aggregated result from SOUL.md)
 //! 6. User task prompt
@@ -59,7 +59,7 @@ pub struct Stage0Assembly {
     pub experience: String,
     /// Long-term memories to include, sorted by kind then recency.
     pub long_term_memories: Vec<LongTermMemory>,
-    /// Fragment keywords (deduped union from memory_fragments).
+    /// Fragment keywords (deduped union from `memory_fragments`).
     pub fragment_keywords: Vec<String>,
     /// System/policy prefix (runtime injection).
     pub system_prefix: String,
@@ -70,6 +70,7 @@ pub struct Stage0Assembly {
 }
 
 impl Stage0Assembly {
+    #[must_use]
     /// Assemble the full context string without truncation.
     ///
     /// Follows spec §9.2 ordering exactly.
@@ -121,6 +122,7 @@ impl Stage0Assembly {
     /// the budget. Personality and system prefix are never truncated.
     /// If the budget cannot accommodate non-truncatable sections alone,
     /// they are still included (we never drop Personality).
+    #[must_use]
     pub fn assemble_with_truncation(&self) -> String {
         let budget = match self.max_tokens {
             Some(b) => b,
@@ -205,7 +207,7 @@ impl Stage0Assembly {
         sorted
     }
 
-    /// Deduplicate fragment keywords using a BTreeSet for deterministic ordering.
+    /// Deduplicate fragment keywords using a `BTreeSet` for deterministic ordering.
     fn deduped_keywords(&self) -> Vec<String> {
         let set: BTreeSet<String> = self
             .fragment_keywords
@@ -221,7 +223,7 @@ impl Stage0Assembly {
 ///
 /// NOTE (S-004): Token estimation uses `chars/4` (byte-length divided by 4)
 /// as a rough approximation. Actual tokenization depends on the tokenizer used
-/// by the LLM (e.g., cl100k_base for GPT-4, sentencepiece for Gemini). The
+/// by the LLM (e.g., `cl100k_base` for GPT-4, sentencepiece for Gemini). The
 /// `chars/4` heuristic overestimates for ASCII-heavy text and underestimates
 /// for non-ASCII content. This is accepted for V1.3 — a more accurate
 /// tokenizer integration is deferred to a future release.
@@ -229,7 +231,8 @@ impl Stage0Assembly {
 ///
 // V1.2 residual R15 (pipeline, nit): Token estimation chars/4 approximation
 // chars/4 is a rough approximation; accurate tokenization requires tiktoken
-pub fn estimate_tokens(text: &str) -> usize {
+#[must_use]
+pub const fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
 }
 
@@ -246,6 +249,7 @@ pub fn estimate_tokens(text: &str) -> usize {
 /// The last fitting truncatable section may be partially truncated.
 ///
 /// Returns the list of `(heading, content)` tuples that fit.
+#[must_use]
 pub fn truncate_with_budget(
     sections: &[(String, String, bool)],
     budget: usize,
@@ -341,7 +345,7 @@ pub struct TwoStageAssembly {
     pub experience: String,
     /// Local long-term memories.
     pub long_term_memories: Vec<LongTermMemory>,
-    /// Local fragment keywords (union from memory_fragments).
+    /// Local fragment keywords (union from `memory_fragments`).
     pub fragment_keywords: Vec<String>,
     /// User task prompt.
     pub user_prompt: String,
@@ -411,6 +415,7 @@ impl TwoStageAssembly {
     /// 6. KB + Timeline from Stage-1 (if available)
     /// 7. Experience (SOUL)
     /// 8. User prompt
+    #[must_use]
     pub fn assemble(&self) -> String {
         let mut parts = Vec::new();
 
@@ -508,10 +513,11 @@ impl TwoStageAssembly {
         parts.join("\n")
     }
 
-    /// Assemble with fallback to Stage0Assembly if Stage-1 failed.
+    /// Assemble with fallback to `Stage0Assembly` if Stage-1 failed.
     ///
     /// When `stage1_response` is `None`, returns Stage0-style output
     /// (local data only, no platform sections).
+    #[must_use]
     pub fn assemble_with_fallback(&self) -> String {
         if self.stage1_response.is_none() {
             return self.assemble_stage0_fallback();
@@ -521,7 +527,7 @@ impl TwoStageAssembly {
 
     /// Fallback assembly when platform unavailable (Stage0 ordering).
     ///
-    /// Reuses Stage0Assembly ordering:
+    /// Reuses `Stage0Assembly` ordering:
     /// system → personality → memories → keywords → experience → prompt
     fn assemble_stage0_fallback(&self) -> String {
         let mut parts = Vec::new();
@@ -596,7 +602,7 @@ impl TwoStageAssembly {
         sorted
     }
 
-    /// Deduplicate fragment keywords using a BTreeSet for deterministic ordering.
+    /// Deduplicate fragment keywords using a `BTreeSet` for deterministic ordering.
     fn deduped_keywords(&self) -> Vec<String> {
         let set: BTreeSet<String> = self
             .fragment_keywords

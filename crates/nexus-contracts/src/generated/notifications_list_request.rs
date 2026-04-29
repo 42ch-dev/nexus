@@ -1,14 +1,14 @@
-//! Nexus NotificationsListRequest
+//! `Nexus` `NotificationsListRequest`
 //!
-//! Request body for listing notifications (platform plan 20).
+//! `Request` body for listing notifications (platform plan 20).
 //!
-//! @schema_version 1
-//! @source notifications-list-request.schema.json
+//! `@schema_version` 1
+//! `@source` notifications-list-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for listing notifications (platform plan 20).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for listing notifications (platform plan 20).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsListRequest {
     pub schema_version: u32,
