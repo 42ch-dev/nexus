@@ -6,7 +6,7 @@ fn test_capability_registry() -> nexus_orchestration::capability::CapabilityRegi
 
 #[test]
 fn reject_unknown_next_state() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-next
   version: 1
@@ -22,7 +22,7 @@ states:
     next: does-not-exist
   - id: b
     terminal: true
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -35,7 +35,7 @@ states:
 
 #[test]
 fn reject_missing_capability() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-cap
   version: 1
@@ -53,7 +53,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -66,7 +66,7 @@ states:
 
 #[test]
 fn reject_inner_graph_cycle() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: cycle-test
   version: 1
@@ -94,7 +94,7 @@ inner_graphs:
         kind: acp_prompt
         depends_on: [diverge]
     output_binding: diverge.text
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems().iter().any(|p| p.error.contains("cycle")),
@@ -143,7 +143,7 @@ states:
 
 #[test]
 fn reject_unknown_inner_graph_reference() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-ig
   version: 1
@@ -161,7 +161,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -174,7 +174,7 @@ states:
 
 #[test]
 fn reject_unknown_judge_capability() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-judge
   version: 1
@@ -192,7 +192,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -205,7 +205,7 @@ states:
 
 #[test]
 fn reject_terminal_state_with_next() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-terminal
   version: 1
@@ -222,7 +222,7 @@ states:
   - id: b
     terminal: true
     next: a
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -235,7 +235,7 @@ states:
 
 #[test]
 fn reject_invalid_initial_state() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-init
   version: 1
@@ -251,7 +251,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -264,7 +264,7 @@ states:
 
 #[test]
 fn reject_invalid_terminal_state_ref() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-term
   version: 1
@@ -280,7 +280,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -293,7 +293,7 @@ states:
 
 #[test]
 fn reject_unknown_depends_on_in_inner_graph() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad-dep
   version: 1
@@ -317,7 +317,7 @@ inner_graphs:
       - id: n1
         kind: acp_prompt
         depends_on: [nonexistent_node]
-"#;
+";
     let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
     assert!(
         err.problems()
@@ -377,7 +377,7 @@ signals:
 
 #[test]
 fn loaded_preset_has_correct_structure() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: struct-test
   version: 2
@@ -393,7 +393,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let loaded = load_preset_from_str(yaml, &test_capability_registry()).unwrap();
     assert_eq!(loaded.id, "struct-test");
     assert_eq!(loaded.version, 2);
@@ -406,7 +406,7 @@ states:
 
 #[test]
 fn source_hash_is_stable() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: hash-test
   version: 1
@@ -422,7 +422,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let caps = test_capability_registry();
     let h1 = load_preset_from_str(yaml, &caps).unwrap().source_hash;
     let h2 = load_preset_from_str(yaml, &caps).unwrap().source_hash;

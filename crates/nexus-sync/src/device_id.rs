@@ -21,7 +21,11 @@ pub enum DeviceIdError {
 /// Uses atomic file creation (`create_new`) to eliminate the TOCTOU race
 /// between the existence check and the write. If the file already exists,
 /// its contents are read and returned unchanged.
+///
+/// # Errors
+/// Returns the specific error type if the operation fails.
 pub fn get_or_create_device_id(nexus_home: &Path) -> Result<String, DeviceIdError> {
+    use std::io::Write;
     let path = nexus_home_layout::device_id_path(nexus_home);
 
     // Ensure parent directory exists.
@@ -37,7 +41,6 @@ pub fn get_or_create_device_id(nexus_home: &Path) -> Result<String, DeviceIdErro
         {
             Ok(mut file) => {
                 let new_id = uuid::Uuid::new_v4().to_string();
-                use std::io::Write;
                 file.write_all(new_id.as_bytes())?;
 
                 // Set 0600 permissions on Unix.
@@ -77,8 +80,7 @@ mod tests {
         let id = get_or_create_device_id(tmp.path()).unwrap();
         assert!(
             uuid::Uuid::parse_str(&id).is_ok(),
-            "created ID should be a valid UUID: {}",
-            id
+            "created ID should be a valid UUID: {id}"
         );
 
         let path = nexus_home_layout::device_id_path(tmp.path());
@@ -139,14 +141,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_path_buf();
 
-        let handles: Vec<_> = (0..10)
+        let results: Vec<String> = (0..10)
             .map(|_| {
                 let p = path.clone();
                 std::thread::spawn(move || get_or_create_device_id(&p).unwrap())
             })
+            .map(|h| h.join().unwrap())
             .collect();
-
-        let results: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         let first = &results[0];
         for r in &results {
             assert_eq!(

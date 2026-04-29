@@ -1,14 +1,14 @@
-//! Nexus ExploreAiAnswerResponse
+//! `Nexus` `ExploreAiAnswerResponse`
 //!
-//! Response for Explore AI Q&A with optional citations envelope (platform plan 19).
+//! `Response` for `Explore` `AI` `Q`&`A` with optional citations envelope (platform plan 19).
 //!
-//! @schema_version 1
-//! @source explore-ai-answer-response.schema.json
+//! `@schema_version` 1
+//! `@source` explore-ai-answer-response.schema.json
 
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiAnswerResponseCitation {
     pub title: String,
@@ -19,8 +19,8 @@ pub struct ExploreAiAnswerResponseCitation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity_id: Option<String>,
 }
-/// Response for Explore AI Q&A with optional citations envelope (platform plan 19).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Response` for `Explore` `AI` `Q`&`A` with optional citations envelope (platform plan 19).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiAnswerResponse {
     pub schema_version: u32,

@@ -1,6 +1,6 @@
-//! ForkBranch aggregate — world branch forked from a parent world.
+//! `ForkBranch` aggregate — world branch forked from a parent world.
 //!
-//! ForkBranch tracks the lineage of world forks, including verification
+//! `ForkBranch` tracks the lineage of world forks, including verification
 //! status and write scope validation. See data-model-v1.md §5.7,
 //! consistency-rules-v1.md §3.4.
 
@@ -8,7 +8,7 @@ use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// ForkBranch status enum.
+/// `ForkBranch` status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForkBranchStatus {
@@ -17,7 +17,8 @@ pub enum ForkBranchStatus {
 }
 
 impl ForkBranchStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Active => "active",
             Self::Archived => "archived",
@@ -25,7 +26,7 @@ impl ForkBranchStatus {
     }
 }
 
-/// ForkBranch verification status enum.
+/// `ForkBranch` verification status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VerificationStatus {
@@ -36,7 +37,8 @@ pub enum VerificationStatus {
 }
 
 impl VerificationStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Unverified => "unverified",
             Self::Requested => "requested",
@@ -46,7 +48,7 @@ impl VerificationStatus {
     }
 }
 
-/// ForkBranch aggregate — describes a world branch forked from a parent.
+/// `ForkBranch` aggregate — describes a world branch forked from a parent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ForkBranch {
     pub schema_version: u32,
@@ -63,8 +65,9 @@ pub struct ForkBranch {
 
 impl ForkBranch {
     /// Create a new fork from a parent world at a specific event.
-    /// Per consistency-rules-v1.md §3.4: must reference valid parent_world_id,
-    /// parent_branch_id, and forked_from_event_id.
+    /// Per consistency-rules-v1.md §3.4: must reference valid `parent_world_id`,
+    /// `parent_branch_id`, and `forked_from_event_id`.
+    #[must_use]
     pub fn fork_from(
         world_id: &str,
         parent_world_id: &str,
@@ -104,7 +107,9 @@ impl ForkBranch {
         self.verification_status = VerificationStatus::Requested.as_str().to_string();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Verify this fork (admin/policy action).
     pub fn verify(&mut self) -> Result<(), DomainError> {
         if self.verification_status != VerificationStatus::Requested.as_str() {
@@ -116,7 +121,9 @@ impl ForkBranch {
         self.verification_status = VerificationStatus::Verified.as_str().to_string();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Reject this fork verification.
     pub fn reject(&mut self, _reason: &str) -> Result<(), DomainError> {
         if self.verification_status != VerificationStatus::Requested.as_str() {
@@ -128,7 +135,9 @@ impl ForkBranch {
         self.verification_status = VerificationStatus::Rejected.as_str().to_string();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Archive this fork branch.
     pub fn archive(&mut self) -> Result<(), DomainError> {
         if self.status == ForkBranchStatus::Archived.as_str() {
@@ -137,7 +146,12 @@ impl ForkBranch {
         self.status = ForkBranchStatus::Archived.as_str().to_string();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Validate that structured writes only go to child world/branch.
     /// Per consistency-rules-v1.md §3.4.
     pub fn validate_write_scope(&self, target_world_id: &str) -> Result<(), DomainError> {
@@ -175,6 +189,7 @@ impl From<nexus_contracts::ForkBranch> for ForkBranch {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<ForkBranch> for nexus_contracts::ForkBranch {
     fn from(d: ForkBranch) -> Self {
         Self {

@@ -1,4 +1,4 @@
-//! Local identity CRUD operations for SQLite.
+//! Local identity CRUD operations for `SQLite`.
 //!
 //! Provides async functions to create, read, list, and update local identities
 //! in the `local_identities` table. These are used by both CLI and daemon.
@@ -22,7 +22,7 @@ pub struct LocalIdentityRow {
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the insert fails (e.g. duplicate creator_id).
+/// Returns `LocalDbError` if the insert fails (e.g. duplicate `creator_id`).
 pub async fn create_local_identity(
     pool: &SqlitePool,
     creator_id: &str,
@@ -44,16 +44,20 @@ pub async fn create_local_identity(
     Ok(LocalIdentityRow {
         creator_id: creator_id.to_string(),
         identity_type: identity_type.to_string(),
-        display_name: display_name.map(|s| s.to_string()),
+        display_name: display_name.map(std::string::ToString::to_string),
         created_at: created_at.to_string(),
         platform_linked: false,
         platform_creator_id: None,
     })
 }
 
-/// Get a local identity by creator_id.
+/// Get a local identity by `creator_id`.
 ///
 /// Returns `None` if no identity exists with the given ID.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn get_local_identity(
     pool: &SqlitePool,
     creator_id: &str,
@@ -81,6 +85,10 @@ pub async fn get_local_identity(
 /// List all local identities.
 ///
 /// Returns all identities sorted by creation time (oldest first).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
 pub async fn list_local_identities(
     pool: &SqlitePool,
 ) -> Result<Vec<LocalIdentityRow>, LocalDbError> {
@@ -135,11 +143,6 @@ pub async fn link_to_platform(
                     creator_id: creator_id.to_string(),
                 });
             }
-            None => {
-                return Err(LocalDbError::IdentityNotFound {
-                    creator_id: creator_id.to_string(),
-                });
-            }
             _ => {
                 return Err(LocalDbError::IdentityNotFound {
                     creator_id: creator_id.to_string(),
@@ -175,11 +178,6 @@ pub async fn unlink_from_platform(pool: &SqlitePool, creator_id: &str) -> Result
                     creator_id: creator_id.to_string(),
                 });
             }
-            None => {
-                return Err(LocalDbError::IdentityNotFound {
-                    creator_id: creator_id.to_string(),
-                });
-            }
             _ => {
                 return Err(LocalDbError::IdentityNotFound {
                     creator_id: creator_id.to_string(),
@@ -191,7 +189,7 @@ pub async fn unlink_from_platform(pool: &SqlitePool, creator_id: &str) -> Result
     Ok(())
 }
 
-/// Delete a local identity by creator_id.
+/// Delete a local identity by `creator_id`.
 ///
 /// # Errors
 ///

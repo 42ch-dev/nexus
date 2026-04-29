@@ -6,7 +6,7 @@
 //!
 //! # Error Code Strategy (DEBT-X3)
 //!
-//! Each `SyncError` variant has a standardized error code (UPPER_SNAKE_CASE)
+//! Each `SyncError` variant has a standardized error code (`UPPER_SNAKE_CASE`)
 //! matching the pattern used by `NexusApiError` in the daemon layer.
 //!
 //! Error codes are used for:
@@ -20,7 +20,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum SyncError {
     // ── Outbox errors ──────────────────────────────────────────────
-    /// Failed to open or initialize the SQLite outbox database.
+    /// Failed to open or initialize the `SQLite` outbox database.
     #[error("outbox database error: {0}")]
     OutboxDatabase(String),
 
@@ -132,68 +132,69 @@ pub enum SyncError {
 }
 
 impl SyncError {
-    /// Get the error code string (UPPER_SNAKE_CASE)
+    /// Get the error code string (`UPPER_SNAKE_CASE`)
     ///
     /// Error codes are standardized across the nexus codebase for
     /// consistent error tracking and monitoring.
-    pub fn error_code(&self) -> &str {
+    #[must_use] 
+    pub const fn error_code(&self) -> &str {
         match self {
             // Outbox errors
-            SyncError::OutboxDatabase(_) => "OUTBOX_DATABASE_ERROR",
-            SyncError::OutboxEntryNotFound { .. } => "OUTBOX_ENTRY_NOT_FOUND",
-            SyncError::OutboxInvalidState { .. } => "OUTBOX_INVALID_STATE",
-            SyncError::OutboxMaxRetriesExceeded { .. } => "OUTBOX_MAX_RETRIES_EXCEEDED",
+            Self::OutboxDatabase(_) => "OUTBOX_DATABASE_ERROR",
+            Self::OutboxEntryNotFound { .. } => "OUTBOX_ENTRY_NOT_FOUND",
+            Self::OutboxInvalidState { .. } => "OUTBOX_INVALID_STATE",
+            Self::OutboxMaxRetriesExceeded { .. } => "OUTBOX_MAX_RETRIES_EXCEEDED",
 
             // Bundle errors
-            SyncError::BundleValidation(_) => "BUNDLE_VALIDATION_ERROR",
-            SyncError::BundleMissingField { .. } => "BUNDLE_MISSING_FIELD",
-            SyncError::BundleSequenceNotMonotonic { .. } => "BUNDLE_SEQUENCE_NOT_MONOTONIC",
-            SyncError::BundleEmptyDeltas => "BUNDLE_EMPTY_DELTAS",
+            Self::BundleValidation(_) => "BUNDLE_VALIDATION_ERROR",
+            Self::BundleMissingField { .. } => "BUNDLE_MISSING_FIELD",
+            Self::BundleSequenceNotMonotonic { .. } => "BUNDLE_SEQUENCE_NOT_MONOTONIC",
+            Self::BundleEmptyDeltas => "BUNDLE_EMPTY_DELTAS",
 
             // Sync client errors
-            SyncError::HttpError(_) => "HTTP_ERROR",
-            SyncError::PlatformError { .. } => "PLATFORM_ERROR",
-            SyncError::SyncConflict { .. } => "SYNC_CONFLICT",
-            SyncError::SyncNotConfigured(_) => "SYNC_NOT_CONFIGURED",
-            SyncError::AuthTokenInvalid(_) => "AUTH_TOKEN_INVALID",
-            SyncError::SyncTimeout { .. } => "SYNC_TIMEOUT",
-            SyncError::HttpBodySizeExceeded { .. } => "HTTP_BODY_SIZE_EXCEEDED",
+            Self::HttpError(_) => "HTTP_ERROR",
+            Self::PlatformError { .. } => "PLATFORM_ERROR",
+            Self::SyncConflict { .. } => "SYNC_CONFLICT",
+            Self::SyncNotConfigured(_) => "SYNC_NOT_CONFIGURED",
+            Self::AuthTokenInvalid(_) => "AUTH_TOKEN_INVALID",
+            Self::SyncTimeout { .. } => "SYNC_TIMEOUT",
+            Self::HttpBodySizeExceeded { .. } => "HTTP_BODY_SIZE_EXCEEDED",
 
             // Conflict resolution errors
-            SyncError::UnresolvableConflict(_) => "UNRESOLVABLE_CONFLICT",
-            SyncError::ManualReviewRequired(_) => "MANUAL_REVIEW_REQUIRED",
+            Self::UnresolvableConflict(_) => "UNRESOLVABLE_CONFLICT",
+            Self::ManualReviewRequired(_) => "MANUAL_REVIEW_REQUIRED",
 
             // Partial apply errors
-            SyncError::PartialApplyStateError(_) => "PARTIAL_APPLY_STATE_ERROR",
-            SyncError::AllDeltasFailed { .. } => "ALL_DELTAS_FAILED",
+            Self::PartialApplyStateError(_) => "PARTIAL_APPLY_STATE_ERROR",
+            Self::AllDeltasFailed { .. } => "ALL_DELTAS_FAILED",
 
             // Precheck errors
-            SyncError::PrecheckFailed(_) => "PRECHECK_FAILED",
-            SyncError::PrecheckVersionMismatch { .. } => "PRECHECK_VERSION_MISMATCH",
-            SyncError::PrecheckCommandInconsistency(_) => "PRECHECK_COMMAND_INCONSISTENCY",
-            SyncError::PrecheckSchemaViolation(_) => "PRECHECK_SCHEMA_VIOLATION",
+            Self::PrecheckFailed(_) => "PRECHECK_FAILED",
+            Self::PrecheckVersionMismatch { .. } => "PRECHECK_VERSION_MISMATCH",
+            Self::PrecheckCommandInconsistency(_) => "PRECHECK_COMMAND_INCONSISTENCY",
+            Self::PrecheckSchemaViolation(_) => "PRECHECK_SCHEMA_VIOLATION",
 
             // Serialization errors
-            SyncError::Serialization(_) => "SERIALIZATION_ERROR",
+            Self::Serialization(_) => "SERIALIZATION_ERROR",
         }
     }
 }
 
 impl From<serde_json::Error> for SyncError {
     fn from(err: serde_json::Error) -> Self {
-        SyncError::Serialization(err.to_string())
+        Self::Serialization(err.to_string())
     }
 }
 
 impl From<sqlx::Error> for SyncError {
     fn from(err: sqlx::Error) -> Self {
-        SyncError::OutboxDatabase(err.to_string())
+        Self::OutboxDatabase(err.to_string())
     }
 }
 
 impl From<nexus_local_db::LocalDbError> for SyncError {
     fn from(err: nexus_local_db::LocalDbError) -> Self {
-        SyncError::OutboxDatabase(err.to_string())
+        Self::OutboxDatabase(err.to_string())
     }
 }
 

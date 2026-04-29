@@ -18,7 +18,8 @@ pub enum CreatorStatus {
 }
 
 impl CreatorStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Active => "active",
             Self::Archived => "archived",
@@ -28,7 +29,7 @@ impl CreatorStatus {
 }
 
 /// Registration source enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RegistrationSource {
     Cli,
@@ -37,7 +38,8 @@ pub enum RegistrationSource {
 }
 
 impl RegistrationSource {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Cli => "cli",
             Self::WebAgent => "web_agent",
@@ -85,6 +87,7 @@ pub struct Creator {
 impl Creator {
     /// Register a new creator (independent of User).
     /// Per roadmap §3.1.2: Creator can register without User login.
+    #[must_use]
     pub fn register(
         creator_id: &str,
         display_name: &str,
@@ -109,7 +112,7 @@ impl Creator {
     }
 
     /// Pair this creator with a user.
-    /// Creates a Pairing record and updates user_id.
+    /// Creates a Pairing record and updates `user_id`.
     pub fn pair_with_user(
         &mut self,
         user_id: &str,
@@ -127,7 +130,9 @@ impl Creator {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(pairing)
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Unpair from current user (revokes pairing).
     pub fn unpair(&mut self) -> Result<(), DomainError> {
         if self.user_id.is_none() {
@@ -137,7 +142,9 @@ impl Creator {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Update style profile.
     pub fn update_style_profile(
         &mut self,
@@ -169,6 +176,7 @@ impl Creator {
     }
 
     /// Check if creator can persist experience (requires active pairing).
+    #[must_use]
     pub fn can_persist_experience(&self) -> bool {
         self.user_id.is_some() && self.status == CreatorStatus::Active.as_str()
     }
@@ -182,7 +190,12 @@ impl Creator {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Lock this creator (admin action).
     pub fn lock(&mut self) -> Result<(), DomainError> {
         if self.status == CreatorStatus::Locked.as_str() {
@@ -222,6 +235,7 @@ impl From<nexus_contracts::Creator> for Creator {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<Creator> for nexus_contracts::Creator {
     fn from(d: Creator) -> Self {
         Self {

@@ -21,11 +21,11 @@ use crate::errors::{SyncError, SyncResult};
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Request body for creator registration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterRequest {
     /// Display name for the creator.
     pub display_name: String,
-    /// Registration source (e.g. "cli", "web_agent").
+    /// Registration source (e.g. "cli", "`web_agent`").
     pub registration_source: String,
     /// Optional creator handle (4–15 chars, `[a-z0-9-_.]`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,7 +48,7 @@ pub struct RegisterRequest {
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterResponse {
     /// Unique creator identifier.
     pub creator_id: String,
@@ -61,7 +61,7 @@ pub struct RegisterResponse {
 }
 
 /// Verification challenge returned by the registration endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerificationChallenge {
     /// Unique code for this verification attempt.
     pub verification_code: String,
@@ -74,7 +74,7 @@ pub struct VerificationChallenge {
 }
 
 /// Request body for challenge verification.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerifyRequest {
     /// The verification code from the registration response.
     pub verification_code: String,
@@ -92,20 +92,20 @@ pub struct VerifyRequest {
 ///   "remaining_attempts": 2
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerifyResponse {
     /// Verification result status.
     pub status: VerifyStatus,
     /// The activated API key (only present on success).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_api_key: Option<String>,
-    /// Remaining verification attempts (on wrong_answer).
+    /// Remaining verification attempts (on `wrong_answer`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_attempts: Option<u32>,
 }
 
 /// Verification result status.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifyStatus {
     /// Challenge solved successfully.
@@ -135,6 +135,9 @@ impl PlatformClient {
     /// * `platform_base_url` - Base URL of the platform API (e.g. `https://api.nexus42.invalid`)
     /// * `auth_token` - Bearer token for authentication
     /// * `device_id` - Persistent machine identifier (UUID v4)
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub fn new(platform_base_url: &str, auth_token: &str, device_id: &str) -> SyncResult<Self> {
         if platform_base_url.is_empty() {
             return Err(SyncError::SyncNotConfigured(
@@ -170,6 +173,9 @@ impl PlatformClient {
     ///
     /// Calls `POST /api/v1/creators/register` with the display name
     /// and registration source.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn register_creator(
         &self,
         display_name: &str,
@@ -180,7 +186,7 @@ impl PlatformClient {
         let body = RegisterRequest {
             display_name: display_name.to_string(),
             registration_source: registration_source.to_string(),
-            handle: handle.map(|h| h.to_string()),
+            handle: handle.map(std::string::ToString::to_string),
         };
 
         tracing::info!(display_name = %display_name, "Registering creator on platform");
@@ -208,6 +214,9 @@ impl PlatformClient {
     ///
     /// Calls `POST /api/v1/creators/verify` with the verification code
     /// and the solved answer.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn verify_creator(
         &self,
         verification_code: &str,
@@ -246,7 +255,7 @@ impl PlatformClient {
         method: Method,
         url: &str,
         body: Option<&T>,
-    ) -> SyncResult<RequestBuilder> {
+    ) -> RequestBuilder {
         let mut request = self
             .client
             .request(method, url)
@@ -259,22 +268,24 @@ impl PlatformClient {
             request = request.json(b);
         }
 
-        Ok(request)
+        request
     }
 
     /// Execute an HTTP request.
+    #[allow(clippy::future_not_send)]
     async fn execute_request<T: Serialize + ?Sized>(
         &self,
         method: Method,
         url: &str,
         body: Option<&T>,
     ) -> SyncResult<reqwest::Response> {
-        let request = self.build_request(method, url, body)?;
+        let request = self.build_request(method, url, body);
         request.send().await.map_err(SyncError::from)
     }
 
     /// Get the base URL (for testing).
     #[cfg(test)]
+    #[must_use] 
     pub fn base_url(&self) -> &str {
         &self.base_url
     }

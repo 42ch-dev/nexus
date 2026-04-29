@@ -1,15 +1,15 @@
-//! Nexus TimelineEvent
+//! `Nexus` `TimelineEvent`
 //!
-//! TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.
+//! `TimelineEvent` - a canonical event on the world timeline with causality and sequence. `Aligned` with data-model-v1.md §5.6.
 //!
-//! @schema_version 1
-//! @source timeline-event.schema.json
+//! `@schema_version` 1
+//! `@source` timeline-event.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{TimelineEventStatus, TimelineEventType};
 
-/// TimelineEvent - a canonical event on the world timeline with causality and sequence. Aligned with data-model-v1.md §5.6.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `TimelineEvent` - a canonical event on the world timeline with causality and sequence. `Aligned` with data-model-v1.md §5.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct TimelineEvent {
     pub schema_version: u32,

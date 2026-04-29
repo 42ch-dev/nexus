@@ -64,7 +64,7 @@ async fn worker_crash_emits_event() {
                 } => {
                     assert_ne!(exit_status, Some(0));
                 }
-                other => panic!("expected Crashed, got {:?}", other),
+                other => panic!("expected Crashed, got {other:?}"),
             }
         }
         WorkerEvent::Crashed {
@@ -73,6 +73,6 @@ async fn worker_crash_emits_event() {
         } => {
             assert_ne!(exit_status, Some(0));
         }
-        other => panic!("expected Crashed, got {:?}", other),
+        other => panic!("expected Crashed, got {other:?}"),
     }
 }

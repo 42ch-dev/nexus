@@ -1,6 +1,6 @@
-//! Shared operational path layout (ADR-014) under the user home directory.
+//! Shared operational path layout (`ADR-014`) under the user home directory.
 //!
-//! Used by `nexus42` CLI and `nexus42d` so SQLite and workspace dirs resolve identically.
+//! Used by `nexus42` CLI and `nexus42d` so `SQLite` and workspace dirs resolve identically.
 
 #![allow(dead_code)]
 
@@ -9,11 +9,13 @@ use std::path::{Path, PathBuf};
 const NEXUS_DIR: &str = ".nexus42";
 
 /// Resolve `~/.nexus42` from the user's home directory.
+#[must_use]
 pub fn nexus_root_from_home(home: &Path) -> PathBuf {
     home.join(NEXUS_DIR)
 }
 
 /// `$HOME/.nexus42/creators/<creator_id>/workspaces/`
+#[must_use]
 pub fn creator_workspaces_root(home: &Path, creator_id: &str) -> PathBuf {
     nexus_root_from_home(home)
         .join("creators")
@@ -22,16 +24,19 @@ pub fn creator_workspaces_root(home: &Path, creator_id: &str) -> PathBuf {
 }
 
 /// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`
+#[must_use]
 pub fn operational_workspace_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
     creator_workspaces_root(home, creator_id).join(workspace_slug)
 }
 
-/// Workspace-local SQLite: `.../workspaces/<slug>/state.db`
+/// Workspace-local `SQLite`: `.../workspaces/<slug>/state.db`
+#[must_use]
 pub fn workspace_state_db_path(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
     operational_workspace_dir(home, creator_id, workspace_slug).join("state.db")
 }
 
-/// Shared global SQLite: `$HOME/.nexus42/shared/global_state.db`
+/// Shared global `SQLite`: `$HOME/.nexus42/shared/global_state.db`
+#[must_use]
 pub fn shared_global_db_path(home: &Path) -> PathBuf {
     nexus_root_from_home(home)
         .join("shared")
@@ -43,11 +48,13 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
 /// Each subdirectory under this path is expected to contain a `preset.yaml`.
 /// See `crates/nexus-orchestration/src/user_preset_dir.rs` for scanning logic.
 /// Directories starting with `_` or `.` are reserved and skipped by the scanner.
+#[must_use]
 pub fn user_preset_base_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("presets")
 }
 
 /// `$HOME/.nexus42/presets/<name>/` — path to a specific user preset bundle.
+#[must_use]
 pub fn user_preset_bundle_dir(home: &Path, name: &str) -> PathBuf {
     user_preset_base_dir(home).join(name)
 }
@@ -56,6 +63,7 @@ pub fn user_preset_bundle_dir(home: &Path, name: &str) -> PathBuf {
 ///
 /// Returns an empty vector if the presets directory doesn't exist or can't be read.
 /// Directories starting with `_` or `.` are skipped.
+#[must_use]
 pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
     let user_dir = user_preset_base_dir(nexus_home);
 
@@ -63,9 +71,8 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         return Vec::new();
     }
 
-    let entries = match std::fs::read_dir(&user_dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = std::fs::read_dir(&user_dir) else {
+        return Vec::new();
     };
 
     entries
@@ -87,12 +94,13 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         .collect()
 }
 
-/// `$HOME/.nexus42/device-id` — persistent machine identifier (UUID v4).
+/// `$HOME/.nexus42/device-id` — persistent machine identifier (`UUID` v4).
+#[must_use]
 pub fn device_id_path(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("device-id")
 }
 
-/// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (ADR-014, ADR-016 D1).
+/// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (`ADR-014`, `ADR-016` D1).
 ///
 /// # Defense-in-depth
 ///
@@ -100,6 +108,7 @@ pub fn device_id_path(home: &Path) -> PathBuf {
 /// function panics rather than silently resolving to an unexpected path.
 /// Callers (e.g., `soul_io::validate_creator_id()`) should validate `creator_id`
 /// before calling this, but this acts as a safety net.
+#[must_use]
 pub fn creator_soul_md_path(home: &Path, creator_id: &str) -> PathBuf {
     assert_creator_id_safe(creator_id);
     nexus_root_from_home(home)
@@ -115,25 +124,19 @@ pub fn creator_soul_md_path(home: &Path, creator_id: &str) -> PathBuf {
 /// `/`, `\`, `..`, and control characters.
 fn assert_creator_id_safe(id: &str) {
     for ch in id.chars() {
-        if ch == '/' || ch == '\\' {
-            panic!(
-                "creator_id contains path separator: {id:?} — \
-                 this would be a path-traversal vulnerability"
-            );
-        }
-    }
-    if id.contains("..") {
-        panic!(
-            "creator_id contains '..': {id:?} — \
-             this would be a path-traversal vulnerability"
+        assert!(
+            ch != '/' && ch != '\\',
+            "creator_id contains path separator: {id:?} — this would be a path-traversal vulnerability"
         );
     }
-    if id.chars().any(|c| c.is_control()) {
-        panic!(
-            "creator_id contains control characters: {id:?} — \
-             this would be a path-traversal vulnerability"
-        );
-    }
+    assert!(
+        !id.contains(".."),
+        "creator_id contains '..': {id:?} — this would be a path-traversal vulnerability"
+    );
+    assert!(
+        !id.chars().any(char::is_control),
+        "creator_id contains control characters: {id:?} — this would be a path-traversal vulnerability"
+    );
 }
 
 #[cfg(test)]

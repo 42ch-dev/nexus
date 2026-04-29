@@ -1,6 +1,6 @@
-//! ManuscriptState aggregate — local-only manuscript phase machine.
+//! `ManuscriptState` aggregate — local-only manuscript phase machine.
 //!
-//! ManuscriptState tracks the creation phase progression (brainstorm → draft →
+//! `ManuscriptState` tracks the creation phase progression (brainstorm → draft →
 //! review → finalize → published). Platform does NOT own this in V1.0.
 //! See data-model-v1.md §5.9B, consistency-rules-v1.md §3.3.
 
@@ -8,7 +8,7 @@ use crate::errors::DomainError;
 use nexus_contracts::ManuscriptPhase;
 use serde::{Deserialize, Serialize};
 
-/// Helper to convert ManuscriptPhase to string.
+/// Helper to convert `ManuscriptPhase` to string.
 fn phase_to_str(phase: &ManuscriptPhase) -> &str {
     match phase {
         ManuscriptPhase::Brainstorm => "brainstorm",
@@ -19,7 +19,7 @@ fn phase_to_str(phase: &ManuscriptPhase) -> &str {
     }
 }
 
-/// Helper to convert string to ManuscriptPhase.
+/// Helper to convert string to `ManuscriptPhase`.
 #[allow(dead_code)]
 fn str_to_phase(s: &str) -> ManuscriptPhase {
     match s {
@@ -31,7 +31,7 @@ fn str_to_phase(s: &str) -> ManuscriptPhase {
     }
 }
 
-/// ManuscriptState aggregate — local manuscript phase machine.
+/// `ManuscriptState` aggregate — local manuscript phase machine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManuscriptState {
     pub schema_version: u32,
@@ -48,6 +48,7 @@ pub struct ManuscriptState {
 }
 
 impl ManuscriptState {
+    #[must_use]
     /// Create new manuscript state in brainstorm phase.
     pub fn new(workspace_id: &str, world_id: &str, creator_id: &str) -> Self {
         let manuscript_state_id =
@@ -86,7 +87,9 @@ impl ManuscriptState {
         self.updated_at = chrono::Utc::now().to_rfc3339();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Set active manifest.
     pub fn set_active_manifest(&mut self, manifest_id: &str) {
         self.active_manifest_id = Some(manifest_id.to_string());
@@ -94,12 +97,13 @@ impl ManuscriptState {
     }
 
     /// Get current phase.
-    pub fn current_phase(&self) -> &ManuscriptPhase {
+    #[must_use]
+    pub const fn current_phase(&self) -> &ManuscriptPhase {
         &self.manuscript_phase
     }
-
+    #[must_use]
     /// Check if phase transition is valid.
-    pub fn can_transition_to(&self, target: &ManuscriptPhase) -> bool {
+    pub const fn can_transition_to(&self, target: &ManuscriptPhase) -> bool {
         matches!(
             (&self.manuscript_phase, target),
             (ManuscriptPhase::Brainstorm, ManuscriptPhase::Draft)
@@ -108,11 +112,13 @@ impl ManuscriptState {
                 | (ManuscriptPhase::Finalize, ManuscriptPhase::Published)
         )
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Validate provisional cleanup before finalize/published gate.
     /// Per consistency-rules-v1.md §3.3: provisional records must be promoted
     /// or cleaned before entering finalize/published.
-    pub fn validate_pre_gate_cleanup(&self, provisional_count: usize) -> Result<(), DomainError> {
+    pub const fn validate_pre_gate_cleanup(&self, provisional_count: usize) -> Result<(), DomainError> {
         match &self.manuscript_phase {
             ManuscriptPhase::Finalize | ManuscriptPhase::Published if provisional_count > 0 => {
                 return Err(DomainError::ProvisionalRecordsExist {

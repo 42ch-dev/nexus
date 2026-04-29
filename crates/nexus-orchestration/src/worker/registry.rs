@@ -1,4 +1,4 @@
-//! WorkerRegistry — multi-creator worker index.
+//! `WorkerRegistry` — multi-creator worker index.
 //!
 //! Maps `CreatorId` → `WorkerHandle` with configurable capacity.
 //! Workers are created via a [`WorkerSpawner`] trait implementation, allowing
@@ -9,6 +9,7 @@
 //! Test usage: [`MockSpawner`] returns handles backed by [`DuplexTransport`].
 
 use crate::worker::manager::{WorkerError, WorkerEvent, WorkerHandle, WorkerManager, WorkerSpec};
+use crate::worker::{DuplexTransport, IpcClient};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
@@ -45,17 +46,18 @@ pub trait WorkerSpawner: Send + Sync {
 /// let registry = WorkerRegistry::new(16, spawner);
 /// ```
 pub struct WorkerManagerSpawner {
-    /// Shared reference to the WorkerManager.
+    /// Shared reference to the `WorkerManager`.
     manager: Arc<Mutex<WorkerManager>>,
 }
 
 impl WorkerManagerSpawner {
     /// Create a new spawner wrapping the given manager.
-    pub fn new(manager: Arc<Mutex<WorkerManager>>) -> Self {
+    pub const fn new(manager: Arc<Mutex<WorkerManager>>) -> Self {
         Self { manager }
     }
 
-    /// Create a spawner with a fresh WorkerManager.
+    /// Create a spawner with a fresh `WorkerManager`.
+    #[must_use] 
     pub fn fresh() -> Self {
         Self::new(Arc::new(Mutex::new(WorkerManager::new())))
     }
@@ -114,6 +116,10 @@ impl<S: WorkerSpawner> WorkerRegistry<S> {
     /// If the creator already has a worker, returns the existing handle.
     /// If the registry is at capacity, returns a `WorkerError::Internal`.
     /// Otherwise, calls the spawner to create a new worker and inserts it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError`] if spawning a new worker fails.
     pub async fn get_or_spawn(
         &mut self,
         creator_id: &str,
@@ -155,6 +161,10 @@ impl<S: WorkerSpawner> WorkerRegistry<S> {
     }
 
     /// Shut down all registered workers and clear the registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError`] if any worker shutdown fails.
     pub async fn shutdown_all(&mut self) -> Result<(), WorkerError> {
         let count = self.workers.len();
         if count == 0 {
@@ -230,12 +240,14 @@ pub struct MockSpawner {
 
 impl MockSpawner {
     /// Create a mock spawner that successfully creates handles.
-    pub fn new() -> Self {
+    #[must_use] 
+    pub const fn new() -> Self {
         Self { fail: false }
     }
 
     /// Create a mock spawner that fails all spawn requests.
-    pub fn failing() -> Self {
+    #[must_use] 
+    pub const fn failing() -> Self {
         Self { fail: true }
     }
 }
@@ -257,8 +269,6 @@ impl WorkerSpawner for MockSpawner {
                 "mock spawn failure",
             )));
         }
-
-        use crate::worker::{DuplexTransport, IpcClient};
 
         // Create a duplex transport pair: one end for the daemon, one for the "worker".
         // For the mock, we only need the daemon end since we're not simulating a real worker.
@@ -285,7 +295,7 @@ impl WorkerSpawner for MockSpawner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker::WorkerSpec;
+    
 
     #[test]
     fn worker_manager_spawner_creates_fresh() {

@@ -1,14 +1,14 @@
-//! ReferenceSource — local-only reference source registration.
+//! `ReferenceSource` — local-only reference source registration.
 //!
 //! Does NOT sync to platform; shared excerpts go through
-//! MemoryItem(memory_kind=research_material). Aligned with data-model-v1.md §5.9A.
+//! `MemoryItem`(`memory_kind`=`research_material`). Aligned with data-model-v1.md §5.9A.
 
 use serde::{Deserialize, Serialize};
 
 use crate::generated::common_types::{ReferenceSourceType, ScanStatus};
 
 /// Local-only registration of research/reference sources.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ReferenceSource {
     pub schema_version: u32,

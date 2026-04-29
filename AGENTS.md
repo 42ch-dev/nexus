@@ -76,6 +76,16 @@ docs/                   # User & contributor docs
 - Stable `cargo fmt` will print warnings and **incorrectly reformat** generated code — always use nightly
 - If nightly is not installed: `rustup toolchain install nightly --component rustfmt`
 
+**Clippy (lint):**
+
+- Workspace-level lint configuration in root `Cargo.toml` → `[workspace.lints.clippy]`: enables `pedantic` + `nursery` groups as `warn`, with selective `allow` overrides for overly noisy lints.
+- All workspace crates inherit via `[lints] workspace = true` in their `Cargo.toml`.
+- CI runs `cargo clippy --all -- -D warnings` — any clippy warning fails the build.
+- **Auto-fix first:** when addressing clippy errors, always run `cargo clippy --fix --allow-dirty --allow-staged` before manual fixes. This resolves the majority of machine-applicable lints (backticks, `use_self`, `uninlined_format_args`, `redundant_clone`, structural rewrites, etc.) in a single pass.
+- **Residual manual fixes:** after `--fix`, run `cargo clippy --all --all-targets --all-features -- -D warnings` to identify remaining errors that need human judgment (e.g., `missing_errors_doc`, `too_many_lines`, `float_cmp`, `similar_names`).
+- **Do not suppress** with `#[allow(...)]` unless absolutely unavoidable; if needed, add a brief justification comment.
+- **Do not change runtime behavior** when fixing lint errors.
+
 **Git worktrees:**
 
 - Put every additional `git worktree` checkout under **this repository root** at `.worktrees/<name>/` only.

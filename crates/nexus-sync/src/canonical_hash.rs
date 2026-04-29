@@ -13,6 +13,7 @@ use nexus_contracts::Delta;
 use sha2::{Digest, Sha256};
 
 /// Returns true if `s` is `sha256:` followed by 64 lowercase hex digits.
+#[must_use] 
 pub fn is_well_formed_canonical_hash(s: &str) -> bool {
     let rest = s.strip_prefix("sha256:");
     let Some(hex_digits) = rest else {
@@ -25,6 +26,9 @@ pub fn is_well_formed_canonical_hash(s: &str) -> bool {
 }
 
 /// SHA-256 over `serde_json` serialization of `deltas` (deterministic for a given slice).
+///
+/// # Errors
+/// Returns the specific error type if the operation fails.
 pub fn canonical_hash_for_deltas(deltas: &[Delta]) -> SyncResult<String> {
     let payload = serde_json::to_vec(deltas).map_err(SyncError::from)?;
     let mut hasher = Sha256::new();

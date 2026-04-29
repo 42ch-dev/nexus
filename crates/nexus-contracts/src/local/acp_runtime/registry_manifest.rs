@@ -1,13 +1,13 @@
-//! RegistryManifest — local-only ACP registry manifest.
+//! `RegistryManifest` — local-only `ACP` registry manifest.
 //!
-//! Schema for the ACP Registry manifest response from the CDN.
-//! The registry lists available ACP agents with their distribution information.
+//! Schema for the `ACP` Registry manifest response from the `CDN`.
+//! The registry lists available `ACP` agents with their distribution information.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// ACP Registry manifest response from the CDN.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct RegistryManifest {
     /// Registry format version (e.g. "1.0.0")
@@ -20,7 +20,7 @@ pub struct RegistryManifest {
 }
 
 /// An ACP agent entry in the registry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct AgentEntry {
     /// Unique agent identifier.
@@ -49,7 +49,7 @@ pub struct AgentEntry {
 }
 
 /// Agent distribution configuration (npx or binary).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Distribution {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,7 +59,7 @@ pub struct Distribution {
 }
 
 /// Npx-based distribution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NpxDistribution {
     /// npm package name with optional version (e.g. @scope/pkg@1.0.0)
@@ -73,7 +73,7 @@ pub struct NpxDistribution {
 }
 
 /// Per-platform binary distribution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct BinaryDistribution {
     #[serde(rename = "darwin-aarch64")]
@@ -97,7 +97,7 @@ pub struct BinaryDistribution {
 }
 
 /// Platform-specific binary.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PlatformBinary {
     /// Download URL for platform-specific archive.

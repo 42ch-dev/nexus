@@ -1,7 +1,20 @@
 {
   "version": 1,
-  "updated_at": "2026-04-28T15:00:00Z",
-  "plans": [],
+  "updated_at": "2026-04-29T10:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-04-29-clippy-pedantic-nursery-cleanup",
+      "title": "Clippy Pedantic + Nursery Cleanup",
+      "status": "InProgress",
+      "created_at": "2026-04-29",
+      "working_branch": "fix/clippy-pedantic-nursery-cleanup",
+      "agents": ["@fullstack-dev"],
+      "primary_spec": "",
+      "spec_refs": [],
+      "progress": 0,
+      "notes": "Fix 378 clippy pedantic/nursery errors: codegen templates + hand-written code"
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",

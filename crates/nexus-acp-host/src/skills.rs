@@ -42,7 +42,7 @@ use agent_client_protocol::schema::FileSystemCapabilities;
 ///
 /// Note: These constants are intentionally unused in V1.0 code — they will be
 /// wired into the initialize request in Task 4 (transport + agent run).
-/// The dead_code warning is suppressed to acknowledge this design.
+/// The `dead_code` warning is suppressed to acknowledge this design.
 #[allow(dead_code)]
 pub mod capabilities {
     /// Client can read text files from the workspace.
@@ -79,7 +79,7 @@ pub mod capabilities {
 ///
 /// Note: This function is intentionally unused in V1.0 code — it will be
 /// wired into the initialize request in Task 4 (transport + agent run).
-/// The dead_code warning is suppressed to acknowledge this design.
+/// The `dead_code` warning is suppressed to acknowledge this design.
 ///
 /// # Example
 ///
@@ -91,6 +91,7 @@ pub mod capabilities {
 /// //                    terminal.create, terminal.output, terminal.release
 /// ```
 #[allow(dead_code)]
+#[must_use]
 pub fn build_v1_0_capabilities() -> ClientCapabilities {
     ClientCapabilities::new()
         .fs(FileSystemCapabilities::new()
@@ -142,8 +143,6 @@ mod tests {
     fn test_build_v1_0_capabilities_returns_non_default() {
         use super::build_v1_0_capabilities;
         let _caps = build_v1_0_capabilities();
-        // Placeholder assertion — will be enhanced in Task 4.
-        // For now, we just verify the function compiles and runs.
-        assert!(true, "Capability builder executed successfully");
+        // Placeholder — will be enhanced in Task 4.
     }
 }

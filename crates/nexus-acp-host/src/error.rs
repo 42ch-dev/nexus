@@ -96,6 +96,7 @@ impl AcpError {
     }
 
     /// Create a connection-failed error wrapping an I/O error.
+    #[must_use]
     pub fn connection_io(err: std::io::Error) -> Self {
         Self::ConnectionFailed {
             message: err.to_string(),
@@ -119,17 +120,23 @@ impl AcpError {
     }
 
     /// Create an agent-crashed error.
+    #[must_use]
     pub fn agent_crashed(
         exit_code: Option<i32>,
         agent_path: PathBuf,
         stderr_output: Option<String>,
     ) -> Self {
+        use std::fmt::Write;
         let mut details = String::new();
         match exit_code {
-            Some(code) => details.push_str(&format!("exit code {}", code)),
+            Some(code) => {
+                let _ = write!(details, "exit code {code}");
+            }
             None => details.push_str("killed by signal"),
         }
-        details.push_str(&format!(" ({})", agent_path.display()));
+        {
+            let _ = write!(details, " ({})", agent_path.display());
+        }
         if let Some(ref stderr) = stderr_output {
             if !stderr.is_empty() {
                 let truncated = if stderr.len() > 200 {
@@ -137,7 +144,7 @@ impl AcpError {
                 } else {
                     stderr.clone()
                 };
-                details.push_str(&format!("\n  stderr: {}", truncated));
+                let _ = write!(details, "\n  stderr: {truncated}");
             }
         }
         Self::AgentCrashed {
@@ -163,7 +170,8 @@ impl AcpError {
     }
 
     /// Wrap an ACP SDK error.
-    pub fn sdk(err: agent_client_protocol::Error) -> Self {
+    #[must_use]
+    pub fn sdk(err: &agent_client_protocol::Error) -> Self {
         Self::Sdk(err.to_string())
     }
 }

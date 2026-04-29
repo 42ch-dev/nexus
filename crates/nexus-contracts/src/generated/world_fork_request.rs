@@ -1,14 +1,14 @@
-//! Nexus WorldForkRequest
+//! `Nexus` `WorldForkRequest`
 //!
-//! Request body for POST /v1/worlds/fork — platform may derive parent world from URL, child world server-side, and creator from auth; body carries fork point and optional title.
+//! `Request` body for `POST` /v1/worlds/fork — platform may derive parent world from `URL`, child world server-side, and creator from auth; body carries fork point and optional title.
 //!
-//! @schema_version 1
-//! @source world-fork-request.schema.json
+//! `@schema_version` 1
+//! `@source` world-fork-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for POST /v1/worlds/fork — platform may derive parent world from URL, child world server-side, and creator from auth; body carries fork point and optional title.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for `POST` /v1/worlds/fork — platform may derive parent world from `URL`, child world server-side, and creator from auth; body carries fork point and optional title.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldForkRequest {
     pub schema_version: u32,

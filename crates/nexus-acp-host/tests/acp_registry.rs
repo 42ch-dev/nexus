@@ -82,7 +82,7 @@ async fn registry_fetch_from_mock_cdn() {
     // Verify parsed data
     assert_eq!(registry.version, "1.0.0");
     assert_eq!(registry.agents.len(), 2);
-    assert!(registry.extensions.as_ref().map_or(true, |v| v.is_empty()));
+    assert!(registry.extensions.is_none_or(|v| v.is_empty()));
 
     // Verify first agent (Claude)
     let claude = &registry.agents[0];
@@ -197,10 +197,11 @@ fn registry_schema_conformance() {
                 &binary.windows_aarch64,
                 &binary.windows_x86_64,
             ] {
-                if let Some(pb) = platform {
-                    assert!(!pb.archive.is_empty(), "platform.archive is required");
-                    assert!(!pb.cmd.is_empty(), "platform.cmd is required");
-                }
+                let Some(pb) = platform else {
+                    continue;
+                };
+                assert!(!pb.archive.is_empty(), "platform.archive is required");
+                assert!(!pb.cmd.is_empty(), "platform.cmd is required");
             }
         }
     }

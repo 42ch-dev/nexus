@@ -2,7 +2,7 @@ use nexus_orchestration::preset::manifest::PresetManifest;
 
 #[test]
 fn parse_minimal_creator_preset() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: tiny
   version: 1
@@ -18,7 +18,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(p.preset.id, "tiny");
     assert_eq!(p.states.len(), 2);
@@ -114,7 +114,7 @@ inner_graphs:
 
 #[test]
 fn unknown_exit_when_kind_fails() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad
   version: 1
@@ -131,7 +131,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = serde_yaml::from_str::<PresetManifest>(yaml);
     assert!(err.is_err(), "expected error for unknown exit_when.kind");
     let msg = format!("{:#}", err.unwrap_err());
@@ -143,7 +143,7 @@ states:
 
 #[test]
 fn unknown_enter_kind_fails() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: bad
   version: 1
@@ -161,7 +161,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
     let err = serde_yaml::from_str::<PresetManifest>(yaml);
     assert!(err.is_err(), "expected error for unknown enter.kind");
     let msg = format!("{:#}", err.unwrap_err());
@@ -173,21 +173,21 @@ states:
 
 #[test]
 fn missing_required_field_fails() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: missing-fields
   version: 1
   kind: creator
   description: test
 states: []
-"#;
+";
     let err = serde_yaml::from_str::<PresetManifest>(yaml);
     assert!(err.is_err(), "expected error for missing required fields");
 }
 
 #[test]
 fn system_preset_parses() {
-    let yaml = r#"
+    let yaml = r"
 preset:
   id: _system.maintenance
   version: 1
@@ -203,7 +203,7 @@ states:
     next: end
   - id: end
     terminal: true
-"#;
+";
     let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(
         p.preset.kind,

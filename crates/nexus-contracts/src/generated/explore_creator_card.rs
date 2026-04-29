@@ -1,15 +1,15 @@
-//! Nexus ExploreCreatorCard
+//! `Nexus` `ExploreCreatorCard`
 //!
-//! Public creator projection for Explore / creator-profile read APIs (platform plan 16 / W3 slice). Field tiers follow v1-spec visibility; omit sensitive fields at the edge.
+//! `Public` creator projection for `Explore` / creator-profile read `APIs` (platform plan 16 / `W3` slice). `Field` tiers follow v1-spec visibility; omit sensitive fields at the edge.
 //!
-//! @schema_version 1
-//! @source explore-creator-card.schema.json
+//! `@schema_version` 1
+//! `@source` explore-creator-card.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{Visibility};
 
-/// Public creator projection for Explore / creator-profile read APIs (platform plan 16 / W3 slice). Field tiers follow v1-spec visibility; omit sensitive fields at the edge.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Public` creator projection for `Explore` / creator-profile read `APIs` (platform plan 16 / `W3` slice). `Field` tiers follow v1-spec visibility; omit sensitive fields at the edge.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreCreatorCard {
     pub schema_version: u32,

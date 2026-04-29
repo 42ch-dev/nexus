@@ -1,14 +1,14 @@
-//! Nexus PublishHistoryRequest
+//! `Nexus` `PublishHistoryRequest`
 //!
-//! Request body for POST /v1/publish/history — paginated publish history with optional filters (platform API).
+//! `Request` body for `POST` /v1/publish/history — paginated publish history with optional filters (platform `API`).
 //!
-//! @schema_version 1
-//! @source publish-history-request.schema.json
+//! `@schema_version` 1
+//! `@source` publish-history-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for POST /v1/publish/history — paginated publish history with optional filters (platform API).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for `POST` /v1/publish/history — paginated publish history with optional filters (platform `API`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PublishHistoryRequest {
     pub schema_version: u32,

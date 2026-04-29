@@ -246,7 +246,7 @@ async fn current_tick_ignores_scheduled_at_field() {
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
     // Schedule with future scheduled_at (9999-01-01)
-    let schedule = make_schedule("S-FUTURE", "creator-future", Some(253402300799));
+    let schedule = make_schedule("S-FUTURE", "creator-future", Some(253_402_300_799));
     supervisor.insert_pending(schedule).await.unwrap();
 
     // Current tick() ignores scheduled_at and admits immediately

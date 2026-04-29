@@ -104,11 +104,13 @@ pub struct AgentRules {
 impl AgentRules {
     /// Create a new empty agent rules set.
     #[allow(dead_code)]
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Check whether any rules are configured.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.grant.is_empty() && self.deny.is_empty() && self.ask.is_empty()
     }
@@ -137,6 +139,7 @@ pub struct PermissionPolicy {
 impl PermissionPolicy {
     /// Create a new permission policy with default settings.
     #[allow(dead_code)]
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -144,6 +147,10 @@ impl PermissionPolicy {
     /// Load permission policy from workspace.
     ///
     /// If the policy file doesn't exist, returns a default policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the policy file exists but cannot be read or parsed.
     pub fn load(workspace_root: &Path) -> anyhow::Result<Self> {
         let policy_path = Self::policy_path(workspace_root);
         if !policy_path.exists() {
@@ -160,6 +167,10 @@ impl PermissionPolicy {
     ///
     /// If the policy file already exists, it is parsed as a `toml_edit` document
     /// and updated in place. Otherwise a new document is created.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed, or written.
     pub fn save_toml_edit(&self, workspace_root: &Path) -> anyhow::Result<()> {
         let mut doc = Self::load_toml_edit(workspace_root)?;
 
@@ -189,13 +200,17 @@ impl PermissionPolicy {
     /// Load the permissions TOML as a mutable `toml_edit` document.
     ///
     /// Returns an empty document if the file doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be read or parsed.
     pub fn load_toml_edit(workspace_root: &Path) -> anyhow::Result<toml_edit::DocumentMut> {
         let policy_path = Self::policy_path(workspace_root);
         if policy_path.exists() {
             let content = std::fs::read_to_string(&policy_path)?;
             let doc = content
                 .parse::<toml_edit::DocumentMut>()
-                .map_err(|e| anyhow::anyhow!("Failed to parse permissions TOML: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse permissions TOML: {e}"))?;
             Ok(doc)
         } else {
             Ok(toml_edit::DocumentMut::new())
@@ -203,6 +218,10 @@ impl PermissionPolicy {
     }
 
     /// Save a `toml_edit` document to the permissions file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written.
     pub fn save_toml_edit_doc(
         workspace_root: &Path,
         doc: &toml_edit::DocumentMut,
@@ -223,6 +242,10 @@ impl PermissionPolicy {
     }
 
     /// Ensure `[agents.<agent>.<action>]` table exists.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `[agents]` table or agent table cannot be accessed after creation.
     pub fn ensure_agent_action_table_doc(
         doc: &mut toml_edit::DocumentMut,
         agent: &str,
@@ -314,6 +337,7 @@ impl PermissionPolicy {
     /// Validate top-level keys in the TOML document against the known schema.
     ///
     /// Returns a list of warning messages for unknown keys.
+    #[must_use]
     pub fn validate_toml_keys(doc: &toml_edit::DocumentMut) -> Vec<String> {
         let mut warnings = Vec::new();
 
@@ -321,22 +345,21 @@ impl PermissionPolicy {
         for (key, _value) in doc.iter() {
             let key_str = key.to_string();
             if !VALID_TOP_LEVEL_KEYS.contains(&key_str.as_str()) {
-                warnings.push(format!("Unknown top-level key: '{}'", key_str));
+                warnings.push(format!("Unknown top-level key: '{key_str}'"));
             }
         }
 
         // Check sub-keys under [agents.<agent>]
         if let Some(agents) = doc.get("agents") {
             if let Some(agents_table) = agents.as_table() {
-                for (agent_id, agent_item) in agents_table.iter() {
+                for (agent_id, agent_item) in agents_table {
                     let agent_str = agent_id.to_string();
                     if let Some(agent_tbl) = agent_item.as_table() {
-                        for (action_key, _) in agent_tbl.iter() {
+                        for (action_key, _) in agent_tbl {
                             let action_str = action_key.to_string();
                             if !["grant", "deny", "ask"].contains(&action_str.as_str()) {
                                 warnings.push(format!(
-                                    "Unknown key '{}' under agent '{}'",
-                                    action_str, agent_str
+                                    "Unknown key '{action_str}' under agent '{agent_str}'",
                                 ));
                             }
                         }
@@ -349,6 +372,7 @@ impl PermissionPolicy {
     }
 
     /// Get the path to the policy file.
+    #[must_use]
     pub fn policy_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".nexus42").join("permissions.toml")
     }
@@ -376,10 +400,10 @@ impl PermissionPolicy {
                     .iter()
                     .filter_map(|(k, _)| {
                         let key_str = k.to_string();
-                        if !map.contains_key(&key_str) {
-                            Some(key_str)
-                        } else {
+                        if map.contains_key(&key_str) {
                             None
+                        } else {
+                            Some(key_str)
                         }
                     })
                     .collect();
@@ -426,10 +450,10 @@ impl PermissionPolicy {
                             .iter()
                             .filter_map(|(k, _)| {
                                 let key_str = k.to_string();
-                                if !map.contains_key(&key_str) {
-                                    Some(key_str)
-                                } else {
+                                if map.contains_key(&key_str) {
                                     None
+                                } else {
+                                    Some(key_str)
                                 }
                             })
                             .collect();
@@ -449,6 +473,7 @@ impl PermissionPolicy {
     /// Evaluate a permission request against the policy.
     ///
     /// Returns the decision for this permission.
+    #[must_use]
     pub fn evaluate(&self, permission_name: &str) -> PermissionDecision {
         // Check explicit grant rules
         if self.grant.contains_key(permission_name) {
@@ -481,6 +506,7 @@ impl PermissionPolicy {
     }
 
     /// List all configured permissions.
+    #[must_use]
     pub fn list_permissions(&self) -> (Vec<String>, Vec<String>) {
         let granted: Vec<String> = self.grant.keys().cloned().collect();
         let denied: Vec<String> = self.deny.keys().cloned().collect();
@@ -545,6 +571,7 @@ impl PermissionPolicy {
     /// Evaluate a permission request for a specific agent.
     ///
     /// Checks agent-scoped rules first, then global rules, then default policy.
+    #[must_use]
     pub fn evaluate_for_agent(&self, agent_id: &str, capability: &str) -> PermissionDecision {
         // Check agent-scoped rules first
         if let Some(rules) = self.agents.get(agent_id) {
@@ -565,21 +592,24 @@ impl PermissionPolicy {
 
     /// List all rules for a specific agent.
     /// Returns (granted, denied, asked) capability lists.
+    #[must_use]
     pub fn list_agent_rules(&self, agent_id: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
-        if let Some(rules) = self.agents.get(agent_id) {
-            let granted: Vec<String> = rules.grant.keys().cloned().collect();
-            let denied: Vec<String> = rules.deny.keys().cloned().collect();
-            let asked: Vec<String> = rules.ask.keys().cloned().collect();
-            (granted, denied, asked)
-        } else {
-            (vec![], vec![], vec![])
-        }
+        self.agents.get(agent_id).map_or_else(
+            || (vec![], vec![], vec![]),
+            |rules| {
+                let granted: Vec<String> = rules.grant.keys().cloned().collect();
+                let denied: Vec<String> = rules.deny.keys().cloned().collect();
+                let asked: Vec<String> = rules.ask.keys().cloned().collect();
+                (granted, denied, asked)
+            },
+        )
     }
 
     /// List all agents that have rules configured.
+    #[must_use]
     pub fn list_agents(&self) -> Vec<&str> {
-        let mut agents: Vec<&str> = self.agents.keys().map(|s| s.as_str()).collect();
-        agents.sort();
+        let mut agents: Vec<&str> = self.agents.keys().map(std::string::String::as_str).collect();
+        agents.sort_unstable();
         agents
     }
 }
@@ -1051,8 +1081,7 @@ default = "ask"
         let warnings = PermissionPolicy::validate_toml_keys(&doc);
         assert!(
             warnings.is_empty(),
-            "Expected no warnings, got: {:?}",
-            warnings
+            "Expected no warnings, got: {warnings:?}",
         );
     }
 

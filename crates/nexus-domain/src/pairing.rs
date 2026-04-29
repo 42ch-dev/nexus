@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// Pairing source enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PairingSource {
     AutoCli,
@@ -18,7 +18,8 @@ pub enum PairingSource {
 }
 
 impl PairingSource {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::AutoCli => "auto_cli",
             Self::ManualWeb => "manual_web",
@@ -43,6 +44,7 @@ pub struct Pairing {
 
 impl Pairing {
     /// Create a new pairing between creator and user.
+    #[must_use]
     pub fn new(
         pairing_id: &str,
         creator_id: &str,
@@ -60,9 +62,11 @@ impl Pairing {
             revoked_at: None,
         }
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Revoke this pairing.
-    /// Sets status to "revoked" and records revoked_at timestamp.
+    /// Sets status to "revoked" and records `revoked_at` timestamp.
     pub fn revoke(&mut self) -> Result<(), DomainError> {
         if self.status != "active" {
             return Err(DomainError::AlreadyInState(self.status.clone()));
@@ -71,13 +75,14 @@ impl Pairing {
         self.revoked_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    #[must_use]
     /// Check if this pairing is active.
     pub fn is_active(&self) -> bool {
         self.status == "active"
     }
 
     /// Validate that this pairing authorizes the given creator+user combination.
+    #[must_use]
     pub fn authorizes(&self, creator_id: &str, user_id: &str) -> bool {
         self.status == "active" && self.creator_id == creator_id && self.user_id == user_id
     }
@@ -100,6 +105,7 @@ impl From<nexus_contracts::Pairing> for Pairing {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<Pairing> for nexus_contracts::Pairing {
     fn from(d: Pairing) -> Self {
         Self {

@@ -1,12 +1,9 @@
 {
   "plan_id": "2026-04-28-v1.11-cli-refresh-token",
-  "title": "V1.11 \u2014 CLI refresh_token Support",
+  "title": "V1.11 — CLI refresh_token Support",
   "status": "Done",
   "done_at": "2026-04-28T15:00:00Z",
   "working_branch": "feature/v1.11",
-  "qc_reports": [
-    ".agents/plans/reports/2026-04-28-v1.11-cli-refresh-token/2026-04-28-v1.11-cli-refresh-token-qc1.md",
-    ".agents/plans/reports/2026-04-28-v1.11-cli-refresh-token/2026-04-28-v1.11-cli-refresh-token-qc2.md",
-    ".agents/plans/reports/2026-04-28-v1.11-cli-refresh-token/2026-04-28-v1.11-cli-refresh-token-qc3.md"
-  ]
+  "qc_reports": [],
+  "note": "QC triple-review was not performed before merge; post-hoc sign-off applied 2026-04-29"
 }

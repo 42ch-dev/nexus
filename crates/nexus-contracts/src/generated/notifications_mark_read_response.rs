@@ -1,14 +1,14 @@
-//! Nexus NotificationsMarkReadResponse
+//! `Nexus` `NotificationsMarkReadResponse`
 //!
-//! Response for mark-read mutations (platform plan 20).
+//! `Response` for mark-read mutations (platform plan 20).
 //!
-//! @schema_version 1
-//! @source notifications-mark-read-response.schema.json
+//! `@schema_version` 1
+//! `@source` notifications-mark-read-response.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Response for mark-read mutations (platform plan 20).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Response` for mark-read mutations (platform plan 20).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsMarkReadResponse {
     pub schema_version: u32,

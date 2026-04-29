@@ -1,14 +1,14 @@
-//! Nexus NotificationsInboxItem
+//! `Nexus` `NotificationsInboxItem`
 //!
-//! Single inbox notification row (platform plan 20).
+//! `Single` inbox notification row (platform plan 20).
 //!
-//! @schema_version 1
-//! @source notifications-inbox-item.schema.json
+//! `@schema_version` 1
+//! `@source` notifications-inbox-item.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Single inbox notification row (platform plan 20).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Single` inbox notification row (platform plan 20).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsInboxItem {
     pub schema_version: u32,

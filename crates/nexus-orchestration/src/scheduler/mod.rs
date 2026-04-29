@@ -51,7 +51,8 @@ pub struct MockClock {
 
 impl MockClock {
     /// Create a mock clock starting at the given Unix timestamp.
-    pub fn new(initial: i64) -> Self {
+    #[must_use] 
+    pub const fn new(initial: i64) -> Self {
         Self {
             now: std::sync::atomic::AtomicI64::new(initial),
         }
@@ -73,19 +74,20 @@ impl ClockSource for MockClock {
 ///
 /// Polls `ScheduleSupervisor::tick_clocked()` for admission of due schedules.
 pub struct Scheduler {
-    /// SQLite pool retained for future use (e.g. direct DB queries).
+    /// `SQLite` pool retained for future use (e.g. direct DB queries).
     #[allow(dead_code)]
     pool: Arc<SqlitePool>,
     clock: Arc<dyn ClockSource>,
 }
 
 impl Scheduler {
-    /// Create a scheduler with the given SQLite pool and clock source.
+    /// Create a scheduler with the given `SQLite` pool and clock source.
     pub fn new(pool: Arc<SqlitePool>, clock: Arc<dyn ClockSource>) -> Self {
         Self { pool, clock }
     }
 
     /// Create a scheduler with production system clock.
+    #[must_use] 
     pub fn with_system_clock(pool: Arc<SqlitePool>) -> Self {
         Self::new(pool, Arc::new(SystemClock))
     }
@@ -129,7 +131,7 @@ impl Scheduler {
 
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     tracing::info!("scheduler poll loop cancelled");
                     break;
                 }
@@ -161,7 +163,7 @@ mod tests {
 
         // Should be within reasonable range (past 2020)
         assert!(
-            now > 1577836800,
+            now > 1_577_836_800,
             "system clock should return valid timestamp"
         );
     }

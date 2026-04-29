@@ -62,7 +62,7 @@ async fn push_handles_version_mismatch_conflict() {
         Err(SyncError::SyncConflict { conflict_type, .. }) => {
             assert!(conflict_type.contains("version_mismatch"));
         }
-        other => panic!("Unexpected result: {:?}", other),
+        other => panic!("Unexpected result: {other:?}"),
     }
 }
 
@@ -345,7 +345,7 @@ async fn push_rejected_with_version_mismatch_409() {
         Err(SyncError::SyncConflict { conflict_type, .. }) => {
             assert!(conflict_type.contains("version_mismatch"));
         }
-        other => panic!("Unexpected result: {:?}", other),
+        other => panic!("Unexpected result: {other:?}"),
     }
 }
 
@@ -427,7 +427,7 @@ async fn sequential_pushes_maintain_sequence() {
     }
 }
 
-/// Test sync pull with pagination (has_more = true via is_up_to_date=false).
+/// Test sync pull with pagination (`has_more` = true via `is_up_to_date=false`).
 #[tokio::test]
 async fn pull_response_indicates_more_bundles() {
     let mock_server = MockServer::start().await;
@@ -477,7 +477,7 @@ async fn pull_response_indicates_more_bundles() {
     assert!(!resp.bundles.is_empty());
 }
 
-/// Test sync push with all_success status.
+/// Test sync push with `all_success` status.
 #[tokio::test]
 async fn push_all_success_response() {
     let mock_server = MockServer::start().await;
