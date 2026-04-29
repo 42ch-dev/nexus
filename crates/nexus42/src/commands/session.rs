@@ -48,7 +48,14 @@ pub enum SessionCommand {
 // ── Command runner ──────────────────────────────────────────────────
 
 /// Run a session command.
-pub async fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Session file I/O operations fail
+/// - Session validation fails
+/// - Session cannot be found
+pub fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
     let sessions_file = SessionManager::default_sessions_file();
     let manager = SessionManager::new(sessions_file);
 
@@ -123,7 +130,7 @@ fn run_show(manager: &SessionManager, session_id: &str) -> Result<()> {
             s.session_id.0.as_ref() == session_id || s.session_id.0.as_ref().starts_with(session_id)
         })
         .ok_or_else(|| {
-            crate::errors::CliError::Other(format!("Session not found: {}", session_id))
+            crate::errors::CliError::Other(format!("Session not found: {session_id}"))
         })?;
 
     print_session_details(session);
@@ -138,15 +145,11 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
         s.session_id.0.as_ref() == session_id || s.session_id.0.as_ref().starts_with(session_id)
     });
 
-    let session = match session {
-        Some(s) => s,
-        None => {
-            eprintln!("Session not found: {}", session_id);
-            return Err(crate::errors::CliError::Other(format!(
-                "Session not found: {}",
-                session_id
-            )));
-        }
+    let Some(session) = session else {
+        eprintln!("Session not found: {session_id}");
+        return Err(crate::errors::CliError::Other(format!(
+            "Session not found: {session_id}"
+        )));
     };
 
     let actual_session_id = session.session_id.clone();
@@ -160,7 +163,7 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
             print_session_details(&session);
         }
         None => {
-            eprintln!("Session not found: {}", session_id);
+            eprintln!("Session not found: {session_id}");
         }
     }
 

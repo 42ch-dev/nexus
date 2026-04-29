@@ -66,9 +66,12 @@ async fn get_capabilities_returns_list() {
     let v: Value = serde_json::from_slice(&bytes).unwrap();
     let caps = v["capabilities"].as_array().unwrap();
     assert!(!caps.is_empty(), "should have at least one capability");
-    let names: Vec<&str> = caps.iter().map(|c| c["name"].as_str().unwrap()).collect();
     assert!(
-        names.contains(&"sync.pull"),
+        caps.iter()
+            .map(|c| c["name"]
+                .as_str()
+                .expect("capability name should be string"))
+            .any(|x| x == "sync.pull"),
         "expected sync.pull in capabilities"
     );
 }

@@ -20,7 +20,8 @@ pub enum WorldStatus {
 }
 
 impl WorldStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Active => "active",
             Self::Archived => "archived",
@@ -57,6 +58,7 @@ pub struct World {
 
 impl World {
     /// Create a new world.
+    #[must_use]
     pub fn new(
         world_id: &str,
         owner_creator_id: &str,
@@ -96,9 +98,11 @@ impl World {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Fork this world.
-    /// Creates a new child world and ForkBranch record.
+    /// Creates a new child world and `ForkBranch` record.
     pub fn fork(
         &self,
         creator_id: &str,
@@ -134,7 +138,12 @@ impl World {
 
         Ok((child_world, fork))
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Update visibility.
     pub fn set_visibility(&mut self, visibility: Visibility) -> Result<(), DomainError> {
         self.visibility = visibility;
@@ -167,6 +176,7 @@ impl From<nexus_contracts::World> for World {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<World> for nexus_contracts::World {
     fn from(d: World) -> Self {
         Self {

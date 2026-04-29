@@ -1,6 +1,10 @@
+//! Complex HTTP handlers with orchestration logic exceed line limits.
+#![allow(clippy::too_many_lines)]
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Sync handler — sync status, push, and resolve endpoints
 //!
-//! Uses `nexus-sync` **Outbox**, **BundleBuilder**, and **precheck** on the push path:
+//! Uses `nexus-sync` **Outbox**, **`BundleBuilder`**, and **precheck** on the push path:
 //! builds a minimal bundle (with `canonical_hash`), runs `precheck_bundle_with_auth`,
 //! then persists via **`Outbox::stage`** (`ready`). This is **offline-first** by default.
 //!
@@ -35,7 +39,7 @@ use tracing::{debug, info, warn};
 
 // ── Response types ───────────────────────────────────────────────
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct SyncStatusResponse {
     /// Number of staged entries (ready to be staged, have command but no bundle yet)
     pub staged_count: u64,
@@ -100,7 +104,7 @@ pub struct PrecheckSummary {
 pub struct SyncResolveRequest {
     /// Outbox entry ID to resolve
     pub outbox_entry_id: String,
-    /// Resolution strategy: auto_accept, auto_reject, manual_review
+    /// Resolution strategy: `auto_accept`, `auto_reject`, `manual_review`
     pub resolution: String,
     /// Skip confirmation (for automation)
     #[serde(default)]
@@ -168,7 +172,7 @@ pub(crate) async fn optional_sync_push_binding(
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Database error: {}", e),
+                message: format!("Database error: {e}"),
             })?;
 
     let world_id: Option<String> =
@@ -177,7 +181,7 @@ pub(crate) async fn optional_sync_push_binding(
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Database error: {}", e),
+                message: format!("Database error: {e}"),
             })?;
 
     let creator_id: Option<String> =
@@ -186,7 +190,7 @@ pub(crate) async fn optional_sync_push_binding(
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
-                message: format!("Database error: {}", e),
+                message: format!("Database error: {e}"),
             })?;
 
     match (workspace_id, world_id, creator_id) {
@@ -219,7 +223,7 @@ pub(crate) fn try_platform_sync_credentials_from_env() -> Option<(String, String
     Some((base, token))
 }
 
-fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
@@ -303,18 +307,18 @@ pub async fn pull(
         }
     })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
 
     let remote = client
         .pull_bundles(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
     let bundles_received = remote.bundles.len();
     let is_up_to_date = remote.is_up_to_date;
 
     let summary = apply_pull_response_to_outbox(outbox, &remote)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     let ts = chrono::Utc::now().to_rfc3339();
     if let Err(e) = sqlx::query!(
@@ -341,64 +345,61 @@ pub async fn pull(
 
 /// GET /v1/local/sync/status
 ///
-/// Returns real outbox state counts using nexus-sync::Outbox.
+/// Returns real outbox state counts using `nexus-sync::Outbox`.
 pub async fn status(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<SyncStatusResponse>, NexusApiError> {
     info!("Handling sync status request");
 
-    match state.outbox() {
-        Some(outbox) => {
-            let staged_count = outbox.count_by_state("staged").await.unwrap_or(0) as u64;
-            let ready_count = outbox.count_by_state("ready").await.unwrap_or(0) as u64;
-            let sent_count = outbox.count_by_state("sent").await.unwrap_or(0) as u64;
-            let acked_count = outbox.count_by_state("acked").await.unwrap_or(0) as u64;
-            let conflicted_count = outbox.count_by_state("conflicted").await.unwrap_or(0) as u64;
-            let failed_count = outbox.count_by_state("failed").await.unwrap_or(0) as u64;
+    if let Some(outbox) = state.outbox() {
+        let staged_count = outbox.count_by_state("staged").await.unwrap_or(0) as u64;
+        let ready_count = outbox.count_by_state("ready").await.unwrap_or(0) as u64;
+        let sent_count = outbox.count_by_state("sent").await.unwrap_or(0) as u64;
+        let acked_count = outbox.count_by_state("acked").await.unwrap_or(0) as u64;
+        let conflicted_count = outbox.count_by_state("conflicted").await.unwrap_or(0) as u64;
+        let failed_count = outbox.count_by_state("failed").await.unwrap_or(0) as u64;
 
-            // Get last sync timestamp from workspace_meta
-            let last_sync_row =
-                sqlx::query!("SELECT value FROM workspace_meta WHERE key = 'last_sync_at'")
-                    .fetch_optional(state.pool())
-                    .await
-                    .ok()
-                    .flatten();
-            let last_sync_at = last_sync_row.map(|r| r.value);
+        // Get last sync timestamp from workspace_meta
+        let last_sync_row =
+            sqlx::query!("SELECT value FROM workspace_meta WHERE key = 'last_sync_at'")
+                .fetch_optional(state.pool())
+                .await
+                .ok()
+                .flatten();
+        let last_sync_at = last_sync_row.map(|r| r.value);
 
-            debug!(
-                staged_count,
-                ready_count,
-                sent_count,
-                acked_count,
-                conflicted_count,
-                failed_count,
-                last_sync_at = ?last_sync_at,
-                "Sync status retrieved from outbox"
-            );
+        debug!(
+            staged_count,
+            ready_count,
+            sent_count,
+            acked_count,
+            conflicted_count,
+            failed_count,
+            last_sync_at = ?last_sync_at,
+            "Sync status retrieved from outbox"
+        );
 
-            Ok(Json(SyncStatusResponse {
-                staged_count,
-                ready_count,
-                sent_count,
-                acked_count,
-                conflicted_count,
-                failed_count,
-                last_sync_at,
-            }))
-        }
-        None => {
-            // Outbox not initialized — return zeroed status
-            warn!("Sync outbox not initialized, returning empty status");
-            Ok(Json(SyncStatusResponse {
-                staged_count: 0,
-                ready_count: 0,
-                sent_count: 0,
-                acked_count: 0,
-                conflicted_count: 0,
-                failed_count: 0,
-                last_sync_at: None,
-            }))
-        }
+        Ok(Json(SyncStatusResponse {
+            staged_count,
+            ready_count,
+            sent_count,
+            acked_count,
+            conflicted_count,
+            failed_count,
+            last_sync_at,
+        }))
+    } else {
+        // Outbox not initialized — return zeroed status
+        warn!("Sync outbox not initialized, returning empty status");
+        Ok(Json(SyncStatusResponse {
+            staged_count: 0,
+            ready_count: 0,
+            sent_count: 0,
+            acked_count: 0,
+            conflicted_count: 0,
+            failed_count: 0,
+            last_sync_at: None,
+        }))
     }
 }
 
@@ -503,14 +504,14 @@ pub async fn push(
             operation: DeltaOperation::Update,
             target_entity_type: None,
             target_entity_id: None,
-            payload: serde_json::Value::Object(Default::default()),
+            payload: serde_json::Value::Object(serde_json::Map::default()),
             source_anchor: None,
             local_timestamp: command.created_at.clone(),
         })
         .build()
         .map_err(|e| NexusApiError::Internal {
             code: "BUNDLE_BUILD_ERROR".into(),
-            message: format!("Failed to build sync bundle: {}", e),
+            message: format!("Failed to build sync bundle: {e}"),
         })?;
 
     let local_state = LocalState::new(0);
@@ -544,7 +545,7 @@ pub async fn push(
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "OUTBOX_STAGE_ERROR".into(),
-            message: format!("Failed to stage bundle in outbox: {}", e),
+            message: format!("Failed to stage bundle in outbox: {e}"),
         })?;
 
     info!(
@@ -602,7 +603,7 @@ pub async fn push(
 /// POST /v1/local/sync/resolve
 ///
 /// Apply a conflict resolution strategy to an outbox entry.
-/// Supports auto_accept, auto_reject, and marks entries accordingly.
+/// Supports `auto_accept`, `auto_reject`, and marks entries accordingly.
 pub async fn resolve(
     State(state): State<WorkspaceState>,
     Json(req): Json<SyncResolveRequest>,
@@ -623,7 +624,7 @@ pub async fn resolve(
     let entry = outbox
         .get(&req.outbox_entry_id)
         .await
-        .map_err(|e| NexusApiError::NotFound(format!("Outbox entry not found: {}", e)))?;
+        .map_err(|e| NexusApiError::NotFound(format!("Outbox entry not found: {e}")))?;
 
     match req.resolution.as_str() {
         "auto_accept" => {
@@ -635,7 +636,7 @@ pub async fn resolve(
                     outbox.mark_acked(&req.outbox_entry_id).await.map_err(|e| {
                         NexusApiError::Internal {
                             code: "OUTBOX_RESOLVE_ERROR".into(),
-                            message: format!("Failed to resolve entry as auto_accept: {}", e),
+                            message: format!("Failed to resolve entry as auto_accept: {e}"),
                         }
                     })?;
 
@@ -648,8 +649,7 @@ pub async fn resolve(
                 }
                 state_str => {
                     let msg = format!(
-                        "Cannot auto_accept entry in '{}' state (requires 'conflicted' or 'sent')",
-                        state_str
+                        "Cannot auto_accept entry in '{state_str}' state (requires 'conflicted' or 'sent')"
                     );
                     Ok(Json(SyncResolveResponse {
                         success: false,
@@ -672,7 +672,7 @@ pub async fn resolve(
                         .await
                         .map_err(|e| NexusApiError::Internal {
                             code: "OUTBOX_RESOLVE_ERROR".into(),
-                            message: format!("Failed to resolve entry as auto_reject: {}", e),
+                            message: format!("Failed to resolve entry as auto_reject: {e}"),
                         })?;
 
                     info!(outbox_entry_id = %req.outbox_entry_id, "Resolved as auto_reject (failed/no retry)");
@@ -685,7 +685,7 @@ pub async fn resolve(
                     }))
                 }
                 state_str => {
-                    let msg = format!("Cannot auto_reject entry in '{}' state", state_str);
+                    let msg = format!("Cannot auto_reject entry in '{state_str}' state");
                     Ok(Json(SyncResolveResponse {
                         success: false,
                         delivery_state: Some(entry.delivery_state.as_str().to_string()),
@@ -705,7 +705,7 @@ pub async fn resolve(
         other => Ok(Json(SyncResolveResponse {
             success: false,
             delivery_state: Some(entry.delivery_state.as_str().to_string()),
-            error: Some(format!("Unknown resolution strategy: {}", other)),
+            error: Some(format!("Unknown resolution strategy: {other}")),
         })),
     }
 }
@@ -725,7 +725,7 @@ pub async fn replay(
 
     let entries = outbox.replay().await.map_err(|e| NexusApiError::Internal {
         code: "OUTBOX_REPLAY_ERROR".into(),
-        message: format!("Failed to replay outbox entries: {}", e),
+        message: format!("Failed to replay outbox entries: {e}"),
     })?;
 
     let summaries: Vec<OutboxEntrySummary> = entries
@@ -734,7 +734,7 @@ pub async fn replay(
             outbox_entry_id: e.outbox_entry_id.clone(),
             bundle_id: e.bundle_id.clone(),
             delivery_state: e.delivery_state.as_str().to_string(),
-            retry_count: e.retry_count.unwrap_or(0u64) as i64,
+            retry_count: e.retry_count.unwrap_or(0u64).cast_signed(),
             last_error: e.last_error.clone(),
             created_at: e.created_at.clone(),
         })
@@ -763,7 +763,7 @@ mod tests {
             failed_count: 1,
             last_sync_at: Some("2026-04-07T00:00:00Z".to_string()),
         };
-        let json = serde_json::to_string(&resp).unwrap();
+        let json = serde_json::to_string(&resp).expect("SyncStatusResponse should serialize");
         assert!(json.contains("\"staged_count\":2"));
         assert!(json.contains("\"ready_count\":1"));
         assert!(json.contains("\"conflicted_count\":3"));
@@ -782,7 +782,7 @@ mod tests {
             failed_count: 0,
             last_sync_at: None,
         };
-        let json = serde_json::to_string(&resp).unwrap();
+        let json = serde_json::to_string(&resp).expect("SyncStatusResponse should serialize");
         assert!(json.contains("\"last_sync_at\":null"));
     }
 
@@ -794,7 +794,8 @@ mod tests {
             "creator_id": "ctr_test",
             "force": true
         }"#;
-        let req: SyncPushRequest = serde_json::from_str(json).unwrap();
+        let req: SyncPushRequest =
+            serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
         assert_eq!(req.workspace_id, "wrk_test");
         assert_eq!(req.world_id, "wld_test");
         assert_eq!(req.creator_id, "ctr_test");
@@ -808,7 +809,8 @@ mod tests {
             "world_id": "wld_test",
             "creator_id": "ctr_test"
         }"#;
-        let req: SyncPushRequest = serde_json::from_str(json).unwrap();
+        let req: SyncPushRequest =
+            serde_json::from_str(json).expect("SyncPushRequest should deserialize from valid JSON");
         assert!(!req.force);
     }
 
@@ -819,7 +821,8 @@ mod tests {
             "world_id": "wld_x",
             "after_confirmed_delta_sequence": 4
         }"#;
-        let req: SyncPullRequest = serde_json::from_str(json).unwrap();
+        let req: SyncPullRequest =
+            serde_json::from_str(json).expect("SyncPullRequest should deserialize from valid JSON");
         assert_eq!(req.schema_version, 1);
         assert_eq!(req.world_id, "wld_x");
         assert_eq!(req.after_confirmed_delta_sequence, Some(4));
@@ -832,7 +835,8 @@ mod tests {
             "resolution": "auto_accept",
             "force": false
         }"#;
-        let req: SyncResolveRequest = serde_json::from_str(json).unwrap();
+        let req: SyncResolveRequest = serde_json::from_str(json)
+            .expect("SyncResolveRequest should deserialize from valid JSON");
         assert_eq!(req.outbox_entry_id, "obe_abc123");
         assert_eq!(req.resolution, "auto_accept");
         assert!(!req.force);
@@ -849,7 +853,7 @@ mod tests {
         // Initially, all counts should be 0
         let result = status(State(state)).await;
         assert!(result.is_ok());
-        let body = result.unwrap();
+        let body = result.expect("status should return Ok for initialized workspace");
         assert_eq!(body.staged_count, 0);
         assert_eq!(body.ready_count, 0);
         assert_eq!(body.conflicted_count, 0);
@@ -873,7 +877,7 @@ mod tests {
 
         let result = push(State(state), Json(req)).await;
         assert!(result.is_ok());
-        let resp = result.unwrap();
+        let resp = result.expect("push should succeed for valid request");
         assert!(resp.success);
         assert!(resp.outbox_entry_id.is_some());
         assert!(resp.bundle_id.is_some());
@@ -894,12 +898,14 @@ mod tests {
             creator_id: "ctr_test".to_string(),
             force: false,
         };
-        let _ = push(State(state.clone()), Json(req)).await.unwrap();
+        let _ = push(State(state.clone()), Json(req))
+            .await
+            .expect("push should succeed in test");
 
         // Check status
         let result = status(State(state)).await;
         assert!(result.is_ok());
-        let body = result.unwrap();
+        let body = result.expect("status should return Ok for initialized workspace");
         // Push uses Outbox::stage → delivery_state `ready` (not `staged`)
         assert_eq!(body.ready_count, 1);
         assert_eq!(body.staged_count, 0);
@@ -913,7 +919,7 @@ mod tests {
             warning_count: 1,
             summary: "All checks passed.".to_string(),
         };
-        let json = serde_json::to_string(&summary).unwrap();
+        let json = serde_json::to_string(&summary).expect("PrecheckSummary should serialize");
         assert!(json.contains("\"valid\":true"));
         assert!(json.contains("\"warning_count\":1"));
     }

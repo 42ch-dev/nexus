@@ -1,3 +1,5 @@
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening)]
 //! Worker Manager subsystem — real implementation (WS-E T4).
 //!
 //! Manages the lifecycle of worker child processes for the daemon.
@@ -28,7 +30,7 @@ const DEFAULT_MAX_WORKERS: usize = 16;
 /// Replaces the mock stub from WS2. Holds a `WorkerRegistry` that manages
 /// one worker process per active creator, using `WorkerManager` for spawning.
 pub struct WorkerMgrSubsystem {
-    /// Shared reference to the WorkerRegistry.
+    /// Shared reference to the `WorkerRegistry`.
     ///
     /// Wrapped in `Arc<Mutex>` for async access from multiple callers
     /// (engine, HTTP endpoints, health checks).
@@ -39,6 +41,7 @@ pub struct WorkerMgrSubsystem {
 
 impl WorkerMgrSubsystem {
     /// Create a new Worker Manager subsystem with default capacity.
+    #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_MAX_WORKERS)
     }
@@ -48,6 +51,7 @@ impl WorkerMgrSubsystem {
     /// # Arguments
     ///
     /// * `max_workers` — maximum concurrent worker processes.
+    #[must_use]
     pub fn with_capacity(max_workers: usize) -> Self {
         let manager = Arc::new(Mutex::new(WorkerManager::new()));
         let spawner = WorkerManagerSpawner::new(manager);
@@ -59,12 +63,13 @@ impl WorkerMgrSubsystem {
         }
     }
 
-    /// Return a shared reference to the WorkerRegistry.
+    /// Return a shared reference to the `WorkerRegistry`.
     ///
     /// Other components (engine, HTTP endpoints) use this to:
     /// - Spawn workers for new creators.
     /// - Look up existing workers by creator ID.
     /// - Send IPC commands to workers.
+    #[must_use]
     pub fn registry(&self) -> Arc<Mutex<WorkerRegistry<WorkerManagerSpawner>>> {
         self.registry.clone()
     }
@@ -197,7 +202,7 @@ mod tests {
 
     #[test]
     fn default_capacity_is_16() {
-        let subsystem = WorkerMgrSubsystem::new();
+        let _subsystem = WorkerMgrSubsystem::new();
         // We can't directly check capacity, but we know it's 16 from the constant.
         assert_eq!(DEFAULT_MAX_WORKERS, 16);
     }

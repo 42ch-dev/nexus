@@ -1,3 +1,5 @@
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening, clippy::missing_panics_doc)]
 //! Entry/exit action bodies for the daemon lifecycle HSM.
 //!
 //! Per spec §5, these actions drive subsystem lifecycle.
@@ -27,7 +29,7 @@ pub struct ActionContext {
     shutdown_grace_ms: u64,
     /// Join handles for subsystem start tasks (used to cancel in-flight starts).
     start_handles: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
-    /// Reason for entering Starting state (e.g., "daemon_boot", "restart_after_failure").
+    /// Reason for entering Starting state (e.g., "`daemon_boot`", "`restart_after_failure`").
     start_reason: String,
     /// Timestamp when Starting state was entered.
     started_at: chrono::DateTime<chrono::Utc>,
@@ -49,6 +51,7 @@ impl std::fmt::Debug for ActionContext {
 
 impl ActionContext {
     /// Create a new action context.
+    #[must_use]
     pub fn new(
         lifecycle: Arc<StatigLifecycle>,
         subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
@@ -66,6 +69,7 @@ impl ActionContext {
     }
 
     /// Create an action context for testing with mock subsystems.
+    #[must_use]
     pub fn new_for_test(lifecycle: Arc<StatigLifecycle>) -> Self {
         let mocks = super::subsystems::MockAllSubsystems::all_succeed();
         Self::new(
@@ -81,7 +85,7 @@ impl ActionContext {
     }
 
     /// Get the shutdown grace period in ms.
-    pub fn shutdown_grace_ms(&self) -> u64 {
+    pub const fn shutdown_grace_ms(&self) -> u64 {
         self.shutdown_grace_ms
     }
 
@@ -91,7 +95,7 @@ impl ActionContext {
     }
 
     /// Get the timestamp when Starting was entered.
-    pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
+    pub const fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.started_at
     }
 
@@ -105,14 +109,14 @@ impl ActionContext {
 ///
 /// Per spec §5.1:
 /// - Bind HTTP listener (subsystem task)
-/// - Open SQLite pool + run migrations (subsystem task)
+/// - Open `SQLite` pool + run migrations (subsystem task)
 /// - Initialize sync outbox reader (subsystem task)
-/// - Instantiate OrchestrationEngine (stub, subsystem task)
+/// - Instantiate `OrchestrationEngine` (stub, subsystem task)
 /// - Start Worker Manager (stub, subsystem task)
 ///
 /// Each subsystem is a tokio task that dispatches `SubsystemUp` or
 /// `SubsystemFailed` on completion.
-pub fn enter_starting(ctx: Arc<ActionContext>) {
+pub fn enter_starting(ctx: &Arc<ActionContext>) {
     tracing::info!("entering Starting state — spawning subsystem tasks");
 
     // Emit diagnostic tracing event.
@@ -165,7 +169,7 @@ pub fn enter_starting(ctx: Arc<ActionContext>) {
 /// Note (RISK-WSC-02): `abort()` cancels the tokio task but does not guarantee
 /// full resource cleanup (file handles, sockets). Full cleanup requires
 /// `SubsystemBootstrap` to implement an `abort()` method (WS7+ work).
-pub fn exit_starting(ctx: Arc<ActionContext>) {
+pub fn exit_starting(ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Starting state — cancelling in-flight subsystem starts");
 
     let mut handles = ctx
@@ -188,7 +192,7 @@ pub fn exit_starting(ctx: Arc<ActionContext>) {
 /// - `_system.maintenance` Session started in main.rs before lifecycle begins.
 /// - Resume any paused sessions with `daemon_restart` reason (stub).
 /// - Emit `tracing` event `daemon_lifecycle.running`.
-pub fn enter_running(_ctx: Arc<ActionContext>) {
+pub fn enter_running(_ctx: &Arc<ActionContext>) {
     tracing::info!("entering Running state — daemon fully operational");
 
     // Engine sessions (including _system.maintenance) are started in main.rs
@@ -208,7 +212,7 @@ pub fn enter_running(_ctx: Arc<ActionContext>) {
 /// Exit action for `Running` state.
 ///
 /// Per spec §5.6: No action needed (engine keeps running across Running ↔ Degraded).
-pub fn exit_running(_ctx: Arc<ActionContext>) {
+pub fn exit_running(_ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Running state");
     // No action: engine keeps running. Only Stopping.entry stops it.
 }
@@ -217,9 +221,9 @@ pub fn exit_running(_ctx: Arc<ActionContext>) {
 ///
 /// Per spec §5.3:
 /// - Record degraded subsystems in state-local storage (done in state.rs)
-/// - Set HTTP endpoint lifecycle_state to "degraded"
+/// - Set HTTP endpoint `lifecycle_state` to "degraded"
 /// - Keep orchestration engine running
-pub fn enter_degraded(_ctx: Arc<ActionContext>) {
+pub fn enter_degraded(_ctx: &Arc<ActionContext>) {
     tracing::info!("entering Degraded state — daemon partially operational");
 
     tracing::info!(
@@ -231,22 +235,22 @@ pub fn enter_degraded(_ctx: Arc<ActionContext>) {
 
 /// Exit action for `Degraded` state.
 ///
-/// Per spec §5.3: Clear degraded_subsystems tracking (done in state.rs).
-pub fn exit_degraded(_ctx: Arc<ActionContext>) {
+/// Per spec §5.3: Clear `degraded_subsystems` tracking (done in state.rs).
+pub fn exit_degraded(_ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Degraded state — all subsystems restored");
 }
 
 /// Entry action for `Stopping` state.
 ///
 /// Per spec §5.4:
-/// - Set HTTP endpoint lifecycle_state to "stopping"
+/// - Set HTTP endpoint `lifecycle_state` to "stopping"
 /// - Stop accepting new sessions
-/// - Call engine.shutdown(grace_ms)
+/// - Call `engine.shutdown(grace_ms)`
 /// - Send shutdown to workers
 /// - Flush outbox, close DB pool, close HTTP listener
-/// - Emit ShutdownDrained when complete
-/// - Start watchdog for ShutdownTimeout
-pub fn enter_stopping(ctx: Arc<ActionContext>) {
+/// - Emit `ShutdownDrained` when complete
+/// - Start watchdog for `ShutdownTimeout`
+pub fn enter_stopping(ctx: &Arc<ActionContext>) {
     tracing::info!("entering Stopping state — graceful shutdown in progress");
 
     let grace_ms = ctx.shutdown_grace_ms();
@@ -291,15 +295,14 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
         // All subsystems shutdown — dispatch ShutdownDrained.
         if success_count == subsystems.len() {
             tracing::info!("all subsystems shutdown — dispatching ShutdownDrained");
-            lc_shutdown.dispatch(Event::ShutdownDrained);
         } else {
             tracing::warn!(
                 "shutdown incomplete ({}/{}) — dispatching ShutdownDrained anyway",
                 success_count,
                 subsystems.len()
             );
-            lc_shutdown.dispatch(Event::ShutdownDrained);
         }
+        lc_shutdown.dispatch(Event::ShutdownDrained);
     });
 
     // Clone for watchdog
@@ -321,9 +324,13 @@ pub fn enter_stopping(ctx: Arc<ActionContext>) {
 /// Entry action for `Failed` state.
 ///
 /// Per spec §5.5:
-/// - Set HTTP endpoint lifecycle_state to "failed"
+/// - Set HTTP endpoint `lifecycle_state` to "failed"
 /// - Log final tracing event
 /// - Call `std::process::exit(exit_code)` after 100ms pause
+///
+/// Note: Takes `last_error: Option<String>` to allow natural `unwrap_or("none")` usage
+/// in tracing macro; reference type would require more complex deref handling.
+#[allow(clippy::needless_pass_by_value)]
 pub fn enter_failed(exit_code: i32, last_error: Option<String>) {
     tracing::error!(
         target: "daemon_lifecycle",

@@ -2,7 +2,7 @@
 //!
 //! R11: add → inspect roundtrip (v0 equals seed)
 //! R12: mid-execution edit stability (edit creates v1; running state finishes on v0)
-//! R13: preset context_update hook regression
+//! R13: preset `context_update` hook regression
 //! R14: dependency chain auto-advance (A completes → B auto-starts)
 
 use nexus_contracts::local::schedule::{
@@ -108,7 +108,7 @@ async fn r11_schedule_add_inspect_roundtrip() {
         CoreContextPayload::Text { body } => {
             assert_eq!(body, seed, "v0 content must equal seed");
         }
-        _ => panic!("expected text payload"),
+        CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 
     // Status should be pending
@@ -167,7 +167,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
         .unwrap();
     match &v0.content {
         CoreContextPayload::Text { body } => assert_eq!(body, seed),
-        _ => panic!("expected text payload"),
+        CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 
     // Simulate mid-execution edit: user appends while running
@@ -192,7 +192,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
         .unwrap();
     match &v0_still.content {
         CoreContextPayload::Text { body } => assert_eq!(body, seed, "v0 should be immutable"),
-        _ => panic!("expected text payload"),
+        CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 
     // v1 should have the appended content (next state reads v1)
@@ -205,7 +205,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
             assert!(body.contains(seed), "v1 should still contain original seed");
             assert!(body.contains(edit_text), "v1 should contain the edit");
         }
-        _ => panic!("expected text payload"),
+        CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 }
 
@@ -279,7 +279,7 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
                 "should contain appended outline hook content"
             );
         }
-        _ => panic!("expected text payload"),
+        CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 }
 

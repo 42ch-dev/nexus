@@ -1,7 +1,7 @@
-//! ReferenceSource aggregate — local-only research/reference registration.
+//! `ReferenceSource` aggregate — local-only research/reference registration.
 //!
-//! ReferenceSource is LOCAL-ONLY — does NOT sync to platform.
-//! Shared excerpts go through MemoryItem(memory_kind=research_material).
+//! `ReferenceSource` is LOCAL-ONLY — does NOT sync to platform.
+//! Shared excerpts go through `MemoryItem(memory_kind=research_material)`.
 //! See data-model-v1.md §5.9A.
 
 use crate::errors::DomainError;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// Reference source type enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceSourceType {
     File,
@@ -21,7 +21,8 @@ pub enum ReferenceSourceType {
 }
 
 impl ReferenceSourceType {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::File => "file",
             Self::Pdf => "pdf",
@@ -42,7 +43,8 @@ pub enum ScanStatus {
 }
 
 impl ScanStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Pending => "pending",
             Self::Scanned => "scanned",
@@ -52,7 +54,7 @@ impl ScanStatus {
     }
 }
 
-/// ReferenceSource aggregate — local-only research/reference registration.
+/// `ReferenceSource` aggregate — local-only research/reference registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReferenceSource {
     pub schema_version: u32,
@@ -73,6 +75,7 @@ pub struct ReferenceSource {
 
 impl ReferenceSource {
     /// Register a new reference source.
+    #[must_use]
     pub fn register(
         workspace_id: &str,
         source_type: ReferenceSourceType,
@@ -117,8 +120,9 @@ impl ReferenceSource {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Convert an excerpt to a MemoryItem for platform sync.
-    /// The ReferenceSource itself stays local; only the MemoryItem syncs.
+    /// Convert an excerpt to a `MemoryItem` for platform sync.
+    /// The `ReferenceSource` itself stays local; only the `MemoryItem` syncs.
+    #[must_use]
     pub fn extract_to_memory_item(
         &self,
         creator_id: &str,
@@ -135,8 +139,10 @@ impl ReferenceSource {
         mi.add_source_ref("reference", &self.reference_source_id);
         mi
     }
-
-    /// Validate URI format based on source_type.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    /// Validate URI format based on `source_type`.
     pub fn validate_uri(&self) -> Result<(), DomainError> {
         if self.uri.trim().is_empty() {
             return Err(DomainError::InvalidUri {
@@ -188,6 +194,7 @@ impl From<nexus_contracts::local::domain::ReferenceSource> for ReferenceSource {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<ReferenceSource> for nexus_contracts::local::domain::ReferenceSource {
     fn from(d: ReferenceSource) -> Self {
         Self {

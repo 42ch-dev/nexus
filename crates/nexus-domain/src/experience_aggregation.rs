@@ -57,7 +57,7 @@ pub trait ExperienceSynthesizer: Send + Sync {
 /// A single experience entry for synthesis.
 #[derive(Debug, Clone)]
 pub struct ExperienceEntry {
-    /// Memory kind (e.g., "story_summary").
+    /// Memory kind (e.g., "`story_summary`").
     pub memory_kind: String,
     /// Memory slug / filename stem.
     pub slug: String,
@@ -99,7 +99,12 @@ pub async fn aggregate_experience(
         used_acp,
     })
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Aggregate experience without updating SOUL.md.
 ///
 /// Returns the generated markdown and metadata, but does NOT write to disk.
@@ -208,7 +213,7 @@ fn deterministic_concat(entries: &[ExperienceEntry]) -> String {
     parts.join("\n\n")
 }
 
-/// Format a memory_kind snake_case string into a human-readable label.
+/// Format a `memory_kind` `snake_case` string into a human-readable label.
 fn format_kind_label(kind: &str) -> String {
     kind.split('_')
         .map(|word| {

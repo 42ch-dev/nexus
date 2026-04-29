@@ -1,4 +1,4 @@
-//! WorkspaceBinding — local-only workspace binding.
+//! `WorkspaceBinding` — local-only workspace binding.
 //!
 //! Binding between a local workspace and a remote world.
 //! Aligned with data-model-v1.md §5.14.
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common_types::BindingStatus;
 
 /// Binding between a local workspace and a remote world.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkspaceBinding {
     pub schema_version: u32,

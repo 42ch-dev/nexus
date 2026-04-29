@@ -1,4 +1,4 @@
-//! T4 test: AcpPromptTask dispatches through Worker Manager IPC.
+//! T4 test: `AcpPromptTask` dispatches through Worker Manager IPC.
 //!
 //! Uses an echo-worker fixture that responds to `worker/acp_prompt` with
 //! the prompt text echoed back.
@@ -65,7 +65,7 @@ async fn acp_prompt_task_no_worker_returns_stub() {
     );
 }
 
-/// Test that WorkerSpec::test_stub creates a valid spec for shell scripts.
+/// Test that `WorkerSpec::test_stub` creates a valid spec for shell scripts.
 #[test]
 fn worker_spec_test_stub() {
     let spec = nexus_orchestration::worker::WorkerSpec::test_stub("echo.sh");
@@ -91,7 +91,7 @@ fn acp_capabilities_registered() {
     );
 }
 
-/// Test that the preset loader accepts acp.prompt and judge.llm in requires_capabilities.
+/// Test that the preset loader accepts acp.prompt and judge.llm in `requires_capabilities`.
 #[test]
 fn preset_with_acp_capabilities_validates() {
     let yaml = r#"

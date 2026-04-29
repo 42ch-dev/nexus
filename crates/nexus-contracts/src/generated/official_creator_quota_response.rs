@@ -1,14 +1,14 @@
-//! OfficialCreatorQuotaResponseV1
+//! `OfficialCreatorQuotaResponseV1`
 //!
-//! GET /official-creator/quota 200 response body. SSOT: v1-spec schema/entitlements-wire-v1.md §4.
+//! `GET` /official-creator/quota 200 response body. `SSOT`: v1-spec schema/entitlements-wire-v1.md §4.
 //!
-//! @schema_version 1
-//! @source official-creator-quota-response.schema.json
+//! `@schema_version` 1
+//! `@source` official-creator-quota-response.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// GET /official-creator/quota 200 response body. SSOT: v1-spec schema/entitlements-wire-v1.md §4.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `GET` /official-creator/quota 200 response body. `SSOT`: v1-spec schema/entitlements-wire-v1.md §4.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct OfficialCreatorQuotaResponse {
     pub schema_version: u32,

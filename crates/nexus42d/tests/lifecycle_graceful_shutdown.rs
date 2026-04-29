@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use nexus42d::lifecycle::{Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind};
 
-/// Test: ShutdownRequested leads to Stopping → Failed (exit 0).
+/// Test: `ShutdownRequested` leads to Stopping → Failed (exit 0).
 ///
 /// This tests the lifecycle state machine's shutdown flow without
 /// actual signal handling.
 ///
-/// Note: Uses new_for_test() instead of new_with_subsystems() because
-/// the deferred initialization pattern in new_with_subsystems has timing
+/// Note: Uses `new_for_test()` instead of `new_with_subsystems()` because
+/// the deferred initialization pattern in `new_with_subsystems` has timing
 /// issues in tests. For production, main.rs handles subsystem startup.
 #[tokio::test]
 async fn shutdown_requested_leads_to_graceful_exit() {
@@ -99,7 +99,7 @@ async fn shutdown_timeout_leads_to_forced_exit() {
 
 /// Test: Panic hook integration.
 ///
-/// FatalError event should transition to Failed with exit 1.
+/// `FatalError` event should transition to Failed with exit 1.
 #[tokio::test]
 async fn fatal_error_from_panic_transitions_to_failed() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
@@ -123,7 +123,7 @@ async fn fatal_error_from_panic_transitions_to_failed() {
     assert_eq!(lifecycle.exit_code(), Some(1));
 }
 
-/// Test: wait_until_terminal blocks until Failed.
+/// Test: `wait_until_terminal` blocks until Failed.
 #[tokio::test]
 async fn wait_until_terminal_blocks_correctly() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());

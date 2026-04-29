@@ -65,7 +65,7 @@ pub enum WorldCommand {
         /// Timeline event id defining the fork point
         #[arg(long, value_parser = validate_event_id)]
         at_event: String,
-        /// Creator id (defaults to active_creator_id from config when set)
+        /// Creator id (defaults to `active_creator_id` from config when set)
         #[arg(long)]
         creator_id: Option<String>,
         /// Print the JSON request and exit without calling the daemon
@@ -117,20 +117,27 @@ fn confirm_fork(yes: bool) -> bool {
     if yes {
         return true;
     }
-    match dialoguer::Confirm::new()
+    dialoguer::Confirm::new()
         .with_prompt("Create a new forked world on the platform?")
         .default(false)
         .interact()
-    {
-        Ok(v) => v,
-        Err(_) => {
+        .unwrap_or_else(|_| {
             eprintln!("Non-interactive terminal: pass --yes to confirm fork.");
             false
-        }
-    }
+        })
 }
 
-/// Run world subcommands
+/// Run world subcommands.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Daemon API calls fail
+/// - Invalid `world_id` or `creator_id` parameters
+/// - Fork creation fails
+///
+/// Note: This function is 129 lines; splitting would break the coherent world command flow.
+#[allow(clippy::too_many_lines)]
 pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config);
 
@@ -201,11 +208,11 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
                             );
                         }
                     } else if let Some(err) = resp.error {
-                        eprintln!("World fork failed: {}", err);
+                        eprintln!("World fork failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("World fork request failed: {}", e);
+                    eprintln!("World fork request failed: {e}");
                     return Err(e);
                 }
             }
@@ -252,17 +259,17 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
                         println!("  world_id:         {}", resp.world_id);
                         println!("  world_revision:   {}", resp.world_revision);
                         if let Some(e) = &resp.at_event_id {
-                            println!("  at_event_id:      {}", e);
+                            println!("  at_event_id:      {e}");
                         }
                         if let Some(c) = &resp.captured_at {
-                            println!("  captured_at:      {}", c);
+                            println!("  captured_at:      {c}");
                         }
                     } else if let Some(err) = resp.error {
-                        eprintln!("World snapshot failed: {}", err);
+                        eprintln!("World snapshot failed: {err}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("World snapshot request failed: {}", e);
+                    eprintln!("World snapshot request failed: {e}");
                     return Err(e);
                 }
             }
@@ -273,6 +280,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

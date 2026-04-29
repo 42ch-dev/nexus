@@ -142,6 +142,9 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
 /// Load a single user preset from a bundle directory.
 ///
 /// Reads `preset.yaml`, validates it, and returns a [`UserPresetEntry`].
+///
+/// # Errors
+/// Returns [`UserPresetWarning`] if the preset directory is missing, YAML parsing fails, or validation fails.
 pub fn load_user_preset_from_dir(
     bundle_dir: &Path,
     dir_name: &str,
@@ -154,7 +157,7 @@ pub fn load_user_preset_from_dir(
         Err(e) => {
             return Err(UserPresetWarning {
                 dir_name: dir_name.to_string(),
-                message: format!("failed to read preset.yaml: {}", e),
+                message: format!("failed to read preset.yaml: {e}"),
             });
         }
     };
@@ -164,7 +167,7 @@ pub fn load_user_preset_from_dir(
         Err(PresetLoadError::YamlParse(e)) => {
             return Err(UserPresetWarning {
                 dir_name: dir_name.to_string(),
-                message: format!("YAML parse error: {}", e),
+                message: format!("YAML parse error: {e}"),
             });
         }
         Err(PresetLoadError::Validation { problems, .. }) => {
@@ -183,13 +186,13 @@ pub fn load_user_preset_from_dir(
         Err(PresetLoadError::InvalidPresetHookOp(e)) => {
             return Err(UserPresetWarning {
                 dir_name: dir_name.to_string(),
-                message: format!("invalid hook operation: {}", e),
+                message: format!("invalid hook operation: {e}"),
             });
         }
         Err(PresetLoadError::NotFound { preset_id }) => {
             return Err(UserPresetWarning {
                 dir_name: dir_name.to_string(),
-                message: format!("preset not found: {}", preset_id),
+                message: format!("preset not found: {preset_id}"),
             });
         }
     };
@@ -202,11 +205,13 @@ pub fn load_user_preset_from_dir(
 }
 
 /// Return the user preset IDs from a scan result.
+#[must_use]
 pub fn list_user_preset_ids(result: &UserPresetScanResult) -> Vec<String> {
     result.presets.iter().map(|e| e.id.clone()).collect()
 }
 
 /// Find a user preset entry by ID.
+#[must_use]
 pub fn find_user_preset<'a>(
     result: &'a UserPresetScanResult,
     id: &str,
@@ -221,12 +226,12 @@ pub fn find_user_preset<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preset::loader::load_preset_from_str;
+
     use std::fs;
 
     /// Minimal valid YAML for testing.
     fn minimal_yaml() -> &'static str {
-        r#"
+        r"
 preset:
   id: test-strategy
   version: 1
@@ -242,7 +247,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#
+"
     }
 
     #[test]
@@ -363,7 +368,7 @@ states:
         fs::write(dir_a.join("preset.yaml"), minimal_yaml()).unwrap();
 
         // Create strategy-b/ with a different preset
-        let yaml_b = r#"
+        let yaml_b = r"
 preset:
   id: strategy-b
   version: 1
@@ -379,7 +384,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let dir_b = base.join("strategy-b");
         fs::create_dir_all(&dir_b).unwrap();
         fs::write(dir_b.join("preset.yaml"), yaml_b).unwrap();

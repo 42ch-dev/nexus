@@ -1,22 +1,22 @@
-//! Nexus MemoryItem
+//! `Nexus` `MemoryItem`
 //!
-//! MemoryItem - structured memory for creator experience and world context. Aligned with data-model-v1.md §5.8.
+//! `MemoryItem` - structured memory for creator experience and world context. `Aligned` with data-model-v1.md §5.8.
 //!
-//! @schema_version 1
-//! @source memory.schema.json
+//! `@schema_version` 1
+//! `@source` memory.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{MemoryKind, MemoryStatus, MemoryType};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct MemorySourceRef {
     pub kind: String,
     pub id: String,
 }
-/// MemoryItem - structured memory for creator experience and world context. Aligned with data-model-v1.md §5.8.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `MemoryItem` - structured memory for creator experience and world context. `Aligned` with data-model-v1.md §5.8.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Memory {
     pub schema_version: u32,

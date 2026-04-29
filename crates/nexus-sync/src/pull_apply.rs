@@ -15,6 +15,9 @@ pub struct PullApplySummary {
 }
 
 /// Deserialize each bundle in `response` and stage it when `bundle_id` is not already present.
+///
+/// # Errors
+/// Returns the specific error type if the operation fails.
 pub async fn apply_pull_response_to_outbox(
     outbox: &Outbox,
     response: &SyncPullResponse,

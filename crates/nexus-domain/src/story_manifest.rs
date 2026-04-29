@@ -1,6 +1,6 @@
-//! StoryManifest aggregate — platform-side chapter/arc manifest and summary authority.
+//! `StoryManifest` aggregate — platform-side chapter/arc manifest and summary authority.
 //!
-//! StoryManifest is the platform-authoritative summary for chapters, arcs,
+//! `StoryManifest` is the platform-authoritative summary for chapters, arcs,
 //! stories, and excerpts. See data-model-v1.md §5.9.
 
 use crate::errors::DomainError;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// Manifest type enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManifestType {
     Chapter,
@@ -18,7 +18,8 @@ pub enum ManifestType {
 }
 
 impl ManifestType {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Chapter => "chapter",
             Self::Arc => "arc",
@@ -28,7 +29,7 @@ impl ManifestType {
     }
 }
 
-/// StoryManifest status enum.
+/// `StoryManifest` status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryManifestStatus {
@@ -39,7 +40,8 @@ pub enum StoryManifestStatus {
 }
 
 impl StoryManifestStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::SummaryReady => "summary_ready",
             Self::StagedForPublish => "staged_for_publish",
@@ -50,7 +52,7 @@ impl StoryManifestStatus {
 }
 
 /// Manuscript storage enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManuscriptStorage {
     None,
@@ -59,7 +61,7 @@ pub enum ManuscriptStorage {
 }
 
 impl ManuscriptStorage {
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::None => "none",
             Self::LocalWorkspace => "local_workspace",
@@ -68,7 +70,7 @@ impl ManuscriptStorage {
     }
 }
 
-/// StoryManifest aggregate — platform-side chapter/arc manifest and summary.
+/// `StoryManifest` aggregate — platform-side chapter/arc manifest and summary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoryManifest {
     pub schema_version: u32,
@@ -100,6 +102,7 @@ pub struct StoryManifest {
 
 impl StoryManifest {
     /// Create a new story manifest.
+    #[must_use]
     pub fn new(
         world_id: &str,
         creator_id: &str,
@@ -175,9 +178,11 @@ impl StoryManifest {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Stage for publishing.
-    /// Pre: summary_text is set, content_hash is computed.
+    /// Pre: `summary_text` is set, `content_hash` is computed.
     pub fn stage_for_publish(&mut self) -> Result<(), DomainError> {
         if self.status != StoryManifestStatus::SummaryReady.as_str() {
             return Err(DomainError::InvalidState {
@@ -194,7 +199,9 @@ impl StoryManifest {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Mark as published.
     pub fn publish(&mut self, artifact_id: &str) -> Result<(), DomainError> {
         if self.status != StoryManifestStatus::StagedForPublish.as_str() {
@@ -208,7 +215,9 @@ impl StoryManifest {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Archive this manifest.
     pub fn archive(&mut self) -> Result<(), DomainError> {
         if self.status == StoryManifestStatus::Archived.as_str() {
@@ -218,9 +227,14 @@ impl StoryManifest {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Validate storage configuration consistency.
-    /// e.g., manuscript_storage=local_workspace requires local_path.
+    /// e.g., `manuscript_storage=local_workspace` requires `local_path`.
     pub fn validate_storage_config(&self) -> Result<(), DomainError> {
         if let Some(ref storage) = self.manuscript_storage {
             match storage.as_str() {
@@ -267,6 +281,7 @@ impl From<nexus_contracts::StoryManifest> for StoryManifest {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<StoryManifest> for nexus_contracts::StoryManifest {
     fn from(d: StoryManifest) -> Self {
         Self {

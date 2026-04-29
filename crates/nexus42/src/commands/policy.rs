@@ -14,7 +14,7 @@ use std::path::PathBuf;
 pub enum PolicyCommand {
     /// Grant a permission for ACP agents
     Grant {
-        /// Permission name (e.g., "file_system.read")
+        /// Permission name (e.g., "`file_system.read`")
         permission: String,
     },
 
@@ -42,7 +42,13 @@ pub enum PolicyCommand {
 }
 
 /// Run policy management commands.
-pub async fn run(command: PolicyCommand) -> Result<()> {
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Not in a Nexus workspace
+/// - Permission policy file cannot be loaded or saved
+pub fn run(command: PolicyCommand) -> Result<()> {
     let workspace_root = find_workspace_root().ok_or_else(|| {
         anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
     })?;
@@ -53,13 +59,13 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
         PolicyCommand::Grant { permission } => {
             policy.grant_permission(permission.clone());
             policy.save_toml_edit(&workspace_root)?;
-            println!("✓ Granted permission: {}", permission);
+            println!("✓ Granted permission: {permission}");
         }
 
         PolicyCommand::Deny { permission } => {
             policy.deny_permission(permission.clone());
             policy.save_toml_edit(&workspace_root)?;
-            println!("✓ Denied permission: {}", permission);
+            println!("✓ Denied permission: {permission}");
         }
 
         PolicyCommand::List { output_format } => {
@@ -81,7 +87,7 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
                 if !granted.is_empty() {
                     println!("Granted Permissions:");
                     for perm in &granted {
-                        println!("  ✓ {}", perm);
+                        println!("  ✓ {perm}");
                     }
                     println!();
                 }
@@ -89,7 +95,7 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
                 if !denied.is_empty() {
                     println!("Denied Permissions:");
                     for perm in &denied {
-                        println!("  ✗ {}", perm);
+                        println!("  ✗ {perm}");
                     }
                     println!();
                 }
@@ -113,15 +119,14 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
                 "deny" => DefaultPolicy::Deny,
                 _ => {
                     return Err(crate::errors::CliError::Other(format!(
-                        "Invalid default policy '{}'. Must be 'ask', 'grant', or 'deny'.",
-                        policy_name
+                        "Invalid default policy '{policy_name}'. Must be 'ask', 'grant', or 'deny'."
                     )))
                 }
             };
 
             policy.default = default_policy;
             policy.save_toml_edit(&workspace_root)?;
-            println!("✓ Default policy set to: {:?}", default_policy);
+            println!("✓ Default policy set to: {default_policy:?}");
         }
 
         PolicyCommand::Show => {
@@ -131,7 +136,7 @@ pub async fn run(command: PolicyCommand) -> Result<()> {
 
             if policy_path.exists() {
                 let content = std::fs::read_to_string(&policy_path)?;
-                println!("{}", content);
+                println!("{content}");
             } else {
                 println!("No policy file found. Using default configuration:");
                 println!("default = \"{:?}\"\n", policy.default);

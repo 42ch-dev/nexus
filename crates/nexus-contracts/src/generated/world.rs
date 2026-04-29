@@ -1,15 +1,15 @@
-//! Nexus World Entity
+//! `Nexus` `World` `Entity`
 //!
-//! World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3.
+//! `World` entity - a narrative universe maintained by creators with timeline evolution. `Aligned` with data-model-v1.md §5.3.
 //!
-//! @schema_version 1
-//! @source world.schema.json
+//! `@schema_version` 1
+//! `@source` world.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{TimePolicy, Visibility, WorldStatus};
 
-/// World entity - a narrative universe maintained by creators with timeline evolution. Aligned with data-model-v1.md §5.3.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `World` entity - a narrative universe maintained by creators with timeline evolution. `Aligned` with data-model-v1.md §5.3.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct World {
     pub schema_version: u32,

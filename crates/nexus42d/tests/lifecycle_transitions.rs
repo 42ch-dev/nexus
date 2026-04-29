@@ -64,7 +64,7 @@ async fn running_to_degraded_to_running() {
     assert_eq!(m.current_state(), LifecycleState::Running);
 }
 
-/// Test: Alive → Stopping → Failed on ShutdownDrained (exit 0).
+/// Test: Alive → Stopping → Failed on `ShutdownDrained` (exit 0).
 #[tokio::test]
 async fn alive_to_stopping_to_failed_on_drained() {
     let m = StatigLifecycle::new_for_test();
@@ -88,7 +88,7 @@ async fn alive_to_stopping_to_failed_on_drained() {
     assert_eq!(m.exit_code(), Some(0));
 }
 
-/// Test: Stopping → Failed on ShutdownTimeout (exit 1).
+/// Test: Stopping → Failed on `ShutdownTimeout` (exit 1).
 #[tokio::test]
 async fn stopping_to_failed_on_timeout() {
     let m = StatigLifecycle::new_for_test();
@@ -107,7 +107,7 @@ async fn stopping_to_failed_on_timeout() {
     assert_eq!(m.exit_code(), Some(1));
 }
 
-/// Test: Starting handles ShutdownRequested → Stopping (abort-on-start).
+/// Test: Starting handles `ShutdownRequested` → Stopping (abort-on-start).
 #[tokio::test]
 async fn starting_to_stopping_on_shutdown_requested() {
     let m = StatigLifecycle::new_for_test();
@@ -120,7 +120,7 @@ async fn starting_to_stopping_on_shutdown_requested() {
     assert_eq!(m.current_state(), LifecycleState::Stopping);
 }
 
-/// Test: SubsystemFailed with retryable=false transitions to Failed.
+/// Test: `SubsystemFailed` with retryable=false transitions to Failed.
 #[tokio::test]
 async fn subsystem_failed_non_retryable_transitions_to_failed() {
     let m = StatigLifecycle::new_for_test();
@@ -135,7 +135,7 @@ async fn subsystem_failed_non_retryable_transitions_to_failed() {
     assert_eq!(m.exit_code(), Some(1));
 }
 
-/// Test: FatalError from alive superstate transitions to Failed.
+/// Test: `FatalError` from alive superstate transitions to Failed.
 #[tokio::test]
 async fn fatal_error_from_alive_to_failed() {
     let m = StatigLifecycle::new_for_test();
@@ -152,7 +152,7 @@ async fn fatal_error_from_alive_to_failed() {
     assert_eq!(m.exit_code(), Some(1));
 }
 
-/// Test: Multiple HealthDegraded events accumulate in Degraded state.
+/// Test: Multiple `HealthDegraded` events accumulate in Degraded state.
 #[tokio::test]
 async fn multiple_health_degraded_accumulate() {
     let m = StatigLifecycle::new_for_test();

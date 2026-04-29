@@ -16,7 +16,8 @@ pub enum AccountStatus {
 }
 
 impl AccountStatus {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Suspended => "suspended",
@@ -26,7 +27,7 @@ impl AccountStatus {
 }
 
 /// Subscription / entitlements tier (spec §5.1).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionTier {
     Free,
@@ -36,7 +37,8 @@ pub enum SubscriptionTier {
 }
 
 impl SubscriptionTier {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Free => "free",
             Self::Pro => "pro",
@@ -63,6 +65,7 @@ pub struct User {
 
 impl User {
     /// New user with active account and free tier.
+    #[must_use]
     pub fn register(user_id: &str, username: &str, email: &str, display_name: &str) -> Self {
         Self {
             schema_version: 1,
@@ -92,8 +95,10 @@ impl User {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
-    /// Soft-delete marker (account_status = deleted).
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    /// Soft-delete marker (`account_status` = deleted).
     pub fn mark_deleted(&mut self) -> Result<(), DomainError> {
         if self.account_status == AccountStatus::Deleted.as_str() {
             return Err(DomainError::AlreadyInState("deleted".to_string()));
@@ -102,7 +107,12 @@ impl User {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Change subscription tier (blocked when deleted).
     pub fn set_subscription_tier(&mut self, tier: SubscriptionTier) -> Result<(), DomainError> {
         if self.account_status == AccountStatus::Deleted.as_str() {

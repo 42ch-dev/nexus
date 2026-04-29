@@ -33,6 +33,14 @@ pub async fn list_presets(
 ///
 /// Running sessions continue on the previous graph (snapshot semantics);
 /// new sessions pick up the new graph.
+///
+/// # Errors
+///
+/// Returns `404 NOT_FOUND` if the preset ID does not exist.
+///
+/// # Panics
+///
+/// Does not panic; the `write_fmt` call is infallible for `String`.
 pub async fn reload_preset(
     Path(preset_id): Path<String>,
 ) -> Result<(StatusCode, Json<ReloadPresetResponse>), (StatusCode, String)> {
@@ -42,21 +50,23 @@ pub async fn reload_preset(
         nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps).map_err(|e| {
             (
                 StatusCode::NOT_FOUND,
-                format!("preset '{}' not found: {}", preset_id, e),
+                format!("preset '{preset_id}' not found: {e}"),
             )
         })?;
 
     // Compute the new source hash (blake3 hex).
-    let hash_hex = loaded
-        .source_hash
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    let mut hash_hex = String::with_capacity(64);
+    for b in &loaded.source_hash {
+        use std::fmt::Write;
+        hash_hex
+            .write_fmt(format_args!("{b:02x}"))
+            .expect("write to String should succeed");
+    }
 
     Ok((
         StatusCode::OK,
         Json(ReloadPresetResponse {
-            preset_id: preset_id.clone(),
+            preset_id,
             source_hash: hash_hex,
         }),
     ))
@@ -97,7 +107,8 @@ mod tests {
         let path = Path("novel-writing".to_string());
         let result = reload_preset(path).await;
         assert!(result.is_ok());
-        let (status, Json(resp)) = result.unwrap();
+        let (status, Json(resp)) =
+            result.expect("reload_preset should succeed for novel-writing preset");
         assert_eq!(status, StatusCode::OK);
         assert_eq!(resp.preset_id, "novel-writing");
         assert!(!resp.source_hash.is_empty());
@@ -110,7 +121,7 @@ mod tests {
         let path = Path("nonexistent-preset".to_string());
         let result = reload_preset(path).await;
         assert!(result.is_err());
-        let (status, msg) = result.unwrap_err();
+        let (status, msg) = result.expect_err("reload_preset should fail for nonexistent preset");
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(msg.contains("not found"), "msg: {msg}");
     }

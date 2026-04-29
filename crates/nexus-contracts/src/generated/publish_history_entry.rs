@@ -1,15 +1,15 @@
-//! Nexus PublishHistoryEntry
+//! `Nexus` `PublishHistoryEntry`
 //!
-//! Single publish history row (platform Publish API).
+//! `Single` publish history row (platform `Publish` `API`).
 //!
-//! @schema_version 1
-//! @source publish-history-entry.schema.json
+//! `@schema_version` 1
+//! `@source` publish-history-entry.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{PublishStoryOutcome};
 
-/// Single publish history row (platform Publish API).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Single` publish history row (platform `Publish` `API`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PublishHistoryEntry {
     pub occurred_at: String,

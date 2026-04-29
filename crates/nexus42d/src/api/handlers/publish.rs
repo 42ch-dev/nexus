@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Publish workflow — platform proxy via `SyncClient`.
 //!
 //! `POST /v1/local/publish/story` → `POST /v1/publish/story`
@@ -20,14 +22,14 @@ use nexus_sync::sync_client::SyncClient;
 use serde::Serialize;
 use tracing::info;
 
-fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
     }
 }
 
-fn nonempty(s: &str) -> bool {
+const fn nonempty(s: &str) -> bool {
     !s.is_empty()
 }
 
@@ -113,11 +115,11 @@ pub async fn story(
             reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN".into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let remote = client
         .publish_story(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(PublishStoryLocalResponse {
         success: true,
@@ -188,11 +190,11 @@ pub async fn history(
             reason: "Set NEXUS_SYNC_PLATFORM_URL and NEXUS_SYNC_PLATFORM_TOKEN".into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let remote = client
         .publish_history(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(PublishHistoryLocalResponse {
         success: true,
@@ -212,7 +214,7 @@ mod tests {
             result: None,
             error: Some("x".into()),
         };
-        let j = serde_json::to_string(&r).unwrap();
+        let j = serde_json::to_string(&r).expect("PublishStoryLocalResponse should serialize");
         assert!(j.contains("\"success\":false"));
     }
 }

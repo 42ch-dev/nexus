@@ -1,3 +1,5 @@
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening)]
 //! HTTP subsystem — wraps the axum listener.
 //!
 //! Real implementation that manages HTTP listener binding.
@@ -32,6 +34,7 @@ pub struct HttpSubsystem {
 
 impl HttpSubsystem {
     /// Create a new HTTP subsystem with the given port.
+    #[must_use]
     pub fn new(port: u16) -> Self {
         Self {
             port,
@@ -63,8 +66,7 @@ impl SubsystemBootstrap for HttpSubsystem {
         let state = self.state.lock().await;
         match &*state {
             HttpState::Running { .. } => SubsystemHealth::Up,
-            HttpState::NotStarted => SubsystemHealth::Down,
-            HttpState::Shutdown => SubsystemHealth::Down,
+            HttpState::NotStarted | HttpState::Shutdown => SubsystemHealth::Down,
         }
     }
 

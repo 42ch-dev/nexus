@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Read `~/.nexus42/config.toml` for active creator / workspace slug (same shape as CLI `CliConfig` subset).
 
 use nexus_contracts::local::domain::RuntimeMode;
@@ -39,7 +41,7 @@ impl CliConfigSnapshot {
                 std::fs::rename(&json_path, nexus_root.join("config.json.migrated"))?;
                 return Ok(Self::default());
             }
-            match serde_json::from_str::<CliConfigSnapshot>(&text) {
+            match serde_json::from_str::<Self>(&text) {
                 Ok(cfg) => {
                     // Write config.toml and rename legacy file
                     let toml_str = toml::to_string_pretty(&cfg)?;
@@ -59,10 +61,11 @@ impl CliConfigSnapshot {
         Ok(Self::default())
     }
 
+    #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> String {
         self.active_workspace_slug_by_creator
             .get(creator_id)
-            .map(|s| s.as_str())
+            .map(std::string::String::as_str)
             .filter(|s| !s.is_empty())
             .unwrap_or(DEFAULT_WORKSPACE_SLUG)
             .to_string()

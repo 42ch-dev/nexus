@@ -1,10 +1,10 @@
-//! LocalSet Bridge for `!Send` ACP SDK futures.
+//! `LocalSet` Bridge for `!Send` ACP SDK futures.
 //!
 //! The `agent-client-protocol` SDK produces `!Send` futures because they require
 //! `tokio::task::LocalSet` + `spawn_local`. This module provides a bridge between:
 //!
 //! - The **async tokio world** (where CLI commands run with `#[tokio::main]`)
-//! - The **LocalSet world** (where ACP SDK futures must run on a single thread)
+//! - The **`LocalSet` world** (where ACP SDK futures must run on a single thread)
 //!
 //! # Architecture
 //!
@@ -52,7 +52,7 @@
 //!
 //! When `LocalSetBridge` is dropped:
 //! 1. Send `None` (shutdown signal) via request channel
-//! 2. Wait for LocalSet thread to exit (join)
+//! 2. Wait for `LocalSet` thread to exit (join)
 
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,7 +75,7 @@ struct BridgeRequest {
     >,
 }
 
-/// Bridge between async tokio world and `!Send` LocalSet world.
+/// Bridge between async tokio world and `!Send` `LocalSet` world.
 ///
 /// This struct spawns a dedicated OS thread running a `LocalSet`, enabling
 /// execution of `!Send` futures (like those from `agent-client-protocol` SDK)
@@ -87,20 +87,25 @@ struct BridgeRequest {
 /// Cloning shares the sender channel and thread handle.
 #[derive(Clone)]
 pub struct LocalSetBridge {
-    /// Sender for requests to the LocalSet thread.
+    /// Sender for requests to the `LocalSet` thread.
     request_tx: mpsc::Sender<Option<BridgeRequest>>,
-    /// Handle to the LocalSet thread for graceful shutdown (shared).
+    /// Handle to the `LocalSet` thread for graceful shutdown (shared).
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Shutdown flag to ensure only one caller sends shutdown signal.
     shutdown_flag: Arc<AtomicBool>,
 }
 
 impl LocalSetBridge {
-    /// Create a new LocalSet bridge.
+    /// Create a new `LocalSet` bridge.
     ///
     /// This spawns a dedicated OS thread running a `LocalSet` that can execute
     /// `!Send` futures. The thread runs until the bridge is dropped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS thread cannot be spawned (system resources exhausted).
     #[allow(dead_code)]
+    #[must_use]
     pub fn new() -> Self {
         let (request_tx, mut request_rx) = mpsc::channel::<Option<BridgeRequest>>(16);
 
@@ -147,9 +152,9 @@ impl LocalSetBridge {
         }
     }
 
-    /// Execute a `!Send` future on the LocalSet thread.
+    /// Execute a `!Send` future on the `LocalSet` thread.
     ///
-    /// This method sends a request to the LocalSet thread and waits for the
+    /// This method sends a request to the `LocalSet` thread and waits for the
     /// result using a oneshot channel.
     ///
     /// # Arguments
@@ -257,12 +262,12 @@ impl Drop for LocalSetBridge {
                 let _ = self.request_tx.try_send(None);
 
                 // Wait for thread to exit with timeout
-                if let Some(handle) = self
+                let value = self
                     .thread_handle
                     .lock()
                     .expect("bridge shutdown: mutex poisoned — unrecoverable")
-                    .take()
-                {
+                    .take();
+                if let Some(handle) = value {
                     // Use channel to implement timeout on join
                     let (done_tx, done_rx) = std_mpsc::channel();
 
@@ -422,7 +427,7 @@ mod tests {
 
     /// Test: Bridge handles shutdown while request is in-flight.
     /// This tests that dropping the bridge doesn't panic even if requests
-    /// are pending or executing on the LocalSet thread.
+    /// are pending or executing on the `LocalSet` thread.
     #[tokio::test]
     async fn bridge_shutdown_while_request_in_flight() {
         let bridge = LocalSetBridge::new();
@@ -465,14 +470,13 @@ mod tests {
         let bridge = LocalSetBridge::new();
 
         // Execute a request that returns () (unit type)
-        let result: () = bridge
+        let _result: () = bridge
             .execute(|| Box::pin(async move {}))
             .await
             .expect("Bridge execute failed");
 
         // Just verify it completed without error
         // unit type has no value to compare
-        let _ = result;
     }
 
     /// Test: Bridge handles error propagation correctly.

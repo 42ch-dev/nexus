@@ -1,4 +1,4 @@
-//! RpcTransport trait + concrete impls for worker IPC.
+//! `RpcTransport` trait + concrete impls for worker IPC.
 //!
 //! The `RpcTransport` trait is the **insurance layer** — callers depend on
 //! `&mut dyn RpcTransport`, never on `jsonrpsee::*` directly. This allows
@@ -84,6 +84,7 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     /// Create a new stdio transport from a child process's pipe halves.
+    #[must_use]
     pub fn new(stdin: tokio::process::ChildStdin, stdout: tokio::process::ChildStdout) -> Self {
         // Use LinesCodec with a generous max-line-length (1 MiB).
         let codec = LinesCodec::new_with_max_length(1024 * 1024);
@@ -177,6 +178,7 @@ pub struct DuplexTransport {
 
 impl DuplexTransport {
     /// Create a connected pair: `(client, server)`.
+    #[must_use]
     pub fn new_pair() -> (Self, Self) {
         let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
         let client = Self::from_stream(client_stream);

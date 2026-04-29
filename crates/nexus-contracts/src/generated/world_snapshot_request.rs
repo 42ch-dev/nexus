@@ -1,14 +1,14 @@
-//! Nexus WorldSnapshotRequest
+//! `Nexus` `WorldSnapshotRequest`
 //!
-//! Request body for POST /v1/worlds/snapshot — capture a read-only snapshot cursor with optional branch and size limits (platform API).
+//! `Request` body for `POST` /v1/worlds/snapshot — capture a read-only snapshot cursor with optional branch and size limits (platform `API`).
 //!
-//! @schema_version 1
-//! @source world-snapshot-request.schema.json
+//! `@schema_version` 1
+//! `@source` world-snapshot-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for POST /v1/worlds/snapshot — capture a read-only snapshot cursor with optional branch and size limits (platform API).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for `POST` /v1/worlds/snapshot — capture a read-only snapshot cursor with optional branch and size limits (platform `API`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldSnapshotRequest {
     pub schema_version: u32,

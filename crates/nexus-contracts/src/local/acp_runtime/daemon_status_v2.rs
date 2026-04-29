@@ -1,12 +1,12 @@
-//! DaemonStatusV2 — local-only daemon status response.
+//! `DaemonStatusV2` — local-only daemon status response.
 //!
-//! Response shape for GET /v1/local/daemon/status. Superset of v1 running-probe,
+//! Response shape for `GET /v1/local/daemon/status`. Superset of v1 running-probe,
 //! wire-compatible. Per daemon-lifecycle-api-v2.md §7.1.
 
 use serde::{Deserialize, Serialize};
 
 /// Response shape for GET /v1/local/daemon/status.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DaemonStatusV2 {
     pub schema_version: u32,
@@ -41,7 +41,7 @@ pub enum LifecycleState {
 }
 
 /// Degraded subsystems information.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DegradedInfo {
     pub subsystems: Vec<DegradedSubsystem>,
@@ -61,7 +61,7 @@ pub enum DegradedSubsystem {
 }
 
 /// Health status for each subsystem.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SubsystemHealth {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +79,7 @@ pub struct SubsystemHealth {
 }
 
 /// Subsystem health entry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SubsystemHealthEntry {
     pub status: HealthStatus,

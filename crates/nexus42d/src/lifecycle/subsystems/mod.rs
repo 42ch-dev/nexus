@@ -1,8 +1,10 @@
+//! Mutex lock patterns have scoped drops.
+#![allow(clippy::significant_drop_tightening)]
 //! Subsystem bootstrap implementations.
 //!
 //! Per spec §5, each subsystem implements `SubsystemBootstrap` for
 //! lifecycle-controlled startup/shutdown. Real implementations where possible,
-//! mock stubs for WS2 components (Engine, WorkerMgr) not yet available.
+//! mock stubs for WS2 components (Engine, `WorkerMgr`) not yet available.
 
 mod db;
 mod http;
@@ -35,7 +37,7 @@ pub enum SubsystemHealth {
 
 /// Trait for subsystem lifecycle management.
 ///
-/// Each managed subsystem (HTTP, DB, Sync, Engine, WorkerMgr) implements this trait.
+/// Each managed subsystem (HTTP, DB, Sync, Engine, `WorkerMgr`) implements this trait.
 /// The lifecycle HSM calls these methods during state transitions.
 #[async_trait]
 pub trait SubsystemBootstrap: Send + Sync {

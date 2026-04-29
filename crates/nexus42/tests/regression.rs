@@ -12,7 +12,7 @@ use tempfile::TempDir;
 // R1: local_only anonymous identity end-to-end
 // =============================================================================
 
-/// Regression R1: Anonymous identity works and sync is blocked in local_only mode
+/// Regression R1: Anonymous identity works and sync is blocked in `local_only` mode
 #[test]
 fn r1_anonymous_identity_e2e() {
     let tmp = TempDir::new().unwrap();
@@ -135,7 +135,7 @@ fn r2_persistent_identity_e2e() {
         .stdout(predicate::str::contains("local_only"));
 }
 
-/// Regression R2: Persistent identity persists in SQLite state.db
+/// Regression R2: Persistent identity persists in `SQLite` state.db
 #[test]
 fn r2_persistent_identity_config_persists() {
     let tmp = TempDir::new().unwrap();
@@ -259,7 +259,7 @@ fn r3_local_truth_chain() {
 /// Regression R3: context assemble-local executes without panic or skip
 ///
 /// Validates the clap -h flag collision fix (hint short alias removed)
-/// and that assemble-local runs successfully in a local_only workspace.
+/// and that assemble-local runs successfully in a `local_only` workspace.
 #[test]
 fn r3_context_assemble_local_executes_without_placeholder_skip() {
     let tmp = TempDir::new().unwrap();
@@ -370,7 +370,7 @@ fn r3_soul_validation() {
 // R5: No-platform dependency guard for local_only path
 // =============================================================================
 
-/// Regression R5: Platform sync push blocked in local_only mode
+/// Regression R5: Platform sync push blocked in `local_only` mode
 #[test]
 fn r5_platform_guard_blocks_sync_push() {
     let tmp = TempDir::new().unwrap();
@@ -397,7 +397,7 @@ fn r5_platform_guard_blocks_sync_push() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// Regression R5: Platform publish works in local_only mode (help only, no daemon needed)
+/// Regression R5: Platform publish works in `local_only` mode (help only, no daemon needed)
 #[test]
 fn r5_platform_guard_publish_help() {
     let tmp = TempDir::new().unwrap();
@@ -423,7 +423,7 @@ fn r5_platform_guard_publish_help() {
         .success();
 }
 
-/// Regression R5: Platform explore help works in local_only mode
+/// Regression R5: Platform explore help works in `local_only` mode
 #[test]
 fn r5_platform_guard_explore_help() {
     let tmp = TempDir::new().unwrap();
@@ -449,7 +449,7 @@ fn r5_platform_guard_explore_help() {
         .success();
 }
 
-/// Regression R5: local sync status works in local_only mode
+/// Regression R5: local sync status works in `local_only` mode
 #[test]
 fn r5_platform_guard_sync_status_works() {
     let tmp = TempDir::new().unwrap();
@@ -476,7 +476,7 @@ fn r5_platform_guard_sync_status_works() {
         .stdout(predicate::str::contains("Daemon"));
 }
 
-/// Regression R5: local_only mode persists across sessions
+/// Regression R5: `local_only` mode persists across sessions
 #[test]
 fn r5_local_only_mode_persists() {
     let tmp = TempDir::new().unwrap();

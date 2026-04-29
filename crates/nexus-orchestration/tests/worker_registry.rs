@@ -1,4 +1,4 @@
-//! Integration tests for WorkerRegistry — multi-creator worker index.
+//! Integration tests for `WorkerRegistry` — multi-creator worker index.
 //!
 //! Tests:
 //! - `registry_get_or_spawn_creates_worker`: spawning for a new creator inserts a handle.
@@ -61,8 +61,7 @@ impl WorkerSpawner for MockSpawner {
                                 "result": { "echo_method": method }
                             });
                             let reply = serde_json::to_string(&response).expect("serialize");
-                            let mut s = server.lock().await;
-                            let _ = s.send(reply).await;
+                            let _ = server.lock().await.send(reply).await;
                         }
                     }
                     None => break,

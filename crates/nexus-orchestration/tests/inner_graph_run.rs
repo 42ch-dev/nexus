@@ -1,18 +1,18 @@
-//! T5 test: Outer state with inner_graph runs to completion and exports output.
+//! T5 test: Outer state with `inner_graph` runs to completion and exports output.
 //!
 //! Validates:
-//! - InnerGraphTask spawns a child session
+//! - `InnerGraphTask` spawns a child session
 //! - Child session polls to completion
-//! - output_binding is read from child context and written to parent
+//! - `output_binding` is read from child context and written to parent
 //! - `engine.spawn_child_session` + `engine.get_context` work on trait + impl
 
 use nexus_orchestration::engine::StepOutcome;
 use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
-/// Preset with one outer state A that enters an inner_graph `my_graph`.
+/// Preset with one outer state A that enters an `inner_graph` `my_graph`.
 /// The inner graph has three nodes: n1 -> n2 -> n3 (rule-only, no ACP).
-/// output_binding: n3.text
+/// `output_binding`: n3.text
 const INNER_GRAPH_PRESET_YAML: &str = r#"
 preset:
   id: inner-graph-test
@@ -90,9 +90,10 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
             }
         }
 
-        if steps > 32 {
-            panic!("did not reach terminal state after {steps} steps");
-        }
+        assert!(
+            steps <= 32,
+            "did not reach terminal state after {steps} steps"
+        );
     }
 
     // Verify completion.
@@ -119,7 +120,7 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
     );
 }
 
-/// Test that spawn_child_session and get_context work via the trait.
+/// Test that `spawn_child_session` and `get_context` work via the trait.
 #[tokio::test]
 async fn spawn_child_and_get_context() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());

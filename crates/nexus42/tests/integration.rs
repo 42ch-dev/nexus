@@ -96,7 +96,7 @@ fn init_workspace_idempotent() {
         .stdout(predicate::str::contains("already registered"));
 }
 
-/// Test auth status (no daemon running — uses local AuthStore)
+/// Test auth status (no daemon running — uses local `AuthStore`)
 #[test]
 fn auth_status_not_logged_in() {
     Command::cargo_bin("nexus42")
@@ -109,7 +109,7 @@ fn auth_status_not_logged_in() {
         .stdout(predicate::str::contains("Not logged in"));
 }
 
-/// Test auth login with token (writes to local AuthStore, no daemon)
+/// Test auth login with token (writes to local `AuthStore`, no daemon)
 #[test]
 fn auth_token_login() {
     let tmp = TempDir::new().unwrap();
@@ -128,7 +128,7 @@ fn auth_token_login() {
         .stdout(predicate::str::contains("token stored"));
 }
 
-/// Test auth logout (clears local AuthStore, no daemon)
+/// Test auth logout (clears local `AuthStore`, no daemon)
 #[test]
 fn auth_logout() {
     let tmp = TempDir::new().unwrap();
@@ -269,7 +269,7 @@ fn daemon_status_not_running() {
         .stdout(predicate::str::contains("Not running"));
 }
 
-/// Test sync status works in local_only mode (local-only query, no platform guard)
+/// Test sync status works in `local_only` mode (local-only query, no platform guard)
 #[test]
 fn sync_status_without_daemon() {
     Command::cargo_bin("nexus42")
@@ -281,7 +281,7 @@ fn sync_status_without_daemon() {
         .stdout(predicate::str::contains("Daemon: not running"));
 }
 
-/// Test sync push is blocked in local_only mode with PlatformOperationProhibited error
+/// Test sync push is blocked in `local_only` mode with `PlatformOperationProhibited` error
 #[test]
 fn sync_push_blocked_in_local_only() {
     let tmp = TempDir::new().unwrap();
@@ -385,7 +385,7 @@ fn clone_help() {
         .stdout(predicate::str::contains("--yes"));
 }
 
-/// Test clone requires world_ref argument
+/// Test clone requires `world_ref` argument
 #[test]
 fn clone_requires_world_ref() {
     let tmp = TempDir::new().unwrap();
@@ -399,7 +399,7 @@ fn clone_requires_world_ref() {
 }
 
 /// Test clone dry-run without daemon (prints JSON, no daemon needed).
-/// Uses --source local to avoid platform requirement in local_only mode (S-008).
+/// Uses --source local to avoid platform requirement in `local_only` mode (S-008).
 #[test]
 fn clone_dry_run_no_daemon() {
     let tmp = TempDir::new().unwrap();
@@ -417,8 +417,8 @@ fn clone_dry_run_no_daemon() {
         .stdout(predicate::str::contains("\"source\""));
 }
 
-/// Test clone with --source platform in local_only mode returns error.
-/// S-008: Platform clone is blocked in local_only mode.
+/// Test clone with --source platform in `local_only` mode returns error.
+/// S-008: Platform clone is blocked in `local_only` mode.
 #[test]
 fn clone_dry_run_source_platform_blocked_in_local_only() {
     let tmp = TempDir::new().unwrap();
@@ -452,7 +452,7 @@ fn clone_dry_run_source_local() {
         .stdout(predicate::str::contains("local"));
 }
 
-/// Test clone rejects invalid world_ref format
+/// Test clone rejects invalid `world_ref` format
 #[test]
 fn clone_rejects_invalid_world_ref() {
     let tmp = TempDir::new().unwrap();
@@ -481,7 +481,7 @@ fn config_help() {
         .stdout(predicate::str::contains("path"));
 }
 
-/// Test config get existing key (runtime_mode has default)
+/// Test config get existing key (`runtime_mode` has default)
 #[test]
 fn config_get_runtime_mode() {
     let tmp = TempDir::new().unwrap();
@@ -643,7 +643,7 @@ fn debug_dump_workspace_toml_format() {
         .stdout(predicate::str::contains("config"));
 }
 
-/// Test debug replay-delta requires delta_id
+/// Test debug replay-delta requires `delta_id`
 #[test]
 fn debug_replay_delta_requires_id() {
     let tmp = TempDir::new().unwrap();
@@ -798,7 +798,7 @@ fn identity_help() {
         .stdout(predicate::str::contains("unlink"));
 }
 
-/// Test identity unlink requires creator_id
+/// Test identity unlink requires `creator_id`
 #[test]
 fn identity_unlink_requires_creator_id() {
     let tmp = TempDir::new().unwrap();
@@ -812,7 +812,7 @@ fn identity_unlink_requires_creator_id() {
         .stderr(predicate::str::contains("CREATOR_ID"));
 }
 
-/// Test identity unlink with nonexistent creator_id (local database exists but identity not found)
+/// Test identity unlink with nonexistent `creator_id` (local database exists but identity not found)
 #[test]
 fn identity_unlink_nonexistent_creator() {
     let tmp = TempDir::new().unwrap();

@@ -13,14 +13,18 @@ use nexus_domain::{
 #[cfg(test)]
 use nexus_domain::DegradationPolicy;
 
-/// Validate WorldId format: must start with 'wld_' followed by alphanumeric characters
+/// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
+///
+/// # Errors
+///
+/// Returns an error string if:
+/// - The input does not start with 'wld_' prefix
+/// - The suffix after 'wld_' is empty
+/// - The suffix contains non-alphanumeric characters
 pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
     // Check prefix
     if !s.starts_with("wld_") {
-        return Err(format!(
-            "WorldId must start with 'wld_' prefix (got '{}')",
-            s
-        ));
+        return Err(format!("WorldId must start with 'wld_' prefix (got '{s}')"));
     }
 
     // Check that there's content after prefix
@@ -30,10 +34,9 @@ pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
     }
 
     // Check that suffix contains only alphanumeric characters
-    if !suffix.chars().all(|c| c.is_alphanumeric()) {
+    if !suffix.chars().all(char::is_alphanumeric) {
         return Err(format!(
-            "WorldId must contain only alphanumeric characters after 'wld_' prefix (got '{}')",
-            suffix
+            "WorldId must contain only alphanumeric characters after 'wld_' prefix (got '{suffix}')"
         ));
     }
 
@@ -103,6 +106,13 @@ pub enum ContextCommand {
 }
 
 /// Run context command
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Context assembly fails (platform API errors, file I/O errors)
+/// - Degradation guard checks fail
+/// - Configuration cannot be loaded
 pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ContextCommand::Assemble {
@@ -136,7 +146,8 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Create a DegradationGuard from config, restoring from persisted snapshot if available.
+/// Create a `DegradationGuard` from config, restoring from persisted snapshot if available.
+#[must_use]
 pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
     let mode = config.runtime_mode();
 
@@ -168,10 +179,10 @@ fn save_degradation_guard(config: &mut CliConfig, guard: &DegradationGuard) -> R
 /// Mode-aware context assembly with degradation support (T6.7 + T6.8).
 ///
 /// Routes by `runtime_mode`:
-/// - `local_only` → Stage0Assembly directly
-/// - `local_first` / `cloud_enhanced` → TwoStageAssembly with fallback to Stage0
+/// - `local_only` → `Stage0Assembly` directly
+/// - `local_first` / `cloud_enhanced` → `TwoStageAssembly` with fallback to Stage0
 ///
-/// Records platform results in DegradationGuard for degradation tracking.
+/// Records platform results in `DegradationGuard` for degradation tracking.
 async fn assemble_local_with_routing(
     config: &CliConfig,
     max_tokens: Option<usize>,
@@ -190,7 +201,7 @@ async fn assemble_local_with_routing(
         );
     }
 
-    println!("{}", context);
+    println!("{context}");
 
     // Persist degradation state
     let mut cfg = config.clone();
@@ -204,7 +215,14 @@ async fn assemble_local_with_routing(
 /// Dispatches to the appropriate assembly strategy based on the current
 /// runtime mode (which may have been downgraded by the degradation guard).
 /// In non-local-only modes, attempts a platform call and falls back to
-/// Stage0Assembly if the platform is unavailable.
+/// `Stage0Assembly` if the platform is unavailable.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Local file scanning or reading fails during Stage-0 assembly
+/// - Configuration cannot be accessed
+/// - Degradation guard state cannot be persisted
 pub async fn assemble_context(
     config: &CliConfig,
     guard: &mut DegradationGuard,
@@ -229,33 +247,28 @@ pub async fn assemble_context(
             // Two-stage: try platform, fallback to Stage0
             let platform_result = try_platform_assemble(config, hint).await;
 
-            match platform_result {
-                Some(response) => {
-                    guard.record_platform_result(true, None);
-                    let stage0 =
-                        build_stage0_from_local(config, hint, max_tokens, include_fragments)
-                            .await?;
-                    let two_stage = build_two_stage_from_local(&stage0, response, mode);
-                    Ok(two_stage.assemble())
-                }
-                None => {
-                    // Platform failed — record and fall back to Stage0
-                    guard.record_platform_result(false, Some("assemble unavailable".to_string()));
-                    let stage0 =
-                        build_stage0_from_local(config, hint, max_tokens, include_fragments)
-                            .await?;
-                    Ok(if max_tokens.is_some() {
-                        stage0.assemble_with_truncation()
-                    } else {
-                        stage0.assemble()
-                    })
-                }
+            if let Some(response) = platform_result {
+                guard.record_platform_result(true, None);
+                let stage0 =
+                    build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
+                let two_stage = build_two_stage_from_local(&stage0, response, mode);
+                Ok(two_stage.assemble())
+            } else {
+                // Platform failed — record and fall back to Stage0
+                guard.record_platform_result(false, Some("assemble unavailable".to_string()));
+                let stage0 =
+                    build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
+                Ok(if max_tokens.is_some() {
+                    stage0.assemble_with_truncation()
+                } else {
+                    stage0.assemble()
+                })
             }
         }
     }
 }
 
-/// Build a Stage0Assembly from local sources (SOUL.md, memories, fragments).
+/// Build a `Stage0Assembly` from local sources (SOUL.md, memories, fragments).
 async fn build_stage0_from_local(
     config: &CliConfig,
     hint: Option<&str>,
@@ -309,10 +322,7 @@ async fn build_stage0_from_local(
 /// Returns `Some(AssembleResponse)` if the platform call succeeds,
 /// or `None` if the daemon is unavailable or the call fails.
 /// This is used for two-stage assembly in `local_first`/`cloud_enhanced` modes.
-async fn try_platform_assemble(
-    config: &CliConfig,
-    _hint: Option<&str>,
-) -> Option<AssembleResponse> {
+async fn try_platform_assemble(config: &CliConfig, hint: Option<&str>) -> Option<AssembleResponse> {
     let client = DaemonClient::from_config(config);
 
     // Use call_assemble which sends the request shape the daemon expects
@@ -332,7 +342,7 @@ async fn try_platform_assemble(
     }
 
     match client
-        .call_assemble(creator_id, workspace_slug, &runtime_mode_str, _hint)
+        .call_assemble(creator_id, workspace_slug, &runtime_mode_str, hint)
         .await
     {
         Ok(Some(response)) => Some(response),
@@ -347,7 +357,7 @@ async fn try_platform_assemble(
     }
 }
 
-/// Build a TwoStageAssembly from local context data and a platform response.
+/// Build a `TwoStageAssembly` from local context data and a platform response.
 fn build_two_stage_from_local(
     local: &Stage0Assembly,
     platform_response: AssembleResponse,
@@ -424,10 +434,12 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
-    /// Test valid WorldId formats
+    /// Test valid `WorldId` formats
     #[test]
     fn validate_world_id_accepts_valid_formats() {
         // Valid: starts with wld_ followed by alphanumeric
@@ -437,7 +449,7 @@ mod tests {
         assert!(validate_world_id("wld_1").is_ok());
     }
 
-    /// Test invalid WorldId formats - missing prefix
+    /// Test invalid `WorldId` formats - missing prefix
     #[test]
     fn validate_world_id_rejects_missing_prefix() {
         let result = validate_world_id("abc123");
@@ -445,7 +457,7 @@ mod tests {
         assert!(result.unwrap_err().contains("must start with 'wld_'"));
     }
 
-    /// Test invalid WorldId formats - wrong prefix
+    /// Test invalid `WorldId` formats - wrong prefix
     #[test]
     fn validate_world_id_rejects_wrong_prefix() {
         let result = validate_world_id("world_123");
@@ -453,7 +465,7 @@ mod tests {
         assert!(result.unwrap_err().contains("must start with 'wld_'"));
     }
 
-    /// Test invalid WorldId formats - empty
+    /// Test invalid `WorldId` formats - empty
     #[test]
     fn validate_world_id_rejects_empty() {
         let result = validate_world_id("");
@@ -461,7 +473,7 @@ mod tests {
         assert!(result.unwrap_err().contains("must start with 'wld_'"));
     }
 
-    /// Test invalid WorldId formats - special characters
+    /// Test invalid `WorldId` formats - special characters
     #[test]
     fn validate_world_id_rejects_special_characters() {
         let result = validate_world_id("wld_test-123");
@@ -473,23 +485,25 @@ mod tests {
         assert!(result.unwrap_err().contains("alphanumeric characters"));
     }
 
-    /// Test invalid WorldId formats - only prefix
+    /// Test invalid `WorldId` formats - only prefix
     #[test]
     fn validate_world_id_rejects_only_prefix() {
         let result = validate_world_id("wld_");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("alphanumeric characters"));
+        assert!(result
+            .expect_err("validation should fail")
+            .contains("alphanumeric characters"));
     }
 
-    /// Test that AssembleLocal variant exists with new hint field
+    /// Test that `AssembleLocal` variant exists with new hint field
     #[test]
     fn context_command_assemble_local_exists() {
-        let _cmd = ContextCommand::AssembleLocal {
+        let _ = ContextCommand::AssembleLocal {
             max_tokens: Some(1000),
             include_fragments: true,
             hint: Some("write chapter 3".to_string()),
         };
-        let _cmd = ContextCommand::AssembleLocal {
+        let _ = ContextCommand::AssembleLocal {
             max_tokens: None,
             include_fragments: false,
             hint: None,
@@ -498,7 +512,7 @@ mod tests {
 
     // ── T6.7 / T6.8: Mode-aware routing tests ────────────────────────────
 
-    /// Helper: create a minimal Stage0Assembly for routing tests.
+    /// Helper: create a minimal `Stage0Assembly` for routing tests.
     fn make_test_stage0() -> Stage0Assembly {
         Stage0Assembly {
             personality: "Creative and bold.".to_string(),
@@ -511,7 +525,7 @@ mod tests {
         }
     }
 
-    /// Helper: create a platform AssembleResponse for routing tests.
+    /// Helper: create a platform `AssembleResponse` for routing tests.
     fn make_platform_response() -> AssembleResponse {
         use nexus_domain::context_assembly::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
 
@@ -534,7 +548,7 @@ mod tests {
         }
     }
 
-    /// T6.8: local_only mode uses Stage0Assembly directly.
+    /// T6.8: `local_only` mode uses `Stage0Assembly` directly.
     #[tokio::test]
     async fn context_assemble_local_only_uses_stage0() {
         let mode = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
@@ -569,7 +583,7 @@ mod tests {
         assert_eq!(guard.failure_count(), 0);
     }
 
-    /// T6.8: cloud_enhanced mode attempts TwoStageAssembly with platform data.
+    /// T6.8: `cloud_enhanced` mode attempts `TwoStageAssembly` with platform data.
     #[tokio::test]
     async fn context_assemble_cloud_enhanced_attempts_two_stage() {
         let mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
@@ -667,7 +681,7 @@ mod tests {
         );
     }
 
-    /// local_first mode falls back to Stage0 on platform failure.
+    /// `local_first` mode falls back to Stage0 on platform failure.
     #[tokio::test]
     async fn context_assemble_local_first_fallback() {
         let mode = DomainRuntimeMode::new(RuntimeMode::LocalFirst);
@@ -683,7 +697,7 @@ mod tests {
         );
     }
 
-    /// build_two_stage_from_local produces correct TwoStageAssembly.
+    /// `build_two_stage_from_local` produces correct `TwoStageAssembly`.
     #[test]
     fn build_two_stage_preserves_local_data() {
         let stage0 = make_test_stage0();
@@ -700,7 +714,7 @@ mod tests {
         assert_eq!(two_stage.runtime_mode, mode);
     }
 
-    /// create_degradation_guard restores from persisted snapshot.
+    /// `create_degradation_guard` restores from persisted snapshot.
     ///
     /// C-001: For non-Normal state, restoration must NOT replay failures
     /// (which would trigger unintended re-degradation).

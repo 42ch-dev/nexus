@@ -82,6 +82,12 @@ impl CliConfig {
     /// Migration: if `config.toml` does not exist but `config.json` does,
     /// the JSON file is read, converted to TOML, and the original is renamed
     /// to `config.json.migrated`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Nexus home directory cannot be resolved
+    /// - File read operations fail
     pub fn load() -> anyhow::Result<Self> {
         let config_path = Self::config_path()?;
         let nexus = nexus_home()?;
@@ -92,7 +98,7 @@ impl CliConfig {
             if content.trim().is_empty() {
                 return Ok(Self::default());
             }
-            return match toml::from_str::<CliConfig>(&content) {
+            return match toml::from_str::<Self>(&content) {
                 Ok(cfg) => Ok(cfg),
                 Err(e) => {
                     // Backup corrupted file and re-initialize with defaults
@@ -118,7 +124,7 @@ impl CliConfig {
                 std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
                 return Ok(Self::default());
             }
-            match serde_json::from_str::<CliConfig>(&content) {
+            match serde_json::from_str::<Self>(&content) {
                 Ok(cfg) => {
                     // Write config.toml and rename legacy file
                     let toml_str = toml::to_string_pretty(&cfg)?;
@@ -149,16 +155,26 @@ impl CliConfig {
     }
 
     /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
-    pub fn runtime_mode(&self) -> DomainRuntimeMode {
+    #[must_use]
+    pub const fn runtime_mode(&self) -> DomainRuntimeMode {
         self.runtime_mode
     }
 
     /// Persisted degradation guard snapshot, if available.
-    pub fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
+    #[must_use]
+    pub const fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
         self.degradation_snapshot.as_ref()
     }
 
-    /// Save configuration to the standard location
+    /// Save configuration to the standard location.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Config file path cannot be resolved
+    /// - Directory creation fails
+    /// - TOML serialization fails
+    /// - File write operation fails
     pub fn save(&self) -> anyhow::Result<()> {
         let config_path = Self::config_path()?;
         if let Some(parent) = config_path.parent() {
@@ -169,21 +185,30 @@ impl CliConfig {
         Ok(())
     }
 
-    /// Path to the configuration file
+    /// Path to the configuration file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     fn config_path() -> anyhow::Result<PathBuf> {
         Ok(nexus_home()?.join("config.toml"))
     }
 
-    /// Public path to the configuration file (for `config path` command)
+    /// Public path to the configuration file (for `config path` command).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     pub fn path() -> anyhow::Result<PathBuf> {
         Self::config_path()
     }
 
     /// Operational workspace slug for `creator_id` (falls back to [`DEFAULT_WORKSPACE_SLUG`]).
+    #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> &str {
         self.active_workspace_slug_by_creator
             .get(creator_id)
-            .map(|s| s.as_str())
+            .map(std::string::String::as_str)
             .filter(|s| !s.is_empty())
             .unwrap_or(DEFAULT_WORKSPACE_SLUG)
     }
@@ -191,7 +216,11 @@ impl CliConfig {
     /// Get a configuration value by key name.
     /// Returns the value as a JSON string representation.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
-    /// For fields with defaults (platform_url, daemon_url), returns the default if empty.
+    /// For fields with defaults (`platform_url`, `daemon_url`), returns the default if empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is not in [`VALID_CONFIG_KEYS`] or is unsupported.
     pub fn get(&self, key: &str) -> anyhow::Result<String> {
         Self::validate_key(key)?;
         match key {
@@ -212,12 +241,18 @@ impl CliConfig {
                 self.daemon_url.clone()
             }),
             "runtime_mode" => Ok(self.runtime_mode.to_string()),
-            _ => Err(anyhow::anyhow!("Unsupported config key: {}", key)),
+            _ => Err(anyhow::anyhow!("Unsupported config key: {key}")),
         }
     }
 
     /// Set a configuration value by key name.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The key is not in [`VALID_CONFIG_KEYS`]
+    /// - The value is invalid for the key (e.g., invalid `runtime_mode`)
     pub fn set(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
         Self::validate_key(key)?;
         match key {
@@ -243,9 +278,9 @@ impl CliConfig {
             }
             "runtime_mode" => {
                 self.runtime_mode = DomainRuntimeMode::parse(value)
-                    .map_err(|e| anyhow::anyhow!("Invalid runtime_mode '{}': {}", value, e))?;
+                    .map_err(|e| anyhow::anyhow!("Invalid runtime_mode '{value}': {e}"))?;
             }
-            _ => Err(anyhow::anyhow!("Unsupported config key: {}", key))?,
+            _ => Err(anyhow::anyhow!("Unsupported config key: {key}"))?,
         }
         Ok(())
     }
@@ -253,6 +288,10 @@ impl CliConfig {
     /// Unset (remove) a configuration key.
     /// MVP: only supports top-level fields listed in [`VALID_CONFIG_KEYS`].
     /// For string fields, clears to empty/default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is not in [`VALID_CONFIG_KEYS`].
     pub fn unset(&mut self, key: &str) -> anyhow::Result<()> {
         Self::validate_key(key)?;
         match key {
@@ -271,21 +310,21 @@ impl CliConfig {
             "runtime_mode" => {
                 self.runtime_mode = default_runtime_mode();
             }
-            _ => Err(anyhow::anyhow!("Unsupported config key: {}", key))?,
+            _ => Err(anyhow::anyhow!("Unsupported config key: {key}"))?,
         }
         Ok(())
     }
 
     /// Validate that a key is in the allowed set.
     fn validate_key(key: &str) -> anyhow::Result<()> {
-        if !VALID_CONFIG_KEYS.contains(&key) {
+        if VALID_CONFIG_KEYS.contains(&key) {
+            Ok(())
+        } else {
             Err(anyhow::anyhow!(
                 "Invalid config key '{}'. Valid keys: {}",
                 key,
                 VALID_CONFIG_KEYS.join(", ")
             ))
-        } else {
-            Ok(())
         }
     }
 }
@@ -322,10 +361,12 @@ mod tests {
 
     #[test]
     fn runtime_mode_roundtrips_via_toml() {
-        let mut c = CliConfig::default();
-        c.runtime_mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
-        let toml_str = toml::to_string(&c).unwrap();
-        let back: CliConfig = toml::from_str(&toml_str).unwrap();
+        let c = CliConfig {
+            runtime_mode: DomainRuntimeMode::parse("cloud_enhanced").expect("valid runtime_mode"),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&c).expect("toml serialize");
+        let back: CliConfig = toml::from_str(&toml_str).expect("toml deserialize");
         assert_eq!(back.runtime_mode().to_string(), "cloud_enhanced");
     }
 
@@ -347,24 +388,26 @@ mod tests {
         use nexus_domain::degradation::DegradationState;
         use nexus_domain::HealthCheckSnapshot;
 
-        let mut c = CliConfig::default();
-        c.degradation_snapshot = Some(DegradationSnapshot {
-            state: DegradationState::DegradedLevel1,
-            failure_count: 3,
-            last_health_check: Some(HealthCheckSnapshot {
-                is_healthy: false,
-                checked_at: "2026-04-15T10:30:00Z".to_string(),
+        let c = CliConfig {
+            degradation_snapshot: Some(DegradationSnapshot {
+                state: DegradationState::DegradedLevel1,
+                failure_count: 3,
+                last_health_check: Some(HealthCheckSnapshot {
+                    is_healthy: false,
+                    checked_at: "2026-04-15T10:30:00Z".to_string(),
+                }),
+                last_upgrade_attempt: None,
             }),
-            last_upgrade_attempt: None,
-        });
+            ..Default::default()
+        };
 
-        let toml_str = toml::to_string(&c).unwrap();
-        let back: CliConfig = toml::from_str(&toml_str).unwrap();
+        let toml_str = toml::to_string(&c).expect("toml serialize");
+        let back: CliConfig = toml::from_str(&toml_str).expect("toml deserialize");
 
-        let snap = back.degradation_snapshot().unwrap();
+        let snap = back.degradation_snapshot().expect("degradation_snapshot");
         assert_eq!(snap.state, DegradationState::DegradedLevel1);
         assert_eq!(snap.failure_count, 3);
-        let hc = snap.last_health_check.as_ref().unwrap();
+        let hc = snap.last_health_check.as_ref().expect("health_check");
         assert!(!hc.is_healthy);
         assert_eq!(hc.checked_at, "2026-04-15T10:30:00Z");
     }
@@ -393,11 +436,19 @@ mod tests {
 
     #[test]
     fn get_optional_field_returns_value_when_set() {
-        let mut c = CliConfig::default();
-        c.workspace_path = Some(PathBuf::from("/test/path"));
-        c.active_creator_id = Some("ctr_test".to_string());
-        assert_eq!(c.get("workspace_path").unwrap(), "/test/path");
-        assert_eq!(c.get("active_creator_id").unwrap(), "ctr_test");
+        let c = CliConfig {
+            workspace_path: Some(PathBuf::from("/test/path")),
+            active_creator_id: Some("ctr_test".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            c.get("workspace_path").expect("get workspace_path"),
+            "/test/path"
+        );
+        assert_eq!(
+            c.get("active_creator_id").expect("get active_creator_id"),
+            "ctr_test"
+        );
     }
 
     #[test]
@@ -433,49 +484,61 @@ mod tests {
 
     #[test]
     fn set_optional_field_to_empty_clears_it() {
-        let mut c = CliConfig::default();
-        c.workspace_path = Some(PathBuf::from("/test"));
-        c.set("workspace_path", "").unwrap();
+        let mut c = CliConfig {
+            workspace_path: Some(PathBuf::from("/test")),
+            ..Default::default()
+        };
+        c.set("workspace_path", "").expect("set workspace_path");
         assert!(c.workspace_path.is_none());
         c.active_creator_id = Some("ctr_old".to_string());
-        c.set("active_creator_id", "").unwrap();
+        c.set("active_creator_id", "")
+            .expect("set active_creator_id");
         assert!(c.active_creator_id.is_none());
     }
 
     #[test]
     fn set_invalid_key_returns_error() {
         let mut c = CliConfig::default();
-        let err = c.set("invalid_key", "value").unwrap_err();
+        let err = c
+            .set("invalid_key", "value")
+            .expect_err("set invalid_key should fail");
         assert!(err.to_string().contains("Invalid config key"));
     }
 
     #[test]
     fn unset_optional_field_clears_it() {
-        let mut c = CliConfig::default();
-        c.workspace_path = Some(PathBuf::from("/test"));
-        c.unset("workspace_path").unwrap();
+        let mut c = CliConfig {
+            workspace_path: Some(PathBuf::from("/test")),
+            ..Default::default()
+        };
+        c.unset("workspace_path").expect("unset workspace_path");
         assert!(c.workspace_path.is_none());
         c.active_creator_id = Some("ctr_test".to_string());
-        c.unset("active_creator_id").unwrap();
+        c.unset("active_creator_id")
+            .expect("unset active_creator_id");
         assert!(c.active_creator_id.is_none());
     }
 
     #[test]
     fn unset_string_field_reverts_to_default() {
-        let mut c = CliConfig::default();
-        c.platform_url = "https://custom.api.io".to_string();
-        c.unset("platform_url").unwrap();
+        let mut c = CliConfig {
+            platform_url: "https://custom.api.io".to_string(),
+            ..Default::default()
+        };
+        c.unset("platform_url").expect("unset platform_url");
         assert_eq!(c.platform_url, "https://api.nexus42.io");
         c.daemon_url = "http://custom:9999".to_string();
-        c.unset("daemon_url").unwrap();
+        c.unset("daemon_url").expect("unset daemon_url");
         assert_eq!(c.daemon_url, "http://127.0.0.1:8420");
     }
 
     #[test]
     fn unset_runtime_mode_reverts_to_default() {
-        let mut c = CliConfig::default();
-        c.runtime_mode = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
-        c.unset("runtime_mode").unwrap();
+        let mut c = CliConfig {
+            runtime_mode: DomainRuntimeMode::parse("cloud_enhanced").expect("valid runtime_mode"),
+            ..Default::default()
+        };
+        c.unset("runtime_mode").expect("unset runtime_mode");
         assert!(c.runtime_mode.is_local_only());
     }
 
@@ -617,9 +680,11 @@ platform_url = "https://direct.api.io"
         let nexus_dir = tmp.path().join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        let mut cfg = CliConfig::default();
-        cfg.active_creator_id = Some("ctr_save_test".to_string());
-        cfg.platform_url = "https://save.test.io".to_string();
+        let cfg = CliConfig {
+            active_creator_id: Some("ctr_save_test".to_string()),
+            platform_url: "https://save.test.io".to_string(),
+            ..Default::default()
+        };
 
         let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", tmp.path());
@@ -635,8 +700,8 @@ platform_url = "https://direct.api.io"
         let config_path = nexus_dir.join("config.toml");
         assert!(config_path.exists(), "config.toml should exist after save");
 
-        let content = std::fs::read_to_string(&config_path).unwrap();
-        let loaded: CliConfig = toml::from_str(&content).unwrap();
+        let content = std::fs::read_to_string(&config_path).expect("read config.toml");
+        let loaded: CliConfig = toml::from_str(&content).expect("parse config.toml");
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_save_test"));
         assert_eq!(loaded.platform_url, "https://save.test.io");
     }
@@ -1000,7 +1065,8 @@ pub struct RoleOverride {
 #[allow(dead_code)]
 impl RoleOverride {
     /// Create a new override with both agent and model.
-    pub fn new(agent: Option<String>, model: Option<String>) -> Self {
+    #[must_use]
+    pub const fn new(agent: Option<String>, model: Option<String>) -> Self {
         Self { agent, model }
     }
 }
@@ -1043,6 +1109,10 @@ impl UserAgentsConfig {
     ///
     /// Returns a default (empty) config if the file does not exist.
     /// Logs a warning and returns defaults if the file exists but cannot be parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     pub fn load() -> anyhow::Result<Self> {
         let path = Self::config_path()?;
         if !path.exists() {
@@ -1054,7 +1124,7 @@ impl UserAgentsConfig {
             return Ok(Self::default());
         }
 
-        match toml::from_str::<UserAgentsConfig>(&content) {
+        match toml::from_str::<Self>(&content) {
             Ok(cfg) => Ok(cfg),
             Err(e) => {
                 tracing::warn!("agents.toml parse error, using defaults: {}", e);
@@ -1064,6 +1134,10 @@ impl UserAgentsConfig {
     }
 
     /// Return the path to `~/.nexus42/agents.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Nexus home directory cannot be resolved.
     pub fn config_path() -> anyhow::Result<PathBuf> {
         Ok(nexus_home()?.join(Self::FILENAME))
     }
@@ -1071,6 +1145,7 @@ impl UserAgentsConfig {
     /// Look up a role override for a given strategy.
     ///
     /// Returns `None` if the strategy or role is not configured.
+    #[must_use]
     pub fn get_role_override(&self, strategy_id: &str, role_id: &str) -> Option<&RoleOverride> {
         self.strategies
             .get(strategy_id)
@@ -1081,6 +1156,7 @@ impl UserAgentsConfig {
     ///
     /// Checks the specified strategy first, then falls back to a
     /// `"default"` strategy if it exists.
+    #[must_use]
     pub fn resolve_role(&self, strategy_id: &str, role_id: &str) -> Option<&RoleOverride> {
         self.get_role_override(strategy_id, role_id)
             .or_else(|| self.get_role_override("default", role_id))
@@ -1103,9 +1179,8 @@ pub fn parse_agent_ref(ref_str: &str) -> anyhow::Result<(String, String, Option<
 
     if segments.len() < 2 {
         anyhow::bail!(
-            "invalid --agent-ref format '{}': expected 'role:agent_id' or 'role:agent_id:model' \
-             (must have at least 2 colon-separated segments)",
-            ref_str
+            "invalid --agent-ref format '{ref_str}': expected 'role:agent_id' or 'role:agent_id:model' \
+             (must have at least 2 colon-separated segments)"
         );
     }
 
@@ -1113,16 +1188,10 @@ pub fn parse_agent_ref(ref_str: &str) -> anyhow::Result<(String, String, Option<
     let acp_agent_id = segments[1];
 
     if role_id.is_empty() {
-        anyhow::bail!(
-            "invalid --agent-ref '{}': role ID must not be empty",
-            ref_str
-        );
+        anyhow::bail!("invalid --agent-ref '{ref_str}': role ID must not be empty");
     }
     if acp_agent_id.is_empty() {
-        anyhow::bail!(
-            "invalid --agent-ref '{}': agent ID must not be empty",
-            ref_str
-        );
+        anyhow::bail!("invalid --agent-ref '{ref_str}': agent ID must not be empty");
     }
 
     // Third segment (model) is optional.
@@ -1150,18 +1219,19 @@ pub fn parse_agent_ref(ref_str: &str) -> anyhow::Result<(String, String, Option<
 /// * `strategy_id` — the strategy context (e.g. `"novel-writing"`)
 /// * `preset_recommended` — from `PresetRoleDefinition.recommended_models` (from T6)
 /// * `user_config` — loaded `UserAgentsConfig`
-/// * `cli_overrides` — map of role_id → `RoleOverride` from `--agent-ref` flags
+/// * `cli_overrides` — map of `role_id` → `RoleOverride` from `--agent-ref` flags
 ///
 /// # Returns
 ///
 /// `(Option<agent>, Option<model>)` — the resolved agent ACP ID and model.
 #[allow(dead_code)]
-pub fn resolve_agent_model(
+#[must_use]
+pub fn resolve_agent_model<S: std::hash::BuildHasher>(
     role_id: &str,
     strategy_id: &str,
     preset_recommended: &[String],
     user_config: &UserAgentsConfig,
-    cli_overrides: &HashMap<String, RoleOverride>,
+    cli_overrides: &HashMap<String, RoleOverride, S>,
 ) -> (Option<String>, Option<String>) {
     // 1. CLI overrides (highest priority)
     if let Some(cli_override) = cli_overrides.get(role_id) {
@@ -1185,7 +1255,11 @@ pub fn resolve_agent_model(
     (None, None)
 }
 
-/// Get the nexus42 home directory (`$HOME/.nexus42`)
+/// Get the nexus42 home directory (`$HOME/.nexus42`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be resolved.
 pub fn nexus_home() -> anyhow::Result<PathBuf> {
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
@@ -1193,11 +1267,21 @@ pub fn nexus_home() -> anyhow::Result<PathBuf> {
 }
 
 /// User home directory (`$HOME`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be resolved.
 pub fn user_home_dir() -> anyhow::Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
 }
 
 /// Resolve workspace `state.db` under ADR-014 (`creators/<creator_id>/workspaces/<slug>/state.db`).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The home directory cannot be resolved
+/// - No active creator is configured
 pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     let user_home = user_home_dir()?;
     let cid = config.active_creator_id.as_deref().ok_or_else(|| {
@@ -1209,17 +1293,28 @@ pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     Ok(crate::paths::state_db_path(&user_home, cid, slug))
 }
 
-/// Load config and resolve the local SQLite database path.
+/// Load config and resolve the local `SQLite` database path.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - CLI configuration cannot be loaded
+/// - State DB path cannot be resolved
 pub fn state_db_path() -> anyhow::Result<PathBuf> {
     resolve_state_db_path(&CliConfig::load()?)
 }
 
-/// Get the path to the auth storage file
+/// Get the path to the auth storage file.
+///
+/// # Errors
+///
+/// Returns an error if the Nexus home directory cannot be resolved.
 pub fn auth_store_path() -> anyhow::Result<PathBuf> {
     Ok(nexus_home()?.join("auth.json"))
 }
 
 /// Check if the current directory (or any parent) contains a workspace
+#[must_use]
 pub fn find_workspace_root() -> Option<PathBuf> {
     let mut current = std::env::current_dir().ok()?;
     loop {
@@ -1234,11 +1329,13 @@ pub fn find_workspace_root() -> Option<PathBuf> {
 }
 
 /// Get the workspace directory path for a given root
+#[must_use]
 pub fn workspace_nexus_dir(workspace_root: &Path) -> PathBuf {
     workspace_root.join(NEXUS_DIR)
 }
 
 /// Get workspace config file path
+#[must_use]
 pub fn workspace_config_path(workspace_root: &Path) -> PathBuf {
     workspace_nexus_dir(workspace_root).join("workspace.json")
 }

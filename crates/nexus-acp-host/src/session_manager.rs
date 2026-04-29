@@ -47,11 +47,17 @@ struct SessionsFile {
 
 impl SessionManager {
     /// Create a new session manager with the given sessions file path.
-    pub fn new(sessions_file: PathBuf) -> Self {
+    #[must_use]
+    pub const fn new(sessions_file: PathBuf) -> Self {
         Self { sessions_file }
     }
 
     /// Get the default sessions file path: `$HOME/.nexus42/acp/sessions.json`
+    ///
+    /// # Panics
+    ///
+    /// Panics if the home directory cannot be determined.
+    #[must_use]
     pub fn default_sessions_file() -> PathBuf {
         let home = dirs::home_dir().expect("Failed to get home directory");
         home.join(".nexus42").join("acp").join("sessions.json")
@@ -60,6 +66,10 @@ impl SessionManager {
     /// Load all sessions from the sessions file.
     ///
     /// Returns an empty vector if the file doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be read or parsed.
     pub fn load_sessions(&self) -> crate::AcpResult<Vec<SessionEntry>> {
         if !self.sessions_file.exists() {
             return Ok(Vec::new());
@@ -72,8 +82,12 @@ impl SessionManager {
 
     /// Save a session entry to the sessions file.
     ///
-    /// If a session with the same session_id exists, it will be updated.
+    /// If a session with the same `session_id` exists, it will be updated.
     /// Otherwise, the session is appended to the list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, written, or parsed.
     #[allow(dead_code)]
     pub fn save_session(&self, entry: &SessionEntry) -> crate::AcpResult<()> {
         // Load existing sessions
@@ -105,7 +119,11 @@ impl SessionManager {
     /// Find the most recent session matching the given agent and workspace.
     ///
     /// Returns the most recently used session (by `last_used_at`) that matches
-    /// both the agent_id and workspace_hint. Returns None if no matching session exists.
+    /// both the `agent_id` and `workspace_hint`. Returns None if no matching session exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the sessions file cannot be read or parsed.
     #[allow(dead_code)]
     pub fn find_recent_session(
         &self,
@@ -127,6 +145,10 @@ impl SessionManager {
     ///
     /// Sessions with `last_used_at` older than 24 hours are removed from the
     /// sessions file. Returns the list of removed sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the sessions file cannot be read or written.
     pub fn cleanup_expired(&self) -> crate::AcpResult<Vec<SessionEntry>> {
         let sessions = self.load_sessions()?;
 
@@ -154,6 +176,10 @@ impl SessionManager {
     /// Delete a session by its session ID.
     ///
     /// Returns the deleted session if it existed, or None if it didn't.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the sessions file cannot be read or written.
     pub fn delete_session(&self, session_id: &SessionId) -> crate::AcpResult<Option<SessionEntry>> {
         let sessions = self.load_sessions()?;
 
@@ -319,7 +345,7 @@ mod tests {
         let sessions_file = temp_dir.path().join("sessions.json");
 
         // Create initial session
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
         let entry1 = SessionEntry {
             session_id: SessionId::new("sess-001"),
             agent_id: "claude-acp".to_string(),
@@ -351,7 +377,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create initial session
         let entry = SessionEntry {
@@ -388,7 +414,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create multiple sessions
         let entry1 = SessionEntry {
@@ -427,7 +453,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create a session for a different agent
         let entry = SessionEntry {
@@ -454,7 +480,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create two sessions for same agent + workspace
         let entry1 = SessionEntry {
@@ -491,7 +517,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create an old session (30 hours ago)
         let old_entry = SessionEntry {
@@ -533,7 +559,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create a recent session (1 hour ago)
         let entry = SessionEntry {
@@ -563,7 +589,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create a session exactly 24 hours old (boundary case)
         let boundary_entry = SessionEntry {
@@ -589,7 +615,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let sessions_file = temp_dir.path().join("sessions.json");
 
-        let manager = SessionManager::new(sessions_file.clone());
+        let manager = SessionManager::new(sessions_file);
 
         // Create two sessions
         let entry1 = SessionEntry {

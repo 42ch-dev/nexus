@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Workspace Manager — higher-level workspace operations
 
 use anyhow::Result;
@@ -23,10 +25,10 @@ pub fn create_workspace_structure(path: &str) -> Result<()> {
     // Create workspace config
     let config_path = nexus_dir.join("workspace.json");
     if !config_path.exists() {
-        let name = base
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unnamed".to_string());
+        let name = base.file_name().map_or_else(
+            || "unnamed".to_string(),
+            |n| n.to_string_lossy().to_string(),
+        );
 
         let config = serde_json::json!({
             "name": name,

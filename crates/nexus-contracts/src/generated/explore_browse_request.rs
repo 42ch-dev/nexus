@@ -1,14 +1,14 @@
-//! Nexus ExploreBrowseRequest
+//! `Nexus` `ExploreBrowseRequest`
 //!
-//! Request body for POST /v1/explore/browse — read-only directory-style listing.
+//! `Request` body for `POST` /v1/explore/browse — read-only directory-style listing.
 //!
-//! @schema_version 1
-//! @source explore-browse-request.schema.json
+//! `@schema_version` 1
+//! `@source` explore-browse-request.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Request body for POST /v1/explore/browse — read-only directory-style listing.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Request` body for `POST` /v1/explore/browse — read-only directory-style listing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreBrowseRequest {
     pub schema_version: u32,

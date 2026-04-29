@@ -1,15 +1,15 @@
-//! Nexus SyncPullResponse
+//! `Nexus` `SyncPullResponse`
 //!
-//! Response body for POST /v1/sync/pull — bundles to apply locally plus server cursors.
+//! `Response` body for `POST` /v1/sync/pull — bundles to apply locally plus server cursors.
 //!
-//! @schema_version 1
-//! @source sync-pull-response.schema.json
+//! `@schema_version` 1
+//! `@source` sync-pull-response.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::bundle::Bundle;
 
-/// Response body for POST /v1/sync/pull — bundles to apply locally plus server cursors.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Response` body for `POST` /v1/sync/pull — bundles to apply locally plus server cursors.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SyncPullResponse {
     pub schema_version: u32,

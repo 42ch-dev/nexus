@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "Nexus CLI — creative world-building command-line interface"
 
+[lints]
+workspace = true
+
 [lib]
 name = "nexus42"
 path = "src/lib.rs"

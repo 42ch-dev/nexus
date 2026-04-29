@@ -1,6 +1,6 @@
 //! Outbox Pattern Implementation
 //!
-//! Local operation queue using SQLite for persistence with connection pooling.
+//! Local operation queue using `SQLite` for persistence with connection pooling.
 //! Implements the full `OutboxEntry` contract type with delivery state management.
 //!
 //! The outbox stores pending bundles for offline-first sync, supporting:
@@ -46,7 +46,7 @@ const BASE_RETRY_DELAY_SECS: u64 = 2;
 // Module-level FromRow structs (sqlx R2: avoid duplication)
 // ---------------------------------------------------------------------------
 
-/// Row mapping for outbox_entries queries (sqlx R2: module-level struct).
+/// Row mapping for `outbox_entries` queries (sqlx R2: module-level struct).
 #[derive(sqlx::FromRow)]
 struct OutboxRow {
     outbox_entry_id: String,
@@ -60,7 +60,7 @@ struct OutboxRow {
     updated_at: Option<String>,
 }
 
-/// Row mapping for partial_apply_states queries (sqlx R2: module-level struct).
+/// Row mapping for `partial_apply_states` queries (sqlx R2: module-level struct).
 #[derive(sqlx::FromRow)]
 struct PartialApplyRow {
     outbox_entry_id: String,
@@ -90,11 +90,11 @@ pub struct Outbox {
 impl Outbox {
     /// Open or create an outbox database at the given path with default pool size.
     ///
-    /// Creates the outbox_entries table if it doesn't exist.
+    /// Creates the `outbox_entries` table if it doesn't exist.
     /// Uses WAL mode for better concurrent read performance.
     ///
     /// # Pool Configuration
-    /// - Pool size: 4 connections (DEFAULT_POOL_SIZE)
+    /// - Pool size: 4 connections (`DEFAULT_POOL_SIZE`)
     /// - WAL mode enabled
     ///
     /// # Errors
@@ -106,8 +106,11 @@ impl Outbox {
     /// Open or create an outbox database with custom pool size.
     ///
     /// # Arguments
-    /// * `db_path` - Path to SQLite database file
+    /// * `db_path` - Path to `SQLite` database file
     /// * `pool_size` - Maximum number of connections in the pool
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn with_pool_size<P: AsRef<Path>>(db_path: P, pool_size: usize) -> SyncResult<Self> {
         let pool = Self::init_pool_with_schema(db_path.as_ref(), pool_size).await?;
         tracing::info!("Outbox database initialized with connection pool");
@@ -130,7 +133,7 @@ impl Outbox {
         // The migration runner creates all tables including outbox_entries.
         nexus_local_db::run_migrations(pool.inner())
             .await
-            .map_err(|e| SyncError::OutboxDatabase(format!("migration failed: {}", e)))?;
+            .map_err(|e| SyncError::OutboxDatabase(format!("migration failed: {e}")))?;
 
         Ok(pool)
     }
@@ -141,6 +144,10 @@ impl Outbox {
     /// or control pool lifecycle externally.
     ///
     /// Note: Caller is responsible for ensuring the schema is initialized.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
+    #[allow(clippy::unused_async)]
     pub async fn with_pool(pool: OutboxPool) -> SyncResult<Self> {
         Ok(Self {
             pool,
@@ -153,6 +160,9 @@ impl Outbox {
     ///
     /// Uses a real file under a [`tempfile::TempDir`] owned by this [`Outbox`] so the directory
     /// is removed when the last clone of this handle is dropped (no `mem::forget`).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     #[cfg(test)]
     pub async fn new_in_memory() -> SyncResult<Self> {
         let tmp = Arc::new(
@@ -170,6 +180,9 @@ impl Outbox {
     /// Append a sync command to the outbox in `staged` state.
     ///
     /// Returns the generated outbox entry ID.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn append(&self, command: &SyncCommand) -> SyncResult<String> {
         let outbox_entry_id = format!("obe_{}", Uuid::new_v4().simple());
         let bundle_id = format!("bdl_{}", Uuid::new_v4().simple());
@@ -205,6 +218,9 @@ impl Outbox {
     /// Stage an existing bundle ID into the outbox.
     ///
     /// Creates a new outbox entry linked to the given bundle.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn stage(&self, bundle: &Bundle) -> SyncResult<String> {
         let outbox_entry_id = format!("obe_{}", Uuid::new_v4().simple());
         let now = chrono::Utc::now().to_rfc3339();
@@ -241,6 +257,9 @@ impl Outbox {
     ///
     /// Returns `Ok(Some(entry_id))` when a new row was inserted, `Ok(None)` when the bundle
     /// was already present.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn stage_if_absent(&self, bundle: &Bundle) -> SyncResult<Option<String>> {
         let new_entry_id = format!("obe_{}", Uuid::new_v4().simple());
         let now = chrono::Utc::now().to_rfc3339();
@@ -292,6 +311,9 @@ impl Outbox {
     }
 
     /// Transition an outbox entry to `sent` state.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn mark_sent(&self, outbox_entry_id: &str) -> SyncResult<()> {
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -316,6 +338,9 @@ impl Outbox {
     }
 
     /// Transition an outbox entry to `acked` state.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn mark_acked(&self, outbox_entry_id: &str) -> SyncResult<()> {
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -344,6 +369,9 @@ impl Outbox {
     /// If a `retry_after` policy is provided (SYNC-R11), it stores the
     /// computed retry timestamp so that [`replay`] will skip this entry
     /// until the server-specified time has elapsed.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn mark_conflicted_with_retry(
         &self,
         outbox_entry_id: &str,
@@ -354,6 +382,9 @@ impl Outbox {
         let next_retry_at = match retry_after {
             RetryAfterPolicy::AtTime(t) => Some(t.to_rfc3339()),
             RetryAfterPolicy::AfterSeconds(secs) => {
+                // SAFETY: secs is a u64 seconds delay from the platform; i64::MAX ~= 292 years,
+                // so any realistic delay in seconds will fit without wrapping.
+                #[allow(clippy::cast_possible_wrap)]
                 let target = now + chrono::Duration::seconds(*secs as i64);
                 Some(target.to_rfc3339())
             }
@@ -393,6 +424,9 @@ impl Outbox {
     }
 
     /// Transition an outbox entry to `conflicted` state with error (no retry policy).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn mark_conflicted(&self, outbox_entry_id: &str, error: &str) -> SyncResult<()> {
         self.mark_conflicted_with_retry(outbox_entry_id, error, &RetryAfterPolicy::None)
             .await
@@ -406,6 +440,9 @@ impl Outbox {
     ///
     /// Calculates the next retry time using exponential backoff.
     /// Returns an error if the max retry count has been exceeded.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn mark_failed(&self, outbox_entry_id: &str, error: &str) -> SyncResult<()> {
         let mut tx = self.pool.inner().begin().await?;
 
@@ -416,6 +453,9 @@ impl Outbox {
         .fetch_one(&mut *tx)
         .await?;
 
+        // SAFETY: retry_count is i64 from SQLite, u64 for storage; i64::MAX > u64::MAX so
+        // any stored retry_count will fit in u64 without sign loss.
+        #[allow(clippy::cast_sign_loss)]
         let retry_count = retry_count_row as u64;
 
         if retry_count >= MAX_RETRIES {
@@ -442,6 +482,9 @@ impl Outbox {
         // Calculate exponential backoff
         let delay_secs =
             BASE_RETRY_DELAY_SECS.saturating_mul(2u64.saturating_pow(retry_count.min(30) as u32));
+        // SAFETY: delay_secs is calculated from BASE_RETRY_DELAY_SECS and retry_count, both u64.
+        // i64::MAX ~= 292 years in seconds, so any realistic delay fits in i64 without wrapping.
+        #[allow(clippy::cast_possible_wrap)]
         let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64);
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -478,6 +521,9 @@ impl Outbox {
     /// Returns entries that are eligible for sync processing.
     /// Also includes conflicted entries whose `retry_after` has elapsed (SYNC-R11),
     /// allowing the caller to re-attempt delivery after a server-specified backoff.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn replay(&self) -> SyncResult<Vec<OutboxEntry>> {
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -510,6 +556,9 @@ impl Outbox {
                 bundle_id: row.bundle_id,
                 idempotency_key: row.idempotency_key,
                 delivery_state,
+                // SAFETY: retry_count is i64 from SQLite, stored as u64; the value is non-negative
+                // and fits in u64 on all supported targets.
+                #[allow(clippy::cast_sign_loss)]
                 retry_count: Some(row.retry_count as u64),
                 last_error: row.last_error,
                 next_retry_at: row.next_retry_at,
@@ -523,6 +572,9 @@ impl Outbox {
     }
 
     /// Get a specific outbox entry by ID.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn get(&self, outbox_entry_id: &str) -> SyncResult<OutboxEntry> {
         // sqlx R2: Uses module-level OutboxRow struct.
         let row = sqlx::query_as!(
@@ -551,6 +603,9 @@ impl Outbox {
             bundle_id: row.bundle_id,
             idempotency_key: row.idempotency_key,
             delivery_state,
+            // SAFETY: retry_count is i64 from SQLite, stored as u64; the value is non-negative
+            // and fits in u64 on all supported targets.
+            #[allow(clippy::cast_sign_loss)]
             retry_count: Some(row.retry_count as u64),
             last_error: row.last_error,
             next_retry_at: row.next_retry_at,
@@ -562,17 +617,26 @@ impl Outbox {
     /// Remove acknowledged entries (cleanup).
     ///
     /// Returns the number of entries removed.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn purge_acked(&self) -> SyncResult<usize> {
         let result = sqlx::query!("DELETE FROM outbox_entries WHERE delivery_state = 'acked'")
             .execute(self.pool.inner())
             .await?;
 
-        let count = result.rows_affected() as usize;
+        // SAFETY: rows_affected() returns i64; on realistic targets usize >= u32, so
+        // the truncation to usize is safe (a u32 row count fits in usize).
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let count = usize::try_from(result.rows_affected()).unwrap_or(usize::MAX);
         tracing::info!(count = count, "Purged acked outbox entries");
         Ok(count)
     }
 
     /// Count entries by delivery state.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn count_by_state(&self, state: &str) -> SyncResult<usize> {
         let count: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) as \"count!\" FROM outbox_entries WHERE delivery_state = ?",
@@ -581,7 +645,11 @@ impl Outbox {
         .fetch_one(self.pool.inner())
         .await?;
 
-        Ok(count as usize)
+        // SAFETY: count is a non-negative row count from SQLite; usize::try_from preserves the value
+        // on all targets where usize >= u32 (all 32-bit and 64-bit targets we support).
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let count = usize::try_from(count).unwrap_or_default();
+        Ok(count)
     }
 
     // ── Partial apply state persistence (SYNC-R12) ──────────────
@@ -591,6 +659,9 @@ impl Outbox {
     /// Stores the partial apply result so that on daemon restart, the
     /// partial apply can be resumed without reconstructing state from scratch.
     /// The state is stored in the `partial_apply_states` table.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn persist_partial_apply_state(
         &self,
         outbox_entry_id: &str,
@@ -624,6 +695,9 @@ impl Outbox {
     /// Load persisted partial apply state for an outbox entry (SYNC-R12).
     ///
     /// Returns `None` if no persisted state exists for the given entry.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn load_partial_apply_state(
         &self,
         outbox_entry_id: &str,
@@ -653,6 +727,9 @@ impl Outbox {
     ///
     /// Called after a partial apply has been fully resolved (all deltas succeeded
     /// or permanently failed).
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn remove_partial_apply_state(&self, outbox_entry_id: &str) -> SyncResult<()> {
         sqlx::query!(
             "DELETE FROM partial_apply_states WHERE outbox_entry_id = ?",
@@ -671,6 +748,9 @@ impl Outbox {
     /// List all outbox entries with persisted partial apply states (SYNC-R12).
     ///
     /// Useful for resuming partial applies after daemon restart.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
     pub async fn list_partial_apply_states(
         &self,
     ) -> SyncResult<Vec<(String, crate::partial_apply::PartialApplyState)>> {
@@ -1161,10 +1241,10 @@ mod tests {
             .await
             .expect("persist 2");
 
-        let states = outbox.list_partial_apply_states().await.expect("list");
-        assert_eq!(states.len(), 2);
-        assert_eq!(states[0].1.bundle_id, "bdl_1");
-        assert_eq!(states[1].1.bundle_id, "bdl_2");
+        let loaded_states = outbox.list_partial_apply_states().await.expect("list");
+        assert_eq!(loaded_states.len(), 2);
+        assert_eq!(loaded_states[0].1.bundle_id, "bdl_1");
+        assert_eq!(loaded_states[1].1.bundle_id, "bdl_2");
     }
 
     #[tokio::test]
@@ -1445,7 +1525,7 @@ mod tests {
         // Fail multiple times and verify retry_count and next_retry_at are atomic
         for i in 1..=3 {
             outbox
-                .mark_failed(&entry_id, &format!("error {}", i))
+                .mark_failed(&entry_id, &format!("error {i}"))
                 .await
                 .expect("mark_failed");
 
@@ -1457,7 +1537,7 @@ mod tests {
                 .last_error
                 .as_ref()
                 .unwrap()
-                .contains(&format!("error {}", i)));
+                .contains(&format!("error {i}")));
         }
     }
 

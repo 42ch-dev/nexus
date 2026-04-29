@@ -5,7 +5,7 @@
 //! Stage 0 (Precheck) checks:
 //! - Command consistency (no conflicting operations)
 //! - Schema compliance (all required fields present)
-//! - Sequencing (last_confirmed_delta_sequence is monotonic)
+//! - Sequencing (`last_confirmed_delta_sequence` is monotonic)
 //! - World revision against expected local state
 //!
 //! Invalid bundles are rejected early with actionable error messages.
@@ -32,6 +32,7 @@ pub struct AuthContext {
 
 impl AuthContext {
     /// Create an auth context for a multi-creator world with an authenticated creator.
+    #[must_use]
     pub fn multi_creator(authenticated_creator_id: &str) -> Self {
         Self {
             authenticated_creator_id: Some(authenticated_creator_id.to_string()),
@@ -40,7 +41,8 @@ impl AuthContext {
     }
 
     /// Create an auth context for a single-creator world (auth validation skipped).
-    pub fn single_creator() -> Self {
+    #[must_use]
+    pub const fn single_creator() -> Self {
         Self {
             authenticated_creator_id: None,
             is_multi_creator: false,
@@ -48,7 +50,8 @@ impl AuthContext {
     }
 
     /// Create an unauthenticated context (no auth available).
-    pub fn unauthenticated() -> Self {
+    #[must_use]
+    pub const fn unauthenticated() -> Self {
         Self {
             authenticated_creator_id: None,
             is_multi_creator: false,
@@ -57,7 +60,7 @@ impl AuthContext {
 }
 
 /// Result of a local precheck validation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrecheckResult {
     /// Bundle passes all prechecks and is ready for upload.
     Valid,
@@ -66,7 +69,7 @@ pub enum PrecheckResult {
 }
 
 /// A precheck validation report containing all issues found.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PrecheckReport {
     /// List of validation issues.
     pub issues: Vec<PrecheckIssue>,
@@ -74,7 +77,8 @@ pub struct PrecheckReport {
 
 impl PrecheckReport {
     /// Create a new empty report.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { issues: Vec::new() }
     }
 
@@ -84,11 +88,13 @@ impl PrecheckReport {
     }
 
     /// Whether the report has any issues.
-    pub fn has_issues(&self) -> bool {
+    #[must_use]
+    pub const fn has_issues(&self) -> bool {
         !self.issues.is_empty()
     }
 
     /// Whether any issue is a hard error (prevents upload).
+    #[must_use]
     pub fn has_errors(&self) -> bool {
         self.issues
             .iter()
@@ -96,11 +102,13 @@ impl PrecheckReport {
     }
 
     /// Whether any issue is a warning only.
+    #[must_use]
     pub fn has_warnings_only(&self) -> bool {
         self.has_issues() && !self.has_errors()
     }
 
     /// Get a human-readable summary.
+    #[must_use]
     pub fn summary(&self) -> String {
         if self.issues.is_empty() {
             return "No issues found.".to_string();
@@ -139,7 +147,8 @@ pub enum PrecheckSeverity {
 }
 
 impl PrecheckSeverity {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Error => "ERROR",
             Self::Warning => "WARNING",
@@ -148,7 +157,7 @@ impl PrecheckSeverity {
 }
 
 /// A single precheck validation issue.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecheckIssue {
     /// Severity level.
     pub severity: PrecheckSeverity,
@@ -162,6 +171,7 @@ pub struct PrecheckIssue {
 
 impl PrecheckIssue {
     /// Create a new error-level issue.
+    #[must_use]
     pub fn error(message: &str) -> Self {
         Self {
             severity: PrecheckSeverity::Error,
@@ -172,6 +182,7 @@ impl PrecheckIssue {
     }
 
     /// Create a new error-level issue with fix hint.
+    #[must_use]
     pub fn error_with_hint(message: &str, hint: &str) -> Self {
         Self {
             severity: PrecheckSeverity::Error,
@@ -182,6 +193,7 @@ impl PrecheckIssue {
     }
 
     /// Create a new warning-level issue.
+    #[must_use]
     pub fn warning(message: &str) -> Self {
         Self {
             severity: PrecheckSeverity::Warning,
@@ -205,7 +217,8 @@ pub struct LocalState {
 
 impl LocalState {
     /// Create a new local state snapshot.
-    pub fn new(world_revision: u64) -> Self {
+    #[must_use]
+    pub const fn new(world_revision: u64) -> Self {
         Self {
             world_revision,
             last_confirmed_delta_sequence: None,
@@ -214,12 +227,14 @@ impl LocalState {
     }
 
     /// Set the last confirmed delta sequence.
-    pub fn with_delta_sequence(mut self, seq: u64) -> Self {
+    #[must_use]
+    pub const fn with_delta_sequence(mut self, seq: u64) -> Self {
         self.last_confirmed_delta_sequence = Some(seq);
         self
     }
 
     /// Set the timeline head ID.
+    #[must_use]
     pub fn with_timeline_head(mut self, id: &str) -> Self {
         self.timeline_head_id = Some(id.to_string());
         self
@@ -238,6 +253,7 @@ impl LocalState {
 ///
 /// This overload skips auth match validation. Use [`precheck_bundle_with_auth`]
 /// for multi-creator worlds.
+#[must_use]
 pub fn precheck_bundle(bundle: &Bundle, local_state: &LocalState) -> PrecheckResult {
     precheck_bundle_with_auth(bundle, local_state, &AuthContext::unauthenticated())
 }
@@ -308,19 +324,20 @@ pub fn precheck_bundle_with_auth(
     }
 }
 
-/// Convert a PrecheckResult into a SyncResult.
+/// Convert a `PrecheckResult` into a `SyncResult`.
+///
+/// # Errors
+/// Returns the specific error type if the operation fails.
 pub fn precheck_to_result(result: PrecheckResult) -> SyncResult<()> {
     match result {
         PrecheckResult::Valid => Ok(()),
         PrecheckResult::Invalid(report) => {
             let message = report.summary();
-            // Use the first error as the primary error
             let primary = report
                 .issues
                 .iter()
                 .find(|i| i.severity == PrecheckSeverity::Error)
-                .map(|i| i.message.clone())
-                .unwrap_or_else(|| "precheck failed".to_string());
+                .map_or_else(|| "precheck failed".to_string(), |i| i.message.clone());
 
             Err(SyncError::PrecheckFailed(format!("{primary}\n{message}")))
         }
@@ -526,7 +543,7 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
     if bundle
         .base_versions
         .as_object()
-        .is_none_or(|o| o.is_empty())
+        .is_none_or(serde_json::Map::is_empty)
     {
         report.add_issue(PrecheckIssue::warning(
             "base_versions is empty (optimistic concurrency baseline missing)",
@@ -547,16 +564,13 @@ fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut Pr
     }
 
     // Skip validation if no authenticated creator ID (unauthenticated session)
-    let authenticated_id = match &auth_context.authenticated_creator_id {
-        Some(id) => id,
-        None => {
-            // In multi-creator world without auth, that's a configuration issue
-            report.add_issue(PrecheckIssue::error_with_hint(
-                "multi-creator world requires authentication, but no auth context provided",
-                "Ensure the daemon has a valid auth token for the authenticated creator",
-            ));
-            return;
-        }
+    let Some(authenticated_id) = &auth_context.authenticated_creator_id else {
+        // In multi-creator world without auth, that's a configuration issue
+        report.add_issue(PrecheckIssue::error_with_hint(
+            "multi-creator world requires authentication, but no auth context provided",
+            "Ensure the daemon has a valid auth token for the authenticated creator",
+        ));
+        return;
     };
 
     if bundle.submitting_creator_id != *authenticated_id {

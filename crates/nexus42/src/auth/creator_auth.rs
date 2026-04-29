@@ -14,6 +14,11 @@ use crate::errors::{CliError, Result};
 ///
 /// Calls `POST /v1/creators/{id}/credentials` on the platform API
 /// to obtain a new short-lived token.
+///
+/// # Errors
+///
+/// Returns `CliError::Other` if the platform API for credential rotation
+/// is not yet available or if the credential rotation fails.
 pub async fn rotate_credentials(config: &CliConfig, creator_id: &str) -> Result<()> {
     // We need a user token to call the platform API
     let _user_token = get_user_token(config).await?;
@@ -37,6 +42,14 @@ pub struct CredentialsResponse {
 }
 
 /// Validate cached Creator token, refresh if expired
+///
+/// # Errors
+///
+/// Returns `CliError::Other` if:
+/// - The auth store cannot be loaded
+/// - The token expiry timestamp cannot be parsed
+/// - Credential rotation fails
+/// - No token is found for the creator after rotation
 pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<String> {
     let store = AuthStore::load()?;
 
@@ -53,12 +66,12 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
     rotate_credentials(config, creator_id).await?;
     let store = AuthStore::load()?;
     let creators = store.creators.as_ref().and_then(|c| c.get(creator_id));
-    creators.map(|s| s.access_token.clone()).ok_or_else(|| {
-        CliError::Other(format!("Failed to obtain token for creator {}", creator_id))
-    })
+    creators
+        .map(|s| s.access_token.clone())
+        .ok_or_else(|| CliError::Other(format!("Failed to obtain token for creator {creator_id}")))
 }
 
-/// Get the current user access token from AuthStore.
+/// Get the current user access token from `AuthStore`.
 ///
 /// Reads the platform JWT from the local auth store.
 /// Calls `ensure_valid_token()` to auto-refresh if the token is expiring.

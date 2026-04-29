@@ -8,7 +8,7 @@ use nexus_contracts::local::domain::RuntimeMode;
 use std::fmt;
 use std::str::FromStr as _;
 
-/// Domain wrapper for RuntimeMode with additional constraint queries.
+/// Domain wrapper for `RuntimeMode` with additional constraint queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DomainRuntimeMode(pub RuntimeMode);
@@ -16,23 +16,25 @@ pub struct DomainRuntimeMode(pub RuntimeMode);
 impl DomainRuntimeMode {
     /// V1.2 default runtime mode.
     pub const DEFAULT: DomainRuntimeMode = DomainRuntimeMode(RuntimeMode::LocalOnly);
-
+    #[must_use]
     /// Create from generated enum.
     pub const fn new(mode: RuntimeMode) -> Self {
         Self(mode)
     }
 
     /// Access the inner generated enum.
+    #[must_use]
     pub const fn inner(&self) -> &RuntimeMode {
         &self.0
     }
 
     /// Whether this mode completely prohibits platform HTTP dependencies.
     /// Only `local_only` returns true.
-    pub fn is_local_only(&self) -> bool {
+    #[must_use]
+    pub const fn is_local_only(&self) -> bool {
         matches!(self.0, RuntimeMode::LocalOnly)
     }
-
+    #[must_use]
     /// Whether this mode allows optional platform use.
     /// `local_first` and `cloud_enhanced` return true.
     pub fn allows_platform(&self) -> bool {
@@ -41,10 +43,13 @@ impl DomainRuntimeMode {
 
     /// Whether this mode allows platform LLM on behalf of Creator.
     /// Only `cloud_enhanced` returns true (ADR-015 D1).
-    pub fn allows_platform_llm(&self) -> bool {
+    #[must_use]
+    pub const fn allows_platform_llm(&self) -> bool {
         matches!(self.0, RuntimeMode::CloudEnhanced)
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Parse from string (matches JSON Schema enum values).
     pub fn parse(s: &str) -> Result<Self, DomainError> {
         RuntimeMode::from_str(s)
@@ -53,9 +58,10 @@ impl DomainRuntimeMode {
     }
 
     /// Downgrade to a more local-first mode.
-    /// Chain: cloud_enhanced → local_first → local_only
-    /// Returns None if already at local_only (cannot downgrade further).
-    pub fn downgrade(&self) -> Option<DomainRuntimeMode> {
+    /// Chain: `cloud_enhanced` → `local_first` → local_only
+    /// Returns None if already at `local_only` (cannot downgrade further).
+    #[must_use]
+    pub const fn downgrade(&self) -> Option<DomainRuntimeMode> {
         match self.0 {
             RuntimeMode::CloudEnhanced => Some(DomainRuntimeMode(RuntimeMode::LocalFirst)),
             RuntimeMode::LocalFirst => Some(DomainRuntimeMode(RuntimeMode::LocalOnly)),
@@ -64,9 +70,10 @@ impl DomainRuntimeMode {
     }
 
     /// Upgrade to a more cloud-enhanced mode.
-    /// Chain: local_only → local_first → cloud_enhanced
-    /// Returns None if already at cloud_enhanced (cannot upgrade further).
-    pub fn upgrade(&self) -> Option<DomainRuntimeMode> {
+    /// Chain: `local_only` → `local_first` → cloud_enhanced
+    /// Returns None if already at `cloud_enhanced` (cannot upgrade further).
+    #[must_use]
+    pub const fn upgrade(&self) -> Option<DomainRuntimeMode> {
         match self.0 {
             RuntimeMode::LocalOnly => Some(DomainRuntimeMode(RuntimeMode::LocalFirst)),
             RuntimeMode::LocalFirst => Some(DomainRuntimeMode(RuntimeMode::CloudEnhanced)),
@@ -76,7 +83,7 @@ impl DomainRuntimeMode {
 
     /// Calculate degradation depth from a target mode.
     /// 0 = same mode, 1 = one level down, 2 = two levels down.
-    pub fn degradation_depth_to(&self, target: &DomainRuntimeMode) -> u32 {
+    pub const fn degradation_depth_to(&self, target: &DomainRuntimeMode) -> u32 {
         match (self.0, target.0) {
             (RuntimeMode::CloudEnhanced, RuntimeMode::CloudEnhanced) => 0,
             (RuntimeMode::CloudEnhanced, RuntimeMode::LocalFirst) => 1,

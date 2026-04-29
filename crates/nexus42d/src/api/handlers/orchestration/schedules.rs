@@ -1,14 +1,29 @@
+//! Complex HTTP handlers with orchestration logic exceed line limits.
+#![allow(clippy::too_many_lines)]
 //! Schedule HTTP handlers: 8 endpoints per WS7 §9.
 //!
 //! Endpoints:
 //! - POST   /schedules — Add schedule
 //! - GET    /schedules — List schedules (optional filters)
 //! - GET    /schedules/{id} — Inspect schedule
-//! - PATCH  /schedules/{id}/core-context — Apply EditOp
+//! - PATCH  /schedules/{id}/core-context — Apply `EditOp`
 //! - GET    /schedules/{id}/core-context — Current content
 //! - GET    /schedules/{id}/core-context-history — Version history
 //! - POST   /schedules/{id}/signal — Pause/Resume/Cancel/Start/Advance
 //! - DELETE /schedules/{id} — Remove (terminal only)
+//!
+//! # Error Documentation
+//!
+//! All handlers return `(StatusCode, String)` errors with consistent patterns:
+//! - `NOT_FOUND` for missing schedules
+//! - `CONFLICT` for state conflicts
+//! - `INTERNAL_SERVER_ERROR` for database failures
+//! - `BAD_REQUEST` for invalid input
+//!
+//! Due to this consistent pattern across all handlers, `missing_errors_doc`
+//! is suppressed for this module.
+
+#![allow(clippy::missing_errors_doc)]
 
 use crate::workspace::WorkspaceState;
 use axum::{
@@ -16,9 +31,15 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use nexus_contracts::local::schedule::http::*;
+use nexus_contracts::local::schedule::http::{
+    AddScheduleRequest, AddScheduleResponse, CoreContextHistoryEntry, CoreContextHistoryResponse,
+    CoreContextResponse, DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
+    InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
+    ScheduleSummary, SignalScheduleRequest, SignalScheduleResponse,
+};
 use nexus_contracts::local::schedule::{
-    CoreContextAuthor, EditOp, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId,
+    ScheduleStatus,
 };
 use std::sync::Arc;
 
@@ -52,8 +73,10 @@ pub async fn add_schedule(
     // Generate a schedule ID (simple timestamp-based for pre-1.0)
     let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
 
-    let concurrency = match &body.concurrency {
-        Some(c) => match c {
+    let concurrency = body
+        .concurrency
+        .as_ref()
+        .map_or(ScheduleConcurrency::Serial, |c| match c {
             ScheduleConcurrencyRequest::Serial => ScheduleConcurrency::Serial,
             ScheduleConcurrencyRequest::ParallelWith { schedule_ids } => {
                 ScheduleConcurrency::ParallelWith(
@@ -63,9 +86,7 @@ pub async fn add_schedule(
                 )
             }
             ScheduleConcurrencyRequest::ParallelAny => ScheduleConcurrency::ParallelAny,
-        },
-        None => ScheduleConcurrency::Serial,
-    };
+        });
 
     let depends_on: Vec<ScheduleId> = body
         .depends_on
@@ -75,7 +96,6 @@ pub async fn add_schedule(
         .map(|s| ScheduleId(s.clone()))
         .collect();
 
-    use nexus_contracts::local::schedule::{CoreContextVersion, Schedule};
     let schedule = Schedule {
         id: ScheduleId(schedule_id.clone()),
         creator_id: body.creator_id.clone(),
@@ -113,8 +133,7 @@ pub async fn add_schedule(
     })?;
 
     // Seed core context v0 if seed is provided
-    let mut core_version: u32 = 0;
-    if let Some(seed) = &body.seed {
+    let core_version = if let Some(seed) = &body.seed {
         let mgr = supervisor.core_context_manager();
         let sid = ScheduleId(schedule_id.clone());
         let _record = mgr
@@ -132,8 +151,10 @@ pub async fn add_schedule(
                     format!("failed to seed core context: {e}"),
                 )
             })?;
-        core_version = 0;
-    }
+        0
+    } else {
+        0
+    };
 
     Ok((
         StatusCode::CREATED,
@@ -189,7 +210,7 @@ pub async fn list_schedules(
         )
     })?;
 
-    let schedules = rows.into_iter().map(|r| r.into_summary()).collect();
+    let schedules = rows.into_iter().map(ListRow::into_summary).collect();
 
     Ok((StatusCode::OK, Json(ListSchedulesResponse { schedules })))
 }
@@ -265,7 +286,7 @@ pub async fn inspect_schedule(
 // PATCH /schedules/{id}/core-context — Apply EditOp
 // ---------------------------------------------------------------------------
 
-/// `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` — apply EditOp.
+/// `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` — apply `EditOp`.
 pub async fn edit_core_context(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -409,6 +430,8 @@ pub async fn get_core_context_history(
     let entries: Vec<CoreContextHistoryEntry> = rows
         .iter()
         .map(|r| CoreContextHistoryEntry {
+            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             version: r.version as u32,
             payload_kind: r.payload_kind.clone(),
             content: None,
@@ -775,7 +798,7 @@ pub async fn delete_schedule(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Parse the HTTP EditCoreContextRequest into an EditOp.
+/// Parse the HTTP `EditCoreContextRequest` into an `EditOp`.
 fn parse_edit_op(body: &EditCoreContextRequest) -> Result<EditOp, (StatusCode, String)> {
     match body.op.as_str() {
         "append" => {
@@ -847,6 +870,8 @@ impl ListRow {
             preset_id: self.preset_id,
             status: self.status,
             label: self.label,
+            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             current_core_context_version: self.current_core_context_version as u32,
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),
@@ -877,6 +902,8 @@ impl InspectRow {
             preset_id: self.preset_id,
             status: self.status,
             label: self.label,
+            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             current_core_context_version: self.current_core_context_version as u32,
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),
@@ -908,8 +935,9 @@ mod tests {
             let req = SignalScheduleRequest {
                 signal: signal.to_string(),
             };
-            let json = serde_json::to_string(&req).unwrap();
-            let back: SignalScheduleRequest = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(&req).expect("SignalScheduleRequest should serialize");
+            let back: SignalScheduleRequest =
+                serde_json::from_str(&json).expect("SignalScheduleRequest should deserialize");
             assert_eq!(back.signal, *signal);
         }
     }
@@ -922,7 +950,7 @@ mod tests {
             patch: None,
             path: None,
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::Append { .. }));
     }
 
@@ -934,7 +962,7 @@ mod tests {
             patch: None,
             path: None,
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::Replace { .. }));
     }
 
@@ -946,7 +974,7 @@ mod tests {
             patch: Some(serde_json::json!({"key": "val"})),
             path: None,
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::StructMerge { .. }));
     }
 
@@ -958,7 +986,7 @@ mod tests {
             patch: None,
             path: Some("key".to_string()),
         };
-        let op = parse_edit_op(&body).unwrap();
+        let op = parse_edit_op(&body).expect("parse_edit_op should succeed for append");
         assert!(matches!(op, EditOp::StructRemove { .. }));
     }
 

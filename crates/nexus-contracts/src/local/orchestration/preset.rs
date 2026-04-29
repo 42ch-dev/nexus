@@ -6,11 +6,11 @@
 //! **NOT** in `schemas/` — this is a local type; `nexus-platform` never
 //! observes it over any wire channel.
 //!
-//! ## Roles and recommended_models (WS-E §7)
+//! ## Roles and `recommended_models` (`WS-E` §7)
 //!
 //! Presets define role-based agent configurations:
 //! - `roles`: list of `PresetRoleDefinition` with `recommended_models`
-//! - `GraphNode.agent`: optional role ID reference
+//! - `GraphNode.agent`: optional role `ID` reference
 //!
 //! Backward compatible: presets without `roles` operate in single-agent mode.
 
@@ -82,8 +82,8 @@ pub struct PresetHeader {
     /// Optional license identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    /// Optional initial action for schedule creation (WS7 §7).
-    /// Controls how core_context v0 is seeded when a schedule is created.
+    /// Optional initial action for schedule creation (`WS7` §7).
+    /// Controls how `core_context` v0 is seeded when a schedule is created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_action: Option<InitialAction>,
 }
@@ -130,6 +130,7 @@ pub struct StateDefinition {
     pub context_update: Option<ContextUpdateHook>,
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_false(b: &bool) -> bool {
     !b
 }
@@ -228,7 +229,7 @@ pub enum ExitWhen {
 ///   rules: [...]
 ///   default: outlining
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NextTarget {
     /// Linear transition to a single state ID.
@@ -238,7 +239,7 @@ pub enum NextTarget {
 }
 
 /// Conditional next form — V1.4 does NOT implement this; loader returns error.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NextConditional {
     /// Must be `"conditional"`.
     pub kind: String,
@@ -250,7 +251,7 @@ pub struct NextConditional {
 }
 
 /// A single conditional rule.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConditionalRule {
     /// Handlebars-style when-condition expression.
     pub when: String,
@@ -309,10 +310,10 @@ pub enum GraphNodeKind {
 /// What action to take when a schedule starts using this preset.
 ///
 /// Declared at `preset.initial_action` level in the YAML manifest.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InitialAction {
-    /// Use the seed text directly as core_context v0.
+    /// Use the seed text directly as `core_context` v0.
     SeedDirect,
     /// Expand the seed using a registered capability (V1.5+).
     SeedExpansion {
@@ -331,12 +332,12 @@ pub enum InitialAction {
 // ContextUpdateHook (WS7 §7)
 // ---------------------------------------------------------------------------
 
-/// A hook that fires on state exit to update the schedule's core_context.
+/// A hook that fires on state exit to update the schedule's `core_context`.
 ///
 /// Declared per-state as `states[].context_update` in the YAML manifest.
 /// Only `Append` and `StructMerge` operations are allowed; `Replace` is
 /// rejected during validation (spec §6.2 — preset hooks are strictly additive).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextUpdateHook {
     /// The edit operation to apply.
     /// Only `append` and `struct_merge` kinds are valid for preset hooks.
@@ -345,11 +346,11 @@ pub struct ContextUpdateHook {
     pub template_file: String,
 }
 
-/// Edit operation shape for context_update hooks.
+/// Edit operation shape for `context_update` hooks.
 ///
 /// A simplified subset of [`nexus_contracts::local::schedule::EditOp`] that
 /// is used at the YAML parsing level (before converting to the full `EditOp`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ContextUpdateOp {
     /// Append text to existing content.
@@ -369,13 +370,13 @@ pub enum ContextUpdateOp {
         #[serde(default)]
         body: String,
     },
-    /// StructRemove is NOT allowed for preset hooks — will be rejected by the loader.
+    /// `StructRemove` is NOT allowed for preset hooks — will be rejected by the loader.
     StructRemove {
         #[serde(default)]
         path: String,
     },
     /// V1.5+ only. Invoke `context.summarize` capability to produce an
-    /// LLM-driven summary of the current core_context.
+    /// LLM-driven summary of the current `core_context`.
     LlmSummarize {
         /// Capability name to invoke (e.g. `context.summarize`).
         capability: String,
@@ -419,14 +420,14 @@ pub enum SignalActionKind {
 // PresetRoleDefinition (WS-E §7)
 // ---------------------------------------------------------------------------
 
-/// A role definition for multi-agent presets (WS-E §7).
+/// A role definition for multi-agent presets (`WS-E` §7).
 ///
 /// Defines a named agent role with:
 /// - A system prompt template (via `system_prompt_file`)
 /// - Recommended agent:model pairs (ordered list, first = default)
 ///
 /// At runtime, the daemon resolves each role to an `acp_agent_id` + `model`
-/// using the priority resolution order (CLI > user config > recommended_models).
+/// using the priority resolution order (`CLI` > user config > `recommended_models`).
 ///
 /// ```yaml
 /// roles:
@@ -445,7 +446,7 @@ pub struct PresetRoleDefinition {
     pub description: String,
     /// Path to system prompt template (relative to preset bundle root).
     pub system_prompt_file: String,
-    /// Ordered list of "acp_agent_id:model_name" pairs.
+    /// Ordered list of `acp_agent_id:model_name` pairs.
     /// First entry is the default; subsequent entries are fallbacks.
     /// Format validated by loader: must contain exactly one colon.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -460,37 +461,8 @@ pub struct PresetRoleDefinition {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_minimal_creator_preset() {
-        let yaml = r#"
-preset:
-  id: tiny
-  version: 1
-  kind: creator
-  description: minimal
-  requires_capabilities: []
-  initial: a
-  terminal: b
-states:
-  - id: a
-    enter: []
-    exit_when: { kind: manual }
-    next: b
-  - id: b
-    terminal: true
-"#;
-        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(p.preset.id, "tiny");
-        assert_eq!(p.preset.version, 1);
-        assert_eq!(p.preset.kind, PresetKind::Creator);
-        assert_eq!(p.states.len(), 2);
-        assert_eq!(p.states[0].id, "a");
-        assert_eq!(p.states[1].terminal, true);
-    }
-
-    #[test]
-    fn parse_full_preset_with_inner_graphs_and_signals() {
-        let yaml = r#"
+    /// Full preset YAML with `inner_graphs` and signals (shared across tests).
+    static FULL_PRESET_YAML: &str = r#"
 preset:
   id: novel-writing
   version: 1
@@ -581,6 +553,43 @@ signals:
       action: force_transition
       target: done
 "#;
+
+    #[test]
+    fn parse_minimal_creator_preset() {
+        let yaml = r"
+preset:
+  id: tiny
+  version: 1
+  kind: creator
+  description: minimal
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.preset.id, "tiny");
+        assert_eq!(p.preset.version, 1);
+        assert_eq!(p.preset.kind, PresetKind::Creator);
+        assert_eq!(p.states.len(), 2);
+        assert_eq!(p.states[0].id, "a");
+        assert!(p.states[1].terminal);
+    }
+
+    #[test]
+    fn parse_full_preset_with_inner_graphs_and_signals() {
+        let yaml = FULL_PRESET_YAML;
+        assert_parsed_full_preset(yaml);
+    }
+
+    /// Shared helper: parse the full-preset YAML and assert key invariants.
+    fn assert_parsed_full_preset(yaml: &str) {
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.preset.id, "novel-writing");
         assert_eq!(p.preset.version, 1);
@@ -604,7 +613,7 @@ signals:
 
     #[test]
     fn unknown_exit_when_kind_fails_with_clear_error() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad
   version: 1
@@ -621,7 +630,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let err = serde_yaml::from_str::<PresetManifest>(yaml);
         assert!(
             err.is_err(),
@@ -636,7 +645,7 @@ states:
 
     #[test]
     fn unknown_enter_kind_fails_with_clear_error() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad
   version: 1
@@ -654,7 +663,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let err = serde_yaml::from_str::<PresetManifest>(yaml);
         assert!(err.is_err(), "expected serde error for unknown enter.kind");
         let msg = format!("{:#}", err.unwrap_err());
@@ -666,7 +675,7 @@ states:
 
     #[test]
     fn system_preset_kind_parses() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: _system.maintenance
   version: 1
@@ -682,7 +691,7 @@ states:
     next: end
   - id: end
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.preset.kind, PresetKind::System);
     }

@@ -1,12 +1,12 @@
-//! OrchestrationEngine trait + GraphFlowEngine adapter over `graph-flow`.
+//! `OrchestrationEngine` trait + `GraphFlowEngine` adapter over `graph-flow`.
 //!
 //! ## WS2 R3: Arc<FlowRunner> per session
 //!
-//! The engine stores `Arc<FlowRunner>` instead of cloning FlowRunner on every
+//! The engine stores `Arc<FlowRunner>` instead of cloning `FlowRunner` on every
 //! step, avoiding unnecessary clone overhead while ensuring internal state is
 //! shared correctly.
 //!
-//! ## WS3 R1: EngineSharedState extraction
+//! ## WS3 R1: `EngineSharedState` extraction
 //!
 //! Shared state (`storage`, `runners`, `sessions`) is extracted into
 //! `EngineSharedState`, eliminating duplication between `GraphFlowEngine` and
@@ -40,6 +40,7 @@ pub struct SessionKey {
 
 impl SessionKey {
     /// Deterministic key for tests (and integration tests).
+    #[must_use]
     pub fn test_fixture() -> Self {
         Self {
             creator_id: "test-creator".into(),
@@ -78,13 +79,15 @@ pub enum SessionStatus {
 
 impl SessionStatus {
     /// Returns `true` if the session is in a terminal state.
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, SessionStatus::Completed | SessionStatus::Failed)
+    #[must_use]
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
     }
 
     /// Returns `true` if the session has completed successfully.
-    pub fn is_completed(&self) -> bool {
-        matches!(self, SessionStatus::Completed)
+    #[must_use]
+    pub const fn is_completed(&self) -> bool {
+        matches!(self, Self::Completed)
     }
 }
 
@@ -106,8 +109,9 @@ pub enum StepOutcome {
 
 impl StepOutcome {
     /// Returns `true` if the outcome requires user input.
-    pub fn is_waiting_for_input(&self) -> bool {
-        matches!(self, StepOutcome::WaitingForInput { .. })
+    #[must_use]
+    pub const fn is_waiting_for_input(&self) -> bool {
+        matches!(self, Self::WaitingForInput { .. })
     }
 }
 
@@ -141,6 +145,7 @@ pub struct Context {
 }
 
 impl Context {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: graph_flow::Context::new(),
@@ -229,14 +234,14 @@ pub trait OrchestrationEngine: Send + Sync {
 // EngineSharedState — extracted shared state (WS3 R1)
 // ---------------------------------------------------------------------------
 
-/// Shared state extracted from GraphFlowEngine for reuse by EngineProxy (WS3 R1).
+/// Shared state extracted from `GraphFlowEngine` for reuse by `EngineProxy` (WS3 R1).
 ///
 /// Eliminates duplication between `GraphFlowEngine` and `EngineProxy` by
 /// placing storage, runners, and sessions in a single Arc-wrapped struct.
 pub struct EngineSharedState {
     /// Session persistence backend.
     pub storage: Arc<dyn SessionStorage>,
-    /// Per-session FlowRunners wrapped in Arc (WS2 R3: avoids clone overhead).
+    /// Per-session `FlowRunners` wrapped in Arc (WS2 R3: avoids clone overhead).
     pub runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<FlowRunner>>>>,
     /// In-memory bookkeeping of active sessions.
     pub sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
@@ -272,6 +277,10 @@ impl EngineSharedState {
     /// Run a single step for a session, updating status after execution.
     ///
     /// Common logic shared between `GraphFlowEngine` and `EngineProxy`.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] if the engine has no graph loaded, the step cannot be resolved,
+    /// or capability execution fails.
     pub async fn run_step_internal(
         &self,
         session_id: &SessionId,
@@ -401,9 +410,8 @@ impl OrchestrationEngine for EngineProxy {
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
             match signal {
                 EngineSignal::Pause => s.status = SessionStatus::Paused,
-                EngineSignal::Resume => s.status = SessionStatus::Running,
+                EngineSignal::Resume | EngineSignal::Advance => s.status = SessionStatus::Running,
                 EngineSignal::Cancel => s.status = SessionStatus::Failed,
-                EngineSignal::Advance => s.status = SessionStatus::Running,
             }
             Ok(())
         } else {
@@ -566,7 +574,7 @@ impl GraphFlowEngine {
         self.state.recover_sessions(summaries).await;
     }
 
-    /// Reconstruct a FlowRunner for a recovered session (R6).
+    /// Reconstruct a `FlowRunner` for a recovered session (R6).
     ///
     /// Loads the embedded preset by `preset_id`, builds the wired outer graph,
     /// and creates a `FlowRunner` with the engine's storage. The persisted
@@ -585,11 +593,9 @@ impl GraphFlowEngine {
         let proxy = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
-        let wired = crate::preset::loader::build_wired_outer_graph(
-            &loaded,
-            proxy as Arc<dyn OrchestrationEngine>,
-            self.caps.clone(),
-        );
+        let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
+        let wired =
+            crate::preset::loader::build_wired_outer_graph(&loaded, &engine_proxy, &self.caps);
 
         // Step 3: Create FlowRunner with the wired graph and existing storage.
         // The storage already contains the persisted session data, so the
@@ -613,6 +619,7 @@ impl GraphFlowEngine {
     }
 
     /// Get a reference to the shared state for use in preset loader (WS3 R1).
+    #[must_use]
     pub fn shared_state(&self) -> Arc<EngineSharedState> {
         self.state.clone()
     }
@@ -623,6 +630,9 @@ impl GraphFlowEngine {
     /// stores it, and registers an `Arc<FlowRunner>` for future `run_step` calls.
     ///
     /// Returns the session ID.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] if session creation, preset loading, or initial step execution fails.
     pub async fn start_session(
         &self,
         preset_id: &str,
@@ -735,9 +745,8 @@ impl OrchestrationEngine for GraphFlowEngine {
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
             match signal {
                 EngineSignal::Pause => s.status = SessionStatus::Paused,
-                EngineSignal::Resume => s.status = SessionStatus::Running,
+                EngineSignal::Resume | EngineSignal::Advance => s.status = SessionStatus::Running,
                 EngineSignal::Cancel => s.status = SessionStatus::Failed,
-                EngineSignal::Advance => s.status = SessionStatus::Running,
             }
             Ok(())
         } else {
@@ -826,14 +835,10 @@ impl OrchestrationEngine for GraphFlowEngine {
         loaded: &crate::preset::LoadedPreset,
     ) -> Result<SessionId, EngineError> {
         // WS3 R1: Use EngineProxy wrapping EngineSharedState.
-        let proxy = Arc::new(EngineProxy {
+        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
-        let wired = crate::preset::loader::build_wired_outer_graph(
-            loaded,
-            proxy as Arc<dyn OrchestrationEngine>,
-            self.caps.clone(),
-        );
+        let wired = crate::preset::loader::build_wired_outer_graph(loaded, &proxy, &self.caps);
         self.start_session(&loaded.id, Arc::new(wired)).await
     }
 }
@@ -942,15 +947,10 @@ mod tests {
         // (It may fail for other reasons if the session state is minimal,
         // but it should not be NoGraphLoaded.)
         let result = engine.run_step(&summary.session_id).await;
-        match result {
-            Err(EngineError::NoGraphLoaded) => {
-                panic!("R6 regression: run_step returned NoGraphLoaded for recovered session with known preset");
-            }
-            _ => {
-                // Any other result is acceptable — the runner was reconstructed.
-                // The session may complete, error, or pause depending on its state.
-            }
-        }
+        assert!(
+            !matches!(result, Err(EngineError::NoGraphLoaded)),
+            "R6 regression: run_step returned NoGraphLoaded for recovered session with known preset"
+        );
     }
 
     #[tokio::test]
@@ -979,9 +979,13 @@ mod tests {
 
         // No runner should have been reconstructed for the terminal session.
         // The runners map should not contain the terminal session ID.
-        let runners = engine.state.runners.read().await;
         assert!(
-            !runners.contains_key(&terminal_summary.session_id.0),
+            !engine
+                .state
+                .runners
+                .read()
+                .await
+                .contains_key(&terminal_summary.session_id.0),
             "terminal session should not have a reconstructed runner"
         );
     }

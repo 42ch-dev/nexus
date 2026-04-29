@@ -22,7 +22,7 @@ fn validate_creator_id(creator_id: &str) -> Result<(), DomainError> {
         )))
     }
 }
-
+#[must_use]
 /// Resolve the SOUL.md path for a creator using the home layout.
 ///
 /// # Panics (defense-in-depth)
@@ -36,6 +36,7 @@ pub fn soul_path(home: &Path, creator_id: &str) -> PathBuf {
 }
 
 /// Check if a SOUL.md exists for the given creator.
+#[must_use]
 pub fn exists(home: &Path, creator_id: &str) -> bool {
     // Existence check: silently return false for invalid IDs rather than
     // erroring, matching common "check then maybe create" patterns.
@@ -62,7 +63,9 @@ pub fn load(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> 
     doc.source_path = Some(path);
     Ok(doc)
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Create a new SOUL.md for a creator. Fails if it already exists.
 pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> {
     validate_creator_id(creator_id)?;
@@ -85,7 +88,9 @@ pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError
     loaded_doc.source_path = Some(path);
     Ok(loaded_doc)
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Save an existing SOUL.md (overwrites). Must already exist.
 pub fn save(home: &Path, creator_id: &str, doc: &SoulDocument) -> Result<(), DomainError> {
     validate_creator_id(creator_id)?;
@@ -101,7 +106,9 @@ pub fn save(home: &Path, creator_id: &str, doc: &SoulDocument) -> Result<(), Dom
         .map_err(|e| DomainError::ValidationError(format!("cannot write SOUL.md: {e}")))?;
     Ok(())
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Validate an existing SOUL.md (check sections and return parsed doc).
 pub fn validate(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainError> {
     validate_creator_id(creator_id)?;
@@ -109,7 +116,12 @@ pub fn validate(home: &Path, creator_id: &str) -> Result<SoulDocument, DomainErr
     doc.validate()?;
     Ok(doc)
 }
-
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
+///
+/// # Errors
+/// Returns `Err(DomainError::...)` if validation fails.
 /// Delete SOUL.md for a creator.
 pub fn delete(home: &Path, creator_id: &str) -> Result<(), DomainError> {
     validate_creator_id(creator_id)?;

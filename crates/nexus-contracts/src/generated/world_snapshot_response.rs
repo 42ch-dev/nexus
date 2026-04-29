@@ -1,14 +1,14 @@
-//! Nexus WorldSnapshotResponse
+//! `Nexus` `WorldSnapshotResponse`
 //!
-//! Response body for POST /v1/worlds/snapshot — snapshot anchor and revision metadata.
+//! `Response` body for `POST` /v1/worlds/snapshot — snapshot anchor and revision metadata.
 //!
-//! @schema_version 1
-//! @source world-snapshot-response.schema.json
+//! `@schema_version` 1
+//! `@source` world-snapshot-response.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// Response body for POST /v1/worlds/snapshot — snapshot anchor and revision metadata.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Response` body for `POST` /v1/worlds/snapshot — snapshot anchor and revision metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldSnapshotResponse {
     pub schema_version: u32,

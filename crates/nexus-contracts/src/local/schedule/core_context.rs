@@ -27,7 +27,7 @@ pub struct CoreContextRecord {
 }
 
 /// The "what preset execution actually sees".
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreContextPayload {
     /// Flat text form (V1.4 minimum).
@@ -43,7 +43,7 @@ pub enum CoreContextPayload {
 /// Uses `#[serde(tag = "kind")]` for forward-compatible tagged enum
 /// representation. `#[non_exhaustive]` on `LlmSummarize` reserves it for
 /// V1.5+ without requiring schema migration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DerivationStep {
     /// v0 — from `schedule add --seed`
@@ -72,7 +72,8 @@ impl DerivationStep {
     ///
     /// This is the only way to create this variant outside the defining crate
     /// because the variant is `#[non_exhaustive]`.
-    pub fn llm_summarize(capability: String, prompt_hash: [u8; 32]) -> Self {
+    #[must_use]
+    pub const fn llm_summarize(capability: String, prompt_hash: [u8; 32]) -> Self {
         Self::LlmSummarize {
             capability,
             prompt_hash,
@@ -81,7 +82,7 @@ impl DerivationStep {
 }
 
 /// Edit operations for user-driven `core_context` changes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EditOp {
     /// Overwrite text content entirely

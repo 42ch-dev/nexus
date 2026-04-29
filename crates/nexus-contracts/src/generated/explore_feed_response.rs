@@ -1,15 +1,15 @@
-//! Nexus ExploreFeedResponse
+//! `Nexus` `ExploreFeedResponse`
 //!
-//! Paginated Explore results for browse and search responses (POST /v1/explore/browse | /v1/explore/search).
+//! `Paginated` `Explore` results for browse and search responses (`POST` /v1/explore/browse | /v1/explore/search).
 //!
-//! @schema_version 1
-//! @source explore-feed-response.schema.json
+//! `@schema_version` 1
+//! `@source` explore-feed-response.schema.json
 
 use serde::{Deserialize, Serialize};
 use crate::generated::explore_hit::ExploreHit;
 
-/// Paginated Explore results for browse and search responses (POST /v1/explore/browse | /v1/explore/search).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// `Paginated` `Explore` results for browse and search responses (`POST` /v1/explore/browse | /v1/explore/search).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreFeedResponse {
     pub schema_version: u32,

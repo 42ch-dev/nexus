@@ -1,4 +1,4 @@
-//! WorldMembership aggregate — Creator-World relationship with roles and permissions.
+//! `WorldMembership` aggregate — Creator-World relationship with roles and permissions.
 //!
 //! Tracks which creators belong to which worlds and what they can do.
 //! See data-model-v1.md §5.4.
@@ -8,7 +8,7 @@ use std::str::FromStr;
 use strum::Display;
 
 /// Membership role enum - matches v1-spec §5.4, §7
-/// Values: owner, maintainer, collaborator, official_creator
+/// Values: owner, maintainer, collaborator, `official_creator`
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -30,7 +30,8 @@ pub enum MembershipStatus {
 }
 
 impl MembershipStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Active => "active",
             Self::Invited => "invited",
@@ -42,6 +43,7 @@ impl MembershipStatus {
 
 /// World membership permissions.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct MembershipPermissions {
     pub can_sync_kb: bool,
     pub can_publish: bool,
@@ -51,7 +53,8 @@ pub struct MembershipPermissions {
 }
 
 impl MembershipPermissions {
-    pub fn owner_permissions() -> Self {
+    #[must_use]
+    pub const fn owner_permissions() -> Self {
         Self {
             can_sync_kb: true,
             can_publish: true,
@@ -61,7 +64,7 @@ impl MembershipPermissions {
         }
     }
 
-    pub fn maintainer_permissions() -> Self {
+    pub const fn maintainer_permissions() -> Self {
         Self {
             can_sync_kb: true,
             can_publish: true,
@@ -71,7 +74,7 @@ impl MembershipPermissions {
         }
     }
 
-    pub fn collaborator_permissions() -> Self {
+    pub const fn collaborator_permissions() -> Self {
         Self {
             can_sync_kb: true,
             can_publish: false,
@@ -81,7 +84,7 @@ impl MembershipPermissions {
         }
     }
 
-    pub fn official_creator_permissions() -> Self {
+    pub const fn official_creator_permissions() -> Self {
         Self {
             can_sync_kb: false,
             can_publish: false,
@@ -92,7 +95,7 @@ impl MembershipPermissions {
     }
 }
 
-/// WorldMembership aggregate — Creator-World relationship.
+/// `WorldMembership` aggregate — Creator-World relationship.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldMembership {
     pub schema_version: u32,
@@ -108,6 +111,7 @@ pub struct WorldMembership {
 
 impl WorldMembership {
     /// Create a new world membership.
+    #[must_use]
     pub fn new(world_id: &str, creator_id: &str, role: MembershipRole) -> Self {
         let membership_id = format!("wmb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         let permissions = match role {
@@ -131,24 +135,21 @@ impl WorldMembership {
     }
 
     /// Check if membership is active.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.membership_status == MembershipStatus::Active.as_str()
     }
 
-    /// Get can_confirm_canon permission.
+    /// Get `can_confirm_canon` permission.
     pub fn can_confirm_canon(&self) -> bool {
         self.permissions
             .as_ref()
-            .map(|p| p.can_confirm_canon)
-            .unwrap_or(false)
+            .is_some_and(|p| p.can_confirm_canon)
     }
 
-    /// Get can_sync_kb permission.
+    /// Get `can_sync_kb` permission.
     pub fn can_sync_kb(&self) -> bool {
-        self.permissions
-            .as_ref()
-            .map(|p| p.can_sync_kb)
-            .unwrap_or(false)
+        self.permissions.as_ref().is_some_and(|p| p.can_sync_kb)
     }
 }
 
@@ -171,6 +172,7 @@ impl From<nexus_contracts::WorldMembership> for WorldMembership {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<WorldMembership> for nexus_contracts::WorldMembership {
     fn from(d: WorldMembership) -> Self {
         Self {
@@ -242,7 +244,7 @@ mod enum_alignment_tests {
 
     #[test]
     fn membership_role_matches_spec() {
-        let roles = vec![
+        let roles = [
             MembershipRole::Owner,
             MembershipRole::Maintainer,
             MembershipRole::Collaborator,

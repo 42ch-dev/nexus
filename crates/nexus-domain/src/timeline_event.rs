@@ -1,6 +1,6 @@
-//! TimelineEvent aggregate — canonical event on the world timeline.
+//! `TimelineEvent` aggregate — canonical event on the world timeline.
 //!
-//! TimelineEvent represents a discrete event on a world's timeline branch,
+//! `TimelineEvent` represents a discrete event on a world's timeline branch,
 //! with causality tracking and provisional → canon promotion gates.
 //! See data-model-v1.md §5.6, consistency-rules-v1.md §3.3.
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// Timeline event type enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TimelineEventType {
     StoryAdvance,
@@ -20,7 +20,8 @@ pub enum TimelineEventType {
 }
 
 impl TimelineEventType {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::StoryAdvance => "story_advance",
             Self::StateUpdate => "state_update",
@@ -41,7 +42,8 @@ pub enum TimelineEventStatus {
 }
 
 impl TimelineEventStatus {
-    pub fn as_str(&self) -> &str {
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Canon => "canon",
             Self::Provisional => "provisional",
@@ -57,7 +59,7 @@ pub struct MembershipPermissionCheck {
     pub can_sync_kb: bool,
 }
 
-/// TimelineEvent aggregate — a canonical event on the world timeline.
+/// `TimelineEvent` aggregate — a canonical event on the world timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimelineEvent {
     pub schema_version: u32,
@@ -82,6 +84,7 @@ pub struct TimelineEvent {
 
 impl TimelineEvent {
     /// Create a new timeline event on a branch.
+    #[must_use]
     pub fn new(
         world_id: &str,
         branch_id: &str,
@@ -110,7 +113,7 @@ impl TimelineEvent {
     /// Promote provisional → canon.
     /// Per consistency-rules-v1.md §3.3:
     /// - Must not reorder existing canon sequence
-    /// - Must revalidate branch_id, causality, sequence constraints, permissions, current head
+    /// - Must revalidate `branch_id`, causality, sequence constraints, permissions, current head
     /// - Default promotion: append as new canon head
     pub fn promote_to_canon(
         &mut self,
@@ -170,7 +173,9 @@ impl TimelineEvent {
         self.status = TimelineEventStatus::Canon.as_str().to_string();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Reject a provisional or canon event.
     pub fn reject(&mut self) -> Result<(), DomainError> {
         if self.status == TimelineEventStatus::Rejected.as_str() {
@@ -179,7 +184,9 @@ impl TimelineEvent {
         self.status = TimelineEventStatus::Rejected.as_str().to_string();
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Add causal predecessor.
     pub fn add_cause(&mut self, event_id: &str) {
         let causes = self.caused_by_event_ids.get_or_insert_with(Vec::new);
@@ -188,7 +195,7 @@ impl TimelineEvent {
         }
     }
 
-    /// Add affected KeyBlock reference.
+    /// Add affected `KeyBlock` reference.
     pub fn add_affected_kb(&mut self, kb_id: &str) {
         let kbs = self.affected_key_block_ids.get_or_insert_with(Vec::new);
         if !kbs.contains(&kb_id.to_string()) {
@@ -196,7 +203,7 @@ impl TimelineEvent {
         }
     }
 
-    /// Validate causality: caused_by_event_ids must reference same world.
+    /// Validate causality: `caused_by_event_ids` must reference same world.
     /// Per consistency-rules-v1.md §3.3.
     pub fn validate_causality(&self, world_id: &str) -> Result<(), DomainError> {
         // Self-referencing check
@@ -222,7 +229,12 @@ impl TimelineEvent {
 
         Ok(())
     }
-
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
+    ///
+    /// # Errors
+    /// Returns `Err(DomainError::...)` if validation fails.
     /// Validate sequence is monotonic within branch.
     pub fn validate_sequence(&self, prev_sequence: u64) -> Result<(), DomainError> {
         if self.sequence_no <= prev_sequence {
@@ -257,6 +269,7 @@ impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
     fn from(d: TimelineEvent) -> Self {
         Self {

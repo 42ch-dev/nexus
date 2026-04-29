@@ -19,6 +19,25 @@ authors = ["42ch"]
 license = "GPL-3.0-only"
 repository = "https://github.com/42ch/nexus"
 
+# --- Lint configuration ---
+# All workspace crates inherit these via [lints] workspace = true.
+# Enable pedantic + nursery groups; selectively allow overly noisy lints.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Pedantic group
+pedantic = { level = "warn", priority = -1 }
+# Nursery group
+nursery = { level = "warn", priority = -1 }
+
+# Selectively allow lints that are too noisy or opinionated for this project.
+# Each allow should have a brief justification; revisit periodically.
+missing_docs_in_private_items = "allow"     # pre-1.0: will enable later
+allow_attributes_without_reason = "allow"   # too noisy during rapid iteration
+# module_name_repetitions = "allow"         # uncomment if too noisy
+# similar_names = "allow"                   # uncomment if too noisy
+
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

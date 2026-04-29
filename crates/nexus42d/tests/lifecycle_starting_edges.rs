@@ -1,8 +1,8 @@
 //! Tests for Starting lifecycle edge cases (WS-C).
 //!
-//! T5: HealthDegraded during Starting → Degraded
-//! T6: ShutdownRequested during Starting with in-flight cancel
-//! T7: ActionContext diagnostics populated in enter_starting
+//! T5: `HealthDegraded` during Starting → Degraded
+//! T6: `ShutdownRequested` during Starting with in-flight cancel
+//! T7: `ActionContext` diagnostics populated in `enter_starting`
 //! T8: Regression — Starting → Running path still works
 
 use std::sync::Arc;
@@ -23,7 +23,7 @@ async fn drive_to_running(m: &StatigLifecycle) {
 
 // ── T5: HealthDegraded during Starting → Degraded ──────────────────────────
 
-/// Test: HealthDegraded for an already-up subsystem during Starting transitions to Degraded.
+/// Test: `HealthDegraded` for an already-up subsystem during Starting transitions to Degraded.
 #[tokio::test]
 async fn health_degraded_during_starting_transitions_to_degraded() {
     let m = StatigLifecycle::new_for_test();
@@ -47,7 +47,7 @@ async fn health_degraded_during_starting_transitions_to_degraded() {
     assert_eq!(m.current_state(), LifecycleState::Degraded);
 }
 
-/// Test: HealthDegraded for a subsystem NOT yet up during Starting is ignored.
+/// Test: `HealthDegraded` for a subsystem NOT yet up during Starting is ignored.
 #[tokio::test]
 async fn health_degraded_for_not_yet_up_subsystem_ignored_in_starting() {
     let m = StatigLifecycle::new_for_test();
@@ -80,10 +80,10 @@ async fn health_degraded_for_not_yet_up_subsystem_ignored_in_starting() {
 
 // ── T6: ShutdownRequested during Starting with in-flight cancel ─────────────
 
-/// Test: ShutdownRequested during Starting transitions to Stopping.
+/// Test: `ShutdownRequested` during Starting transitions to Stopping.
 ///
-/// This is already tested in lifecycle_transitions.rs, but here we verify
-/// it still works after adding the exit_starting cancellation logic.
+/// This is already tested in `lifecycle_transitions.rs`, but here we verify
+/// it still works after adding the `exit_starting` cancellation logic.
 #[tokio::test]
 async fn shutdown_during_starting_transitions_to_stopping() {
     let m = StatigLifecycle::new_for_test();
@@ -97,7 +97,7 @@ async fn shutdown_during_starting_transitions_to_stopping() {
     assert_eq!(m.current_state(), LifecycleState::Stopping);
 }
 
-/// Test: ShutdownRequested after partial subsystem startup still transitions to Stopping.
+/// Test: `ShutdownRequested` after partial subsystem startup still transitions to Stopping.
 #[tokio::test]
 async fn shutdown_after_partial_subsystem_up_transitions_to_stopping() {
     let m = StatigLifecycle::new_for_test();
@@ -120,7 +120,7 @@ async fn shutdown_after_partial_subsystem_up_transitions_to_stopping() {
 
 // ── T7: ActionContext diagnostics ──────────────────────────────────────────
 
-/// Test: ActionContext has diagnostic fields populated after construction.
+/// Test: `ActionContext` has diagnostic fields populated after construction.
 #[test]
 fn action_context_diagnostic_fields_populated() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
@@ -143,7 +143,7 @@ fn action_context_diagnostic_fields_populated() {
     assert!(ctx.initiating_event().is_none());
 }
 
-/// Test: ActionContext start_reason can be customized.
+/// Test: `ActionContext` `start_reason` can be customized.
 #[test]
 fn action_context_custom_start_reason() {
     let lifecycle = Arc::new(StatigLifecycle::new_for_test());
@@ -222,7 +222,7 @@ async fn regression_starting_to_failed_on_subsystem_failure() {
     assert_eq!(m.exit_code(), Some(1));
 }
 
-/// Test: Multiple HealthDegraded events in Degraded state still accumulate.
+/// Test: Multiple `HealthDegraded` events in Degraded state still accumulate.
 #[tokio::test]
 async fn regression_multiple_health_degraded_accumulate() {
     let m = StatigLifecycle::new_for_test();

@@ -1,6 +1,6 @@
-//! AgentProfile — local-only agent configuration.
+//! `AgentProfile` — local-only agent configuration.
 //!
-//! Configuration for an ACP agent in a workspace. Aligned with data-model-v1.md §5.15.
+//! Configuration for an `ACP` agent in a workspace. Aligned with data-model-v1.md §5.15.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common_types::{AgentProfileStatus, ProfileKind, SelectionMode, Transport};
 
 /// Configuration for an ACP agent in a workspace.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct AgentProfile {
     pub schema_version: u32,

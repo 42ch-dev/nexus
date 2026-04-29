@@ -1,3 +1,5 @@
+//! HTTP handlers have consistent error patterns.
+#![allow(clippy::missing_errors_doc)]
 //! Explore read-only proxy — `SyncClient` + platform `NEXUS_SYNC_PLATFORM_*` credentials.
 //!
 //! `POST /v1/local/explore/browse` → `POST /v1/explore/browse`
@@ -11,7 +13,7 @@ use nexus_sync::sync_client::SyncClient;
 use serde::Serialize;
 use tracing::info;
 
-fn map_sync_client_error(e: nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
@@ -58,11 +60,11 @@ pub async fn browse(
                 .into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let feed = client
         .explore_browse(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(ExploreLocalResponse {
         success: true,
@@ -98,11 +100,11 @@ pub async fn search(
                 .into(),
         })?;
 
-    let client = SyncClient::new(&base_url, &token).map_err(map_sync_client_error)?;
+    let client = SyncClient::new(&base_url, &token).map_err(|e| map_sync_client_error(&e))?;
     let feed = client
         .explore_search(&req)
         .await
-        .map_err(map_sync_client_error)?;
+        .map_err(|e| map_sync_client_error(&e))?;
 
     Ok(Json(ExploreLocalResponse {
         success: true,
@@ -122,7 +124,7 @@ mod tests {
             feed: None,
             error: Some("x".into()),
         };
-        let j = serde_json::to_string(&r).unwrap();
+        let j = serde_json::to_string(&r).expect("ExploreLocalResponse should serialize");
         assert!(j.contains("\"success\":false"));
     }
 }

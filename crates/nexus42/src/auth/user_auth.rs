@@ -7,7 +7,7 @@
 //! CLI → platform POST /api/v1/auth/device/code and /device/token.
 //! Token stored in local `AuthStore.user_token` (~/.nexus42/auth.json).
 //!
-//! V1.11: Added refresh_token storage and auto-refresh logic.
+//! V1.11: Added `refresh_token` storage and auto-refresh logic.
 
 use crate::auth::{AuthStore, UserTokenState};
 use crate::config::CliConfig;
@@ -19,10 +19,15 @@ const REFRESH_BUFFER_SECS: i64 = 60;
 
 /// Initiate device flow login via platform API (RFC 8628).
 ///
-/// 1. POST `/device/code` → get device_code, user_code, verification_uri
+/// 1. POST `/device/code` → get `device_code`, `user_code`, `verification_uri`
 /// 2. Print verification URI + user code to terminal
-/// 3. Poll `/device/token` respecting interval and slow_down
-/// 4. On success, store platform JWT in AuthStore
+/// 3. Poll `/device/token` respecting interval and `slow_down`
+/// 4. On success, store platform JWT in `AuthStore`
+///
+/// # Errors
+///
+/// Returns `CliError::Other` if authorization is denied, expired, or times out.
+/// Returns network/API errors from the platform request failures.
 pub async fn login(config: &CliConfig) -> Result<()> {
     let client = DeviceFlowClient::new(&config.platform_url, &config.device_id)?;
 
@@ -31,7 +36,7 @@ pub async fn login(config: &CliConfig) -> Result<()> {
 
     println!("To authenticate, visit:");
     if let Some(uri_complete) = &auth_response.verification_uri_complete {
-        println!("  {}", uri_complete);
+        println!("  {uri_complete}");
     } else {
         println!("  {}", auth_response.verification_uri);
     }
@@ -55,7 +60,9 @@ pub async fn login(config: &CliConfig) -> Result<()> {
             Ok(token_response) => {
                 // Success — compute expires_at and store in AuthStore
                 let expires_at = chrono::Utc::now()
-                    + chrono::Duration::seconds(token_response.expires_in as i64);
+                    + chrono::Duration::seconds(
+                        i64::try_from(token_response.expires_in).unwrap_or(0),
+                    );
 
                 // Extract user_id from JWT claims (decode without verification
                 // — the token came from the platform over HTTPS).
@@ -90,9 +97,8 @@ pub async fn login(config: &CliConfig) -> Result<()> {
             }
             Err(DeviceFlowError::AuthorizationPending) => {
                 if attempt % 6 == 0 {
-                    println!("  [{}] Waiting for authorization...", attempt);
+                    println!("  [{attempt}] Waiting for authorization...");
                 }
-                continue;
             }
             Err(DeviceFlowError::SlowDown) => {
                 // Increase interval by 5 seconds (RFC 8628 §3.4)
@@ -104,7 +110,6 @@ pub async fn login(config: &CliConfig) -> Result<()> {
                         interval.as_secs()
                     );
                 }
-                continue;
             }
             Err(DeviceFlowError::ExpiredToken) => {
                 eprintln!("\u{2717} Device code expired. Please try again.");
@@ -116,9 +121,8 @@ pub async fn login(config: &CliConfig) -> Result<()> {
             }
             Err(DeviceFlowError::Other(msg)) => {
                 if attempt % 6 == 0 {
-                    eprintln!("  [{}] Poll error: {}", attempt, msg);
+                    eprintln!("  [{attempt}] Poll error: {msg}");
                 }
-                continue;
             }
         }
     }
@@ -130,14 +134,19 @@ pub async fn login(config: &CliConfig) -> Result<()> {
 
 /// Login with a raw access token (development/testing mode).
 ///
-/// Stores the token directly in AuthStore without going through device flow.
-pub async fn login_with_token(
+/// Stores the token directly in `AuthStore` without going through device flow.
+///
+/// # Errors
+///
+/// Returns I/O errors if the auth store file cannot be read or written.
+pub fn login_with_token(
     _config: &CliConfig,
     access_token: String,
     user_id: String,
     expires_in_secs: u64,
 ) -> Result<()> {
-    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(expires_in_secs as i64);
+    let expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(i64::try_from(expires_in_secs).unwrap_or(0));
 
     let user_token = UserTokenState {
         access_token,
@@ -166,8 +175,12 @@ pub async fn login_with_token(
     Ok(())
 }
 
-/// Logout — clear user token from AuthStore (local only, no daemon/platform call).
-pub async fn logout(_config: &CliConfig) -> Result<()> {
+/// Logout — clear user token from `AuthStore` (local only, no daemon/platform call).
+///
+/// # Errors
+///
+/// Returns I/O errors if the auth store file cannot be read or written.
+pub fn logout(_config: &CliConfig) -> Result<()> {
     let mut store = AuthStore::load()?;
     if store.is_user_authenticated() {
         store.clear_user_token()?;
@@ -178,8 +191,12 @@ pub async fn logout(_config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// Show current authentication status from AuthStore (no daemon required).
-pub async fn status(_config: &CliConfig) -> Result<()> {
+/// Show current authentication status from `AuthStore` (no daemon required).
+///
+/// # Errors
+///
+/// Returns I/O errors if the auth store file cannot be read.
+pub fn status(_config: &CliConfig) -> Result<()> {
     let store = AuthStore::load()?;
 
     if let Some(token) = &store.user_token {
@@ -196,13 +213,13 @@ pub async fn status(_config: &CliConfig) -> Result<()> {
                     match chrono::DateTime::parse_from_rfc3339(re) {
                         Ok(expiry) => {
                             if expiry > chrono::Utc::now() {
-                                println!("  Refresh expires: {} (valid)", re);
+                                println!("  Refresh expires: {re} (valid)");
                             } else {
-                                println!("  Refresh expires: {} (expired)", re);
+                                println!("  Refresh expires: {re} (expired)");
                             }
                         }
                         Err(_) => {
-                            println!("  Refresh expires: {} (unparseable)", re);
+                            println!("  Refresh expires: {re} (unparseable)");
                         }
                     }
                 } else {
@@ -227,6 +244,16 @@ pub async fn status(_config: &CliConfig) -> Result<()> {
 /// On success: updates `AuthStore` with new token pair.
 /// On `invalid_grant`: clears all tokens (refresh token revoked/expired).
 /// On network error: returns error without clearing tokens (might be transient).
+///
+/// # Errors
+///
+/// Returns `CliError::Other` if:
+/// - No refresh token is available
+/// - The refresh token is expired or revoked (`invalid_grant`)
+/// - The token response cannot be parsed
+///
+/// Returns `CliError::Api` on HTTP error responses from the platform.
+/// Returns I/O errors on network failures.
 pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
     let store = AuthStore::load()?;
     let token = store
@@ -305,16 +332,15 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
         serde_json::from_value(data)
             .map_err(|e| CliError::Other(format!("Failed to parse token response: {e}")))?;
 
-    let expires_at =
-        chrono::Utc::now() + chrono::Duration::seconds(token_response.expires_in as i64);
+    let expires_at = chrono::Utc::now()
+        + chrono::Duration::seconds(i64::try_from(token_response.expires_in).unwrap_or(0));
 
     // Get the existing user_id from the current store
     let store = AuthStore::load()?;
     let user_id = store
         .user_token
         .as_ref()
-        .map(|t| t.user_id.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map_or_else(|| "unknown".to_string(), |t| t.user_id.clone());
 
     let new_token = UserTokenState {
         access_token: token_response.access_token,
@@ -337,6 +363,13 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
 /// If expiring and a `refresh_token` exists, calls `refresh_access_token()`.
 /// If no `refresh_token`, returns the current token (caller handles expiry).
 /// On refresh failure, clears tokens and returns an auth error.
+///
+/// # Errors
+///
+/// Returns `CliError::Other` if:
+/// - No user token is stored (user not authenticated)
+/// - Token is expired and no refresh token is available
+/// - Token refresh fails and tokens are cleared
 pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
     let store = AuthStore::load()?;
 
@@ -382,18 +415,18 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
     Ok(token.access_token.clone())
 }
 
-/// Extract user_id from a JWT payload without full verification.
+/// Extract `user_id` from a JWT payload without full verification.
 ///
 /// This is safe for display purposes — the JWT came from the platform over HTTPS.
 /// The JWT payload is base64url-encoded JSON with `sub` and/or `userId` fields.
 fn extract_user_id_from_jwt(token: &str) -> Option<String> {
+    use base64::Engine;
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return None;
     }
 
     // Decode the payload (middle part) — base64url without padding
-    use base64::Engine;
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let payload_bytes = engine.decode(parts[1]).ok()?;
     let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
@@ -403,7 +436,7 @@ fn extract_user_id_from_jwt(token: &str) -> Option<String> {
         .get("userId")
         .or_else(|| payload.get("sub"))
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
 }
 
 #[cfg(test)]
@@ -418,7 +451,7 @@ mod tests {
             .encode(r#"{"alg":"HS256","typ":"JWT"}"#);
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(r#"{"sub":"usr_abc123","userId":"usr_abc123","iss":"nexus-platform"}"#);
-        let token = format!("{}.{}.fake_sig", header, payload);
+        let token = format!("{header}.{payload}.fake_sig");
 
         let user_id = extract_user_id_from_jwt(&token).expect("extract");
         assert_eq!(user_id, "usr_abc123");
@@ -430,7 +463,7 @@ mod tests {
             .encode(r#"{"alg":"HS256","typ":"JWT"}"#);
         let payload =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"usr_sub_only"}"#);
-        let token = format!("{}.{}.fake_sig", header, payload);
+        let token = format!("{header}.{payload}.fake_sig");
 
         let user_id = extract_user_id_from_jwt(&token).expect("extract");
         assert_eq!(user_id, "usr_sub_only");
@@ -489,9 +522,7 @@ mod tests {
         // JSON errors can occur when auth.json has stale content from other tests.
         let result = login(&config).await;
         match result {
-            Ok(()) => {}                 // Full success
-            Err(CliError::Io(_)) => {}   // Expected in sandboxed env
-            Err(CliError::Json(_)) => {} // Stale auth.json from other tests
+            Ok(()) | Err(CliError::Io(_) | CliError::Json(_)) => {}
             Err(e) => panic!("Unexpected error: {e}"),
         }
     }
@@ -646,8 +677,7 @@ mod tests {
 
         let result = refresh_access_token(&config).await;
         match result {
-            Ok(()) => {}
-            Err(CliError::Io(_)) | Err(CliError::Json(_)) => {}
+            Ok(()) | Err(CliError::Io(_) | CliError::Json(_)) => {}
             Err(e) => panic!("Unexpected error: {e}"),
         }
     }
@@ -691,15 +721,11 @@ mod tests {
         }
 
         let result = refresh_access_token(&config).await;
-        match result {
-            Err(CliError::Other(msg)) => {
-                assert!(
-                    msg.contains("expired"),
-                    "Expected 'expired' in error, got: {msg}"
-                );
-            }
-            Err(CliError::Io(_)) | Err(CliError::Json(_)) => {}
-            _ => {} // Other tests may interfere
+        if let Err(CliError::Other(msg)) = result {
+            assert!(
+                msg.contains("expired"),
+                "Expected 'expired' in error, got: {msg}"
+            );
         }
     }
 
@@ -724,19 +750,11 @@ mod tests {
         let result = refresh_access_token(&config).await;
         // May succeed storing to disk but fail with "No refresh token"
         // or get an error from a concurrent test's stale auth.json
-        match result {
-            Err(CliError::Other(msg)) => {
-                assert!(
-                    msg.contains("No refresh token") || msg.contains("invalid"),
-                    "Expected 'No refresh token' in error, got: {msg}"
-                );
-            }
-            Err(_) => {
-                // Network/IO errors are acceptable in shared-disk test env
-            }
-            Ok(()) => {
-                // Could happen if another test left a valid refresh_token
-            }
+        if let Err(CliError::Other(msg)) = result {
+            assert!(
+                msg.contains("No refresh token") || msg.contains("invalid"),
+                "Expected 'No refresh token' in error, got: {msg}"
+            );
         }
     }
 
@@ -772,7 +790,7 @@ mod tests {
                     "Expected valid token, got: {tok}"
                 );
             }
-            Err(CliError::Io(_)) | Err(CliError::Json(_)) => {}
+            Err(CliError::Io(_) | CliError::Json(_)) => {}
             Err(e) => panic!("Unexpected error: {e}"),
         }
     }
@@ -797,19 +815,12 @@ mod tests {
         }
 
         let result = ensure_valid_token(&config).await;
-        match result {
-            Err(CliError::Other(msg)) => {
-                // Either "expired + no refresh token" (our token) or
-                // "Not authenticated" (concurrent clear from another test)
-                assert!(
-                    (msg.contains("expired") && msg.contains("no refresh token"))
-                        || msg.contains("Not authenticated"),
-                    "Expected expired/no-refresh or not-authenticated error, got: {msg}"
-                );
-            }
-            Err(CliError::Io(_)) | Err(CliError::Json(_)) => {}
-            // Other tests may have stored a valid token concurrently
-            _ => {}
+        if let Err(CliError::Other(msg)) = result {
+            assert!(
+                (msg.contains("expired") && msg.contains("no refresh token"))
+                    || msg.contains("Not authenticated"),
+                "Expected expired/no-refresh or not-authenticated error, got: {msg}"
+            );
         }
     }
 
@@ -823,16 +834,11 @@ mod tests {
         }
 
         let result = ensure_valid_token(&config).await;
-        match result {
-            Err(CliError::Other(msg)) => {
-                assert!(
-                    msg.contains("Not authenticated"),
-                    "Expected 'Not authenticated', got: {msg}"
-                );
-            }
-            Err(CliError::Io(_)) | Err(CliError::Json(_)) => {}
-            // Another test may have stored a token concurrently
-            _ => {}
+        if let Err(CliError::Other(msg)) = result {
+            assert!(
+                msg.contains("Not authenticated"),
+                "Expected 'Not authenticated', got: {msg}"
+            );
         }
     }
 
@@ -855,9 +861,9 @@ mod tests {
             return; // Skip if disk I/O fails
         }
 
-        match logout(&config).await {
+        match logout(&config) {
             Ok(()) => {}
-            Err(CliError::Io(_)) | Err(CliError::Json(_)) => return,
+            Err(CliError::Io(_) | CliError::Json(_)) => return,
             Err(e) => panic!("Unexpected error: {e}"),
         }
 

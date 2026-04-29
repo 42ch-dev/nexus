@@ -61,7 +61,7 @@ impl std::fmt::Debug for LoadedPreset {
             .field("signals_len", &self.signals.len())
             .field("source_hash", &format!("{:02x?}", &self.source_hash[..4]))
             .field("output_bindings", &self.output_bindings)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -96,9 +96,10 @@ pub enum PresetLoadError {
 
 impl PresetLoadError {
     /// Borrow the list of validation problems (if this is a validation error).
+    #[must_use]
     pub fn problems(&self) -> &[ValidationProblem] {
         match self {
-            PresetLoadError::Validation { problems, .. } => problems,
+            Self::Validation { problems, .. } => problems,
             _ => &[],
         }
     }
@@ -123,6 +124,9 @@ pub struct ValidationProblem {
 /// filesystem root (use [`load_preset`] for that).
 ///
 /// `source_hash` is blake3 over the YAML string.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if YAML parsing, validation, or graph construction fails.
 pub fn load_preset_from_str(
     yaml: &str,
     caps: &CapabilityRegistry,
@@ -180,7 +184,10 @@ pub fn load_preset_from_str(
 ///
 /// Reads `preset.yaml` from the bundle root and delegates to
 /// [`load_preset_from_str`]. Adds filesystem-level sandbox validation
-/// that template_file paths resolve within the bundle root.
+/// that `template_file` paths resolve within the bundle root.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if file reading, parsing, or validation fails.
 pub fn load_preset(
     bundle_root: &Path,
     caps: &CapabilityRegistry,
@@ -191,7 +198,7 @@ pub fn load_preset(
             len: 1,
             problems: vec![ValidationProblem {
                 path: preset_yaml_path.to_string_lossy().to_string(),
-                error: format!("failed to read preset.yaml: {}", e),
+                error: format!("failed to read preset.yaml: {e}"),
             }],
         })?;
 
@@ -222,6 +229,9 @@ pub fn load_preset(
 /// - `/` prefix (absolute path)
 /// - null bytes
 /// - control characters
+///
+/// # Errors
+/// Returns [`LoaderError`] if the template file path is invalid (contains `..`, is absolute, or parent traversal).
 pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
     if path.starts_with('/') {
         return Err(format!(
@@ -241,7 +251,7 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
     if path.contains('\0') {
         return Err(format!("template_file contains null bytes: {path:?}"));
     }
-    if path.chars().any(|c| c.is_control()) {
+    if path.chars().any(char::is_control) {
         return Err(format!(
             "template_file contains control characters: {path:?}"
         ));
@@ -263,12 +273,12 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
             ..
         }) = state.exit_when
         {
-            entries.push((format!("states[{}].exit_when.template_file", i), tf));
+            entries.push((format!("states[{i}].exit_when.template_file"), tf));
         }
         // context_update template_file
         if let Some(ref hook) = state.context_update {
             entries.push((
-                format!("states[{}].context_update.template_file", i),
+                format!("states[{i}].context_update.template_file"),
                 &hook.template_file,
             ));
         }
@@ -279,10 +289,7 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
         for (name, ig) in inner_graphs {
             for (k, node) in ig.nodes.iter().enumerate() {
                 if let Some(ref tf) = node.template_file {
-                    entries.push((
-                        format!("inner_graphs.{}.nodes[{}].template_file", name, k),
-                        tf,
-                    ));
+                    entries.push((format!("inner_graphs.{name}.nodes[{k}].template_file"), tf));
                 }
             }
         }
@@ -319,7 +326,7 @@ fn validate_template_files_in_sandbox(
             // but still fatal. Return a single problem.
             problems.push(ValidationProblem {
                 path: "bundle_root".to_string(),
-                error: format!("cannot canonicalize bundle root: {}", e),
+                error: format!("cannot canonicalize bundle root: {e}"),
             });
             return problems;
         }
@@ -330,23 +337,19 @@ fn validate_template_files_in_sandbox(
     // Validate each path resolves within bundle_root
     for (dot_path, template_file) in &entries {
         let resolved = bundle_root.join(template_file);
-        match resolved.canonicalize() {
-            Ok(canonical) => {
-                if !canonical.starts_with(&canonical_root) {
-                    problems.push(ValidationProblem {
-                        path: (*dot_path).to_string(),
-                        error: format!(
-                            "template_file '{}' resolves outside the bundle root",
-                            template_file
-                        ),
-                    });
-                }
+        if let Ok(canonical) = resolved.canonicalize() {
+            if !canonical.starts_with(&canonical_root) {
+                problems.push(ValidationProblem {
+                    path: (*dot_path).clone(),
+                    error: format!(
+                        "template_file '{template_file}' resolves outside the bundle root"
+                    ),
+                });
             }
-            Err(_) => {
-                // File doesn't exist yet — this is fine for validation.
-                // The structural check (no .., no absolute) already happened
-                // in assert_template_file_safe. Skip canonicalize failures.
-            }
+        } else {
+            // File doesn't exist yet — this is fine for validation.
+            // The structural check (no .., no absolute) already happened
+            // in assert_template_file_safe. Skip canonicalize failures.
         }
     }
 
@@ -360,6 +363,10 @@ fn validate_template_files_in_sandbox(
 /// Run all §7.6 validation rules against a parsed manifest.
 ///
 /// Returns a list of problems (empty = valid).
+///
+/// # Errors
+/// This function does not return errors, it returns validation problems.
+#[allow(clippy::too_many_lines)]
 fn validate_manifest(
     manifest: &PresetManifest,
     caps: &CapabilityRegistry,
@@ -374,8 +381,8 @@ fn validate_manifest(
     for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
         if caps.get(req_cap).is_none() {
             problems.push(ValidationProblem {
-                path: format!("preset.requires_capabilities[{}]", i),
-                error: format!("required capability not found in registry: '{}'", req_cap),
+                path: format!("preset.requires_capabilities[{i}]"),
+                error: format!("required capability not found in registry: '{req_cap}'"),
             });
         }
     }
@@ -398,7 +405,7 @@ fn validate_manifest(
 
     // Validate each state
     for (i, state) in manifest.states.iter().enumerate() {
-        let state_path = format!("states[{}]", i);
+        let state_path = format!("states[{i}]");
 
         // Check next state reference
         if let Some(ref next) = state.next {
@@ -406,14 +413,14 @@ fn validate_manifest(
                 NextTarget::Linear(target_id) => {
                     if !state_ids.contains(target_id.as_str()) {
                         problems.push(ValidationProblem {
-                            path: format!("{}.next", state_path),
-                            error: format!("unknown state: '{}'", target_id),
+                            path: format!("{state_path}.next"),
+                            error: format!("unknown state: '{target_id}'"),
                         });
                     }
                 }
                 NextTarget::Conditional(_) => {
                     problems.push(ValidationProblem {
-                        path: format!("{}.next", state_path),
+                        path: format!("{state_path}.next"),
                         error: "conditional next is not yet supported in V1.4 (ConditionalNotYetSupported)"
                             .to_string(),
                     });
@@ -424,20 +431,20 @@ fn validate_manifest(
         // Check that the terminal state has no next
         if state.terminal && state.next.is_some() {
             problems.push(ValidationProblem {
-                path: format!("{}.terminal", state_path),
+                path: format!("{state_path}.terminal"),
                 error: "terminal state must not have a 'next' field".to_string(),
             });
         }
 
         // Check enter actions
         for (j, enter) in state.enter.iter().enumerate() {
-            let enter_path = format!("{}.enter[{}]", state_path, j);
+            let enter_path = format!("{state_path}.enter[{j}]");
             match enter {
                 crate::preset::manifest::EnterAction::Capability { name, .. } => {
                     if caps.get(name).is_none() {
                         problems.push(ValidationProblem {
-                            path: format!("{}.name", enter_path),
-                            error: format!("unknown capability: '{}'", name),
+                            path: format!("{enter_path}.name"),
+                            error: format!("unknown capability: '{name}'"),
                         });
                     }
                 }
@@ -449,8 +456,8 @@ fn validate_manifest(
                         .is_some_and(|ig| ig.contains_key(name));
                     if !has_inner {
                         problems.push(ValidationProblem {
-                            path: format!("{}.name", enter_path),
-                            error: format!("unknown inner_graph: '{}'", name),
+                            path: format!("{enter_path}.name"),
+                            error: format!("unknown inner_graph: '{name}'"),
                         });
                     }
                 }
@@ -465,8 +472,8 @@ fn validate_manifest(
         {
             if caps.get(cap_name).is_none() {
                 problems.push(ValidationProblem {
-                    path: format!("{}.exit_when.judge_capability", state_path),
-                    error: format!("unknown capability: '{}'", cap_name),
+                    path: format!("{state_path}.exit_when.judge_capability"),
+                    error: format!("unknown capability: '{cap_name}'"),
                 });
             }
         }
@@ -479,23 +486,20 @@ fn validate_manifest(
                     // Validate that the referenced capability exists
                     if caps.get(capability).is_none() {
                         problems.push(ValidationProblem {
-                            path: format!("{}.context_update.op.capability", state_path),
-                            error: format!(
-                                "unknown capability for llm_summarize: '{}'",
-                                capability
-                            ),
+                            path: format!("{state_path}.context_update.op.capability"),
+                            error: format!("unknown capability for llm_summarize: '{capability}'"),
                         });
                     }
                 }
                 ContextUpdateOp::Replace { .. } => {
                     problems.push(ValidationProblem {
-                        path: format!("{}.context_update.op", state_path),
+                        path: format!("{state_path}.context_update.op"),
                         error: "'replace' is not allowed in preset hooks (only 'append' and 'struct_merge')".to_string(),
                     });
                 }
                 ContextUpdateOp::StructRemove { .. } => {
                     problems.push(ValidationProblem {
-                        path: format!("{}.context_update.op", state_path),
+                        path: format!("{state_path}.context_update.op"),
                         error: "'struct_remove' is not allowed in preset hooks (only 'append' and 'struct_merge')".to_string(),
                     });
                 }
@@ -513,7 +517,7 @@ fn validate_manifest(
     for (i, role) in manifest.roles.iter().enumerate() {
         if seen_role_ids.contains(role.id.as_str()) {
             problems.push(ValidationProblem {
-                path: format!("roles[{}].id", i),
+                path: format!("roles[{i}].id"),
                 error: format!("duplicate role id: '{}'", role.id),
             });
         }
@@ -523,10 +527,9 @@ fn validate_manifest(
         for (j, rec_model) in role.recommended_models.iter().enumerate() {
             if !validate_recommended_model_format(rec_model) {
                 problems.push(ValidationProblem {
-                    path: format!("roles[{}].recommended_models[{}]", i, j),
+                    path: format!("roles[{i}].recommended_models[{j}]"),
                     error: format!(
-                        "invalid recommended_models format '{}': expected 'acp_agent_id:model_name'",
-                        rec_model
+                        "invalid recommended_models format '{rec_model}': expected 'acp_agent_id:model_name'"
                     ),
                 });
             }
@@ -544,7 +547,7 @@ fn validate_manifest(
         }
         if role.recommended_models.is_empty() {
             problems.push(ValidationProblem {
-                path: format!("roles[{}].recommended_models", i),
+                path: format!("roles[{i}].recommended_models"),
                 error: "role must have at least one recommended_model".to_string(),
             });
         }
@@ -552,15 +555,15 @@ fn validate_manifest(
 
     // Validate inner graphs
     if let Some(ref inner_graphs) = manifest.inner_graphs {
-        for (name, ig) in inner_graphs.iter() {
-            let ig_path = format!("inner_graphs.{}", name);
+        for (name, ig) in inner_graphs {
+            let ig_path = format!("inner_graphs.{name}");
 
             // Cycle detection on depends_on
             let cycle_path = ig_path.clone();
             if let Some(cycle) = detect_cycle(ig) {
                 problems.push(ValidationProblem {
                     path: cycle_path,
-                    error: format!("cycle detected: {}", cycle),
+                    error: format!("cycle detected: {cycle}"),
                 });
             }
 
@@ -570,8 +573,8 @@ fn validate_manifest(
                 for dep in &node.depends_on {
                     if !node_ids.contains(dep.as_str()) {
                         problems.push(ValidationProblem {
-                            path: format!("{}.nodes[{}].depends_on", ig_path, k),
-                            error: format!("unknown node: '{}'", dep),
+                            path: format!("{ig_path}.nodes[{k}].depends_on"),
+                            error: format!("unknown node: '{dep}'"),
                         });
                     }
                 }
@@ -581,17 +584,16 @@ fn validate_manifest(
                     // If roles are defined, agent must reference a valid role ID
                     if !manifest.roles.is_empty() && !role_ids.contains(agent_ref.as_str()) {
                         problems.push(ValidationProblem {
-                            path: format!("{}.nodes[{}].agent", ig_path, k),
-                            error: format!("unknown role reference: '{}'", agent_ref),
+                            path: format!("{ig_path}.nodes[{k}].agent"),
+                            error: format!("unknown role reference: '{agent_ref}'"),
                         });
                     }
                     // If no roles defined, agent field should not be present
                     if manifest.roles.is_empty() {
                         problems.push(ValidationProblem {
-                            path: format!("{}.nodes[{}].agent", ig_path, k),
+                            path: format!("{ig_path}.nodes[{k}].agent"),
                             error: format!(
-                                "agent field '{}' references role, but no roles section defined",
-                                agent_ref
+                                "agent field '{agent_ref}' references role, but no roles section defined"
                             ),
                         });
                     }
@@ -604,8 +606,8 @@ fn validate_manifest(
                 let node_id = binding.split('.').next().unwrap_or(binding);
                 if !node_ids.contains(node_id) {
                     problems.push(ValidationProblem {
-                        path: format!("{}.output_binding", ig_path),
-                        error: format!("output_binding references unknown node: '{}'", node_id),
+                        path: format!("{ig_path}.output_binding"),
+                        error: format!("output_binding references unknown node: '{node_id}'"),
                     });
                 }
             }
@@ -682,8 +684,10 @@ fn dfs_cycle2<'a>(
             if gray.contains(next) {
                 // Found a cycle: path from next to node to next.
                 let cycle_start = path.iter().position(|&n| n == *next).unwrap_or(0);
-                let mut parts: Vec<String> =
-                    path[cycle_start..].iter().map(|s| s.to_string()).collect();
+                let mut parts: Vec<String> = path[cycle_start..]
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect();
                 parts.push(next.to_string());
                 return Some(parts.join(" → "));
             }
@@ -699,7 +703,7 @@ fn dfs_cycle2<'a>(
     None
 }
 
-/// Validate recommended_models format: "acp_agent_id:model_name".
+/// Validate `recommended_models` format: "`acp_agent_id:model_name`".
 ///
 /// Format must contain exactly one colon separating the agent ID and model name.
 /// Both parts must be non-empty.
@@ -718,7 +722,7 @@ fn validate_recommended_model_format(s: &str) -> bool {
 /// Build the outer state-machine graph per §8.2.
 ///
 /// Each `states[].id` → a composite `Task` that encodes the enter actions,
-/// exit_when condition, and terminal semantics.
+/// `exit_when` condition, and terminal semantics.
 fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
@@ -743,8 +747,8 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 /// composite tasks (for `start_session_with_preset`).
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
-    engine: Arc<dyn crate::engine::OrchestrationEngine>,
-    caps: Arc<CapabilityRegistry>,
+    engine: &Arc<dyn crate::engine::OrchestrationEngine>,
+    caps: &Arc<CapabilityRegistry>,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
@@ -769,7 +773,7 @@ pub fn build_wired_outer_graph(
     graph
 }
 
-/// Extract output bindings from the manifest's inner_graphs.
+/// Extract output bindings from the manifest's `inner_graphs`.
 fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String> {
     let mut bindings = HashMap::new();
     if let Some(ref inner_graphs) = manifest.inner_graphs {
@@ -791,7 +795,7 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 /// ## WS-E T5: agent field propagation
 ///
 /// Each node's `agent` field (if present) is stored in `InnerGraphNodeTask::agent_ref`.
-/// At runtime, the engine resolves agent refs to session_ids and stores them
+/// At runtime, the engine resolves agent refs to `session_ids` and stores them
 /// in context as `_session_routes`, which `InnerGraphNodeTask::run()` uses for routing.
 fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_flow::Graph>> {
     use crate::preset::manifest::GraphNodeKind;
@@ -852,7 +856,7 @@ mod tests {
     }
 
     fn minimal_valid_yaml() -> &'static str {
-        r#"
+        r"
 preset:
   id: tiny
   version: 1
@@ -868,7 +872,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#
+"
     }
 
     #[test]
@@ -882,7 +886,7 @@ states:
 
     #[test]
     fn reject_unknown_next_state() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-next
   version: 1
@@ -898,7 +902,7 @@ states:
     next: does-not-exist
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -912,7 +916,7 @@ states:
 
     #[test]
     fn reject_missing_capability() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-cap
   version: 1
@@ -930,7 +934,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -944,7 +948,7 @@ states:
 
     #[test]
     fn reject_inner_graph_cycle() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: cycle-test
   version: 1
@@ -972,7 +976,7 @@ inner_graphs:
         kind: acp_prompt
         depends_on: [diverge]
     output_binding: diverge.text
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -984,7 +988,7 @@ inner_graphs:
 
     #[test]
     fn reject_unknown_judge_capability() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-judge
   version: 1
@@ -1002,7 +1006,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1055,7 +1059,7 @@ states:
 
     #[test]
     fn reject_unknown_inner_graph_reference() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-ig
   version: 1
@@ -1073,7 +1077,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1087,7 +1091,7 @@ states:
 
     #[test]
     fn reject_terminal_with_next() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-terminal
   version: 1
@@ -1104,7 +1108,7 @@ states:
   - id: b
     terminal: true
     next: a
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1128,7 +1132,7 @@ states:
 
     #[test]
     fn loaded_preset_has_inner_graphs() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: ig-test
   version: 1
@@ -1155,7 +1159,7 @@ inner_graphs:
         kind: acp_prompt
         depends_on: [n1]
     output_binding: n2.text
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps).unwrap();
         assert!(loaded.inner_graphs.contains_key("my_graph"));
@@ -1166,7 +1170,7 @@ inner_graphs:
 
     #[test]
     fn reject_unknown_depends_on_in_inner_graph() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-dep
   version: 1
@@ -1190,7 +1194,7 @@ inner_graphs:
       - id: n1
         kind: acp_prompt
         depends_on: [nonexistent_node]
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1202,7 +1206,7 @@ inner_graphs:
 
     #[test]
     fn reject_invalid_initial_state() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-init
   version: 1
@@ -1218,7 +1222,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1232,7 +1236,7 @@ states:
 
     #[test]
     fn reject_invalid_terminal_state() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-term
   version: 1
@@ -1248,7 +1252,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1262,7 +1266,7 @@ states:
 
     #[test]
     fn valid_preset_with_known_capability_passes() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: cap-test
   version: 1
@@ -1281,7 +1285,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps);
         assert!(loaded.is_ok(), "expected valid preset: {loaded:?}");
@@ -1305,7 +1309,7 @@ states:
         let h1 = load_preset_from_str(minimal_valid_yaml(), &caps)
             .unwrap()
             .source_hash;
-        let yaml2 = r#"
+        let yaml2 = r"
 preset:
   id: other
   version: 1
@@ -1321,14 +1325,14 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let h2 = load_preset_from_str(yaml2, &caps).unwrap().source_hash;
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn reject_unknown_requires_capabilities() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-req-caps
   version: 1
@@ -1346,7 +1350,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -1361,7 +1365,7 @@ states:
 
     #[test]
     fn known_requires_capabilities_passes() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: good-req-caps
   version: 1
@@ -1379,7 +1383,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps);
         assert!(
@@ -1394,7 +1398,7 @@ states:
     fn parse_initial_action_and_context_update() {
         use crate::preset::manifest::{ContextUpdateOp, InitialAction};
 
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: demo
   version: 1
@@ -1415,7 +1419,7 @@ states:
       template_file: prompts/a-ctx.md
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps).unwrap();
 
@@ -1435,7 +1439,7 @@ states:
     fn parse_initial_action_seed_expansion() {
         use crate::preset::manifest::InitialAction;
 
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: exp-demo
   version: 1
@@ -1456,7 +1460,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps).unwrap();
         assert!(matches!(
@@ -1541,7 +1545,7 @@ states:
     fn context_update_struct_merge_parses() {
         use crate::preset::manifest::ContextUpdateOp;
 
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-demo
   version: 1
@@ -1560,7 +1564,7 @@ states:
       template_file: prompts/a-ctx.md
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps).unwrap();
         let hook = loaded.context_update_hooks.get("a").unwrap();
@@ -1578,7 +1582,7 @@ states:
 
     #[test]
     fn context_update_llm_summarize_validates_known_capability() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: llm-sum-test
   version: 1
@@ -1600,7 +1604,7 @@ states:
       template_file: prompts/summarize.md
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps).unwrap();
         let hook = loaded.context_update_hooks.get("a").unwrap();
@@ -1662,7 +1666,7 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let bundle_root = tmp.path().join("invalid-preset");
         std::fs::create_dir_all(&bundle_root).unwrap();
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: invalid
   version: 1
@@ -1678,7 +1682,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
 
         let caps = test_capability_registry();
@@ -1753,7 +1757,7 @@ states:
 
     #[test]
     fn context_update_llm_summarize_rejects_unknown_capability() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: llm-sum-bad
   version: 1
@@ -1773,7 +1777,7 @@ states:
       template_file: prompts/summarize.md
   - id: b
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();

@@ -55,26 +55,27 @@ impl Platform {
     /// Detect the current platform.
     ///
     /// Returns `None` if the platform is not supported by ACP binary distribution.
-    pub fn current() -> Option<Self> {
+    #[must_use]
+    pub const fn current() -> Option<Self> {
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
-            Some(Platform::DarwinAarch64)
+            Some(Self::DarwinAarch64)
         }
         #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
         {
-            Some(Platform::DarwinX86_64)
+            Some(Self::DarwinX86_64)
         }
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         {
-            Some(Platform::LinuxAarch64)
+            Some(Self::LinuxAarch64)
         }
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            Some(Platform::LinuxX86_64)
+            Some(Self::LinuxX86_64)
         }
         #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         {
-            Some(Platform::WindowsX86_64)
+            Some(Self::WindowsX86_64)
         }
         #[cfg(not(any(
             all(target_os = "macos", target_arch = "aarch64"),
@@ -89,13 +90,14 @@ impl Platform {
     }
 
     /// Return the platform identifier string used in ACP registry manifests.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            Platform::DarwinAarch64 => "darwin-aarch64",
-            Platform::DarwinX86_64 => "darwin-x86_64",
-            Platform::LinuxAarch64 => "linux-aarch64",
-            Platform::LinuxX86_64 => "linux-x86_64",
-            Platform::WindowsX86_64 => "windows-x86_64",
+            Self::DarwinAarch64 => "darwin-aarch64",
+            Self::DarwinX86_64 => "darwin-x86_64",
+            Self::LinuxAarch64 => "linux-aarch64",
+            Self::LinuxX86_64 => "linux-x86_64",
+            Self::WindowsX86_64 => "windows-x86_64",
         }
     }
 }
@@ -118,7 +120,8 @@ pub struct AgentSpawner {
 #[allow(dead_code)]
 impl AgentSpawner {
     /// Create a new spawner with the given working directory.
-    pub fn new(cwd: PathBuf) -> Self {
+    #[must_use]
+    pub const fn new(cwd: PathBuf) -> Self {
         Self { cwd }
     }
 
@@ -130,7 +133,7 @@ impl AgentSpawner {
     /// # Arguments
     ///
     /// * `program` — The executable to run (e.g., "npx", "/path/to/agent-binary")
-    /// * `args` — Command-line arguments (e.g., ["@zed/claude-agent-acp@0.18.0", "--acp"])
+    /// * `args` — Command-line arguments (e.g. `[`"@zed/claude-agent-acp@0.18.0"`, `"--acp"`]`)
     ///
     /// # Returns
     ///
@@ -138,6 +141,14 @@ impl AgentSpawner {
     /// - `tokio::process::Child` — The spawned subprocess
     /// - `tokio::process::ChildStdin` — Pipe for sending JSON-RPC to the agent
     /// - `tokio::process::ChildStdout` — Pipe for receiving JSON-RPC from the agent
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the program cannot be found or spawned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if stdin/stdout pipes cannot be extracted (pipe configuration error).
     pub fn spawn(
         &self,
         program: &str,
@@ -189,6 +200,10 @@ impl AgentSpawner {
     ///     // Use the spawned process
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the program cannot be spawned.
     pub fn spawn_mock(
         &self,
         program: &str,
@@ -249,7 +264,8 @@ impl AcpSession {
     /// * `agent_path` — The binary path or command string (for error messages)
     /// * `io_task` — Optional handle to the background I/O task (if spawned)
     /// * `cancel_tx` — Optional cancellation signal sender
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         agent_id: String,
         child: tokio::process::Child,
         agent_path: PathBuf,
@@ -277,6 +293,7 @@ impl AcpSession {
     ///
     /// Returns an error if the subprocess fails to terminate after SIGKILL,
     /// or if there's an I/O error during the shutdown sequence.
+    #[allow(clippy::too_many_lines)]
     pub async fn shutdown(mut self) -> AcpResult<()> {
         tracing::info!(
             agent_id = %self.agent_id,
@@ -337,7 +354,7 @@ impl AcpSession {
                     Some("Cannot get PID: process has already exited".into()),
                 )
             })?;
-            let pid = Pid::from_raw(pid as i32);
+            let pid = Pid::from_raw(pid.cast_signed());
             if let Err(e) = kill(pid, Signal::SIGTERM) {
                 tracing::warn!(
                     agent_id = %self.agent_id,
@@ -375,7 +392,7 @@ impl AcpSession {
                             Some("Cannot get PID: process has already exited".into()),
                         )
                     })?;
-                    let pid = Pid::from_raw(pid as i32);
+                    let pid = Pid::from_raw(pid.cast_signed());
                     if let Err(e) = kill(pid, Signal::SIGKILL) {
                         tracing::error!(
                             agent_id = %self.agent_id,
@@ -385,7 +402,7 @@ impl AcpSession {
                         return Err(AcpError::agent_crashed(
                             None,
                             self.agent_path,
-                            Some(format!("Failed to kill agent: {}", e)),
+                            Some(format!("Failed to kill agent: {e}")),
                         ));
                     }
 
@@ -444,12 +461,14 @@ impl AcpSession {
     }
 
     /// Get the agent identifier.
+    #[must_use]
     pub fn agent_id(&self) -> &str {
         &self.agent_id
     }
 
     /// Get the agent path (for error reporting).
-    pub fn agent_path(&self) -> &PathBuf {
+    #[must_use]
+    pub const fn agent_path(&self) -> &PathBuf {
         &self.agent_path
     }
 }
