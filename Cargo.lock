@@ -2218,6 +2218,7 @@ dependencies = [
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",
+ "nexus-orchestration",
  "nexus-sync",
  "nix 0.28.0",
  "predicates",
