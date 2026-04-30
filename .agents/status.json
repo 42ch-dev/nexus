@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-29T10:00:00Z",
+  "updated_at": "2026-04-30T16:00:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -8,27 +8,20 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-28T15:00:00Z",
-      "total_open": 16,
+      "updated_at": "2026-04-30T20:00:00Z",
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 10,
-        "warning": 5,
-        "nit": 2
+        "low": 0,
+        "warning": 0,
+        "nit": 0
       },
       "by_target": {
-        "backlog": 17
+        "backlog": 0
       },
-      "by_plan": {
-        "2026-04-18-v1.5-stabilization": 1,
-        "2026-04-21-v1.7-ws-abc-residual-closure": 1,
-        "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
-        "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
-        "2026-04-24-v1.9-m1": 7,
-        "2026-04-27-v1.11-daemon-cleanup-toctou": 4
-      },
+      "by_plan": {},
       "in_flight": {},
       "cross_cutting": [
         {
@@ -42,206 +35,13 @@
       ]
     },
     "residual_findings": {
-      "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [
-        {
-          "id": "R-WA-001",
-          "title": "async_fn_in_trait MSRV concern",
-          "severity": "warning",
-          "source": "QC3 F-003",
-          "scope": "crates/nexus42/src/challenge/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-WA-002",
-          "title": "No fallback metrics/telemetry",
-          "severity": "warning",
-          "source": "QC3 F-004",
-          "scope": "crates/nexus42/src/challenge/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "post-M1",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        }
-      ],
-      "2026-04-23-v1.8-ws-c-name-positional-to-flag": [
-        {
-          "id": "R-WC-002",
-          "title": "Positional\u2192flag migration UX",
-          "severity": "warning",
-          "source": "QC3 F-005",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-WC-003",
-          "title": "HashMap non-determinism in obtain_auth_token test",
-          "severity": "warning",
-          "source": "QC2 F-004",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        }
-      ],
-      "2026-04-18-v1.5-stabilization": [
-        {
-          "id": "R5",
-          "title": "nix crate unconditionally included \u2014 Windows build blocked",
-          "severity": "low",
-          "source": "QC2 W1",
-          "scope": "crates/nexus-orchestration/Cargo.toml",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-21-v1.7-ws-abc-residual-closure": [
-        {
-          "id": "R11",
-          "title": "run_reset does raw toml_edit document surgery instead of delegating to policy helpers",
-          "severity": "low",
-          "source": "QC#2 S2-3",
-          "scope": "crates/nexus42/src/commands/permission.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-24-v1.9-m1": [
-        {
-          "id": "R-M1-W02",
-          "title": "ALL_SCHEMA_PATHS manually maintained list separate from build_schema_map()",
-          "severity": "low",
-          "source": "QC1 F-007",
-          "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W03",
-          "title": "preset list requires daemon running for embedded presets",
-          "severity": "low",
-          "source": "QC1 F-008",
-          "scope": "crates/nexus42/src/commands/preset.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W04",
-          "title": "No YAML depth/size limits on user-supplied preset YAML",
-          "severity": "low",
-          "source": "QC2 F-QC2-02",
-          "scope": "crates/nexus-orchestration/src/preset/loader.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W05",
-          "title": "init rejects _ prefix but scan silently skips \u2014 inconsistent UX",
-          "severity": "low",
-          "source": "QC2 F-QC2-03",
-          "scope": "crates/nexus42/src/commands/preset.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W06",
-          "title": "Preset lookup scans all user presets O(n) instead of O(1)",
-          "severity": "low",
-          "source": "QC3 W-1",
-          "scope": "crates/nexus-orchestration/src/preset/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W07",
-          "title": "JoinHandle abort() risk \u2014 no graceful cleanup (documented RISK-WSC-02)",
-          "severity": "low",
-          "source": "QC3 W-2",
-          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W09",
-          "title": "Drift detection test may be slow at scale",
-          "severity": "nit",
-          "source": "QC3 W-4",
-          "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        }
-      ],
+      "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [],
+      "2026-04-23-v1.8-ws-c-name-positional-to-flag": [],
+      "2026-04-18-v1.5-stabilization": [],
+      "2026-04-21-v1.7-ws-abc-residual-closure": [],
+      "2026-04-24-v1.9-m1": [],
       "2026-04-27-v1.10-device-flow-login": [],
-      "2026-04-27-v1.11-daemon-cleanup-toctou": [
-        {
-          "id": "R-V111-S01",
-          "title": "device_id retry loop has no max retry count",
-          "severity": "low",
-          "source": "QC3 S-1",
-          "scope": "crates/nexus-sync/src/device_id.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
-        },
-        {
-          "id": "R-V111-S02",
-          "title": "refresh_access_token multiple AuthStore reloads",
-          "severity": "low",
-          "source": "QC3 S-4",
-          "scope": "crates/nexus42/src/auth/user_auth.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
-        },
-        {
-          "id": "R-V111-S03",
-          "title": "API error body disclosure in non-invalid_grant 400s",
-          "severity": "low",
-          "source": "QC2 S-1",
-          "scope": "crates/nexus42/src/auth/user_auth.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc2.md"
-        },
-        {
-          "id": "R-V111-S04",
-          "title": "_ prefix on struct fields for sqlx-only columns",
-          "severity": "nit",
-          "source": "QC1 F-001",
-          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc1.md"
-        }
-      ]
+      "2026-04-27-v1.11-daemon-cleanup-toctou": [],
     },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"

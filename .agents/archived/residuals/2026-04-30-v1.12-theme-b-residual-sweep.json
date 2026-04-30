@@ -1,0 +1,70 @@
+{
+  "plan_id": "2026-04-30-v1.12-theme-b-residual-sweep",
+  "closed_at": "2026-04-30",
+  "closed_residuals": [
+    {
+      "id": "R-V111-S01",
+      "title": "device_id retry loop has no max retry count",
+      "severity": "low",
+      "source": "QC3 S-1",
+      "scope": "crates/nexus-sync/src/device_id.rs",
+      "closure_note": "MAX_EMPTY_RETRIES=3 added; returns TimedOut after exhaustion"
+    },
+    {
+      "id": "R-V111-S02",
+      "title": "refresh_access_token multiple AuthStore reloads",
+      "severity": "low",
+      "source": "QC3 S-4",
+      "scope": "crates/nexus42/src/auth/user_auth.rs",
+      "closure_note": "AuthStore loads reduced from 4 to 2 (read + mutation)"
+    },
+    {
+      "id": "R-V111-S03",
+      "title": "API error body disclosure in non-invalid_grant 400s",
+      "severity": "low",
+      "source": "QC2 S-1",
+      "scope": "crates/nexus42/src/auth/user_auth.rs",
+      "closure_note": "Non-invalid_grant 400s return sanitized generic message"
+    },
+    {
+      "id": "R-V111-S04",
+      "title": "_ prefix on struct fields for sqlx-only columns",
+      "severity": "nit",
+      "source": "QC1 F-001",
+      "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+      "closure_note": "Fields renamed; dead_code allowed with justification comment"
+    },
+    {
+      "id": "R-WA-001",
+      "title": "async_fn_in_trait MSRV concern",
+      "severity": "warning",
+      "source": "QC3 F-003",
+      "scope": "crates/nexus42/src/challenge/mod.rs",
+      "closure_note": "MSRV 1.75+ confirmed stable; #[allow] retained with documented justification for clippy auto-trait limitation"
+    },
+    {
+      "id": "R-WA-002",
+      "title": "No fallback metrics/telemetry",
+      "severity": "warning",
+      "source": "QC3 F-004",
+      "scope": "crates/nexus42/src/challenge/mod.rs",
+      "closure_note": "Telemetry TODO placeholder added with specific counter/metric names"
+    },
+    {
+      "id": "R-WC-002",
+      "title": "Positional\u2192flag migration UX",
+      "severity": "warning",
+      "source": "QC3 F-005",
+      "scope": "crates/nexus42/src/commands/creator.rs",
+      "closure_note": "Help text documents positional\u2192flag migration intent for Use/Pair/Unpair"
+    },
+    {
+      "id": "R-WC-003",
+      "title": "HashMap non-determinism in obtain_auth_token test",
+      "severity": "warning",
+      "source": "QC2 F-004",
+      "scope": "crates/nexus42/src/commands/creator.rs",
+      "closure_note": "Test helper uses BTreeMap for deterministic insertion order"
+    }
+  ]
+}

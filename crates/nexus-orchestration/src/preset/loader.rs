@@ -69,6 +69,12 @@ impl std::fmt::Debug for LoadedPreset {
 // PresetLoadError
 // ---------------------------------------------------------------------------
 
+/// Default maximum YAML file size for user-supplied presets (1 MiB).
+pub const DEFAULT_MAX_YAML_SIZE: usize = 1024 * 1024;
+
+/// Default maximum YAML nesting depth for user-supplied presets.
+pub const DEFAULT_MAX_YAML_DEPTH: usize = 10;
+
 /// Structured error listing every problem found during preset loading.
 #[derive(Error, Debug)]
 pub enum PresetLoadError {
@@ -91,6 +97,28 @@ pub enum PresetLoadError {
     NotFound {
         /// The preset ID that was not found.
         preset_id: String,
+    },
+    /// YAML file exceeds the maximum allowed size.
+    #[error(
+        "preset YAML exceeds maximum size ({actual} bytes, limit is {limit} bytes). \
+            Simplify the preset or split into smaller presets."
+    )]
+    YamlSizeExceeded {
+        /// Actual size in bytes.
+        actual: usize,
+        /// Maximum allowed size in bytes.
+        limit: usize,
+    },
+    /// YAML nesting depth exceeds the maximum allowed depth.
+    #[error(
+        "preset YAML nesting depth ({actual}) exceeds maximum ({limit}). \
+            Flatten deeply nested structures in your preset."
+    )]
+    YamlDepthExceeded {
+        /// Actual nesting depth.
+        actual: usize,
+        /// Maximum allowed depth.
+        limit: usize,
     },
 }
 
@@ -131,8 +159,45 @@ pub fn load_preset_from_str(
     yaml: &str,
     caps: &CapabilityRegistry,
 ) -> Result<LoadedPreset, PresetLoadError> {
-    // 1. Parse YAML.
-    let manifest: PresetManifest = serde_yaml::from_str(yaml)?;
+    load_preset_from_str_with_limits(yaml, caps, DEFAULT_MAX_YAML_SIZE, DEFAULT_MAX_YAML_DEPTH)
+}
+
+/// Load a preset from a YAML string with explicit limits.
+///
+/// Like [`load_preset_from_str`] but allows overriding the default size and
+/// depth limits. Embedded/bundled presets may call this with higher limits.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if YAML parsing, limit checks, or validation fails.
+pub fn load_preset_from_str_with_limits(
+    yaml: &str,
+    caps: &CapabilityRegistry,
+    max_size: usize,
+    max_depth: usize,
+) -> Result<LoadedPreset, PresetLoadError> {
+    // 0a. Size check.
+    if yaml.len() > max_size {
+        return Err(PresetLoadError::YamlSizeExceeded {
+            actual: yaml.len(),
+            limit: max_size,
+        });
+    }
+
+    // 0b. Depth check — parse to Value, measure depth, then deserialize from
+    //     the same Value tree (single parse avoids double stack-overflow surface).
+    let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
+    let actual_depth = yaml_value_depth(&yaml_value);
+    if actual_depth > max_depth {
+        return Err(PresetLoadError::YamlDepthExceeded {
+            actual: actual_depth,
+            limit: max_depth,
+        });
+    }
+
+    // 1. Deserialize from the already-parsed Value (avoids double-parse that widens
+    //    the stack-overflow attack surface — QC3 W-002).
+    let manifest: PresetManifest =
+        serde_yaml::from_value(yaml_value).map_err(PresetLoadError::from)?;
 
     // 2. Validate.
     let problems = validate_manifest(&manifest, caps);
@@ -840,6 +905,37 @@ fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_fl
     }
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// YAML depth measurement
+// ---------------------------------------------------------------------------
+
+/// Measure the maximum nesting depth of a [`serde_yaml::Value`].
+///
+/// Scalars have depth 1, sequences/mappings add 1 for the container level.
+pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            let child_depth = map.values().map(yaml_value_depth).max().unwrap_or(0);
+            let key_depth = map
+                .keys()
+                .filter_map(|k| match k {
+                    serde_yaml::Value::Mapping(_) | serde_yaml::Value::Sequence(_) => {
+                        Some(yaml_value_depth(k))
+                    }
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            1 + child_depth.max(key_depth)
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            let child_depth = seq.iter().map(yaml_value_depth).max().unwrap_or(0);
+            1 + child_depth
+        }
+        _ => 1,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2050,6 +2146,107 @@ states:
                 .iter()
                 .any(|p| p.path.contains("initial_action") && p.error.contains("..")),
             "expected '..' traversal rejection in initial_action: {problems:?}"
+        );
+    }
+
+    // ── R-M1-W04: YAML depth/size limit tests ───────────────────────
+
+    #[test]
+    fn reject_oversized_yaml() {
+        // Build a YAML string that exceeds the size limit.
+        let base = "preset:\n  id: big\n  version: 1\n  kind: creator\n  description: \"";
+        let suffix = "\"\n  requires_capabilities: []\n  initial: a\n  terminal: b\nstates:\n  - id: a\n    enter: []\n    exit_when: { kind: manual }\n    next: b\n  - id: b\n    terminal: true\n";
+        let padding_len = DEFAULT_MAX_YAML_SIZE + 1 - base.len() - suffix.len();
+        let yaml = format!("{base}{}{suffix}", "x".repeat(padding_len));
+
+        let caps = test_capability_registry();
+        let err = load_preset_from_str_with_limits(
+            &yaml,
+            &caps,
+            DEFAULT_MAX_YAML_SIZE,
+            DEFAULT_MAX_YAML_DEPTH,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, PresetLoadError::YamlSizeExceeded { actual, limit } if *actual > *limit),
+            "expected YamlSizeExceeded error: {err:?}"
+        );
+        // Verify actionable message content.
+        let msg = format!("{err}");
+        assert!(msg.contains("bytes"), "error should mention bytes: {msg}");
+        assert!(
+            msg.contains("Simplify"),
+            "error should suggest simplification: {msg}"
+        );
+    }
+
+    #[test]
+    fn reject_deeply_nested_yaml() {
+        // Build YAML with nesting deeper than the limit.
+        let mut yaml = String::from("root:\n");
+        for i in 1..=15 {
+            let indent = "  ".repeat(i);
+            yaml.push_str(&format!("{indent}level{i}:\n"));
+        }
+        // Add valid preset structure at the top level to make it parseable.
+        yaml.push_str("preset:\n  id: deep\n  version: 1\n  kind: creator\n  description: test\n  requires_capabilities: []\n  initial: a\n  terminal: b\nstates:\n  - id: a\n    enter: []\n    exit_when: { kind: manual }\n    next: b\n  - id: b\n    terminal: true\n");
+
+        let caps = test_capability_registry();
+        let err = load_preset_from_str_with_limits(
+            &yaml,
+            &caps,
+            DEFAULT_MAX_YAML_SIZE,
+            DEFAULT_MAX_YAML_DEPTH,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, PresetLoadError::YamlDepthExceeded { actual, limit } if *actual > *limit),
+            "expected YamlDepthExceeded error: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Flatten"),
+            "error should suggest flattening: {msg}"
+        );
+    }
+
+    #[test]
+    fn normal_yaml_passes_size_and_depth_limits() {
+        // Normal preset YAML should pass both checks without issue.
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(minimal_valid_yaml(), &caps);
+        assert!(loaded.is_ok(), "normal preset should load: {loaded:?}");
+    }
+
+    #[test]
+    fn yaml_value_depth_flat_scalar_is_1() {
+        let val: serde_yaml::Value = serde_yaml::from_str("hello").unwrap();
+        assert_eq!(yaml_value_depth(&val), 1);
+    }
+
+    #[test]
+    fn yaml_value_depth_nested_mapping() {
+        let val: serde_yaml::Value = serde_yaml::from_str("a:\n  b:\n    c: 1").unwrap();
+        // root mapping → a mapping → b mapping → c scalar = 4
+        assert_eq!(yaml_value_depth(&val), 4);
+    }
+
+    #[test]
+    fn yaml_value_depth_sequence() {
+        let val: serde_yaml::Value = serde_yaml::from_str("- a:\n    - b").unwrap();
+        // root sequence → mapping → sequence → scalar = 4
+        assert!(yaml_value_depth(&val) >= 3);
+    }
+
+    #[test]
+    fn load_preset_from_str_with_limits_allows_higher_limits() {
+        // Using higher limits should allow larger/deeper YAML.
+        let yaml = minimal_valid_yaml();
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str_with_limits(yaml, &caps, 10 * 1024 * 1024, 50);
+        assert!(
+            loaded.is_ok(),
+            "should pass with generous limits: {loaded:?}"
         );
     }
 }

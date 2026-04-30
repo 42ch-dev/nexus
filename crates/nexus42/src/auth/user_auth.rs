@@ -255,12 +255,19 @@ pub fn status(_config: &CliConfig) -> Result<()> {
 /// Returns `CliError::Api` on HTTP error responses from the platform.
 /// Returns I/O errors on network failures.
 pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
-    let store = AuthStore::load()?;
-    let token = store
+    // Load once — reuse for reading refresh_token and user_id.
+    let initial_store = AuthStore::load()?;
+    let refresh_token = initial_store
         .user_token
         .as_ref()
         .and_then(|t| t.refresh_token.as_ref())
         .ok_or_else(|| CliError::Other("No refresh token available".into()))?;
+
+    // Capture user_id up front from the same load.
+    let user_id = initial_store
+        .user_token
+        .as_ref()
+        .map_or_else(|| "unknown".to_string(), |t| t.user_id.clone());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -270,7 +277,7 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
 
     let body = serde_json::json!({
         "grant_type": "refresh_token",
-        "refresh_token": token,
+        "refresh_token": refresh_token,
     });
 
     let response = client
@@ -309,10 +316,10 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
                 ));
             }
         }
-        return Err(CliError::Api {
-            status,
-            message: text,
-        });
+        // Sanitize: don't leak upstream error details for non-invalid_grant 400s.
+        return Err(CliError::Other(
+            "Token refresh failed (400 Bad Request). Please try `nexus42 auth login` again.".into(),
+        ));
     }
 
     if status >= 400 {
@@ -334,13 +341,6 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
 
     let expires_at = chrono::Utc::now()
         + chrono::Duration::seconds(i64::try_from(token_response.expires_in).unwrap_or(0));
-
-    // Get the existing user_id from the current store
-    let store = AuthStore::load()?;
-    let user_id = store
-        .user_token
-        .as_ref()
-        .map_or_else(|| "unknown".to_string(), |t| t.user_id.clone());
 
     let new_token = UserTokenState {
         access_token: token_response.access_token,

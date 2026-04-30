@@ -1,0 +1,42 @@
+{
+  "plan_id": "2026-04-30-v1.12-theme-a-preset-completion",
+  "closed_at": "2026-04-30",
+  "closed_residuals": [
+    {
+      "id": "R-M1-W03",
+      "title": "preset list requires daemon running for embedded presets",
+      "severity": "low",
+      "source": "QC1 F-008",
+      "scope": "crates/nexus42/src/commands/preset.rs",
+      "closure_note": "Embedded presets now resolved from compile-time data via build.rs; preset list works without daemon",
+      "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+    },
+    {
+      "id": "R-M1-W04",
+      "title": "No YAML depth/size limits on user-supplied preset YAML",
+      "severity": "low",
+      "source": "QC2 F-QC2-02",
+      "scope": "crates/nexus-orchestration/src/preset/loader.rs",
+      "closure_note": "YAML depth (10) and size (1MB) limits enforced with clear error messages",
+      "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+    },
+    {
+      "id": "R-M1-W05",
+      "title": "init rejects _ prefix but scan silently skips — inconsistent UX",
+      "severity": "low",
+      "source": "QC2 F-QC2-03",
+      "scope": "crates/nexus42/src/commands/preset.rs",
+      "closure_note": "init accepts _ prefix; list warns on _-prefixed entries; preset validate subcommand added",
+      "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+    },
+    {
+      "id": "R-M1-W06",
+      "title": "Preset lookup scans all user presets O(n) instead of O(1)",
+      "severity": "low",
+      "source": "QC3 W-1",
+      "scope": "crates/nexus-orchestration/src/preset/mod.rs",
+      "closure_note": "HashMap index built at scan time with mtime-based cache invalidation; O(1) lookup",
+      "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
+    }
+  ]
+}

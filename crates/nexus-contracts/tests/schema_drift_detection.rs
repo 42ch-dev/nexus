@@ -338,63 +338,49 @@ fn build_schema_map() -> Vec<SchemaEntry> {
 // Schema File Loading and Caching (T2)
 // ---------------------------------------------------------------------------
 
-/// List of all known schema file paths for the cache.
-const ALL_SCHEMA_PATHS: &[&str] = &[
-    "schemas/common/common.schema.json",
-    "schemas/common/source-anchor.schema.json",
-    "schemas/common/version-ref.schema.json",
-    "schemas/domain/bundle.schema.json",
-    "schemas/domain/creator.schema.json",
-    "schemas/domain/delta.schema.json",
-    "schemas/domain/fork-branch.schema.json",
-    "schemas/domain/key-block.schema.json",
-    "schemas/domain/memory.schema.json",
-    "schemas/domain/pairing.schema.json",
-    "schemas/domain/story-manifest.schema.json",
-    "schemas/domain/sync-command.schema.json",
-    "schemas/domain/timeline-event.schema.json",
-    "schemas/domain/user.schema.json",
-    "schemas/domain/world.schema.json",
-    "schemas/domain/world-membership.schema.json",
-    "schemas/cli-sync/bundle.schema.json",
-    "schemas/cli-sync/conflict-response.schema.json",
-    "schemas/cli-sync/sync-pull-request.schema.json",
-    "schemas/cli-sync/sync-pull-response.schema.json",
-    "schemas/platform/context-assembly-v1.schema.json",
-    "schemas/platform/creator-runtime-policy-response.schema.json",
-    "schemas/platform/explore-ai-answer-request.schema.json",
-    "schemas/platform/explore-ai-answer-response.schema.json",
-    "schemas/platform/explore-ai-summary-request.schema.json",
-    "schemas/platform/explore-ai-summary-response.schema.json",
-    "schemas/platform/explore-browse-request.schema.json",
-    "schemas/platform/explore-creator-card.schema.json",
-    "schemas/platform/explore-feed-response.schema.json",
-    "schemas/platform/explore-hit.schema.json",
-    "schemas/platform/explore-search-request.schema.json",
-    "schemas/platform/me-entitlements-response.schema.json",
-    "schemas/platform/memory-web-list-request.schema.json",
-    "schemas/platform/memory-web-list-response.schema.json",
-    "schemas/platform/notifications-inbox-item.schema.json",
-    "schemas/platform/notifications-list-request.schema.json",
-    "schemas/platform/notifications-list-response.schema.json",
-    "schemas/platform/notifications-mark-read-request.schema.json",
-    "schemas/platform/notifications-mark-read-response.schema.json",
-    "schemas/platform/official-creator-quota-response.schema.json",
-    "schemas/platform/publish-chapter-request.schema.json",
-    "schemas/platform/publish-history-entry.schema.json",
-    "schemas/platform/publish-history-request.schema.json",
-    "schemas/platform/publish-history-response.schema.json",
-    "schemas/platform/publish-story-request.schema.json",
-    "schemas/platform/publish-story-response.schema.json",
-    "schemas/platform/social-graph-feed-request.schema.json",
-    "schemas/platform/social-graph-feed-response.schema.json",
-    "schemas/platform/social-graph-relationship-request.schema.json",
-    "schemas/platform/social-graph-relationship-response.schema.json",
-    "schemas/platform/world-fork-request.schema.json",
-    "schemas/platform/world-fork-response.schema.json",
-    "schemas/platform/world-snapshot-request.schema.json",
-    "schemas/platform/world-snapshot-response.schema.json",
-];
+/// Derive the complete set of schema file paths from two sources:
+/// 1. All paths registered in `build_schema_map()` (the checked schemas)
+/// 2. A deterministic glob over `schemas/**/*.schema.json` (catches schemas
+///    without checkers, e.g., definitions-only or allOf-only schemas)
+///
+/// This replaces the former manually-maintained `ALL_SCHEMA_PATHS` list,
+/// ensuring new schemas are automatically discovered.
+///
+/// Accepts a pre-built schema map to avoid redundant construction (each call
+/// to `build_schema_map()` allocates ~51 boxed closures).
+fn collect_all_schema_paths(entries: &[SchemaEntry]) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+
+    // Collect from the provided schema map
+    for entry in entries {
+        paths.insert(entry.schema_path.to_string());
+    }
+
+    // Supplement with glob discovery for any schemas not in the map
+    let root = workspace_root();
+    let schemas_dir = root.join("schemas");
+    collect_schema_files_recursive(&schemas_dir, &root, &mut paths);
+
+    paths
+}
+
+/// Recursively collect `.schema.json` files under a directory.
+fn collect_schema_files_recursive(dir: &Path, root: &Path, paths: &mut BTreeSet<String>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_schema_files_recursive(&path, root, paths);
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.ends_with(".schema.json") {
+                    if let Ok(relative) = path.strip_prefix(root) {
+                        paths.insert(relative.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Workspace root: traverse up from `CARGO_MANIFEST_DIR` (`crates/nexus-contracts`)
 /// to the workspace root (2 levels up).
@@ -415,12 +401,14 @@ fn load_json(relative_path: &str) -> Result<Value, String> {
 
 /// Build a cache of all schema files keyed by their relative path.
 /// Also keyed by the `https://nexus42.invalid/...` URL for $ref resolution.
-fn build_schema_cache() -> HashMap<String, Value> {
+///
+/// Accepts a pre-built schema map to avoid double construction of boxed checkers.
+fn build_schema_cache(entries: &[SchemaEntry]) -> HashMap<String, Value> {
     let mut cache = HashMap::new();
-    for path in ALL_SCHEMA_PATHS {
-        if let Ok(val) = load_json(path) {
+    for path in collect_all_schema_paths(entries) {
+        if let Ok(val) = load_json(&path) {
             // Key by relative path
-            cache.insert(path.to_string(), val.clone());
+            cache.insert(path.clone(), val.clone());
             // Also key by the `$id` URL if present
             if let Some(id) = val.get("$id").and_then(|v| v.as_str()) {
                 // Strip any #fragment from $id before using as key
@@ -757,10 +745,29 @@ fn check_fields_match(
 // Main Test (T5, T6)
 // ---------------------------------------------------------------------------
 
+/// Maximum acceptable wall-clock time for drift detection in milliseconds.
+///
+/// Defaults to 500ms (~25x headroom over typical ~18ms runtime). Override via
+/// `NEXUS_DRIFT_LIMIT_MS` env var for slow CI runners.
+///
+/// The elapsed time is always printed so regressions are observable even when
+/// the threshold is not exceeded.
+const DRIFT_DETECTION_TIME_LIMIT_MS_DEFAULT: u64 = 500;
+
+/// Returns the drift time limit, checking `NEXUS_DRIFT_LIMIT_MS` env var first.
+fn drift_time_limit_ms() -> u64 {
+    std::env::var("NEXUS_DRIFT_LIMIT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DRIFT_DETECTION_TIME_LIMIT_MS_DEFAULT)
+}
+
 #[test]
 fn schema_drift_detection() {
+    let start = std::time::Instant::now();
+
     let entries = build_schema_map();
-    let schema_cache = build_schema_cache();
+    let schema_cache = build_schema_cache(&entries);
     let mut all_errors: Vec<String> = Vec::new();
     let mut checked_count = 0;
 
@@ -814,6 +821,9 @@ fn schema_drift_detection() {
         }
     }
 
+    let elapsed = start.elapsed();
+    let elapsed_ms = elapsed.as_millis();
+
     if !all_errors.is_empty() {
         // Build a detailed error report
         let unique_errors: HashSet<&str> = all_errors.iter().map(String::as_str).collect();
@@ -832,10 +842,28 @@ fn schema_drift_detection() {
         panic!("{summary}");
     }
 
-    println!(
-        "✓ Schema drift detection passed: {} schemas, {} structs checked",
+    // Log elapsed time for observability
+    let limit_ms = drift_time_limit_ms();
+    eprintln!(
+        "  drift detection timing: {elapsed_ms}ms for {} schemas, {} structs (limit: {limit_ms}ms)",
         entries.len(),
         checked_count,
+    );
+
+    // Assert time threshold
+    assert!(
+        elapsed < std::time::Duration::from_millis(limit_ms),
+        "Schema drift detection took {elapsed_ms}ms, exceeding {limit_ms}ms \
+         limit. This may indicate schema growth needs optimization. \
+         {entries_len} schemas, {checked_count} structs checked.",
+        entries_len = entries.len(),
+    );
+
+    println!(
+        "✓ Schema drift detection passed: {} schemas, {} structs checked in {}ms",
+        entries.len(),
+        checked_count,
+        elapsed_ms,
     );
 }
 

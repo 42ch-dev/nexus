@@ -20,6 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-domain = { path = "../nexus-domain" }
 nexus-sync = { path = "../nexus-sync" }
 nexus-home-layout = { path = "../nexus-home-layout" }
@@ -29,6 +30,7 @@ clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 toml = "0.8"
 toml_edit = "0.22"
 reqwest = { workspace = true }

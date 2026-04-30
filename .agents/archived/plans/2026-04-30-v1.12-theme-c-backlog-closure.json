@@ -1,0 +1,18 @@
+{
+  "id": "2026-04-30-v1.12-theme-c-backlog-closure",
+  "title": "V1.12 Theme C — Remaining Backlog Closure",
+  "status": "Done",
+  "size": "S",
+  "theme": "C",
+  "branch": "feature/v1.12",
+  "plan_path": ".agents/plans/2026-04-30-v1.12-theme-c-backlog-closure.md",
+  "created_at": "2026-04-30",
+  "done_at": "2026-04-30",
+  "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+  "metadata": {
+    "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+    "spec_refs": [],
+    "residuals_target": ["R5", "R11", "R-M1-W02", "R-M1-W07", "R-M1-W09"],
+    "residuals_closed": ["R5", "R11", "R-M1-W02", "R-M1-W07", "R-M1-W09"]
+  }
+}

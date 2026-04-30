@@ -16,6 +16,10 @@ pub enum DeviceIdError {
     Uuid(#[from] uuid::Error),
 }
 
+/// Maximum number of retries when the device-id file exists but is empty
+/// (another thread may be writing concurrently).
+const MAX_EMPTY_RETRIES: u8 = 3;
+
 /// Get the existing device ID or create a new one.
 ///
 /// Uses atomic file creation (`create_new`) to eliminate the TOCTOU race
@@ -33,6 +37,7 @@ pub fn get_or_create_device_id(nexus_home: &Path) -> Result<String, DeviceIdErro
         std::fs::create_dir_all(parent)?;
     }
 
+    let mut empty_retries = 0u8;
     loop {
         match std::fs::OpenOptions::new()
             .write(true)
@@ -57,6 +62,16 @@ pub fn get_or_create_device_id(nexus_home: &Path) -> Result<String, DeviceIdErro
                 let existing = std::fs::read_to_string(&path)?;
                 let trimmed = existing.trim();
                 if trimmed.is_empty() {
+                    empty_retries += 1;
+                    if empty_retries > MAX_EMPTY_RETRIES {
+                        return Err(DeviceIdError::Io(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!(
+                                "device-id file is empty after {MAX_EMPTY_RETRIES} retries; \
+                                 another process may be stuck writing it"
+                            ),
+                        )));
+                    }
                     // Empty file — another thread may be writing.
                     // Wait briefly and retry rather than removing,
                     // to avoid NotFound races for concurrent readers.

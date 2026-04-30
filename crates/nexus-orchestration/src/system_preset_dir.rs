@@ -192,6 +192,15 @@ pub fn load_system_preset_from_dir(
                 message: format!("preset not found: {preset_id}"),
             });
         }
+        Err(
+            e @ (PresetLoadError::YamlSizeExceeded { .. }
+            | PresetLoadError::YamlDepthExceeded { .. }),
+        ) => {
+            return Err(SystemPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("{e}"),
+            });
+        }
     };
 
     // The qualified ID uses `_system.<dir_name>` convention.

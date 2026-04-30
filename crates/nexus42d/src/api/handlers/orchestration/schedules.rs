@@ -890,8 +890,10 @@ struct InspectRow {
     created_at: i64,
     updated_at: i64,
     concurrency_kind: String,
+    // sqlx-only: column is read to satisfy the query but not used in into_summary().
     #[sqlx(rename = "concurrency_whitelist")]
-    _concurrency_whitelist: Option<String>,
+    #[allow(dead_code)]
+    concurrency_whitelist: Option<String>,
 }
 
 impl InspectRow {
@@ -915,8 +917,10 @@ impl InspectRow {
 struct HistoryRow {
     version: i64,
     payload_kind: String,
+    // sqlx-only: column is read to satisfy the query; content excluded from history listing.
     #[sqlx(rename = "content")]
-    _content: Vec<u8>,
+    #[allow(dead_code)]
+    content: Vec<u8>,
     derivation_kind: String,
     created_at: i64,
 }
