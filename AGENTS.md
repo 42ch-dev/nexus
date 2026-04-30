@@ -1,15 +1,11 @@
 # Nexus AGENTS.md
 
-This file provides an overview for agents working in the **nexus** open-source monorepo. Domain-specific rules live in subdirectory AGENTS.md files listed below.
+This file provides decision rules, invariants, and indexes for agents working in the **nexus** open-source monorepo.
+Domain-specific rules live in subdirectory AGENTS.md files listed below.
 
 ## Repository Identity
 
-This is the **public open-source monorepo** containing:
-
-- `nexus42` CLI executable (Rust)
-- `nexus42d` daemon/supervisor (Rust)
-- JSON Schema wire contracts (truth source for TypeScript/Rust code generation)
-- Published package: `@42ch/nexus-contracts` (npm) — Rust `nexus-contracts` crate is monorepo-internal only
+This is the **public open-source monorepo** containing `nexus42` CLI (Rust), `nexus42d` daemon (Rust), JSON Schema wire contracts (truth source for TypeScript/Rust codegen), and published package `@42ch/nexus-contracts` (npm). Rust `nexus-contracts` crate is monorepo-internal only.
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
@@ -22,105 +18,48 @@ This is the **public open-source monorepo** containing:
 ## Key Naming (Frozen)
 
 - Product: **Nexus**
-- CLI executable: `**nexus42`**
-- Daemon: `**nexus42d`**
-- npm scope: `**@42ch**`
-- Contracts package: `**@42ch/nexus-contracts**`
+- CLI executable: **nexus42**
+- Daemon: **nexus42d**
+- npm scope: **@42ch**
+- Contracts package: **@42ch/nexus-contracts**
 
-## Monorepo Structure
+## Subdirectory Index
 
-```
-schemas/                # JSON Schema truth source → see schemas/AGENTS.md
-crates/
-  nexus-contracts/      # Generated Rust types → see crates/nexus-contracts/AGENTS.md
-  nexus42/              # CLI binary → see crates/nexus42/AGENTS.md
-  nexus42d/             # Daemon → see crates/nexus42d/AGENTS.md
-  nexus-sync/           # CLI ↔ Platform sync (library)
-  nexus-acp-host/       # ACP client adapter → see crates/nexus-acp-host/AGENTS.md
-  nexus-domain/         # Domain types and logic
-  nexus-home-layout/    # ~/.nexus42/ path layout → see crates/nexus-home-layout/AGENTS.md
-  nexus-local-db/       # Local database layer → see crates/nexus-local-db/AGENTS.md
-  nexus-orchestration/  # Orchestration engine → see crates/nexus-orchestration/AGENTS.md
-packages/
-  nexus-contracts/      # Generated TypeScript wire types (npm package)
-tooling/
-  codegen/              # Schema → TS + Rust pipeline → see tooling/AGENTS.md
-docs/                   # User & contributor docs
-.agents/                # Harness infrastructure → see .agents/AGENTS.md
-.github/workflows/      # CI
-```
+See linked AGENTS.md files for per-directory decision rules and invariants:
 
-## Subdirectory Conventions
-
-| Directory | Scope | Key Rules |
+| Directory | Scope | AGENTS.md |
 |-----------|-------|-----------|
-| [`schemas/AGENTS.md`](schemas/AGENTS.md) | JSON Schema wire contracts | Schema URI, codegen flow, mandatory regeneration |
-| [`tooling/AGENTS.md`](tooling/AGENTS.md) | Codegen pipeline & CI | Pre-merge checklist, formatting, linting |
-| [`crates/nexus42/AGENTS.md`](crates/nexus42/AGENTS.md) | CLI executable | ACP client behavior, shared contract types, daemon control |
-| [`crates/nexus42d/AGENTS.md`](crates/nexus42d/AGENTS.md) | Daemon / supervisor | Not an ACP server, sqlx macros, database migrations |
-| [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) | ACP client adapter | ACP protocol rules, official SDK usage |
-| [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) | Generated Rust wire types | No hand-editing generated code, `enum_conversions.rs` |
-| [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) | `~/.nexus42/` path layout | ADR-014 canonical paths, no hardcoded paths |
-| [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) | Local database layer | Migrations, sqlx compile-time macros |
-| [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) | Orchestration engine | Embedded presets, validation rules |
-| [`.agents/AGENTS.md`](.agents/AGENTS.md) | Harness infrastructure | Plans, residuals, knowledge, QC/QA, upstream mstar-harness |
+| `schemas/` | JSON Schema wire contracts | [`schemas/AGENTS.md`](schemas/AGENTS.md) |
+| `tooling/` | Codegen pipeline & CI | [`tooling/AGENTS.md`](tooling/AGENTS.md) |
+| `crates/nexus42/` | CLI executable | [`crates/nexus42/AGENTS.md`](crates/nexus42/AGENTS.md) |
+| `crates/nexus42d/` | Daemon / supervisor | [`crates/nexus42d/AGENTS.md`](crates/nexus42d/AGENTS.md) |
+| `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
+| `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
+| `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
+| `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
+| `crates/nexus-orchestration/` | Orchestration engine | [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) |
+| `.agents/` | Harness infrastructure | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
 
-**New crate policy:** when adding a new package or crate directory to the monorepo, create an `AGENTS.md` in that directory documenting its purpose, key rules, and dependencies — even if it starts minimal. This keeps the onboarding index complete.
+**New crate policy:** when adding a new package or crate to the monorepo, create an `AGENTS.md` in that directory — even if minimal — documenting its purpose, key rules, and dependencies.
 
-## Development Workflow
+## Development Policy
 
-**Formatting (cargo fmt):**
+**Formatting:** `cargo fmt` must use the **nightly** toolchain: `cargo +nightly fmt --all`. Stable `cargo fmt` ignores `.rustfmt.toml`'s `ignore` field and will **incorrectly reformat** generated code under `crates/nexus-contracts/src/generated/`.
 
-- `cargo fmt` must use the **nightly** toolchain: `cargo +nightly fmt --all`
-- The workspace `.rustfmt.toml` uses the `ignore` field (nightly-only) to skip `crates/nexus-contracts/src/generated/`
-- Stable `cargo fmt` will print warnings and **incorrectly reformat** generated code — always use nightly
-- If nightly is not installed: `rustup toolchain install nightly --component rustfmt`
+**Clippy:** Workspace-level config in root `Cargo.toml` enables `pedantic` + `nursery` as `warn`, inherited by all crates. CI runs `cargo clippy --all -- -D warnings`. When fixing clippy errors, auto-fix first (`cargo clippy --fix --allow-dirty --allow-staged`), then handle residual manually. **Do not suppress** with `#[allow(...)]` without a brief justification comment. **Do not change runtime behavior** when fixing lint errors.
 
-**Clippy (lint):**
+**Git worktrees:** Place every additional `git worktree` checkout under this repository root at `.worktrees/<name>/` only (`.worktrees/` is gitignored).
 
-- Workspace-level lint configuration in root `Cargo.toml` → `[workspace.lints.clippy]`: enables `pedantic` + `nursery` groups as `warn`, with selective `allow` overrides for overly noisy lints.
-- All workspace crates inherit via `[lints] workspace = true` in their `Cargo.toml`.
-- CI runs `cargo clippy --all -- -D warnings` — any clippy warning fails the build.
-- **Auto-fix first:** when addressing clippy errors, always run `cargo clippy --fix --allow-dirty --allow-staged` before manual fixes. This resolves the majority of machine-applicable lints (backticks, `use_self`, `uninlined_format_args`, `redundant_clone`, structural rewrites, etc.) in a single pass.
-- **Residual manual fixes:** after `--fix`, run `cargo clippy --all --all-targets --all-features -- -D warnings` to identify remaining errors that need human judgment (e.g., `missing_errors_doc`, `too_many_lines`, `float_cmp`, `similar_names`).
-- **Do not suppress** with `#[allow(...)]` unless absolutely unavoidable; if needed, add a brief justification comment.
-- **Do not change runtime behavior** when fixing lint errors.
-
-**Git worktrees:**
-
-- Put every additional `git worktree` checkout under **this repository root** at `.worktrees/<name>/` only.
-- The `.worktrees/` directory is listed in `.gitignore`.
-- Example: `git worktree add .worktrees/my-branch -b my-branch`
-
-## Dev/Test Infrastructure
-
-**Required containers:** Postgres + pgvector (`pgvector/pgvector:pg16`), Neo4j (`neo4j:5`), Redis (`redis/redis-stack-server:latest`)
-
-**API keys** (external, not in this repo's code but needed for integration): LLM inference API, OAuth/IdP credentials
-
-## Versioning & Compatibility
-
-### Package versions (current snapshot)
-
-| Deliverable | Version | Declared in |
-|---|---|---|
-| Rust workspace crates | **0.1.0** | Root `Cargo.toml` → `[workspace.package] version` |
-| `nexus-contracts` (monorepo-internal) | **0.1.0** | Root `Cargo.toml` → `[workspace.package] version`; not published to crates.io |
-| `@42ch/nexus-contracts` (npm) | **0.3.0** | `packages/nexus-contracts/package.json` |
-| `nexus-codegen` (private tooling) | **0.1.0** | `tooling/codegen/package.json` |
-| Root `nexus-monorepo` meta package | **0.1.0** | Root `package.json` |
-
-**npm vs Rust crate SemVer:** The npm package may use a **different** semantic version than the Rust workspace while both implement the same `LATEST_SCHEMA_VERSION` on the wire. Treat `schema_version` as the cross-language lock.
-
-### Policy
+## Versioning Policy
 
 - Schema contracts use `schema_version` field aligned with bundle envelope
-- CLI / daemon crate SemVer must reflect breaking wire changes when you version the binaries
+- CLI / daemon SemVer must reflect breaking wire changes
 - `@42ch/nexus-contracts` major bump → coordinated update across CLI + platform API + npm package
+- npm and Rust workspace versions may differ; `schema_version` is the cross-language lock
 
 ## Pre-release Development (Version < 1.0)
 
-Breaking changes are expected and allowed — API shapes, CLI flags, on-disk paths, config file layout, and behavior may change without a deprecation period. Local persistence (SQLite, `~/.nexus42/`) may be wiped rather than migrated. After first release, follow SemVer.
+Breaking changes are expected and allowed — API shapes, CLI flags, on-disk paths, config file layout, and behavior may change without a deprecation period. Local persistence may be wiped rather than migrated. After first release, follow SemVer.
 
 ## Constraints & Pitfalls
 
@@ -130,11 +69,9 @@ Breaking changes are expected and allowed — API shapes, CLI flags, on-disk pat
 - **Wire contracts must match schemas** — no drift between `schemas/` and generated types
 - **Single truth source for DTOs** — avoid parallel handwritten types in Rust or TypeScript
 
-## TypeScript Contract Package
+## TypeScript Contract Package (cross-repo)
 
-- `nexus-platform` (private repo) consumes `@42ch/nexus-contracts` via npm semver lock
-- **No handwritten second DTO source** in platform — all wire types come from this repo's schemas
-- **SemVer:** Breaking wire shapes require a **major** npm bump and coordinated platform upgrade
+`nexus-platform` (private repo) consumes `@42ch/nexus-contracts` via npm semver lock. **No handwritten second DTO source** in platform — all wire types come from this repo's schemas.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
