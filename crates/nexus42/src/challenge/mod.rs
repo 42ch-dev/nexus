@@ -70,7 +70,6 @@ pub type Result<T> = std::result::Result<T, ChallengeError>;
 /// If the LLM is unavailable or returns an error, implementations
 /// should return `None` so the caller falls through to the original
 /// parse error.
-#[allow(async_fn_in_trait)]
 pub trait LlmSolver: Send + Sync {
     /// Attempt to solve a challenge using LLM.
     ///
