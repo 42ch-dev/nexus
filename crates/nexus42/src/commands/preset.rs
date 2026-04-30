@@ -296,9 +296,8 @@ fn validate_preset(path: &str) -> Result<()> {
         )));
     }
 
-    let yaml = std::fs::read_to_string(file_path).map_err(|e| {
-        CliError::Other(format!("Failed to read {}: {e}", file_path.display()))
-    })?;
+    let yaml = std::fs::read_to_string(file_path)
+        .map_err(|e| CliError::Other(format!("Failed to read {}: {e}", file_path.display())))?;
 
     // Size check.
     if yaml.len() > VALIDATE_MAX_YAML_SIZE {
@@ -311,9 +310,8 @@ fn validate_preset(path: &str) -> Result<()> {
     }
 
     // Parse to generic Value for depth measurement.
-    let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml).map_err(|e| {
-        CliError::Other(format!("YAML parse error: {e}"))
-    })?;
+    let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml)
+        .map_err(|e| CliError::Other(format!("YAML parse error: {e}")))?;
 
     // Depth check.
     let actual_depth = yaml_value_depth(&yaml_value);
@@ -326,9 +324,8 @@ fn validate_preset(path: &str) -> Result<()> {
 
     // Deserialize to PresetManifest for structural validation.
     let manifest: nexus_contracts::local::orchestration::preset::PresetManifest =
-        serde_yaml::from_str(&yaml).map_err(|e| {
-            CliError::Other(format!("Structural validation error: {e}"))
-        })?;
+        serde_yaml::from_str(&yaml)
+            .map_err(|e| CliError::Other(format!("Structural validation error: {e}")))?;
 
     // Basic structural checks.
     if manifest.preset.id.is_empty() {
@@ -508,7 +505,8 @@ mod tests {
 
     #[test]
     fn preset_validate_parses() {
-        let cmd = PresetCli::try_parse_from(["preset", "validate", "path/to/preset.yaml"]).expect("parse");
+        let cmd = PresetCli::try_parse_from(["preset", "validate", "path/to/preset.yaml"])
+            .expect("parse");
         match cmd.command {
             PresetCommand::Validate { path } => assert_eq!(path, "path/to/preset.yaml"),
             _ => panic!("expected Validate variant"),
