@@ -3,25 +3,9 @@
   "updated_at": "2026-04-30T16:00:00Z",
   "plans": [
     {
-      "id": "2026-04-30-v1.12-theme-b-residual-sweep",
-      "title": "V1.12 Theme B — V1.11 + Warning Residual Sweep",
-      "status": "InProgress",
-      "size": "S",
-      "theme": "B",
-      "branch": "feature/v1.12",
-      "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
-      "plan_path": ".agents/plans/2026-04-30-v1.12-theme-b-residual-sweep.md",
-      "created_at": "2026-04-30",
-      "metadata": {
-        "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
-        "spec_refs": [],
-        "residuals_target": ["R-V111-S01", "R-V111-S02", "R-V111-S03", "R-V111-S04", "R-WA-001", "R-WA-002", "R-WC-002", "R-WC-003"]
-      }
-    },
-    {
       "id": "2026-04-30-v1.12-theme-c-backlog-closure",
       "title": "V1.12 Theme C — Remaining Backlog Closure",
-      "status": "Todo",
+      "status": "InProgress",
       "size": "S",
       "theme": "C",
       "branch": "feature/v1.12",
@@ -41,26 +25,23 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-30T16:00:00Z",
-      "total_open": 12,
+      "updated_at": "2026-04-30T18:00:00Z",
+      "total_open": 5,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 6,
-        "warning": 5,
-        "nit": 2
+        "low": 2,
+        "warning": 0,
+        "nit": 1
       },
       "by_target": {
-        "backlog": 13
+        "backlog": 5
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
         "2026-04-21-v1.7-ws-abc-residual-closure": 1,
-        "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
-        "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
-        "2026-04-24-v1.9-m1": 3,
-        "2026-04-27-v1.11-daemon-cleanup-toctou": 4
+        "2026-04-24-v1.9-m1": 3
       },
       "in_flight": {},
       "cross_cutting": [
@@ -75,54 +56,8 @@
       ]
     },
     "residual_findings": {
-      "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [
-        {
-          "id": "R-WA-001",
-          "title": "async_fn_in_trait MSRV concern",
-          "severity": "warning",
-          "source": "QC3 F-003",
-          "scope": "crates/nexus42/src/challenge/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-WA-002",
-          "title": "No fallback metrics/telemetry",
-          "severity": "warning",
-          "source": "QC3 F-004",
-          "scope": "crates/nexus42/src/challenge/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "post-M1",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        }
-      ],
-      "2026-04-23-v1.8-ws-c-name-positional-to-flag": [
-        {
-          "id": "R-WC-002",
-          "title": "Positional\u2192flag migration UX",
-          "severity": "warning",
-          "source": "QC3 F-005",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-WC-003",
-          "title": "HashMap non-determinism in obtain_auth_token test",
-          "severity": "warning",
-          "source": "QC2 F-004",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md"
-        }
-      ],
+      "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [],
+      "2026-04-23-v1.8-ws-c-name-positional-to-flag": [],
       "2026-04-18-v1.5-stabilization": [
         {
           "id": "R5",
@@ -185,52 +120,7 @@
         }
       ],
       "2026-04-27-v1.10-device-flow-login": [],
-      "2026-04-27-v1.11-daemon-cleanup-toctou": [
-        {
-          "id": "R-V111-S01",
-          "title": "device_id retry loop has no max retry count",
-          "severity": "low",
-          "source": "QC3 S-1",
-          "scope": "crates/nexus-sync/src/device_id.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
-        },
-        {
-          "id": "R-V111-S02",
-          "title": "refresh_access_token multiple AuthStore reloads",
-          "severity": "low",
-          "source": "QC3 S-4",
-          "scope": "crates/nexus42/src/auth/user_auth.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc3.md"
-        },
-        {
-          "id": "R-V111-S03",
-          "title": "API error body disclosure in non-invalid_grant 400s",
-          "severity": "low",
-          "source": "QC2 S-1",
-          "scope": "crates/nexus42/src/auth/user_auth.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc2.md"
-        },
-        {
-          "id": "R-V111-S04",
-          "title": "_ prefix on struct fields for sqlx-only columns",
-          "severity": "nit",
-          "source": "QC1 F-001",
-          "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-27-v1.11-daemon-cleanup-toctou/2026-04-27-v1.11-daemon-cleanup-toctou-qc1.md"
-        }
-      ]
+      "2026-04-27-v1.11-daemon-cleanup-toctou": [],
     },
     "program_reviews": {
       "v1.2": "archived/plans/v1.2-program-review.json"
