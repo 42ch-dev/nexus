@@ -26,7 +26,9 @@
 
 use crate::worker::ipc::IpcClient;
 use crate::worker::transport::StdioTransport;
+#[cfg(unix)]
 use nix::sys::signal::{kill, Signal};
+#[cfg(unix)]
 use nix::unistd::Pid;
 use serde_json::Value;
 use std::time::Duration;
@@ -689,48 +691,86 @@ impl WorkerManager {
         tokio::spawn(async move {
             tokio::select! {
                 () = supervisor_cancel.cancelled() => {
-                    // WS2 R4: SIGTERM → SIGKILL escalation.
-                    // 1. Send SIGTERM first.
-                    #[allow(clippy::cast_possible_wrap)]
-                    let nix_pid = Pid::from_raw(pid as i32);
-                    if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
-                        warn!(pid, error = %e, "failed to send SIGTERM to worker");
-                        // If SIGTERM fails, fall back to SIGKILL immediately.
-                        let _ = child.start_kill();
-                    } else {
-                        debug!(pid, grace_ms = grace.as_millis(), "sent SIGTERM, waiting for graceful exit");
-                    }
+                    // WS2 R4: Graceful shutdown with SIGTERM→SIGKILL escalation (Unix)
+                    // or direct kill (non-Unix).
+                    #[cfg(unix)]
+                    {
+                        // 1. Send SIGTERM first.
+                        #[allow(clippy::cast_possible_wrap)]
+                        let nix_pid = Pid::from_raw(pid as i32);
+                        if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
+                            warn!(pid, error = %e, "failed to send SIGTERM to worker");
+                            // If SIGTERM fails, fall back to SIGKILL immediately.
+                            let _ = child.start_kill();
+                        } else {
+                            debug!(pid, grace_ms = grace.as_millis(), "sent SIGTERM, waiting for graceful exit");
+                        }
 
-                    // 2. Wait for grace period for clean exit.
-                    match tokio::time::timeout(grace, child.wait()).await {
-                        Ok(Ok(status)) => {
-                            if status.success() {
-                                debug!(pid, "worker exited cleanly after SIGTERM");
-                                let _ = event_tx.send(WorkerEvent::Stopped { pid });
-                            } else {
-                                warn!(pid, code = ?status.code(), "worker exited with non-zero status after SIGTERM");
+                        // 2. Wait for grace period for clean exit.
+                        match tokio::time::timeout(grace, child.wait()).await {
+                            Ok(Ok(status)) => {
+                                if status.success() {
+                                    debug!(pid, "worker exited cleanly after SIGTERM");
+                                    let _ = event_tx.send(WorkerEvent::Stopped { pid });
+                                } else {
+                                    warn!(pid, code = ?status.code(), "worker exited with non-zero status after SIGTERM");
+                                    let _ = event_tx.send(WorkerEvent::Crashed {
+                                        pid,
+                                        exit_status: status.code(),
+                                    });
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                warn!(pid, error = %e, "error waiting for worker after SIGTERM");
                                 let _ = event_tx.send(WorkerEvent::Crashed {
                                     pid,
-                                    exit_status: status.code(),
+                                    exit_status: None,
+                                });
+                            }
+                            Err(_) => {
+                                // 3. Grace period expired — escalate to SIGKILL.
+                                warn!(pid, "worker did not exit within grace period, sending SIGKILL");
+                                let _ = child.start_kill();
+                                let _ = child.wait().await;
+                                let _ = event_tx.send(WorkerEvent::Crashed {
+                                    pid,
+                                    exit_status: None,
                                 });
                             }
                         }
-                        Ok(Err(e)) => {
-                            warn!(pid, error = %e, "error waiting for worker after SIGTERM");
-                            let _ = event_tx.send(WorkerEvent::Crashed {
-                                pid,
-                                exit_status: None,
-                            });
-                        }
-                        Err(_) => {
-                            // 3. Grace period expired — escalate to SIGKILL.
-                            warn!(pid, "worker did not exit within grace period, sending SIGKILL");
-                            let _ = child.start_kill();
-                            let _ = child.wait().await;
-                            let _ = event_tx.send(WorkerEvent::Crashed {
-                                pid,
-                                exit_status: None,
-                            });
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // Non-Unix: no SIGTERM/SIGKILL — use tokio's start_kill directly.
+                        debug!(pid, grace_ms = grace.as_millis(), "requesting worker kill (non-Unix)");
+                        let _ = child.start_kill();
+                        match tokio::time::timeout(grace, child.wait()).await {
+                            Ok(Ok(status)) => {
+                                if status.success() {
+                                    debug!(pid, "worker exited cleanly after kill");
+                                    let _ = event_tx.send(WorkerEvent::Stopped { pid });
+                                } else {
+                                    warn!(pid, code = ?status.code(), "worker exited with non-zero status after kill");
+                                    let _ = event_tx.send(WorkerEvent::Crashed {
+                                        pid,
+                                        exit_status: status.code(),
+                                    });
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                warn!(pid, error = %e, "error waiting for worker after kill");
+                                let _ = event_tx.send(WorkerEvent::Crashed {
+                                    pid,
+                                    exit_status: None,
+                                });
+                            }
+                            Err(_) => {
+                                warn!(pid, "worker kill timed out");
+                                let _ = event_tx.send(WorkerEvent::Crashed {
+                                    pid,
+                                    exit_status: None,
+                                });
+                            }
                         }
                     }
                 }
