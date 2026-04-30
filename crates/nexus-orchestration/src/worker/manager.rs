@@ -766,6 +766,8 @@ impl WorkerManager {
                             }
                             Err(_) => {
                                 warn!(pid, "worker kill timed out");
+                                // Reap the child to prevent orphan processes.
+                                let _ = child.wait().await;
                                 let _ = event_tx.send(WorkerEvent::Crashed {
                                     pid,
                                     exit_status: None,

@@ -191,10 +191,12 @@ pub fn enter_starting(ctx: &Arc<ActionContext>) {
 
 /// Exit action for `Starting` state.
 ///
-/// Gracefully cancels in-flight subsystem start tasks by signalling a
-/// shared `CancellationToken`, then awaits their completion within a
-/// short grace window. Falls back to `abort()` only if tasks don't
-/// respond to cancellation in time.
+/// Signals all in-flight subsystem start tasks to cancel via a shared
+/// `CancellationToken`, then immediately aborts any task that hasn't
+/// finished. There is no grace window between signal and abort — the
+/// cancellation is cooperative (tasks check at await points), but if a
+/// task hasn't finished by the time we drain handles, it is aborted
+/// immediately to prevent blocking the state transition.
 ///
 /// Note (RISK-WSC-02): cancellation prevents event dispatch but does
 /// not guarantee full resource cleanup (file handles, sockets).
