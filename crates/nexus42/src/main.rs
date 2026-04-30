@@ -274,7 +274,7 @@ async fn main() {
         Some(Commands::Session { command }) => commands::session::run(command, &config),
         Some(Commands::Policy { command }) => commands::policy::run(command),
         Some(Commands::Permission { command }) => commands::permission::run(command),
-        Some(Commands::Preset { command }) => commands::preset::run(command, &config).await,
+        Some(Commands::Preset { command }) => commands::preset::run(command, &config),
         Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
         Some(Commands::RuntimeMode { command }) => commands::runtime_mode::run(command, &config),
         Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
