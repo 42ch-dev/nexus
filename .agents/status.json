@@ -1,48 +1,27 @@
 {
   "version": 1,
   "updated_at": "2026-04-30T16:00:00Z",
-  "plans": [
-    {
-      "id": "2026-04-30-v1.12-theme-c-backlog-closure",
-      "title": "V1.12 Theme C — Remaining Backlog Closure",
-      "status": "InProgress",
-      "size": "S",
-      "theme": "C",
-      "branch": "feature/v1.12",
-      "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
-      "plan_path": ".agents/plans/2026-04-30-v1.12-theme-c-backlog-closure.md",
-      "created_at": "2026-04-30",
-      "metadata": {
-        "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
-        "spec_refs": [],
-        "residuals_target": ["R5", "R11", "R-M1-W02", "R-M1-W07", "R-M1-W09"]
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-30T18:00:00Z",
-      "total_open": 5,
+      "updated_at": "2026-04-30T20:00:00Z",
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 2,
+        "low": 0,
         "warning": 0,
-        "nit": 1
+        "nit": 0
       },
       "by_target": {
-        "backlog": 5
+        "backlog": 0
       },
-      "by_plan": {
-        "2026-04-18-v1.5-stabilization": 1,
-        "2026-04-21-v1.7-ws-abc-residual-closure": 1,
-        "2026-04-24-v1.9-m1": 3
-      },
+      "by_plan": {},
       "in_flight": {},
       "cross_cutting": [
         {
@@ -58,67 +37,9 @@
     "residual_findings": {
       "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [],
       "2026-04-23-v1.8-ws-c-name-positional-to-flag": [],
-      "2026-04-18-v1.5-stabilization": [
-        {
-          "id": "R5",
-          "title": "nix crate unconditionally included \u2014 Windows build blocked",
-          "severity": "low",
-          "source": "QC2 W1",
-          "scope": "crates/nexus-orchestration/Cargo.toml",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-21-v1.7-ws-abc-residual-closure": [
-        {
-          "id": "R11",
-          "title": "run_reset does raw toml_edit document surgery instead of delegating to policy helpers",
-          "severity": "low",
-          "source": "QC#2 S2-3",
-          "scope": "crates/nexus42/src/commands/permission.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": null
-        }
-      ],
-      "2026-04-24-v1.9-m1": [
-        {
-          "id": "R-M1-W02",
-          "title": "ALL_SCHEMA_PATHS manually maintained list separate from build_schema_map()",
-          "severity": "low",
-          "source": "QC1 F-007",
-          "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W07",
-          "title": "JoinHandle abort() risk \u2014 no graceful cleanup (documented RISK-WSC-02)",
-          "severity": "low",
-          "source": "QC3 W-2",
-          "scope": "crates/nexus42d/src/lifecycle/actions.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V2.0",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W09",
-          "title": "Drift detection test may be slow at scale",
-          "severity": "nit",
-          "source": "QC3 W-4",
-          "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        }
-      ],
+      "2026-04-18-v1.5-stabilization": [],
+      "2026-04-21-v1.7-ws-abc-residual-closure": [],
+      "2026-04-24-v1.9-m1": [],
       "2026-04-27-v1.10-device-flow-login": [],
       "2026-04-27-v1.11-daemon-cleanup-toctou": [],
     },
