@@ -221,7 +221,9 @@ pub fn exit_starting(ctx: &Arc<ActionContext>) {
                 // was already signalled and the task will check it at the next
                 // await point. abort() ensures we don't hang.
                 handle.abort();
-                tracing::debug!("aborted in-flight subsystem start task (graceful cancel signalled)");
+                tracing::debug!(
+                    "aborted in-flight subsystem start task (graceful cancel signalled)"
+                );
             }
         }
         tracing::info!("cancelled {count} in-flight subsystem start tasks");
