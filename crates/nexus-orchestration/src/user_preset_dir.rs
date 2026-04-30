@@ -241,16 +241,13 @@ pub fn list_user_preset_ids(result: &UserPresetScanResult) -> Vec<String> {
     result.presets.iter().map(|e| e.id.clone()).collect()
 }
 
-/// Find a user preset entry by ID using O(1) HashMap lookup.
+/// Find a user preset entry by ID using O(1) `HashMap` lookup.
 #[must_use]
 pub fn find_user_preset<'a>(
     result: &'a UserPresetScanResult,
     id: &str,
 ) -> Option<&'a UserPresetEntry> {
-    result
-        .index
-        .get(id)
-        .map(|&idx| &result.presets[idx])
+    result.index.get(id).map(|&idx| &result.presets[idx])
 }
 
 /// Check whether a cached scan result is still valid by comparing file mtimes.
