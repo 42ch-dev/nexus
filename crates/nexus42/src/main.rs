@@ -175,7 +175,7 @@ enum Commands {
         command: PermissionCommand,
     },
 
-    /// User-installed preset management (init, list)
+    /// User-installed preset management (init, list, validate)
     Preset {
         #[command(subcommand)]
         command: PresetCommand,
