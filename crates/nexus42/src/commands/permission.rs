@@ -353,17 +353,7 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
 
         let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
             .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-        if let Some(agents) = doc.get_mut("agents") {
-            if let Some(agent_table) = agents.get_mut(agent_id) {
-                if let Some(t) = agent_table.as_table_like_mut() {
-                    t.clear();
-                }
-            }
-            // Clean up empty agent entry
-            if let Some(agents_table) = agents.as_table_like_mut() {
-                agents_table.remove(agent_id);
-            }
-        }
+        PermissionPolicy::reset_agent_doc(&mut doc, agent_id);
         PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
             .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
         println!("Reset all rules for agent '{agent_id}'.");
@@ -376,11 +366,7 @@ fn run_reset(workspace_root: &std::path::Path, agent: Option<&str>) -> Result<()
 
         let mut doc = PermissionPolicy::load_toml_edit(workspace_root)
             .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-        if let Some(agents) = doc.get_mut("agents") {
-            if let Some(table) = agents.as_table_like_mut() {
-                table.clear();
-            }
-        }
+        PermissionPolicy::reset_all_agents_doc(&mut doc);
         PermissionPolicy::save_toml_edit_doc(workspace_root, &doc)
             .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
         println!("Reset all agent rules.");

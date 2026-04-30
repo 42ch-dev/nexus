@@ -334,6 +334,38 @@ impl PermissionPolicy {
         }
     }
 
+    /// Reset all rules for a specific agent by clearing its action tables
+    /// and removing the agent entry. Uses the same cleanup logic as
+    /// `clean_empty_agent_tables_doc` but clears all actions first.
+    pub fn reset_agent_doc(doc: &mut toml_edit::DocumentMut, agent: &str) {
+        let actions = ["grant", "deny", "ask"];
+        if let Some(agents) = doc.get_mut("agents") {
+            if let Some(agent_table) = agents.get_mut(agent) {
+                // Clear all action sub-tables
+                if let Some(t) = agent_table.as_table_like_mut() {
+                    for action in &actions {
+                        t.remove(action);
+                    }
+                }
+            }
+            // Remove the agent entry entirely (now empty after clearing actions)
+            if let Some(t) = agents.as_table_like_mut() {
+                t.remove(agent);
+            }
+            // Remove agents table if empty
+            if let Some(agents_table) = doc["agents"].as_table() {
+                if agents_table.is_empty() {
+                    doc.remove("agents");
+                }
+            }
+        }
+    }
+
+    /// Reset all agent rules by clearing the entire `[agents]` table.
+    pub fn reset_all_agents_doc(doc: &mut toml_edit::DocumentMut) {
+        doc.remove("agents");
+    }
+
     /// Validate top-level keys in the TOML document against the known schema.
     ///
     /// Returns a list of warning messages for unknown keys.
