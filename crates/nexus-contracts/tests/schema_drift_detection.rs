@@ -742,8 +742,21 @@ fn check_fields_match(
 // Main Test (T5, T6)
 // ---------------------------------------------------------------------------
 
+/// Maximum acceptable wall-clock time for drift detection in milliseconds.
+///
+/// This threshold is intentionally generous (5s) to avoid flaky failures on
+/// slow CI runners. The test currently runs in ~10ms for ~55 schemas on a
+/// typical dev machine (2026-04). If the elapsed time consistently approaches
+/// this threshold, consider optimizing the test or raising the limit.
+///
+/// The elapsed time is always printed so regressions are observable even when
+/// the threshold is not exceeded.
+const DRIFT_DETECTION_TIME_LIMIT_MS: u64 = 5_000;
+
 #[test]
 fn schema_drift_detection() {
+    let start = std::time::Instant::now();
+
     let entries = build_schema_map();
     let schema_cache = build_schema_cache();
     let mut all_errors: Vec<String> = Vec::new();
@@ -799,6 +812,9 @@ fn schema_drift_detection() {
         }
     }
 
+    let elapsed = start.elapsed();
+    let elapsed_ms = elapsed.as_millis();
+
     if !all_errors.is_empty() {
         // Build a detailed error report
         let unique_errors: HashSet<&str> = all_errors.iter().map(String::as_str).collect();
@@ -817,10 +833,28 @@ fn schema_drift_detection() {
         panic!("{summary}");
     }
 
-    println!(
-        "✓ Schema drift detection passed: {} schemas, {} structs checked",
+    // Log elapsed time for observability
+    eprintln!(
+        "  drift detection timing: {elapsed_ms}ms for {} schemas, {} structs (limit: {}ms)",
         entries.len(),
         checked_count,
+        DRIFT_DETECTION_TIME_LIMIT_MS,
+    );
+
+    // Assert time threshold
+    assert!(
+        elapsed < std::time::Duration::from_millis(DRIFT_DETECTION_TIME_LIMIT_MS),
+        "Schema drift detection took {elapsed_ms}ms, exceeding {DRIFT_DETECTION_TIME_LIMIT_MS}ms \
+         limit. This may indicate schema growth needs optimization. \
+         {entries_len} schemas, {checked_count} structs checked.",
+        entries_len = entries.len(),
+    );
+
+    println!(
+        "✓ Schema drift detection passed: {} schemas, {} structs checked in {}ms",
+        entries.len(),
+        checked_count,
+        elapsed_ms,
     );
 }
 
