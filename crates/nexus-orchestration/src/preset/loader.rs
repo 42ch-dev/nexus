@@ -183,7 +183,8 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    // 0b. Depth check — parse to Value first, measure depth, then deserialize.
+    // 0b. Depth check — parse to Value, measure depth, then deserialize from
+    //     the same Value tree (single parse avoids double stack-overflow surface).
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
     let actual_depth = yaml_value_depth(&yaml_value);
     if actual_depth > max_depth {
@@ -193,8 +194,10 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    // 1. Deserialize to manifest.
-    let manifest: PresetManifest = serde_yaml::from_str(yaml).map_err(PresetLoadError::from)?;
+    // 1. Deserialize from the already-parsed Value (avoids double-parse that widens
+    //    the stack-overflow attack surface — QC3 W-002).
+    let manifest: PresetManifest =
+        serde_yaml::from_value(yaml_value).map_err(PresetLoadError::from)?;
 
     // 2. Validate.
     let problems = validate_manifest(&manifest, caps);
@@ -911,7 +914,7 @@ fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_fl
 /// Measure the maximum nesting depth of a [`serde_yaml::Value`].
 ///
 /// Scalars have depth 1, sequences/mappings add 1 for the container level.
-fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
+pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
     match value {
         serde_yaml::Value::Mapping(map) => {
             let child_depth = map.values().map(yaml_value_depth).max().unwrap_or(0);
