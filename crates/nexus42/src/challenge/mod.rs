@@ -70,6 +70,11 @@ pub type Result<T> = std::result::Result<T, ChallengeError>;
 /// If the LLM is unavailable or returns an error, implementations
 /// should return `None` so the caller falls through to the original
 /// parse error.
+// `async fn in trait` is stable since Rust 1.75 (our MSRV is well past that).
+// Suppress the clippy lint because auto-trait bounds on the returned Future
+// are not needed — the trait is sealed-internal and all impls are within this
+// crate where `Send` is already guaranteed by the `: Send + Sync` supertrait.
+#[allow(async_fn_in_trait)]
 pub trait LlmSolver: Send + Sync {
     /// Attempt to solve a challenge using LLM.
     ///
