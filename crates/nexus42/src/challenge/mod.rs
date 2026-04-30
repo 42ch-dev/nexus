@@ -182,6 +182,9 @@ where
     match solve_challenge(text) {
         ok @ Ok(_) => ok,
         Err(ChallengeError::ParseError) => {
+            // TODO(telemetry): emit `challenge.fallback.attempted` counter when
+            // metrics infrastructure is available. Track outcome (success/failure/
+            // timeout/unavailable) as labelled counters.
             tracing::warn!("pure logic pipeline failed, attempting LLM fallback for challenge");
             let llm_result = tokio::time::timeout(
                 std::time::Duration::from_secs(LLM_FALLBACK_TIMEOUT_SECS),
