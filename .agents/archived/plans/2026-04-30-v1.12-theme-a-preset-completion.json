@@ -1,0 +1,24 @@
+{
+  "id": "2026-04-30-v1.12-theme-a-preset-completion",
+  "title": "V1.12 Theme A — Preset Module Completion",
+  "status": "Done",
+  "size": "M",
+  "theme": "A",
+  "branch": "feature/v1.12",
+  "plan_path": ".agents/plans/2026-04-30-v1.12-theme-a-preset-completion.md",
+  "created_at": "2026-04-30",
+  "done_at": "2026-04-30",
+  "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+  "metadata": {
+    "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+    "spec_refs": [],
+    "residuals_target": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"],
+    "residuals_closed": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"],
+    "qc_reports": [
+      ".agents/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qc1.md",
+      ".agents/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qc2.md",
+      ".agents/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qc3.md"
+    ],
+    "qa_report": ".agents/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qa.md"
+  }
+}

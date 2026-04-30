@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use tokio_util::sync::CancellationToken;
+
 use super::subsystems::SubsystemBootstrap;
 use super::{Event, Lifecycle, LifecycleState, StatigLifecycle, SubsystemKind};
 
@@ -29,6 +31,9 @@ pub struct ActionContext {
     shutdown_grace_ms: u64,
     /// Join handles for subsystem start tasks (used to cancel in-flight starts).
     start_handles: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Cancellation token shared with in-flight subsystem start tasks.
+    /// Cancelled on `exit_starting` to signal graceful termination.
+    start_cancel: CancellationToken,
     /// Reason for entering Starting state (e.g., "`daemon_boot`", "`restart_after_failure`").
     start_reason: String,
     /// Timestamp when Starting state was entered.
@@ -62,6 +67,7 @@ impl ActionContext {
             subsystems,
             shutdown_grace_ms,
             start_handles: std::sync::Mutex::new(Vec::new()),
+            start_cancel: CancellationToken::new(),
             start_reason: String::from("daemon_boot"),
             started_at: chrono::Utc::now(),
             initiating_event: None,
@@ -130,26 +136,48 @@ pub fn enter_starting(ctx: &Arc<ActionContext>) {
     );
 
     let lc = ctx.lifecycle();
+    let task_cancel = ctx.start_cancel.clone();
 
     for subsystem in &ctx.subsystems {
         let kind = subsystem.kind();
         let subsystem_clone = Arc::clone(subsystem);
         let lc_clone = Arc::clone(&lc);
+        let cancel = task_cancel.clone();
 
         let handle = tokio::spawn(async move {
-            let result = subsystem_clone.start().await;
-            match result {
-                Ok(()) => {
-                    tracing::info!("subsystem {:?} started successfully", kind);
-                    lc_clone.dispatch(Event::SubsystemUp(kind));
+            // Check cancellation before starting
+            if cancel.is_cancelled() {
+                tracing::debug!("subsystem {:?} start cancelled before execution", kind);
+                return;
+            }
+
+            tokio::select! {
+                result = subsystem_clone.start() => {
+                    match result {
+                        Ok(()) => {
+                            if cancel.is_cancelled() {
+                                tracing::debug!("subsystem {:?} completed but cancel requested — skipping event dispatch", kind);
+                                return;
+                            }
+                            tracing::info!("subsystem {:?} started successfully", kind);
+                            lc_clone.dispatch(Event::SubsystemUp(kind));
+                        }
+                        Err(e) => {
+                            if cancel.is_cancelled() {
+                                tracing::debug!("subsystem {:?} failed but cancel requested — skipping event dispatch", kind);
+                                return;
+                            }
+                            tracing::error!("subsystem {:?} failed to start: {}", kind, e);
+                            lc_clone.dispatch(Event::SubsystemFailed {
+                                kind,
+                                err: e.to_string(),
+                                retryable: false, // startup failures are non-retryable
+                            });
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("subsystem {:?} failed to start: {}", kind, e);
-                    lc_clone.dispatch(Event::SubsystemFailed {
-                        kind,
-                        err: e.to_string(),
-                        retryable: false, // startup failures are non-retryable
-                    });
+                () = cancel.cancelled() => {
+                    tracing::debug!("subsystem {:?} start cancelled during execution", kind);
                 }
             }
         });
@@ -163,26 +191,44 @@ pub fn enter_starting(ctx: &Arc<ActionContext>) {
 
 /// Exit action for `Starting` state.
 ///
-/// Cancels any in-flight subsystem start tasks that haven't completed yet.
-/// This prevents the FSM from hanging when `ShutdownRequested` arrives during boot.
+/// Signals all in-flight subsystem start tasks to cancel via a shared
+/// `CancellationToken`, then immediately aborts any task that hasn't
+/// finished. There is no grace window between signal and abort — the
+/// cancellation is cooperative (tasks check at await points), but if a
+/// task hasn't finished by the time we drain handles, it is aborted
+/// immediately to prevent blocking the state transition.
 ///
-/// Note (RISK-WSC-02): `abort()` cancels the tokio task but does not guarantee
-/// full resource cleanup (file handles, sockets). Full cleanup requires
-/// `SubsystemBootstrap` to implement an `abort()` method (WS7+ work).
+/// Note (RISK-WSC-02): cancellation prevents event dispatch but does
+/// not guarantee full resource cleanup (file handles, sockets).
+/// Full cleanup requires `SubsystemBootstrap` to implement an
+/// `abort()` method (WS7+ work).
 pub fn exit_starting(ctx: &Arc<ActionContext>) {
     tracing::info!("exiting Starting state — cancelling in-flight subsystem starts");
+
+    // Signal cancellation to all in-flight start tasks
+    ctx.start_cancel.cancel();
 
     let mut handles = ctx
         .start_handles
         .lock()
         .expect("start_handles mutex not poisoned");
     let count = handles.len();
-    for handle in handles.drain(..) {
-        handle.abort();
-        tracing::debug!("aborted in-flight subsystem start task");
-    }
+
     if count > 0 {
-        tracing::info!("cancelled {} in-flight subsystem start tasks", count);
+        for handle in handles.drain(..) {
+            if handle.is_finished() {
+                tracing::debug!("in-flight subsystem start task already completed");
+            } else {
+                // Task still running — abort as last resort since cancellation
+                // was already signalled and the task will check it at the next
+                // await point. abort() ensures we don't hang.
+                handle.abort();
+                tracing::debug!(
+                    "aborted in-flight subsystem start task (graceful cancel signalled)"
+                );
+            }
+        }
+        tracing::info!("cancelled {count} in-flight subsystem start tasks");
     }
 }
 

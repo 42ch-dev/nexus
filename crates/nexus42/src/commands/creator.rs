@@ -57,8 +57,11 @@ pub enum CreatorCommand {
     },
 
     /// Switch the active Creator
+    ///
+    /// Positional `<creator_ref>` is accepted for convenience.
+    /// A future version may require `--creator-id <id>` flag syntax.
     Use {
-        /// Creator ID or display name
+        /// Creator ID or display name (positional; may become a flag in a future version)
         creator_ref: String,
     },
 
@@ -66,14 +69,20 @@ pub enum CreatorCommand {
     List,
 
     /// Initiate pairing flow with a Creator
+    ///
+    /// Positional `<creator_id>` is accepted for convenience.
+    /// A future version may require `--creator-id <id>` flag syntax.
     Pair {
-        /// Creator ID to pair
+        /// Creator ID to pair (positional; may become a flag in a future version)
         creator_id: String,
     },
 
     /// Remove pairing with a Creator
+    ///
+    /// Positional `<creator_id>` is accepted for convenience.
+    /// A future version may require `--creator-id <id>` flag syntax.
     Unpair {
-        /// Creator ID to unpair
+        /// Creator ID to unpair (positional; may become a flag in a future version)
         creator_id: String,
     },
 
@@ -635,19 +644,17 @@ mod tests {
     /// Helper: create an `AuthStore` with a known access token.
     fn store_with_token(creator_id: &str, token: &str) -> AuthStore {
         let mut store = AuthStore::default();
-        store.creators = Some({
-            let mut m = std::collections::HashMap::new();
-            m.insert(
-                creator_id.to_string(),
-                CreatorAuthState {
-                    creator_id: creator_id.to_string(),
-                    access_token: token.to_string(),
-                    expires_at: "2099-01-01T00:00:00Z".to_string(),
-                    creator_api_key: None,
-                },
-            );
-            m
-        });
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(
+            creator_id.to_string(),
+            CreatorAuthState {
+                creator_id: creator_id.to_string(),
+                access_token: token.to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                creator_api_key: None,
+            },
+        );
+        store.creators = Some(m.into_iter().collect());
         store
     }
 
@@ -662,20 +669,30 @@ mod tests {
 
     #[test]
     fn obtain_auth_token_returns_first_available_token() {
-        let mut store = store_with_token("crt_a", "token_a");
-        if let Some(creators) = store.creators.as_mut() {
-            creators.insert(
-                "crt_b".to_string(),
-                CreatorAuthState {
-                    creator_id: "crt_b".to_string(),
-                    access_token: "token_b".to_string(),
-                    expires_at: "2099-01-01T00:00:00Z".to_string(),
-                    creator_api_key: None,
-                },
-            );
-        }
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            "crt_a".to_string(),
+            CreatorAuthState {
+                creator_id: "crt_a".to_string(),
+                access_token: "token_a".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                creator_api_key: None,
+            },
+        );
+        map.insert(
+            "crt_b".to_string(),
+            CreatorAuthState {
+                creator_id: "crt_b".to_string(),
+                access_token: "token_b".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                creator_api_key: None,
+            },
+        );
+        let mut store = AuthStore::default();
+        store.creators = Some(map.into_iter().collect());
         let token = obtain_auth_token(&store).expect("should find token");
-        // HashMap iteration order is non-deterministic, but it should find *one* token
+        // With BTreeMap insertion, keys are ordered: "crt_a" < "crt_b".
+        // HashMap iteration is non-deterministic, so we accept either token.
         assert!(token == "token_a" || token == "token_b");
     }
 

@@ -5,11 +5,16 @@
 //! as embedded/system presets. Any directory whose name starts with `_` (system)
 //! or `.` (hidden) is silently skipped.
 //!
+//! The scan result builds a `HashMap` index for O(1) preset lookup by ID.
+//! Cache invalidation is based on file modification time (mtime).
+//!
 //! Design: V1.9 WS-A — third-party preset loading.
 
 use crate::capability::CapabilityRegistry;
 use crate::preset::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -27,10 +32,17 @@ pub struct UserPresetEntry {
 }
 
 /// Result of scanning the user preset directory.
+///
+/// Includes a `HashMap` index for O(1) lookup by preset ID, and mtime
+/// metadata for cache invalidation.
 #[derive(Debug, Default)]
 pub struct UserPresetScanResult {
     /// Successfully loaded user presets.
     pub presets: Vec<UserPresetEntry>,
+    /// Index mapping preset ID → position in `presets` Vec for O(1) lookup.
+    index: HashMap<String, usize>,
+    /// Modification times of scanned preset files for cache invalidation.
+    mtimes: HashMap<String, SystemTime>,
     /// Warnings for presets that were skipped (corrupted, invalid YAML, etc.).
     pub warnings: Vec<UserPresetWarning>,
 }
@@ -109,12 +121,20 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
         }
 
         // Skip directories without preset.yaml.
-        if !path.join("preset.yaml").exists() {
+        let preset_yaml_path = path.join("preset.yaml");
+        if !preset_yaml_path.exists() {
             result.warnings.push(UserPresetWarning {
                 dir_name: dir_name.clone(),
                 message: "missing preset.yaml".to_string(),
             });
             continue;
+        }
+
+        // Track mtime for cache invalidation.
+        if let Ok(metadata) = std::fs::metadata(&preset_yaml_path) {
+            if let Ok(mtime) = metadata.modified() {
+                result.mtimes.insert(dir_name.clone(), mtime);
+            }
         }
 
         match load_user_preset_from_dir(&path, &dir_name, caps) {
@@ -123,6 +143,8 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
                     id = %entry.id,
                     "registered user preset"
                 );
+                let idx = result.presets.len();
+                result.index.insert(entry.id.clone(), idx);
                 result.presets.push(entry);
             }
             Err(warning) => {
@@ -195,6 +217,15 @@ pub fn load_user_preset_from_dir(
                 message: format!("preset not found: {preset_id}"),
             });
         }
+        Err(
+            e @ (PresetLoadError::YamlSizeExceeded { .. }
+            | PresetLoadError::YamlDepthExceeded { .. }),
+        ) => {
+            return Err(UserPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("{e}"),
+            });
+        }
     };
 
     Ok(UserPresetEntry {
@@ -210,13 +241,69 @@ pub fn list_user_preset_ids(result: &UserPresetScanResult) -> Vec<String> {
     result.presets.iter().map(|e| e.id.clone()).collect()
 }
 
-/// Find a user preset entry by ID.
+/// Find a user preset entry by ID using O(1) `HashMap` lookup.
 #[must_use]
 pub fn find_user_preset<'a>(
     result: &'a UserPresetScanResult,
     id: &str,
 ) -> Option<&'a UserPresetEntry> {
-    result.presets.iter().find(|e| e.id == id)
+    result.index.get(id).map(|&idx| &result.presets[idx])
+}
+
+/// Check whether a cached scan result is still valid by comparing file mtimes.
+///
+/// Returns `true` if the cache is still fresh (no changes detected),
+/// `false` if any preset file was modified, added, or removed.
+///
+/// The `nexus_home` parameter should be the same path used for the original scan.
+#[must_use]
+pub fn is_scan_cache_fresh(result: &UserPresetScanResult, nexus_home: &Path) -> bool {
+    let user_dir = nexus_home.join("presets");
+
+    // If directory doesn't exist but we had results, cache is stale.
+    if !user_dir.exists() {
+        return result.presets.is_empty() && result.warnings.is_empty();
+    }
+
+    let Ok(entries) = std::fs::read_dir(&user_dir) else {
+        return false;
+    };
+
+    let mut current_count = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if dir_name.starts_with('_') || dir_name.starts_with('.') {
+            continue;
+        }
+        if !path.join("preset.yaml").exists() {
+            continue;
+        }
+        current_count += 1;
+
+        // Check mtime for known presets.
+        if let Some(&cached_mtime) = result.mtimes.get(&dir_name) {
+            if let Ok(metadata) = std::fs::metadata(path.join("preset.yaml")) {
+                if let Ok(current_mtime) = metadata.modified() {
+                    if current_mtime != cached_mtime {
+                        return false;
+                    }
+                }
+            }
+        } else {
+            // New preset not in cache — stale.
+            return false;
+        }
+    }
+
+    // If count differs, something was removed — stale.
+    current_count == result.presets.len()
 }
 
 // ---------------------------------------------------------------------------
@@ -445,5 +532,152 @@ states:
         let loaded = load_user_preset_from_dir(&bundle_dir, "test-strat", &caps).unwrap();
         assert_eq!(loaded.id, "test-strat");
         assert_eq!(loaded.loaded.id, "test-strategy");
+    }
+
+    // ── R-M1-W06: HashMap index + mtime cache tests ────────────────
+
+    #[test]
+    fn find_user_preset_is_o1_with_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nexus_home = tmp.path().to_path_buf();
+        let base = nexus_home.join("presets");
+
+        // Create 3 presets.
+        for name in ["alpha", "beta", "gamma"] {
+            let dir = base.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            let yaml = minimal_yaml().replace("test-strategy", name);
+            fs::write(dir.join("preset.yaml"), yaml).unwrap();
+        }
+
+        let caps = CapabilityRegistry::with_builtins();
+        let result = scan_user_presets(&nexus_home, &caps);
+
+        assert_eq!(result.presets.len(), 3);
+        // O(1) lookup via index should find all three.
+        assert!(find_user_preset(&result, "alpha").is_some());
+        assert!(find_user_preset(&result, "beta").is_some());
+        assert!(find_user_preset(&result, "gamma").is_some());
+        assert!(find_user_preset(&result, "nonexistent").is_none());
+
+        // Verify index maps to correct entries.
+        let alpha = find_user_preset(&result, "alpha").unwrap();
+        assert_eq!(alpha.id, "alpha");
+    }
+
+    #[test]
+    fn index_size_matches_preset_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nexus_home = tmp.path().to_path_buf();
+        let base = nexus_home.join("presets");
+
+        // Create 5 presets.
+        for i in 0..5 {
+            let name = format!("preset-{i}");
+            let dir = base.join(&name);
+            fs::create_dir_all(&dir).unwrap();
+            let yaml = minimal_yaml().replace("test-strategy", &name);
+            fs::write(dir.join("preset.yaml"), yaml).unwrap();
+        }
+
+        let caps = CapabilityRegistry::with_builtins();
+        let result = scan_user_presets(&nexus_home, &caps);
+
+        assert_eq!(result.presets.len(), 5);
+        // The index should have exactly as many entries as presets.
+        assert_eq!(result.index.len(), result.presets.len());
+    }
+
+    #[test]
+    fn scan_cache_fresh_when_no_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nexus_home = tmp.path().to_path_buf();
+        let base = nexus_home.join("presets");
+
+        let dir = base.join("my-strategy");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
+
+        let caps = CapabilityRegistry::with_builtins();
+        let result = scan_user_presets(&nexus_home, &caps);
+
+        assert!(
+            is_scan_cache_fresh(&result, &nexus_home),
+            "cache should be fresh immediately after scan"
+        );
+    }
+
+    #[test]
+    fn scan_cache_stale_after_modification() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nexus_home = tmp.path().to_path_buf();
+        let base = nexus_home.join("presets");
+
+        let dir = base.join("my-strategy");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
+
+        let caps = CapabilityRegistry::with_builtins();
+        let result = scan_user_presets(&nexus_home, &caps);
+        assert!(is_scan_cache_fresh(&result, &nexus_home));
+
+        // Modify the file (wait briefly to ensure different mtime on fast systems).
+        let updated_yaml = minimal_yaml().replace("test-strategy", "modified");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(dir.join("preset.yaml"), updated_yaml).unwrap();
+
+        assert!(
+            !is_scan_cache_fresh(&result, &nexus_home),
+            "cache should be stale after file modification"
+        );
+    }
+
+    #[test]
+    fn scan_cache_stale_after_new_preset_added() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nexus_home = tmp.path().to_path_buf();
+        let base = nexus_home.join("presets");
+
+        let dir = base.join("existing");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
+
+        let caps = CapabilityRegistry::with_builtins();
+        let result = scan_user_presets(&nexus_home, &caps);
+        assert!(is_scan_cache_fresh(&result, &nexus_home));
+
+        // Add a new preset.
+        let new_dir = base.join("new-preset");
+        fs::create_dir_all(&new_dir).unwrap();
+        let yaml = minimal_yaml().replace("test-strategy", "new-preset");
+        fs::write(new_dir.join("preset.yaml"), yaml).unwrap();
+
+        assert!(
+            !is_scan_cache_fresh(&result, &nexus_home),
+            "cache should be stale after new preset added"
+        );
+    }
+
+    #[test]
+    fn scan_cache_stale_after_preset_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nexus_home = tmp.path().to_path_buf();
+        let base = nexus_home.join("presets");
+
+        let dir = base.join("to-remove");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
+
+        let caps = CapabilityRegistry::with_builtins();
+        let result = scan_user_presets(&nexus_home, &caps);
+        assert!(is_scan_cache_fresh(&result, &nexus_home));
+
+        // Remove the preset.
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert!(
+            !is_scan_cache_fresh(&result, &nexus_home),
+            "cache should be stale after preset removed"
+        );
     }
 }

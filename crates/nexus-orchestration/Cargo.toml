@@ -33,7 +33,9 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 blake3 = { workspace = true }
 include_dir = "0.7"
-# WS2 R4: SIGTERM support for graceful worker shutdown.
+# WS2 R4: SIGTERM support for graceful worker shutdown (Unix only).
+# R5: gated behind cfg(unix) for Windows build compatibility.
+[target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
 
 [dev-dependencies]

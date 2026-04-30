@@ -1,0 +1,46 @@
+{
+  "plan_id": "2026-04-30-v1.12-theme-c-backlog-closure",
+  "closed_at": "2026-04-30",
+  "closed_residuals": [
+    {
+      "id": "R5",
+      "title": "nix crate unconditionally included — Windows build blocked",
+      "severity": "low",
+      "source": "QC2 W1",
+      "scope": "crates/nexus-orchestration/Cargo.toml",
+      "closure_note": "nix dependency gated behind #[cfg(unix)]; non-Unix stubs provided"
+    },
+    {
+      "id": "R11",
+      "title": "run_reset does raw toml_edit document surgery instead of delegating to policy helpers",
+      "severity": "low",
+      "source": "QC#2 S2-3",
+      "scope": "crates/nexus42/src/commands/permission.rs",
+      "closure_note": "Refactored to use reset_agent_doc()/reset_all_agents_doc() policy helpers"
+    },
+    {
+      "id": "R-M1-W02",
+      "title": "ALL_SCHEMA_PATHS manually maintained list separate from build_schema_map()",
+      "severity": "low",
+      "source": "QC1 F-007",
+      "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
+      "closure_note": "collect_all_schema_paths() now accepts &[SchemaEntry] from build_schema_map() + glob; manual list eliminated"
+    },
+    {
+      "id": "R-M1-W07",
+      "title": "JoinHandle abort() risk — no graceful cleanup",
+      "severity": "low",
+      "source": "QC3 W-2",
+      "scope": "crates/nexus42d/src/lifecycle/actions.rs",
+      "closure_note": "Replaced with CancellationToken graceful shutdown; doc comment corrected to match actual behavior"
+    },
+    {
+      "id": "R-M1-W09",
+      "title": "Drift detection test may be slow at scale",
+      "severity": "nit",
+      "source": "QC3 W-4",
+      "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
+      "closure_note": "500ms default threshold with NEXUS_DRIFT_LIMIT_MS env var override; actual runtime ~9-23ms"
+    }
+  ]
+}
