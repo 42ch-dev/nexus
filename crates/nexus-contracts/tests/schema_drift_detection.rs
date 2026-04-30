@@ -338,63 +338,48 @@ fn build_schema_map() -> Vec<SchemaEntry> {
 // Schema File Loading and Caching (T2)
 // ---------------------------------------------------------------------------
 
-/// List of all known schema file paths for the cache.
-const ALL_SCHEMA_PATHS: &[&str] = &[
-    "schemas/common/common.schema.json",
-    "schemas/common/source-anchor.schema.json",
-    "schemas/common/version-ref.schema.json",
-    "schemas/domain/bundle.schema.json",
-    "schemas/domain/creator.schema.json",
-    "schemas/domain/delta.schema.json",
-    "schemas/domain/fork-branch.schema.json",
-    "schemas/domain/key-block.schema.json",
-    "schemas/domain/memory.schema.json",
-    "schemas/domain/pairing.schema.json",
-    "schemas/domain/story-manifest.schema.json",
-    "schemas/domain/sync-command.schema.json",
-    "schemas/domain/timeline-event.schema.json",
-    "schemas/domain/user.schema.json",
-    "schemas/domain/world.schema.json",
-    "schemas/domain/world-membership.schema.json",
-    "schemas/cli-sync/bundle.schema.json",
-    "schemas/cli-sync/conflict-response.schema.json",
-    "schemas/cli-sync/sync-pull-request.schema.json",
-    "schemas/cli-sync/sync-pull-response.schema.json",
-    "schemas/platform/context-assembly-v1.schema.json",
-    "schemas/platform/creator-runtime-policy-response.schema.json",
-    "schemas/platform/explore-ai-answer-request.schema.json",
-    "schemas/platform/explore-ai-answer-response.schema.json",
-    "schemas/platform/explore-ai-summary-request.schema.json",
-    "schemas/platform/explore-ai-summary-response.schema.json",
-    "schemas/platform/explore-browse-request.schema.json",
-    "schemas/platform/explore-creator-card.schema.json",
-    "schemas/platform/explore-feed-response.schema.json",
-    "schemas/platform/explore-hit.schema.json",
-    "schemas/platform/explore-search-request.schema.json",
-    "schemas/platform/me-entitlements-response.schema.json",
-    "schemas/platform/memory-web-list-request.schema.json",
-    "schemas/platform/memory-web-list-response.schema.json",
-    "schemas/platform/notifications-inbox-item.schema.json",
-    "schemas/platform/notifications-list-request.schema.json",
-    "schemas/platform/notifications-list-response.schema.json",
-    "schemas/platform/notifications-mark-read-request.schema.json",
-    "schemas/platform/notifications-mark-read-response.schema.json",
-    "schemas/platform/official-creator-quota-response.schema.json",
-    "schemas/platform/publish-chapter-request.schema.json",
-    "schemas/platform/publish-history-entry.schema.json",
-    "schemas/platform/publish-history-request.schema.json",
-    "schemas/platform/publish-history-response.schema.json",
-    "schemas/platform/publish-story-request.schema.json",
-    "schemas/platform/publish-story-response.schema.json",
-    "schemas/platform/social-graph-feed-request.schema.json",
-    "schemas/platform/social-graph-feed-response.schema.json",
-    "schemas/platform/social-graph-relationship-request.schema.json",
-    "schemas/platform/social-graph-relationship-response.schema.json",
-    "schemas/platform/world-fork-request.schema.json",
-    "schemas/platform/world-fork-response.schema.json",
-    "schemas/platform/world-snapshot-request.schema.json",
-    "schemas/platform/world-snapshot-response.schema.json",
-];
+/// Derive the complete set of schema file paths from two sources:
+/// 1. All paths registered in `build_schema_map()` (the checked schemas)
+/// 2. A deterministic glob over `schemas/**/*.schema.json` (catches schemas
+///    without checkers, e.g., definitions-only or allOf-only schemas)
+///
+/// This replaces the former manually-maintained `ALL_SCHEMA_PATHS` list,
+/// ensuring new schemas are automatically discovered.
+fn collect_all_schema_paths() -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+
+    // Collect from the registered schema map
+    for entry in &build_schema_map() {
+        paths.insert(entry.schema_path.to_string());
+    }
+
+    // Supplement with glob discovery for any schemas not in the map
+    let root = workspace_root();
+    let schemas_dir = root.join("schemas");
+    if let Ok(entries) = std::fs::read_dir(&schemas_dir) {
+        collect_schema_files_recursive(&schemas_dir, &root, &mut paths);
+    }
+
+    paths
+}
+
+/// Recursively collect `.schema.json` files under a directory.
+fn collect_schema_files_recursive(dir: &Path, root: &Path, paths: &mut BTreeSet<String>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_schema_files_recursive(&path, root, paths);
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.ends_with(".schema.json") {
+                    if let Ok(relative) = path.strip_prefix(root) {
+                        paths.insert(relative.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Workspace root: traverse up from `CARGO_MANIFEST_DIR` (`crates/nexus-contracts`)
 /// to the workspace root (2 levels up).
@@ -417,10 +402,10 @@ fn load_json(relative_path: &str) -> Result<Value, String> {
 /// Also keyed by the `https://nexus42.invalid/...` URL for $ref resolution.
 fn build_schema_cache() -> HashMap<String, Value> {
     let mut cache = HashMap::new();
-    for path in ALL_SCHEMA_PATHS {
-        if let Ok(val) = load_json(path) {
+    for path in collect_all_schema_paths() {
+        if let Ok(val) = load_json(&path) {
             // Key by relative path
-            cache.insert(path.to_string(), val.clone());
+            cache.insert(path.clone(), val.clone());
             // Also key by the `$id` URL if present
             if let Some(id) = val.get("$id").and_then(|v| v.as_str()) {
                 // Strip any #fragment from $id before using as key
