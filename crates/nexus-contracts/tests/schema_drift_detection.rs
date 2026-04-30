@@ -345,20 +345,21 @@ fn build_schema_map() -> Vec<SchemaEntry> {
 ///
 /// This replaces the former manually-maintained `ALL_SCHEMA_PATHS` list,
 /// ensuring new schemas are automatically discovered.
-fn collect_all_schema_paths() -> BTreeSet<String> {
+///
+/// Accepts a pre-built schema map to avoid redundant construction (each call
+/// to `build_schema_map()` allocates ~51 boxed closures).
+fn collect_all_schema_paths(entries: &[SchemaEntry]) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
 
-    // Collect from the registered schema map
-    for entry in &build_schema_map() {
+    // Collect from the provided schema map
+    for entry in entries {
         paths.insert(entry.schema_path.to_string());
     }
 
     // Supplement with glob discovery for any schemas not in the map
     let root = workspace_root();
     let schemas_dir = root.join("schemas");
-    if let Ok(entries) = std::fs::read_dir(&schemas_dir) {
-        collect_schema_files_recursive(&schemas_dir, &root, &mut paths);
-    }
+    collect_schema_files_recursive(&schemas_dir, &root, &mut paths);
 
     paths
 }
@@ -400,9 +401,11 @@ fn load_json(relative_path: &str) -> Result<Value, String> {
 
 /// Build a cache of all schema files keyed by their relative path.
 /// Also keyed by the `https://nexus42.invalid/...` URL for $ref resolution.
-fn build_schema_cache() -> HashMap<String, Value> {
+///
+/// Accepts a pre-built schema map to avoid double construction of boxed checkers.
+fn build_schema_cache(entries: &[SchemaEntry]) -> HashMap<String, Value> {
     let mut cache = HashMap::new();
-    for path in collect_all_schema_paths() {
+    for path in collect_all_schema_paths(entries) {
         if let Ok(val) = load_json(&path) {
             // Key by relative path
             cache.insert(path.clone(), val.clone());
@@ -744,21 +747,27 @@ fn check_fields_match(
 
 /// Maximum acceptable wall-clock time for drift detection in milliseconds.
 ///
-/// This threshold is intentionally generous (5s) to avoid flaky failures on
-/// slow CI runners. The test currently runs in ~10ms for ~55 schemas on a
-/// typical dev machine (2026-04). If the elapsed time consistently approaches
-/// this threshold, consider optimizing the test or raising the limit.
+/// Defaults to 500ms (~25x headroom over typical ~18ms runtime). Override via
+/// `NEXUS_DRIFT_LIMIT_MS` env var for slow CI runners.
 ///
 /// The elapsed time is always printed so regressions are observable even when
 /// the threshold is not exceeded.
-const DRIFT_DETECTION_TIME_LIMIT_MS: u64 = 5_000;
+const DRIFT_DETECTION_TIME_LIMIT_MS_DEFAULT: u64 = 500;
+
+/// Returns the drift time limit, checking `NEXUS_DRIFT_LIMIT_MS` env var first.
+fn drift_time_limit_ms() -> u64 {
+    std::env::var("NEXUS_DRIFT_LIMIT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DRIFT_DETECTION_TIME_LIMIT_MS_DEFAULT)
+}
 
 #[test]
 fn schema_drift_detection() {
     let start = std::time::Instant::now();
 
     let entries = build_schema_map();
-    let schema_cache = build_schema_cache();
+    let schema_cache = build_schema_cache(&entries);
     let mut all_errors: Vec<String> = Vec::new();
     let mut checked_count = 0;
 
@@ -834,17 +843,17 @@ fn schema_drift_detection() {
     }
 
     // Log elapsed time for observability
+    let limit_ms = drift_time_limit_ms();
     eprintln!(
-        "  drift detection timing: {elapsed_ms}ms for {} schemas, {} structs (limit: {}ms)",
+        "  drift detection timing: {elapsed_ms}ms for {} schemas, {} structs (limit: {limit_ms}ms)",
         entries.len(),
         checked_count,
-        DRIFT_DETECTION_TIME_LIMIT_MS,
     );
 
     // Assert time threshold
     assert!(
-        elapsed < std::time::Duration::from_millis(DRIFT_DETECTION_TIME_LIMIT_MS),
-        "Schema drift detection took {elapsed_ms}ms, exceeding {DRIFT_DETECTION_TIME_LIMIT_MS}ms \
+        elapsed < std::time::Duration::from_millis(limit_ms),
+        "Schema drift detection took {elapsed_ms}ms, exceeding {limit_ms}ms \
          limit. This may indicate schema growth needs optimization. \
          {entries_len} schemas, {checked_count} structs checked.",
         entries_len = entries.len(),
