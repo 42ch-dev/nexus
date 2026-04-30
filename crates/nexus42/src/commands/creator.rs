@@ -57,8 +57,11 @@ pub enum CreatorCommand {
     },
 
     /// Switch the active Creator
+    ///
+    /// Positional `<creator_ref>` is accepted for convenience.
+    /// A future version may require `--creator-id <id>` flag syntax.
     Use {
-        /// Creator ID or display name
+        /// Creator ID or display name (positional; may become a flag in a future version)
         creator_ref: String,
     },
 
@@ -66,14 +69,20 @@ pub enum CreatorCommand {
     List,
 
     /// Initiate pairing flow with a Creator
+    ///
+    /// Positional `<creator_id>` is accepted for convenience.
+    /// A future version may require `--creator-id <id>` flag syntax.
     Pair {
-        /// Creator ID to pair
+        /// Creator ID to pair (positional; may become a flag in a future version)
         creator_id: String,
     },
 
     /// Remove pairing with a Creator
+    ///
+    /// Positional `<creator_id>` is accepted for convenience.
+    /// A future version may require `--creator-id <id>` flag syntax.
     Unpair {
-        /// Creator ID to unpair
+        /// Creator ID to unpair (positional; may become a flag in a future version)
         creator_id: String,
     },
 
