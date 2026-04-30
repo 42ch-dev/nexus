@@ -47,6 +47,7 @@ http-body-util = { workspace = true }
 statig = { workspace = true }
 tempfile = "3"
 async-trait = "0.1"
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"
