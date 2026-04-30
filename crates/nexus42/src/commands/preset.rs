@@ -296,10 +296,24 @@ fn validate_preset(path: &str) -> Result<()> {
         )));
     }
 
+    // Check file size via metadata BEFORE reading to prevent OOM on large
+    // files (QC3 W-001 — unbounded allocation).
+    let metadata = std::fs::metadata(file_path)
+        .map_err(|e| CliError::Other(format!("Failed to stat {}: {e}", file_path.display())))?;
+    if metadata.len() > VALIDATE_MAX_YAML_SIZE as u64 {
+        return Err(CliError::Other(format!(
+            "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes). \
+                Simplify the preset or split into smaller presets.",
+            metadata.len(),
+            VALIDATE_MAX_YAML_SIZE
+        )));
+    }
+
     let yaml = std::fs::read_to_string(file_path)
         .map_err(|e| CliError::Other(format!("Failed to read {}: {e}", file_path.display())))?;
 
-    // Size check.
+    // Size check (defense-in-depth: metadata size may differ slightly from
+    // string byte length on some platforms).
     if yaml.len() > VALIDATE_MAX_YAML_SIZE {
         return Err(CliError::Other(format!(
             "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes). \
@@ -313,8 +327,9 @@ fn validate_preset(path: &str) -> Result<()> {
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml)
         .map_err(|e| CliError::Other(format!("YAML parse error: {e}")))?;
 
-    // Depth check.
-    let actual_depth = yaml_value_depth(&yaml_value);
+    // Depth check — uses the canonical implementation from nexus-orchestration
+    // (QC1 W-A01 — single truth source for depth semantics).
+    let actual_depth = nexus_orchestration::preset::yaml_value_depth(&yaml_value);
     if actual_depth > VALIDATE_MAX_YAML_DEPTH {
         return Err(CliError::Other(format!(
             "Preset YAML nesting depth ({actual_depth}) exceeds maximum ({VALIDATE_MAX_YAML_DEPTH}). \
@@ -322,9 +337,10 @@ fn validate_preset(path: &str) -> Result<()> {
         )));
     }
 
-    // Deserialize to PresetManifest for structural validation.
+    // Deserialize from the already-parsed Value (avoids double-parse that
+    // widens the stack-overflow attack surface — QC3 W-002).
     let manifest: nexus_contracts::local::orchestration::preset::PresetManifest =
-        serde_yaml::from_str(&yaml)
+        serde_yaml::from_value(yaml_value)
             .map_err(|e| CliError::Other(format!("Structural validation error: {e}")))?;
 
     // Basic structural checks.
@@ -373,31 +389,6 @@ fn validate_preset(path: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Measure the maximum nesting depth of a [`serde_yaml::Value`].
-fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
-    match value {
-        serde_yaml::Value::Mapping(map) => {
-            let child_depth = map.values().map(yaml_value_depth).max().unwrap_or(0);
-            let key_depth = map
-                .keys()
-                .filter_map(|k| match k {
-                    serde_yaml::Value::Mapping(_) | serde_yaml::Value::Sequence(_) => {
-                        Some(yaml_value_depth(k))
-                    }
-                    _ => None,
-                })
-                .max()
-                .unwrap_or(0);
-            1 + child_depth.max(key_depth)
-        }
-        serde_yaml::Value::Sequence(seq) => {
-            let child_depth = seq.iter().map(yaml_value_depth).max().unwrap_or(0);
-            1 + child_depth
-        }
-        _ => 1,
-    }
 }
 
 // ---------------------------------------------------------------------------

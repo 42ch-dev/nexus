@@ -3,6 +3,27 @@
 //!
 //! This allows `preset list` to show embedded presets without requiring
 //! the daemon to be running (R-M1-W03).
+//!
+//! ## Cross-crate build-time dependency (QC1 W-A02)
+//!
+//! **What it reads:** Embedded preset IDs from `crates/nexus-orchestration/embedded-presets/`.
+//! Each subdirectory containing a `preset.yaml` file is treated as a preset whose ID
+//! is the directory name.
+//!
+//! **Why:** The CLI's `preset list` subcommand needs to display embedded presets
+//! without connecting to the daemon. Reading at compile time avoids a runtime
+//! dependency on nexus-orchestration's `include_dir!` from the CLI binary.
+//!
+//! **Contract:**
+//! - Expects a flat directory of subdirectories under `embedded-presets/`.
+//! - Each subdirectory must contain a `preset.yaml` file with an `id:` field.
+//! - Directory names are sorted for deterministic output.
+//!
+//! **What breaks if the contract changes:** If the directory structure or naming
+//! convention changes in nexus-orchestration, this build script will either
+//! produce incorrect preset IDs or the compile will fail if the directory
+//! is missing. Changes to `embedded-presets/` layout must be coordinated
+//! with this build script.
 
 use std::env;
 use std::fs;
