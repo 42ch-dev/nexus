@@ -1,7 +1,56 @@
 {
   "version": 1,
-  "updated_at": "2026-04-29T10:00:00Z",
-  "plans": [],
+  "updated_at": "2026-04-30T12:00:00Z",
+  "plans": [
+    {
+      "id": "2026-04-30-v1.12-theme-a-preset-completion",
+      "title": "V1.12 Theme A — Preset Module Completion",
+      "status": "Todo",
+      "size": "M",
+      "theme": "A",
+      "branch": "feature/v1.12",
+      "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+      "plan_path": ".agents/plans/2026-04-30-v1.12-theme-a-preset-completion.md",
+      "created_at": "2026-04-30",
+      "metadata": {
+        "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+        "spec_refs": [],
+        "residuals_target": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"]
+      }
+    },
+    {
+      "id": "2026-04-30-v1.12-theme-b-residual-sweep",
+      "title": "V1.12 Theme B — V1.11 + Warning Residual Sweep",
+      "status": "Todo",
+      "size": "S",
+      "theme": "B",
+      "branch": "feature/v1.12",
+      "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+      "plan_path": ".agents/plans/2026-04-30-v1.12-theme-b-residual-sweep.md",
+      "created_at": "2026-04-30",
+      "metadata": {
+        "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+        "spec_refs": [],
+        "residuals_target": ["R-V111-S01", "R-V111-S02", "R-V111-S03", "R-V111-S04", "R-WA-001", "R-WA-002", "R-WC-002", "R-WC-003"]
+      }
+    },
+    {
+      "id": "2026-04-30-v1.12-theme-c-backlog-closure",
+      "title": "V1.12 Theme C — Remaining Backlog Closure",
+      "status": "Todo",
+      "size": "S",
+      "theme": "C",
+      "branch": "feature/v1.12",
+      "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+      "plan_path": ".agents/plans/2026-04-30-v1.12-theme-c-backlog-closure.md",
+      "created_at": "2026-04-30",
+      "metadata": {
+        "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
+        "spec_refs": [],
+        "residuals_target": ["R5", "R11", "R-M1-W02", "R-M1-W07", "R-M1-W09"]
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
