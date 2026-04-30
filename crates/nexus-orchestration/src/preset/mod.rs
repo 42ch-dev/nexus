@@ -18,7 +18,8 @@ pub mod loader;
 pub mod manifest;
 
 pub use loader::{
-    load_preset, load_preset_from_str, LoadedPreset, PresetLoadError, ValidationProblem,
+    load_preset, load_preset_from_str, load_preset_from_str_with_limits, LoadedPreset,
+    PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };
 
 // ---------------------------------------------------------------------------

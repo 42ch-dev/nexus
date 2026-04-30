@@ -195,6 +195,15 @@ pub fn load_user_preset_from_dir(
                 message: format!("preset not found: {preset_id}"),
             });
         }
+        Err(
+            e @ (PresetLoadError::YamlSizeExceeded { .. }
+            | PresetLoadError::YamlDepthExceeded { .. }),
+        ) => {
+            return Err(UserPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("{e}"),
+            });
+        }
     };
 
     Ok(UserPresetEntry {
