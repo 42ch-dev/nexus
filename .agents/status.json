@@ -1,27 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-04-30T12:00:00Z",
+  "updated_at": "2026-04-30T16:00:00Z",
   "plans": [
-    {
-      "id": "2026-04-30-v1.12-theme-a-preset-completion",
-      "title": "V1.12 Theme A — Preset Module Completion",
-      "status": "Todo",
-      "size": "M",
-      "theme": "A",
-      "branch": "feature/v1.12",
-      "compass": ".agents/knowledge/v1.12-delivery-compass-v1.md",
-      "plan_path": ".agents/plans/2026-04-30-v1.12-theme-a-preset-completion.md",
-      "created_at": "2026-04-30",
-      "metadata": {
-        "primary_spec": ".agents/knowledge/v1.12-delivery-compass-v1.md",
-        "spec_refs": [],
-        "residuals_target": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"]
-      }
-    },
     {
       "id": "2026-04-30-v1.12-theme-b-residual-sweep",
       "title": "V1.12 Theme B — V1.11 + Warning Residual Sweep",
-      "status": "Todo",
+      "status": "InProgress",
       "size": "S",
       "theme": "B",
       "branch": "feature/v1.12",
@@ -57,25 +41,25 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-04-28T15:00:00Z",
-      "total_open": 16,
+      "updated_at": "2026-04-30T16:00:00Z",
+      "total_open": 12,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 10,
+        "low": 6,
         "warning": 5,
         "nit": 2
       },
       "by_target": {
-        "backlog": 17
+        "backlog": 13
       },
       "by_plan": {
         "2026-04-18-v1.5-stabilization": 1,
         "2026-04-21-v1.7-ws-abc-residual-closure": 1,
         "2026-04-23-v1.8-ws-a-challenge-llm-fallback": 2,
         "2026-04-23-v1.8-ws-c-name-positional-to-flag": 2,
-        "2026-04-24-v1.9-m1": 7,
+        "2026-04-24-v1.9-m1": 3,
         "2026-04-27-v1.11-daemon-cleanup-toctou": 4
       },
       "in_flight": {},
@@ -172,50 +156,6 @@
           "severity": "low",
           "source": "QC1 F-007",
           "scope": "crates/nexus-contracts/tests/schema_drift_detection.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W03",
-          "title": "preset list requires daemon running for embedded presets",
-          "severity": "low",
-          "source": "QC1 F-008",
-          "scope": "crates/nexus42/src/commands/preset.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W04",
-          "title": "No YAML depth/size limits on user-supplied preset YAML",
-          "severity": "low",
-          "source": "QC2 F-QC2-02",
-          "scope": "crates/nexus-orchestration/src/preset/loader.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W05",
-          "title": "init rejects _ prefix but scan silently skips \u2014 inconsistent UX",
-          "severity": "low",
-          "source": "QC2 F-QC2-03",
-          "scope": "crates/nexus42/src/commands/preset.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "backlog",
-          "tracking_link": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc-consolidated.md"
-        },
-        {
-          "id": "R-M1-W06",
-          "title": "Preset lookup scans all user presets O(n) instead of O(1)",
-          "severity": "low",
-          "source": "QC3 W-1",
-          "scope": "crates/nexus-orchestration/src/preset/mod.rs",
           "decision": "defer",
           "owner": "fullstack-dev",
           "target_date": "backlog",
