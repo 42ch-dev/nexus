@@ -316,10 +316,10 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
                 ));
             }
         }
-        return Err(CliError::Api {
-            status,
-            message: text,
-        });
+        // Sanitize: don't leak upstream error details for non-invalid_grant 400s.
+        return Err(CliError::Other(
+            "Token refresh failed (400 Bad Request). Please try `nexus42 auth login` again.".into(),
+        ));
     }
 
     if status >= 400 {
