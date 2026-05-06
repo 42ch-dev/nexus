@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active
+**Status**: Active (V1.13 planning active — OSS-forward)
 **Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.10), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.10) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-04-27
+**Last updated**: 2026-05-06
 
 ---
 
@@ -35,11 +35,11 @@
 
 | ID | Feature | First deferred | Target | Effort est. | Deferral history | Blocking reason / Notes |
 |----|---------|---------------|--------|-------------|-----------------|----------------------|
-| DF-11 | CoreContext Handlebars template engine binding | V1.6 | Any future | L | V1.6→V1.7+→V1.8+→backlog | Data produced by V1.4 WS7, template rendering not yet integrated. Never scoped into V1.7–V1.10. Worth doing when template needs surface. |
+| DF-11 | CoreContext Handlebars template engine binding | V1.6 | **V1.13** | L | V1.6→V1.7+→V1.8+→backlog→V1.13 | Data produced by V1.4 WS7, template rendering not yet integrated. Scoped as primary V1.13 feature theme. |
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture-v1.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
-| DF-14 | CLI+Platform e2e integration | V1.2 | V2.0+ | L | V1.2 (V1.3)→V1.3 (not in V1.3) | Cross-repo integration. |
-| DF-15 | OpenAPI export work | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | |
+| DF-14 | CLI+Platform e2e integration | V1.2 | **V1.13** | L | V1.2 (V1.3)→V1.3 (not in V1.3)→V2.0+→V1.13 | Cross-repo integration. Scoped in V1.13 with staged gates. |
+| DF-15 | OpenAPI export work | V1.3 | **V1.13 (governance closure)** | XS | V1.3 (not in V1.3)→V2.0+→V1.13-governance | V1.13 scope is decision closure only (cancelled/superseded), not implementation delivery. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
 
 ### 3.2 Backlog (no committed target version)
@@ -166,21 +166,21 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 | New residuals introduced | 2 | R-V110-003, R-V110-004 |
 | **Total** | **3** | 1 residual closed + 2 new residuals created |
 
-### Open items targeting V1.11+
+### Open items targeting V1.13
 
 | Category | Count | IDs |
 |----------|-------|-----|
-| Features | 1 | DF-11 (Handlebars — uncommitted target) |
-| Tech-debt residuals | 1 | R-V110-004 (TOCTOU race, target V1.11) |
+| Features | 3 | DF-11 (Handlebars binding), DF-14 (CLI+Platform e2e), DF-15 (governance closure only) |
+| Tech-debt residuals | 0 | — |
 
 ### Items targeting V2.0+
 
 | Category | Count | IDs |
 |----------|-------|-----|
-| Features | 4 | DF-13 (Entitlements), DF-14 (e2e), DF-15 (OpenAPI), DF-16 (Billing) |
+| Features | 2 | DF-13 (Entitlements), DF-16 (Billing) |
 | Tech-debt residuals | 3 | R5 (nix crate Windows), R11 (toml_edit surgery), R-M1-W07 (single-threaded event loop) |
 | Backlog | 1 | BL-08 (Social/marketing) |
-| **Total** | **8** | |
+| **Total** | **6** | |
 
 ### Open backlog (no committed target)
 
@@ -252,4 +252,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: 2026-04-27. Status: Active. Review when any version ships or items are re-deferred.*
+*Created: 2026-04-21. Last updated: 2026-05-06. Status: Active. V1.13 planning in progress with DF-11/DF-14 delivery and DF-15 governance closure scope.*
