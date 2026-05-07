@@ -5,16 +5,16 @@
     {
       "plan_id": "2026-05-06-v1.13-oss-forward-delivery",
       "title": "V1.13 OSS-forward delivery (DF-11/DF-14 + DF-15 governance)",
-      "status": "InReview",
+      "status": "InProgress",
       "priority": "high",
       "owner": "project-manager",
-      "last_updated": "2026-05-07T01:00:00Z",
-      "next_action": "QC tri-review → QA verification → Done",
+      "last_updated": "2026-05-07T02:00:00Z",
+      "next_action": "Fix QC2-W-001 and QC2-W-002 blocking items, then re-QC + QA",
       "plan_path": ".agents/plans/2026-05-06-v1.13-oss-forward-delivery.md",
       "metadata": {
         "version": "v1.13",
         "task_category": "logic",
-        "phase": "review",
+        "phase": "fix-qc",
         "working_branch": "feature/v1.13"
       }
     }
