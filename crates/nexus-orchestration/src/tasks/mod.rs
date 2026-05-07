@@ -1034,6 +1034,26 @@ impl Task for AcpPromptTask {
 }
 
 // ---------------------------------------------------------------------------
+// CoreContext template rendering (DF-11)
+// ---------------------------------------------------------------------------
+
+/// Render a handlebars template against a JSON payload.
+///
+/// Used by the orchestration engine to substitute `CoreContext` values into
+/// prompt templates. Supports nested path access (e.g. `{{world.title}}`).
+///
+/// # Errors
+/// Returns an error if the template syntax is invalid or rendering fails.
+pub fn render_core_context_template(
+    template: &str,
+    payload: &serde_json::Value,
+) -> anyhow::Result<String> {
+    let reg = handlebars::Handlebars::new();
+    let rendered = reg.render_template(template, payload)?;
+    Ok(rendered)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
