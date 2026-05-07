@@ -48,4 +48,5 @@ pub use nexus_contracts::{
 
 // Re-export sync error types
 pub use errors::{SyncError, SyncResult};
+pub use platform_client::{classify_platform_error, StagedPlatformError};
 pub use pull_apply::{apply_pull_response_to_outbox, PullApplySummary};

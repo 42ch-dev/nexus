@@ -288,7 +288,22 @@ async fn e2e_session_list_includes_created() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 6: Embedded preset has correct state count
+// Test 6: CoreContext template rendering (DF-11)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn core_context_template_is_rendered_into_prompt() {
+    let rendered = nexus_orchestration::tasks::render_core_context_template(
+        "World: {{world.title}}",
+        &serde_json::json!({ "world": { "title": "Nexus" } }),
+    )
+    .expect("template render should succeed");
+
+    assert_eq!(rendered, "World: Nexus");
+}
+
+// ---------------------------------------------------------------------------
+// Test 7: Embedded preset has correct state count
 // ---------------------------------------------------------------------------
 
 #[test]

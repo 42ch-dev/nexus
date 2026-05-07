@@ -39,7 +39,7 @@
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture-v1.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
 | DF-14 | CLI+Platform e2e integration | V1.2 | **V1.13** | L | V1.2 (V1.3)→V1.3 (not in V1.3)→V2.0+→V1.13 | Cross-repo integration. Scoped in V1.13 with staged gates. |
-| DF-15 | OpenAPI export work | V1.3 | **V1.13 (governance closure)** | XS | V1.3 (not in V1.3)→V2.0+→V1.13-governance | V1.13 scope is decision closure only (cancelled/superseded), not implementation delivery. |
+
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
 
 ### 3.2 Backlog (no committed target version)
@@ -129,6 +129,7 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 | ~~DF-N~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-02 — User-authored capabilities (shell / WASM plugin ABI). Over-designed. |
 | ~~DF-O~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-05 — Full ACP permission policy engine UI (web-based). Not core product value. |
 | ~~DF-P~~ | **Superseded** | 2026-04-21 (V1.7 planning) | DF-06 — Preset hot-reload. Snapshot semantics correct; real need → DF-17. |
+| ~~DF-15~~ | **Cancelled** | V1.13 (governance closure) | OpenAPI export work. Nexus is not an OpenAPI-first product boundary for runtime value delivery; V1.13 resolves tracker ambiguity as governance-only closure with no implementation scope. |
 
 ---
 
@@ -166,11 +167,12 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 | New residuals introduced | 2 | R-V110-003, R-V110-004 |
 | **Total** | **3** | 1 residual closed + 2 new residuals created |
 
-### Open items targeting V1.13
+### Shipped in V1.13
 
 | Category | Count | IDs |
 |----------|-------|-----|
-| Features | 3 | DF-11 (Handlebars binding), DF-14 (CLI+Platform e2e), DF-15 (governance closure only) |
+| Features | 2 | DF-11 (Handlebars binding), DF-14 (CLI+Platform e2e) |
+| Governance closure | 1 | DF-15 (Cancelled — OpenAPI export) |
 | Tech-debt residuals | 0 | — |
 
 ### Items targeting V2.0+
@@ -252,4 +254,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: 2026-05-06. Status: Active. V1.13 planning in progress with DF-11/DF-14 delivery and DF-15 governance closure scope.*
+*Created: 2026-04-21. Last updated: 2026-05-07. Status: Active. V1.13 DF-11/DF-14 shipped, DF-15 governance-closed.*

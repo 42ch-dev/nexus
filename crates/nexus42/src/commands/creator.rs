@@ -11,7 +11,9 @@ use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
 use nexus_contracts::Creator;
-use nexus_sync::platform_client::{PlatformClient, VerifyStatus};
+use nexus_sync::platform_client::{
+    classify_platform_error, PlatformClient, StagedPlatformError, VerifyStatus,
+};
 use std::path::PathBuf;
 
 /// Default registration source for the CLI.
@@ -32,6 +34,112 @@ const EXPIRY_BUFFER_SECS: i64 = 10;
 
 /// Maximum number of auto-retry attempts for wrong answers (D4).
 const MAX_VERIFY_ATTEMPTS: u32 = 2;
+
+/// Test mode for the staged e2e verification harness.
+///
+/// Controls whether the staged flow runs against a happy-path platform
+/// or simulates an upstream failure scenario. Used by e2e tests to
+/// verify deterministic error buckets without modifying production code.
+// Dead code: used by integration tests (creator_register_e2e.rs) which
+// are separate binary targets and don't count as "used" for the lib/bin.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestMode {
+    /// Platform responds with valid registration + verification.
+    HappyPath,
+    /// Platform is unreachable or returns a timeout.
+    UpstreamTimeout,
+}
+
+/// Result of the staged creator register e2e flow.
+///
+/// Breaks the registration pipeline into discrete stages so tests can
+/// assert on individual gate outcomes (gate-B1: register, gate-B2: verify).
+// Dead code: used by integration tests (creator_register_e2e.rs) which
+// are separate binary targets and don't count as "used" for the lib/bin.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct StagedE2eResult {
+    /// Gate-B1 outcome: platform register call result.
+    pub register:
+        std::result::Result<nexus_sync::platform_client::RegisterResponse, StagedPlatformError>,
+    /// Gate-B2 outcome: platform verify call result (None if register failed).
+    pub verify: Option<
+        std::result::Result<nexus_sync::platform_client::VerifyResponse, StagedPlatformError>,
+    >,
+}
+
+/// Run the staged creator register e2e verification flow.
+///
+/// This is the testable harness that separates gate-B1 (register) and
+/// gate-B2 (verify) into distinct stages with deterministic error shaping.
+///
+/// In `TestMode::HappyPath`, the platform client calls proceed normally.
+/// In `TestMode::UpstreamTimeout`, the function simulates an upstream
+/// timeout by using a deliberately unreachable platform URL.
+///
+/// # Errors
+///
+/// Returns a `StagedE2eResult` where each stage's error is classified into
+/// a deterministic [`StagedPlatformError`] bucket via [`classify_platform_error`].
+// Dead code: used by integration tests (creator_register_e2e.rs) which
+// are separate binary targets and don't count as "used" for the lib/bin.
+#[allow(dead_code)]
+pub async fn run_creator_register_e2e(
+    platform_url: &str,
+    auth_token: &str,
+    device_id: &str,
+    display_name: &str,
+    registration_source: &str,
+    handle: Option<&str>,
+    mode: TestMode,
+) -> StagedE2eResult {
+    let effective_url = match mode {
+        TestMode::HappyPath => platform_url.to_string(),
+        TestMode::UpstreamTimeout => {
+            // Use a deliberately unreachable URL to trigger a timeout/connection error
+            "http://192.0.2.1:1".to_string()
+        }
+    };
+
+    let client = match PlatformClient::new(&effective_url, auth_token, device_id) {
+        Ok(c) => c,
+        Err(err) => {
+            return StagedE2eResult {
+                register: Err(classify_platform_error(err)),
+                verify: None,
+            };
+        }
+    };
+
+    // Gate-B1: Register creator on platform
+    let register_result = client
+        .register_creator(display_name, registration_source, handle)
+        .await
+        .map_err(classify_platform_error);
+
+    let Ok(ref register_response) = register_result else {
+        return StagedE2eResult {
+            register: register_result,
+            verify: None,
+        };
+    };
+
+    // Gate-B2: Verify creator (using a placeholder answer — the e2e harness
+    // focuses on platform connectivity and error shaping, not challenge solving)
+    let verify_result = client
+        .verify_creator(
+            &register_response.verification.verification_code,
+            "0", // Placeholder answer for e2e harness
+        )
+        .await
+        .map_err(classify_platform_error);
+
+    StagedE2eResult {
+        register: Ok(register_response.clone()),
+        verify: Some(verify_result),
+    }
+}
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {

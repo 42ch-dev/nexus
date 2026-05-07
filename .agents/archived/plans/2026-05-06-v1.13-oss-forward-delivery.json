@@ -1,0 +1,33 @@
+{
+  "plan_id": "2026-05-06-v1.13-oss-forward-delivery",
+  "title": "V1.13 OSS-forward delivery (DF-11/DF-14 + DF-15 governance)",
+  "status": "Done",
+  "done_at": "2026-05-07",
+  "plan_file": ".agents/plans/2026-05-06-v1.13-oss-forward-delivery.md",
+  "working_branch": "feature/v1.13",
+  "task_category": "logic",
+  "metadata": {
+    "version": "v1.13",
+    "phase": "done",
+    "commits": [
+      "1041c49 docs(agents): move v1.13 plan to InProgress and set working branch",
+      "ce27658 feat(orchestration): bind core_context template rendering path",
+      "2b36bd8 feat(cli): add staged cli-platform e2e verification flow",
+      "8d8a4ba docs(agents): close df-15 as governance outcome in v1.13",
+      "3db8332 fix(orchestration): wire handlebars renderer into AcpPromptTask runtime path",
+      "4186af9 fix(sync): sanitize upstream error bodies in CLI output"
+    ],
+    "qc_reviews": {
+      "wave1": {
+        "qc1": { "verdict": "Approve", "critical": 0, "warning": 2, "suggestion": 3 },
+        "qc2": { "verdict": "Request Changes", "critical": 0, "warning": 2, "suggestion": 1 },
+        "qc3": { "verdict": "Request Changes", "critical": 0, "warning": 1, "suggestion": 3 }
+      },
+      "wave_rev2": {
+        "qc1": { "verdict": "Approve", "critical": 0, "warning": 0, "suggestion": 3 }
+      }
+    },
+    "qa_verdict": "Approve",
+    "residual_findings": ["R-V113-001", "R-V113-002", "R-V113-003", "R-V113-004", "R-V113-005", "R-V113-006", "R-V113-007"]
+  }
+}
