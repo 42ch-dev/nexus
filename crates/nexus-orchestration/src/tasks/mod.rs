@@ -928,28 +928,24 @@ impl AcpPromptTask {
         }
     }
 
-    /// Render the prompt template with basic placeholder substitution.
+    /// Render the prompt template using handlebars against a nested JSON payload.
     ///
-    /// Supports `{{key}}` → value from context.
-    /// Unknown keys are replaced with empty string (consumed).
-    async fn render_template(&self, context: &graph_flow::Context) -> String {
-        let mut rendered = self.template.clone();
-
-        // Simple placeholder substitution: {{key}} → value from context.
-        // This is intentionally basic — full handlebars integration can come later.
-        while let Some(start) = rendered.find("{{") {
-            if let Some(end) = rendered[start..].find("}}") {
-                let key = rendered[start + 2..start + end].trim().to_string();
-                // Try to get the value from context (as String).
-                let value: Option<String> = context.get(&key).await;
-                let replacement = value.unwrap_or_default();
-                rendered.replace_range(start..start + end + 2, &replacement);
-            } else {
-                break;
+    /// Renders the prompt template using handlebars against a nested JSON payload.
+    ///
+    /// Builds a nested JSON payload from flat context keys (e.g.
+    /// `core_context.version` → `{"core_context":{"version":"..."}}`) so
+    /// that handlebars nested path access (`{{world.title}}`) works.
+    ///
+    /// Falls back to the raw template if rendering fails (non-fatal for stubs).
+    fn render_template(&self, context: &graph_flow::Context) -> String {
+        let payload = build_nested_payload(context);
+        match render_core_context_template(&self.template, &payload) {
+            Ok(rendered) => rendered,
+            Err(e) => {
+                tracing::warn!(error = %e, "template render failed, using raw template");
+                self.template.clone()
             }
         }
-
-        rendered
     }
 }
 
@@ -964,7 +960,7 @@ impl Task for AcpPromptTask {
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
         // 1. Render the template.
-        let prompt = self.render_template(&context).await;
+        let prompt = self.render_template(&context);
 
         // 2. If we have a worker handle, dispatch via IPC.
         let full_text = if let Some(ref handle_arc) = self.worker_handle {
@@ -1031,6 +1027,77 @@ impl Task for AcpPromptTask {
         // 5. Return TaskResult.
         Ok(TaskResult::new(Some(full_text), NextAction::Continue))
     }
+}
+
+// ---------------------------------------------------------------------------
+// CoreContext template rendering (DF-11)
+// ---------------------------------------------------------------------------
+
+/// Render a handlebars template against a JSON payload.
+///
+/// Used by the orchestration engine to substitute `CoreContext` values into
+/// prompt templates. Supports nested path access (e.g. `{{world.title}}`).
+///
+/// Uses `no_escape` mode to preserve plain-text fidelity in prompts
+/// (avoids HTML-encoding `&`, `<`, `>` etc.).
+///
+/// # Errors
+/// Returns an error if the template syntax is invalid or rendering fails.
+pub fn render_core_context_template(
+    template: &str,
+    payload: &serde_json::Value,
+) -> anyhow::Result<String> {
+    let mut reg = handlebars::Handlebars::new();
+    reg.register_escape_fn(handlebars::no_escape);
+    let rendered = reg.render_template(template, payload)?;
+    Ok(rendered)
+}
+
+/// Build a nested JSON object from flat dot-separated context keys.
+///
+/// For example, keys like `core_context.version` become
+/// `{"core_context": {"version": ...}}`. This allows handlebars templates
+/// to use nested path access (`{{core_context.version}}`).
+fn build_nested_payload(context: &graph_flow::Context) -> serde_json::Value {
+    let Ok(serialized) = serde_json::to_value(context) else {
+        return serde_json::Value::Object(serde_json::Map::new());
+    };
+
+    // serialized Context is {"data": {...}, "chat_history": {...}} —
+    // extract just the data map.
+    let data = serialized
+        .as_object()
+        .and_then(|obj| obj.get("data"))
+        .and_then(|d| d.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut root = serde_json::Map::new();
+    for (key, value) in &data {
+        set_nested(&mut root, key, value.clone());
+    }
+    serde_json::Value::Object(root)
+}
+
+/// Set a value at a dot-separated path in a JSON map, creating intermediate
+/// objects as needed.
+fn set_nested(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) {
+    let mut parts: Vec<&str> = key.split('.').collect();
+    let leaf = parts.pop().expect("set_nested: key must not be empty");
+    let mut current = map;
+    for part in &parts {
+        let entry = current
+            .entry((*part).to_string())
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        current = entry
+            .as_object_mut()
+            .expect("set_nested: intermediate path segment must be an object");
+    }
+    current.insert(leaf.to_string(), value);
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,6 +1208,52 @@ mod tests {
         assert!(matches!(result.next_action, NextAction::Continue));
         let response = result.response.unwrap();
         assert!(response.contains("Hello 42"), "response: {response}");
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_task_nested_handlebars_rendering() {
+        // QC2-W-001: prove nested path rendering ({{world.title}}) works
+        // through the real AcpPromptTask execution path.
+        let task = AcpPromptTask::new(
+            None,
+            "test-state",
+            "World: {{world.title}}, Chapter: {{world.chapter}}",
+            ToolPolicy::DenyAll,
+            None,
+        );
+        let ctx = graph_flow::Context::new();
+        ctx.set("world.title", "Nexus").await;
+        ctx.set("world.chapter", "1").await;
+        let result = task.run(ctx).await.unwrap();
+        let response = result.response.unwrap();
+        assert!(
+            response.contains("World: Nexus"),
+            "nested world.title should render: {response}"
+        );
+        assert!(
+            response.contains("Chapter: 1"),
+            "nested world.chapter should render: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_task_no_escape_preserves_special_chars() {
+        // QC2-S-001: handlebars must NOT HTML-escape prompt values.
+        let task = AcpPromptTask::new(
+            None,
+            "test-state",
+            "Text: {{content}}",
+            ToolPolicy::DenyAll,
+            None,
+        );
+        let ctx = graph_flow::Context::new();
+        ctx.set("content", "foo & bar < baz > qux").await;
+        let result = task.run(ctx).await.unwrap();
+        let response = result.response.unwrap();
+        assert!(
+            response.contains("foo & bar < baz > qux"),
+            "special chars must not be HTML-escaped: {response}"
+        );
     }
 
     #[tokio::test]

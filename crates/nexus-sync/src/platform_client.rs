@@ -20,6 +20,187 @@ use crate::errors::{SyncError, SyncResult};
 /// Default request timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
+/// Deterministic CLI-visible error bucket for staged platform operations.
+///
+/// Maps low-level [`SyncError`] variants into a small, stable set of
+/// error categories that the CLI can display and test against without
+/// leaking internal error details.
+///
+/// This is the "error shaping" layer for the staged e2e verification
+/// harness (DF-14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedPlatformError {
+    /// Upstream platform request timed out.
+    Timeout,
+    /// Client configuration is incomplete or invalid.
+    Config(String),
+    /// Authentication token is missing, empty, or rejected.
+    Auth(String),
+    /// Platform returned a non-success HTTP response.
+    Platform {
+        /// HTTP status code.
+        status: u16,
+        /// Sanitized response body (capped length, secrets redacted).
+        body: String,
+    },
+}
+
+/// Maximum length for displayed error bodies.
+const ERROR_BODY_CAP: usize = 200;
+
+/// Sanitize an upstream error body for safe CLI display.
+///
+/// - Caps the body length to [`ERROR_BODY_CAP`] characters.
+/// - Redacts patterns that look like API keys, bearer tokens, or long
+///   hex/base64 secrets.
+fn sanitize_error_body(body: &str) -> String {
+    let mut s = body.to_string();
+
+    // Redact Bearer tokens: "Bearer <token>"
+    if let Some(pos) = s.find("Bearer ") {
+        let after_bearer = pos + 7; // len("Bearer ")
+        let end = s[after_bearer..]
+            .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '}')
+            .map_or(s.len(), |i| after_bearer + i);
+        s.replace_range(pos..end, "Bearer [REDACTED]");
+    }
+
+    // Redact sk- prefixed keys (case-insensitive)
+    s = redact_prefixed_tokens(&s, "sk-");
+    s = redact_prefixed_tokens(&s, "sk_");
+    s = redact_prefixed_tokens(&s, "nexus_live_");
+    s = redact_prefixed_tokens(&s, "nexus_test_");
+
+    // Redact long hex-like strings (32+ hex chars)
+    s = redact_long_pattern(&s, |c: char| c.is_ascii_hexdigit(), 32, "[REDACTED_HEX]");
+
+    // Redact long base64-like strings (40+ alphanumeric+/= chars)
+    s = redact_long_pattern(
+        &s,
+        |c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=',
+        40,
+        "[REDACTED_B64]",
+    );
+
+    // Cap length
+    if s.len() > ERROR_BODY_CAP {
+        s.truncate(ERROR_BODY_CAP);
+        s.push('…');
+    }
+
+    s
+}
+
+/// Find and replace tokens starting with `prefix` (case-insensitive match).
+fn redact_prefixed_tokens(s: &str, prefix: &str) -> String {
+    let lower = s.to_ascii_lowercase();
+    let prefix_lower = prefix.to_ascii_lowercase();
+    let mut result = s.to_string();
+    let mut offset = 0;
+
+    while let Some(pos) = lower[offset..].find(&prefix_lower) {
+        let abs_pos = offset + pos;
+        let after_prefix = abs_pos + prefix.len();
+        // Token ends at next whitespace, comma, quote, or brace
+        let end = result[after_prefix..]
+            .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '}')
+            .map_or(result.len(), |i| after_prefix + i);
+        result.replace_range(abs_pos..end, "[REDACTED_KEY]");
+        // Advance past the replacement to avoid infinite loop
+        offset = abs_pos + "[REDACTED_KEY]".len();
+        if offset >= result.len() {
+            break;
+        }
+    }
+
+    result
+}
+
+/// Redact long runs of characters matching `is_valid` that exceed `min_len`.
+fn redact_long_pattern(
+    s: &str,
+    is_valid: impl Fn(char) -> bool,
+    min_len: usize,
+    replacement: &str,
+) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::with_capacity(s.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        let start = i;
+        while i < chars.len() && is_valid(chars[i]) {
+            i += 1;
+        }
+        let run_len = i - start;
+        if run_len >= min_len {
+            result.push_str(replacement);
+        } else {
+            for &ch in &chars[start..i] {
+                result.push(ch);
+            }
+        }
+        // Append non-matching character(s)
+        if i < chars.len() && !is_valid(chars[i]) {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+impl std::fmt::Display for StagedPlatformError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout => write!(f, "platform integration failed: timeout"),
+            Self::Config(msg) => write!(f, "platform integration failed: config — {msg}"),
+            Self::Auth(msg) => write!(f, "platform integration failed: auth — {msg}"),
+            Self::Platform { status, body } => {
+                write!(f, "platform integration failed: HTTP {status} — {body}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StagedPlatformError {}
+
+/// Classify a [`SyncError`] into a deterministic CLI-visible error bucket.
+///
+/// The mapping is:
+/// - `SyncTimeout` → `Timeout`
+/// - `SyncNotConfigured` → `Config`
+/// - `AuthTokenInvalid` → `Auth`
+/// - `PlatformError` → `Platform`
+/// - Everything else → `Platform` with status 0 (uncategorized transport error)
+#[must_use]
+pub fn classify_platform_error(err: SyncError) -> StagedPlatformError {
+    match err {
+        SyncError::SyncTimeout { seconds: _ } => StagedPlatformError::Timeout,
+        SyncError::SyncNotConfigured(msg) => StagedPlatformError::Config(msg),
+        SyncError::AuthTokenInvalid(msg) => StagedPlatformError::Auth(msg),
+        SyncError::PlatformError { status, body } => StagedPlatformError::Platform {
+            status,
+            body: sanitize_error_body(&body),
+        },
+        SyncError::HttpError(e) => {
+            // reqwest timeout errors surface as HttpError with is_timeout()
+            if e.is_timeout() {
+                StagedPlatformError::Timeout
+            } else {
+                StagedPlatformError::Platform {
+                    status: 0,
+                    body: sanitize_error_body(&e.to_string()),
+                }
+            }
+        }
+        other => StagedPlatformError::Platform {
+            status: 0,
+            body: sanitize_error_body(&other.to_string()),
+        },
+    }
+}
+
 /// Request body for creator registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterRequest {
@@ -294,6 +475,164 @@ impl PlatformClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── StagedPlatformError classification tests ──────────────────
+
+    #[test]
+    fn classify_timeout_maps_to_staged_timeout() {
+        let err = SyncError::SyncTimeout { seconds: 30 };
+        let staged = classify_platform_error(err);
+        assert_eq!(staged, StagedPlatformError::Timeout);
+    }
+
+    #[test]
+    fn classify_not_configured_maps_to_staged_config() {
+        let err = SyncError::SyncNotConfigured("platform_base_url is required".to_string());
+        let staged = classify_platform_error(err);
+        assert_eq!(
+            staged,
+            StagedPlatformError::Config("platform_base_url is required".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_auth_token_invalid_maps_to_staged_auth() {
+        let err = SyncError::AuthTokenInvalid("expired".to_string());
+        let staged = classify_platform_error(err);
+        assert_eq!(staged, StagedPlatformError::Auth("expired".to_string()));
+    }
+
+    #[test]
+    fn classify_platform_error_maps_to_staged_platform() {
+        let err = SyncError::PlatformError {
+            status: 409,
+            body: "creator already exists".to_string(),
+        };
+        let staged = classify_platform_error(err);
+        assert_eq!(
+            staged,
+            StagedPlatformError::Platform {
+                status: 409,
+                body: "creator already exists".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn sanitize_redacts_bearer_token() {
+        let body = r#"{"error": "Bearer sk-proj-abc123def456ghi789jkl012mno345"}"#;
+        let sanitized = sanitize_error_body(body);
+        assert!(
+            !sanitized.contains("sk-proj-abc123"),
+            "Bearer token should be redacted: {sanitized}"
+        );
+        assert!(
+            sanitized.contains("[REDACTED]"),
+            "Should contain redaction marker: {sanitized}"
+        );
+    }
+
+    #[test]
+    fn sanitize_redacts_sk_prefixed_key() {
+        let body = r#"api_key=sk-live-abcdef1234567890abcdef1234567890"#;
+        let sanitized = sanitize_error_body(body);
+        assert!(
+            !sanitized.contains("sk-live-abcdef"),
+            "sk- key should be redacted: {sanitized}"
+        );
+        assert!(
+            sanitized.contains("[REDACTED_KEY]"),
+            "Should contain redaction marker: {sanitized}"
+        );
+    }
+
+    #[test]
+    fn sanitize_redacts_nexus_live_key() {
+        let body = r#"creator_api_key: nexus_live_abc123XYZ789"#;
+        let sanitized = sanitize_error_body(body);
+        assert!(
+            !sanitized.contains("nexus_live_abc"),
+            "nexus_live_ key should be redacted: {sanitized}"
+        );
+        assert!(
+            sanitized.contains("[REDACTED_KEY]"),
+            "Should contain redaction marker: {sanitized}"
+        );
+    }
+
+    #[test]
+    fn sanitize_redacts_long_hex_string() {
+        let body = format!("token={}", "deadbeef".repeat(8)); // 64 hex chars
+        let sanitized = sanitize_error_body(&body);
+        assert!(
+            !sanitized.contains("deadbeef"),
+            "long hex should be redacted: {sanitized}"
+        );
+        assert!(
+            sanitized.contains("[REDACTED_HEX]"),
+            "Should contain redaction marker: {sanitized}"
+        );
+    }
+
+    #[test]
+    fn sanitize_caps_body_length() {
+        let body = "x".repeat(500);
+        let sanitized = sanitize_error_body(&body);
+        assert!(
+            sanitized.len() <= ERROR_BODY_CAP + "…".len(),
+            "body should be capped at {}: got {} chars: {sanitized}",
+            ERROR_BODY_CAP,
+            sanitized.len()
+        );
+    }
+
+    #[test]
+    fn sanitize_preserves_safe_body() {
+        let body = "creator already exists";
+        let sanitized = sanitize_error_body(body);
+        assert_eq!(sanitized, body);
+    }
+
+    #[test]
+    fn classify_platform_error_sanitizes_raw_body() {
+        let err = SyncError::PlatformError {
+            status: 500,
+            body: format!(
+                "error: key=nexus_live_SECRETKEY123, token={}",
+                "a".repeat(64)
+            ),
+        };
+        let staged = classify_platform_error(err);
+        let display = format!("{staged}");
+        assert!(
+            !display.contains("nexus_live_SECRETKEY123"),
+            "raw key should not appear in display: {display}"
+        );
+        assert!(
+            !display.contains(&"a".repeat(64)),
+            "long hex should not appear in display: {display}"
+        );
+    }
+
+    #[test]
+    fn staged_platform_error_display_timeout() {
+        let err = StagedPlatformError::Timeout;
+        let msg = format!("{err}");
+        assert!(msg.contains("timeout"));
+        assert!(msg.contains("platform integration failed"));
+    }
+
+    #[test]
+    fn staged_platform_error_display_platform() {
+        let err = StagedPlatformError::Platform {
+            status: 500,
+            body: "internal error".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("500"));
+        assert!(msg.contains("internal error"));
+        assert!(msg.contains("platform integration failed"));
+    }
 
     // ── Struct serialization/deserialization tests ──────────────────
 
