@@ -5,16 +5,16 @@
     {
       "plan_id": "2026-05-06-v1.13-oss-forward-delivery",
       "title": "V1.13 OSS-forward delivery (DF-11/DF-14 + DF-15 governance)",
-      "status": "InProgress",
+      "status": "InReview",
       "priority": "high",
       "owner": "project-manager",
-      "last_updated": "2026-05-07T00:00:00Z",
-      "next_action": "Dispatch T2 (DF-11) and T3 (DF-14) in parallel, then T4 (DF-15 governance)",
+      "last_updated": "2026-05-07T01:00:00Z",
+      "next_action": "QC tri-review → QA verification → Done",
       "plan_path": ".agents/plans/2026-05-06-v1.13-oss-forward-delivery.md",
       "metadata": {
         "version": "v1.13",
         "task_category": "logic",
-        "phase": "implement",
+        "phase": "review",
         "working_branch": "feature/v1.13"
       }
     }
