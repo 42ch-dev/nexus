@@ -20,6 +20,79 @@ use crate::errors::{SyncError, SyncResult};
 /// Default request timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
+/// Deterministic CLI-visible error bucket for staged platform operations.
+///
+/// Maps low-level [`SyncError`] variants into a small, stable set of
+/// error categories that the CLI can display and test against without
+/// leaking internal error details.
+///
+/// This is the "error shaping" layer for the staged e2e verification
+/// harness (DF-14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedPlatformError {
+    /// Upstream platform request timed out.
+    Timeout,
+    /// Client configuration is incomplete or invalid.
+    Config(String),
+    /// Authentication token is missing, empty, or rejected.
+    Auth(String),
+    /// Platform returned a non-success HTTP response.
+    Platform {
+        /// HTTP status code.
+        status: u16,
+        /// Response body or error message.
+        body: String,
+    },
+}
+
+impl std::fmt::Display for StagedPlatformError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout => write!(f, "platform integration failed: timeout"),
+            Self::Config(msg) => write!(f, "platform integration failed: config — {msg}"),
+            Self::Auth(msg) => write!(f, "platform integration failed: auth — {msg}"),
+            Self::Platform { status, body } => {
+                write!(f, "platform integration failed: HTTP {status} — {body}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StagedPlatformError {}
+
+/// Classify a [`SyncError`] into a deterministic CLI-visible error bucket.
+///
+/// The mapping is:
+/// - `SyncTimeout` → `Timeout`
+/// - `SyncNotConfigured` → `Config`
+/// - `AuthTokenInvalid` → `Auth`
+/// - `PlatformError` → `Platform`
+/// - Everything else → `Platform` with status 0 (uncategorized transport error)
+#[must_use]
+pub fn classify_platform_error(err: SyncError) -> StagedPlatformError {
+    match err {
+        SyncError::SyncTimeout { seconds: _ } => StagedPlatformError::Timeout,
+        SyncError::SyncNotConfigured(msg) => StagedPlatformError::Config(msg),
+        SyncError::AuthTokenInvalid(msg) => StagedPlatformError::Auth(msg),
+        SyncError::PlatformError { status, body } => StagedPlatformError::Platform { status, body },
+        SyncError::HttpError(e) => {
+            // reqwest timeout errors surface as HttpError with is_timeout()
+            if e.is_timeout() {
+                StagedPlatformError::Timeout
+            } else {
+                StagedPlatformError::Platform {
+                    status: 0,
+                    body: e.to_string(),
+                }
+            }
+        }
+        other => StagedPlatformError::Platform {
+            status: 0,
+            body: other.to_string(),
+        },
+    }
+}
+
 /// Request body for creator registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterRequest {
@@ -294,6 +367,68 @@ impl PlatformClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── StagedPlatformError classification tests ──────────────────
+
+    #[test]
+    fn classify_timeout_maps_to_staged_timeout() {
+        let err = SyncError::SyncTimeout { seconds: 30 };
+        let staged = classify_platform_error(err);
+        assert_eq!(staged, StagedPlatformError::Timeout);
+    }
+
+    #[test]
+    fn classify_not_configured_maps_to_staged_config() {
+        let err = SyncError::SyncNotConfigured("platform_base_url is required".to_string());
+        let staged = classify_platform_error(err);
+        assert_eq!(
+            staged,
+            StagedPlatformError::Config("platform_base_url is required".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_auth_token_invalid_maps_to_staged_auth() {
+        let err = SyncError::AuthTokenInvalid("expired".to_string());
+        let staged = classify_platform_error(err);
+        assert_eq!(staged, StagedPlatformError::Auth("expired".to_string()));
+    }
+
+    #[test]
+    fn classify_platform_error_maps_to_staged_platform() {
+        let err = SyncError::PlatformError {
+            status: 409,
+            body: "creator already exists".to_string(),
+        };
+        let staged = classify_platform_error(err);
+        assert_eq!(
+            staged,
+            StagedPlatformError::Platform {
+                status: 409,
+                body: "creator already exists".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn staged_platform_error_display_timeout() {
+        let err = StagedPlatformError::Timeout;
+        let msg = format!("{err}");
+        assert!(msg.contains("timeout"));
+        assert!(msg.contains("platform integration failed"));
+    }
+
+    #[test]
+    fn staged_platform_error_display_platform() {
+        let err = StagedPlatformError::Platform {
+            status: 500,
+            body: "internal error".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("500"));
+        assert!(msg.contains("internal error"));
+        assert!(msg.contains("platform integration failed"));
+    }
 
     // ── Struct serialization/deserialization tests ──────────────────
 
