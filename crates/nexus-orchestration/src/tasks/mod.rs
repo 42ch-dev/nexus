@@ -1037,7 +1037,8 @@ impl Task for AcpPromptTask {
 ///
 /// Uses `no_escape` mode to preserve plain-text fidelity in prompts
 /// (avoids HTML-encoding `&`, `<`, `>` etc.).
-static HANDLEBARS: std::sync::OnceLock<handlebars::Handlebars<'static>> = std::sync::OnceLock::new();
+static HANDLEBARS: std::sync::OnceLock<handlebars::Handlebars<'static>> =
+    std::sync::OnceLock::new();
 
 /// Return a reference to the shared Handlebars registry.
 ///
