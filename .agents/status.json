@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-10T00:05:00Z",
+  "updated_at": "2026-05-10T00:10:00Z",
   "plans": [
     {
       "plan_id": "2026-05-09-v1.14-n2-residual-governance",
@@ -16,8 +16,8 @@
     {
       "plan_id": "2026-05-09-v1.14-n1-batch2-nit-cleanup",
       "title": "V1.14 N1 batch 2 nit cleanup",
-      "status": "InProgress",
-      "phase": "implement",
+      "status": "InReview",
+      "phase": "review",
       "metadata": {
         "version": "v1.14",
         "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch2-nit-cleanup.md",
