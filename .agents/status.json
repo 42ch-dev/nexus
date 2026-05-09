@@ -1,19 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-10T12:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-05-09-v1.14-n2-residual-governance",
-      "title": "V1.14 N2 residual governance",
-      "status": "InProgress",
-      "phase": "implement",
-      "metadata": {
-        "version": "v1.14",
-        "plan_path": ".agents/plans/2026-05-09-v1.14-n2-residual-governance.md",
-        "task_category": "docs",
-        "working_branch": "feature/v1.14-n2-residual-governance"
-      }
-    }
+  "updated_at": "2026-05-10T12:05:00Z",
+  "plans": [],
   ],
   "metadata": {
     "branch_naming": {
