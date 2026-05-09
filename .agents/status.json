@@ -1,16 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-05-09T13:01:43Z",
+  "updated_at": "2026-05-10T00:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-09-v1.14-n1-batch1-runtime-hardening",
       "title": "V1.14 N1 batch 1 runtime hardening",
-      "status": "Todo",
-      "phase": "specify",
+      "status": "Done",
+      "phase": "done",
       "metadata": {
         "version": "v1.14",
         "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch1-runtime-hardening.md",
-        "task_category": "logic"
+        "task_category": "logic",
+        "working_branch": "feature/v1.14-n1-batch1-runtime-hardening"
       }
     },
     {
@@ -69,52 +70,8 @@
       ]
     }
   },
-  "residual_findings": {
+    "residual_findings": {
     "2026-05-06-v1.13-oss-forward-delivery": [
-      {
-        "id": "R-V113-001",
-        "title": "Pre-existing clippy format_push_string error in preset/loader.rs",
-        "severity": "low",
-        "source": "QC1-F-W002 (qc1 report)",
-        "scope": "crates/nexus-orchestration/src/preset/loader.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "status.json metadata.tech_debt_summary"
-      },
-      {
-        "id": "R-V113-002",
-        "title": "Test harness API pollution in CLI crate (pub items with #[allow(dead_code)])",
-        "severity": "medium",
-        "source": "QC1-F-W001 (qc1 report)",
-        "scope": "crates/nexus42/src/commands/creator.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
-      },
-      {
-        "id": "R-V113-003",
-        "title": "Handlebars registry per-call instantiation in render_core_context_template",
-        "severity": "low",
-        "source": "QC3-W-001 (qc3 report)",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
-      },
-      {
-        "id": "R-V113-004",
-        "title": "Missing template syntax error test coverage in e2e_novel_writing.rs",
-        "severity": "low",
-        "source": "QC3-S-001 (qc3 report)",
-        "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
-      },
       {
         "id": "R-V113-005",
         "title": "UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s)",
