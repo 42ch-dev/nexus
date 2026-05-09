@@ -2,6 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     "superpowers@git+https://github.com/obra/superpowers.git",
-    "morning-star@git+https://github.com/btspoony/mstar-harness.git"
+    "@mstar-harness/opencode@latest"
   ]
 }
