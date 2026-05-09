@@ -1261,8 +1261,7 @@ mod tests {
             .expect("verify stage should be present after successful register");
         assert!(
             verify_result.is_ok(),
-            "gate-B2 verify should succeed in HappyPath; got: {:?}",
-            verify_result
+            "gate-B2 verify should succeed in HappyPath; got: {verify_result:?}",
         );
         let verify_resp = verify_result.as_ref().expect("verify response");
         assert_eq!(verify_resp.status, VerifyStatus::Verified);
@@ -1294,12 +1293,14 @@ mod tests {
             result.register
         );
 
-        let err = result.register.err().expect("register error");
+        let err = result
+            .register
+            .expect_err("register should be Err in UpstreamTimeout");
         // The error must be shaped into a deterministic bucket.
         match &err {
-            StagedPlatformError::Timeout => {}
-            StagedPlatformError::Platform { status: 0, .. } => {}
-            StagedPlatformError::Platform { status: 502, .. } => {}
+            StagedPlatformError::Timeout
+            | StagedPlatformError::Platform { status: 0, .. }
+            | StagedPlatformError::Platform { status: 502, .. } => {}
             StagedPlatformError::Config(msg) => {
                 panic!("unexpected Config error: {msg}");
             }
