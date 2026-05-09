@@ -1,19 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-10T00:00:00Z",
+  "updated_at": "2026-05-10T00:05:00Z",
   "plans": [
-    {
-      "plan_id": "2026-05-09-v1.14-n1-batch1-runtime-hardening",
-      "title": "V1.14 N1 batch 1 runtime hardening",
-      "status": "Done",
-      "phase": "done",
-      "metadata": {
-        "version": "v1.14",
-        "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch1-runtime-hardening.md",
-        "task_category": "logic",
-        "working_branch": "feature/v1.14-n1-batch1-runtime-hardening"
-      }
-    },
     {
       "plan_id": "2026-05-09-v1.14-n2-residual-governance",
       "title": "V1.14 N2 residual governance",
@@ -28,12 +16,13 @@
     {
       "plan_id": "2026-05-09-v1.14-n1-batch2-nit-cleanup",
       "title": "V1.14 N1 batch 2 nit cleanup",
-      "status": "Todo",
-      "phase": "specify",
+      "status": "InProgress",
+      "phase": "implement",
       "metadata": {
         "version": "v1.14",
         "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch2-nit-cleanup.md",
-        "task_category": "logic"
+        "task_category": "logic",
+        "working_branch": "feature/v1.14-n1-batch2-nit-cleanup"
       }
     }
   ],
