@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-05-09-v1.14-n1-batch2-nit-cleanup",
+  "archived_at": "2026-05-10",
+  "entries": [
+    {
+      "id": "R-V113-006",
+      "title": "build_nested_payload helper could use generic nested JSON builder",
+      "severity": "nit",
+      "decision": "fixed",
+      "closure_note": "Renamed set_nested → insert_nested; replaced Vec::split+pop with rsplit_once; replaced serde_json::Value::Object(Map::new()) with serde_json::json!({}). No runtime behavior change."
+    }
+  ]
+}
