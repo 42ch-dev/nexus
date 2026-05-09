@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-05-09-v1.14-n1-batch2-nit-cleanup",
+  "title": "V1.14 N1 batch 2 nit cleanup",
+  "status": "Done",
+  "phase": "done",
+  "archived_at": "2026-05-10",
+  "metadata": {
+    "version": "v1.14",
+    "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch2-nit-cleanup.md",
+    "task_category": "logic",
+    "working_branch": "feature/v1.14-n1-batch2-nit-cleanup"
+  },
+  "qc_reports": [
+    "2026-05-09-v1.14-n1-batch2-nit-cleanup-qc1.md",
+    "2026-05-09-v1.14-n1-batch2-nit-cleanup-qc2.md",
+    "2026-05-09-v1.14-n1-batch2-nit-cleanup-qc3.md"
+  ],
+  "qa_verdict": "PASS",
+  "notes": "R-V113-006 closed: build_nested_payload simplified (renamed to insert_nested, Vec+pop replaced with rsplit_once). QC all Approve, QA all gates pass."
+}
