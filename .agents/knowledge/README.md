@@ -26,6 +26,8 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.10-delivery-compass-v1.md](v1.10-delivery-compass-v1.md) | V1.10 (2026-04-26) | V1.10 delivery compass: Device Flow Login + DeviceID Header + Daemon Auth/Context Mock Removal. | **Done (Frozen)** — V1.10 delivery complete |
 | [v1.11-delivery-compass-v1.md](v1.11-delivery-compass-v1.md) | V1.11 (2026-04-27) | V1.11 delivery compass: Daemon Stub Cleanup + DeviceID TOCTOU Fix + CLI refresh_token. 3 workstreams (WS-A–WS-C), 2 milestones. | **Done (Frozen)** — V1.11 shipped 2026-04-28 |
 | [v1.12-delivery-compass-v1.md](v1.12-delivery-compass-v1.md) | V1.12 (2026-04-30) | V1.12 delivery compass: 收口迭代 — Preset Module Completion + V1.11+Warning Residual Sweep + Backlog Closure. 3 themes (A–C), 17 residuals + 1 doc fix, target: open residual = 0. | **Active** — InProgress |
+| [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md) | V1.13 (2026-05-06) | V1.13 delivery compass: OSS-forward — DF-11/DF-14 + DF-15 governance closure. | **Done** |
+| [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md) | V1.14 (2026-05-09) | V1.14 delivery compass: balanced runtime hardening — template/CLI harness + residual batch; **§0** 含 scope lock; QC/QA §9（实现阶段再启用）。 | **Active** |
 
 ## Archived (`archived/knowledge/`)
 
