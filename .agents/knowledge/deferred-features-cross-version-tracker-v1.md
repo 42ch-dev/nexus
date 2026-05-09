@@ -58,7 +58,7 @@
 
 ### 3.3 Open tech-debt residuals (tracked in `status.json`)
 
-These are QC-found issues with a target version. See `status.json` → `metadata.residual_findings` for authoritative machine state.
+These are QC-found issues with a target version. See **`status.json` root `residual_findings`** for authoritative machine state.
 
 | ID | Title | Severity | Target | Origin plan | Scope |
 |----|-------|----------|--------|-------------|-------|
@@ -223,7 +223,7 @@ These are QC-found issues with a target version. See `status.json` → `metadata
 - **Updates**: When a version ships, move all delivered items to §4 Closed. When an item is re-deferred, update §3.
 - **Source compasses remain authoritative for scope decisions**: If the active compass says "Out" for an item but this tracker has it as "Open" with that version target, the compass controls whether it enters scope.
 - **Effort estimates are approximate** (XS/S/M/L/XL agent-session scale) and for planning guidance only — not contractual. See `effort-estimation.md` for methodology.
-- **Residual detail**: Machine-state residuals (§3.3) are authoritative in `status.json` → `metadata.residual_findings`. This file mirrors them for cross-version planning convenience; if there's a conflict, `status.json` wins.
+- **Residual detail**: Machine-state residuals (§3.3) are authoritative in **`status.json` root `residual_findings`**. This file mirrors them for cross-version planning convenience; if there's a conflict, `status.json` wins.
 
 ---
 

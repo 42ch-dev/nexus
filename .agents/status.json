@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-07T03:00:00Z",
+  "updated_at": "2026-05-09T11:59:11Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -26,104 +26,94 @@
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
           "severity": "low",
           "target_date": "backlog",
           "decision": "accept",
-          "note": "Blocked by wiremock \u2192 http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
+          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ]
-    },
-    "residual_findings": {
-      "2026-04-23-v1.8-ws-a-challenge-llm-fallback": [],
-      "2026-04-23-v1.8-ws-c-name-positional-to-flag": [],
-      "2026-04-18-v1.5-stabilization": [],
-      "2026-04-21-v1.7-ws-abc-residual-closure": [],
-      "2026-04-24-v1.9-m1": [],
-      "2026-04-27-v1.10-device-flow-login": [],
-      "2026-04-27-v1.11-daemon-cleanup-toctou": [],
-      "2026-05-06-v1.13-oss-forward-delivery": [
-        {
-          "id": "R-V113-001",
-          "title": "Pre-existing clippy format_push_string error in preset/loader.rs",
-          "severity": "low",
-          "source": "QC1-F-W002 (qc1 report)",
-          "scope": "crates/nexus-orchestration/src/preset/loader.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.14",
-          "tracking_link": "status.json metadata.tech_debt_summary"
-        },
-        {
-          "id": "R-V113-002",
-          "title": "Test harness API pollution in CLI crate (pub items with #[allow(dead_code)])",
-          "severity": "medium",
-          "source": "QC1-F-W001 (qc1 report)",
-          "scope": "crates/nexus42/src/commands/creator.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.14",
-          "tracking_link": "plan V1.14"
-        },
-        {
-          "id": "R-V113-003",
-          "title": "Handlebars registry per-call instantiation in render_core_context_template",
-          "severity": "low",
-          "source": "QC3-W-001 (qc3 report)",
-          "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.14",
-          "tracking_link": "plan V1.14"
-        },
-        {
-          "id": "R-V113-004",
-          "title": "Missing template syntax error test coverage in e2e_novel_writing.rs",
-          "severity": "low",
-          "source": "QC3-S-001 (qc3 report)",
-          "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.14",
-          "tracking_link": "plan V1.14"
-        },
-        {
-          "id": "R-V113-005",
-          "title": "UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s)",
-          "severity": "low",
-          "source": "QC3-S-003 (qc3 report)",
-          "scope": "crates/nexus42/tests/creator_register_e2e.rs",
-          "decision": "accept",
-          "owner": "qa-engineer",
-          "target_date": "backlog",
-          "tracking_link": "N/A"
-        },
-        {
-          "id": "R-V113-006",
-          "title": "build_nested_payload helper could use generic nested JSON builder",
-          "severity": "nit",
-          "source": "QC rev2 S-REV2-001",
-          "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
-          "decision": "defer",
-          "owner": "fullstack-dev",
-          "target_date": "V1.14",
-          "tracking_link": "plan V1.14"
-        },
-        {
-          "id": "R-V113-007",
-          "title": "Pre-existing flaky test auth::tests::get_returns_none_for_unknown_creator",
-          "severity": "low",
-          "source": "QC/T3 report — pre-existing race condition",
-          "scope": "crates/nexus42/src/auth/mod.rs",
-          "decision": "accept",
-          "owner": "fullstack-dev",
-          "target_date": "V1.14",
-          "tracking_link": "N/A"
-        }
-      ]
-    },
-    "program_reviews": {
-      "v1.2": "archived/plans/v1.2-program-review.json"
     }
+  },
+  "residual_findings": {
+    "2026-05-06-v1.13-oss-forward-delivery": [
+      {
+        "id": "R-V113-001",
+        "title": "Pre-existing clippy format_push_string error in preset/loader.rs",
+        "severity": "low",
+        "source": "QC1-F-W002 (qc1 report)",
+        "scope": "crates/nexus-orchestration/src/preset/loader.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "V1.14",
+        "tracking_link": "status.json metadata.tech_debt_summary"
+      },
+      {
+        "id": "R-V113-002",
+        "title": "Test harness API pollution in CLI crate (pub items with #[allow(dead_code)])",
+        "severity": "medium",
+        "source": "QC1-F-W001 (qc1 report)",
+        "scope": "crates/nexus42/src/commands/creator.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "V1.14",
+        "tracking_link": "plan V1.14"
+      },
+      {
+        "id": "R-V113-003",
+        "title": "Handlebars registry per-call instantiation in render_core_context_template",
+        "severity": "low",
+        "source": "QC3-W-001 (qc3 report)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "V1.14",
+        "tracking_link": "plan V1.14"
+      },
+      {
+        "id": "R-V113-004",
+        "title": "Missing template syntax error test coverage in e2e_novel_writing.rs",
+        "severity": "low",
+        "source": "QC3-S-001 (qc3 report)",
+        "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "V1.14",
+        "tracking_link": "plan V1.14"
+      },
+      {
+        "id": "R-V113-005",
+        "title": "UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s)",
+        "severity": "low",
+        "source": "QC3-S-003 (qc3 report)",
+        "scope": "crates/nexus42/tests/creator_register_e2e.rs",
+        "decision": "accept",
+        "owner": "qa-engineer",
+        "target_date": "backlog",
+        "tracking_link": "N/A"
+      },
+      {
+        "id": "R-V113-006",
+        "title": "build_nested_payload helper could use generic nested JSON builder",
+        "severity": "nit",
+        "source": "QC rev2 S-REV2-001",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "V1.14",
+        "tracking_link": "plan V1.14"
+      },
+      {
+        "id": "R-V113-007",
+        "title": "Pre-existing flaky test auth::tests::get_returns_none_for_unknown_creator",
+        "severity": "low",
+        "source": "QC/T3 report — pre-existing race condition",
+        "scope": "crates/nexus42/src/auth/mod.rs",
+        "decision": "accept",
+        "owner": "fullstack-dev",
+        "target_date": "V1.14",
+        "tracking_link": "N/A"
+      }
+    ]
   }
 }

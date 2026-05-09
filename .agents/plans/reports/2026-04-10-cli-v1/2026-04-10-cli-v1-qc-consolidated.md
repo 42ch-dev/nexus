@@ -79,7 +79,7 @@ All reviewers agree on:
 
 ## Residual Findings to Track
 
-The following items should be added to `metadata.residual_findings[multi-plan-v1-cli-sprint-20260410]` if formal tracking is desired:
+The following items should be added to `residual_findings[multi-plan-v1-cli-sprint-20260410]` if formal tracking is desired:
 
 ```json
 [
@@ -159,7 +159,7 @@ The following items should be added to `metadata.residual_findings[multi-plan-v1
 ## Next Steps
 
 1. **No code changes required** — all three plans remain `Done`
-2. **Optional**: Add CLI-QC-W1 and CLI-QC-W2 to `metadata.residual_findings` if formal tracking desired
+2. **Optional**: Add CLI-QC-W1 and CLI-QC-W2 to `residual_findings` if formal tracking desired
 3. **Update `status.json` gates** to record QC triple review completion:
    - Add `qc_status: "QC triple approved (2026-04-10)"` to each plan's `metadata.gates`
 4. **Continue with next plans** in the V1.1 roadmap

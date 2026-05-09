@@ -7,7 +7,7 @@
 **Scope**: `crates/nexus-contracts`, `nexus-domain`, `nexus-local-db`, `nexus-sync`, `nexus42` (CLI), `nexus42d` (daemon)  
 **Benchmark**: `v1-spec/` (architecture/v1.md, domain/data-model-v1.md, cli-sync/cli-spec-v1.md, acp-runtime/acp-client-tech-spec-v1.md, cli-sync/sync-contract-v1.md)
 
-**Authoritative execution SSOT**: Open **residual rows** and plan lifecycle live in [`.agents/status.json`](../status.json) (`metadata.residual_findings`, `plans[]`). This document states **intent and narrative**; if a statement here disagrees with `status.json`, **fix this document** in the same change set that updates the SSOT file.
+**Authoritative execution SSOT**: Open **residual rows** and plan lifecycle live in [`.agents/status.json`](../status.json) (**root** `residual_findings`, `plans[]`). This document states **intent and narrative**; if a statement here disagrees with `status.json`, **fix this document** in the same change set that updates the SSOT file.
 
 **Related Documents**:
 
@@ -43,7 +43,7 @@ At baseline, several **critical and high gaps** were recorded (verbatim historic
 
 **TD resolution matrix (authoritative for “is this done?”)**
 
-| ID | Baseline (§2.6) | Resolution statement (SSOT) | Open residual id (`metadata.residual_findings` key = owning plan id) |
+| ID | Baseline (§2.6) | Resolution statement (SSOT) | Open residual id (**root** `residual_findings` key = owning plan id) |
 | --- | --- | --- | --- |
 | TD-1 | Critical — sync not wired | **Mitigated** — blocker plan Done; offline-first queue and integration delivered per plan. Optional **eager platform push** from daemon remains deferred. | `2026-04-09-v1.1-arch-alignment-blockers` → **ARCH-SYNC-D1** (low, defer) |
 | TD-2 | Critical — `Frozen` vs `Paused` | **Resolved** — closed under blocker plan (no open row). | — |

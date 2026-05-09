@@ -280,4 +280,4 @@ No upward dependencies from `acp/` module to CLI command layer.
 **Traceability**:
 - All findings linked to file:line references
 - Tech spec sections: §1.2 (SDK), §2.2 (Module Layout), §3 (Registry), §5 (Skills)
-- Residual tracking: `status.json` → `metadata.residual_findings["2025-04-05-acp-client"]`
+- Residual tracking: `status.json` → `residual_findings["2025-04-05-acp-client"]`
