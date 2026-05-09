@@ -335,3 +335,25 @@ fn e2e_novel_writing_has_five_states() {
         ]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Test 8: R-V113-004 — template syntax error coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn template_syntax_error_returns_deterministic_failure() {
+    // Feed malformed Handlebars syntax through the same render path used by
+    // the novel-writing preset. The assertion verifies a deterministic error
+    // (not a panic) with a message that explains the template syntax failure.
+    let result = nexus_orchestration::tasks::render_core_context_template(
+        "{{#if unclosed_block",
+        &serde_json::json!({}),
+    );
+
+    assert!(result.is_err(), "malformed template syntax should fail deterministically");
+    let err = format!("{:#}", result.unwrap_err());
+    assert!(
+        err.contains("template") || err.contains("syntax"),
+        "error should explain template syntax failure, got: {err}"
+    );
+}
