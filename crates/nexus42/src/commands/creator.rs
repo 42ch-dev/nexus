@@ -35,111 +35,7 @@ const EXPIRY_BUFFER_SECS: i64 = 10;
 /// Maximum number of auto-retry attempts for wrong answers (D4).
 const MAX_VERIFY_ATTEMPTS: u32 = 2;
 
-/// Test mode for the staged e2e verification harness.
-///
-/// Controls whether the staged flow runs against a happy-path platform
-/// or simulates an upstream failure scenario. Used by e2e tests to
-/// verify deterministic error buckets without modifying production code.
-// Dead code: used by integration tests (creator_register_e2e.rs) which
-// are separate binary targets and don't count as "used" for the lib/bin.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TestMode {
-    /// Platform responds with valid registration + verification.
-    HappyPath,
-    /// Platform is unreachable or returns a timeout.
-    UpstreamTimeout,
-}
 
-/// Result of the staged creator register e2e flow.
-///
-/// Breaks the registration pipeline into discrete stages so tests can
-/// assert on individual gate outcomes (gate-B1: register, gate-B2: verify).
-// Dead code: used by integration tests (creator_register_e2e.rs) which
-// are separate binary targets and don't count as "used" for the lib/bin.
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct StagedE2eResult {
-    /// Gate-B1 outcome: platform register call result.
-    pub register:
-        std::result::Result<nexus_sync::platform_client::RegisterResponse, StagedPlatformError>,
-    /// Gate-B2 outcome: platform verify call result (None if register failed).
-    pub verify: Option<
-        std::result::Result<nexus_sync::platform_client::VerifyResponse, StagedPlatformError>,
-    >,
-}
-
-/// Run the staged creator register e2e verification flow.
-///
-/// This is the testable harness that separates gate-B1 (register) and
-/// gate-B2 (verify) into distinct stages with deterministic error shaping.
-///
-/// In `TestMode::HappyPath`, the platform client calls proceed normally.
-/// In `TestMode::UpstreamTimeout`, the function simulates an upstream
-/// timeout by using a deliberately unreachable platform URL.
-///
-/// # Errors
-///
-/// Returns a `StagedE2eResult` where each stage's error is classified into
-/// a deterministic [`StagedPlatformError`] bucket via [`classify_platform_error`].
-// Dead code: used by integration tests (creator_register_e2e.rs) which
-// are separate binary targets and don't count as "used" for the lib/bin.
-#[allow(dead_code)]
-pub async fn run_creator_register_e2e(
-    platform_url: &str,
-    auth_token: &str,
-    device_id: &str,
-    display_name: &str,
-    registration_source: &str,
-    handle: Option<&str>,
-    mode: TestMode,
-) -> StagedE2eResult {
-    let effective_url = match mode {
-        TestMode::HappyPath => platform_url.to_string(),
-        TestMode::UpstreamTimeout => {
-            // Use a deliberately unreachable URL to trigger a timeout/connection error
-            "http://192.0.2.1:1".to_string()
-        }
-    };
-
-    let client = match PlatformClient::new(&effective_url, auth_token, device_id) {
-        Ok(c) => c,
-        Err(err) => {
-            return StagedE2eResult {
-                register: Err(classify_platform_error(err)),
-                verify: None,
-            };
-        }
-    };
-
-    // Gate-B1: Register creator on platform
-    let register_result = client
-        .register_creator(display_name, registration_source, handle)
-        .await
-        .map_err(classify_platform_error);
-
-    let Ok(ref register_response) = register_result else {
-        return StagedE2eResult {
-            register: register_result,
-            verify: None,
-        };
-    };
-
-    // Gate-B2: Verify creator (using a placeholder answer — the e2e harness
-    // focuses on platform connectivity and error shaping, not challenge solving)
-    let verify_result = client
-        .verify_creator(
-            &register_response.verification.verification_code,
-            "0", // Placeholder answer for e2e harness
-        )
-        .await
-        .map_err(classify_platform_error);
-
-    StagedE2eResult {
-        register: Ok(register_response.clone()),
-        verify: Some(verify_result),
-    }
-}
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
@@ -1209,5 +1105,230 @@ mod tests {
     fn name_65_chars_exceeds_max_length() {
         let name_65 = "a".repeat(65);
         assert!(name_65.len() > MAX_CREATOR_NAME_LENGTH);
+    }
+
+    // ── DF-14: Staged e2e verification harness (gate-B1/B2) ─────────
+
+    /// Test mode for the staged e2e verification harness.
+    ///
+    /// Controls whether the staged flow runs against a happy-path platform
+    /// or simulates an upstream failure scenario.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestMode {
+        /// Platform responds with valid registration + verification.
+        HappyPath,
+        /// Platform is unreachable or returns a timeout.
+        UpstreamTimeout,
+    }
+
+    /// Result of the staged creator register e2e flow.
+    ///
+    /// Breaks the registration pipeline into discrete stages so tests can
+    /// assert on individual gate outcomes (gate-B1: register, gate-B2: verify).
+    #[derive(Debug)]
+    struct StagedE2eResult {
+        /// Gate-B1 outcome: platform register call result.
+        register:
+            std::result::Result<nexus_sync::platform_client::RegisterResponse, StagedPlatformError>,
+        /// Gate-B2 outcome: platform verify call result (None if register failed).
+        verify: Option<
+            std::result::Result<nexus_sync::platform_client::VerifyResponse, StagedPlatformError>,
+        >,
+    }
+
+    /// Run the staged creator register e2e verification flow.
+    ///
+    /// This is the testable harness that separates gate-B1 (register) and
+    /// gate-B2 (verify) into distinct stages with deterministic error shaping.
+    ///
+    /// In `TestMode::HappyPath`, the platform client calls proceed normally.
+    /// In `TestMode::UpstreamTimeout`, the function simulates an upstream
+    /// timeout by using a deliberately unreachable platform URL.
+    async fn run_creator_register_e2e(
+        platform_url: &str,
+        auth_token: &str,
+        device_id: &str,
+        display_name: &str,
+        registration_source: &str,
+        handle: Option<&str>,
+        mode: TestMode,
+    ) -> StagedE2eResult {
+        let effective_url = match mode {
+            TestMode::HappyPath => platform_url.to_string(),
+            TestMode::UpstreamTimeout => {
+                // Use a deliberately unreachable URL to trigger a timeout/connection error
+                "http://192.0.2.1:1".to_string()
+            }
+        };
+
+        let client = match PlatformClient::new(&effective_url, auth_token, device_id) {
+            Ok(c) => c,
+            Err(err) => {
+                return StagedE2eResult {
+                    register: Err(classify_platform_error(err)),
+                    verify: None,
+                };
+            }
+        };
+
+        // Gate-B1: Register creator on platform
+        let register_result = client
+            .register_creator(display_name, registration_source, handle)
+            .await
+            .map_err(classify_platform_error);
+
+        let Ok(ref register_response) = register_result else {
+            return StagedE2eResult {
+                register: register_result,
+                verify: None,
+            };
+        };
+
+        // Gate-B2: Verify creator (using a placeholder answer — the e2e harness
+        // focuses on platform connectivity and error shaping, not challenge solving)
+        let verify_result = client
+            .verify_creator(
+                &register_response.verification.verification_code,
+                "0", // Placeholder answer for e2e harness
+            )
+            .await
+            .map_err(classify_platform_error);
+
+        StagedE2eResult {
+            register: Ok(register_response.clone()),
+            verify: Some(verify_result),
+        }
+    }
+
+    /// Gate-B1/B2: Happy path — platform returns valid register + verify responses.
+    ///
+    /// Verifies that `run_creator_register_e2e` with `TestMode::HappyPath`
+    /// successfully completes both the register (B1) and verify (B2) stages.
+    #[tokio::test]
+    async fn creator_register_e2e_handles_platform_happy_path() {
+        use nexus_sync::platform_client::VerifyStatus;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+
+        // Mock POST /api/v1/creators/register → valid registration
+        Mock::given(method("POST"))
+            .and(path("/api/v1/creators/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "creator_id": "crt_staged_e2e",
+                "display_name": "Staged E2E Creator",
+                "creator_api_key": "nexus_live_staged_key",
+                "verification": {
+                    "verification_code": "nxc_verify_staged",
+                    "challenge_text": "A basket has five apples and someone adds three more",
+                    "expires_at": "2099-12-31T23:59:59.000Z",
+                    "instructions": "Solve the math problem"
+                }
+            })))
+            .mount(&mock)
+            .await;
+
+        // Mock POST /api/v1/creators/verify → verified
+        Mock::given(method("POST"))
+            .and(path("/api/v1/creators/verify"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "verified",
+                "creator_api_key": "nexus_live_staged_active"
+            })))
+            .mount(&mock)
+            .await;
+
+        let result = run_creator_register_e2e(
+            &mock.uri(),
+            "test_token",
+            "dev_staged",
+            "Staged E2E Creator",
+            "cli",
+            None,
+            TestMode::HappyPath,
+        )
+        .await;
+
+        // Gate-B1: register should succeed
+        assert!(
+            result.register.is_ok(),
+            "gate-B1 register should succeed in HappyPath; got: {:?}",
+            result.register
+        );
+        let register_resp = result.register.as_ref().expect("register response");
+        assert_eq!(register_resp.creator_id, "crt_staged_e2e");
+
+        // Gate-B2: verify should succeed
+        let verify_result = result
+            .verify
+            .as_ref()
+            .expect("verify stage should be present after successful register");
+        assert!(
+            verify_result.is_ok(),
+            "gate-B2 verify should succeed in HappyPath; got: {:?}",
+            verify_result
+        );
+        let verify_resp = verify_result.as_ref().expect("verify response");
+        assert_eq!(verify_resp.status, VerifyStatus::Verified);
+    }
+
+    /// Gate-B1/B2: Upstream timeout — platform is unreachable.
+    ///
+    /// Verifies that `run_creator_register_e2e` with `TestMode::UpstreamTimeout`
+    /// surfaces a deterministic timeout error from gate-B1, and that the error
+    /// is shaped into a [`StagedPlatformError`] bucket.
+    #[tokio::test]
+    async fn creator_register_e2e_surfaces_platform_failure_context() {
+        use nexus_sync::platform_client::StagedPlatformError;
+
+        // No mock server needed — UpstreamTimeout mode uses an unreachable URL
+        let result = run_creator_register_e2e(
+            "http://will-be-ignored.invalid", // Overridden by UpstreamTimeout mode
+            "test_token",
+            "dev_staged_fail",
+            "Staged Fail Creator",
+            "cli",
+            None,
+            TestMode::UpstreamTimeout,
+        )
+        .await;
+
+        // Gate-B1: register should fail with a timeout/connection error
+        assert!(
+            result.register.is_err(),
+            "gate-B1 register should fail in UpstreamTimeout; got: {:?}",
+            result.register
+        );
+
+        let err = result.register.err().expect("register error");
+        // The error must be shaped into a deterministic bucket.
+        match &err {
+            StagedPlatformError::Timeout => {}
+            StagedPlatformError::Platform { status: 0, .. } => {}
+            StagedPlatformError::Platform { status: 502, .. } => {}
+            StagedPlatformError::Config(msg) => {
+                panic!("unexpected Config error: {msg}");
+            }
+            StagedPlatformError::Auth(msg) => {
+                panic!("unexpected Auth error: {msg}");
+            }
+            StagedPlatformError::Platform { status, body } => {
+                panic!("unexpected Platform error with HTTP status {status}: {body}");
+            }
+        }
+
+        // The error display must contain "timeout" or "platform" for CLI visibility
+        let err_display = format!("{err}");
+        assert!(
+            err_display.contains("timeout") || err_display.contains("platform"),
+            "error must contain 'timeout' or 'platform' for CLI visibility; got: {err_display}"
+        );
+
+        // Gate-B2: verify should not be reached (None)
+        assert!(
+            result.verify.is_none(),
+            "gate-B2 verify should not be reached when gate-B1 fails"
+        );
     }
 }
