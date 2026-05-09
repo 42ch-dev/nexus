@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-10T00:25:00Z",
+  "updated_at": "2026-05-10T12:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-09-v1.14-n2-residual-governance",
@@ -59,7 +59,7 @@
         "decision": "accept",
         "owner": "qa-engineer",
         "target_date": "backlog",
-        "tracking_link": "N/A"
+        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-005-upstream-timeout-e2e-variance.md"
       },
       {
         "id": "R-V113-007",
@@ -69,8 +69,8 @@
         "scope": "crates/nexus42/src/auth/mod.rs",
         "decision": "accept",
         "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "N/A"
+        "target_date": "backlog",
+        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-007-flaky-auth-unit-test.md"
       }
     ]
   }
