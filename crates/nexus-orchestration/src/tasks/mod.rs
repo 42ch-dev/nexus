@@ -1033,6 +1033,24 @@ impl Task for AcpPromptTask {
 // CoreContext template rendering (DF-11)
 // ---------------------------------------------------------------------------
 
+/// Static Handlebars registry — avoids per-call allocation overhead.
+///
+/// Uses `no_escape` mode to preserve plain-text fidelity in prompts
+/// (avoids HTML-encoding `&`, `<`, `>` etc.).
+static HANDLEBARS: std::sync::OnceLock<handlebars::Handlebars<'static>> = std::sync::OnceLock::new();
+
+/// Return a reference to the shared Handlebars registry.
+///
+/// The registry is initialized once with `no_escape` mode and reused
+/// across all template renders for the process lifetime.
+fn handlebars_registry() -> &'static handlebars::Handlebars<'static> {
+    HANDLEBARS.get_or_init(|| {
+        let mut reg = handlebars::Handlebars::new();
+        reg.register_escape_fn(handlebars::no_escape);
+        reg
+    })
+}
+
 /// Render a handlebars template against a JSON payload.
 ///
 /// Used by the orchestration engine to substitute `CoreContext` values into
@@ -1047,10 +1065,9 @@ pub fn render_core_context_template(
     template: &str,
     payload: &serde_json::Value,
 ) -> anyhow::Result<String> {
-    let mut reg = handlebars::Handlebars::new();
-    reg.register_escape_fn(handlebars::no_escape);
-    let rendered = reg.render_template(template, payload)?;
-    Ok(rendered)
+    handlebars_registry()
+        .render_template(template, payload)
+        .map_err(Into::into)
 }
 
 /// Build a nested JSON object from flat dot-separated context keys.
@@ -1426,5 +1443,20 @@ mod tests {
             ToolPolicy::from_str("unknown").unwrap(),
             ToolPolicy::AutoGrantReadOnly
         );
+    }
+
+    // ── R-V113-003: OnceLock determinism regression test ──────────
+
+    #[test]
+    fn core_context_template_repeated_renders_are_deterministic() {
+        let payload = serde_json::json!({ "world": { "title": "Nexus" } });
+
+        let first = render_core_context_template("World: {{world.title}}", &payload)
+            .expect("first render should succeed");
+        let second = render_core_context_template("World: {{world.title}}", &payload)
+            .expect("second render should succeed");
+
+        assert_eq!(first, "World: Nexus");
+        assert_eq!(second, first);
     }
 }
