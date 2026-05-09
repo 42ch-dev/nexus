@@ -1,18 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-10T00:20:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-05-09-v1.14-n2-residual-governance",
-      "title": "V1.14 N2 residual governance",
-      "status": "Todo",
-      "phase": "specify",
-      "metadata": {
-        "version": "v1.14",
-        "plan_path": ".agents/plans/2026-05-09-v1.14-n2-residual-governance.md",
-        "task_category": "docs"
-      }
-    }
+  "updated_at": "2026-05-10T12:05:00Z",
+  "plans": [],
   ],
   "metadata": {
     "branch_naming": {
@@ -58,7 +47,7 @@
         "decision": "accept",
         "owner": "qa-engineer",
         "target_date": "backlog",
-        "tracking_link": "N/A"
+        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-005-upstream-timeout-e2e-variance.md"
       },
       {
         "id": "R-V113-007",
@@ -68,8 +57,8 @@
         "scope": "crates/nexus42/src/auth/mod.rs",
         "decision": "accept",
         "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "N/A"
+        "target_date": "backlog",
+        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-007-flaky-auth-unit-test.md"
       }
     ]
   }
