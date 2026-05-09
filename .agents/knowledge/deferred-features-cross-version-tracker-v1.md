@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.13 planning active — OSS-forward)
+**Status**: Active (V1.14 planned — balanced runtime hardening)
 **Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.10), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.10) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-06
+**Last updated**: 2026-05-09
 
 ---
 
@@ -175,6 +175,15 @@ These are QC-found issues with a target version. See **`status.json` root `resid
 | Governance closure | 1 | DF-15 (Cancelled — OpenAPI export) |
 | Tech-debt residuals | 0 | — |
 
+### V1.14 planning horizon (registered)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)（§0 scope lock **合并于**本 compass） |
+| Machine state | `status.json` `residual_findings` → `2026-05-06-v1.13-oss-forward-delivery`（无 V1.14 `plans[]` 登记） |
+| Residual batch 1 | `R-V113-002` (P0), `R-V113-003`, `R-V113-004`, `R-V113-001`; governance: `R-V113-007`, optional `R-V113-006` |
+| Cross-repo gates | Canonical: `nexus-platform/.agents/knowledge/v1.14-program-compass-v1.md` §5 |
+
 ### Items targeting V2.0+
 
 | Category | Count | IDs |
@@ -241,6 +250,8 @@ Internal (this repo):
 - V1.8 delivery compass: [v1.8-delivery-compass-v1.md](v1.8-delivery-compass-v1.md)
 - V1.9 delivery compass: [v1.9-delivery-compass-v1.md](v1.9-delivery-compass-v1.md)
 - V1.10 delivery compass: [v1.10-delivery-compass-v1.md](v1.10-delivery-compass-v1.md)
+- V1.13 delivery compass: [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md)
+- V1.14 delivery compass: [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)
 - Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
 - ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
 - Creator schedule & core context: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)
@@ -254,4 +265,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: 2026-05-07. Status: Active. V1.13 DF-11/DF-14 shipped, DF-15 governance-closed.*
+*Created: 2026-04-21. Last updated: 2026-05-09. Status: Active. V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. V1.14: knowledge-only compass §0 + cross-repo gates; `status.json` residuals remain under `2026-05-06-v1.13-oss-forward-delivery`; no V1.14 plan registration.*
