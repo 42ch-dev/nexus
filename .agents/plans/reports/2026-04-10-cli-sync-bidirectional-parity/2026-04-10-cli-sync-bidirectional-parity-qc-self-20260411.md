@@ -36,7 +36,7 @@ generated_at: 2026-04-11T00:00:00Z
 ## Source Trace
 - Finding ID: F-SYNC-AUTH-RESOLVED
 - Source Type: manual-reasoning
-- Source Reference: `metadata.residual_findings["2026-04-10-cli-sync-bidirectional-parity"]` SYNC-AUTH-TOKEN-01
+- Source Reference: `residual_findings["2026-04-10-cli-sync-bidirectional-parity"]` SYNC-AUTH-TOKEN-01
 - Confidence: High
 
 ## Summary

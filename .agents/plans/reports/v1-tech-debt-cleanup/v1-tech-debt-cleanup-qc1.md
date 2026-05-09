@@ -42,7 +42,7 @@ This review covers Batch B changes as defined in the Assignment:
 
 - **Plan ID**: `v1-tech-debt-cleanup` (MUST match QC#2 and QC#3)
 - **Review Range**: `merge-base: origin/main; tip: HEAD on feature/v1.1-tech-debt-cleanup-batch-b` (MUST match QC#2 and QC#3)
-- **Residuals**: QC-W2, QC-W4, QC-W3, QC-W7 (4 low-severity items from `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`)
+- **Residuals**: QC-W2, QC-W4, QC-W3, QC-W7 (4 low-severity items from `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`)
 
 ### Files Changed (6 files in scope)
 
@@ -63,7 +63,7 @@ This review covers Batch B changes as defined in the Assignment:
 
 ### QC-W2: HTTP body size error variant ✅ VERIFIED
 
-**Source**: QC#1, `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
+**Source**: QC#1, `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
 
 **Original Issue**: HTTP body size errors incorrectly used `Serialization` error variant, which is semantically incorrect.
 
@@ -108,7 +108,7 @@ This review covers Batch B changes as defined in the Assignment:
 
 ### QC-W4: InvalidParameterName misuse ✅ VERIFIED
 
-**Source**: QC#2, `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
+**Source**: QC#2, `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
 
 **Original Issue**: `InvalidParameterName` error was misused for pool-related errors (panic/aborted), which is not semantically appropriate.
 
@@ -153,7 +153,7 @@ fn interact_to_rusqlite_err(e: InteractError) -> rusqlite::Error {
 
 ### QC-W3: Pool status monitoring ✅ VERIFIED
 
-**Source**: QC#1, `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
+**Source**: QC#1, `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
 
 **Original Issue**: Pool status monitoring was not exposed, limiting observability.
 
@@ -207,7 +207,7 @@ fn interact_to_rusqlite_err(e: InteractError) -> rusqlite::Error {
 
 ### QC-W7: Pool configuration ✅ VERIFIED
 
-**Source**: QC#3, `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
+**Source**: QC#3, `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
 
 **Original Issue**: Pool configuration (timeout, max size) was not tunable via config.
 
@@ -481,7 +481,7 @@ All other findings are based on direct code inspection and can be verified by QC
 
 **Action for @project-manager**:
 1. Archive all 4 residuals to `.agents/archived/residuals/2026-04-08-v1.1-tech-debt-mitigation.json`
-2. Remove entries from `status.json` `metadata.residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
+2. Remove entries from `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
 3. Update `tech_debt_summary` counts (12 → 8 open)
 4. Mark Batch B as completed in plan file
 
@@ -539,7 +539,7 @@ Batch B implementation successfully addresses all 4 residuals with high-quality 
 ### Process & Documentation Gate
 
 - [x] **Plan file updated**: Batch B marked as completed in plan
-- [x] **status.json consistent**: Residuals tracked in `metadata.residual_findings`
+- [x] **status.json consistent**: Residuals tracked in `residual_findings`
 - [x] **No plan drift**: Implementation matches acceptance criteria
 
 ### Code Quality

@@ -441,7 +441,7 @@ pub struct ApiErrorDetail {
 ## Handoff Notes
 
 **For @project-manager**:
-- QC review complete; findings documented in `status.json` under `metadata.residual_findings["2026-04-06-foundation-hardening"]`
+- QC review complete; findings documented in `status.json` under `residual_findings["2026-04-06-foundation-hardening"]`
 - Recommend creating follow-up Plan B for residual items QC2-R1 through QC2-R3
 - Coordinate with Reviewer #1 and #3 for consolidated decision
 

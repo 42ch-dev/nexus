@@ -9,6 +9,8 @@ This is the **public open-source monorepo** containing `nexus42` CLI (Rust), `ne
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
+**Harness `status.json`:** Open QC residual rows are stored under **root** `residual_findings` in `.agents/status.json`. Details: [`.agents/AGENTS.md`](.agents/AGENTS.md).
+
 ## Tech Stack & Protocol Decisions
 
 - **CLI/daemon:** Rust-first (aligns with ACP official SDK availability)

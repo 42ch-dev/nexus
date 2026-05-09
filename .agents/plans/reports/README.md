@@ -22,7 +22,7 @@ reports/
 ## Usage
 
 - **Reports are read-only historical records**
-- **Residual findings are tracked in `../status.json`** under `metadata.residual_findings`
+- **Residual findings are tracked in `../status.json`** under **root `residual_findings`**; inspect with `jq '.residual_findings'`.
 - For active plans, see the main plan file (e.g., `../2025-04-05-domain-models.md`)
 
 ## Naming Convention
@@ -37,22 +37,25 @@ All residual findings from QC reviews are tracked in `../status.json`:
 
 ```json
 {
-  "metadata": {
-    "residual_findings": {
-      "2025-04-05-domain-models": [
-        {
-          "id": "R1",
-          "title": "Finding title",
-          "severity": "medium|low",
-          "decision": "defer|accept",
-          "owner": "@fullstack-dev",
-          "target": "When to address"
-        }
-      ]
-    }
-  }
+  "version": 1,
+  "plans": [],
+  "residual_findings": {
+    "2025-04-05-domain-models": [
+      {
+        "id": "R1",
+        "title": "Finding title",
+        "severity": "medium|low",
+        "decision": "defer|accept",
+        "owner": "@fullstack-dev",
+        "target": "When to address"
+      }
+    ]
+  },
+  "metadata": {}
 }
 ```
+
+Maintain a single map: root `residual_findings` in `status.json`.
 
 ---
 

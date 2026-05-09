@@ -55,7 +55,7 @@ generated_at: "2026-04-11"
 | Codegen emits concrete Rust/TS types for common `$ref` string defs and whole-schema refs | Done | Generated `publish_*`, `world_fork_response`, `sync_pull_response`, `explore_feed_response` use `String` / `Vec<Bundle>` / `ForkBranch` / `Vec<ExploreHit>` etc. |
 | Regenerated output only (no hand edits under `*/generated/`) | Done | `pnpm run codegen` drives TS/Rust output |
 | Downstream compiles | Done | `cargo clippy --all -- -D warnings` |
-| Close PUBLISH-CODEGEN-01 & FORK-SNAP-01 | Done | `archived/residuals/2026-04-10-cli-publish-workflow-parity.json`, `archived/residuals/2026-04-10-cli-fork-world-snapshot-parity.json`; `metadata.residual_findings` cleared |
+| Close PUBLISH-CODEGEN-01 & FORK-SNAP-01 | Done | `archived/residuals/2026-04-10-cli-publish-workflow-parity.json`, `archived/residuals/2026-04-10-cli-fork-world-snapshot-parity.json`; `residual_findings` cleared |
 | Plan SSOT | Done | `.agents/status.json`, `notes.json`, this report |
 
 ## Verification

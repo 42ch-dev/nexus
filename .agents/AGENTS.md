@@ -50,4 +50,4 @@ This repository uses **Profile B** from the Morning Star `mstar-plan-conventions
 
 ### Residual detail prose (`plans/residuals/`)
 
-Open residuals needing more than structured `status.json` fields may have prose detail documents under `plans/residuals/<plan-id>/`. These complement (not replace) `metadata.residual_findings` entries. Named `<td-or-r-id>-<short-label>.md`. When the residual is closed, the prose doc is archived alongside the structured JSON to `archived/residuals/<plan-id>.json`.
+Open residuals needing more than structured `status.json` fields may have prose detail documents under `plans/residuals/<plan-id>/`. These complement (not replace) **root-level** `residual_findings` entries in `status.json` (canonical per upstream `mstar-plan-conventions`). Named `<td-or-r-id>-<short-label>.md`. When the residual is closed, the prose doc is archived alongside the structured JSON to `archived/residuals/<plan-id>.json`.

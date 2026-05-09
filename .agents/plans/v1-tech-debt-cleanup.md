@@ -562,7 +562,7 @@ cargo +nightly fmt --all -- --check
 - Tests / clippy / docs: maintained per batch (see Validation Commands)
 
 **Current status**: **InProgress** — **lowest priority**; milestone **A–D complete**; **Batch E** next on **V1.2** schedule under **this plan id**  
-**Residuals SSOT**: `status.json` → `metadata.residual_findings` (program-wide items may live on sibling plan ids)
+**Residuals SSOT**: `status.json` **root** `residual_findings` (program-wide items may live on sibling plan ids)
 
 **Audit snapshot** (C+D milestone row, historical only): `archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json`
 

@@ -65,6 +65,6 @@
       "2c6380f T5.15-T5.16 memory CLI commands",
       "3721e71 T5.17 E2E tests"
     ],
-    "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in metadata.residual_findings"
+    "residual_summary": "9 open residuals (1 medium, 4 low, 2 nit, 2 deferred) — tracked in residual_findings"
   }
 }

@@ -115,11 +115,11 @@ rg "SELECT schedule_id FROM creator_schedules.*scheduled_at" --type rust
 
 ### Medium — `status.json` SSOT not updated (AC8)
 
-**Finding**: R1 and R2 remain listed as open `medium`-severity residuals in `.agents/status.json` under `metadata.residual_findings["2026-04-18-v1.5-stabilization"]`. R3 and R6 (low) also remain.
+**Finding**: R1 and R2 remain listed as open `medium`-severity residuals in `.agents/status.json` under `residual_findings["2026-04-18-v1.5-stabilization"]`. R3 and R6 (low) also remain.
 
 **Impact**: The acceptance criterion "No `medium`-severity residuals remain open (check status.json)" is not met at the SSOT level, despite the implementation being complete and all tests passing.
 
-**Root cause**: The implementation commits (f7379b3, 3b0464b, 68a9367, d4fcce3) resolve the code issues, but the residual findings have not been archived per `plan-convention.md` lifecycle rules (move to `.agents/archived/residuals/<plan-id>.json` and remove from `metadata.residual_findings`).
+**Root cause**: The implementation commits (f7379b3, 3b0464b, 68a9367, d4fcce3) resolve the code issues, but the residual findings have not been archived per `plan-convention.md` lifecycle rules (move to `.agents/archived/residuals/<plan-id>.json` and remove from `residual_findings`).
 
 **Remediation**: Before merge, `status.json` must be updated to:
 1. Archive R1, R2, R3, R6 findings for `2026-04-18-v1.5-stabilization`
@@ -141,7 +141,7 @@ rg "SELECT schedule_id FROM creator_schedules.*scheduled_at" --type rust
 
 | Item | Owner | Action |
 |------|-------|--------|
-| Update `status.json` residual findings | `@project-manager` / `@fullstack-dev` | Archive R1/R2/R3/R6 from `metadata.residual_findings`; update `tech_debt_summary` counts |
+| Update `status.json` residual findings | `@project-manager` / `@fullstack-dev` | Archive R1/R2/R3/R6 from `residual_findings`; update `tech_debt_summary` counts |
 
 ---
 

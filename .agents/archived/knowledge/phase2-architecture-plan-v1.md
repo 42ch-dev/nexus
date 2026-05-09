@@ -41,7 +41,7 @@ The recommended approach is sequential: **Foundation Hardening → ACP SDK Bridg
 
 | Criterion | Verification |
 |-----------|-------------|
-| All CRITICAL and HIGH residuals addressed | `status.json` `metadata.residual_findings` updated; severity audit shows 0 open HIGH+ |
+| All CRITICAL and HIGH residuals addressed | `status.json` `residual_findings` updated; severity audit shows 0 open HIGH+ |
 | `nexus42 agent run claude-acp` sends prompt, receives response | Integration test: spawn mock agent, send prompt, assert response |
 | Daemon returns proper HTTP 4xx/5xx status codes | Test: POST to init with invalid payload → 400, not 200 |
 | SQLite schema defined in exactly 1 location | Grep confirms `CREATE TABLE creators` appears in ≤1 non-generated file |
