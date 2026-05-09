@@ -11,9 +11,7 @@ use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
 use nexus_contracts::Creator;
-use nexus_sync::platform_client::{
-    classify_platform_error, PlatformClient, StagedPlatformError, VerifyStatus,
-};
+use nexus_sync::platform_client::{PlatformClient, VerifyStatus};
 use std::path::PathBuf;
 
 /// Default registration source for the CLI.
@@ -34,8 +32,6 @@ const EXPIRY_BUFFER_SECS: i64 = 10;
 
 /// Maximum number of auto-retry attempts for wrong answers (D4).
 const MAX_VERIFY_ATTEMPTS: u32 = 2;
-
-
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
@@ -643,7 +639,7 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
 mod tests {
     use super::*;
     use crate::auth::{AuthStore, CreatorAuthState};
-    use nexus_sync::platform_client::VerifyStatus;
+    use nexus_sync::platform_client::{classify_platform_error, StagedPlatformError, VerifyStatus};
 
     /// Helper: create an `AuthStore` with a known access token.
     fn store_with_token(creator_id: &str, token: &str) -> AuthStore {
@@ -1206,7 +1202,6 @@ mod tests {
     /// successfully completes both the register (B1) and verify (B2) stages.
     #[tokio::test]
     async fn creator_register_e2e_handles_platform_happy_path() {
-        use nexus_sync::platform_client::VerifyStatus;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1280,8 +1275,6 @@ mod tests {
     /// is shaped into a [`StagedPlatformError`] bucket.
     #[tokio::test]
     async fn creator_register_e2e_surfaces_platform_failure_context() {
-        use nexus_sync::platform_client::StagedPlatformError;
-
         // No mock server needed — UpstreamTimeout mode uses an unreachable URL
         let result = run_creator_register_e2e(
             "http://will-be-ignored.invalid", // Overridden by UpstreamTimeout mode

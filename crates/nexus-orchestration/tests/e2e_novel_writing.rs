@@ -350,7 +350,10 @@ fn template_syntax_error_returns_deterministic_failure() {
         &serde_json::json!({}),
     );
 
-    assert!(result.is_err(), "malformed template syntax should fail deterministically");
+    assert!(
+        result.is_err(),
+        "malformed template syntax should fail deterministically"
+    );
     let err = format!("{:#}", result.unwrap_err());
     assert!(
         err.contains("template") || err.contains("syntax"),
