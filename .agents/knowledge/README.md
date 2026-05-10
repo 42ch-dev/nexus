@@ -28,6 +28,8 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.12-delivery-compass-v1.md](v1.12-delivery-compass-v1.md) | V1.12 (2026-04-30) | V1.12 delivery compass: 收口迭代 — Preset Module Completion + V1.11+Warning Residual Sweep + Backlog Closure. 3 themes (A–C), 17 residuals + 1 doc fix, target: open residual = 0. | **Active** — InProgress |
 | [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md) | V1.13 (2026-05-06) | V1.13 delivery compass: OSS-forward — DF-11/DF-14 + DF-15 governance closure. | **Done** |
 | [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md) | V1.14 (2026-05-09) | V1.14 delivery compass: balanced runtime hardening — template/CLI harness + residual batch; **§0** 含 scope lock; QC/QA §9（实现阶段再启用）。 | **Active** |
+| [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md) | V1.15 (2026-05-10) | V1.15 delivery compass: orchestration-first — `embedded-skills/`、`$HOME/.nexus42/skills/` 同步、preset `recommended_skills`、移除 `research`/`manuscript`/`publish` CLI、`novel-writing` 路径与 sync 模块；与 `nexus-platform` V1.15 program compass **§5** 对齐。 | **Draft** |
+| [v1.16-prompt-skills-compass-v1.md](v1.16-prompt-skills-compass-v1.md) | V1.16 (2026-05-10) | V1.16 compass: prompt + embedded skills 质量迭代；**仅在 nexus V1.15 Done 后**启动（见 compass §0 gate）。 | **Draft (gated)** |
 
 ## Archived (`archived/knowledge/`)
 
