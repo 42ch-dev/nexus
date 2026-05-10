@@ -43,6 +43,15 @@ pub fn shared_global_db_path(home: &Path) -> PathBuf {
         .join("global_state.db")
 }
 
+/// `$HOME/.nexus42/skills/` — directory for synced embedded skills.
+///
+/// See `crates/nexus-orchestration/src/skill_sync.rs` for the sync logic that
+/// populates this directory.
+#[must_use]
+pub fn user_skills_dir(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("skills")
+}
+
 /// `$HOME/.nexus42/presets/` — base directory for user-installed presets.
 ///
 /// Each subdirectory under this path is expected to contain a `preset.yaml`.
@@ -176,6 +185,15 @@ mod tests {
         assert_eq!(
             user_preset_bundle_dir(&home, "my-strategy"),
             PathBuf::from("/fake/home/.nexus42/presets/my-strategy")
+        );
+    }
+
+    #[test]
+    fn user_skills_dir_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            user_skills_dir(&home),
+            PathBuf::from("/fake/home/.nexus42/skills")
         );
     }
 

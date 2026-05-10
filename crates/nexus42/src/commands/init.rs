@@ -235,6 +235,27 @@ async fn init_workspace(
     let nh = nexus_home()?;
     std::fs::create_dir_all(&nh)?;
 
+    // Best-effort: sync embedded skills to ~/.nexus42/skills/.
+    // Failure is non-fatal — log a warning and continue.
+    match nexus_orchestration::skill_sync::sync_embedded_skills(&nh) {
+        Ok(result) => {
+            if !result.installed.is_empty() {
+                println!("  Skills synced: {} installed", result.installed.len());
+            }
+            if !result.conflicts.is_empty() {
+                for c in &result.conflicts {
+                    eprintln!(
+                        "  nexus42: skill conflict — {} (user-modified, not overwritten)",
+                        c.skill_id
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("nexus42: skill sync skipped — {e}");
+        }
+    }
+
     let op_dir = crate::paths::operational_workspace_dir(&user_home, &creator_id, &workspace_slug);
 
     println!("✓ Workspace initialized: {workspace_name}");
