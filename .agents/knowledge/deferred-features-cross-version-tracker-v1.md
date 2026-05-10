@@ -176,7 +176,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Position |
 |----------|----------|
-| Program | **未登记** — 等待新 compass + `{PLAN_DIR}` plan；本 tracker §3.1/§3.2 继续承载长期 defer / backlog |
+| Program | **Compass 已登记、计划行未开** — 交付 SSOT：[v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)；平台程序：`nexus-platform` 仓 `.agents/knowledge/v1.15-program-compass-v1.md`。`status.json` **`plans[]` 仍为空**（`{PLAN_DIR}` 与 `plans[]` 由 PM 另择时机登记）。**规格与 knowledge 先行**：闭源仓 `v1-spec/cli-sync/cli-spec-v1.md` §0.2、§6.6 / §6.6B、§13 与 **ADR-023 / ADR-024**；本仓 knowledge 与 preset 契约随实现迭代。 |
 
 ### Items targeting V2.0+
 
