@@ -23,9 +23,6 @@ use tracing;
 
 use crate::embedded_skills;
 
-/// Subdirectory name under `nexus_home` for installed skills.
-const SKILLS_DIR_NAME: &str = "skills";
-
 /// Filename for the primary skill document within each skill directory.
 const SKILL_MD_FILENAME: &str = "SKILL.md";
 
@@ -98,7 +95,7 @@ pub enum SkillSyncError {
 /// Returns `SkillSyncError` if the skills directory cannot be created or if
 /// a file write fails.
 pub fn sync_embedded_skills(nexus_home: &Path) -> Result<SkillSyncResult, SkillSyncError> {
-    let skills_dir = nexus_home.join(SKILLS_DIR_NAME);
+    let skills_dir = nexus_home.join("skills");
 
     // Ensure the top-level skills directory exists.
     fs::create_dir_all(&skills_dir)?;
@@ -201,7 +198,7 @@ mod tests {
     /// Helper: resolve a skill's SKILL.md path under the temp dir.
     fn skill_md_path(temp: &tempfile::TempDir, skill_id: &str) -> PathBuf {
         temp.path()
-            .join(SKILLS_DIR_NAME)
+            .join("skills")
             .join(skill_id)
             .join(SKILL_MD_FILENAME)
     }
@@ -324,7 +321,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
 
         // Create a fake skill directory that doesn't correspond to any embedded skill.
-        let fake_dir = temp.path().join(SKILLS_DIR_NAME).join("fake-removed-skill");
+        let fake_dir = temp.path().join("skills").join("fake-removed-skill");
         fs::create_dir_all(&fake_dir).expect("create fake dir");
         fs::write(fake_dir.join(SKILL_MD_FILENAME), "fake content").expect("write fake file");
 
@@ -352,7 +349,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
 
         // Create the skills dir and then make it read-only.
-        let skills_dir = temp.path().join(SKILLS_DIR_NAME);
+        let skills_dir = temp.path().join("skills");
         fs::create_dir_all(&skills_dir).expect("create skills dir");
 
         // On Unix, set the directory to read-only (no write permission).
