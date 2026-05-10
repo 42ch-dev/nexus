@@ -101,12 +101,8 @@ pub async fn materialize_adr014_workspace(
     workspace_display_name: &str,
 ) -> Result<std::path::PathBuf> {
     let nexus_dir = workspace_nexus_dir(creative_root);
-    let stories_dir = creative_root.join("Stories");
-    let references_dir = creative_root.join("References");
 
     std::fs::create_dir_all(&nexus_dir)?;
-    std::fs::create_dir_all(&stories_dir)?;
-    std::fs::create_dir_all(&references_dir)?;
 
     let workspace_config = serde_json::json!({
         "name": workspace_display_name,

@@ -10,8 +10,6 @@ pub fn create_workspace_structure(path: &str) -> Result<()> {
     let nexus_dir = base.join(".nexus42");
 
     std::fs::create_dir_all(&nexus_dir)?;
-    std::fs::create_dir_all(base.join("Stories"))?;
-    std::fs::create_dir_all(base.join("References"))?;
 
     // Create .gitignore
     let gitignore = nexus_dir.join(".gitignore");
