@@ -10,6 +10,11 @@ max_tokens: 3000
 Using the brainstorm results, create a structured outline for the
 **{{preset.input.vibe}}** novel about **{{preset.input.topic}}**.
 
+**Output path**: Save the outline to:
+`Stories/{{preset.input.story_ref}}/outline.md`
+
+Create the directory `Stories/{{preset.input.story_ref}}/` if it does not exist.
+
 Structure:
 1. **Title** (working title)
 2. **Premise** (2-3 sentences)

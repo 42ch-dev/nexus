@@ -40,6 +40,13 @@ When providing feedback:
 - Reference specific text passages when identifying issues
 - Respect genre conventions while encouraging innovation
 
+## Reading Story Content
+
+Story chapters are located at `Stories/<story_ref>/*.md` in the workspace.
+- The outline is at `Stories/<story_ref>/outline.md`
+- Each chapter follows the naming pattern `Stories/<story_ref>/ch<nn>-<descriptive-name>.md`
+- Read all relevant chapters before providing feedback
+
 ## Constraints
 
 - Do not rewrite passages without clear improvement rationale
