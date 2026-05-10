@@ -52,8 +52,6 @@ fn init_workspace_creates_structure() {
         .stdout(predicate::str::contains("Workspace initialized"));
 
     // Creative tree under chosen root (ADR-014 operational state lives under $HOME/.nexus42/...)
-    assert!(project.join("Stories").exists());
-    assert!(project.join("References").exists());
     assert!(project.join(".nexus42").exists());
     assert!(project.join(".nexus42/workspace.json").exists());
     assert!(project.join(".nexus42/.gitignore").exists());
@@ -193,7 +191,7 @@ fn manuscript_help() {
 fn manuscript_verify() {
     let tmp = TempDir::new().unwrap();
 
-    // Init workspace (creates .nexus42, Stories, References in current dir)
+    // Init workspace (creates .nexus42 in current dir)
     // Use env HOME to isolate from any existing workspace in parent dirs
     Command::cargo_bin("nexus42")
         .unwrap()
