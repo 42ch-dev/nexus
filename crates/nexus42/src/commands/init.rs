@@ -265,8 +265,14 @@ async fn init_workspace(
     println!("  .nexus42/  — workspace configuration (creative root)");
     println!();
     println!("Next steps:");
-    println!("  nexus42 auth login    — authenticate with the platform");
-    println!("  nexus42 creator register — create a Creator entity");
+    println!("  nexus42 preset list           — see available workflow presets");
+    println!("  nexus42 schedule add --preset <id> --creator <id>");
+    println!("                                 — start a preset-driven workflow");
+    println!("  nexus42 auth login            — authenticate with the platform");
+    println!("  nexus42 creator register      — create a Creator entity");
+    println!();
+    println!("Workspace artifacts (stories, research reports) are created");
+    println!("automatically by preset workflows as needed.");
 
     Ok(())
 }
