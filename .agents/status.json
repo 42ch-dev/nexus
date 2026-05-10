@@ -1,7 +1,118 @@
 {
   "version": 1,
-  "updated_at": "2026-05-10T12:05:00Z",
-  "plans": [],
+  "updated_at": "2026-05-10T13:58:12Z",
+  "plans": [
+    {
+      "plan_id": "2026-05-10-v1.15-orchestration-first-pipeline",
+      "title": "V1.15 orchestration-first pipeline execution plan",
+      "file": ".agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md",
+      "status": "Todo",
+      "priority": "high",
+      "created_at": "2026-05-10T13:58:12Z",
+      "updated_at": "2026-05-10T13:58:12Z",
+      "owner": "architect",
+      "agents": [
+        "architect",
+        "fullstack-dev",
+        "fullstack-dev-2",
+        "qa-engineer",
+        "qc-specialist",
+        "qc-specialist-2",
+        "qc-specialist-3"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.15",
+        "orchestration",
+        "embedded-skills",
+        "novel-writing"
+      ],
+      "notes": [
+        "2026-05-10T13:58:12Z — Plan registered from .agents/knowledge/v1.15-delivery-compass-v1.md."
+      ],
+      "metadata": {
+        "working_branch": "feature/v1.15",
+        "phase": "plan",
+        "priority": "high",
+        "primary_spec": ".agents/knowledge/v1.15-delivery-compass-v1.md",
+        "plan_path": ".agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md",
+        "task_category": "docs",
+        "gates": {
+          "prepare_specify": "done",
+          "prepare_clarify": "done",
+          "prepare_plan": "this assignment",
+          "execute_plan_locked": "n/a",
+          "execute_tasks": "n/a",
+          "execute_implement": "this assignment",
+          "gate_decision": "go"
+        },
+        "batch_strategy": "B1 (O1-A..D) -> B2 (O2-A..C) -> B3 (O3-A..C); full QC/QA after all batches reach InReview",
+        "batches": [
+          {
+            "index": 1,
+            "id": "B1",
+            "covers": [
+              "T1",
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ],
+            "workstreams": [
+              "O1-A",
+              "O1-B",
+              "O1-C",
+              "O1-D"
+            ],
+            "status": "planned",
+            "owner": "fullstack-dev / fullstack-dev-2 / qa-engineer",
+            "exit_condition": "Embedded skills install/upgrade sync works and recommended_skills round-trips into ACP new-session context."
+          },
+          {
+            "index": 2,
+            "id": "B2",
+            "covers": [
+              "T6",
+              "T7",
+              "T8"
+            ],
+            "workstreams": [
+              "O2-A",
+              "O2-B",
+              "O2-C"
+            ],
+            "status": "planned",
+            "owner": "fullstack-dev / fullstack-dev-2 / qa-engineer",
+            "exit_condition": "Removed CLI groups are absent from help/dispatch and replacement preset entrypoints are tested."
+          },
+          {
+            "index": 3,
+            "id": "B3",
+            "covers": [
+              "T9",
+              "T10",
+              "T11"
+            ],
+            "workstreams": [
+              "O3-A",
+              "O3-B",
+              "O3-C"
+            ],
+            "status": "planned",
+            "owner": "architect / fullstack-dev / fullstack-dev-2",
+            "exit_condition": "novel-writing produces Stories/<StoryRef>/... layout and sync module contract/tests are review-ready."
+          }
+        ],
+        "cross_repo_gates": {
+          "G1": "V1.15 nexus compass and companion platform program compass scope aligned.",
+          "G2": "B1 merged with green cargo clippy / cargo test evidence on touched crates.",
+          "G3": "B2+B3 complete with status.json and residuals updated.",
+          "G4": "Tracker and deferred tracker V1.15 horizon prose aligned; platform CLI spec and ADR companion changes land before or with Done claim.",
+          "G5": "QC x3 plus QA on the registered plan diff range."
+        }
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
