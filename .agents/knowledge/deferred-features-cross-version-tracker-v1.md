@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.14 planned — balanced runtime hardening)
+**Status**: Active (V1.14 **platform Done**; OSS `plans[]` empty — **no** new nexus `{PLAN_DIR}` row; residual SSOT = 2 **accepted** backlog items)
 **Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.10), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.10) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-09
+**Last updated**: 2026-05-10
 
 ---
 
@@ -35,11 +35,8 @@
 
 | ID | Feature | First deferred | Target | Effort est. | Deferral history | Blocking reason / Notes |
 |----|---------|---------------|--------|-------------|-----------------|----------------------|
-| DF-11 | CoreContext Handlebars template engine binding | V1.6 | **V1.13** | L | V1.6→V1.7+→V1.8+→backlog→V1.13 | Data produced by V1.4 WS7, template rendering not yet integrated. Scoped as primary V1.13 feature theme. |
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture-v1.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
-| DF-14 | CLI+Platform e2e integration | V1.2 | **V1.13** | L | V1.2 (V1.3)→V1.3 (not in V1.3)→V2.0+→V1.13 | Cross-repo integration. Scoped in V1.13 with staged gates. |
-
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
 
 ### 3.2 Backlog (no committed target version)
@@ -58,25 +55,14 @@
 
 ### 3.3 Open tech-debt residuals (tracked in `status.json`)
 
-These are QC-found issues with a target version. See **`status.json` root `residual_findings`** for authoritative machine state.
+Authoritative machine state: **`status.json` root `residual_findings`**（`updated_at` **2026-05-10**）。`metadata.tech_debt_summary.total_open` is **0** — remaining rows below are **`decision: accept`** with `target_date: backlog` (QA-owned follow-ups, not blocking releases).
 
-| ID | Title | Severity | Target | Origin plan | Scope |
-|----|-------|----------|--------|-------------|-------|
-| R5 | `nix` crate unconditionally included — Windows build blocked | low | V2.0 | v1.5-stabilization | `crates/nexus-orchestration/Cargo.toml` |
-| R11 | `run_reset` uses `toml_edit` surgery on serialized policy TOML — fragile | low | V2.0 | v1.7-ws-abc-residual-closure | `crates/nexus-acp-host/src/policy.rs` |
-| R-WA-001 | `async fn in trait` requires MSRV 1.75+ — may limit platform compatibility | warning | Backlog | v1.8-ws-a-challenge-llm-fallback | `crates/nexus-acp-host/src/` |
-| R-WA-002 | No fallback metrics when LLM challenge stream fails silently | warning | post-M1 | v1.8-ws-a-challenge-llm-fallback | `crates/nexus-acp-host/src/` |
-| R-WC-002 | `--name` to `--name <flag>` migration UX gap (no deprecation warning) | warning | Backlog | v1.8-ws-c-name-positional-to-flag | `crates/nexus42/src/commands/` |
-| R-WC-003 | HashMap iteration order non-determinism in preset listing | warning | Backlog | v1.8-ws-c-name-positional-to-flag | `crates/nexus42/src/commands/` |
-| R-M1-W02 | Preset YAML schema validation missing (malformed presets accepted) | low | Backlog | v1.9-m1 | `crates/nexus-orchestration/` |
-| R-M1-W03 | Third-party preset symlink traversal not blocked | low | Backlog | v1.9-m1 | `crates/nexus-orchestration/` |
-| R-M1-W04 | `preset list` output truncates long descriptions without indicator | low | Backlog | v1.9-m1 | `crates/nexus42/src/commands/` |
-| R-M1-W05 | Missing CLI `preset validate` subcommand | low | Backlog | v1.9-m1 | `crates/nexus42/src/commands/` |
-| R-M1-W06 | Template_file relative path resolution inconsistent across OS | low | Backlog | v1.9-m1 | `crates/nexus42/src/commands/` |
-| R-M1-W07 | Orchestration engine single-threaded event loop — no concurrent preset execution | low | V2.0 (accepted) | v1.9-m1 | `crates/nexus-orchestration/` |
-| R-M1-W09 | Drift detect CLI output not machine-parseable | nit | Backlog (accepted) | v1.9-m1 | `crates/nexus42/src/commands/` |
-| R-V110-003 | Login error message exposes internal auth flow details | low | Backlog | v1.10-device-flow-login | `crates/nexus42/src/commands/` |
-| R-V110-004 | Device code TOCTOU race — verify_device_code called after code expiry | warning | V1.11 | v1.10-device-flow-login | `crates/nexus42d/src/auth/device_flow.rs` |
+| ID | Title | Severity | Decision | `target_date` | Origin plan | Scope |
+|----|-------|----------|----------|----------------|-------------|-------|
+| R-V113-005 | UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s) | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/tests/creator_register_e2e.rs` |
+| R-V113-007 | Pre-existing flaky test `auth::tests::get_returns_none_for_unknown_creator` | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/src/auth/mod.rs` |
+
+**Hygiene note (2026-05-10)**: Older tracker ids (R5, R11, R-WA-*, R-M1-W*, R-V110-*, …) are **not** present in root `residual_findings` today. Recover narrative detail from `archived/residuals/` / plan QC reports if you need historical provenance.
 
 > **Note**: `DEBT-RAND-073` (rand 0.7.3, blocked by wiremock) is **cancelled/accepted** — listed in §4 Closed.
 
@@ -105,6 +91,8 @@ These are QC-found issues with a target version. See **`status.json` root `resid
 | ~~DF-09~~ | Template_file path validation | V1.9 (WS-B) | Filesystem preset path traversal protection. |
 | ~~DF-10~~ | Starting lifecycle edge cases | V1.9 (WS-C) | HealthDegraded during Starting, Starting.exit in-flight cancel. |
 | ~~DF-17~~ | Third-party preset loading (`~/.nexus42/presets/`) + CLI init templates | V1.9 (WS-A) | Path corrected from `~/.nexus/strategies/` to `~/.nexus42/presets/`. |
+| ~~DF-11~~ | CoreContext Handlebars template engine binding | V1.13 | WS7 data path + template rendering integrated per V1.13 OSS-forward delivery. |
+| ~~DF-14~~ | CLI + Platform e2e integration | V1.13 | Staged cross-repo gates + harness per V1.13 OSS-forward delivery. |
 
 ### Tech-debt residuals shipped
 
@@ -175,23 +163,29 @@ These are QC-found issues with a target version. See **`status.json` root `resid
 | Governance closure | 1 | DF-15 (Cancelled — OpenAPI export) |
 | Tech-debt residuals | 0 | — |
 
-### V1.14 planning horizon (registered)
+### V1.14 delivery snapshot (registered)
 
 | Category | Position |
 |----------|----------|
 | Delivery SSOT | [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)（§0 scope lock **合并于**本 compass） |
-| Machine state | `status.json` `residual_findings` → `2026-05-06-v1.13-oss-forward-delivery`（无 V1.14 `plans[]` 登记） |
-| Residual batch 1 | `R-V113-002` (P0), `R-V113-003`, `R-V113-004`, `R-V113-001`; governance: `R-V113-007`, optional `R-V113-006` |
+| Machine state | `status.json` `plans[]` **空**；`residual_findings` 仅 **R-V113-005** / **R-V113-007**（accepted / backlog） |
+| Platform execution | **Done** — `nexus-platform` Plans **86–87**（rate-limit/JWKS + OpenAPI doc batch）；详见平台仓 `status.json` `metadata.tech_debt_summary.note` |
 | Cross-repo gates | Canonical: `nexus-platform/.agents/knowledge/v1.14-program-compass-v1.md` §5 |
+
+### V1.15+ horizon
+
+| Category | Position |
+|----------|----------|
+| Program | **未登记** — 等待新 compass + `{PLAN_DIR}` plan；本 tracker §3.1/§3.2 继续承载长期 defer / backlog |
 
 ### Items targeting V2.0+
 
 | Category | Count | IDs |
 |----------|-------|-----|
 | Features | 2 | DF-13 (Entitlements), DF-16 (Billing) |
-| Tech-debt residuals | 3 | R5 (nix crate Windows), R11 (toml_edit surgery), R-M1-W07 (single-threaded event loop) |
+| Tech-debt residuals | 0 | No V2.0-targeted rows in root `residual_findings` (2026-05-10); historical R5/R11/M1-W07 remain **knowledge / compass** follow-ups until re-filed |
 | Backlog | 1 | BL-08 (Social/marketing) |
-| **Total** | **6** | |
+| **Total** | **3** | |
 
 ### Open backlog (no committed target)
 
@@ -199,8 +193,8 @@ These are QC-found issues with a target version. See **`status.json` root `resid
 |----------|-------|-----|
 | Features | 1 | DF-03 (Preset registry/publish) |
 | Backlog features | 8 | BL-01 through BL-08 |
-| Tech-debt residuals | 10 | R-WA-001, R-WA-002, R-WC-002, R-WC-003, R-M1-W02 through R-M1-W06, R-M1-W09, R-V110-003 |
-| **Total** | **19** | |
+| Tech-debt (accepted backlog) | 2 | R-V113-005, R-V113-007（§3.3） |
+| **Total** | **11** | |
 
 ### Cancelled / Superseded (V1.7 planning, 2026-04-21)
 
@@ -265,4 +259,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: 2026-05-09. Status: Active. V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. V1.14: knowledge-only compass §0 + cross-repo gates; `status.json` residuals remain under `2026-05-06-v1.13-oss-forward-delivery`; no V1.14 plan registration.*
+*Created: 2026-04-21. Last updated: **2026-05-10**. Status: Active. V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. V1.14: **platform** Plans 86–87 **Done**; OSS `plans[]` 空；`residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）；§3.1 Open 表移除已交付 DF-11/DF-14。*
