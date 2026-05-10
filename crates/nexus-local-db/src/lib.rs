@@ -14,6 +14,7 @@ pub mod identity;
 pub mod memory_fragment;
 pub mod pending_review;
 pub mod soul_meta;
+pub mod world_stories;
 
 mod error;
 mod version;
@@ -48,6 +49,12 @@ pub use pending_review::{
 pub use memory_fragment::{
     create_fragment, delete_fragment, get_all_keywords, list_fragments, list_fragments_by_session,
     MemoryFragmentRecord,
+};
+
+// Re-export world_stories types
+pub use world_stories::{
+    create_world_story, delete_world_story, generate_id as generate_world_story_id, get_by_id,
+    list_by_world, update_chapters, update_status, WorldStory,
 };
 
 /// Runtime role for database initialization
