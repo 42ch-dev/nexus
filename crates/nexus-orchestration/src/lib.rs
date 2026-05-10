@@ -7,6 +7,7 @@ pub mod engine;
 pub mod preset;
 pub mod schedule;
 pub mod scheduler;
+pub mod skill_sync;
 pub mod storage;
 pub mod system_preset;
 pub mod system_preset_dir;

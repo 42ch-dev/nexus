@@ -108,12 +108,7 @@ pub fn list_embedded_skills() -> Vec<EmbeddedSkillEntry> {
                     )
                 })
                 .contents_utf8()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "embedded-skills/{} must be valid UTF-8",
-                        entry.source
-                    )
-                })
+                .unwrap_or_else(|| panic!("embedded-skills/{} must be valid UTF-8", entry.source))
                 .to_string();
 
             EmbeddedSkillEntry {
@@ -162,8 +157,11 @@ mod tests {
     #[test]
     fn embedded_skill_dir_is_not_empty() {
         let dir = embedded_skill_dir();
-        assert!(!dir.files().collect::<Vec<_>>().is_empty() || !dir.dirs().collect::<Vec<_>>().is_empty(),
-            "embedded skills directory must contain at least one file or subdirectory");
+        assert!(
+            !dir.files().collect::<Vec<_>>().is_empty()
+                || !dir.dirs().collect::<Vec<_>>().is_empty(),
+            "embedded skills directory must contain at least one file or subdirectory"
+        );
     }
 
     #[test]
@@ -181,7 +179,10 @@ mod tests {
         assert_eq!(skill.version, 1);
         assert!(!skill.description.is_empty());
         assert_eq!(skill.source, "novel-writing-assistant/SKILL.md");
-        assert!(!skill.content.is_empty(), "SKILL.md content must not be empty");
+        assert!(
+            !skill.content.is_empty(),
+            "SKILL.md content must not be empty"
+        );
         // Content should be a markdown file with a heading.
         assert!(
             skill.content.contains("# "),
