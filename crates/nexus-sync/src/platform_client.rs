@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn sanitize_redacts_sk_prefixed_key() {
-        let body = r#"api_key=sk-live-abcdef1234567890abcdef1234567890"#;
+        let body = r"api_key=sk-live-abcdef1234567890abcdef1234567890";
         let sanitized = sanitize_error_body(body);
         assert!(
             !sanitized.contains("sk-live-abcdef"),
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn sanitize_redacts_nexus_live_key() {
-        let body = r#"creator_api_key: nexus_live_abc123XYZ789"#;
+        let body = r"creator_api_key: nexus_live_abc123XYZ789";
         let sanitized = sanitize_error_body(body);
         assert!(
             !sanitized.contains("nexus_live_abc"),

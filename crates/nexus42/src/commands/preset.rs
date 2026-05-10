@@ -510,7 +510,7 @@ mod tests {
         let yaml_path = tmp.path().join("preset.yaml");
         std::fs::write(
             &yaml_path,
-            r#"
+            "
 preset:
   id: validate-test
   version: 1
@@ -526,11 +526,11 @@ states:
     next: b
   - id: b
     terminal: true
-"#,
+",
         )
         .expect("write yaml");
 
-        let result = validate_preset(yaml_path.to_str().unwrap());
+        let result = validate_preset(yaml_path.to_str().expect("valid utf-8 path"));
         assert!(result.is_ok(), "valid preset should pass: {result:?}");
     }
 
@@ -540,7 +540,7 @@ states:
         let yaml_path = tmp.path().join("preset.yaml");
         std::fs::write(&yaml_path, "not: valid: yaml: [").expect("write yaml");
 
-        let result = validate_preset(yaml_path.to_str().unwrap());
+        let result = validate_preset(yaml_path.to_str().expect("valid utf-8 path"));
         assert!(result.is_err());
         let msg = format!("{result:?}");
         assert!(

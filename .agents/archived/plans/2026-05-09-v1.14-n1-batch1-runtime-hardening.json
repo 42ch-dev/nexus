@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-05-09-v1.14-n1-batch1-runtime-hardening",
+  "title": "V1.14 N1 batch 1 runtime hardening",
+  "status": "Done",
+  "phase": "done",
+  "archived_at": "2026-05-10",
+  "metadata": {
+    "version": "v1.14",
+    "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch1-runtime-hardening.md",
+    "task_category": "logic",
+    "working_branch": "feature/v1.14-n1-batch1-runtime-hardening"
+  },
+  "residuals_closed": [
+    "R-V113-001",
+    "R-V113-002",
+    "R-V113-003",
+    "R-V113-004"
+  ]
+}

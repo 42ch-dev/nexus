@@ -2182,11 +2182,13 @@ states:
 
     #[test]
     fn reject_deeply_nested_yaml() {
+        use std::fmt::Write as _;
+
         // Build YAML with nesting deeper than the limit.
         let mut yaml = String::from("root:\n");
         for i in 1..=15 {
             let indent = "  ".repeat(i);
-            yaml.push_str(&format!("{indent}level{i}:\n"));
+            writeln!(yaml, "{indent}level{i}:").expect("writing to String should not fail");
         }
         // Add valid preset structure at the top level to make it parseable.
         yaml.push_str("preset:\n  id: deep\n  version: 1\n  kind: creator\n  description: test\n  requires_capabilities: []\n  initial: a\n  terminal: b\nstates:\n  - id: a\n    enter: []\n    exit_when: { kind: manual }\n    next: b\n  - id: b\n    terminal: true\n");
