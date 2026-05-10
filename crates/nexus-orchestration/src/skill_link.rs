@@ -167,11 +167,13 @@ mod tests {
 
         // Verify symlink exists and points correctly
         let link_path = workspace.join(".agents").join("skills").join("my-skill");
-        assert!(link_path.is_symlink() || link_path.is_dir(), "link should exist");
+        assert!(
+            link_path.is_symlink() || link_path.is_dir(),
+            "link should exist"
+        );
 
         // Verify content is readable through the symlink
-        let content =
-            fs::read_to_string(link_path.join("SKILL.md")).expect("read through symlink");
+        let content = fs::read_to_string(link_path.join("SKILL.md")).expect("read through symlink");
         assert_eq!(content, "skill content");
     }
 
@@ -230,8 +232,7 @@ mod tests {
             "skill-b".to_string(),
             "skill-c".to_string(),
         ];
-        let count =
-            ensure_role_skills(&workspace, &home_skills, &skills).expect("should succeed");
+        let count = ensure_role_skills(&workspace, &home_skills, &skills).expect("should succeed");
         assert_eq!(count, 3, "should have created 3 links");
 
         // Verify all three are readable
@@ -278,8 +279,12 @@ mod tests {
         assert_eq!(wrong_content, "wrong content");
 
         // Now call ensure_skill_link with the correct target
-        let result = ensure_skill_link(&workspace, &home_skills.join("correct-skill").parent().unwrap(), "target-skill")
-            .expect("should succeed");
+        let result = ensure_skill_link(
+            &workspace,
+            &home_skills.join("correct-skill").parent().unwrap(),
+            "target-skill",
+        )
+        .expect("should succeed");
 
         // On Unix this should recreate; the target dir is home_skills/correct-skill
         // but we passed home_skills as the base, so it looks for home_skills/target-skill
