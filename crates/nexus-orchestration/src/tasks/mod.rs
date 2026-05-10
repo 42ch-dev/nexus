@@ -1033,6 +1033,25 @@ impl Task for AcpPromptTask {
 // CoreContext template rendering (DF-11)
 // ---------------------------------------------------------------------------
 
+/// Static Handlebars registry — avoids per-call allocation overhead.
+///
+/// Uses `no_escape` mode to preserve plain-text fidelity in prompts
+/// (avoids HTML-encoding `&`, `<`, `>` etc.).
+static HANDLEBARS: std::sync::OnceLock<handlebars::Handlebars<'static>> =
+    std::sync::OnceLock::new();
+
+/// Return a reference to the shared Handlebars registry.
+///
+/// The registry is initialized once with `no_escape` mode and reused
+/// across all template renders for the process lifetime.
+fn handlebars_registry() -> &'static handlebars::Handlebars<'static> {
+    HANDLEBARS.get_or_init(|| {
+        let mut reg = handlebars::Handlebars::new();
+        reg.register_escape_fn(handlebars::no_escape);
+        reg
+    })
+}
+
 /// Render a handlebars template against a JSON payload.
 ///
 /// Used by the orchestration engine to substitute `CoreContext` values into
@@ -1047,10 +1066,9 @@ pub fn render_core_context_template(
     template: &str,
     payload: &serde_json::Value,
 ) -> anyhow::Result<String> {
-    let mut reg = handlebars::Handlebars::new();
-    reg.register_escape_fn(handlebars::no_escape);
-    let rendered = reg.render_template(template, payload)?;
-    Ok(rendered)
+    handlebars_registry()
+        .render_template(template, payload)
+        .map_err(Into::into)
 }
 
 /// Build a nested JSON object from flat dot-separated context keys.
@@ -1060,7 +1078,7 @@ pub fn render_core_context_template(
 /// to use nested path access (`{{core_context.version}}`).
 fn build_nested_payload(context: &graph_flow::Context) -> serde_json::Value {
     let Ok(serialized) = serde_json::to_value(context) else {
-        return serde_json::Value::Object(serde_json::Map::new());
+        return serde_json::json!({});
     };
 
     // serialized Context is {"data": {...}, "chat_history": {...}} —
@@ -1074,28 +1092,30 @@ fn build_nested_payload(context: &graph_flow::Context) -> serde_json::Value {
 
     let mut root = serde_json::Map::new();
     for (key, value) in &data {
-        set_nested(&mut root, key, value.clone());
+        insert_nested(&mut root, key, value.clone());
     }
     serde_json::Value::Object(root)
 }
 
-/// Set a value at a dot-separated path in a JSON map, creating intermediate
-/// objects as needed.
-fn set_nested(
+/// Insert a value at a dot-separated path, creating intermediate objects.
+fn insert_nested(
     map: &mut serde_json::Map<String, serde_json::Value>,
     key: &str,
     value: serde_json::Value,
 ) {
-    let mut parts: Vec<&str> = key.split('.').collect();
-    let leaf = parts.pop().expect("set_nested: key must not be empty");
+    let Some((prefix, leaf)) = key.rsplit_once('.') else {
+        map.insert(key.to_string(), value);
+        return;
+    };
+
     let mut current = map;
-    for part in &parts {
+    for segment in prefix.split('.') {
         let entry = current
-            .entry((*part).to_string())
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            .entry(segment.to_string())
+            .or_insert_with(|| serde_json::json!({}));
         current = entry
             .as_object_mut()
-            .expect("set_nested: intermediate path segment must be an object");
+            .expect("insert_nested: intermediate segment must be an object");
     }
     current.insert(leaf.to_string(), value);
 }
@@ -1426,5 +1446,20 @@ mod tests {
             ToolPolicy::from_str("unknown").unwrap(),
             ToolPolicy::AutoGrantReadOnly
         );
+    }
+
+    // ── R-V113-003: OnceLock determinism regression test ──────────
+
+    #[test]
+    fn core_context_template_repeated_renders_are_deterministic() {
+        let payload = serde_json::json!({ "world": { "title": "Nexus" } });
+
+        let first = render_core_context_template("World: {{world.title}}", &payload)
+            .expect("first render should succeed");
+        let second = render_core_context_template("World: {{world.title}}", &payload)
+            .expect("second render should succeed");
+
+        assert_eq!(first, "World: Nexus");
+        assert_eq!(second, first);
     }
 }

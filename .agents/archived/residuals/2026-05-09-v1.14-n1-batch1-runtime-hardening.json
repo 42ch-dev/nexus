@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-05-09-v1.14-n1-batch1-runtime-hardening",
+  "archived_at": "2026-05-10",
+  "entries": [
+    {
+      "id": "R-V113-001",
+      "title": "Pre-existing clippy format_push_string error in preset/loader.rs",
+      "severity": "low",
+      "decision": "fixed",
+      "closure_note": "Replaced push_str(format!(...)) with writeln! macro"
+    },
+    {
+      "id": "R-V113-002",
+      "title": "Test harness API pollution in CLI crate (pub items with #[allow(dead_code)])",
+      "severity": "medium",
+      "decision": "fixed",
+      "closure_note": "Moved TestMode, StagedE2eResult, run_creator_register_e2e into #[cfg(test)] mod tests; migrated staged harness tests from integration tests"
+    },
+    {
+      "id": "R-V113-003",
+      "title": "Handlebars registry per-call instantiation in render_core_context_template",
+      "severity": "low",
+      "decision": "fixed",
+      "closure_note": "Replaced per-call Handlebars::new() with OnceLock static registry"
+    },
+    {
+      "id": "R-V113-004",
+      "title": "Missing template syntax error test coverage in e2e_novel_writing.rs",
+      "severity": "low",
+      "decision": "fixed",
+      "closure_note": "Added template_syntax_error_returns_deterministic_failure test"
+    }
+  ]
+}

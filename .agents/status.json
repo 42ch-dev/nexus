@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-09T11:59:11Z",
+  "updated_at": "2026-05-10T12:05:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -35,52 +35,8 @@
       ]
     }
   },
-  "residual_findings": {
+    "residual_findings": {
     "2026-05-06-v1.13-oss-forward-delivery": [
-      {
-        "id": "R-V113-001",
-        "title": "Pre-existing clippy format_push_string error in preset/loader.rs",
-        "severity": "low",
-        "source": "QC1-F-W002 (qc1 report)",
-        "scope": "crates/nexus-orchestration/src/preset/loader.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "status.json metadata.tech_debt_summary"
-      },
-      {
-        "id": "R-V113-002",
-        "title": "Test harness API pollution in CLI crate (pub items with #[allow(dead_code)])",
-        "severity": "medium",
-        "source": "QC1-F-W001 (qc1 report)",
-        "scope": "crates/nexus42/src/commands/creator.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
-      },
-      {
-        "id": "R-V113-003",
-        "title": "Handlebars registry per-call instantiation in render_core_context_template",
-        "severity": "low",
-        "source": "QC3-W-001 (qc3 report)",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
-      },
-      {
-        "id": "R-V113-004",
-        "title": "Missing template syntax error test coverage in e2e_novel_writing.rs",
-        "severity": "low",
-        "source": "QC3-S-001 (qc3 report)",
-        "scope": "crates/nexus-orchestration/tests/e2e_novel_writing.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
-      },
       {
         "id": "R-V113-005",
         "title": "UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s)",
@@ -90,18 +46,7 @@
         "decision": "accept",
         "owner": "qa-engineer",
         "target_date": "backlog",
-        "tracking_link": "N/A"
-      },
-      {
-        "id": "R-V113-006",
-        "title": "build_nested_payload helper could use generic nested JSON builder",
-        "severity": "nit",
-        "source": "QC rev2 S-REV2-001",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
-        "decision": "defer",
-        "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "knowledge v1.14-delivery-compass-v1.md"
+        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-005-upstream-timeout-e2e-variance.md"
       },
       {
         "id": "R-V113-007",
@@ -111,8 +56,8 @@
         "scope": "crates/nexus42/src/auth/mod.rs",
         "decision": "accept",
         "owner": "fullstack-dev",
-        "target_date": "V1.14",
-        "tracking_link": "N/A"
+        "target_date": "backlog",
+        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-007-flaky-auth-unit-test.md"
       }
     ]
   }
