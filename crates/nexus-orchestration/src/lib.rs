@@ -2,6 +2,7 @@
 //! Authoritative design: `.agents/plans/knowledge/orchestration-engine-v1.md`.
 
 pub mod capability;
+pub mod embedded_skills;
 pub mod engine;
 pub mod preset;
 pub mod schedule;
