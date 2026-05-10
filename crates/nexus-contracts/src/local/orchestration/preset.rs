@@ -772,10 +772,7 @@ roles:
         assert_eq!(p.roles[0].description, "Primary content writer");
         assert_eq!(p.roles[0].system_prompt_file, "prompts/writer-system.md");
         assert_eq!(p.roles[0].recommended_skills.len(), 1);
-        assert_eq!(
-            p.roles[0].recommended_skills[0],
-            "novel-writing-assistant"
-        );
+        assert_eq!(p.roles[0].recommended_skills[0], "novel-writing-assistant");
         assert_eq!(p.roles[1].id, "reviewer");
         assert_eq!(p.roles[1].recommended_skills.len(), 1);
     }

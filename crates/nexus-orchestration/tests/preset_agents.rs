@@ -53,10 +53,7 @@ roles:
     assert_eq!(writer.description, "Content writer");
     assert_eq!(writer.system_prompt_file, "prompts/writer.md");
     assert_eq!(writer.recommended_skills.len(), 1);
-    assert_eq!(
-        writer.recommended_skills[0],
-        "novel-writing-assistant"
-    );
+    assert_eq!(writer.recommended_skills[0], "novel-writing-assistant");
 
     let reviewer = loaded.roles.iter().find(|r| r.id == "reviewer").unwrap();
     assert_eq!(reviewer.recommended_skills.len(), 1);
