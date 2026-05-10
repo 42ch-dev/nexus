@@ -22,6 +22,17 @@ When working on creative tasks:
 - Flag potential narrative inconsistencies proactively
 - Keep the user's creative vision as the primary guide
 
+## File Output Policy
+
+All story content MUST be written to the `Stories/<story_ref>/` directory within the workspace.
+
+- Each chapter is a separate `.md` file: `Stories/<story_ref>/ch<nn>-<descriptive-name>.md`
+  - Example: `Stories/my-first-novel/ch01-introduction.md`
+  - Example: `Stories/my-first-novel/ch02-awakening.md`
+- The `story_ref` is provided via core_context input as `{{preset.input.story_ref}}`
+- Create the directory if it does not exist
+- Save the outline as `Stories/<story_ref>/outline.md`
+
 ## Constraints
 
 - Do not generate content that violates content policy guidelines
