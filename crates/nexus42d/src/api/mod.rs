@@ -10,10 +10,7 @@
 //! - GET  /v1/local/workspace        — Workspace info
 //! - POST /v1/local/workspace/init   — Initialize workspace
 //! - GET  /v1/local/creators         — List creators (auth required)
-//! - GET  /v1/local/manuscript       — Manuscript status (auth required)
 //! - GET  /v1/local/references       — List reference sources (auth required)
-//! - POST /v1/local/publish/story — Publish manuscript story (platform proxy)
-//! - POST /v1/local/publish/history — Publish history (platform proxy)
 //! - GET  /v1/local/sync/status      — Sync status
 //! - POST /v1/local/acp/tool/execute — ACP tool execution (daemon-mediated)
 //! - GET  /v1/local/acp/sessions     — List ACP sessions
@@ -43,7 +40,7 @@ use tower_http::cors::CorsLayer;
 /// - workspace info & init
 ///
 /// **Auth-guarded routes** (require valid Bearer token):
-/// - creators, manuscript, references
+/// - creators, references
 pub fn create_router(state: WorkspaceState) -> Router {
     let runtime_routes = Router::new()
         .route("/v1/local/runtime/health", get(handlers::runtime::health))
@@ -73,13 +70,6 @@ pub fn create_router(state: WorkspaceState) -> Router {
             auth_middleware::require_auth,
         ));
 
-    let manuscript_routes = Router::new()
-        .route("/v1/local/manuscript", get(handlers::manuscript::status))
-        .route_layer(axum_mw::from_fn_with_state(
-            state.clone(),
-            auth_middleware::require_auth,
-        ));
-
     let reference_routes = Router::new()
         .route("/v1/local/references", get(handlers::references::list))
         .route_layer(axum_mw::from_fn_with_state(
@@ -103,13 +93,6 @@ pub fn create_router(state: WorkspaceState) -> Router {
     let explore_routes = Router::new()
         .route("/v1/local/explore/browse", post(handlers::explore::browse))
         .route("/v1/local/explore/search", post(handlers::explore::search));
-
-    let publish_routes = Router::new()
-        .route("/v1/local/publish/story", post(handlers::publish::story))
-        .route(
-            "/v1/local/publish/history",
-            post(handlers::publish::history),
-        );
 
     // ACP tool execution routes (unguarded — workspace validation in handler)
     let acp_routes = Router::new().route(
@@ -206,12 +189,10 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(monitoring_routes)
         .merge(workspace_routes)
         .merge(creator_routes)
-        .merge(manuscript_routes)
         .merge(reference_routes)
         .merge(sync_routes)
         .merge(world_routes)
         .merge(explore_routes)
-        .merge(publish_routes)
         .merge(acp_routes)
         .merge(session_routes)
         .merge(memory_routes)

@@ -127,10 +127,6 @@ fn build_test_app(state: WorkspaceState) -> Router {
             axum::routing::get(handlers::creators::list),
         )
         .route(
-            "/v1/local/manuscript",
-            axum::routing::get(handlers::manuscript::status),
-        )
-        .route(
             "/v1/local/references",
             axum::routing::get(handlers::references::list),
         )
@@ -213,20 +209,6 @@ async fn creators_list_endpoint() {
 }
 
 #[tokio::test]
-async fn manuscript_status_endpoint() {
-    let (state, _tmp) = create_test_state().await;
-    let app = build_test_app(state);
-
-    let server = TestServer::new(app).unwrap();
-    let response = server.get("/v1/local/manuscript").await;
-
-    response.assert_status_ok();
-    let body: serde_json::Value = response.json();
-    assert!(body["phase"].is_null());
-    assert!(body["active_manifest_id"].is_null());
-}
-
-#[tokio::test]
 async fn references_list_endpoint() {
     let (state, _tmp) = create_test_state().await;
     let app = build_test_app(state);
@@ -254,19 +236,17 @@ async fn concurrent_handler_requests_succeed() {
 
     let server = TestServer::new(app).unwrap();
 
-    // Fire 5 concurrent requests to different endpoints
-    let (health, workspace, creators, manuscript, references) = tokio::join!(
+    // Fire 4 concurrent requests to different endpoints
+    let (health, workspace, creators, references) = tokio::join!(
         async { server.get("/v1/local/runtime/health").await.status_code() },
         async { server.get("/v1/local/workspace").await.status_code() },
         async { server.get("/v1/local/creators").await.status_code() },
-        async { server.get("/v1/local/manuscript").await.status_code() },
         async { server.get("/v1/local/references").await.status_code() },
     );
 
     assert_eq!(health, 200, "health endpoint returned {health}");
     assert_eq!(workspace, 200, "workspace endpoint returned {workspace}");
     assert_eq!(creators, 200, "creators endpoint returned {creators}");
-    assert_eq!(manuscript, 200, "manuscript endpoint returned {manuscript}");
     assert_eq!(references, 200, "references endpoint returned {references}");
 }
 
@@ -297,10 +277,6 @@ fn build_extended_test_app(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/creators",
             axum::routing::get(handlers::creators::list),
-        )
-        .route(
-            "/v1/local/manuscript",
-            axum::routing::get(handlers::manuscript::status),
         )
         .route(
             "/v1/local/references",

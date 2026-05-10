@@ -11,7 +11,6 @@ mod config;
 mod context;
 mod db;
 mod errors;
-mod manuscript;
 mod paths;
 mod session_capture;
 
@@ -20,9 +19,9 @@ use commands::{
     acp_worker::AcpWorkerArgs, agent::AgentCommand, auth::AuthCommand, clone::CloneArgs,
     config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
-    identity::IdentityCommand, init::InitCommand, manuscript::ManuscriptCommand,
+    identity::IdentityCommand, init::InitCommand,
     memory::MemoryCommand, permission::PermissionCommand, policy::PolicyCommand,
-    preset::PresetCommand, publish::PublishCommand, research::ResearchCommand,
+    preset::PresetCommand,
     runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand, session::SessionCommand,
     soul::SoulCommand, sync::SyncCommand, system::SystemPresetCommand, world::WorldCommand,
 };
@@ -117,28 +116,10 @@ enum Commands {
         command: ExploreCommand,
     },
 
-    /// Manuscript publish workflow (platform via daemon)
-    Publish {
-        #[command(subcommand)]
-        command: PublishCommand,
-    },
-
     /// Manage Creator entities (register, pair, credentials)
     Creator {
         #[command(subcommand)]
         command: CreatorCommand,
-    },
-
-    /// Manage manuscript phases and lifecycle
-    Manuscript {
-        #[command(subcommand)]
-        command: ManuscriptCommand,
-    },
-
-    /// Research and reference source management
-    Research {
-        #[command(subcommand)]
-        command: ResearchCommand,
     },
 
     /// Context assembly (V1.1+)
@@ -262,12 +243,7 @@ async fn main() {
         Some(Commands::Explore { command }) => {
             commands::explore::run(command, &config, &cli.output_format).await
         }
-        Some(Commands::Publish { command }) => {
-            commands::publish::run(command, &config, &cli.output_format).await
-        }
         Some(Commands::Creator { command }) => commands::creator::run(command, &config).await,
-        Some(Commands::Manuscript { command }) => commands::manuscript::run(command, &config).await,
-        Some(Commands::Research { command }) => commands::research::run(command, &config).await,
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
         Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
         Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,

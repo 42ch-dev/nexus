@@ -262,8 +262,6 @@ async fn init_workspace(
     println!("  Creative root: {}", creative_root.display());
     println!("  Operational: {}", op_dir.display());
     println!("  state.db: {}", db_path.display());
-    println!("  Stories/   — manuscript files");
-    println!("  References/ — research sources");
     println!("  .nexus42/  — workspace configuration (creative root)");
     println!();
     println!("Next steps:");
