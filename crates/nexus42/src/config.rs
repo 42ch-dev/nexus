@@ -1091,7 +1091,7 @@ pub struct StrategyOverrides {
 ///
 /// This file provides persistent agent/model overrides per strategy and role.
 /// It is the middle layer in the priority resolution chain:
-/// CLI flags > user config > preset `recommended_models`.
+/// CLI flags > user config > preset `recommended_skills`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UserAgentsConfig {
@@ -1211,13 +1211,13 @@ pub fn parse_agent_ref(ref_str: &str) -> anyhow::Result<(String, String, Option<
 
 /// Resolve the effective agent and model for a role using priority chain.
 ///
-/// Priority: CLI `--agent-ref` overrides > user config > preset `recommended_models[0]`.
+/// Priority: CLI `--agent-ref` overrides > user config > preset `recommended_skills[0]`.
 ///
 /// # Arguments
 ///
 /// * `role_id` — the role to resolve (e.g. `"writer"`, `"reviewer"`)
 /// * `strategy_id` — the strategy context (e.g. `"novel-writing"`)
-/// * `preset_recommended` — from `PresetRoleDefinition.recommended_models` (from T6)
+/// * `preset_recommended` — from `PresetRoleDefinition.recommended_skills` (from T6)
 /// * `user_config` — loaded `UserAgentsConfig`
 /// * `cli_overrides` — map of `role_id` → `RoleOverride` from `--agent-ref` flags
 ///
@@ -1243,7 +1243,7 @@ pub fn resolve_agent_model<S: std::hash::BuildHasher>(
         return (user_override.agent.clone(), user_override.model.clone());
     }
 
-    // 3. Preset recommended_models[0] — may be "agent_id:model_name" or plain model name
+    // 3. Preset recommended_skills[0] — may be "agent_id:model_name" or plain model name
     if let Some(preset) = preset_recommended.first() {
         if let Some((agent, model)) = preset.split_once(':') {
             let agent = agent.to_string();

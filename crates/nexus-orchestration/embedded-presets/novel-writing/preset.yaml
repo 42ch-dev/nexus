@@ -11,22 +11,20 @@ preset:
   terminal: done
 
 # Multi-agent role definitions (WS-E §7)
-# Each role defines recommended agent:model pairs and a system prompt.
-# Runtime resolution: CLI --agent-ref > user config > recommended_models[0]
+# Each role defines recommended skills and a system prompt.
+# Skills injected into each role's ACP session for this preset.
 roles:
   - id: writer
     description: "Primary content writer for drafting narrative text"
     system_prompt_file: prompts/writer-system.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
-      - "gemini:gemini-2.5-pro"
+    recommended_skills:
+      - "novel-writing-assistant"
 
   - id: reviewer
     description: "Editor/reviewer for quality assessment and refinement"
     system_prompt_file: prompts/reviewer-system.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
-      - "codex-acp:o3"
+    recommended_skills:
+      - "novel-writing-assistant"
 
 states:
   - id: gathering

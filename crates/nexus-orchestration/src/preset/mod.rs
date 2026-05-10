@@ -503,10 +503,9 @@ states:
         assert!(loaded.roles.iter().any(|r| r.id == "writer"));
         assert!(loaded.roles.iter().any(|r| r.id == "reviewer"));
 
-        // Verify writer role has recommended_models
+        // Verify writer role has recommended_skills
         let writer = loaded.roles.iter().find(|r| r.id == "writer").unwrap();
-        assert_eq!(writer.recommended_models.len(), 2);
-        assert!(writer.recommended_models[0].contains(':'));
-        assert!(writer.recommended_models[1].contains(':'));
+        assert_eq!(writer.recommended_skills.len(), 1);
+        assert_eq!(writer.recommended_skills[0], "novel-writing-assistant");
     }
 }
