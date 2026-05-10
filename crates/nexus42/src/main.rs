@@ -1,7 +1,7 @@
 //! nexus42 — Nexus Creative World-Building CLI
 //!
-//! A command-line interface for managing creative worlds, manuscripts,
-//! and Creator entities through the Nexus platform.
+//! A command-line interface for managing creative worlds, Creators,
+//! and preset-driven orchestration workflows through the Nexus platform.
 
 mod api;
 mod auth;
@@ -19,9 +19,8 @@ use commands::{
     acp_worker::AcpWorkerArgs, agent::AgentCommand, auth::AuthCommand, clone::CloneArgs,
     config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
-    identity::IdentityCommand, init::InitCommand,
-    memory::MemoryCommand, permission::PermissionCommand, policy::PolicyCommand,
-    preset::PresetCommand,
+    identity::IdentityCommand, init::InitCommand, memory::MemoryCommand,
+    permission::PermissionCommand, policy::PolicyCommand, preset::PresetCommand,
     runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand, session::SessionCommand,
     soul::SoulCommand, sync::SyncCommand, system::SystemPresetCommand, world::WorldCommand,
 };
@@ -32,7 +31,10 @@ use commands::{
     name = "nexus42",
     version,
     about = "Nexus creative world-building CLI",
-    long_about = "Manage creative worlds, manuscripts, Creators, and research.\n\nUse `nexus42 init workspace` to start, or `nexus42 --help` for all commands.",
+    long_about = "Nexus creative world-building CLI — orchestration-first.\n\n\
+        Use `nexus42 schedule --preset <id>` to start a preset-driven workflow,\n\
+        or `nexus42 preset list` to see available presets.\n\
+        Run `nexus42 init workspace` to set up a new workspace.",
     propagate_version = true
 )]
 struct Cli {
@@ -156,7 +158,7 @@ enum Commands {
         command: PermissionCommand,
     },
 
-    /// User-installed preset management (init, list, validate)
+    /// Preset management (init, list, validate) — orchestration templates
     Preset {
         #[command(subcommand)]
         command: PresetCommand,
@@ -186,7 +188,7 @@ enum Commands {
         command: MemoryCommand,
     },
 
-    /// Schedule preset sessions (minimal; WS3)
+    /// Schedule preset-driven orchestration workflows
     Schedule {
         #[command(subcommand)]
         command: ScheduleCommand,
