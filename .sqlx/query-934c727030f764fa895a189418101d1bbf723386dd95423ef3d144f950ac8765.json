@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO world_stories (id, world_id, story_ref, workspace_path)\n          VALUES (?, ?, ?, ?)\n          ON CONFLICT(world_id, story_ref) DO UPDATE SET updated_at = datetime('now')\n          RETURNING\n            id as \"id!\",\n            world_id as \"world_id!\",\n            story_ref as \"story_ref!\",\n            workspace_path as \"workspace_path!\",\n            chapter_count as \"chapter_count!\",\n            first_chapter_id,\n            latest_chapter_id,\n            status as \"status!\",\n            created_at as \"created_at!\",\n            updated_at as \"updated_at!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "story_ref!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "workspace_path!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "chapter_count!",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "first_chapter_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "latest_chapter_id",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "934c727030f764fa895a189418101d1bbf723386dd95423ef3d144f950ac8765"
+}

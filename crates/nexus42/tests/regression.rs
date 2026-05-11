@@ -397,32 +397,6 @@ fn r5_platform_guard_blocks_sync_push() {
         .stderr(predicate::str::contains("not available in local_only mode"));
 }
 
-/// Regression R5: Platform publish works in `local_only` mode (help only, no daemon needed)
-#[test]
-fn r5_platform_guard_publish_help() {
-    let tmp = TempDir::new().unwrap();
-    let home = tmp.path();
-
-    // Set runtime mode to local_only
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("runtime-mode")
-        .arg("set")
-        .arg("local_only")
-        .env("HOME", home)
-        .assert()
-        .success();
-
-    // Publish help should still work (no actual platform call)
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("publish")
-        .arg("--help")
-        .env("HOME", home)
-        .assert()
-        .success();
-}
-
 /// Regression R5: Platform explore help works in `local_only` mode
 #[test]
 fn r5_platform_guard_explore_help() {

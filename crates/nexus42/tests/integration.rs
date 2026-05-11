@@ -16,7 +16,7 @@ fn cli_shows_help() {
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("auth"))
         .stdout(predicate::str::contains("creator"))
-        .stdout(predicate::str::contains("manuscript"));
+        .stdout(predicate::str::contains("preset"));
 }
 
 /// Test that CLI shows version
@@ -52,8 +52,6 @@ fn init_workspace_creates_structure() {
         .stdout(predicate::str::contains("Workspace initialized"));
 
     // Creative tree under chosen root (ADR-014 operational state lives under $HOME/.nexus42/...)
-    assert!(project.join("Stories").exists());
-    assert!(project.join("References").exists());
     assert!(project.join(".nexus42").exists());
     assert!(project.join(".nexus42/workspace.json").exists());
     assert!(project.join(".nexus42/.gitignore").exists());
@@ -171,90 +169,6 @@ fn creator_list_empty() {
         .env("HOME", tmp.path())
         .assert()
         .success();
-}
-
-/// Test manuscript command group
-#[test]
-fn manuscript_help() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("manuscript")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("status"))
-        .stdout(predicate::str::contains("phase"))
-        .stdout(predicate::str::contains("promote"))
-        .stdout(predicate::str::contains("verify"));
-}
-
-/// Test manuscript verify
-#[test]
-fn manuscript_verify() {
-    let tmp = TempDir::new().unwrap();
-
-    // Init workspace (creates .nexus42, Stories, References in current dir)
-    // Use env HOME to isolate from any existing workspace in parent dirs
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("init")
-        .arg("workspace")
-        .env("HOME", tmp.path())
-        .current_dir(tmp.path())
-        .assert()
-        .success();
-
-    // Create a manuscript (must run in workspace dir)
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("manuscript")
-        .arg("create")
-        .arg("Test Manuscript")
-        .env("HOME", tmp.path())
-        .current_dir(tmp.path())
-        .assert()
-        .success();
-
-    // Verify the manuscript
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("manuscript")
-        .arg("verify")
-        .arg("Test Manuscript")
-        .env("HOME", tmp.path())
-        .current_dir(tmp.path())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Verification passed"));
-}
-
-/// Test research command group
-#[test]
-fn research_help() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("research")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("scan"))
-        .stdout(predicate::str::contains("list"))
-        .stdout(predicate::str::contains("extract"));
-}
-
-/// Test research scan (no directory)
-#[test]
-fn research_scan_missing_dir() {
-    let tmp = TempDir::new().unwrap();
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("research")
-        .arg("scan")
-        .arg("--path")
-        .arg(tmp.path().join("nonexistent").to_str().unwrap())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("not found"));
 }
 
 /// Test daemon status (daemon not running)

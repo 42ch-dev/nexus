@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "id": "novel-writing-assistant",
+      "version": 1,
+      "description": "Core skill for novel-writing preset sessions — provides guidance on story structure, chapter drafting, character consistency, and narrative pacing for ACP agents.",
+      "source": "novel-writing-assistant/SKILL.md"
+    }
+  ]
+}

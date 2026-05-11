@@ -3,12 +3,10 @@
 pub mod acp;
 pub mod creators;
 pub mod explore;
-pub mod manuscript;
 pub mod memory;
 pub mod monitoring;
 pub mod orchestration;
 pub mod permissions;
-pub mod publish;
 pub mod references;
 pub mod runtime;
 pub mod sessions;

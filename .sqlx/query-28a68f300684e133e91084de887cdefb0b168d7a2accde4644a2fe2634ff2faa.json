@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE world_stories\n          SET status = ?, updated_at = datetime('now')\n          WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "28a68f300684e133e91084de887cdefb0b168d7a2accde4644a2fe2634ff2faa"
+}
