@@ -1,7 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-28T15:00:00Z",
+  "updated_at": "2026-05-11T12:30:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-10-v1.15-orchestration-first-pipeline",
+      "title": "V1.15 orchestration-first pipeline execution plan",
+      "done_at": "2026-05-11T12:30:00Z",
+      "plan_file": ".agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md",
+      "archived_record": ".agents/archived/plans/2026-05-10-v1.15-orchestration-first-pipeline.json"
+    },
     {
       "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
       "title": "V1.5 WS-A \u2014 Schedule FSM hardening",
