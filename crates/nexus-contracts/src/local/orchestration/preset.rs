@@ -6,10 +6,10 @@
 //! **NOT** in `schemas/` — this is a local type; `nexus-platform` never
 //! observes it over any wire channel.
 //!
-//! ## Roles and `recommended_models` (`WS-E` §7)
+//! ## Roles and `recommended_skills` (`WS-E` §7)
 //!
 //! Presets define role-based agent configurations:
-//! - `roles`: list of `PresetRoleDefinition` with `recommended_models`
+//! - `roles`: list of `PresetRoleDefinition` with `recommended_skills`
 //! - `GraphNode.agent`: optional role `ID` reference
 //!
 //! Backward compatible: presets without `roles` operate in single-agent mode.
@@ -46,7 +46,7 @@ pub struct PresetManifest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<SignalBinding>,
     /// Optional role definitions for multi-agent presets (WS-E §7).
-    /// Each role defines `recommended_models` and a `system_prompt_file`.
+    /// Each role defines `recommended_skills` and a `system_prompt_file`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<PresetRoleDefinition>,
 }
@@ -424,19 +424,18 @@ pub enum SignalActionKind {
 ///
 /// Defines a named agent role with:
 /// - A system prompt template (via `system_prompt_file`)
-/// - Recommended agent:model pairs (ordered list, first = default)
+/// - Recommended skill slugs (ordered list, first = primary)
 ///
-/// At runtime, the daemon resolves each role to an `acp_agent_id` + `model`
-/// using the priority resolution order (`CLI` > user config > `recommended_models`).
+/// At runtime, the daemon injects each skill into the role's ACP session
+/// using the priority resolution order (`CLI` > user config > `recommended_skills`).
 ///
 /// ```yaml
 /// roles:
 ///   - id: writer
 ///     description: "Primary content writer"
 ///     system_prompt_file: prompts/writer-system.md
-///     recommended_models:
-///       - "claude-acp:claude-sonnet-4-20250514"
-///       - "gemini:gemini-2.5-pro"
+///     recommended_skills:
+///       - "novel-writing-assistant"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetRoleDefinition {
@@ -446,11 +445,11 @@ pub struct PresetRoleDefinition {
     pub description: String,
     /// Path to system prompt template (relative to preset bundle root).
     pub system_prompt_file: String,
-    /// Ordered list of `acp_agent_id:model_name` pairs.
-    /// First entry is the default; subsequent entries are fallbacks.
-    /// Format validated by loader: must contain exactly one colon.
+    /// Ordered list of skill slugs to inject into the role's ACP session.
+    /// First entry is the primary skill; subsequent entries are supplementary.
+    /// Skill slugs must match entries in the embedded skill manifest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub recommended_models: Vec<String>,
+    pub recommended_skills: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +734,7 @@ states:
         }
     }
 
-    // ── WS-E T6: Roles and recommended_models ──────────────────────────────
+    // ── WS-E T6: Roles and recommended_skills ──────────────────────────────
 
     #[test]
     fn parse_preset_with_roles() {
@@ -759,27 +758,23 @@ roles:
   - id: writer
     description: "Primary content writer"
     system_prompt_file: prompts/writer-system.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
-      - "gemini:gemini-2.5-pro"
+    recommended_skills:
+      - "novel-writing-assistant"
   - id: reviewer
     description: "Content reviewer"
     system_prompt_file: prompts/reviewer-system.md
-    recommended_models:
-      - "codex-acp:o3"
+    recommended_skills:
+      - "novel-writing-assistant"
 "#;
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.roles.len(), 2);
         assert_eq!(p.roles[0].id, "writer");
         assert_eq!(p.roles[0].description, "Primary content writer");
         assert_eq!(p.roles[0].system_prompt_file, "prompts/writer-system.md");
-        assert_eq!(p.roles[0].recommended_models.len(), 2);
-        assert_eq!(
-            p.roles[0].recommended_models[0],
-            "claude-acp:claude-sonnet-4-20250514"
-        );
+        assert_eq!(p.roles[0].recommended_skills.len(), 1);
+        assert_eq!(p.roles[0].recommended_skills[0], "novel-writing-assistant");
         assert_eq!(p.roles[1].id, "reviewer");
-        assert_eq!(p.roles[1].recommended_models.len(), 1);
+        assert_eq!(p.roles[1].recommended_skills.len(), 1);
     }
 
     #[test]
@@ -806,8 +801,8 @@ roles:
   - id: writer
     description: "Writer"
     system_prompt_file: prompts/writer.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
+    recommended_skills:
+      - "novel-writing-assistant"
 inner_graphs:
   work_graph:
     nodes:
@@ -854,15 +849,15 @@ states:
     }
 
     #[test]
-    fn role_without_recommended_models_parses() {
-        // recommended_models is optional (can be empty).
-        // Loader will reject empty recommended_models during validation.
+    fn role_without_recommended_skills_parses() {
+        // recommended_skills is optional (can be empty).
+        // Loader will reject empty recommended_skills during validation.
         let yaml = r#"
 preset:
   id: empty-roles
   version: 1
   kind: creator
-  description: "Preset with empty recommended_models"
+  description: "Preset with empty recommended_skills"
   requires_capabilities: []
   initial: a
   terminal: b
@@ -880,7 +875,7 @@ roles:
 "#;
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.roles.len(), 1);
-        assert!(p.roles[0].recommended_models.is_empty());
+        assert!(p.roles[0].recommended_skills.is_empty());
     }
 
     #[test]

@@ -1,0 +1,101 @@
+# Research Preset — Output Contract
+#
+# This preset produces research artifacts at the following locations:
+# - Primary report: {$workspace_dir}/.nexus42/references/{$run_id}/report.md
+# - Supporting artifacts: {$workspace_dir}/.nexus42/references/{$run_id}/artifacts/
+#
+# {$run_id} is derived from the session ID or a timestamp-based identifier.
+# The output structure is created by the preset workflow, not by CLI commands.
+
+preset:
+  id: research
+  version: 1
+  kind: creator
+  description: "A research workflow: scan references, extract content, and produce structured reports"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+  initial: scanning
+  terminal: done
+
+# Roles for the research workflow
+roles:
+  - id: researcher
+    description: "Primary researcher for scanning and extracting reference materials"
+    system_prompt_file: prompts/researcher-system.md
+    recommended_skills:
+      - "novel-writing-assistant"
+
+  - id: analyst
+    description: "Data analyst for structuring and summarizing extracted content"
+    system_prompt_file: prompts/analyst-system.md
+    recommended_skills:
+      - "novel-writing-assistant"
+
+states:
+  - id: scanning
+    description: "Scan workspace References/ directory for reference sources"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/scanning.md
+          vars:
+            references_dir: "{{preset.input.references_dir}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/scanning-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: extracting
+
+  - id: extracting
+    description: "Extract content from discovered reference sources"
+    enter:
+      - kind: inner_graph
+        name: extraction_graph
+    exit_when:
+      kind: graph_complete
+    next: synthesizing
+
+  - id: synthesizing
+    description: "Synthesize extracted content into a structured research report"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/synthesizing.md
+          vars:
+            output_dir: "{{preset.input.output_dir}}"
+    exit_when:
+      kind: manual
+    next: done
+    context_update:
+      op:
+        kind: append
+      template_file: prompts/synthesizing-ctx-update.md
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  extraction_graph:
+    nodes:
+      - id: extract_text
+        kind: acp_prompt
+        agent: researcher
+        template_file: prompts/extract-text.md
+        tool_policy: auto_grant_read_only
+      - id: extract_metadata
+        kind: acp_prompt
+        agent: researcher
+        depends_on: [extract_text]
+        template_file: prompts/extract-metadata.md
+        tool_policy: auto_grant_read_only
+      - id: validate
+        kind: acp_prompt
+        agent: analyst
+        depends_on: [extract_metadata]
+        template_file: prompts/validate-extraction.md
+    output_binding: validate.text

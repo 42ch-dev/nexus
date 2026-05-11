@@ -175,7 +175,11 @@ pub enum ScheduleCommand {
 
 /// Wrapper for parsing `ScheduleCommand` in tests.
 #[derive(Debug, Parser)]
-#[command(subcommand_required = true, name = "schedule")]
+#[command(
+    subcommand_required = true,
+    name = "schedule",
+    about = "Schedule preset-driven orchestration workflows"
+)]
 struct ScheduleCli {
     #[command(subcommand)]
     command: ScheduleCommand,

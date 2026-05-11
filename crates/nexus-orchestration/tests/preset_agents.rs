@@ -1,7 +1,7 @@
 //! Tests for multi-agent preset role definitions (WS-E T6).
 //!
 //! Covers:
-//! - Role parsing and `recommended_models` format
+//! - Role parsing and `recommended_skills` format
 //! - Agent reference validation
 //! - Backward compatibility (no roles = single-agent mode)
 //! - Rejection of invalid configurations
@@ -16,7 +16,7 @@ fn test_capability_registry() -> nexus_orchestration::capability::CapabilityRegi
 // ── Role parsing tests ──────────────────────────────────────────────────────
 
 #[test]
-fn parse_roles_with_recommended_models() {
+fn parse_roles_with_recommended_skills() {
     let yaml = r#"
 preset:
   id: multi-agent-test
@@ -37,14 +37,13 @@ roles:
   - id: writer
     description: "Content writer"
     system_prompt_file: prompts/writer.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
-      - "gemini:gemini-2.5-pro"
+    recommended_skills:
+      - "novel-writing-assistant"
   - id: reviewer
     description: "Content reviewer"
     system_prompt_file: prompts/reviewer.md
-    recommended_models:
-      - "codex-acp:o3"
+    recommended_skills:
+      - "novel-writing-assistant"
 "#;
     let caps = test_capability_registry();
     let loaded = load_preset_from_str(yaml, &caps).unwrap();
@@ -53,22 +52,18 @@ roles:
     let writer = loaded.roles.iter().find(|r| r.id == "writer").unwrap();
     assert_eq!(writer.description, "Content writer");
     assert_eq!(writer.system_prompt_file, "prompts/writer.md");
-    assert_eq!(writer.recommended_models.len(), 2);
-    assert_eq!(
-        writer.recommended_models[0],
-        "claude-acp:claude-sonnet-4-20250514"
-    );
-    assert_eq!(writer.recommended_models[1], "gemini:gemini-2.5-pro");
+    assert_eq!(writer.recommended_skills.len(), 1);
+    assert_eq!(writer.recommended_skills[0], "novel-writing-assistant");
 
     let reviewer = loaded.roles.iter().find(|r| r.id == "reviewer").unwrap();
-    assert_eq!(reviewer.recommended_models.len(), 1);
-    assert_eq!(reviewer.recommended_models[0], "codex-acp:o3");
+    assert_eq!(reviewer.recommended_skills.len(), 1);
+    assert_eq!(reviewer.recommended_skills[0], "novel-writing-assistant");
 }
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn recommended_models_format_validation() {
-    // Valid format: "agent:model"
+fn recommended_skills_format_validation() {
+    // Valid format: skill slug
     let yaml_valid = r#"
 preset:
   id: valid-format
@@ -89,16 +84,16 @@ roles:
   - id: agent1
     description: "Agent"
     system_prompt_file: prompts/agent1.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
+    recommended_skills:
+      - "novel-writing-assistant"
 "#;
     let caps = test_capability_registry();
     assert!(load_preset_from_str(yaml_valid, &caps).is_ok());
 
-    // Invalid format: no colon
-    let yaml_no_colon = r#"
+    // Valid: simple single-char slug
+    let yaml_single_char = r#"
 preset:
-  id: no-colon
+  id: single-char
   version: 1
   kind: creator
   description: "test"
@@ -116,20 +111,15 @@ roles:
   - id: agent1
     description: "Agent"
     system_prompt_file: prompts/agent1.md
-    recommended_models:
-      - "claude-acp-without-colon"
+    recommended_skills:
+      - "a"
 "#;
-    let err = load_preset_from_str(yaml_no_colon, &caps).unwrap_err();
-    assert!(err
-        .problems()
-        .iter()
-        .any(|p| p.error.contains("invalid recommended_models format")
-            && p.error.contains("expected 'acp_agent_id:model_name'")));
+    assert!(load_preset_from_str(yaml_single_char, &caps).is_ok());
 
-    // Invalid format: multiple colons
-    let yaml_multi_colon = r#"
+    // Valid: hyphenated multi-word
+    let yaml_hyphenated = r#"
 preset:
-  id: multi-colon
+  id: hyphenated
   version: 1
   kind: creator
   description: "test"
@@ -147,19 +137,15 @@ roles:
   - id: agent1
     description: "Agent"
     system_prompt_file: prompts/agent1.md
-    recommended_models:
-      - "agent:model:extra"
+    recommended_skills:
+      - "my-skill-v2"
 "#;
-    let err = load_preset_from_str(yaml_multi_colon, &caps).unwrap_err();
-    assert!(err
-        .problems()
-        .iter()
-        .any(|p| p.error.contains("invalid recommended_models format")));
+    assert!(load_preset_from_str(yaml_hyphenated, &caps).is_ok());
 
-    // Invalid format: empty agent id
-    let yaml_empty_agent = r#"
+    // Invalid: uppercase
+    let yaml_uppercase = r#"
 preset:
-  id: empty-agent
+  id: uppercase
   version: 1
   kind: creator
   description: "test"
@@ -177,19 +163,19 @@ roles:
   - id: agent1
     description: "Agent"
     system_prompt_file: prompts/agent1.md
-    recommended_models:
-      - ":model-name"
+    recommended_skills:
+      - "UPPERCASE"
 "#;
-    let err = load_preset_from_str(yaml_empty_agent, &caps).unwrap_err();
+    let err = load_preset_from_str(yaml_uppercase, &caps).unwrap_err();
     assert!(err
         .problems()
         .iter()
-        .any(|p| p.error.contains("invalid recommended_models format")));
+        .any(|p| p.error.contains("invalid recommended_skills format")));
 
-    // Invalid format: empty model name
-    let yaml_empty_model = r#"
+    // Invalid: starts with digit
+    let yaml_starts_digit = r#"
 preset:
-  id: empty-model
+  id: starts-digit
   version: 1
   kind: creator
   description: "test"
@@ -207,18 +193,108 @@ roles:
   - id: agent1
     description: "Agent"
     system_prompt_file: prompts/agent1.md
-    recommended_models:
-      - "agent-id:"
+    recommended_skills:
+      - "123invalid"
 "#;
-    let err = load_preset_from_str(yaml_empty_model, &caps).unwrap_err();
+    let err = load_preset_from_str(yaml_starts_digit, &caps).unwrap_err();
     assert!(err
         .problems()
         .iter()
-        .any(|p| p.error.contains("invalid recommended_models format")));
+        .any(|p| p.error.contains("invalid recommended_skills format")));
+
+    // Invalid: contains spaces
+    let yaml_spaces = r#"
+preset:
+  id: has-spaces
+  version: 1
+  kind: creator
+  description: "test"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: agent1
+    description: "Agent"
+    system_prompt_file: prompts/agent1.md
+    recommended_skills:
+      - "has spaces"
+"#;
+    let err = load_preset_from_str(yaml_spaces, &caps).unwrap_err();
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_skills format")));
+
+    // Invalid: starts with hyphen
+    let yaml_starts_hyphen = r#"
+preset:
+  id: starts-hyphen
+  version: 1
+  kind: creator
+  description: "test"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: agent1
+    description: "Agent"
+    system_prompt_file: prompts/agent1.md
+    recommended_skills:
+      - "-starts-hyphen"
+"#;
+    let err = load_preset_from_str(yaml_starts_hyphen, &caps).unwrap_err();
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_skills format")));
+
+    // Invalid: ends with hyphen
+    let yaml_ends_hyphen = r#"
+preset:
+  id: ends-hyphen
+  version: 1
+  kind: creator
+  description: "test"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: agent1
+    description: "Agent"
+    system_prompt_file: prompts/agent1.md
+    recommended_skills:
+      - "ends-hyphen-"
+"#;
+    let err = load_preset_from_str(yaml_ends_hyphen, &caps).unwrap_err();
+    assert!(err
+        .problems()
+        .iter()
+        .any(|p| p.error.contains("invalid recommended_skills format")));
 }
 
 #[test]
-fn role_must_have_at_least_one_recommended_model() {
+fn role_must_have_at_least_one_recommended_skill() {
     let yaml = r#"
 preset:
   id: empty-recommended
@@ -244,7 +320,7 @@ roles:
     let err = load_preset_from_str(yaml, &caps).unwrap_err();
     assert!(err.problems().iter().any(|p| p
         .error
-        .contains("role must have at least one recommended_model")));
+        .contains("role must have at least one recommended_skill")));
 }
 
 #[test]
@@ -269,13 +345,13 @@ roles:
   - id: writer
     description: "Writer 1"
     system_prompt_file: prompts/writer1.md
-    recommended_models:
-      - "claude-acp:model"
+    recommended_skills:
+      - "writer-skill"
   - id: writer
     description: "Writer 2"
     system_prompt_file: prompts/writer2.md
-    recommended_models:
-      - "gemini:model"
+    recommended_skills:
+      - "reviewer-skill"
 "#;
     let caps = test_capability_registry();
     let err = load_preset_from_str(yaml, &caps).unwrap_err();
@@ -311,8 +387,8 @@ roles:
   - id: writer
     description: "Writer"
     system_prompt_file: prompts/writer.md
-    recommended_models:
-      - "claude-acp:model"
+    recommended_skills:
+      - "writer-skill"
 inner_graphs:
   work:
     nodes:
@@ -388,8 +464,8 @@ roles:
   - id: writer
     description: "Writer"
     system_prompt_file: prompts/writer.md
-    recommended_models:
-      - "claude-acp:model"
+    recommended_skills:
+      - "writer-skill"
 inner_graphs:
   work:
     nodes:
@@ -486,8 +562,8 @@ roles:
   - id: writer
     description: "Writer"
     system_prompt_file: prompts/writer.md
-    recommended_models:
-      - "claude-acp:model"
+    recommended_skills:
+      - "writer-skill"
 inner_graphs:
   work:
     nodes:
@@ -532,8 +608,8 @@ roles:
   - id: writer
     description: "Writer"
     system_prompt_file: prompts/writer.md
-    recommended_models:
-      - "claude-acp:claude-sonnet-4-20250514"
+    recommended_skills:
+      - "novel-writing-assistant"
 "#;
     let caps = test_capability_registry();
     let loaded = load_preset_from_str(yaml, &caps).unwrap();

@@ -192,13 +192,6 @@ mod tests {
                 super::require_auth,
             ));
 
-        let manuscript_routes = Router::new()
-            .route("/v1/local/manuscript", get(handlers::manuscript::status))
-            .route_layer(axum_mw::from_fn_with_state(
-                state.clone(),
-                super::require_auth,
-            ));
-
         let reference_routes = Router::new()
             .route("/v1/local/references", get(handlers::references::list))
             .route_layer(axum_mw::from_fn_with_state(
@@ -210,7 +203,6 @@ mod tests {
             .merge(runtime_routes)
             .merge(workspace_routes)
             .merge(creator_routes)
-            .merge(manuscript_routes)
             .merge(reference_routes)
             .with_state(state)
     }
@@ -238,18 +230,6 @@ mod tests {
             response.status_code(),
             401,
             "creators should return 401 without auth token"
-        );
-        assert_auth_error_body(&response);
-    }
-
-    #[tokio::test]
-    async fn manuscript_returns_401_without_token() {
-        let app = create_test_app().await;
-        let response = app.get("/v1/local/manuscript").await;
-        assert_eq!(
-            response.status_code(),
-            401,
-            "manuscript should return 401 without auth token"
         );
         assert_auth_error_body(&response);
     }

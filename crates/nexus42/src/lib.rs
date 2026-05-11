@@ -11,7 +11,6 @@ pub mod config;
 pub mod context;
 pub mod db;
 pub mod errors;
-pub mod manuscript;
 pub mod paths;
 pub mod session_capture;
 

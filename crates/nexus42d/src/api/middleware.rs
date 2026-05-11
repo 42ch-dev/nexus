@@ -139,13 +139,6 @@ mod tests {
                 middleware::require_workspace,
             ));
 
-        let manuscript_routes = Router::new()
-            .route("/v1/local/manuscript", get(handlers::manuscript::status))
-            .route_layer(axum_mw::from_fn_with_state(
-                state.clone(),
-                middleware::require_workspace,
-            ));
-
         let reference_routes = Router::new()
             .route("/v1/local/references", get(handlers::references::list))
             .route_layer(axum_mw::from_fn_with_state(
@@ -157,7 +150,6 @@ mod tests {
             .merge(runtime_routes)
             .merge(workspace_routes)
             .merge(creator_routes)
-            .merge(manuscript_routes)
             .merge(reference_routes)
             .with_state(state)
     }
@@ -226,18 +218,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manuscript_returns_409_without_init() {
-        let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/manuscript").await;
-        assert_eq!(
-            response.status_code(),
-            409,
-            "manuscript should return 409 without init"
-        );
-        assert_uninitialized_error_body(&response);
-    }
-
-    #[tokio::test]
     async fn references_returns_409_without_init() {
         let app = create_uninitialized_app().await;
         let response = app.get("/v1/local/references").await;
@@ -258,17 +238,6 @@ mod tests {
         assert!(
             response.status_code().is_success(),
             "creators should return 2xx after init, got {}",
-            response.status_code(),
-        );
-    }
-
-    #[tokio::test]
-    async fn manuscript_succeeds_after_init() {
-        let app = create_initialized_app().await;
-        let response = app.get("/v1/local/manuscript").await;
-        assert!(
-            response.status_code().is_success(),
-            "manuscript should return 2xx after init, got {}",
             response.status_code(),
         );
     }

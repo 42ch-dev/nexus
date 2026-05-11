@@ -101,12 +101,8 @@ pub async fn materialize_adr014_workspace(
     workspace_display_name: &str,
 ) -> Result<std::path::PathBuf> {
     let nexus_dir = workspace_nexus_dir(creative_root);
-    let stories_dir = creative_root.join("Stories");
-    let references_dir = creative_root.join("References");
 
     std::fs::create_dir_all(&nexus_dir)?;
-    std::fs::create_dir_all(&stories_dir)?;
-    std::fs::create_dir_all(&references_dir)?;
 
     let workspace_config = serde_json::json!({
         "name": workspace_display_name,
@@ -235,19 +231,44 @@ async fn init_workspace(
     let nh = nexus_home()?;
     std::fs::create_dir_all(&nh)?;
 
+    // Best-effort: sync embedded skills to ~/.nexus42/skills/.
+    // Failure is non-fatal — log a warning and continue.
+    match nexus_orchestration::skill_sync::sync_embedded_skills(&nh) {
+        Ok(result) => {
+            if !result.installed.is_empty() {
+                println!("  Skills synced: {} installed", result.installed.len());
+            }
+            if !result.conflicts.is_empty() {
+                for c in &result.conflicts {
+                    eprintln!(
+                        "  nexus42: skill conflict — {} (user-modified, not overwritten)",
+                        c.skill_id
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("nexus42: skill sync skipped — {e}");
+        }
+    }
+
     let op_dir = crate::paths::operational_workspace_dir(&user_home, &creator_id, &workspace_slug);
 
     println!("✓ Workspace initialized: {workspace_name}");
     println!("  Creative root: {}", creative_root.display());
     println!("  Operational: {}", op_dir.display());
     println!("  state.db: {}", db_path.display());
-    println!("  Stories/   — manuscript files");
-    println!("  References/ — research sources");
     println!("  .nexus42/  — workspace configuration (creative root)");
     println!();
     println!("Next steps:");
-    println!("  nexus42 auth login    — authenticate with the platform");
-    println!("  nexus42 creator register — create a Creator entity");
+    println!("  nexus42 preset list           — see available workflow presets");
+    println!("  nexus42 schedule add --preset <id> --creator <id>");
+    println!("                                 — start a preset-driven workflow");
+    println!("  nexus42 auth login            — authenticate with the platform");
+    println!("  nexus42 creator register      — create a Creator entity");
+    println!();
+    println!("Workspace artifacts (stories, research reports) are created");
+    println!("automatically by preset workflows as needed.");
 
     Ok(())
 }

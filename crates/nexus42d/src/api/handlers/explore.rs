@@ -29,7 +29,7 @@ pub struct ExploreLocalResponse {
     pub error: Option<String>,
 }
 
-const BROWSE_SCOPES: &[&str] = &["all", "worlds", "creators", "manuscripts"];
+const BROWSE_SCOPES: &[&str] = &["all", "worlds", "creators"];
 
 /// POST /v1/local/explore/browse
 pub async fn browse(

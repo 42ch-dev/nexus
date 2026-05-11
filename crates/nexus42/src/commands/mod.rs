@@ -35,8 +35,6 @@ pub mod identity;
 #[deny(clippy::unwrap_used)]
 pub mod init;
 #[deny(clippy::unwrap_used)]
-pub mod manuscript;
-#[deny(clippy::unwrap_used)]
 pub mod memory;
 #[deny(clippy::unwrap_used)]
 pub mod permission;
@@ -44,10 +42,6 @@ pub mod permission;
 pub mod policy;
 #[deny(clippy::unwrap_used)]
 pub mod preset;
-#[deny(clippy::unwrap_used)]
-pub mod publish;
-#[deny(clippy::unwrap_used)]
-pub mod research;
 #[deny(clippy::unwrap_used)]
 pub mod runtime_mode;
 #[deny(clippy::unwrap_used)]

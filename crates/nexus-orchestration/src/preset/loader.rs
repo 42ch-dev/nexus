@@ -588,32 +588,32 @@ fn validate_manifest(
         }
         seen_role_ids.insert(role.id.as_str());
 
-        // Check recommended_models format: must be "acp_agent_id:model_name"
-        for (j, rec_model) in role.recommended_models.iter().enumerate() {
-            if !validate_recommended_model_format(rec_model) {
+        // Check recommended_skills format: must be a valid skill slug
+        for (j, rec_skill) in role.recommended_skills.iter().enumerate() {
+            if !validate_skill_slug_format(rec_skill) {
                 problems.push(ValidationProblem {
-                    path: format!("roles[{i}].recommended_models[{j}]"),
+                    path: format!("roles[{i}].recommended_skills[{j}]"),
                     error: format!(
-                        "invalid recommended_models format '{rec_model}': expected 'acp_agent_id:model_name'"
+                        "invalid recommended_skills format '{rec_skill}': expected lowercase alphanumeric with hyphens (e.g. 'novel-writing-assistant')"
                     ),
                 });
             }
         }
 
-        // Reject empty recommended_models (loader should enforce at least one entry)
-        if !role.recommended_models.is_empty()
+        // Reject empty recommended_skills (loader should enforce at least one entry)
+        if !role.recommended_skills.is_empty()
             && manifest
                 .roles
                 .iter()
-                .any(|r| r.recommended_models.is_empty())
+                .any(|r| r.recommended_skills.is_empty())
         {
-            // Only report if there are other roles with models (mixed state)
-            // If ALL roles have empty recommended_models, that's a different error
+            // Only report if there are other roles with skills (mixed state)
+            // If ALL roles have empty recommended_skills, that's a different error
         }
-        if role.recommended_models.is_empty() {
+        if role.recommended_skills.is_empty() {
             problems.push(ValidationProblem {
-                path: format!("roles[{i}].recommended_models"),
-                error: "role must have at least one recommended_model".to_string(),
+                path: format!("roles[{i}].recommended_skills"),
+                error: "role must have at least one recommended_skill".to_string(),
             });
         }
     }
@@ -768,16 +768,33 @@ fn dfs_cycle2<'a>(
     None
 }
 
-/// Validate `recommended_models` format: "`acp_agent_id:model_name`".
+/// Validate `recommended_skills` format: skill slug pattern.
 ///
-/// Format must contain exactly one colon separating the agent ID and model name.
-/// Both parts must be non-empty.
-fn validate_recommended_model_format(s: &str) -> bool {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 2 {
+/// Pattern: `^[a-z][a-z0-9-]*[a-z0-9]$` (lowercase alphanumeric + hyphens,
+/// must start with letter, end with alphanumeric). Single-character slugs
+/// (e.g. `"a"`) are also valid.
+fn validate_skill_slug_format(s: &str) -> bool {
+    if s.is_empty() {
         return false;
     }
-    !parts[0].is_empty() && !parts[1].is_empty()
+    let bytes = s.as_bytes();
+    // Must start with a lowercase letter
+    if !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    // Single char is valid
+    if bytes.len() == 1 {
+        return true;
+    }
+    // Must end with alphanumeric
+    let last = bytes[bytes.len() - 1];
+    if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
+        return false;
+    }
+    // Middle chars: lowercase alphanumeric or hyphen
+    bytes[1..bytes.len() - 1]
+        .iter()
+        .all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 // ---------------------------------------------------------------------------

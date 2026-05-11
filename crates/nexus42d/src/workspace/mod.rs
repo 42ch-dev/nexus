@@ -379,8 +379,6 @@ impl WorkspaceState {
         let nexus_dir = workspace_dir.join(".nexus42");
 
         std::fs::create_dir_all(&nexus_dir)?;
-        std::fs::create_dir_all(workspace_dir.join("Stories"))?;
-        std::fs::create_dir_all(workspace_dir.join("References"))?;
 
         // Store workspace path in the database
         // SAFETY: single static INSERT into workspace_meta key-value table.

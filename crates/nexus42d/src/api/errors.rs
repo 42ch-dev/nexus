@@ -416,31 +416,4 @@ mod tests {
         let body = result.expect("result should be Ok");
         assert!(body.references.is_empty());
     }
-
-    /// Integration test: GET /v1/local/manuscript when called directly without workspace.
-    ///
-    /// Workspace initialization is enforced by middleware, not by the handler.
-    /// Calling the handler directly (bypassing middleware) returns Ok with None fields
-    /// because `sqlx::query_as` `fetch_optional` returns Ok(None) when no rows match.
-    ///
-    /// Middleware-level rejection is tested in `api::middleware::tests`.
-    #[tokio::test]
-    async fn manuscript_without_workspace_returns_ok_when_called_directly() {
-        use crate::api::handlers::manuscript::status;
-        use crate::test_utils::create_test_workspace;
-        use crate::workspace::WorkspaceState;
-        use axum::extract::State;
-
-        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-
-        let result = status(State(state)).await;
-        assert!(
-            result.is_ok(),
-            "Handler should succeed when called directly (no middleware)"
-        );
-        let body = result.expect("result should be Ok");
-        assert!(body.phase.is_none());
-        assert!(body.active_manifest_id.is_none());
-    }
 }
