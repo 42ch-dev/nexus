@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.14 **platform Done**; OSS `plans[]` empty — **no** new nexus `{PLAN_DIR}` row; residual SSOT = 2 **accepted** backlog items)
-**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.10), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
+**Status**: Active (V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
+**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.15), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
-**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.10) and the v1.2 reclassification matrix.
+**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.15) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-10
+**Last updated**: 2026-05-11
 
 ---
 
@@ -55,14 +55,14 @@
 
 ### 3.3 Open tech-debt residuals (tracked in `status.json`)
 
-Authoritative machine state: **`status.json` root `residual_findings`**（`updated_at` **2026-05-10**）。`metadata.tech_debt_summary.total_open` is **0** — remaining rows below are **`decision: accept`** with `target_date: backlog` (QA-owned follow-ups, not blocking releases).
+Authoritative machine state: **`status.json` root `residual_findings`**（`updated_at` **2026-05-11**）。`metadata.tech_debt_summary.total_open` is **0** — remaining rows below are **`decision: accept`** with `target_date: backlog` (QA-owned follow-ups, not blocking releases).
 
 | ID | Title | Severity | Decision | `target_date` | Origin plan | Scope |
 |----|-------|----------|----------|----------------|-------------|-------|
 | R-V113-005 | UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s) | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/tests/creator_register_e2e.rs` |
 | R-V113-007 | Pre-existing flaky test `auth::tests::get_returns_none_for_unknown_creator` | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/src/auth/mod.rs` |
 
-**Hygiene note (2026-05-10)**: Older tracker ids (R5, R11, R-WA-*, R-M1-W*, R-V110-*, …) are **not** present in root `residual_findings` today. Recover narrative detail from `archived/residuals/` / plan QC reports if you need historical provenance.
+**Hygiene note (2026-05-11)**: Older tracker ids (R5, R11, R-WA-*, R-M1-W*, R-V110-*, …) are **not** present in root `residual_findings` today. Recover narrative detail from `archived/residuals/` / plan QC reports if you need historical provenance.
 
 > **Note**: `DEBT-RAND-073` (rand 0.7.3, blocked by wiremock) is **cancelled/accepted** — listed in §4 Closed.
 
@@ -172,18 +172,32 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Platform execution | **Done** — `nexus-platform` Plans **86–87**（rate-limit/JWKS + OpenAPI doc batch）；详见平台仓 `status.json` `metadata.tech_debt_summary.note` |
 | Cross-repo gates | Canonical: `nexus-platform/.agents/knowledge/v1.14-program-compass-v1.md` §5 |
 
-### V1.15+ horizon
+### V1.15 delivery snapshot (Done)
 
 | Category | Position |
 |----------|----------|
-| Program | **Compass 已登记、计划行未开** — 交付 SSOT：[v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)；平台程序：`nexus-platform` 仓 `.agents/knowledge/v1.15-program-compass-v1.md`。`status.json` **`plans[]` 仍为空**（`{PLAN_DIR}` 与 `plans[]` 由 PM 另择时机登记）。**规格与 knowledge 先行**：闭源仓 `v1-spec/cli-sync/cli-spec-v1.md` §0.2、§6.6 / §6.6B、§13 与 **ADR-023 / ADR-024**；本仓 knowledge 与 preset 契约随实现迭代。 |
+| Delivery SSOT | [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)（§0 scope lock, D1-D7 architecture decisions） |
+| Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` unchanged — **R-V113-005** / **R-V113-007**（accepted / backlog） |
+| Plan | `2026-05-10-v1.15-orchestration-first-pipeline` — **Done** (archived to `archived/plans/`) |
+| PR | [#23](https://github.com/42ch-dev/nexus/pull/23) merged to `main` |
+| QC | Triple review: QC1 Request Changes (pre-existing auth test drift), QC2 Approve, QC3 Approve (3 warnings accepted) |
+| Cross-repo gates | G1–G3 done, G4 done (tracker aligned), G5 done (QC triple complete) |
+| New tracker items | None — all V1.15 work was new features, no DF-* items from tracker were in scope |
+| New residuals | None formally filed — QC3 warnings (skill_sync I/O, skill_link TOCTOU, sync_module unbounded memory, embedded_skills linear search) accepted in-place |
+
+### V1.16+ horizon
+
+| Category | Position |
+|----------|----------|
+| Program | **Compass registered** — delivery SSOT：[v1.16-prompt-skills-compass-v1.md](v1.16-prompt-skills-compass-v1.md). `status.json` `plans[]` **empty**. |
+| Next version (gated) | V1.16 prompt-skills compass exists; `{PLAN_DIR}` plan not yet opened. |
 
 ### Items targeting V2.0+
 
 | Category | Count | IDs |
 |----------|-------|-----|
 | Features | 2 | DF-13 (Entitlements), DF-16 (Billing) |
-| Tech-debt residuals | 0 | No V2.0-targeted rows in root `residual_findings` (2026-05-10); historical R5/R11/M1-W07 remain **knowledge / compass** follow-ups until re-filed |
+| Tech-debt residuals | 0 | No V2.0-targeted rows in root `residual_findings` (2026-05-11); historical R5/R11/M1-W07 remain **knowledge / compass** follow-ups until re-filed |
 | Backlog | 1 | BL-08 (Social/marketing) |
 | **Total** | **3** | |
 
@@ -246,6 +260,8 @@ Internal (this repo):
 - V1.10 delivery compass: [v1.10-delivery-compass-v1.md](v1.10-delivery-compass-v1.md)
 - V1.13 delivery compass: [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md)
 - V1.14 delivery compass: [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)
+- V1.15 delivery compass: [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)
+- V1.16 prompt-skills compass: [v1.16-prompt-skills-compass-v1.md](v1.16-prompt-skills-compass-v1.md)
 - Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
 - ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
 - Creator schedule & core context: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)
@@ -259,4 +275,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-10**. Status: Active. V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. V1.14: **platform** Plans 86–87 **Done**; OSS `plans[]` 空；`residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）；§3.1 Open 表移除已交付 DF-11/DF-14。*
+*Created: 2026-04-21. Last updated: **2026-05-11**. Status: Active. V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）。*
