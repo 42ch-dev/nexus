@@ -416,5 +416,4 @@ mod tests {
         let body = result.expect("result should be Ok");
         assert!(body.references.is_empty());
     }
-
 }
