@@ -128,9 +128,7 @@ async fn get_presets_returns_system_maintenance() {
     assert!(presets
         .iter()
         .any(|p| p.as_str().unwrap() == "novel-writing"));
-    assert!(presets
-        .iter()
-        .any(|p| p.as_str().unwrap() == "research"));
+    assert!(presets.iter().any(|p| p.as_str().unwrap() == "research"));
 }
 
 #[tokio::test]
