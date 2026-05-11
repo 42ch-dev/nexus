@@ -189,8 +189,8 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Position |
 |----------|----------|
-| Program | **Compass registered** — delivery SSOT：[v1.16-prompt-skills-compass-v1.md](v1.16-prompt-skills-compass-v1.md). `status.json` `plans[]` **empty**. |
-| Next version (gated) | V1.16 prompt-skills compass exists; `{PLAN_DIR}` plan not yet opened. |
+| Program | **Compass registered** — delivery SSOT：[v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md). `status.json` `plans[]` **empty**. |
+| Next version (gated) | V1.17 prompt-skills compass exists；`{PLAN_DIR}` 计划尚未开启。 |
 
 ### Items targeting V2.0+
 
@@ -261,7 +261,8 @@ Internal (this repo):
 - V1.13 delivery compass: [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md)
 - V1.14 delivery compass: [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)
 - V1.15 delivery compass: [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)
-- V1.16 prompt-skills compass: [v1.16-prompt-skills-compass-v1.md](v1.16-prompt-skills-compass-v1.md)
+- V1.16 delivery compass: [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md)
+- V1.17 prompt-skills compass: [v1.17-prompt-skills-compass-v1.md](v1.17-prompt-skills-compass-v1.md)
 - Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
 - ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
 - Creator schedule & core context: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)
