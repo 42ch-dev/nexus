@@ -4,9 +4,9 @@ Dev-process knowledge for the Nexus project. These documents are **inputs to** o
 
 For the distinction between this directory and user-facing `docs/`, see [AGENTS.md](../../../AGENTS.md) (same file explains the content boundary between `docs/` and `.agents/knowledge/`).
 
-### Current focus (as of 2026-05-10)
+### Current focus (as of 2026-05-11)
 
-- **Active delivery track**: **V1.15** — orchestration-first preset pipeline (embedded skills, workspace artifacts, ACP **`recommended_skills`**, removal of legacy `research` / `manuscript` / `publish` CLI groups, **`novel-writing`** layout + sync module). SSOT **[v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)** (**Active**). Platform program intent and cross-repo gates: companion **V1.15 program compass** in the private `nexus-platform` repo (same filename under its `.agents/knowledge/`).
+- **Active delivery track**: **V1.16** — Big-bang V2 repositioning（ACP-first 控制面 + Creator 本地知识面 + 命令 IA 重排）。SSOT **[v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md)** (**Draft / Active planning**).
 - **`status.json`**: `plans[]` **empty**; root `residual_findings` holds **2** accepted low items (R-V113-005 / R-V113-007, backlog). No hot `{PLAN_DIR}` row required to start V1.15 spec-aligned implementation work.
 - **Cross-repo spec**: authoritative **`cli-spec-v1.md`** (CLI / workspace semantics) and **ADR-023 / ADR-024** live in the **private platform repository**’s frozen `v1-spec/` tree (not shipped inside this clone); wire contracts remain **`schemas/`** here.
 
@@ -35,7 +35,8 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 | [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md) | V1.13 (2026-05-06) | V1.13 delivery compass: OSS-forward — DF-11/DF-14 + DF-15 governance closure. | **Done** |
 | [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md) | V1.14 (2026-05-09) | V1.14 delivery compass: balanced runtime hardening — OSS-side template/CLI harness + residual narrative; **§0** scope lock. Cross-repo closure led by **platform** Plans **86–87**; this repo had **no** new `plans[]` row. | **Active** — planning SSOT in file; cross-repo **V1.14 Done** per program timeline |
 | [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md) | V1.15 (2026-05-10) | V1.15 delivery compass: orchestration-first — `embedded-skills/` → **`$HOME/.nexus42/skills/`**, preset **`recommended_skills`**, hard-remove **`research` / `manuscript` / `publish`** CLI groups, **`novel-writing`** paths + **sync** submodule; align with platform program compass **§5** (G1–G5). | **Active** — platform `v1-spec` **documentation** for V1.15 (`cli-spec` + ADR-023/024) updated ahead of Rust delivery; `{PLAN_DIR}` / `plans[]` still optional |
-| [v1.16-prompt-skills-compass-v1.md](v1.16-prompt-skills-compass-v1.md) | V1.16 (2026-05-10) | V1.16 compass: prompt + embedded skills 质量迭代；**仅在 nexus V1.15 Done 后**启动（见 compass §0 gate）。 | **Draft (gated)** |
+| [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md) | V1.16 (2026-05-11) | V1.16 delivery compass：Big-bang V2（ACP-first control plane + Creator-owned knowledge plane + 命令面重排）。 | **Draft (active planning SSOT)** |
+| [v1.17-prompt-skills-compass-v1.md](v1.17-prompt-skills-compass-v1.md) | V1.17 (2026-05-11) | V1.17 compass：prompt + embedded skills 质量迭代；**仅在 V1.16 Done 后**启动。 | **Draft (gated)** |
 
 ## Archived (`archived/knowledge/`)
 
