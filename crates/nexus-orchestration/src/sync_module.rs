@@ -304,8 +304,7 @@ mod tests {
         write_file(&story_dir, "ch01.md", "test content");
 
         let stories = discover_stories(workspace.path());
-        let bundle = build_story_bundle("w1", &stories[0], workspace.path())
-            .expect("bundle");
+        let bundle = build_story_bundle("w1", &stories[0], workspace.path()).expect("bundle");
 
         // Verify hash matches manual SHA-256 of "test content"
         let expected = format!("{:x}", Sha256::digest(b"test content"));

@@ -144,10 +144,7 @@ pub async fn list_by_world(
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
-pub async fn get_by_id(
-    pool: &SqlitePool,
-    id: &str,
-) -> Result<Option<WorldStory>, LocalDbError> {
+pub async fn get_by_id(pool: &SqlitePool, id: &str) -> Result<Option<WorldStory>, LocalDbError> {
     let row = sqlx::query!(
         r#"SELECT
             id as "id!",
