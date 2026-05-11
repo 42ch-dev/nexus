@@ -11,9 +11,6 @@ cargo build --release
 # Show help
 ./target/release/nexus42 --help
 
-# Initialize a workspace
-./target/release/nexus42 init workspace "My Novel"
-
 # Start daemon
 ./target/release/nexus42 daemon start
 ```
