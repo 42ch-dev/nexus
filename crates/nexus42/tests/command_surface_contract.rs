@@ -38,11 +38,8 @@ fn current_state_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // All user-visible commands after Plan 3 (10 more legacy commands hidden, platform added)
-    let expected_commands = [
-        "acp", "clone", "creator", "daemon", "init", "memory", "platform", "schedule", "soul",
-        "sync", "system", "world",
-    ];
+    // All user-visible commands after Plan 4 (6 visible groups, 6 more hidden)
+    let expected_commands = ["acp", "creator", "daemon", "platform", "sync", "system"];
 
     for cmd in &expected_commands {
         assert!(
@@ -67,6 +64,12 @@ fn current_state_visible_command_groups() {
         "identity",
         "preset",
         "runtime-mode",
+        "soul",
+        "memory",
+        "init",
+        "clone",
+        "world",
+        "schedule",
     ];
     for hidden in &hidden_commands {
         // These should not appear as visible top-level commands
@@ -77,11 +80,11 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify count: 12 user-visible commands
+    // Verify count: 6 user-visible commands
     let visible_count = expected_commands.len();
     assert_eq!(
-        visible_count, 12,
-        "Current-state snapshot: expected exactly 12 user-visible commands, found {visible_count}"
+        visible_count, 6,
+        "Current-state snapshot: expected exactly 6 user-visible commands, found {visible_count}"
     );
 }
 
@@ -247,10 +250,8 @@ fn current_state_system_subcommands() {
 /// V2 Target: Only 6 user-visible top-level command groups:
 /// `daemon`, `acp`, `creator`, `sync`, `platform`, `system`
 ///
-/// Un-ignore after Plans 2–4 have restructured the CLI.
-/// Before un-ignoring, also add backward-compat alias tests if needed.
+/// Un-ignored by Plans 2-4 completing the CLI restructuring.
 #[test]
-#[ignore = "V2 target — un-ignore after Plans 2-4 complete the CLI restructuring"]
 fn v2_only_six_visible_command_groups() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -398,9 +399,8 @@ fn v2_target_acp_subcommands() {
 ///   credentials (rotate), workspace (list/create/use/init/clone/link/unlink/status),
 ///   soul, memory, kb
 ///
-/// Un-ignore after Plan 4 extends the `creator` group.
+/// Un-ignored by Plan 4.
 #[test]
-#[ignore = "V2 target — un-ignore after Plan 4 extends creator group"]
 fn v2_target_creator_subcommands() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -439,9 +439,8 @@ fn v2_target_creator_subcommands() {
 ///
 /// Expected: pull, push, status, retry, resolve
 ///
-/// Un-ignore after Plans 2–3 consolidate sync.
+/// Un-ignored by Plans 2-4 consolidating sync.
 #[test]
-#[ignore = "V2 target — un-ignore after Plans 2-3 consolidate sync"]
 fn v2_target_sync_subcommands() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
