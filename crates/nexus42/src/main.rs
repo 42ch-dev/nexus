@@ -20,9 +20,10 @@ use commands::{
     config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
     identity::IdentityCommand, init::InitCommand, memory::MemoryCommand,
-    permission::PermissionCommand, policy::PolicyCommand, preset::PresetCommand,
-    runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand, session::SessionCommand,
-    soul::SoulCommand, sync::SyncCommand, system::SystemPresetCommand, world::WorldCommand,
+    permission::PermissionCommand, platform::PlatformCommand, policy::PolicyCommand,
+    preset::PresetCommand, runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand,
+    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, system::SystemCommand,
+    world::WorldCommand,
 };
 
 /// Nexus CLI — creative world-building command-line interface
@@ -58,7 +59,8 @@ enum Commands {
         command: InitCommand,
     },
 
-    /// Authentication (login/logout/status)
+    /// Authentication (deprecated: use `nexus42 platform auth`)
+    #[command(hide = true)]
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
@@ -70,19 +72,22 @@ enum Commands {
         command: DaemonCommand,
     },
 
-    /// Database status and management
+    /// Database status and management (deprecated: use `nexus42 system db`)
+    #[command(hide = true)]
     Db {
         #[command(subcommand)]
         command: DbCommand,
     },
 
-    /// Internal debugging utilities
+    /// Internal debugging utilities (deprecated: use `nexus42 system debug`)
+    #[command(hide = true)]
     Debug {
         #[command(subcommand)]
         command: DebugCommand,
     },
 
-    /// Diagnostic health checks
+    /// Diagnostic health checks (deprecated: use `nexus42 system doctor`)
+    #[command(hide = true)]
     Doctor {
         #[command(subcommand)]
         command: DoctorCommand,
@@ -106,13 +111,15 @@ enum Commands {
         args: CloneArgs,
     },
 
-    /// Configuration file management
+    /// Configuration file management (deprecated: use `nexus42 system config`)
+    #[command(hide = true)]
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
     },
 
-    /// Explore browse and search (read-only, platform via daemon)
+    /// Explore browse and search (deprecated: use `nexus42 platform explore`)
+    #[command(hide = true)]
     Explore {
         #[command(subcommand)]
         command: ExploreCommand,
@@ -124,7 +131,8 @@ enum Commands {
         command: CreatorCommand,
     },
 
-    /// Context assembly (V1.1+)
+    /// Context assembly (deprecated: use `nexus42 platform context`)
+    #[command(hide = true)]
     Context {
         #[command(subcommand)]
         command: ContextCommand,
@@ -161,19 +169,22 @@ enum Commands {
         command: PermissionCommand,
     },
 
-    /// Preset management (init, list, validate) — orchestration templates
+    /// Preset management (deprecated: use `nexus42 system preset` or `nexus42 preset`)
+    #[command(hide = true)]
     Preset {
         #[command(subcommand)]
         command: PresetCommand,
     },
 
-    /// Local identity management (`local_only` mode)
+    /// Local identity management (deprecated: use `nexus42 system identity`)
+    #[command(hide = true)]
     Identity {
         #[command(subcommand)]
         command: IdentityCommand,
     },
 
-    /// Runtime mode management (`local_only` / `local_first` / `cloud_enhanced`)
+    /// Runtime mode management (deprecated: use `nexus42 system runtime-mode`)
+    #[command(hide = true)]
     RuntimeMode {
         #[command(subcommand)]
         command: RuntimeModeCommand,
@@ -197,10 +208,16 @@ enum Commands {
         command: ScheduleCommand,
     },
 
-    /// System management (presets, diagnostics)
+    /// System management (presets, diagnostics, config, identity, etc.)
     System {
         #[command(subcommand)]
-        command: SystemPresetCommand,
+        command: SystemCommand,
+    },
+
+    /// Platform interaction (auth, explore, context, publish)
+    Platform {
+        #[command(subcommand)]
+        command: PlatformCommand,
     },
 }
 
@@ -262,6 +279,9 @@ async fn main() {
         Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
         Some(Commands::Schedule { command }) => commands::schedule::run(command, &config).await,
         Some(Commands::System { command }) => commands::system::run(command, &config).await,
+        Some(Commands::Platform { command }) => {
+            commands::platform::run(command, &config, &cli.output_format).await
+        }
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

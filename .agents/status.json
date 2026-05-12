@@ -48,7 +48,9 @@
     {
       "plan_id": "2026-05-12-v1.16-system-platform-topology",
       "title": "V1.16 system and platform command consolidation",
-      "status": "Todo",
+      "status": "InProgress",
+      "started_at": "2026-05-12T19:30:00Z",
+      "working_branch": "feature/v1.16-system-platform-topology",
       "theme": "B1",
       "milestone": "M2",
       "effort": "M",
