@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-05-12-v1.16-trace-correlation",
+  "title": "V1.16 run and capability-call trace correlation",
+  "status": "Done",
+  "started_at": "2026-05-13T04:30:00Z",
+  "done_at": "2026-05-13T05:30:00Z",
+  "working_branch": "feature/v1.16-trace-correlation",
+  "theme": "B2",
+  "milestone": "M3",
+  "effort": "M",
+  "depends_on": ["2026-05-12-v1.16-acp-execution-consolidation"],
+  "created_at": "2026-05-12T09:00:00Z",
+  "qc_verdict": "Approve with residuals (4 W deferred to V1.17)",
+  "qa_verdict": "Pass",
+  "residuals": ["R-TRACE-001", "R-TRACE-002", "R-TRACE-003", "R-TRACE-004"]
+}
