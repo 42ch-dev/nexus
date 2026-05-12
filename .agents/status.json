@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-13T04:30:00Z",
+  "updated_at": "2026-05-13T06:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-12-v1.16-command-surface-contract",
@@ -48,7 +48,7 @@
     {
       "plan_id": "2026-05-12-v1.16-acp-execution-consolidation",
       "title": "V1.16 ACP-first execution path consolidation",
-      "status": "InReview",
+      "status": "Done",
       "theme": "B2",
       "milestone": "M3",
       "effort": "L",
@@ -57,7 +57,10 @@
       ],
       "created_at": "2026-05-12T09:00:00Z",
       "started_at": "2026-05-13T03:00:00Z",
+      "done_at": "2026-05-13T06:00:00Z",
       "working_branch": "feature/v1.16-acp-execution-consolidation",
+      "qc_verdict": "Approve (after fix commit 62a9e77)",
+      "qa_verdict": "Pass",
       "metadata": {
         "primary_spec": ".agents/knowledge/v1.16-delivery-compass-v1.md",
         "spec_refs": [
