@@ -1,5 +1,9 @@
 //! Agent Command — ACP agent management commands.
 //!
+//! **Deprecated**: Top-level `nexus42 agent` commands have moved to `nexus42 acp`.
+//! This module is retained for internal reference and test compatibility.
+//! Key functionality has been migrated to `commands/acp.rs`.
+//!
 //! Implements the `nexus42 agent` subcommands:
 //! - `list` — List available agents from the ACP registry
 //! - `show` — Show details for a specific agent
@@ -16,6 +20,10 @@
 //!     ├─► run   ──► AgentSpawner::spawn() + AcpSdkAdapter + LocalSet
 //!     └─► probe ──► RegistryClient (registry) / AgentSpawner (agent)
 //! ```
+
+// This module is retained for backward compat and test coverage.
+// Top-level `nexus42 agent` has moved to `nexus42 acp` (Plan 2).
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 

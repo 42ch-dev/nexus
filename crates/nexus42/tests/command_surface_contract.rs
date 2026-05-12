@@ -38,9 +38,9 @@ fn current_state_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // All user-visible commands in V1.15 (alphabetical)
+    // All user-visible commands after Plan 2 (agent/session/policy/permission hidden, acp added)
     let expected_commands = [
-        "agent",
+        "acp",
         "auth",
         "clone",
         "config",
@@ -54,12 +54,9 @@ fn current_state_visible_command_groups() {
         "identity",
         "init",
         "memory",
-        "permission",
-        "policy",
         "preset",
         "runtime-mode",
         "schedule",
-        "session",
         "soul",
         "sync",
         "system",
@@ -73,11 +70,22 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify count: 24 user-visible commands
+    // Verify agent/session/policy/permission are NOT user-visible (hidden after Plan 2)
+    let hidden_commands = ["agent", "session", "policy", "permission"];
+    for hidden in &hidden_commands {
+        // These should not appear as visible top-level commands
+        // (they're kept as hidden for backward compat)
+        assert!(
+            !help_text.contains(&format!("  {hidden} ")),
+            "Current-state snapshot: '{hidden}' should be hidden from --help output"
+        );
+    }
+
+    // Verify count: 21 user-visible commands
     let visible_count = expected_commands.len();
     assert_eq!(
-        visible_count, 24,
-        "Current-state snapshot: expected exactly 24 user-visible commands, found {visible_count}"
+        visible_count, 21,
+        "Current-state snapshot: expected exactly 21 user-visible commands, found {visible_count}"
     );
 }
 
@@ -116,19 +124,21 @@ fn current_state_daemon_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // V1.15 daemon: start, stop, status (no restart or logs yet)
-    for subcmd in &["start", "stop", "status"] {
+    // V1.16+ daemon: start, stop, restart, status, logs, doctor, orchestrate
+    for subcmd in &[
+        "start",
+        "stop",
+        "restart",
+        "status",
+        "logs",
+        "doctor",
+        "orchestrate",
+    ] {
         assert!(
             help_text.contains(subcmd),
             "Current-state daemon: expected subcommand '{subcmd}'"
         );
     }
-
-    // Verify restart and logs are NOT present (not yet implemented)
-    assert!(
-        !help_text.contains("restart"),
-        "Current-state daemon: 'restart' should NOT exist yet (V2 target)"
-    );
 }
 
 /// Snapshot: `creator` command has expected subcommands in V1.15.
@@ -299,9 +309,8 @@ fn v2_only_six_visible_command_groups() {
 /// Expected: start, stop, restart, status, logs, doctor,
 ///           orchestrate (with list/run/pause/resume/cancel/inspect)
 ///
-/// Un-ignore after Plan 2 implements daemon restructuring.
+/// Un-ignored by Plan 2 (daemon restructuring implemented).
 #[test]
-#[ignore = "V2 target — un-ignore after Plan 2 implements daemon restructuring"]
 fn v2_target_daemon_subcommands() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -355,9 +364,8 @@ fn v2_target_daemon_subcommands() {
 /// Expected subcommands: status, doctor, probe,
 ///   registry (list, inspect), agent (use, list), skills (export, verify)
 ///
-/// Un-ignore after Plan 2 creates the `acp` group.
+/// Un-ignored by Plan 2 (acp group created).
 #[test]
-#[ignore = "V2 target — un-ignore after Plan 2 creates the acp group"]
 fn v2_target_acp_subcommands() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
