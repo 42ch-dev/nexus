@@ -10,6 +10,43 @@ use nix::sys::signal::Signal;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+/// Orchestration control subcommands (V1.16+).
+#[derive(Debug, Subcommand)]
+pub enum OrchestrateCommand {
+    /// List active orchestration schedules
+    List,
+
+    /// Run an orchestration schedule
+    Run {
+        /// Schedule ID to run
+        schedule_id: String,
+    },
+
+    /// Pause a running orchestration
+    Pause {
+        /// Schedule ID to pause
+        schedule_id: String,
+    },
+
+    /// Resume a paused orchestration
+    Resume {
+        /// Schedule ID to resume
+        schedule_id: String,
+    },
+
+    /// Cancel an orchestration
+    Cancel {
+        /// Schedule ID to cancel
+        schedule_id: String,
+    },
+
+    /// Inspect an orchestration schedule in detail
+    Inspect {
+        /// Schedule ID to inspect
+        schedule_id: String,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Start the nexus42d daemon
@@ -30,11 +67,46 @@ pub enum DaemonCommand {
         port: u16,
     },
 
+    /// Restart the daemon (stop then start)
+    Restart {
+        /// Port to listen on (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+
+        /// Run daemon in foreground (do not detach)
+        #[arg(long)]
+        foreground: bool,
+    },
+
     /// Check daemon status / health
     Status {
         /// Port the daemon is listening on (default: 8420)
         #[arg(long, default_value_t = DAEMON_PORT)]
         port: u16,
+    },
+
+    /// View daemon logs
+    Logs {
+        /// Port the daemon is listening on (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+
+        /// Number of log lines to show
+        #[arg(short, long, default_value_t = 50)]
+        lines: usize,
+    },
+
+    /// Run daemon health diagnostics
+    Doctor {
+        /// Port the daemon is listening on (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+    },
+
+    /// Orchestration control (schedules and workflows)
+    Orchestrate {
+        #[command(subcommand)]
+        command: OrchestrateCommand,
     },
 }
 
@@ -50,7 +122,11 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         DaemonCommand::Start { port, foreground } => start_daemon(port, foreground).await,
         DaemonCommand::Stop { port } => stop_daemon(port).await,
+        DaemonCommand::Restart { port, foreground } => restart_daemon(port, foreground).await,
         DaemonCommand::Status { port } => daemon_status(port, config).await,
+        DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
+        DaemonCommand::Doctor { port } => daemon_doctor(port).await,
+        DaemonCommand::Orchestrate { command } => run_orchestrate(command),
     }
 }
 
@@ -421,6 +497,159 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
+/// Restart the daemon (stop then start).
+async fn restart_daemon(port: u16, foreground: bool) -> Result<()> {
+    println!("Restarting nexus42d daemon...");
+    stop_daemon(port).await?;
+    start_daemon(port, foreground).await
+}
+
+/// View daemon logs.
+///
+/// Reads the daemon's log file or queries the daemon for recent log entries.
+async fn daemon_logs(port: u16, lines: usize) -> Result<()> {
+    // First check if daemon is running
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+
+    if !client.health_check().await? {
+        println!("Daemon is not running on port {port}.");
+        println!();
+        println!("Start with: nexus42 daemon start");
+        return Ok(());
+    }
+
+    // Try to read the log file from the standard location
+    let home = dirs::home_dir().ok_or_else(|| CliError::Daemon {
+        message: "Cannot determine home directory".to_string(),
+    })?;
+    let log_path = home.join(".nexus42").join("logs").join("daemon.log");
+
+    if log_path.exists() {
+        // Read the last N lines from the log file
+        let content = std::fs::read_to_string(&log_path)?;
+        let log_lines: Vec<&str> = content.lines().rev().take(lines).collect();
+
+        println!("Daemon logs (last {} lines):", log_lines.len().min(lines));
+        println!("{}", "─".repeat(60));
+
+        for line in log_lines.into_iter().rev() {
+            println!("{line}");
+        }
+    } else {
+        println!(
+            "Daemon is running but no log file found at {}",
+            log_path.display()
+        );
+        println!();
+        println!("Logs may be available via:");
+        println!("  journalctl --user -u nexus42d");
+    }
+
+    Ok(())
+}
+
+/// Run daemon health diagnostics.
+async fn daemon_doctor(port: u16) -> Result<()> {
+    println!("Daemon Doctor — Running diagnostics...");
+    println!();
+
+    let mut issues = 0u32;
+
+    // Check 1: Daemon connectivity
+    print!("  [1/3] Daemon connectivity... ");
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    match client.health_check().await {
+        Ok(true) => {
+            println!("✓ Running on port {port}");
+        }
+        Ok(false) => {
+            println!("✗ Not running on port {port}");
+            issues += 1;
+        }
+        Err(e) => {
+            println!("✗ Error: {e}");
+            issues += 1;
+        }
+    }
+
+    // Check 2: PID file consistency
+    print!("  [2/3] PID file... ");
+    match read_pid_file() {
+        Ok(Some(pid)) => {
+            println!("✓ Found (PID: {pid})");
+        }
+        Ok(None) => {
+            println!("⚠ No PID file found");
+        }
+        Err(e) => {
+            println!("✗ Error reading PID file: {e}");
+            issues += 1;
+        }
+    }
+
+    // Check 3: Home directory
+    print!("  [3/3] Home directory... ");
+    let home = dirs::home_dir().ok_or_else(|| CliError::Daemon {
+        message: "Cannot determine home directory".to_string(),
+    })?;
+    let nexus_home = home.join(".nexus42");
+    if nexus_home.exists() {
+        println!("✓ {}", nexus_home.display());
+    } else {
+        println!("⚠ Not initialized ({})", nexus_home.display());
+    }
+
+    println!();
+    if issues == 0 {
+        println!("✓ All checks passed — daemon is healthy.");
+    } else {
+        println!("✗ {issues} issue(s) found. See above for details.");
+    }
+
+    Ok(())
+}
+
+/// Run orchestration subcommands.
+///
+/// Most orchestration commands are stubs — the full implementation will be
+/// wired in Plan 6.
+#[allow(clippy::unnecessary_wraps)]
+fn run_orchestrate(cmd: OrchestrateCommand) -> Result<()> {
+    match cmd {
+        OrchestrateCommand::List => {
+            println!("Coming soon: `daemon orchestrate list` — list orchestration schedules.");
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Run { schedule_id } => {
+            println!("Coming soon: `daemon orchestrate run {schedule_id}` — run an orchestration.");
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Pause { schedule_id } => {
+            println!(
+                "Coming soon: `daemon orchestrate pause {schedule_id}` — pause an orchestration."
+            );
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Resume { schedule_id } => {
+            println!(
+                "Coming soon: `daemon orchestrate resume {schedule_id}` — resume an orchestration."
+            );
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Cancel { schedule_id } => {
+            println!(
+                "Coming soon: `daemon orchestrate cancel {schedule_id}` — cancel an orchestration."
+            );
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Inspect { schedule_id } => {
+            println!("Coming soon: `daemon orchestrate inspect {schedule_id}` — inspect an orchestration.");
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -518,5 +747,34 @@ mod tests {
         // The stop_daemon function reads from ~/.nexus42/daemon.pid,
         // so this test verifies the logic conceptually.
         // In production, the stale PID cleanup happens inside stop_daemon.
+    }
+
+    #[tokio::test]
+    async fn test_daemon_logs_not_running() {
+        let result = daemon_logs(19999, 50).await;
+        assert!(
+            result.is_ok(),
+            "daemon_logs should succeed even when daemon not running"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_daemon_doctor() {
+        let result = daemon_doctor(19999).await;
+        assert!(result.is_ok(), "daemon_doctor should succeed");
+    }
+
+    #[test]
+    fn test_orchestrate_list_stub() {
+        let result = run_orchestrate(OrchestrateCommand::List);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_orchestrate_run_stub() {
+        let result = run_orchestrate(OrchestrateCommand::Run {
+            schedule_id: "test-schedule".to_string(),
+        });
+        assert!(result.is_ok());
     }
 }
