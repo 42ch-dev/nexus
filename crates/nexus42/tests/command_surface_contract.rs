@@ -38,29 +38,10 @@ fn current_state_visible_command_groups() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // All user-visible commands after Plan 2 (agent/session/policy/permission hidden, acp added)
+    // All user-visible commands after Plan 3 (10 more legacy commands hidden, platform added)
     let expected_commands = [
-        "acp",
-        "auth",
-        "clone",
-        "config",
-        "context",
-        "creator",
-        "daemon",
-        "db",
-        "debug",
-        "doctor",
-        "explore",
-        "identity",
-        "init",
-        "memory",
-        "preset",
-        "runtime-mode",
-        "schedule",
-        "soul",
-        "sync",
-        "system",
-        "world",
+        "acp", "clone", "creator", "daemon", "init", "memory", "platform", "schedule", "soul",
+        "sync", "system", "world",
     ];
 
     for cmd in &expected_commands {
@@ -70,8 +51,23 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify agent/session/policy/permission are NOT user-visible (hidden after Plan 2)
-    let hidden_commands = ["agent", "session", "policy", "permission"];
+    // Verify hidden commands are NOT user-visible
+    let hidden_commands = [
+        "agent",
+        "session",
+        "policy",
+        "permission",
+        "auth",
+        "context",
+        "config",
+        "debug",
+        "doctor",
+        "db",
+        "explore",
+        "identity",
+        "preset",
+        "runtime-mode",
+    ];
     for hidden in &hidden_commands {
         // These should not appear as visible top-level commands
         // (they're kept as hidden for backward compat)
@@ -81,11 +77,11 @@ fn current_state_visible_command_groups() {
         );
     }
 
-    // Verify count: 21 user-visible commands
+    // Verify count: 12 user-visible commands
     let visible_count = expected_commands.len();
     assert_eq!(
-        visible_count, 21,
-        "Current-state snapshot: expected exactly 21 user-visible commands, found {visible_count}"
+        visible_count, 12,
+        "Current-state snapshot: expected exactly 12 user-visible commands, found {visible_count}"
     );
 }
 
@@ -202,24 +198,33 @@ fn current_state_system_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // V1.15 system: only `preset` subcommand (system presets)
-    for subcmd in &["preset"] {
+    // V1.16+ system: preset, version, doctor, completion, config, debug, db, identity, runtime-mode
+    for subcmd in &[
+        "preset",
+        "version",
+        "doctor",
+        "completion",
+        "config",
+        "debug",
+        "db",
+        "identity",
+        "runtime-mode",
+    ] {
         assert!(
             help_text.contains(subcmd),
             "Current-state system: expected subcommand '{subcmd}'"
         );
     }
 
-    // Verify version/completion/config/debug are NOT present as subcommands.
-    // clap lists subcommands indented under "Commands:" header, e.g. "  preset  Show..."
-    // We check that these words don't appear as indented subcommand entries.
+    // Verify no unexpected subcommands
     let commands_section_start = help_text.find("Commands:").unwrap_or(0);
     let options_section_start = help_text.find("\nOptions:").unwrap_or(help_text.len());
     let commands_section = &help_text[commands_section_start..options_section_start];
 
+    // These were NOT system subcommands before — verify they exist now
     assert!(
-        !commands_section.contains("version"),
-        "Current-state system: 'version' should NOT be a system subcommand yet"
+        commands_section.contains("version"),
+        "Current-state system: 'version' should now be a system subcommand"
     );
 }
 
@@ -465,7 +470,6 @@ fn v2_target_sync_subcommands() {
 ///
 /// Un-ignore after Plan 3 creates the `platform` group.
 #[test]
-#[ignore = "V2 target — un-ignore after Plan 3 creates the platform group"]
 fn v2_target_platform_subcommands() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -494,7 +498,6 @@ fn v2_target_platform_subcommands() {
 ///
 /// Un-ignore after Plan 3 extends the `system` group.
 #[test]
-#[ignore = "V2 target — un-ignore after Plan 3 extends system group"]
 fn v2_target_system_subcommands() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
@@ -508,7 +511,17 @@ fn v2_target_system_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    for subcmd in &["version", "doctor", "completion", "config", "debug"] {
+    for subcmd in &[
+        "version",
+        "doctor",
+        "completion",
+        "config",
+        "debug",
+        "preset",
+        "db",
+        "identity",
+        "runtime-mode",
+    ] {
         assert!(
             help_text.contains(subcmd),
             "V2 system: expected subcommand '{subcmd}'"
