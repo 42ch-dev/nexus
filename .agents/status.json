@@ -1,18 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-05-13T08:00:00Z",
-  "plans": [
-  ],
-      "created_at": "2026-05-12T09:00:00Z",
-      "started_at": "2026-05-13T06:00:00Z",
-      "metadata": {
-        "primary_spec": ".agents/knowledge/v1.16-delivery-compass-v1.md",
-        "spec_refs": [
-          "nexus-platform/.agents/designs/v1-spec/cli-sync/cli-spec-v1.md"
-        ]
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
