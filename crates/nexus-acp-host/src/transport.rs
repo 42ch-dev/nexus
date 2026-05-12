@@ -158,6 +158,38 @@ impl AgentSpawner {
         tokio::process::ChildStdin,
         tokio::process::ChildStdout,
     )> {
+        self.spawn_with_env(program, args, &[])
+    }
+
+    /// Spawn an agent subprocess with additional environment variables.
+    ///
+    /// Like [`spawn`](Self::spawn), but also sets the given environment
+    /// variables on the child process. Existing callers that don't need
+    /// env vars should continue to use `spawn()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `program` — The executable to run
+    /// * `args` — Command-line arguments
+    /// * `env` — Key-value pairs to set in the child's environment
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the program cannot be found or spawned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if stdin/stdout pipes cannot be extracted (pipe configuration error).
+    pub fn spawn_with_env(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> AcpResult<(
+        tokio::process::Child,
+        tokio::process::ChildStdin,
+        tokio::process::ChildStdout,
+    )> {
         // Construct the command
         let mut cmd = Command::new(program);
         cmd.args(args)
@@ -166,6 +198,11 @@ impl AgentSpawner {
             .stdout(Stdio::piped()) // stdout for JSON-RPC responses
             .stderr(Stdio::inherit()) // stderr for agent logs (visible in terminal)
             .kill_on_drop(true); // Ensure subprocess is killed if the handle is dropped
+
+        // Set environment variables
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
 
         // Spawn the process
         let mut child = cmd.spawn().map_err(|e| {
