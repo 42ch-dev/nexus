@@ -63,7 +63,8 @@ impl Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Initialize a Nexus workspace
+    /// Initialize a Nexus workspace (deprecated: use `nexus42 creator workspace init`)
+    #[command(hide = true)]
     Init {
         #[command(subcommand)]
         command: InitCommand,
@@ -109,13 +110,15 @@ pub enum Commands {
         command: SyncCommand,
     },
 
-    /// World fork and snapshot (platform via daemon)
+    /// World fork and snapshot (deprecated: use `nexus42 sync world`)
+    #[command(hide = true)]
     World {
         #[command(subcommand)]
         command: WorldCommand,
     },
 
-    /// Clone a world from platform or local source
+    /// Clone a world from platform or local source (deprecated: use `nexus42 creator workspace clone`)
+    #[command(hide = true)]
     Clone {
         #[command(flatten)]
         args: CloneArgs,
@@ -200,19 +203,22 @@ pub enum Commands {
         command: RuntimeModeCommand,
     },
 
-    /// SOUL management (local personality and experience)
+    /// SOUL management (deprecated: use `nexus42 creator soul`)
+    #[command(hide = true)]
     Soul {
         #[command(subcommand)]
         command: SoulCommand,
     },
 
-    /// Long-term memory management
+    /// Long-term memory management (deprecated: use `nexus42 creator memory`)
+    #[command(hide = true)]
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
     },
 
-    /// Schedule preset-driven orchestration workflows
+    /// Schedule preset-driven orchestration workflows (deprecated: use `nexus42 daemon schedule`)
+    #[command(hide = true)]
     Schedule {
         #[command(subcommand)]
         command: ScheduleCommand,
