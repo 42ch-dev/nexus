@@ -9,6 +9,8 @@
 #[deny(clippy::unwrap_used)]
 pub mod acp;
 #[deny(clippy::unwrap_used)]
+pub mod acp_trace;
+#[deny(clippy::unwrap_used)]
 pub mod acp_worker;
 #[deny(clippy::unwrap_used)]
 pub mod agent;

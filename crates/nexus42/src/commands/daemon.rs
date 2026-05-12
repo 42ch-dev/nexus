@@ -21,6 +21,9 @@ pub enum OrchestrateCommand {
     Run {
         /// Schedule ID to run
         schedule_id: String,
+        /// Run ID for trace correlation (auto-generated if omitted)
+        #[arg(long)]
+        run_id: Option<String>,
     },
 
     /// Pause a running orchestration
@@ -777,9 +780,25 @@ fn run_orchestrate(cmd: OrchestrateCommand) -> Result<()> {
             println!("Coming soon: `daemon orchestrate list` — list orchestration schedules.");
             println!("  This feature will be implemented in a follow-up plan.");
         }
-        OrchestrateCommand::Run { schedule_id } => {
+        OrchestrateCommand::Run {
+            schedule_id,
+            run_id,
+        } => {
+            // Resolve or generate run ID
+            let resolved_run_id = match run_id {
+                Some(ref id) => {
+                    nexus_home_layout::validate_run_id_safe(id).map_err(CliError::Other)?;
+                    id.clone()
+                }
+                None => format!("run_{}", uuid::Uuid::new_v4().simple()),
+            };
+
             println!("Coming soon: `daemon orchestrate run {schedule_id}` — run an orchestration.");
             println!("  This feature will be implemented in a follow-up plan.");
+            println!("Run ID: {resolved_run_id}");
+            // TODO(V1.17): Pass `resolved_run_id` as `_run_id` into the orchestration context
+            // when the daemon API is implemented. The engine should store it in graph_flow::Context.
+            let _ = resolved_run_id;
         }
         OrchestrateCommand::Pause { schedule_id } => {
             println!(
@@ -931,6 +950,16 @@ mod tests {
     fn test_orchestrate_run_stub() {
         let result = run_orchestrate(OrchestrateCommand::Run {
             schedule_id: "test-schedule".to_string(),
+            run_id: None,
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_orchestrate_run_stub_with_run_id() {
+        let result = run_orchestrate(OrchestrateCommand::Run {
+            schedule_id: "test-schedule".to_string(),
+            run_id: Some("run_custom123".to_string()),
         });
         assert!(result.is_ok());
     }
