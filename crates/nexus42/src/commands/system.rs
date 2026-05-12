@@ -37,10 +37,7 @@ pub enum SystemCommand {
     Version,
 
     /// Diagnostic health checks
-    Doctor {
-        #[command(subcommand)]
-        command: super::doctor::DoctorCommand,
-    },
+    Doctor,
 
     /// Generate shell completion script
     Completion {
@@ -118,7 +115,7 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
             println!("nexus42 {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        SystemCommand::Doctor { command } => super::doctor::run(command, config).await,
+        SystemCommand::Doctor => run_combined_doctor(config).await,
         SystemCommand::Completion { shell } => print_completion(&shell),
         SystemCommand::Config { command } => super::config::run(command, config),
         SystemCommand::Debug { command } => super::debug::run(command, config).await,
@@ -163,6 +160,80 @@ fn print_completion(shell_str: &str) -> Result<()> {
     let mut cmd = crate::cli::build_command();
     let name = cmd.get_name().to_string();
     clap_complete::generate(shell, &mut cmd, &name, &mut std::io::stdout());
+    Ok(())
+}
+
+/// Run combined diagnostics: daemon connectivity + ACP registry + home directory.
+///
+/// This is the `nexus42 system doctor` implementation — a unified diagnostic
+/// that combines infrastructure checks in a single pass.
+async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
+    println!("nexus42 system doctor — combined diagnostics");
+    println!();
+
+    let mut issues = 0u32;
+
+    // Check 1: Daemon connectivity
+    print!("  [1/3] Daemon connectivity... ");
+    let client = crate::api::DaemonClient::from_config(config);
+    match client.health_check().await {
+        Ok(true) => println!("✓ Running"),
+        Ok(false) => {
+            println!("✗ Not responding at {}", config.daemon_url);
+            issues += 1;
+        }
+        Err(e) => {
+            println!("✗ Error: {e}");
+            issues += 1;
+        }
+    }
+
+    // Check 2: ACP registry reachability
+    print!("  [2/3] ACP registry reachability... ");
+    match nexus_acp_host::registry::RegistryClient::new() {
+        Ok(reg_client) => match reg_client.get_registry().await {
+            Ok(registry) => {
+                println!(
+                    "✓ Reachable (v{}, {} agents)",
+                    registry.version,
+                    registry.agents.len()
+                );
+            }
+            Err(e) => {
+                println!("✗ Error: {e}");
+                issues += 1;
+            }
+        },
+        Err(e) => {
+            println!("✗ Error: {e}");
+            issues += 1;
+        }
+    }
+
+    // Check 3: Home directory health
+    print!("  [3/3] Home directory (~/.nexus42/)... ");
+    match crate::config::nexus_home() {
+        Ok(home) => {
+            if home.exists() && home.is_dir() {
+                println!("✓ Found at {}", home.display());
+            } else {
+                println!("✗ Not found at {}", home.display());
+                issues += 1;
+            }
+        }
+        Err(e) => {
+            println!("✗ Cannot resolve: {e}");
+            issues += 1;
+        }
+    }
+
+    println!();
+    if issues == 0 {
+        println!("✓ All checks passed — system is healthy.");
+    } else {
+        println!("✗ {issues} issue(s) found. See above for details.");
+    }
+
     Ok(())
 }
 
