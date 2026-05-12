@@ -48,7 +48,9 @@
     {
       "plan_id": "2026-05-12-v1.16-creator-knowledge-topology",
       "title": "V1.16 Creator identity and knowledge command topology",
-      "status": "Todo",
+      "status": "InProgress",
+      "started_at": "2026-05-12T23:00:00Z",
+      "working_branch": "feature/v1.16-creator-knowledge-topology",
       "theme": "B3",
       "milestone": "M2",
       "effort": "M",
