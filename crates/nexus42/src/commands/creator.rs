@@ -170,6 +170,9 @@ pub enum CreatorWorkspaceCommand {
         /// Clone source: platform (default) or local
         #[arg(long, value_enum, default_value = "platform")]
         source: crate::commands::clone::CloneSourceArg,
+        /// Print the JSON request and exit without calling the daemon
+        #[arg(long)]
+        dry_run: bool,
         /// Skip interactive confirmation
         #[arg(long)]
         yes: bool,
@@ -235,10 +238,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             run_kb(command);
             Ok(())
         }
-        CreatorCommand::Logout => {
-            println!("Coming soon: `creator logout` — clear creator credentials/session.");
-            Ok(())
-        }
+        CreatorCommand::Logout => logout_creator(config),
     }
 }
 
@@ -370,12 +370,13 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         CreatorWorkspaceCommand::Clone {
             world_ref,
             source,
+            dry_run,
             yes,
         } => {
             let args = CloneArgs {
                 world_ref,
                 source,
-                dry_run: false,
+                dry_run,
                 yes,
             };
             super::clone::run(args, config).await
@@ -704,6 +705,41 @@ fn unpair_creator(_config: &CliConfig, creator_id: &str) {
     // Platform API integration not yet available
     println!("⚠ V1.0 skeleton: Creator unpairing requires platform API.");
     println!("  Creator: {creator_id}");
+}
+
+/// Logout — clear active creator credentials from local config and auth store.
+///
+/// Removes the `active_creator_id` from CLI config and clears the creator
+/// entry from the auth store (tokens + API key).
+///
+/// # Errors
+///
+/// Returns I/O errors if config or auth store cannot be read or written.
+fn logout_creator(config: &CliConfig) -> Result<()> {
+    let creator_id = config.active_creator_id.as_deref();
+
+    if creator_id.is_none() {
+        println!("No active Creator to logout.");
+        return Ok(());
+    }
+
+    let creator_id = creator_id.expect("checked above");
+
+    // Clear creator credentials from auth store
+    let mut store = auth::AuthStore::load()?;
+    if let Some(creators) = &mut store.creators {
+        if creators.remove(creator_id).is_some() {
+            store.save()?;
+        }
+    }
+
+    // Clear active creator from CLI config
+    let mut cli_config = CliConfig::load()?;
+    cli_config.active_creator_id = None;
+    cli_config.save()?;
+
+    println!("✓ Creator {creator_id} logged out.");
+    Ok(())
 }
 
 /// Rotate Creator credentials
