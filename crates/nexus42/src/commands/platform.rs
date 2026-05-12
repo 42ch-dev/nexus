@@ -1,7 +1,7 @@
 //! Platform Command — Platform interaction group.
 //!
 //! Implements the `nexus42 platform` top-level command with subcommands:
-//! - `auth` — User authentication (login/logout/status/token)
+//! - `auth` — User authentication (login/logout/status)
 //! - `explore` — Browse and search platform content
 //! - `context` — Context assembly
 //! - `publish` — Publish content (stub, coming soon)
@@ -17,7 +17,7 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum PlatformCommand {
-    /// Authentication (login/logout/status/token)
+    /// Authentication (login/logout/status)
     Auth {
         #[command(subcommand)]
         command: super::auth::AuthCommand,

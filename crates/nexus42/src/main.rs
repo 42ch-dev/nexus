@@ -3,238 +3,23 @@
 //! A command-line interface for managing creative worlds, Creators,
 //! and preset-driven orchestration workflows through the Nexus platform.
 
-mod api;
-mod auth;
-mod challenge;
-mod commands;
-mod config;
-mod context;
-mod db;
-mod errors;
-mod paths;
-mod session_capture;
-
-use clap::{Parser, Subcommand};
-use commands::{
-    acp::AcpCommand, acp_worker::AcpWorkerArgs, auth::AuthCommand, clone::CloneArgs,
-    config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
-    db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
-    identity::IdentityCommand, init::InitCommand, memory::MemoryCommand,
-    permission::PermissionCommand, platform::PlatformCommand, policy::PolicyCommand,
-    preset::PresetCommand, runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand,
-    session::SessionCommand, soul::SoulCommand, sync::SyncCommand, system::SystemCommand,
-    world::WorldCommand,
-};
-
-/// Nexus CLI — creative world-building command-line interface
-#[derive(Parser, Debug)]
-#[command(
-    name = "nexus42",
-    version,
-    about = "Nexus creative world-building CLI",
-    long_about = "Nexus creative world-building CLI — orchestration-first.\n\n\
-        Use `nexus42 schedule --preset <id>` to start a preset-driven workflow,\n\
-        or `nexus42 preset list` to see available presets.\n\
-        Run `nexus42 init workspace` to set up a new workspace.",
-    propagate_version = true
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
-    /// Enable verbose logging
-    #[arg(short, long, global = true)]
-    verbose: bool,
-
-    /// Output format (text or json)
-    #[arg(short = 'o', long = "output", global = true, default_value = "text")]
-    output_format: String,
-}
-
-#[derive(Debug, Subcommand)]
-enum Commands {
-    /// Initialize a Nexus workspace
-    Init {
-        #[command(subcommand)]
-        command: InitCommand,
-    },
-
-    /// Authentication (deprecated: use `nexus42 platform auth`)
-    #[command(hide = true)]
-    Auth {
-        #[command(subcommand)]
-        command: AuthCommand,
-    },
-
-    /// Manage the nexus42d daemon
-    Daemon {
-        #[command(subcommand)]
-        command: DaemonCommand,
-    },
-
-    /// Database status and management (deprecated: use `nexus42 system db`)
-    #[command(hide = true)]
-    Db {
-        #[command(subcommand)]
-        command: DbCommand,
-    },
-
-    /// Internal debugging utilities (deprecated: use `nexus42 system debug`)
-    #[command(hide = true)]
-    Debug {
-        #[command(subcommand)]
-        command: DebugCommand,
-    },
-
-    /// Diagnostic health checks (deprecated: use `nexus42 system doctor`)
-    #[command(hide = true)]
-    Doctor {
-        #[command(subcommand)]
-        command: DoctorCommand,
-    },
-
-    /// Synchronize workspace with platform
-    Sync {
-        #[command(subcommand)]
-        command: SyncCommand,
-    },
-
-    /// World fork and snapshot (platform via daemon)
-    World {
-        #[command(subcommand)]
-        command: WorldCommand,
-    },
-
-    /// Clone a world from platform or local source
-    Clone {
-        #[command(flatten)]
-        args: CloneArgs,
-    },
-
-    /// Configuration file management (deprecated: use `nexus42 system config`)
-    #[command(hide = true)]
-    Config {
-        #[command(subcommand)]
-        command: ConfigCommand,
-    },
-
-    /// Explore browse and search (deprecated: use `nexus42 platform explore`)
-    #[command(hide = true)]
-    Explore {
-        #[command(subcommand)]
-        command: ExploreCommand,
-    },
-
-    /// Manage Creator entities (register, pair, credentials)
-    Creator {
-        #[command(subcommand)]
-        command: CreatorCommand,
-    },
-
-    /// Context assembly (deprecated: use `nexus42 platform context`)
-    #[command(hide = true)]
-    Context {
-        #[command(subcommand)]
-        command: ContextCommand,
-    },
-
-    /// ACP capability plane (agents, registry, skills, connectivity)
-    Acp {
-        #[command(subcommand)]
-        command: AcpCommand,
-    },
-
-    /// Hidden: ACP worker subprocess entry point (daemon-managed)
-    #[command(hide = true)]
-    AcpWorker(AcpWorkerArgs),
-
-    /// ACP session persistence management (deprecated: use `nexus42 acp` commands)
-    #[command(hide = true)]
-    Session {
-        #[command(subcommand)]
-        command: SessionCommand,
-    },
-
-    /// Permission policy management (deprecated: use `nexus42 acp` commands)
-    #[command(hide = true)]
-    Policy {
-        #[command(subcommand)]
-        command: PolicyCommand,
-    },
-
-    /// Agent-scoped permission management (deprecated: use `nexus42 acp` commands)
-    #[command(hide = true)]
-    Permission {
-        #[command(subcommand)]
-        command: PermissionCommand,
-    },
-
-    /// Preset management (deprecated: use `nexus42 system preset` or `nexus42 preset`)
-    #[command(hide = true)]
-    Preset {
-        #[command(subcommand)]
-        command: PresetCommand,
-    },
-
-    /// Local identity management (deprecated: use `nexus42 system identity`)
-    #[command(hide = true)]
-    Identity {
-        #[command(subcommand)]
-        command: IdentityCommand,
-    },
-
-    /// Runtime mode management (deprecated: use `nexus42 system runtime-mode`)
-    #[command(hide = true)]
-    RuntimeMode {
-        #[command(subcommand)]
-        command: RuntimeModeCommand,
-    },
-
-    /// SOUL management (local personality and experience)
-    Soul {
-        #[command(subcommand)]
-        command: SoulCommand,
-    },
-
-    /// Long-term memory management
-    Memory {
-        #[command(subcommand)]
-        command: MemoryCommand,
-    },
-
-    /// Schedule preset-driven orchestration workflows
-    Schedule {
-        #[command(subcommand)]
-        command: ScheduleCommand,
-    },
-
-    /// System management (presets, diagnostics, config, identity, etc.)
-    System {
-        #[command(subcommand)]
-        command: SystemCommand,
-    },
-
-    /// Platform interaction (auth, explore, context, publish)
-    Platform {
-        #[command(subcommand)]
-        command: PlatformCommand,
-    },
-}
+use clap::Parser;
+use nexus42::cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
 
     // Initialize tracing
-    init_logging(cli.verbose);
+    init_logging(cli.verbose());
 
     // Load configuration
-    let mut config = config::CliConfig::load().unwrap_or_default();
+    let mut config = nexus42::config::CliConfig::load().unwrap_or_default();
 
     // Resolve persistent device ID (UUID v4) for platform HTTP requests.
     // Only create the device-id file if the nexus home already exists
     // (i.e., the user has already run `init workspace` or equivalent).
-    if let Ok(nexus_home) = config::nexus_home() {
+    if let Ok(nexus_home) = nexus42::config::nexus_home() {
         if nexus_home.exists() {
             match nexus_sync::device_id::get_or_create_device_id(&nexus_home) {
                 Ok(device_id) => config.device_id = device_id,
@@ -251,36 +36,55 @@ async fn main() {
     }
 
     // Execute command
-    let result = match cli.command {
-        Some(Commands::Init { command }) => commands::init::run(command).await,
-        Some(Commands::Auth { command }) => commands::auth::run(command, &config).await,
-        Some(Commands::Daemon { command }) => commands::daemon::run(command, &config).await,
-        Some(Commands::Db { command }) => commands::db::run(command, &config).await,
-        Some(Commands::Debug { command }) => commands::debug::run(command, &config).await,
-        Some(Commands::Doctor { command }) => commands::doctor::run(command, &config).await,
-        Some(Commands::Sync { command }) => commands::sync::run(command, &config).await,
-        Some(Commands::World { command }) => commands::world::run(command, &config).await,
-        Some(Commands::Clone { args }) => commands::clone::run(args, &config).await,
-        Some(Commands::Config { command }) => commands::config::run(command, &config),
-        Some(Commands::Explore { command }) => {
-            commands::explore::run(command, &config, &cli.output_format).await
+    let output_format = cli.output_format().to_string();
+    let result = match cli.into_command() {
+        Some(Commands::Init { command }) => nexus42::commands::init::run(command).await,
+        Some(Commands::Auth { command }) => nexus42::commands::auth::run(command, &config).await,
+        Some(Commands::Daemon { command }) => {
+            nexus42::commands::daemon::run(command, &config).await
         }
-        Some(Commands::Creator { command }) => commands::creator::run(command, &config).await,
-        Some(Commands::Context { command }) => commands::context::run(command, &config).await,
-        Some(Commands::Acp { command }) => commands::acp::run(command, &config).await,
-        Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,
-        Some(Commands::Session { command }) => commands::session::run(command, &config),
-        Some(Commands::Policy { command }) => commands::policy::run(command),
-        Some(Commands::Permission { command }) => commands::permission::run(command),
-        Some(Commands::Preset { command }) => commands::preset::run(command, &config),
-        Some(Commands::Identity { command }) => commands::identity::run(command, &config).await,
-        Some(Commands::RuntimeMode { command }) => commands::runtime_mode::run(command, &config),
-        Some(Commands::Soul { command }) => commands::soul::run(command, &config).await,
-        Some(Commands::Memory { command }) => commands::memory::run(command, &config).await,
-        Some(Commands::Schedule { command }) => commands::schedule::run(command, &config).await,
-        Some(Commands::System { command }) => commands::system::run(command, &config).await,
+        Some(Commands::Db { command }) => nexus42::commands::db::run(command, &config).await,
+        Some(Commands::Debug { command }) => nexus42::commands::debug::run(command, &config).await,
+        Some(Commands::Doctor { command }) => {
+            nexus42::commands::doctor::run(command, &config).await
+        }
+        Some(Commands::Sync { command }) => nexus42::commands::sync::run(command, &config).await,
+        Some(Commands::World { command }) => nexus42::commands::world::run(command, &config).await,
+        Some(Commands::Clone { args }) => nexus42::commands::clone::run(args, &config).await,
+        Some(Commands::Config { command }) => nexus42::commands::config::run(command, &config),
+        Some(Commands::Explore { command }) => {
+            nexus42::commands::explore::run(command, &config, &output_format).await
+        }
+        Some(Commands::Creator { command }) => {
+            nexus42::commands::creator::run(command, &config).await
+        }
+        Some(Commands::Context { command }) => {
+            nexus42::commands::context::run(command, &config).await
+        }
+        Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
+        Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
+        Some(Commands::Session { command }) => nexus42::commands::session::run(command, &config),
+        Some(Commands::Policy { command }) => nexus42::commands::policy::run(command),
+        Some(Commands::Permission { command }) => nexus42::commands::permission::run(command),
+        Some(Commands::Preset { command }) => nexus42::commands::preset::run(command, &config),
+        Some(Commands::Identity { command }) => {
+            nexus42::commands::identity::run(command, &config).await
+        }
+        Some(Commands::RuntimeMode { command }) => {
+            nexus42::commands::runtime_mode::run(command, &config)
+        }
+        Some(Commands::Soul { command }) => nexus42::commands::soul::run(command, &config).await,
+        Some(Commands::Memory { command }) => {
+            nexus42::commands::memory::run(command, &config).await
+        }
+        Some(Commands::Schedule { command }) => {
+            nexus42::commands::schedule::run(command, &config).await
+        }
+        Some(Commands::System { command }) => {
+            nexus42::commands::system::run(command, &config).await
+        }
         Some(Commands::Platform { command }) => {
-            commands::platform::run(command, &config, &cli.output_format).await
+            nexus42::commands::platform::run(command, &config, &output_format).await
         }
         None => {
             Cli::parse_from(["nexus42", "--help"]);
