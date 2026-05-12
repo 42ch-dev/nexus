@@ -288,6 +288,11 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
 
 /// Handle knowledge base commands.
 fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
+    // F002: Validate active_creator_id before constructing any paths.
+    // This prevents path traversal if config is corrupted or malicious.
+    if let Some(cid) = &config.active_creator_id {
+        paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
+    }
     match cmd {
         KbCommand::List { scope } => kb_list(config, &scope),
         KbCommand::Search { query, scope } => kb_search(config, &query, &scope),
@@ -338,24 +343,35 @@ fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-/// Write the KB index to disk, creating parent directories if needed.
+/// Write the KB index to disk atomically.
+///
+/// Writes to a temporary file first, then renames to the final path.
+/// `std::fs::rename` is atomic on the same filesystem (POSIX), which
+/// prevents corruption from crashes mid-write or concurrent `kb add` races.
+#[allow(dead_code)] // Kept as utility; kb_add inlines the pattern for W2 ordering.
 fn write_kb_index(index_path: &std::path::Path, index: &KbIndex) -> Result<()> {
     if let Some(parent) = index_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(index)?;
-    std::fs::write(index_path, json)?;
+    let tmp_path = index_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json)?;
+    std::fs::rename(&tmp_path, index_path)?;
     Ok(())
 }
 
-/// Generate a KB entry ID: `kb_` + 8 hex lowercase chars from timestamp.
+/// Generate a KB entry ID: `kb_` + 8 hex chars from timestamp + 4 hex chars
+/// from a simple hash to reduce collision risk under rapid successive calls.
+#[allow(clippy::cast_possible_truncation)]
 fn generate_entry_id() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    // Use lower 32 bits of nanosecond timestamp as unique-ish suffix.
-    let suffix = (now.as_nanos() & 0xFFFF_FFFF) as u32;
-    format!("kb_{suffix:08x}")
+    let millis = now.as_millis() as u32;
+    // Mix in lower bits of sub-millisecond timing and a simple diversifier
+    // to avoid collisions when called in rapid succession.
+    let diversifier = ((millis << 16) ^ (now.subsec_nanos() >> 4)) as u16;
+    format!("kb_{:08x}{:04x}", millis % 0xFFFF_FFFF, diversifier)
 }
 
 /// `kb list` implementation.
@@ -435,6 +451,8 @@ fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
         world_scope_deferred();
         return Ok(());
     }
+    // F001: Validate entry_id before constructing file path to prevent path traversal.
+    paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
     let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
     let entry_path = entries_dir.join(format!("{entry_id}.md"));
@@ -451,6 +469,10 @@ fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
 }
 
 /// `kb add` implementation — copy file into KB, update index.
+///
+/// Writes the index update to a temp file first, then copies the entry file,
+/// then atomically renames the index. This prevents orphan entry files on
+/// partial failure (W2).
 fn kb_add(
     config: &CliConfig,
     file: &std::path::Path,
@@ -476,18 +498,14 @@ fn kb_add(
     // Create directories if needed
     std::fs::create_dir_all(&entries_dir)?;
 
-    // Generate entry ID and copy file
+    // Generate entry ID and determine title
     let entry_id = generate_entry_id();
-    let dest = entries_dir.join(format!("{entry_id}.md"));
-    std::fs::copy(file, &dest)?;
-
-    // Determine title (filename stem if not provided)
     let entry_title = title
         .map(std::string::ToString::to_string)
         .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
         .unwrap_or_else(|| entry_id.clone());
 
-    // Update index
+    // Step 1: Write updated index to temp file (W2 — index update first)
     let mut index = read_kb_index(&index_path);
     let created_at = chrono::Utc::now().to_rfc3339();
     index.entries.push(KbIndexEntry {
@@ -495,7 +513,21 @@ fn kb_add(
         title: entry_title,
         created_at,
     });
-    write_kb_index(&index_path, &index)?;
+    let tmp_index_path = index_path.with_extension("json.tmp");
+    {
+        if let Some(parent) = tmp_index_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&index)?;
+        std::fs::write(&tmp_index_path, json)?;
+    }
+
+    // Step 2: Copy source file to entries dir
+    let dest = entries_dir.join(format!("{entry_id}.md"));
+    std::fs::copy(file, &dest)?;
+
+    // Step 3: Atomically rename temp index to final (W2 — only committed after file is safe)
+    std::fs::rename(&tmp_index_path, &index_path)?;
 
     println!("✓ KB entry added: {entry_id}");
     Ok(())
