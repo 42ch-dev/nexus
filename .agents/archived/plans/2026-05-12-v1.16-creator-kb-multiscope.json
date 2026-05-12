@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-05-12-v1.16-creator-kb-multiscope",
+  "title": "V1.16 Creator KB multi-scope local baseline",
+  "status": "Done",
+  "started_at": "2026-05-13T01:00:00Z",
+  "done_at": "2026-05-13T02:00:00Z",
+  "working_branch": "feature/v1.16-creator-kb-multiscope",
+  "theme": "B3",
+  "milestone": "M3",
+  "effort": "M",
+  "depends_on": ["2026-05-12-v1.16-creator-knowledge-topology"],
+  "created_at": "2026-05-12T09:00:00Z",
+  "qc_verdict": "Approve (after path traversal + atomic index fixes)",
+  "qa_verdict": "Pass",
+  "residuals": ["R-KB-001", "R-KB-002"]
+}
