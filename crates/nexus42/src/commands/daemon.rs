@@ -1,6 +1,7 @@
 //! Daemon Command — Manage the nexus42d daemon
 
 use crate::api::DaemonClient;
+use crate::commands::schedule::ScheduleCommand;
 use crate::config::{CliConfig, DAEMON_PORT};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -108,6 +109,12 @@ pub enum DaemonCommand {
         #[command(subcommand)]
         command: OrchestrateCommand,
     },
+
+    /// Schedule preset-driven orchestration workflows (migrated from `nexus42 schedule`)
+    Schedule {
+        #[command(subcommand)]
+        command: Box<ScheduleCommand>,
+    },
 }
 
 /// Run daemon command
@@ -127,6 +134,7 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
         DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
         DaemonCommand::Doctor { port } => daemon_doctor(port).await,
         DaemonCommand::Orchestrate { command } => run_orchestrate(command),
+        DaemonCommand::Schedule { command } => super::schedule::run(*command, config).await,
     }
 }
 

@@ -15,19 +15,19 @@ use serde::Deserialize;
 #[derive(Debug, Args)]
 pub struct CloneArgs {
     /// World reference to clone (`world_id`, e.g. `wld_abc123`)
-    world_ref: String,
+    pub world_ref: String,
 
     /// Clone source: platform (default) or local
     #[arg(long, value_enum, default_value = "platform")]
-    source: CloneSourceArg,
+    pub source: CloneSourceArg,
 
     /// Print the JSON request and exit without calling the daemon
     #[arg(long)]
-    dry_run: bool,
+    pub dry_run: bool,
 
     /// Skip interactive confirmation
     #[arg(long)]
-    yes: bool,
+    pub yes: bool,
 }
 
 /// Clone source options
