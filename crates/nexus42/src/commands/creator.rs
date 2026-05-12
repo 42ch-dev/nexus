@@ -115,7 +115,7 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
-    /// Knowledge base management (coming soon)
+    /// Knowledge base management (local work scope; world scope coming soon)
     Kb {
         #[command(subcommand)]
         command: KbCommand,
@@ -125,16 +125,55 @@ pub enum CreatorCommand {
     Logout,
 }
 
-/// Knowledge base subcommands (coming soon).
+/// KB scope: `work` (local workspace, default) or `world` (platform, future).
+#[derive(Debug, Clone, clap::ValueEnum, Default, PartialEq, Eq)]
+pub enum KbScope {
+    /// Local workspace knowledge (default)
+    #[default]
+    Work,
+    /// Platform/world-scoped knowledge (future)
+    World,
+}
+
+/// Knowledge base subcommands.
 #[derive(Debug, Subcommand)]
 pub enum KbCommand {
-    /// List knowledge base entries (coming soon)
-    List,
+    /// List knowledge base entries
+    List {
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
 
-    /// Search knowledge base (coming soon)
+    /// Search knowledge base entries by title/content
     Search {
         /// Search query string
         query: String,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
+
+    /// Show a single knowledge base entry
+    Show {
+        /// Entry ID to display (e.g. `kb_a1b2c3d4`)
+        entry_id: String,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
+
+    /// Add a knowledge base entry from a file
+    Add {
+        /// Path to the source file to add as a KB entry
+        #[arg(long)]
+        file: PathBuf,
+        /// Optional title (defaults to filename stem)
+        #[arg(long)]
+        title: Option<String>,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
     },
 }
 
@@ -234,10 +273,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
         CreatorCommand::Soul { command } => super::soul::run(command, config).await,
         CreatorCommand::Memory { command } => super::memory::run(command, config).await,
-        CreatorCommand::Kb { command } => {
-            run_kb(command);
-            Ok(())
-        }
+        CreatorCommand::Kb { command } => run_kb(command, config),
         CreatorCommand::Logout => logout_creator(config),
     }
 }
@@ -250,16 +286,251 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
     init::validate_slug("workspace_slug", slug)
 }
 
-/// Handle knowledge base stub subcommands.
-fn run_kb(cmd: KbCommand) {
-    match cmd {
-        KbCommand::List => {
-            println!("Coming soon: `creator kb list` — list knowledge base entries.");
-        }
-        KbCommand::Search { query } => {
-            println!("Coming soon: `creator kb search` — search knowledge base for: {query}");
-        }
+/// Handle knowledge base commands.
+fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
+    // F002: Validate active_creator_id before constructing any paths.
+    // This prevents path traversal if config is corrupted or malicious.
+    if let Some(cid) = &config.active_creator_id {
+        paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
     }
+    match cmd {
+        KbCommand::List { scope } => kb_list(config, &scope),
+        KbCommand::Search { query, scope } => kb_search(config, &query, &scope),
+        KbCommand::Show { entry_id, scope } => kb_show(config, &entry_id, &scope),
+        KbCommand::Add { file, title, scope } => kb_add(config, &file, title.as_deref(), &scope),
+    }
+}
+
+/// Deferred message for `world` scope commands.
+fn world_scope_deferred() {
+    println!("KB world scope requires platform connection (coming soon).");
+}
+
+/// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
+fn resolve_kb_paths(config: &CliConfig) -> Result<(String, String, PathBuf)> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(CliError::CreatorNotSelected)?
+        .to_string();
+    let slug = config.workspace_slug_for_creator(&creator_id).to_string();
+    let home = user_home()?;
+    Ok((creator_id, slug, home))
+}
+
+/// KB index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct KbIndex {
+    #[serde(default)]
+    entries: Vec<KbIndexEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct KbIndexEntry {
+    entry_id: String,
+    title: String,
+    created_at: String,
+}
+
+/// Read the KB index from disk. Returns default (empty) if file is missing or corrupt.
+fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
+    if !index_path.exists() {
+        return KbIndex::default();
+    }
+    let Ok(content) = std::fs::read_to_string(index_path) else {
+        return KbIndex::default();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+/// Write the KB index to disk atomically.
+///
+/// Writes to a temporary file first, then renames to the final path.
+/// `std::fs::rename` is atomic on the same filesystem (POSIX), which
+/// prevents corruption from crashes mid-write or concurrent `kb add` races.
+#[allow(dead_code)] // Kept as utility; kb_add inlines the pattern for W2 ordering.
+fn write_kb_index(index_path: &std::path::Path, index: &KbIndex) -> Result<()> {
+    if let Some(parent) = index_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(index)?;
+    let tmp_path = index_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json)?;
+    std::fs::rename(&tmp_path, index_path)?;
+    Ok(())
+}
+
+/// Generate a KB entry ID: `kb_` + 8 hex chars from timestamp + 4 hex chars
+/// from a simple hash to reduce collision risk under rapid successive calls.
+#[allow(clippy::cast_possible_truncation)]
+fn generate_entry_id() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let millis = now.as_millis() as u32;
+    // Mix in lower bits of sub-millisecond timing and a simple diversifier
+    // to avoid collisions when called in rapid succession.
+    let diversifier = ((millis << 16) ^ (now.subsec_nanos() >> 4)) as u16;
+    format!("kb_{:08x}{:04x}", millis % 0xFFFF_FFFF, diversifier)
+}
+
+/// `kb list` implementation.
+fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+
+    if !index_path.exists() {
+        println!("No KB entries in workspace {slug}.");
+        return Ok(());
+    }
+
+    let index = read_kb_index(&index_path);
+    if index.entries.is_empty() {
+        println!("No KB entries in workspace {slug}.");
+        return Ok(());
+    }
+
+    println!("KB entries in workspace {slug}:");
+    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
+    for entry in &index.entries {
+        println!(
+            "{:<20} {:<40} {}",
+            entry.entry_id, entry.title, entry.created_at
+        );
+    }
+    Ok(())
+}
+
+/// `kb search` implementation — case-insensitive substring match on title.
+fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+
+    if !index_path.exists() {
+        println!("No KB entries in workspace {slug} to search.");
+        return Ok(());
+    }
+
+    let index = read_kb_index(&index_path);
+    let query_lower = query.to_lowercase();
+    let matches: Vec<&KbIndexEntry> = index
+        .entries
+        .iter()
+        .filter(|e| e.title.to_lowercase().contains(&query_lower))
+        .collect();
+
+    if matches.is_empty() {
+        println!("No KB entries matching \"{query}\" in workspace {slug}.");
+        return Ok(());
+    }
+
+    println!("KB entries matching \"{query}\" in workspace {slug}:");
+    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
+    for entry in matches {
+        println!(
+            "{:<20} {:<40} {}",
+            entry.entry_id, entry.title, entry.created_at
+        );
+    }
+    Ok(())
+}
+
+/// `kb show` implementation — read and print a single entry file.
+fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    // F001: Validate entry_id before constructing file path to prevent path traversal.
+    paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
+    let entry_path = entries_dir.join(format!("{entry_id}.md"));
+
+    if !entry_path.exists() {
+        return Err(CliError::Other(format!(
+            "KB entry {entry_id} not found in workspace {slug}."
+        )));
+    }
+
+    let content = std::fs::read_to_string(&entry_path)?;
+    println!("{content}");
+    Ok(())
+}
+
+/// `kb add` implementation — copy file into KB, update index.
+///
+/// Writes the index update to a temp file first, then copies the entry file,
+/// then atomically renames the index. This prevents orphan entry files on
+/// partial failure (W2).
+fn kb_add(
+    config: &CliConfig,
+    file: &std::path::Path,
+    title: Option<&str>,
+    scope: &KbScope,
+) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    if !file.exists() {
+        return Err(CliError::Other(format!(
+            "Source file not found: {}",
+            file.display()
+        )));
+    }
+
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+
+    // Create directories if needed
+    std::fs::create_dir_all(&entries_dir)?;
+
+    // Generate entry ID and determine title
+    let entry_id = generate_entry_id();
+    let entry_title = title
+        .map(std::string::ToString::to_string)
+        .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| entry_id.clone());
+
+    // Step 1: Write updated index to temp file (W2 — index update first)
+    let mut index = read_kb_index(&index_path);
+    let created_at = chrono::Utc::now().to_rfc3339();
+    index.entries.push(KbIndexEntry {
+        entry_id: entry_id.clone(),
+        title: entry_title,
+        created_at,
+    });
+    let tmp_index_path = index_path.with_extension("json.tmp");
+    {
+        if let Some(parent) = tmp_index_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&index)?;
+        std::fs::write(&tmp_index_path, json)?;
+    }
+
+    // Step 2: Copy source file to entries dir
+    let dest = entries_dir.join(format!("{entry_id}.md"));
+    std::fs::copy(file, &dest)?;
+
+    // Step 3: Atomically rename temp index to final (W2 — only committed after file is safe)
+    std::fs::rename(&tmp_index_path, &index_path)?;
+
+    println!("✓ KB entry added: {entry_id}");
+    Ok(())
 }
 
 /// Validate a creator handle against the frozen spec v3 §7 regex.

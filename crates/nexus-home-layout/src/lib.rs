@@ -103,6 +103,22 @@ pub fn list_user_preset_ids(nexus_home: &Path) -> Vec<String> {
         .collect()
 }
 
+/// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/kb/`
+///
+/// Knowledge base directory for a workspace (ADR-014 layout, flat files + JSON index).
+#[must_use]
+pub fn creator_kb_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
+    operational_workspace_dir(home, creator_id, workspace_slug).join("kb")
+}
+
+/// `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/kb/entries/`
+///
+/// Individual KB entry files (`<entry_id>.md`).
+#[must_use]
+pub fn creator_kb_entries_dir(home: &Path, creator_id: &str, workspace_slug: &str) -> PathBuf {
+    creator_kb_dir(home, creator_id, workspace_slug).join("entries")
+}
+
 /// `$HOME/.nexus42/device-id` — persistent machine identifier (`UUID` v4).
 #[must_use]
 pub fn device_id_path(home: &Path) -> PathBuf {
@@ -146,6 +162,68 @@ fn assert_creator_id_safe(id: &str) {
         !id.chars().any(char::is_control),
         "creator_id contains control characters: {id:?} — this would be a path-traversal vulnerability"
     );
+}
+
+/// Non-panicking path-traversal validation for `creator_id`.
+///
+/// Returns `Ok(())` if the ID is safe, or `Err` with a description.
+/// Same checks as [`assert_creator_id_safe`] but suitable for fallible call sites
+/// (e.g. KB path construction) where panicking is undesirable.
+///
+/// # Errors
+///
+/// Returns `Err` if the ID contains `/`, `\`, `..`, or control characters.
+pub fn validate_creator_id_safe(id: &str) -> std::result::Result<(), String> {
+    for ch in id.chars() {
+        if ch == '/' || ch == '\\' {
+            return Err(format!(
+                "creator_id contains path separator: {id:?} — rejected for safety"
+            ));
+        }
+    }
+    if id.contains("..") {
+        return Err(format!(
+            "creator_id contains '..': {id:?} — rejected for safety"
+        ));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(format!(
+            "creator_id contains control characters: {id:?} — rejected for safety"
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that a user-supplied `entry_id` is safe to use in a file path.
+///
+/// Rejects path separators (`/`, `\`), traversal sequences (`..`), and control characters.
+/// This prevents path-traversal attacks in KB entry operations.
+///
+/// # Errors
+///
+/// Returns `Err` if the ID is empty, contains `/`, `\`, `..`, or control characters.
+pub fn validate_entry_id_safe(id: &str) -> std::result::Result<(), String> {
+    if id.is_empty() {
+        return Err("entry_id must not be empty".to_string());
+    }
+    for ch in id.chars() {
+        if ch == '/' || ch == '\\' {
+            return Err(format!(
+                "entry_id contains path separator: {id:?} — rejected for safety"
+            ));
+        }
+    }
+    if id.contains("..") {
+        return Err(format!(
+            "entry_id contains '..': {id:?} — rejected for safety"
+        ));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(format!(
+            "entry_id contains control characters: {id:?} — rejected for safety"
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -216,6 +294,24 @@ mod tests {
     }
 
     #[test]
+    fn creator_kb_dir_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            creator_kb_dir(&home, "ctr_test", "ws1"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/workspaces/ws1/kb")
+        );
+    }
+
+    #[test]
+    fn creator_kb_entries_dir_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            creator_kb_entries_dir(&home, "ctr_test", "ws1"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/workspaces/ws1/kb/entries")
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "path separator")]
     fn soul_md_path_rejects_forward_slash() {
         let home = PathBuf::from("/h");
@@ -241,5 +337,73 @@ mod tests {
     fn soul_md_path_rejects_control_chars() {
         let home = PathBuf::from("/h");
         let _ = creator_soul_md_path(&home, "ctr_\x00null");
+    }
+
+    // ── validate_creator_id_safe tests ────────────────────────
+
+    #[test]
+    fn validate_creator_id_safe_accepts_valid() {
+        assert!(validate_creator_id_safe("crt_abc123").is_ok());
+    }
+
+    #[test]
+    fn validate_creator_id_safe_rejects_forward_slash() {
+        let err = validate_creator_id_safe("../../etc/passwd").unwrap_err();
+        assert!(err.contains("path separator"));
+    }
+
+    #[test]
+    fn validate_creator_id_safe_rejects_backslash() {
+        let err = validate_creator_id_safe("ctr_bad\\etc").unwrap_err();
+        assert!(err.contains("path separator"));
+    }
+
+    #[test]
+    fn validate_creator_id_safe_rejects_dotdot() {
+        let err = validate_creator_id_safe("ctr_.._secret").unwrap_err();
+        assert!(err.contains("'..'"));
+    }
+
+    #[test]
+    fn validate_creator_id_safe_rejects_control_chars() {
+        let err = validate_creator_id_safe("ctr_\x00null").unwrap_err();
+        assert!(err.contains("control characters"));
+    }
+
+    // ── validate_entry_id_safe tests ──────────────────────────
+
+    #[test]
+    fn validate_entry_id_safe_accepts_valid() {
+        assert!(validate_entry_id_safe("kb_a1b2c3d4").is_ok());
+    }
+
+    #[test]
+    fn validate_entry_id_safe_rejects_empty() {
+        let err = validate_entry_id_safe("").unwrap_err();
+        assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_entry_id_safe_rejects_dotdot() {
+        let err = validate_entry_id_safe("kb_.._secret").unwrap_err();
+        assert!(err.contains("'..'"));
+    }
+
+    #[test]
+    fn validate_entry_id_safe_rejects_forward_slash() {
+        let err = validate_entry_id_safe("kb_foo/bar").unwrap_err();
+        assert!(err.contains("path separator"));
+    }
+
+    #[test]
+    fn validate_entry_id_safe_rejects_backslash() {
+        let err = validate_entry_id_safe("kb_foo\\bar").unwrap_err();
+        assert!(err.contains("path separator"));
+    }
+
+    #[test]
+    fn validate_entry_id_safe_rejects_control_chars() {
+        let err = validate_entry_id_safe("kb_\x01ctrl").unwrap_err();
+        assert!(err.contains("control characters"));
     }
 }
