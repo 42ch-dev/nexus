@@ -90,7 +90,10 @@ pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
             agent_ref,
             message,
             cwd,
-        } => cmd_run(&agent_ref, message, cwd).await,
+        } => {
+            eprintln!("Note: `nexus42 agent run` is deprecated. Use `nexus42 acp run` instead.");
+            super::acp::cmd_run(&agent_ref, message, cwd).await
+        }
         AgentCommand::Probe { registry, agent } => super::acp::cmd_probe(registry, agent).await,
         AgentCommand::Skills {
             verbose,
@@ -106,206 +109,11 @@ pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
     }
 }
 
-// ── `agent run` (unique to agent.rs — not duplicated in acp.rs) ───
-
-async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>) -> Result<()> {
-    let client = nexus_acp_host::registry::RegistryClient::new()?;
-    let registry = client.get_registry().await?;
-
-    let agent = client.find_agent(&registry, agent_ref).ok_or_else(|| {
-        crate::errors::CliError::Other(format!(
-            "Agent '{agent_ref}' not found. Run `nexus42 agent list` to see available agents."
-        ))
-    })?;
-
-    // Resolve working directory
-    let work_dir = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-    // Resolve the launch command from distribution
-    let (program, args) = super::acp::resolve_launch_command(agent)?;
-
-    eprintln!("Starting {} {}...", agent.name, agent.version);
-    eprintln!("  Command: {} {}", program, args.join(" "));
-
-    let spawner = nexus_acp_host::transport::AgentSpawner::new(work_dir.clone());
-
-    // Spawn the agent subprocess
-    let (child, _stdin, _stdout) = spawner
-        .spawn(
-            &program,
-            &args
-                .iter()
-                .map(std::string::String::as_str)
-                .collect::<Vec<_>>(),
-        )
-        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
-
-    let mut child = child;
-    // Set up graceful shutdown handler (Ctrl+C)
-    let cancel_tx = setup_cancel_handler(agent.id.clone());
-
-    // Determine mode
-    let result = if let Some(msg) = message {
-        // Single-shot mode: send message, wait, exit
-        eprintln!("  Mode: single-shot");
-        eprintln!();
-        eprintln!("Message: {msg}");
-        eprintln!();
-
-        // Wait for the agent to finish (with timeout)
-        wait_for_agent_exit(&mut child, &agent.id).await
-    } else {
-        // Interactive mode
-        eprintln!("  Mode: interactive");
-        eprintln!();
-        eprintln!("Type your message and press Enter. Press Ctrl+C to exit.");
-        eprintln!();
-
-        // Simple interactive prompt loop using stdin
-        // The full ACP prompt integration (LocalSet + SDK) will be wired
-        // in a follow-up task — here we handle the subprocess lifecycle.
-        interactive_prompt_loop(&child, &agent.id)
-    };
-
-    // Send cancel signal
-    let _ = cancel_tx.send(());
-
-    // Wait for exit
-    match result {
-        Ok(()) => {
-            let status = child.wait().await.map_err(|e| {
-                crate::errors::CliError::Other(format!("Failed to wait for agent: {e}"))
-            })?;
-            if let Some(code) = status.code() {
-                if code == 0 {
-                    eprintln!("Agent exited (code {code}).");
-                } else {
-                    eprintln!("Agent exited with code {code}.");
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("Agent error: {e}");
-        }
-    }
-
-    Ok(())
-}
-
-/// Set up a Ctrl+C handler that sends a cancel signal.
-fn setup_cancel_handler(agent_id: String) -> tokio::sync::oneshot::Sender<()> {
-    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-
-    // Spawn a task that waits for Ctrl+C and forwards it
-    tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
-        tracing::info!(
-            agent_id = %agent_id,
-            "Ctrl+C received, initiating graceful shutdown"
-        );
-        eprintln!("\nShutting down agent (Ctrl+C)...");
-        // The cancel_tx is consumed here; the receiver side is dropped
-        // when the scope exits, which is the signal to shut down.
-        drop(cancel_rx);
-    });
-
-    cancel_tx
-}
-
-/// Wait for the agent subprocess to exit with a timeout.
-async fn wait_for_agent_exit(
-    child: &mut tokio::process::Child,
-    agent_id: &str,
-) -> std::result::Result<(), String> {
-    // Use a 5-minute timeout for single-shot mode
-    let timeout_duration = std::time::Duration::from_mins(5);
-
-    match tokio::time::timeout(timeout_duration, child.wait()).await {
-        Ok(Ok(status)) => {
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Agent {} exited with {}",
-                    agent_id,
-                    status
-                        .code()
-                        .map_or_else(|| "signal".to_string(), |c| format!("code {c}"))
-                ))
-            }
-        }
-        Ok(Err(e)) => Err(format!("Failed to wait for agent: {e}")),
-        Err(_) => Err(format!(
-            "Agent {} timed out after {}s",
-            agent_id,
-            timeout_duration.as_secs()
-        )),
-    }
-}
-
-/// Simple interactive prompt loop.
-///
-/// This reads user input from stdin and forwards it. The full ACP
-/// integration (`LocalSet` + SDK prompt) will be wired in a follow-up.
-fn interactive_prompt_loop(
-    child: &tokio::process::Child,
-    agent_id: &str,
-) -> std::result::Result<(), String> {
-    use std::io::{BufRead, Write};
-
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
-
-    eprintln!("(Connected to agent: {agent_id})");
-    eprintln!();
-
-    loop {
-        // Check if agent is still running
-        if child.id().is_none() {
-            eprintln!("Agent process has exited.");
-            break;
-        }
-
-        // Print prompt
-        eprint!("> ");
-        let _ = stdout.flush();
-
-        // Read user input
-        let mut input = String::new();
-        let read_result = stdin.lock().read_line(&mut input);
-        match read_result {
-            Ok(0) => {
-                // EOF (Ctrl+D)
-                eprintln!("\nExiting (EOF).");
-                break;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                return Err(format!("Failed to read input: {e}"));
-            }
-        }
-
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // Exit commands
-        if trimmed == "/quit" || trimmed == "/exit" || trimmed == "quit" || trimmed == "exit" {
-            eprintln!("Exiting.");
-            break;
-        }
-
-        // In V1.0, we note that the full ACP prompt loop requires
-        // LocalSet + SDK integration. The prompt would go through
-        // AcpSdkAdapter::prompt() within a LocalSet context.
-        eprintln!(
-            "  [note: ACP prompt integration pending — message '{trimmed}' not sent to agent]"
-        );
-    }
-
-    Ok(())
-}
+// ── Helper re-exports for acp::cmd_run ────────────────────────────────
+//
+// These functions are defined in acp.rs's private `agent` module but are
+// needed there. They are re-exported via pub(super) in acp.rs and called
+// directly. No additional code needed here.
 
 // ── Tests ──────────────────────────────────────────────────────────
 

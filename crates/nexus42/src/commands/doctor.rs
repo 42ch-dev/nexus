@@ -45,6 +45,7 @@ pub enum DoctorCommand {
 /// - Health checks fail critically
 /// - Configuration cannot be loaded
 pub async fn run(cmd: DoctorCommand, config: &CliConfig) -> Result<()> {
+    eprintln!("Note: `nexus42 doctor` is deprecated. Use `nexus42 system doctor` instead.");
     match cmd {
         DoctorCommand::Check => run_checks(config).await,
     }

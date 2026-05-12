@@ -56,6 +56,7 @@ pub enum SessionCommand {
 /// - Session validation fails
 /// - Session cannot be found
 pub fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
+    eprintln!("Note: `nexus42 session` is deprecated. Use `nexus42 acp session` instead.");
     let sessions_file = SessionManager::default_sessions_file();
     let manager = SessionManager::new(sessions_file);
 

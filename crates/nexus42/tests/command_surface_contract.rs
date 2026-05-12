@@ -579,3 +579,129 @@ fn v2_target_kb_subcommands() {
         );
     }
 }
+
+// =============================================================================
+// Part 4: Plan 6 ACP execution path consolidation contract tests
+// =============================================================================
+
+/// V2 Target: `acp session --help` shows list, show, delete subcommands.
+#[test]
+fn v2_target_acp_session_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["acp", "session", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["list", "show", "delete"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V2 acp session: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// V2 Target: `acp policy --help` shows grant, deny, list subcommands.
+#[test]
+fn v2_target_acp_policy_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["acp", "policy", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["grant", "deny", "list"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V2 acp policy: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// V2 Target: `acp permission --help` shows 6 subcommands.
+#[test]
+fn v2_target_acp_permission_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["acp", "permission", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["list", "grant", "deny", "ask", "revoke", "reset"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V2 acp permission: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// V2 Target: `acp --help` shows `run` subcommand.
+#[test]
+fn v2_target_acp_run() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["acp", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("run"),
+        "V2 acp: expected subcommand 'run'"
+    );
+}
+
+/// V2 Target: `platform explore --help` shows browse and search subcommands.
+#[test]
+fn v2_target_platform_explore_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["platform", "explore", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["browse", "search"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V2 platform explore: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// V2 Target: `system --help` shows `doctor` subcommand.
+#[test]
+fn v2_target_system_doctor() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["system", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("doctor"),
+        "V2 system: expected subcommand 'doctor'"
+    );
+}
