@@ -527,3 +527,55 @@ fn v2_target_system_subcommands() {
         );
     }
 }
+
+// =============================================================================
+// Part 3: Plan 5 KB scope contract tests (must pass immediately)
+// =============================================================================
+
+/// Verify `creator kb list --help` contains `--scope` flag.
+#[test]
+fn v2_target_kb_scope_flag() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "kb", "list", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--scope"),
+        "kb list --help must contain --scope flag"
+    );
+    assert!(
+        help_text.contains("work"),
+        "kb list --help must list 'work' scope option"
+    );
+    assert!(
+        help_text.contains("world"),
+        "kb list --help must list 'world' scope option"
+    );
+}
+
+/// Verify `creator kb --help` shows list, search, show, add subcommands.
+#[test]
+fn v2_target_kb_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "kb", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["list", "search", "show", "add"] {
+        assert!(
+            help_text.contains(subcmd),
+            "creator kb --help must show subcommand '{subcmd}'"
+        );
+    }
+}

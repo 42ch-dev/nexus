@@ -1,7 +1,8 @@
 //! Operational filesystem paths (ADR-014). Shared implementation: [`nexus_home_layout`].
 
 pub use nexus_home_layout::{
-    creator_workspaces_root, operational_workspace_dir, workspace_state_db_path,
+    creator_kb_dir, creator_kb_entries_dir, creator_workspaces_root, operational_workspace_dir,
+    workspace_state_db_path,
 };
 
 /// Workspace `state.db` path (alias for plan/ADR naming).
