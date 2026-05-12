@@ -1,7 +1,63 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-11T12:30:00Z",
+  "updated_at": "2026-05-13T08:00:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-12-v1.16-command-surface-contract",
+      "title": "V1.16 command surface contract and regression matrix",
+      "done_at": "2026-05-12T18:30:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-command-surface-contract.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-command-surface-contract.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-daemon-acp-topology",
+      "title": "V1.16 daemon and ACP top-level command topology",
+      "done_at": "2026-05-12T19:00:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-daemon-acp-topology.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-daemon-acp-topology.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-creator-knowledge-topology",
+      "title": "V1.16 creator knowledge topology (soul/memory/kb convergence)",
+      "done_at": "2026-05-12T20:00:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-creator-knowledge-topology.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-creator-knowledge-topology.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-system-platform-topology",
+      "title": "V1.16 system and platform top-level command topology",
+      "done_at": "2026-05-12T20:30:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-system-platform-topology.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-system-platform-topology.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-acp-execution-consolidation",
+      "title": "V1.16 ACP execution consolidation",
+      "done_at": "2026-05-12T21:00:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-acp-execution-consolidation.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-acp-execution-consolidation.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-creator-kb-multiscope",
+      "title": "V1.16 creator KB multi-scope baseline",
+      "done_at": "2026-05-12T21:30:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-creator-kb-multiscope.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-creator-kb-multiscope.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-trace-correlation",
+      "title": "V1.16 trace correlation",
+      "done_at": "2026-05-12T22:00:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-trace-correlation.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-trace-correlation.json"
+    },
+    {
+      "plan_id": "2026-05-12-v1.16-creator-identity-auth-compat",
+      "title": "V1.16 creator identity cache and auth compat",
+      "done_at": "2026-05-12T22:30:00Z",
+      "plan_file": ".agents/plans/2026-05-12-v1.16-creator-identity-auth-compat.md",
+      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-creator-identity-auth-compat.json"
+    },
     {
       "plan_id": "2026-05-10-v1.15-orchestration-first-pipeline",
       "title": "V1.15 orchestration-first pipeline execution plan",
