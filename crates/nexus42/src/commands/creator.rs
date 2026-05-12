@@ -5,7 +5,11 @@
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
+use crate::commands::clone::CloneArgs;
 use crate::commands::init;
+use crate::commands::init::InitCommand;
+use crate::commands::memory::MemoryCommand;
+use crate::commands::soul::SoulCommand;
 use crate::config::{CliConfig, DEFAULT_WORKSPACE_SLUG};
 use crate::errors::{CliError, Result};
 use crate::paths;
@@ -98,6 +102,40 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: CreatorWorkspaceCommand,
     },
+
+    /// SOUL management (deprecated: use `nexus42 creator soul`)
+    Soul {
+        #[command(subcommand)]
+        command: SoulCommand,
+    },
+
+    /// Long-term memory management (deprecated: use `nexus42 creator memory`)
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+
+    /// Knowledge base management (coming soon)
+    Kb {
+        #[command(subcommand)]
+        command: KbCommand,
+    },
+
+    /// Logout and clear creator credentials
+    Logout,
+}
+
+/// Knowledge base subcommands (coming soon).
+#[derive(Debug, Subcommand)]
+pub enum KbCommand {
+    /// List knowledge base entries (coming soon)
+    List,
+
+    /// Search knowledge base (coming soon)
+    Search {
+        /// Search query string
+        query: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -120,6 +158,34 @@ pub enum CreatorWorkspaceCommand {
         /// Workspace slug (directory must exist under creators/<id>/workspaces/)
         workspace_slug: String,
     },
+    /// Initialize a new workspace (migrated from `nexus42 init`)
+    Init {
+        #[command(subcommand)]
+        command: InitCommand,
+    },
+    /// Clone a world into the workspace (migrated from `nexus42 clone`)
+    Clone {
+        /// World reference to clone (e.g. `wld_abc123`)
+        world_ref: String,
+        /// Clone source: platform (default) or local
+        #[arg(long, value_enum, default_value = "platform")]
+        source: crate::commands::clone::CloneSourceArg,
+        /// Skip interactive confirmation
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Link a workspace (coming soon)
+    Link {
+        /// Workspace slug to link
+        workspace_slug: String,
+    },
+    /// Unlink a workspace (coming soon)
+    Unlink {
+        /// Workspace slug to unlink
+        workspace_slug: String,
+    },
+    /// Show workspace status (coming soon)
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -163,6 +229,16 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             }
         },
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
+        CreatorCommand::Soul { command } => super::soul::run(command, config).await,
+        CreatorCommand::Memory { command } => super::memory::run(command, config).await,
+        CreatorCommand::Kb { command } => {
+            run_kb(command);
+            Ok(())
+        }
+        CreatorCommand::Logout => {
+            println!("Coming soon: `creator logout` — clear creator credentials/session.");
+            Ok(())
+        }
     }
 }
 
@@ -172,6 +248,18 @@ fn user_home() -> Result<PathBuf> {
 
 fn validate_workspace_slug(slug: &str) -> Result<()> {
     init::validate_slug("workspace_slug", slug)
+}
+
+/// Handle knowledge base stub subcommands.
+fn run_kb(cmd: KbCommand) {
+    match cmd {
+        KbCommand::List => {
+            println!("Coming soon: `creator kb list` — list knowledge base entries.");
+        }
+        KbCommand::Search { query } => {
+            println!("Coming soon: `creator kb search` — search knowledge base for: {query}");
+        }
+    }
 }
 
 /// Validate a creator handle against the frozen spec v3 §7 regex.
@@ -189,6 +277,7 @@ fn validate_handle(handle: &str) -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Result<()> {
     let creator_id = config
         .active_creator_id
@@ -275,6 +364,34 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 .insert(creator_id.to_string(), workspace_slug.clone());
             cli.save()?;
             println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
+            Ok(())
+        }
+        CreatorWorkspaceCommand::Init { command } => super::init::run(command).await,
+        CreatorWorkspaceCommand::Clone {
+            world_ref,
+            source,
+            yes,
+        } => {
+            let args = CloneArgs {
+                world_ref,
+                source,
+                dry_run: false,
+                yes,
+            };
+            super::clone::run(args, config).await
+        }
+        CreatorWorkspaceCommand::Link { workspace_slug } => {
+            println!("Coming soon: `creator workspace link` — link workspace: {workspace_slug}");
+            Ok(())
+        }
+        CreatorWorkspaceCommand::Unlink { workspace_slug } => {
+            println!(
+                "Coming soon: `creator workspace unlink` — unlink workspace: {workspace_slug}"
+            );
+            Ok(())
+        }
+        CreatorWorkspaceCommand::Status => {
+            println!("Coming soon: `creator workspace status` — show workspace status.");
             Ok(())
         }
     }
