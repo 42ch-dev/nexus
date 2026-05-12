@@ -11,6 +11,7 @@ use crate::commands::init::InitCommand;
 use crate::commands::memory::MemoryCommand;
 use crate::commands::soul::SoulCommand;
 use crate::config::{CliConfig, DEFAULT_WORKSPACE_SLUG};
+use crate::creator_identity::{self, CreatorIdentityEntry};
 use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
@@ -789,6 +790,17 @@ async fn register_creator(
             let mut store = auth::AuthStore::load()?;
             store.store_creator_api_key(creator_id, api_key)?;
 
+            // V1.16: populate CLI-local identity cache
+            let identity_entry = CreatorIdentityEntry {
+                creator_id: creator_id.clone(),
+                handle: handle.clone(),
+                display_name: Some(name.clone()),
+            };
+            if let Err(e) = creator_identity::set_creator_identity(identity_entry) {
+                // Non-fatal: identity cache is best-effort display data
+                tracing::warn!("Failed to cache creator identity: {e}");
+            }
+
             // Set as active creator
             let mut cli_config = CliConfig::load()?;
             cli_config.active_creator_id = Some(creator_id.clone());
@@ -896,7 +908,7 @@ fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
     Err(CliError::AuthenticationRequired)
 }
 
-/// Show Creator status
+/// Show Creator status with three-layer identity model (V1.16).
 fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
     let id = creator_id.unwrap_or_else(|| {
         config
@@ -912,54 +924,106 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
     }
 
     let store = crate::auth::AuthStore::load()?;
+    let cache = creator_identity::load_creator_identity_cache();
+    let entry = creator_identity::get_creator_identity(&cache, &id);
 
-    // Try to get from local cache first
-    println!("Creator: {id}");
+    let handle_str = entry.and_then(|e| e.handle.as_deref()).unwrap_or("-");
+    let display_name_str = entry.and_then(|e| e.display_name.as_deref()).unwrap_or("-");
 
-    if store.is_creator_authenticated(&id) {
-        println!("  Auth: ✓ Token cached");
+    // Auth indicators
+    let has_creator_api_key = store.get_creator_api_key(&id).unwrap_or(None).is_some();
+    let has_cached_token = store.is_creator_authenticated(&id);
+
+    let creator_key_indicator = if has_creator_api_key {
+        "✓ Creator API key"
     } else {
-        println!("  Auth: ✗ No cached token");
-    }
+        "✗ No Creator API key"
+    };
+    let token_indicator = if has_cached_token {
+        "✓ Token cached"
+    } else {
+        "✗ No cached token"
+    };
 
-    println!();
-    println!("⚠ V1.0 skeleton: full status requires daemon + platform API.");
+    println!("Creator ID:    {id}");
+    println!("Handle:        {handle_str}");
+    println!("Display Name:  {display_name_str}");
+    println!("Auth:          {creator_key_indicator} | {token_indicator}");
 
     Ok(())
 }
 
-/// Switch active Creator
+/// Switch active Creator.
+///
+/// V1.16: normalizes the input using the CLI-local identity cache:
+/// 1. Exact `creator_id` match → use that ID.
+/// 2. Exact `handle` match → use the matched `creator_id`.
+/// 3. Path-safe but unknown → persist as explicit ID (backward compat).
+/// 4. Unsafe characters → error.
 fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
+    let resolved_id = creator_identity::resolve_creator_ref(creator_ref)?;
+
     let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(creator_ref.to_string());
-    // New active creator uses default workspace slug until `creator workspace use`.
+    cli_config.active_creator_id = Some(resolved_id.clone());
+    // Clear workspace slug for the old creator ref and the resolved ID.
     cli_config
         .active_workspace_slug_by_creator
         .remove(creator_ref);
+    cli_config
+        .active_workspace_slug_by_creator
+        .remove(&resolved_id);
     cli_config.save()?;
 
-    println!("✓ Active Creator set to: {creator_ref}");
+    if resolved_id == creator_ref {
+        println!("✓ Active Creator set to: {resolved_id}");
+    } else {
+        println!("✓ Active Creator set to: {resolved_id} (resolved from: {creator_ref})");
+    }
     println!(
         "  Workspace slug: {DEFAULT_WORKSPACE_SLUG} (use `nexus42 creator workspace use <slug>` after the directory exists)"
     );
     Ok(())
 }
 
-/// List all registered Creators
+/// List all known Creators with three-layer identity model (V1.16).
 fn list_creators(_config: &CliConfig) -> Result<()> {
-    // In V1.0, list from local cache
-    // In production, also fetch from platform
     let config = CliConfig::load()?;
+    let cache = creator_identity::load_creator_identity_cache();
+    let active_id = config.active_creator_id.as_deref();
 
-    println!("Registered Creators:");
-    println!();
+    // Collect all known creators from both the identity cache and auth store.
+    // The identity cache is the primary source for display metadata.
+    let auth_store = crate::auth::AuthStore::load()?;
 
-    if let Some(active_id) = &config.active_creator_id {
-        println!("  {active_id} (active)");
+    // Gather all known creator IDs from both sources.
+    let mut all_ids: Vec<String> = cache.creators.keys().cloned().collect();
+    if let Some(creators) = &auth_store.creators {
+        for id in creators.keys() {
+            if !all_ids.contains(id) {
+                all_ids.push(id.clone());
+            }
+        }
+    }
+    all_ids.sort();
+
+    if all_ids.is_empty() {
+        println!("No registered Creators found.");
+        println!("Use: nexus42 creator register --name <name>");
+        return Ok(());
     }
 
-    println!();
-    println!("⚠ V1.0 skeleton: full list requires daemon + platform API.");
+    println!("CREATOR ID          HANDLE         DISPLAY NAME          ACTIVE");
+    for id in &all_ids {
+        let entry = creator_identity::get_creator_identity(&cache, id);
+        let handle_str = entry.and_then(|e| e.handle.as_deref()).unwrap_or("-");
+        let display_str = entry.and_then(|e| e.display_name.as_deref()).unwrap_or("-");
+        let active_marker = if active_id == Some(id.as_str()) {
+            "✓"
+        } else {
+            ""
+        };
+        println!("{id:<19} {handle_str:<14} {display_str:<21} {active_marker}");
+    }
 
     Ok(())
 }

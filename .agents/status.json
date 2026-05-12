@@ -48,7 +48,7 @@
     {
       "plan_id": "2026-05-12-v1.16-creator-identity-auth-compat",
       "title": "V1.16 Creator identity and auth compatibility regression",
-      "status": "Todo",
+      "status": "InReview",
       "theme": "B4",
       "milestone": "M3",
       "effort": "M",
@@ -57,6 +57,9 @@
         "2026-05-12-v1.16-creator-kb-multiscope"
       ],
       "created_at": "2026-05-12T09:00:00Z",
+      "started_at": "2026-05-12T19:00:00Z",
+      "qc_verdict": "Approve (QC1) / Request Changes → Resolved (QC2) / Needs Discussion (QC3)",
+      "qa_verdict": "Pass",
       "metadata": {
         "primary_spec": ".agents/knowledge/v1.16-delivery-compass-v1.md",
         "spec_refs": [
@@ -178,6 +181,41 @@
         "owner": "fullstack-dev",
         "target_date": "backlog",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-kb-multiscope/2026-05-12-v1.16-creator-kb-multiscope-qa.md"
+      }
+    ],
+    "2026-05-12-v1.16-creator-identity-auth-compat": [
+      {
+        "id": "R-CREATOR-001",
+        "title": "Test flakiness under --test-threads>1 due to HOME env manipulation on macOS (dirs::home_dir does not respect $HOME)",
+        "severity": "warning",
+        "source": "QC1 W-001, QC2 W-001, QC3 W-4",
+        "scope": "crates/nexus42/src/creator_identity.rs (tests module)",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
+      },
+      {
+        "id": "R-CREATOR-002",
+        "title": "RMW race on creator-identities.json under concurrent CLI invocations (no file locking)",
+        "severity": "warning",
+        "source": "QC3 W-1",
+        "scope": "crates/nexus42/src/creator_identity.rs:100-104 (set_creator_identity)",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
+      },
+      {
+        "id": "R-CREATOR-003",
+        "title": "creator_auth_headers() does not validate creator_id input at entry point",
+        "severity": "low",
+        "source": "QC2 W-004",
+        "scope": "crates/nexus42/src/auth/creator_auth.rs:38-56",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
       }
     ],
     "2026-05-12-v1.16-trace-correlation": [
