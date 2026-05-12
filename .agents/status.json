@@ -48,7 +48,7 @@
     {
       "plan_id": "2026-05-12-v1.16-creator-kb-multiscope",
       "title": "V1.16 Creator KB multi-scope local baseline",
-      "status": "Todo",
+      "status": "InProgress",
       "theme": "B3",
       "milestone": "M3",
       "effort": "M",
@@ -56,6 +56,8 @@
         "2026-05-12-v1.16-creator-knowledge-topology"
       ],
       "created_at": "2026-05-12T09:00:00Z",
+      "started_at": "2026-05-13T01:00:00Z",
+      "working_branch": "feature/v1.16-creator-kb-multiscope",
       "metadata": {
         "primary_spec": ".agents/knowledge/v1.16-delivery-compass-v1.md",
         "spec_refs": [
