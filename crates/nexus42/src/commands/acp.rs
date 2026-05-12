@@ -180,6 +180,9 @@ pub enum AcpCommand {
         /// Working directory for the agent subprocess
         #[arg(short, long)]
         cwd: Option<PathBuf>,
+        /// Run ID for trace correlation (auto-generated if omitted)
+        #[arg(long)]
+        run_id: Option<String>,
     },
 }
 
@@ -223,7 +226,8 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
             agent_ref,
             message,
             cwd,
-        } => cmd_run(&agent_ref, message, cwd).await,
+            run_id,
+        } => cmd_run(&agent_ref, message, cwd, run_id).await,
     }
 }
 
@@ -839,7 +843,72 @@ fn describe_distribution(agent: &AgentEntry) -> String {
 /// - Agent lookup fails
 /// - Agent subprocess cannot be spawned
 /// - Agent exits with an error
-pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>) -> Result<()> {
+pub async fn cmd_run(
+    agent_ref: &str,
+    message: Option<String>,
+    cwd: Option<PathBuf>,
+    run_id_opt: Option<String>,
+) -> Result<()> {
+    use nexus_contracts::local::acp_runtime::trace::{
+        NexusRunStarted, NexusTraceEvent, NexusTraceStatus,
+    };
+
+    // Resolve or generate run ID
+    let run_id = match run_id_opt {
+        Some(ref id) => {
+            nexus_home_layout::validate_run_id_safe(id).map_err(crate::errors::CliError::Other)?;
+            super::acp_trace::NexusRunId(id.clone())
+        }
+        None => super::acp_trace::generate_run_id(),
+    };
+
+    eprintln!("Run ID: {}", run_id.0);
+
+    // Write run_started trace event (best-effort)
+    let home = dirs::home_dir().unwrap_or_default();
+    let now_ts = chrono::Utc::now().to_rfc3339();
+    let pid = std::process::id();
+
+    let start_event = NexusTraceEvent::RunStarted(NexusRunStarted {
+        schema_version: 1,
+        run_id: run_id.clone(),
+        entrypoint: "acp.run".to_string(),
+        agent_id: None, // will be filled after lookup
+        cwd: cwd.as_ref().map(|p| p.display().to_string()),
+        pid: Some(pid),
+        timestamp: now_ts,
+    });
+    super::acp_trace::append_trace_event(&home, &run_id, &start_event).ok();
+
+    let result = cmd_run_inner(agent_ref, message, cwd, &run_id).await;
+
+    // Write run_finished trace event (best-effort)
+    let now_ts = chrono::Utc::now().to_rfc3339();
+    let (status, error) = match &result {
+        Ok(()) => (NexusTraceStatus::Completed, None),
+        Err(e) => (NexusTraceStatus::Failed, Some(e.to_string())),
+    };
+    let finish_event = NexusTraceEvent::RunFinished(
+        nexus_contracts::local::acp_runtime::trace::NexusRunFinished {
+            schema_version: 1,
+            run_id: run_id.clone(),
+            status,
+            error,
+            timestamp: now_ts,
+        },
+    );
+    super::acp_trace::append_trace_event(&home, &run_id, &finish_event).ok();
+
+    result
+}
+
+/// Inner implementation of `cmd_run` (after run ID is resolved).
+async fn cmd_run_inner(
+    agent_ref: &str,
+    message: Option<String>,
+    cwd: Option<PathBuf>,
+    run_id: &super::acp_trace::NexusRunId,
+) -> Result<()> {
     // Validate cwd if provided
     if let Some(ref dir) = cwd {
         if !dir.exists() {
@@ -876,14 +945,16 @@ pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathB
 
     let spawner = AgentSpawner::new(work_dir);
 
-    // Spawn the agent subprocess
+    // Spawn the agent subprocess with NEXUS_RUN_ID in environment
+    let env_pairs = [("NEXUS_RUN_ID", run_id.0.as_str())];
     let (child, _stdin, _stdout) = spawner
-        .spawn(
+        .spawn_with_env(
             &program,
             &args
                 .iter()
                 .map(std::string::String::as_str)
                 .collect::<Vec<_>>(),
+            &env_pairs,
         )
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
 
