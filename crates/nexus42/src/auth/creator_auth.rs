@@ -13,12 +13,21 @@ use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 
 /// Creator-context auth headers for HTTP requests.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CreatorAuthHeaders {
     /// `Authorization: Bearer <token>` value.
     pub authorization: String,
     /// Optional `X-Creator-Id` header value (set when using user token fallback).
     pub x_creator_id: Option<String>,
+}
+
+impl std::fmt::Debug for CreatorAuthHeaders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreatorAuthHeaders")
+            .field("authorization", &"<redacted>")
+            .field("x_creator_id", &self.x_creator_id)
+            .finish()
+    }
 }
 
 /// Build Creator-context authentication headers.
@@ -156,16 +165,17 @@ mod tests {
     }
 
     fn store_with_user_token(token: &str) -> AuthStore {
-        let mut store = AuthStore::default();
-        store.user_token = Some(UserTokenState {
-            access_token: token.to_string(),
-            token_type: "Bearer".to_string(),
-            expires_at: "2099-01-01T00:00:00Z".to_string(),
-            user_id: "usr_test".to_string(),
-            refresh_token: None,
-            refresh_expires_at: None,
-        });
-        store
+        AuthStore {
+            user_token: Some(UserTokenState {
+                access_token: token.to_string(),
+                token_type: "Bearer".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                user_id: "usr_test".to_string(),
+                refresh_token: None,
+                refresh_expires_at: None,
+            }),
+            ..Default::default()
+        }
     }
 
     #[test]
