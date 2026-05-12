@@ -395,8 +395,24 @@ async fn stop_daemon(port: u16) -> Result<()> {
                     });
                 }
             }
-            // Brief wait for SIGKILL to take effect
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            // Poll to confirm the process is actually dead
+            let kill_timeout = std::time::Duration::from_secs(2);
+            let kill_start = std::time::Instant::now();
+            while kill_start.elapsed() < kill_timeout {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if !stopped {
+                return Err(CliError::Daemon {
+                    message: format!(
+                        "Daemon (PID {pid}) did not terminate after SIGKILL within {kill_timeout:?}"
+                    ),
+                });
+            }
         }
 
         remove_pid_file()?;
@@ -498,10 +514,144 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
 }
 
 /// Restart the daemon (stop then start).
+///
+/// First attempts a normal stop. If no PID file is found, uses port-based
+/// lsof to discover and kill the process. Polls with health check to
+/// confirm the old daemon is fully dead before starting the new one.
 async fn restart_daemon(port: u16, foreground: bool) -> Result<()> {
     println!("Restarting nexus42d daemon...");
+
+    // Stop the old daemon
     stop_daemon(port).await?;
+
+    // Verify the old daemon is fully dead via health check
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let confirm_timeout = std::time::Duration::from_secs(3);
+    let confirm_start = std::time::Instant::now();
+    let mut confirmed_dead = false;
+
+    while confirm_start.elapsed() < confirm_timeout {
+        match client.health_check().await {
+            Ok(false) | Err(_) => {
+                confirmed_dead = true;
+                break;
+            }
+            Ok(true) => {
+                // Still alive — wait and retry
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    if !confirmed_dead {
+        // Last resort: try port-based lsof kill
+        #[cfg(unix)]
+        {
+            eprintln!("  Old daemon still alive after stop, attempting port-based kill...");
+            let output = std::process::Command::new("lsof")
+                .args(["-ti", &format!(":{port}")])
+                .output()
+                .map_err(|e| CliError::Daemon {
+                    message: format!("Failed to run lsof: {e}"),
+                })?;
+
+            let pids_str = String::from_utf8_lossy(&output.stdout);
+            for pid_str in pids_str.lines() {
+                if let Ok(pid_num) = pid_str.trim().parse::<u32>() {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let nix_pid = nix::unistd::Pid::from_raw(pid_num as i32);
+                    let _ = nix::sys::signal::kill(nix_pid, Signal::SIGKILL);
+                    eprintln!("  Sent SIGKILL to PID {pid_num}.");
+                }
+            }
+
+            // Poll again to confirm death
+            let kill_wait = std::time::Duration::from_secs(2);
+            let kill_start = std::time::Instant::now();
+            while kill_start.elapsed() < kill_wait {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                if !client.health_check().await.unwrap_or(false) {
+                    confirmed_dead = true;
+                    break;
+                }
+            }
+        }
+
+        if !confirmed_dead {
+            return Err(CliError::Daemon {
+                message: format!(
+                    "Old daemon on port {port} could not be killed. Aborting restart."
+                ),
+            });
+        }
+    }
+
     start_daemon(port, foreground).await
+}
+
+/// Read the last `n` lines from a file without loading the entire file.
+///
+/// Seeks from the end of the file in chunks to find the last N lines,
+/// avoiding `O(file_size)` memory usage for large log files.
+fn read_tail_lines(path: &std::path::Path, n: usize) -> Result<Vec<String>> {
+    use std::io::{BufRead, Read, Seek, SeekFrom};
+
+    let file = std::fs::File::open(path)?;
+    let file_size = file.metadata()?.len();
+
+    // For small files, just read normally
+    if file_size < 8192 {
+        let content = std::io::BufReader::new(file)
+            .lines()
+            .map_while(std::result::Result::ok)
+            .collect::<Vec<_>>();
+        let start = content.len().saturating_sub(n);
+        return Ok(content[start..].to_vec());
+    }
+
+    // For larger files, seek backwards in chunks looking for newlines
+    let mut reader = std::io::BufReader::new(file);
+    let chunk_size: usize = 4096;
+    let mut buffer = String::new();
+    let mut pos = file_size;
+    let mut newline_count = 0usize;
+    let mut done = false;
+
+    // Small temporary buffer for reading backwards
+    let mut tmp = vec![0u8; chunk_size];
+
+    while pos > 0 && !done {
+        let read_size = (chunk_size as u64).min(pos);
+        // chunk_size (4096) fits in usize; read_size <= chunk_size, so truncation cannot occur
+        #[allow(clippy::cast_possible_truncation)]
+        let read_size_usize = read_size as usize;
+        pos -= read_size;
+
+        reader.seek(SeekFrom::Start(pos))?;
+        reader.read_exact(&mut tmp[..read_size_usize])?;
+
+        // Count newlines in this chunk
+        for &byte in tmp[..read_size_usize].iter().rev() {
+            if byte == b'\n' {
+                newline_count += 1;
+                if newline_count > n {
+                    done = true;
+                    break;
+                }
+            }
+        }
+
+        // Prepend this chunk to our buffer
+        let chunk_str = String::from_utf8_lossy(&tmp[..read_size_usize]);
+        buffer = format!("{chunk_str}{buffer}");
+    }
+
+    let all_lines: Vec<&str> = buffer.lines().collect();
+    let start = all_lines.len().saturating_sub(n);
+    Ok(all_lines[start..]
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect())
 }
 
 /// View daemon logs.
@@ -525,14 +675,13 @@ async fn daemon_logs(port: u16, lines: usize) -> Result<()> {
     let log_path = home.join(".nexus42").join("logs").join("daemon.log");
 
     if log_path.exists() {
-        // Read the last N lines from the log file
-        let content = std::fs::read_to_string(&log_path)?;
-        let log_lines: Vec<&str> = content.lines().rev().take(lines).collect();
+        // Read only the last N lines without loading the entire file into memory.
+        let last_lines = read_tail_lines(&log_path, lines)?;
 
-        println!("Daemon logs (last {} lines):", log_lines.len().min(lines));
+        println!("Daemon logs (last {} lines):", last_lines.len().min(lines));
         println!("{}", "─".repeat(60));
 
-        for line in log_lines.into_iter().rev() {
+        for line in &last_lines {
             println!("{line}");
         }
     } else {

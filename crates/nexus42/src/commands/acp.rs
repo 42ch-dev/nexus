@@ -190,7 +190,7 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
 // ── `acp status` ──────────────────────────────────────────────────
 
 /// Show daemon and ACP agent status.
-async fn cmd_status() -> Result<()> {
+pub(super) async fn cmd_status() -> Result<()> {
     let client =
         crate::api::DaemonClient::new(&format!("http://127.0.0.1:{}", crate::config::DAEMON_PORT));
 
@@ -322,7 +322,7 @@ async fn cmd_doctor(port: u16, config: &CliConfig) -> Result<()> {
 
 // ── `acp probe` ──────────────────────────────────────────────────
 
-async fn cmd_probe(_registry_flag: bool, agent: Option<String>) -> Result<()> {
+pub(super) async fn cmd_probe(_registry_flag: bool, agent: Option<String>) -> Result<()> {
     match agent {
         Some(agent_ref) => probe_agent(&agent_ref).await,
         None => probe_registry().await,
@@ -418,7 +418,14 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
             }
         }
         Err(_) => {
-            let _ = child.kill().await;
+            // Timeout — agent is still running (good sign)
+            // Kill it since we're just probing
+            if let Err(e) = child.kill().await {
+                eprintln!("  Warning: failed to kill agent process: {e}");
+            }
+            // Reap the process to avoid zombie
+            let _ = child.wait().await;
+
             println!("✓ Agent probe successful");
             println!("  Agent: {} v{}", agent.id, agent.version);
             println!("  Distribution: {}", describe_distribution(agent));
@@ -437,7 +444,7 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
 
 // ── `acp registry list` ──────────────────────────────────────────
 
-async fn cmd_registry_list(format_str: &str) -> Result<()> {
+pub(super) async fn cmd_registry_list(format_str: &str) -> Result<()> {
     let output_format: OutputFormat = format_str
         .parse()
         .map_err(crate::errors::CliError::Config)?;
@@ -555,7 +562,7 @@ fn print_list_json(
 
 // ── `acp registry inspect` ──────────────────────────────────────────
 
-async fn cmd_registry_inspect(agent_ref: &str) -> Result<()> {
+pub(super) async fn cmd_registry_inspect(agent_ref: &str) -> Result<()> {
     let client = RegistryClient::new()?;
     let registry = client.get_registry().await?;
 
@@ -605,7 +612,7 @@ fn cmd_agent_use(_agent_ref: &str) {
 
 // ── `acp skills export` ──────────────────────────────────────────────
 
-fn cmd_skills_export(output_format: &str) -> Result<()> {
+pub(super) fn cmd_skills_export(output_format: &str) -> Result<()> {
     let capabilities = client_capabilities();
 
     if output_format == "json" {
@@ -695,7 +702,7 @@ fn client_capabilities() -> Vec<(&'static str, &'static str, &'static str)> {
 }
 
 /// Resolve the launch command from an agent's distribution metadata.
-fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
+pub(super) fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
     if let Some(ref npx) = agent.distribution.npx {
         let mut args = vec![npx.package.clone()];
         if let Some(ref npx_args) = npx.args {
