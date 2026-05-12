@@ -2,18 +2,7 @@
   "version": 1,
   "updated_at": "2026-05-13T08:00:00Z",
   "plans": [
-    {
-      "plan_id": "2026-05-12-v1.16-verification-doc-sync",
-      "title": "V1.16 verification, documentation, and tracker sync",
-      "status": "InReview",
-      "theme": "B4",
-      "milestone": "M4",
-      "effort": "S",
-      "depends_on": [
-        "2026-05-12-v1.16-system-platform-topology",
-        "2026-05-12-v1.16-trace-correlation",
-        "2026-05-12-v1.16-creator-identity-auth-compat"
-      ],
+  ],
       "created_at": "2026-05-12T09:00:00Z",
       "started_at": "2026-05-13T06:00:00Z",
       "metadata": {
