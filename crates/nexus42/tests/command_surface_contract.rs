@@ -705,3 +705,45 @@ fn v2_target_system_doctor() {
         "V2 system: expected subcommand 'doctor'"
     );
 }
+
+// =============================================================================
+// Part 5: Plan 7 Run and capability-call trace correlation contract tests
+// =============================================================================
+
+/// Verify `acp run --help` includes `--run-id` flag.
+#[test]
+fn acp_run_shows_run_id_flag() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["acp", "run", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--run-id"),
+        "acp run --help must contain --run-id flag"
+    );
+}
+
+/// Verify `daemon orchestrate run --help` includes `--run-id` flag.
+#[test]
+fn daemon_orchestrate_run_shows_run_id_flag() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["daemon", "orchestrate", "run", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--run-id"),
+        "daemon orchestrate run --help must contain --run-id flag"
+    );
+}

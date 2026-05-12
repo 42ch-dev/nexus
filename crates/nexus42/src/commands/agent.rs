@@ -92,7 +92,7 @@ pub async fn run(cmd: AgentCommand, _config: &CliConfig) -> Result<()> {
             cwd,
         } => {
             eprintln!("Note: `nexus42 agent run` is deprecated. Use `nexus42 acp run` instead.");
-            super::acp::cmd_run(&agent_ref, message, cwd).await
+            super::acp::cmd_run(&agent_ref, message, cwd, None).await
         }
         AgentCommand::Probe { registry, agent } => super::acp::cmd_probe(registry, agent).await,
         AgentCommand::Skills {
