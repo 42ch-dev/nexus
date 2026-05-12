@@ -76,7 +76,6 @@ pub enum PermissionCommand {
 /// - Permission policy file cannot be loaded or saved
 /// - Invalid capability format
 pub fn run(command: PermissionCommand) -> Result<()> {
-    eprintln!("Note: `nexus42 permission` is deprecated. Use `nexus42 acp permission` instead.");
     let workspace_root = find_workspace_root().ok_or_else(|| {
         anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
     })?;

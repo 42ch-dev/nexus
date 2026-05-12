@@ -840,6 +840,22 @@ fn describe_distribution(agent: &AgentEntry) -> String {
 /// - Agent subprocess cannot be spawned
 /// - Agent exits with an error
 pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>) -> Result<()> {
+    // Validate cwd if provided
+    if let Some(ref dir) = cwd {
+        if !dir.exists() {
+            return Err(crate::errors::CliError::Other(format!(
+                "Working directory does not exist: {}",
+                dir.display()
+            )));
+        }
+        if !dir.is_dir() {
+            return Err(crate::errors::CliError::Other(format!(
+                "Path is not a directory: {}",
+                dir.display()
+            )));
+        }
+    }
+
     let client = nexus_acp_host::registry::RegistryClient::new()?;
     let registry = client.get_registry().await?;
 
@@ -858,7 +874,7 @@ pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathB
     eprintln!("Starting {} {}...", agent.name, agent.version);
     eprintln!("  Command: {} {}", program, args.join(" "));
 
-    let spawner = AgentSpawner::new(work_dir.clone());
+    let spawner = AgentSpawner::new(work_dir);
 
     // Spawn the agent subprocess
     let (child, _stdin, _stdout) = spawner
@@ -883,8 +899,28 @@ pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathB
         eprintln!("Message: {msg}");
         eprintln!();
 
-        // Wait for the agent to finish (with timeout)
-        wait_for_agent_exit(&mut child, &agent.id).await
+        // Wait for the agent to finish (with timeout).
+        // wait_for_agent_exit already calls child.wait(), so we do NOT
+        // call it again — single-shot mode handles its own exit reporting.
+        let wait_result = wait_for_agent_exit(&mut child, &agent.id).await;
+
+        // Send cancel signal
+        let _ = cancel_tx.send(());
+
+        return match wait_result {
+            Ok(()) => {
+                eprintln!("Agent exited successfully.");
+                Ok(())
+            }
+            Err(e) => {
+                // Ensure orphaned child is killed on error (e.g. timeout)
+                if child.id().is_some() {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                }
+                Err(crate::errors::CliError::Other(e))
+            }
+        };
     } else {
         // Interactive mode
         eprintln!("  Mode: interactive");
@@ -899,7 +935,7 @@ pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathB
     // Send cancel signal
     let _ = cancel_tx.send(());
 
-    // Wait for exit
+    // Interactive-mode cleanup: wait for exit
     match result {
         Ok(()) => {
             let status = child.wait().await.map_err(|e| {
@@ -914,6 +950,11 @@ pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathB
             }
         }
         Err(e) => {
+            // Ensure orphaned child is killed on error
+            if child.id().is_some() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
             eprintln!("Agent error: {e}");
         }
     }

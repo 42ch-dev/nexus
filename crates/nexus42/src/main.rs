@@ -46,6 +46,7 @@ async fn main() {
         Some(Commands::Db { command }) => nexus42::commands::db::run(command, &config).await,
         Some(Commands::Debug { command }) => nexus42::commands::debug::run(command, &config).await,
         Some(Commands::Doctor { command }) => {
+            eprintln!("Note: `nexus42 doctor` is deprecated. Use `nexus42 system doctor` instead.");
             nexus42::commands::doctor::run(command, &config).await
         }
         Some(Commands::Sync { command }) => nexus42::commands::sync::run(command, &config).await,
@@ -53,6 +54,9 @@ async fn main() {
         Some(Commands::Clone { args }) => nexus42::commands::clone::run(args, &config).await,
         Some(Commands::Config { command }) => nexus42::commands::config::run(command, &config),
         Some(Commands::Explore { command }) => {
+            eprintln!(
+                "Note: `nexus42 explore` is deprecated. Use `nexus42 platform explore` instead."
+            );
             nexus42::commands::explore::run(command, &config, &output_format).await
         }
         Some(Commands::Creator { command }) => {
@@ -63,9 +67,20 @@ async fn main() {
         }
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
         Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
-        Some(Commands::Session { command }) => nexus42::commands::session::run(command, &config),
-        Some(Commands::Policy { command }) => nexus42::commands::policy::run(command),
-        Some(Commands::Permission { command }) => nexus42::commands::permission::run(command),
+        Some(Commands::Session { command }) => {
+            eprintln!("Note: `nexus42 session` is deprecated. Use `nexus42 acp session` instead.");
+            nexus42::commands::session::run(command, &config)
+        }
+        Some(Commands::Policy { command }) => {
+            eprintln!("Note: `nexus42 policy` is deprecated. Use `nexus42 acp policy` instead.");
+            nexus42::commands::policy::run(command)
+        }
+        Some(Commands::Permission { command }) => {
+            eprintln!(
+                "Note: `nexus42 permission` is deprecated. Use `nexus42 acp permission` instead."
+            );
+            nexus42::commands::permission::run(command)
+        }
         Some(Commands::Preset { command }) => nexus42::commands::preset::run(command, &config),
         Some(Commands::Identity { command }) => {
             nexus42::commands::identity::run(command, &config).await
