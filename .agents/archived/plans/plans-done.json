@@ -1,9 +1,22 @@
 [
   {
+    "plan_id": "2026-05-12-v1.16-command-surface-contract",
+    "title": "2026-05-12-v1.16-command-surface-contract",
+    "done": true
+  },
+  {
+    "plan_id": "2026-05-12-v1.16-daemon-acp-topology",
+    "title": "2026-05-12-v1.16-daemon-acp-topology",
+    "done": true
+  },
+  {
     "plan_id": "2026-05-12-v1.16-system-platform-topology",
-    "title": "V1.16 system and platform command consolidation",
-    "done_at": "2026-05-12T22:30:00Z",
-    "theme": "B1",
-    "milestone": "M2"
+    "title": "2026-05-12-v1.16-system-platform-topology",
+    "done": true
+  },
+  {
+    "plan_id": "2026-05-12-v1.16-creator-knowledge-topology",
+    "title": "2026-05-12-v1.16-creator-knowledge-topology",
+    "done": true
   }
 ]
