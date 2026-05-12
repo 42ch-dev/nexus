@@ -21,6 +21,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use clap_complete::Shell;
 
 const ORCHESTRATION_BASE: &str = "/v1/local/orchestration";
 
@@ -118,10 +119,7 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
             Ok(())
         }
         SystemCommand::Doctor { command } => super::doctor::run(command, config).await,
-        SystemCommand::Completion { shell } => {
-            print_completion_help(&shell);
-            Ok(())
-        }
+        SystemCommand::Completion { shell } => print_completion(&shell),
         SystemCommand::Config { command } => super::config::run(command, config),
         SystemCommand::Debug { command } => super::debug::run(command, config).await,
         SystemCommand::Db { command } => super::db::run(command, config).await,
@@ -146,18 +144,26 @@ pub async fn run_legacy(cmd: SystemPresetCommand, config: &CliConfig) -> Result<
     }
 }
 
-/// Print shell completion help text.
+/// Generate shell completion script for the given shell.
 ///
-/// `clap_complete` is not yet a dependency, so this provides a helpful
-/// message directing users to generate completions via their shell's
-/// built-in mechanism.
-fn print_completion_help(shell: &str) {
-    println!("Shell completion for '{shell}' is not yet available.");
-    println!();
-    println!("To generate completions manually:");
-    println!("  eval \"$(nexus42 --help | tail -n +2)\"");
-    println!();
-    println!("Full completion support will be added in a future release.");
+/// Parses the shell name case-insensitively and generates a completion
+/// script for the full `nexus42` CLI.
+///
+/// # Errors
+///
+/// Returns an error if the shell name is not recognized.
+fn print_completion(shell_str: &str) -> Result<()> {
+    use clap::ValueEnum;
+
+    let shell = Shell::from_str(shell_str, true).map_err(|_| {
+        anyhow::anyhow!(
+            "Unknown shell: '{shell_str}'. Supported: bash, zsh, fish, elvish, powershell"
+        )
+    })?;
+    let mut cmd = crate::cli::build_command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, &name, &mut std::io::stdout());
+    Ok(())
 }
 
 async fn list_system_presets(config: &CliConfig) -> Result<()> {
@@ -214,7 +220,19 @@ mod tests {
     }
 
     #[test]
-    fn print_completion_help_does_not_error() {
-        print_completion_help("bash");
+    fn print_completion_valid_shell_bash() {
+        // Should not error for a valid shell name
+        assert!(print_completion("bash").is_ok());
+    }
+
+    #[test]
+    fn print_completion_rejects_unknown_shell() {
+        let result = print_completion("invalid_shell");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Unknown shell"),
+            "Expected 'Unknown shell' in error, got: {err_msg}"
+        );
     }
 }

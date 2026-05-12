@@ -12,6 +12,12 @@ pub enum AuthCommand {
     Login,
 
     /// Set access token directly (development/testing)
+    ///
+    /// Hidden from `platform auth` to avoid exposing tokens as positional
+    /// CLI arguments (visible in shell history / process listings).
+    /// Kept for backward compat — use `nexus42 auth token` (hidden top-level)
+    /// or environment-based auth instead.
+    #[command(hide = true)]
     Token {
         /// Access token
         access_token: String,
