@@ -10,6 +10,43 @@ use nix::sys::signal::Signal;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+/// Orchestration control subcommands (V1.16+).
+#[derive(Debug, Subcommand)]
+pub enum OrchestrateCommand {
+    /// List active orchestration schedules
+    List,
+
+    /// Run an orchestration schedule
+    Run {
+        /// Schedule ID to run
+        schedule_id: String,
+    },
+
+    /// Pause a running orchestration
+    Pause {
+        /// Schedule ID to pause
+        schedule_id: String,
+    },
+
+    /// Resume a paused orchestration
+    Resume {
+        /// Schedule ID to resume
+        schedule_id: String,
+    },
+
+    /// Cancel an orchestration
+    Cancel {
+        /// Schedule ID to cancel
+        schedule_id: String,
+    },
+
+    /// Inspect an orchestration schedule in detail
+    Inspect {
+        /// Schedule ID to inspect
+        schedule_id: String,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Start the nexus42d daemon
@@ -30,11 +67,46 @@ pub enum DaemonCommand {
         port: u16,
     },
 
+    /// Restart the daemon (stop then start)
+    Restart {
+        /// Port to listen on (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+
+        /// Run daemon in foreground (do not detach)
+        #[arg(long)]
+        foreground: bool,
+    },
+
     /// Check daemon status / health
     Status {
         /// Port the daemon is listening on (default: 8420)
         #[arg(long, default_value_t = DAEMON_PORT)]
         port: u16,
+    },
+
+    /// View daemon logs
+    Logs {
+        /// Port the daemon is listening on (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+
+        /// Number of log lines to show
+        #[arg(short, long, default_value_t = 50)]
+        lines: usize,
+    },
+
+    /// Run daemon health diagnostics
+    Doctor {
+        /// Port the daemon is listening on (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+    },
+
+    /// Orchestration control (schedules and workflows)
+    Orchestrate {
+        #[command(subcommand)]
+        command: OrchestrateCommand,
     },
 }
 
@@ -50,7 +122,11 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         DaemonCommand::Start { port, foreground } => start_daemon(port, foreground).await,
         DaemonCommand::Stop { port } => stop_daemon(port).await,
+        DaemonCommand::Restart { port, foreground } => restart_daemon(port, foreground).await,
         DaemonCommand::Status { port } => daemon_status(port, config).await,
+        DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
+        DaemonCommand::Doctor { port } => daemon_doctor(port).await,
+        DaemonCommand::Orchestrate { command } => run_orchestrate(command),
     }
 }
 
@@ -319,8 +395,24 @@ async fn stop_daemon(port: u16) -> Result<()> {
                     });
                 }
             }
-            // Brief wait for SIGKILL to take effect
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            // Poll to confirm the process is actually dead
+            let kill_timeout = std::time::Duration::from_secs(2);
+            let kill_start = std::time::Instant::now();
+            while kill_start.elapsed() < kill_timeout {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if !stopped {
+                return Err(CliError::Daemon {
+                    message: format!(
+                        "Daemon (PID {pid}) did not terminate after SIGKILL within {kill_timeout:?}"
+                    ),
+                });
+            }
         }
 
         remove_pid_file()?;
@@ -421,6 +513,292 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
+/// Restart the daemon (stop then start).
+///
+/// First attempts a normal stop. If no PID file is found, uses port-based
+/// lsof to discover and kill the process. Polls with health check to
+/// confirm the old daemon is fully dead before starting the new one.
+async fn restart_daemon(port: u16, foreground: bool) -> Result<()> {
+    println!("Restarting nexus42d daemon...");
+
+    // Stop the old daemon
+    stop_daemon(port).await?;
+
+    // Verify the old daemon is fully dead via health check
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let confirm_timeout = std::time::Duration::from_secs(3);
+    let confirm_start = std::time::Instant::now();
+    let mut confirmed_dead = false;
+
+    while confirm_start.elapsed() < confirm_timeout {
+        match client.health_check().await {
+            Ok(false) | Err(_) => {
+                confirmed_dead = true;
+                break;
+            }
+            Ok(true) => {
+                // Still alive — wait and retry
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    if !confirmed_dead {
+        // Last resort: try port-based lsof kill
+        #[cfg(unix)]
+        {
+            eprintln!("  Old daemon still alive after stop, attempting port-based kill...");
+            let output = std::process::Command::new("lsof")
+                .args(["-ti", &format!(":{port}")])
+                .output()
+                .map_err(|e| CliError::Daemon {
+                    message: format!("Failed to run lsof: {e}"),
+                })?;
+
+            let pids_str = String::from_utf8_lossy(&output.stdout);
+            for pid_str in pids_str.lines() {
+                if let Ok(pid_num) = pid_str.trim().parse::<u32>() {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let nix_pid = nix::unistd::Pid::from_raw(pid_num as i32);
+                    let _ = nix::sys::signal::kill(nix_pid, Signal::SIGKILL);
+                    eprintln!("  Sent SIGKILL to PID {pid_num}.");
+                }
+            }
+
+            // Poll again to confirm death
+            let kill_wait = std::time::Duration::from_secs(2);
+            let kill_start = std::time::Instant::now();
+            while kill_start.elapsed() < kill_wait {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                if !client.health_check().await.unwrap_or(false) {
+                    confirmed_dead = true;
+                    break;
+                }
+            }
+        }
+
+        if !confirmed_dead {
+            return Err(CliError::Daemon {
+                message: format!(
+                    "Old daemon on port {port} could not be killed. Aborting restart."
+                ),
+            });
+        }
+    }
+
+    start_daemon(port, foreground).await
+}
+
+/// Read the last `n` lines from a file without loading the entire file.
+///
+/// Seeks from the end of the file in chunks to find the last N lines,
+/// avoiding `O(file_size)` memory usage for large log files.
+fn read_tail_lines(path: &std::path::Path, n: usize) -> Result<Vec<String>> {
+    use std::io::{BufRead, Read, Seek, SeekFrom};
+
+    let file = std::fs::File::open(path)?;
+    let file_size = file.metadata()?.len();
+
+    // For small files, just read normally
+    if file_size < 8192 {
+        let content = std::io::BufReader::new(file)
+            .lines()
+            .map_while(std::result::Result::ok)
+            .collect::<Vec<_>>();
+        let start = content.len().saturating_sub(n);
+        return Ok(content[start..].to_vec());
+    }
+
+    // For larger files, seek backwards in chunks looking for newlines
+    let mut reader = std::io::BufReader::new(file);
+    let chunk_size: usize = 4096;
+    let mut buffer = String::new();
+    let mut pos = file_size;
+    let mut newline_count = 0usize;
+    let mut done = false;
+
+    // Small temporary buffer for reading backwards
+    let mut tmp = vec![0u8; chunk_size];
+
+    while pos > 0 && !done {
+        let read_size = (chunk_size as u64).min(pos);
+        // chunk_size (4096) fits in usize; read_size <= chunk_size, so truncation cannot occur
+        #[allow(clippy::cast_possible_truncation)]
+        let read_size_usize = read_size as usize;
+        pos -= read_size;
+
+        reader.seek(SeekFrom::Start(pos))?;
+        reader.read_exact(&mut tmp[..read_size_usize])?;
+
+        // Count newlines in this chunk
+        for &byte in tmp[..read_size_usize].iter().rev() {
+            if byte == b'\n' {
+                newline_count += 1;
+                if newline_count > n {
+                    done = true;
+                    break;
+                }
+            }
+        }
+
+        // Prepend this chunk to our buffer
+        let chunk_str = String::from_utf8_lossy(&tmp[..read_size_usize]);
+        buffer = format!("{chunk_str}{buffer}");
+    }
+
+    let all_lines: Vec<&str> = buffer.lines().collect();
+    let start = all_lines.len().saturating_sub(n);
+    Ok(all_lines[start..]
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect())
+}
+
+/// View daemon logs.
+///
+/// Reads the daemon's log file or queries the daemon for recent log entries.
+async fn daemon_logs(port: u16, lines: usize) -> Result<()> {
+    // First check if daemon is running
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+
+    if !client.health_check().await? {
+        println!("Daemon is not running on port {port}.");
+        println!();
+        println!("Start with: nexus42 daemon start");
+        return Ok(());
+    }
+
+    // Try to read the log file from the standard location
+    let home = dirs::home_dir().ok_or_else(|| CliError::Daemon {
+        message: "Cannot determine home directory".to_string(),
+    })?;
+    let log_path = home.join(".nexus42").join("logs").join("daemon.log");
+
+    if log_path.exists() {
+        // Read only the last N lines without loading the entire file into memory.
+        let last_lines = read_tail_lines(&log_path, lines)?;
+
+        println!("Daemon logs (last {} lines):", last_lines.len().min(lines));
+        println!("{}", "─".repeat(60));
+
+        for line in &last_lines {
+            println!("{line}");
+        }
+    } else {
+        println!(
+            "Daemon is running but no log file found at {}",
+            log_path.display()
+        );
+        println!();
+        println!("Logs may be available via:");
+        println!("  journalctl --user -u nexus42d");
+    }
+
+    Ok(())
+}
+
+/// Run daemon health diagnostics.
+async fn daemon_doctor(port: u16) -> Result<()> {
+    println!("Daemon Doctor — Running diagnostics...");
+    println!();
+
+    let mut issues = 0u32;
+
+    // Check 1: Daemon connectivity
+    print!("  [1/3] Daemon connectivity... ");
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    match client.health_check().await {
+        Ok(true) => {
+            println!("✓ Running on port {port}");
+        }
+        Ok(false) => {
+            println!("✗ Not running on port {port}");
+            issues += 1;
+        }
+        Err(e) => {
+            println!("✗ Error: {e}");
+            issues += 1;
+        }
+    }
+
+    // Check 2: PID file consistency
+    print!("  [2/3] PID file... ");
+    match read_pid_file() {
+        Ok(Some(pid)) => {
+            println!("✓ Found (PID: {pid})");
+        }
+        Ok(None) => {
+            println!("⚠ No PID file found");
+        }
+        Err(e) => {
+            println!("✗ Error reading PID file: {e}");
+            issues += 1;
+        }
+    }
+
+    // Check 3: Home directory
+    print!("  [3/3] Home directory... ");
+    let home = dirs::home_dir().ok_or_else(|| CliError::Daemon {
+        message: "Cannot determine home directory".to_string(),
+    })?;
+    let nexus_home = home.join(".nexus42");
+    if nexus_home.exists() {
+        println!("✓ {}", nexus_home.display());
+    } else {
+        println!("⚠ Not initialized ({})", nexus_home.display());
+    }
+
+    println!();
+    if issues == 0 {
+        println!("✓ All checks passed — daemon is healthy.");
+    } else {
+        println!("✗ {issues} issue(s) found. See above for details.");
+    }
+
+    Ok(())
+}
+
+/// Run orchestration subcommands.
+///
+/// Most orchestration commands are stubs — the full implementation will be
+/// wired in Plan 6.
+#[allow(clippy::unnecessary_wraps)]
+fn run_orchestrate(cmd: OrchestrateCommand) -> Result<()> {
+    match cmd {
+        OrchestrateCommand::List => {
+            println!("Coming soon: `daemon orchestrate list` — list orchestration schedules.");
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Run { schedule_id } => {
+            println!("Coming soon: `daemon orchestrate run {schedule_id}` — run an orchestration.");
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Pause { schedule_id } => {
+            println!(
+                "Coming soon: `daemon orchestrate pause {schedule_id}` — pause an orchestration."
+            );
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Resume { schedule_id } => {
+            println!(
+                "Coming soon: `daemon orchestrate resume {schedule_id}` — resume an orchestration."
+            );
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Cancel { schedule_id } => {
+            println!(
+                "Coming soon: `daemon orchestrate cancel {schedule_id}` — cancel an orchestration."
+            );
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+        OrchestrateCommand::Inspect { schedule_id } => {
+            println!("Coming soon: `daemon orchestrate inspect {schedule_id}` — inspect an orchestration.");
+            println!("  This feature will be implemented in a follow-up plan.");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -518,5 +896,34 @@ mod tests {
         // The stop_daemon function reads from ~/.nexus42/daemon.pid,
         // so this test verifies the logic conceptually.
         // In production, the stale PID cleanup happens inside stop_daemon.
+    }
+
+    #[tokio::test]
+    async fn test_daemon_logs_not_running() {
+        let result = daemon_logs(19999, 50).await;
+        assert!(
+            result.is_ok(),
+            "daemon_logs should succeed even when daemon not running"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_daemon_doctor() {
+        let result = daemon_doctor(19999).await;
+        assert!(result.is_ok(), "daemon_doctor should succeed");
+    }
+
+    #[test]
+    fn test_orchestrate_list_stub() {
+        let result = run_orchestrate(OrchestrateCommand::List);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_orchestrate_run_stub() {
+        let result = run_orchestrate(OrchestrateCommand::Run {
+            schedule_id: "test-schedule".to_string(),
+        });
+        assert!(result.is_ok());
     }
 }

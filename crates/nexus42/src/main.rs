@@ -16,7 +16,7 @@ mod session_capture;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    acp_worker::AcpWorkerArgs, agent::AgentCommand, auth::AuthCommand, clone::CloneArgs,
+    acp::AcpCommand, acp_worker::AcpWorkerArgs, auth::AuthCommand, clone::CloneArgs,
     config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
     db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
     identity::IdentityCommand, init::InitCommand, memory::MemoryCommand,
@@ -130,29 +130,32 @@ enum Commands {
         command: ContextCommand,
     },
 
-    /// Agent management (ACP integration)
-    Agent {
+    /// ACP capability plane (agents, registry, skills, connectivity)
+    Acp {
         #[command(subcommand)]
-        command: AgentCommand,
+        command: AcpCommand,
     },
 
     /// Hidden: ACP worker subprocess entry point (daemon-managed)
     #[command(hide = true)]
     AcpWorker(AcpWorkerArgs),
 
-    /// ACP session persistence management
+    /// ACP session persistence management (deprecated: use `nexus42 acp` commands)
+    #[command(hide = true)]
     Session {
         #[command(subcommand)]
         command: SessionCommand,
     },
 
-    /// Permission policy management (ACP-R7)
+    /// Permission policy management (deprecated: use `nexus42 acp` commands)
+    #[command(hide = true)]
     Policy {
         #[command(subcommand)]
         command: PolicyCommand,
     },
 
-    /// Agent-scoped permission management (V1.6)
+    /// Agent-scoped permission management (deprecated: use `nexus42 acp` commands)
+    #[command(hide = true)]
     Permission {
         #[command(subcommand)]
         command: PermissionCommand,
@@ -247,7 +250,7 @@ async fn main() {
         }
         Some(Commands::Creator { command }) => commands::creator::run(command, &config).await,
         Some(Commands::Context { command }) => commands::context::run(command, &config).await,
-        Some(Commands::Agent { command }) => commands::agent::run(command, &config).await,
+        Some(Commands::Acp { command }) => commands::acp::run(command, &config).await,
         Some(Commands::AcpWorker(args)) => commands::acp_worker::run(args).await,
         Some(Commands::Session { command }) => commands::session::run(command, &config),
         Some(Commands::Policy { command }) => commands::policy::run(command),
