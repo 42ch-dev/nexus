@@ -49,7 +49,6 @@ pub enum PolicyCommand {
 /// - Not in a Nexus workspace
 /// - Permission policy file cannot be loaded or saved
 pub fn run(command: PolicyCommand) -> Result<()> {
-    eprintln!("Note: `nexus42 policy` is deprecated. Use `nexus42 acp policy` instead.");
     let workspace_root = find_workspace_root().ok_or_else(|| {
         anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
     })?;
