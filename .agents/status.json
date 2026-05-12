@@ -48,7 +48,7 @@
     {
       "plan_id": "2026-05-12-v1.16-trace-correlation",
       "title": "V1.16 run and capability-call trace correlation",
-      "status": "Todo",
+      "status": "InProgress",
       "theme": "B2",
       "milestone": "M3",
       "effort": "M",
