@@ -63,7 +63,24 @@ pub fn load_creator_identity_cache() -> CreatorIdentityCache {
         return CreatorIdentityCache::default();
     }
 
-    serde_json::from_str(&content).unwrap_or_default()
+    let mut cache: CreatorIdentityCache = serde_json::from_str(&content).unwrap_or_default();
+
+    // C-001: Validate all creator_id values loaded from disk.
+    // A corrupt cache may contain entries with unsafe IDs (path traversal, etc.)
+    // that bypass the write-time validate_creator_id_safe() check.
+    let invalid_ids: Vec<String> = cache
+        .creators
+        .keys()
+        .filter(|id| crate::paths::validate_creator_id_safe(id).is_err())
+        .cloned()
+        .collect();
+
+    for id in &invalid_ids {
+        tracing::warn!("Removing cache entry with unsafe creator_id: {id:?} — rejected for safety");
+        cache.creators.remove(id);
+    }
+
+    cache
 }
 
 /// Save the creator identity cache to disk atomically.
@@ -97,6 +114,9 @@ pub fn get_creator_identity<'a>(
 /// # Errors
 ///
 /// Returns an error if the cache cannot be saved to disk.
+// TODO(V1.17): The load-modify-save pattern here is not atomic — concurrent
+// CLI invocations may race and lose updates. Consider file locking or migrating
+// the identity cache to SQLite (nexus-local-db) for proper concurrency safety.
 pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
     let mut cache = load_creator_identity_cache();
     cache.creators.insert(entry.creator_id.clone(), entry);
