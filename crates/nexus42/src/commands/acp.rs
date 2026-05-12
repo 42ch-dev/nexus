@@ -27,6 +27,8 @@
 //!     └─► Skills(Verify)    ──► Verify client capabilities
 //! ```
 
+use std::path::PathBuf;
+
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
@@ -149,6 +151,36 @@ pub enum AcpCommand {
         #[command(subcommand)]
         command: SkillsCommand,
     },
+
+    /// ACP session persistence management
+    Session {
+        #[command(subcommand)]
+        command: super::session::SessionCommand,
+    },
+
+    /// Global permission policy management
+    Policy {
+        #[command(subcommand)]
+        command: super::policy::PolicyCommand,
+    },
+
+    /// Agent-scoped permission rules
+    Permission {
+        #[command(subcommand)]
+        command: super::permission::PermissionCommand,
+    },
+
+    /// Run an ACP agent interactively or with a single message
+    Run {
+        /// Agent reference (id or name, partial match supported)
+        agent_ref: String,
+        /// Send a single message and exit (non-interactive mode)
+        #[arg(short, long)]
+        message: Option<String>,
+        /// Working directory for the agent subprocess
+        #[arg(short, long)]
+        cwd: Option<PathBuf>,
+    },
 }
 
 // ── Entry point ────────────────────────────────────────────────────
@@ -184,6 +216,14 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
                 Ok(())
             }
         },
+        AcpCommand::Session { command } => super::session::run(command, config),
+        AcpCommand::Policy { command } => super::policy::run(command),
+        AcpCommand::Permission { command } => super::permission::run(command),
+        AcpCommand::Run {
+            agent_ref,
+            message,
+            cwd,
+        } => cmd_run(&agent_ref, message, cwd).await,
     }
 }
 
@@ -784,6 +824,254 @@ fn describe_distribution(agent: &AgentEntry) -> String {
         ),
         _ => "unknown".to_string(),
     }
+}
+
+// ── `acp run` (moved from agent.rs) ────────────────────────────────
+
+/// Run an ACP agent interactively or with a single message.
+///
+/// This is the primary ACP-first execution entry point, moved from the
+/// deprecated `agent run` command.
+///
+/// # Errors
+///
+/// Returns `CliError` if:
+/// - Agent lookup fails
+/// - Agent subprocess cannot be spawned
+/// - Agent exits with an error
+pub async fn cmd_run(agent_ref: &str, message: Option<String>, cwd: Option<PathBuf>) -> Result<()> {
+    // Validate cwd if provided
+    if let Some(ref dir) = cwd {
+        if !dir.exists() {
+            return Err(crate::errors::CliError::Other(format!(
+                "Working directory does not exist: {}",
+                dir.display()
+            )));
+        }
+        if !dir.is_dir() {
+            return Err(crate::errors::CliError::Other(format!(
+                "Path is not a directory: {}",
+                dir.display()
+            )));
+        }
+    }
+
+    let client = nexus_acp_host::registry::RegistryClient::new()?;
+    let registry = client.get_registry().await?;
+
+    let agent = client.find_agent(&registry, agent_ref).ok_or_else(|| {
+        crate::errors::CliError::Other(format!(
+            "Agent '{agent_ref}' not found. Run `nexus42 acp registry list` to see available agents."
+        ))
+    })?;
+
+    // Resolve working directory
+    let work_dir = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    // Resolve the launch command from distribution
+    let (program, args) = resolve_launch_command(agent)?;
+
+    eprintln!("Starting {} {}...", agent.name, agent.version);
+    eprintln!("  Command: {} {}", program, args.join(" "));
+
+    let spawner = AgentSpawner::new(work_dir);
+
+    // Spawn the agent subprocess
+    let (child, _stdin, _stdout) = spawner
+        .spawn(
+            &program,
+            &args
+                .iter()
+                .map(std::string::String::as_str)
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
+
+    let mut child = child;
+    // Set up graceful shutdown handler (Ctrl+C)
+    let cancel_tx = setup_cancel_handler(agent.id.clone());
+
+    // Determine mode
+    let result = if let Some(msg) = message {
+        // Single-shot mode: send message, wait, exit
+        eprintln!("  Mode: single-shot");
+        eprintln!();
+        eprintln!("Message: {msg}");
+        eprintln!();
+
+        // Wait for the agent to finish (with timeout).
+        // wait_for_agent_exit already calls child.wait(), so we do NOT
+        // call it again — single-shot mode handles its own exit reporting.
+        let wait_result = wait_for_agent_exit(&mut child, &agent.id).await;
+
+        // Send cancel signal
+        let _ = cancel_tx.send(());
+
+        return match wait_result {
+            Ok(()) => {
+                eprintln!("Agent exited successfully.");
+                Ok(())
+            }
+            Err(e) => {
+                // Ensure orphaned child is killed on error (e.g. timeout)
+                if child.id().is_some() {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                }
+                Err(crate::errors::CliError::Other(e))
+            }
+        };
+    } else {
+        // Interactive mode
+        eprintln!("  Mode: interactive");
+        eprintln!();
+        eprintln!("Type your message and press Enter. Press Ctrl+C to exit.");
+        eprintln!();
+
+        // Simple interactive prompt loop using stdin
+        interactive_prompt_loop(&child, &agent.id)
+    };
+
+    // Send cancel signal
+    let _ = cancel_tx.send(());
+
+    // Interactive-mode cleanup: wait for exit
+    match result {
+        Ok(()) => {
+            let status = child.wait().await.map_err(|e| {
+                crate::errors::CliError::Other(format!("Failed to wait for agent: {e}"))
+            })?;
+            if let Some(code) = status.code() {
+                if code == 0 {
+                    eprintln!("Agent exited (code {code}).");
+                } else {
+                    eprintln!("Agent exited with code {code}.");
+                }
+            }
+        }
+        Err(e) => {
+            // Ensure orphaned child is killed on error
+            if child.id().is_some() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+            eprintln!("Agent error: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Set up a Ctrl+C handler that sends a cancel signal.
+fn setup_cancel_handler(agent_id: String) -> tokio::sync::oneshot::Sender<()> {
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+    // Spawn a task that waits for Ctrl+C and forwards it
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        tracing::info!(
+            agent_id = %agent_id,
+            "Ctrl+C received, initiating graceful shutdown"
+        );
+        eprintln!("\nShutting down agent (Ctrl+C)...");
+        drop(cancel_rx);
+    });
+
+    cancel_tx
+}
+
+/// Wait for the agent subprocess to exit with a timeout.
+async fn wait_for_agent_exit(
+    child: &mut tokio::process::Child,
+    agent_id: &str,
+) -> std::result::Result<(), String> {
+    let timeout_duration = std::time::Duration::from_mins(5);
+
+    match tokio::time::timeout(timeout_duration, child.wait()).await {
+        Ok(Ok(status)) => {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Agent {} exited with {}",
+                    agent_id,
+                    status
+                        .code()
+                        .map_or_else(|| "signal".to_string(), |c| format!("code {c}"))
+                ))
+            }
+        }
+        Ok(Err(e)) => Err(format!("Failed to wait for agent: {e}")),
+        Err(_) => Err(format!(
+            "Agent {} timed out after {}s",
+            agent_id,
+            timeout_duration.as_secs()
+        )),
+    }
+}
+
+/// Simple interactive prompt loop.
+///
+/// This reads user input from stdin and forwards it. The full ACP
+/// integration (`LocalSet` + SDK prompt) will be wired in a follow-up.
+fn interactive_prompt_loop(
+    child: &tokio::process::Child,
+    agent_id: &str,
+) -> std::result::Result<(), String> {
+    use std::io::{BufRead, Write};
+
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout();
+
+    eprintln!("(Connected to agent: {agent_id})");
+    eprintln!();
+
+    loop {
+        // Check if agent is still running
+        if child.id().is_none() {
+            eprintln!("Agent process has exited.");
+            break;
+        }
+
+        // Print prompt
+        eprint!("> ");
+        let _ = stdout.flush();
+
+        // Read user input
+        let mut input = String::new();
+        let read_result = stdin.lock().read_line(&mut input);
+        match read_result {
+            Ok(0) => {
+                // EOF (Ctrl+D)
+                eprintln!("\nExiting (EOF).");
+                break;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                return Err(format!("Failed to read input: {e}"));
+            }
+        }
+
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Exit commands
+        if trimmed == "/quit" || trimmed == "/exit" || trimmed == "quit" || trimmed == "exit" {
+            eprintln!("Exiting.");
+            break;
+        }
+
+        // In V1.0, we note that the full ACP prompt loop requires
+        // LocalSet + SDK integration. The prompt would go through
+        // AcpSdkAdapter::prompt() within a LocalSet context.
+        eprintln!(
+            "  [note: ACP prompt integration pending — message '{trimmed}' not sent to agent]"
+        );
+    }
+
+    Ok(())
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
