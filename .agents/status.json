@@ -48,7 +48,7 @@
     {
       "plan_id": "2026-05-12-v1.16-creator-identity-auth-compat",
       "title": "V1.16 Creator identity and auth compatibility regression",
-      "status": "Todo",
+      "status": "InProgress",
       "theme": "B4",
       "milestone": "M3",
       "effort": "M",
