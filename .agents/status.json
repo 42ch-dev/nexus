@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-13T18:00:00Z",
+  "updated_at": "2026-05-13T18:30:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -8,21 +8,17 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-05-13T18:00:00Z",
-      "total_open": 1,
+      "updated_at": "2026-05-13T18:30:00Z",
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 1,
+        "low": 0,
         "nit": 0
       },
-      "by_target": {
-        "backlog": 1
-      },
-      "by_plan": {
-        "v1.13": 1
-      },
+      "by_target": {},
+      "by_plan": {},
       "in_flight": {},
       "cross_cutting": [
         {
@@ -36,19 +32,5 @@
       ]
     }
   },
-  "residual_findings": {
-    "2026-05-06-v1.13-oss-forward-delivery": [
-      {
-        "id": "R-V113-005",
-        "title": "UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s)",
-        "severity": "low",
-        "source": "QC3-S-003 (qc3 report)",
-        "scope": "crates/nexus42/tests/creator_register_e2e.rs",
-        "decision": "accept",
-        "owner": "fullstack-dev",
-        "target_date": "backlog",
-        "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-005-upstream-timeout-e2e-variance.md"
-      }
-    ]
-  }
+  "residual_findings": {}
 }
