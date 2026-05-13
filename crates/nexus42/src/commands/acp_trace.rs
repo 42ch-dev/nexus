@@ -23,27 +23,50 @@ use nexus_home_layout::validate_run_id_safe;
 /// mutex serializes concurrent writes within the same process.
 static TRACE_WRITER: LazyLock<Mutex<Option<TraceWriter>>> = LazyLock::new(|| Mutex::new(None));
 
+/// Maximum trace file size in bytes (10 MB). When the file exceeds this
+/// limit it is truncated and writing starts from the beginning.
+const TRACE_FILE_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
+
 /// Buffered trace writer that keeps the file handle open for the
 /// lifetime of a single CLI run.
 struct TraceWriter {
     writer: BufWriter<std::fs::File>,
     path: PathBuf,
+    /// Approximate bytes written since open — used for size-limit checks
+    /// without re-statting the file on every event.
+    bytes_written: u64,
 }
 
 impl TraceWriter {
     /// Open (or create) the trace file and wrap it in a buffered writer.
-    /// Creates parent directories as needed.
+    /// Creates parent directories as needed. If the existing file exceeds
+    /// `TRACE_FILE_SIZE_LIMIT`, it is truncated to zero length.
     fn open(trace_file: &Path) -> std::result::Result<Self, std::io::Error> {
         if let Some(parent) = trace_file.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(trace_file)?;
+
+        // Check existing file size; truncate if over the limit.
+        let existing_size = std::fs::metadata(trace_file).map(|m| m.len()).unwrap_or(0);
+
+        let file = if existing_size > TRACE_FILE_SIZE_LIMIT {
+            // Truncate: open without append, which resets to zero length.
+            std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(trace_file)?
+        } else {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(trace_file)?
+        };
+
         Ok(Self {
             writer: BufWriter::new(file),
             path: trace_file.to_path_buf(),
+            bytes_written: 0,
         })
     }
 
@@ -53,7 +76,9 @@ impl TraceWriter {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         line.push('\n');
         self.writer.write_all(line.as_bytes())?;
-        self.writer.flush()
+        self.writer.flush()?;
+        self.bytes_written += line.len() as u64;
+        Ok(())
     }
 }
 
@@ -270,5 +295,53 @@ mod tests {
         let trace_path = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
         let content = std::fs::read_to_string(&trace_path).unwrap();
         assert_eq!(content.lines().count(), 2, "both events should be written");
+    }
+
+    #[test]
+    fn trace_file_size_limit_truncates_oversized_file() {
+        reset_trace_writer();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path();
+        let run_id = NexusRunId("run_sizelimit0000000000000000001".to_string());
+        let trace_path = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
+
+        // Pre-create a trace file that exceeds the size limit
+        if let Some(parent) = trace_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        // Write TRACE_FILE_SIZE_LIMIT + 1 bytes of padding
+        let oversize_content = "X".repeat((TRACE_FILE_SIZE_LIMIT + 1) as usize);
+        std::fs::write(&trace_path, oversize_content.as_bytes()).unwrap();
+        assert!(
+            std::fs::metadata(&trace_path).unwrap().len() > TRACE_FILE_SIZE_LIMIT,
+            "pre-condition: file should exceed limit"
+        );
+
+        // Now write a trace event — the oversized file should be truncated
+        let event = NexusTraceEvent::RunStarted(NexusRunStarted {
+            schema_version: 1,
+            run_id: run_id.clone(),
+            entrypoint: "acp.run".to_string(),
+            agent_id: None,
+            cwd: None,
+            pid: None,
+            timestamp: now_rfc3339(),
+        });
+
+        append_trace_event(home, &run_id, &event).unwrap();
+        flush_trace_writer();
+
+        let file_size = std::fs::metadata(&trace_path).unwrap().len();
+        assert!(
+            file_size <= TRACE_FILE_SIZE_LIMIT,
+            "file should be capped at the limit after truncation, got {file_size} bytes"
+        );
+
+        // The truncated file should contain exactly one JSONL line
+        let content = std::fs::read_to_string(&trace_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1, "truncated file should have exactly 1 event");
+        let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed["event"], "run_started");
     }
 }
