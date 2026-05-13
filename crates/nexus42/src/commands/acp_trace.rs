@@ -9,6 +9,7 @@
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
+use tracing::warn;
 
 // Re-export trace DTOs for use by other command modules
 pub use nexus_contracts::local::acp_runtime::trace::{
@@ -133,7 +134,7 @@ pub fn append_trace_event(
         match TraceWriter::open(&trace_file) {
             Ok(w) => *guard = Some(w),
             Err(e) => {
-                eprintln!("Warning: failed to open trace file: {e}");
+                warn!("failed to open trace file: {e}");
                 return Ok(());
             }
         }
@@ -141,7 +142,7 @@ pub fn append_trace_event(
 
     if let Some(writer) = guard.as_mut() {
         if let Err(e) = writer.write_event(event) {
-            eprintln!("Warning: failed to write trace event: {e}");
+            warn!("failed to write trace event: {e}");
         }
     }
     drop(guard);
@@ -154,9 +155,10 @@ pub fn append_trace_event(
 /// Call this at the end of a CLI run to ensure all buffered data is
 /// written and the file handle is released. Safe to call multiple times.
 pub fn flush_trace_writer() {
-    if let Ok(mut guard) = TRACE_WRITER.lock() {
-        *guard = None;
-    }
+    let mut guard = TRACE_WRITER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = None;
 }
 
 #[cfg(test)]
@@ -174,9 +176,10 @@ mod tests {
     /// Reset the singleton trace writer so each test starts clean.
     /// Must run with --test-threads=1 to avoid cross-test interference.
     fn reset_trace_writer() {
-        if let Ok(mut guard) = TRACE_WRITER.lock() {
-            *guard = None;
-        }
+        let mut guard = TRACE_WRITER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = None;
     }
 
     #[test]
