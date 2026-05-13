@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-05-12-v1.16-daemon-acp-topology",
+  "title": "V1.16 daemon and ACP top-level command topology",
+  "status": "Done",
+  "theme": "B1",
+  "milestone": "M2",
+  "effort": "M",
+  "depends_on": [
+    "2026-05-12-v1.16-command-surface-contract"
+  ],
+  "created_at": "2026-05-12T09:00:00Z",
+  "started_at": "2026-05-12T18:30:00Z",
+  "done_at": "2026-05-12T19:00:00Z",
+  "working_branch": "feature/v1.16-daemon-acp-topology",
+  "qa_verdict": "Approve with residuals",
+  "metadata": {
+    "primary_spec": ".agents/knowledge/v1.16-delivery-compass-v1.md",
+    "spec_refs": [
+      "nexus-platform/.agents/designs/v1-spec/cli-sync/cli-spec-v1.md"
+    ]
+  },
+  "archived_at": "2026-05-13T08:00:00Z",
+  "archive_reason": "Profile B compaction — plan Done"
+}

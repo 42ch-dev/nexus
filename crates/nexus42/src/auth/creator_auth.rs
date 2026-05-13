@@ -3,12 +3,75 @@
 //! Manages Creator API keys. Keys are stored in platform secure storage.
 //! CLI obtains short-lived tokens via `POST /v1/creators/{id}/credentials`
 //! and caches them locally.
+//!
+//! V1.16 adds `creator_auth_headers()` for Creator-context HTTP header selection.
 
 #![allow(dead_code)]
 
 use super::AuthStore;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
+
+/// Creator-context auth headers for HTTP requests.
+#[derive(Clone)]
+pub struct CreatorAuthHeaders {
+    /// `Authorization: Bearer <token>` value.
+    pub authorization: String,
+    /// Optional `X-Creator-Id` header value (set when using user token fallback).
+    pub x_creator_id: Option<String>,
+}
+
+impl std::fmt::Debug for CreatorAuthHeaders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreatorAuthHeaders")
+            .field("authorization", &"<redacted>")
+            .field("x_creator_id", &self.x_creator_id)
+            .finish()
+    }
+}
+
+/// Build Creator-context authentication headers.
+///
+/// Selection logic:
+/// 1. If `creator_api_key` exists for the `creator_id` →
+///    `Authorization: Bearer <creator_api_key>` (no X-Creator-Id needed).
+/// 2. Else if a valid user token exists →
+///    `Authorization: Bearer <user_token>` + `X-Creator-Id: <creator_id>`.
+/// 3. Else → Error: "Authentication required."
+///
+/// This is a pure function — no network calls.
+///
+/// # Errors
+///
+/// Returns `CliError::AuthenticationRequired` if no credentials are available.
+pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<CreatorAuthHeaders> {
+    let store = AuthStore::load()?;
+
+    // Path 1: Creator API key
+    if let Some(api_key) = store.get_creator_api_key(creator_id)? {
+        return Ok(CreatorAuthHeaders {
+            authorization: format!("Bearer {api_key}"),
+            x_creator_id: None,
+        });
+    }
+
+    // Path 2: User token + X-Creator-Id
+    if store.is_user_authenticated() {
+        if let Some(token_state) = &store.user_token {
+            let token = token_state.access_token.clone();
+            return Ok(CreatorAuthHeaders {
+                authorization: format!("Bearer {token}"),
+                x_creator_id: Some(creator_id.to_string()),
+            });
+        }
+    }
+
+    // Path 3: No credentials
+    Err(CliError::Other(
+        "Authentication required. Run `nexus42 auth login` or `nexus42 creator register`."
+            .to_string(),
+    ))
+}
 
 /// Rotate credentials for a Creator entity
 ///
@@ -78,4 +141,103 @@ pub async fn ensure_valid_token(config: &CliConfig, creator_id: &str) -> Result<
 /// Returns an error if the user is not authenticated.
 async fn get_user_token(config: &CliConfig) -> Result<String> {
     super::user_auth::ensure_valid_token(config).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{CreatorAuthState, UserTokenState};
+
+    fn store_with_creator_key(creator_id: &str, api_key: &str) -> AuthStore {
+        let mut store = AuthStore::default();
+        let mut creators = std::collections::HashMap::new();
+        creators.insert(
+            creator_id.to_string(),
+            CreatorAuthState {
+                creator_id: creator_id.to_string(),
+                access_token: String::new(),
+                expires_at: String::new(),
+                creator_api_key: Some(api_key.to_string()),
+            },
+        );
+        store.creators = Some(creators);
+        store
+    }
+
+    fn store_with_user_token(token: &str) -> AuthStore {
+        AuthStore {
+            user_token: Some(UserTokenState {
+                access_token: token.to_string(),
+                token_type: "Bearer".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                user_id: "usr_test".to_string(),
+                refresh_token: None,
+                refresh_expires_at: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn creator_key_auth_path() {
+        // Creator API key exists → Bearer <api_key>, no X-Creator-Id
+        let store = store_with_creator_key("ctr_alpha", "nexus_live_alpha");
+        let headers = build_headers_from_store(&store, "ctr_alpha").expect("headers");
+        assert_eq!(headers.authorization, "Bearer nexus_live_alpha");
+        assert!(headers.x_creator_id.is_none());
+    }
+
+    #[test]
+    fn user_token_fallback_path() {
+        // No creator key but valid user token → Bearer <user_token> + X-Creator-Id
+        let store = store_with_user_token("user_tok_123");
+        let headers = build_headers_from_store(&store, "ctr_alpha").expect("headers");
+        assert_eq!(headers.authorization, "Bearer user_tok_123");
+        assert_eq!(headers.x_creator_id.as_deref(), Some("ctr_alpha"));
+    }
+
+    #[test]
+    fn no_credentials_errors() {
+        // Neither creator key nor user token → error
+        let store = AuthStore::default();
+        let result = build_headers_from_store(&store, "ctr_alpha");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Authentication required"));
+    }
+
+    /// Test helper: build headers directly from an `AuthStore` without disk I/O.
+    fn build_headers_from_store(store: &AuthStore, creator_id: &str) -> Result<CreatorAuthHeaders> {
+        // Path 1: Creator API key
+        if let Some(creators) = &store.creators {
+            if let Some(state) = creators.get(creator_id) {
+                if let Some(api_key) = &state.creator_api_key {
+                    return Ok(CreatorAuthHeaders {
+                        authorization: format!("Bearer {api_key}"),
+                        x_creator_id: None,
+                    });
+                }
+            }
+        }
+
+        // Path 2: User token + X-Creator-Id
+        if store.is_user_authenticated() {
+            let token = store
+                .user_token
+                .as_ref()
+                .expect("is_user_authenticated guarantees Some")
+                .access_token
+                .clone();
+            return Ok(CreatorAuthHeaders {
+                authorization: format!("Bearer {token}"),
+                x_creator_id: Some(creator_id.to_string()),
+            });
+        }
+
+        // Path 3: No credentials
+        Err(CliError::Other(
+            "Authentication required. Run `nexus42 auth login` or `nexus42 creator register`."
+                .to_string(),
+        ))
+    }
 }

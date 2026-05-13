@@ -6,9 +6,11 @@
 pub mod api;
 pub mod auth;
 pub mod challenge;
+pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod context;
+pub mod creator_identity;
 pub mod db;
 pub mod errors;
 pub mod paths;

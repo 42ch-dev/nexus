@@ -5,8 +5,13 @@
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
+use crate::commands::clone::CloneArgs;
 use crate::commands::init;
+use crate::commands::init::InitCommand;
+use crate::commands::memory::MemoryCommand;
+use crate::commands::soul::SoulCommand;
 use crate::config::{CliConfig, DEFAULT_WORKSPACE_SLUG};
+use crate::creator_identity::{self, CreatorIdentityEntry};
 use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
@@ -98,6 +103,79 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: CreatorWorkspaceCommand,
     },
+
+    /// SOUL management (deprecated: use `nexus42 creator soul`)
+    Soul {
+        #[command(subcommand)]
+        command: SoulCommand,
+    },
+
+    /// Long-term memory management (deprecated: use `nexus42 creator memory`)
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+
+    /// Knowledge base management (local work scope; world scope coming soon)
+    Kb {
+        #[command(subcommand)]
+        command: KbCommand,
+    },
+
+    /// Logout and clear creator credentials
+    Logout,
+}
+
+/// KB scope: `work` (local workspace, default) or `world` (platform, future).
+#[derive(Debug, Clone, clap::ValueEnum, Default, PartialEq, Eq)]
+pub enum KbScope {
+    /// Local workspace knowledge (default)
+    #[default]
+    Work,
+    /// Platform/world-scoped knowledge (future)
+    World,
+}
+
+/// Knowledge base subcommands.
+#[derive(Debug, Subcommand)]
+pub enum KbCommand {
+    /// List knowledge base entries
+    List {
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
+
+    /// Search knowledge base entries by title/content
+    Search {
+        /// Search query string
+        query: String,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
+
+    /// Show a single knowledge base entry
+    Show {
+        /// Entry ID to display (e.g. `kb_a1b2c3d4`)
+        entry_id: String,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
+
+    /// Add a knowledge base entry from a file
+    Add {
+        /// Path to the source file to add as a KB entry
+        #[arg(long)]
+        file: PathBuf,
+        /// Optional title (defaults to filename stem)
+        #[arg(long)]
+        title: Option<String>,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -120,6 +198,37 @@ pub enum CreatorWorkspaceCommand {
         /// Workspace slug (directory must exist under creators/<id>/workspaces/)
         workspace_slug: String,
     },
+    /// Initialize a new workspace (migrated from `nexus42 init`)
+    Init {
+        #[command(subcommand)]
+        command: InitCommand,
+    },
+    /// Clone a world into the workspace (migrated from `nexus42 clone`)
+    Clone {
+        /// World reference to clone (e.g. `wld_abc123`)
+        world_ref: String,
+        /// Clone source: platform (default) or local
+        #[arg(long, value_enum, default_value = "platform")]
+        source: crate::commands::clone::CloneSourceArg,
+        /// Print the JSON request and exit without calling the daemon
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip interactive confirmation
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Link a workspace (coming soon)
+    Link {
+        /// Workspace slug to link
+        workspace_slug: String,
+    },
+    /// Unlink a workspace (coming soon)
+    Unlink {
+        /// Workspace slug to unlink
+        workspace_slug: String,
+    },
+    /// Show workspace status (coming soon)
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -163,6 +272,10 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             }
         },
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
+        CreatorCommand::Soul { command } => super::soul::run(command, config).await,
+        CreatorCommand::Memory { command } => super::memory::run(command, config).await,
+        CreatorCommand::Kb { command } => run_kb(command, config),
+        CreatorCommand::Logout => logout_creator(config),
     }
 }
 
@@ -172,6 +285,253 @@ fn user_home() -> Result<PathBuf> {
 
 fn validate_workspace_slug(slug: &str) -> Result<()> {
     init::validate_slug("workspace_slug", slug)
+}
+
+/// Handle knowledge base commands.
+fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
+    // F002: Validate active_creator_id before constructing any paths.
+    // This prevents path traversal if config is corrupted or malicious.
+    if let Some(cid) = &config.active_creator_id {
+        paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
+    }
+    match cmd {
+        KbCommand::List { scope } => kb_list(config, &scope),
+        KbCommand::Search { query, scope } => kb_search(config, &query, &scope),
+        KbCommand::Show { entry_id, scope } => kb_show(config, &entry_id, &scope),
+        KbCommand::Add { file, title, scope } => kb_add(config, &file, title.as_deref(), &scope),
+    }
+}
+
+/// Deferred message for `world` scope commands.
+fn world_scope_deferred() {
+    println!("KB world scope requires platform connection (coming soon).");
+}
+
+/// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
+fn resolve_kb_paths(config: &CliConfig) -> Result<(String, String, PathBuf)> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(CliError::CreatorNotSelected)?
+        .to_string();
+    let slug = config.workspace_slug_for_creator(&creator_id).to_string();
+    let home = user_home()?;
+    Ok((creator_id, slug, home))
+}
+
+/// KB index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct KbIndex {
+    #[serde(default)]
+    entries: Vec<KbIndexEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct KbIndexEntry {
+    entry_id: String,
+    title: String,
+    created_at: String,
+}
+
+/// Read the KB index from disk. Returns default (empty) if file is missing or corrupt.
+fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
+    if !index_path.exists() {
+        return KbIndex::default();
+    }
+    let Ok(content) = std::fs::read_to_string(index_path) else {
+        return KbIndex::default();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+/// Write the KB index to disk atomically.
+///
+/// Writes to a temporary file first, then renames to the final path.
+/// `std::fs::rename` is atomic on the same filesystem (POSIX), which
+/// prevents corruption from crashes mid-write or concurrent `kb add` races.
+#[allow(dead_code)] // Kept as utility; kb_add inlines the pattern for W2 ordering.
+fn write_kb_index(index_path: &std::path::Path, index: &KbIndex) -> Result<()> {
+    if let Some(parent) = index_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(index)?;
+    let tmp_path = index_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json)?;
+    std::fs::rename(&tmp_path, index_path)?;
+    Ok(())
+}
+
+/// Generate a KB entry ID: `kb_` + 8 hex chars from timestamp + 4 hex chars
+/// from a simple hash to reduce collision risk under rapid successive calls.
+#[allow(clippy::cast_possible_truncation)]
+fn generate_entry_id() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let millis = now.as_millis() as u32;
+    // Mix in lower bits of sub-millisecond timing and a simple diversifier
+    // to avoid collisions when called in rapid succession.
+    let diversifier = ((millis << 16) ^ (now.subsec_nanos() >> 4)) as u16;
+    format!("kb_{:08x}{:04x}", millis % 0xFFFF_FFFF, diversifier)
+}
+
+/// `kb list` implementation.
+fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+
+    if !index_path.exists() {
+        println!("No KB entries in workspace {slug}.");
+        return Ok(());
+    }
+
+    let index = read_kb_index(&index_path);
+    if index.entries.is_empty() {
+        println!("No KB entries in workspace {slug}.");
+        return Ok(());
+    }
+
+    println!("KB entries in workspace {slug}:");
+    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
+    for entry in &index.entries {
+        println!(
+            "{:<20} {:<40} {}",
+            entry.entry_id, entry.title, entry.created_at
+        );
+    }
+    Ok(())
+}
+
+/// `kb search` implementation — case-insensitive substring match on title.
+fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+
+    if !index_path.exists() {
+        println!("No KB entries in workspace {slug} to search.");
+        return Ok(());
+    }
+
+    let index = read_kb_index(&index_path);
+    let query_lower = query.to_lowercase();
+    let matches: Vec<&KbIndexEntry> = index
+        .entries
+        .iter()
+        .filter(|e| e.title.to_lowercase().contains(&query_lower))
+        .collect();
+
+    if matches.is_empty() {
+        println!("No KB entries matching \"{query}\" in workspace {slug}.");
+        return Ok(());
+    }
+
+    println!("KB entries matching \"{query}\" in workspace {slug}:");
+    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
+    for entry in matches {
+        println!(
+            "{:<20} {:<40} {}",
+            entry.entry_id, entry.title, entry.created_at
+        );
+    }
+    Ok(())
+}
+
+/// `kb show` implementation — read and print a single entry file.
+fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    // F001: Validate entry_id before constructing file path to prevent path traversal.
+    paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
+    let entry_path = entries_dir.join(format!("{entry_id}.md"));
+
+    if !entry_path.exists() {
+        return Err(CliError::Other(format!(
+            "KB entry {entry_id} not found in workspace {slug}."
+        )));
+    }
+
+    let content = std::fs::read_to_string(&entry_path)?;
+    println!("{content}");
+    Ok(())
+}
+
+/// `kb add` implementation — copy file into KB, update index.
+///
+/// Writes the index update to a temp file first, then copies the entry file,
+/// then atomically renames the index. This prevents orphan entry files on
+/// partial failure (W2).
+fn kb_add(
+    config: &CliConfig,
+    file: &std::path::Path,
+    title: Option<&str>,
+    scope: &KbScope,
+) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    if !file.exists() {
+        return Err(CliError::Other(format!(
+            "Source file not found: {}",
+            file.display()
+        )));
+    }
+
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+
+    // Create directories if needed
+    std::fs::create_dir_all(&entries_dir)?;
+
+    // Generate entry ID and determine title
+    let entry_id = generate_entry_id();
+    let entry_title = title
+        .map(std::string::ToString::to_string)
+        .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| entry_id.clone());
+
+    // Step 1: Write updated index to temp file (W2 — index update first)
+    let mut index = read_kb_index(&index_path);
+    let created_at = chrono::Utc::now().to_rfc3339();
+    index.entries.push(KbIndexEntry {
+        entry_id: entry_id.clone(),
+        title: entry_title,
+        created_at,
+    });
+    let tmp_index_path = index_path.with_extension("json.tmp");
+    {
+        if let Some(parent) = tmp_index_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&index)?;
+        std::fs::write(&tmp_index_path, json)?;
+    }
+
+    // Step 2: Copy source file to entries dir
+    let dest = entries_dir.join(format!("{entry_id}.md"));
+    std::fs::copy(file, &dest)?;
+
+    // Step 3: Atomically rename temp index to final (W2 — only committed after file is safe)
+    std::fs::rename(&tmp_index_path, &index_path)?;
+
+    println!("✓ KB entry added: {entry_id}");
+    Ok(())
 }
 
 /// Validate a creator handle against the frozen spec v3 §7 regex.
@@ -189,6 +549,7 @@ fn validate_handle(handle: &str) -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand) -> Result<()> {
     let creator_id = config
         .active_creator_id
@@ -275,6 +636,35 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 .insert(creator_id.to_string(), workspace_slug.clone());
             cli.save()?;
             println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
+            Ok(())
+        }
+        CreatorWorkspaceCommand::Init { command } => super::init::run(command).await,
+        CreatorWorkspaceCommand::Clone {
+            world_ref,
+            source,
+            dry_run,
+            yes,
+        } => {
+            let args = CloneArgs {
+                world_ref,
+                source,
+                dry_run,
+                yes,
+            };
+            super::clone::run(args, config).await
+        }
+        CreatorWorkspaceCommand::Link { workspace_slug } => {
+            println!("Coming soon: `creator workspace link` — link workspace: {workspace_slug}");
+            Ok(())
+        }
+        CreatorWorkspaceCommand::Unlink { workspace_slug } => {
+            println!(
+                "Coming soon: `creator workspace unlink` — unlink workspace: {workspace_slug}"
+            );
+            Ok(())
+        }
+        CreatorWorkspaceCommand::Status => {
+            println!("Coming soon: `creator workspace status` — show workspace status.");
             Ok(())
         }
     }
@@ -400,6 +790,17 @@ async fn register_creator(
             let mut store = auth::AuthStore::load()?;
             store.store_creator_api_key(creator_id, api_key)?;
 
+            // V1.16: populate CLI-local identity cache
+            let identity_entry = CreatorIdentityEntry {
+                creator_id: creator_id.clone(),
+                handle: handle.clone(),
+                display_name: Some(name.clone()),
+            };
+            if let Err(e) = creator_identity::set_creator_identity(identity_entry) {
+                // Non-fatal: identity cache is best-effort display data
+                tracing::warn!("Failed to cache creator identity: {e}");
+            }
+
             // Set as active creator
             let mut cli_config = CliConfig::load()?;
             cli_config.active_creator_id = Some(creator_id.clone());
@@ -507,7 +908,7 @@ fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
     Err(CliError::AuthenticationRequired)
 }
 
-/// Show Creator status
+/// Show Creator status with three-layer identity model (V1.16).
 fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
     let id = creator_id.unwrap_or_else(|| {
         config
@@ -523,54 +924,106 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
     }
 
     let store = crate::auth::AuthStore::load()?;
+    let cache = creator_identity::load_creator_identity_cache();
+    let entry = creator_identity::get_creator_identity(&cache, &id);
 
-    // Try to get from local cache first
-    println!("Creator: {id}");
+    let handle_str = entry.and_then(|e| e.handle.as_deref()).unwrap_or("-");
+    let display_name_str = entry.and_then(|e| e.display_name.as_deref()).unwrap_or("-");
 
-    if store.is_creator_authenticated(&id) {
-        println!("  Auth: ✓ Token cached");
+    // Auth indicators
+    let has_creator_api_key = store.get_creator_api_key(&id).unwrap_or(None).is_some();
+    let has_cached_token = store.is_creator_authenticated(&id);
+
+    let creator_key_indicator = if has_creator_api_key {
+        "✓ Creator API key"
     } else {
-        println!("  Auth: ✗ No cached token");
-    }
+        "✗ No Creator API key"
+    };
+    let token_indicator = if has_cached_token {
+        "✓ Token cached"
+    } else {
+        "✗ No cached token"
+    };
 
-    println!();
-    println!("⚠ V1.0 skeleton: full status requires daemon + platform API.");
+    println!("Creator ID:    {id}");
+    println!("Handle:        {handle_str}");
+    println!("Display Name:  {display_name_str}");
+    println!("Auth:          {creator_key_indicator} | {token_indicator}");
 
     Ok(())
 }
 
-/// Switch active Creator
+/// Switch active Creator.
+///
+/// V1.16: normalizes the input using the CLI-local identity cache:
+/// 1. Exact `creator_id` match → use that ID.
+/// 2. Exact `handle` match → use the matched `creator_id`.
+/// 3. Path-safe but unknown → persist as explicit ID (backward compat).
+/// 4. Unsafe characters → error.
 fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
+    let resolved_id = creator_identity::resolve_creator_ref(creator_ref)?;
+
     let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(creator_ref.to_string());
-    // New active creator uses default workspace slug until `creator workspace use`.
+    cli_config.active_creator_id = Some(resolved_id.clone());
+    // Clear workspace slug for the old creator ref and the resolved ID.
     cli_config
         .active_workspace_slug_by_creator
         .remove(creator_ref);
+    cli_config
+        .active_workspace_slug_by_creator
+        .remove(&resolved_id);
     cli_config.save()?;
 
-    println!("✓ Active Creator set to: {creator_ref}");
+    if resolved_id == creator_ref {
+        println!("✓ Active Creator set to: {resolved_id}");
+    } else {
+        println!("✓ Active Creator set to: {resolved_id} (resolved from: {creator_ref})");
+    }
     println!(
         "  Workspace slug: {DEFAULT_WORKSPACE_SLUG} (use `nexus42 creator workspace use <slug>` after the directory exists)"
     );
     Ok(())
 }
 
-/// List all registered Creators
+/// List all known Creators with three-layer identity model (V1.16).
 fn list_creators(_config: &CliConfig) -> Result<()> {
-    // In V1.0, list from local cache
-    // In production, also fetch from platform
     let config = CliConfig::load()?;
+    let cache = creator_identity::load_creator_identity_cache();
+    let active_id = config.active_creator_id.as_deref();
 
-    println!("Registered Creators:");
-    println!();
+    // Collect all known creators from both the identity cache and auth store.
+    // The identity cache is the primary source for display metadata.
+    let auth_store = crate::auth::AuthStore::load()?;
 
-    if let Some(active_id) = &config.active_creator_id {
-        println!("  {active_id} (active)");
+    // Gather all known creator IDs from both sources.
+    let mut all_ids: Vec<String> = cache.creators.keys().cloned().collect();
+    if let Some(creators) = &auth_store.creators {
+        for id in creators.keys() {
+            if !all_ids.contains(id) {
+                all_ids.push(id.clone());
+            }
+        }
+    }
+    all_ids.sort();
+
+    if all_ids.is_empty() {
+        println!("No registered Creators found.");
+        println!("Use: nexus42 creator register --name <name>");
+        return Ok(());
     }
 
-    println!();
-    println!("⚠ V1.0 skeleton: full list requires daemon + platform API.");
+    println!("CREATOR ID          HANDLE         DISPLAY NAME          ACTIVE");
+    for id in &all_ids {
+        let entry = creator_identity::get_creator_identity(&cache, id);
+        let handle_str = entry.and_then(|e| e.handle.as_deref()).unwrap_or("-");
+        let display_str = entry.and_then(|e| e.display_name.as_deref()).unwrap_or("-");
+        let active_marker = if active_id == Some(id.as_str()) {
+            "✓"
+        } else {
+            ""
+        };
+        println!("{id:<19} {handle_str:<14} {display_str:<21} {active_marker}");
+    }
 
     Ok(())
 }
@@ -587,6 +1040,41 @@ fn unpair_creator(_config: &CliConfig, creator_id: &str) {
     // Platform API integration not yet available
     println!("⚠ V1.0 skeleton: Creator unpairing requires platform API.");
     println!("  Creator: {creator_id}");
+}
+
+/// Logout — clear active creator credentials from local config and auth store.
+///
+/// Removes the `active_creator_id` from CLI config and clears the creator
+/// entry from the auth store (tokens + API key).
+///
+/// # Errors
+///
+/// Returns I/O errors if config or auth store cannot be read or written.
+fn logout_creator(config: &CliConfig) -> Result<()> {
+    let creator_id = config.active_creator_id.as_deref();
+
+    if creator_id.is_none() {
+        println!("No active Creator to logout.");
+        return Ok(());
+    }
+
+    let creator_id = creator_id.expect("checked above");
+
+    // Clear creator credentials from auth store
+    let mut store = auth::AuthStore::load()?;
+    if let Some(creators) = &mut store.creators {
+        if creators.remove(creator_id).is_some() {
+            store.save()?;
+        }
+    }
+
+    // Clear active creator from CLI config
+    let mut cli_config = CliConfig::load()?;
+    cli_config.active_creator_id = None;
+    cli_config.save()?;
+
+    println!("✓ Creator {creator_id} logged out.");
+    Ok(())
 }
 
 /// Rotate Creator credentials

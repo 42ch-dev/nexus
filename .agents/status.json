@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-11T12:30:00Z",
+  "updated_at": "2026-05-13T08:00:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -35,7 +35,7 @@
       ]
     }
   },
-    "residual_findings": {
+  "residual_findings": {
     "2026-05-06-v1.13-oss-forward-delivery": [
       {
         "id": "R-V113-005",
@@ -58,6 +58,124 @@
         "owner": "fullstack-dev",
         "target_date": "backlog",
         "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-007-flaky-auth-unit-test.md"
+      }
+    ],
+    "2026-05-12-v1.16-daemon-acp-topology": [
+      {
+        "id": "R-DAEMON-ACP-001",
+        "title": "config::tests::migration_converts_json_to_toml flaky under parallel test execution",
+        "severity": "warning",
+        "source": "QA report — HOME env race condition between parallel tests",
+        "scope": "crates/nexus42/src/config.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "backlog",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-daemon-acp-topology/2026-05-12-v1.16-daemon-acp-topology-qa.md"
+      }
+    ],
+    "2026-05-12-v1.16-creator-kb-multiscope": [
+      {
+        "id": "R-KB-001",
+        "title": "Corrupt index.json silently discarded on next add (best-effort recovery only)",
+        "severity": "warning",
+        "source": "QA report — atomic write mitigates but corrupt file on disk is unrecoverable",
+        "scope": "crates/nexus42/src/commands/creator.rs",
+        "decision": "accept",
+        "owner": "fullstack-dev",
+        "target_date": "backlog",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-kb-multiscope/2026-05-12-v1.16-creator-kb-multiscope-qa.md"
+      },
+      {
+        "id": "R-KB-002",
+        "title": "Entry ID collision guard absent (millis+diversifier reduces but doesn't eliminate risk)",
+        "severity": "warning",
+        "source": "QA report — collision detection not enforced at write time",
+        "scope": "crates/nexus42/src/commands/creator.rs",
+        "decision": "accept",
+        "owner": "fullstack-dev",
+        "target_date": "backlog",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-kb-multiscope/2026-05-12-v1.16-creator-kb-multiscope-qa.md"
+      }
+    ],
+    "2026-05-12-v1.16-creator-identity-auth-compat": [
+      {
+        "id": "R-CREATOR-001",
+        "title": "Test flakiness under --test-threads>1 due to HOME env manipulation on macOS (dirs::home_dir does not respect $HOME)",
+        "severity": "warning",
+        "source": "QC1 W-001, QC2 W-001, QC3 W-4",
+        "scope": "crates/nexus42/src/creator_identity.rs (tests module)",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
+      },
+      {
+        "id": "R-CREATOR-002",
+        "title": "RMW race on creator-identities.json under concurrent CLI invocations (no file locking)",
+        "severity": "warning",
+        "source": "QC3 W-1",
+        "scope": "crates/nexus42/src/creator_identity.rs:100-104 (set_creator_identity)",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
+      },
+      {
+        "id": "R-CREATOR-003",
+        "title": "creator_auth_headers() does not validate creator_id input at entry point",
+        "severity": "low",
+        "source": "QC2 W-004",
+        "scope": "crates/nexus42/src/auth/creator_auth.rs:38-56",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
+      }
+    ],
+    "2026-05-12-v1.16-trace-correlation": [
+      {
+        "id": "R-TRACE-001",
+        "title": "Trace files grow unbounded — no rotation, size limits, or TTL cleanup",
+        "severity": "warning",
+        "source": "QC3 W-001",
+        "scope": "crates/nexus42/src/commands/acp_trace.rs, crates/nexus-home-layout/src/lib.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
+      },
+      {
+        "id": "R-TRACE-002",
+        "title": "Per-event file open/close overhead on hot path",
+        "severity": "warning",
+        "source": "QC3 W-002",
+        "scope": "crates/nexus42/src/commands/acp_trace.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
+      },
+      {
+        "id": "R-TRACE-003",
+        "title": "Concurrent writes to same trace file risk interleaved bytes",
+        "severity": "warning",
+        "source": "QC3 W-003",
+        "scope": "crates/nexus42/src/commands/acp_trace.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
+      },
+      {
+        "id": "R-TRACE-004",
+        "title": "Best-effort I/O errors lack structured observability (eprintln swallowed)",
+        "severity": "warning",
+        "source": "QC3 W-004",
+        "scope": "crates/nexus42/src/commands/acp_trace.rs",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target_date": "v1.17",
+        "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
       }
     ]
   }
