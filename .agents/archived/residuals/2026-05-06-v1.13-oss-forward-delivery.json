@@ -1,0 +1,38 @@
+{
+  "plan_id": "2026-05-06-v1.13-oss-forward-delivery",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V113-005",
+      "title": "UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s)",
+      "severity": "low",
+      "source": "QC3-S-003 (qc3 report)",
+      "scope": "crates/nexus42/tests/creator_register_e2e.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target_date": "backlog",
+      "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-005-upstream-timeout-e2e-variance.md",
+      "lifecycle": "waived",
+      "closed_at": "2026-05-13",
+      "closure_note": "OS/proxy-dependent variance — not fixable in code. Accepted and archived.",
+      "closure_evidence": "Pre-existing test behavior; no code change needed.",
+      "archived_at": "2026-05-13"
+    },
+    {
+      "id": "R-V113-007",
+      "title": "Pre-existing flaky test auth::tests::get_returns_none_for_unknown_creator",
+      "severity": "low",
+      "source": "QC/T3 report — pre-existing race condition",
+      "scope": "crates/nexus42/src/auth/mod.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "backlog",
+      "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-007-flaky-auth-unit-test.md",
+      "lifecycle": "resolved",
+      "closed_at": "2026-05-13",
+      "closure_note": "Migrated to testutil::isolated_home() RAII guard in post-v1.16 tech debt batch 1 plan.",
+      "closure_evidence": "commit 42a6e3f; cargo test -p nexus42 -- --test-threads=2: 539 passed, 0 failed",
+      "archived_at": "2026-05-13"
+    }
+  ]
+}

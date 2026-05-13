@@ -44,7 +44,14 @@ impl std::fmt::Debug for CreatorAuthHeaders {
 /// # Errors
 ///
 /// Returns `CliError::AuthenticationRequired` if no credentials are available.
+/// Returns `CliError::Other` if `creator_id` is empty or whitespace-only.
 pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<CreatorAuthHeaders> {
+    if creator_id.trim().is_empty() {
+        return Err(CliError::Other(
+            "creator_id must not be empty or whitespace-only.".to_string(),
+        ));
+    }
+
     let store = AuthStore::load()?;
 
     // Path 1: Creator API key
@@ -239,5 +246,47 @@ mod tests {
             "Authentication required. Run `nexus42 auth login` or `nexus42 creator register`."
                 .to_string(),
         ))
+    }
+
+    // ── R-CREATOR-003: creator_id validation tests ────────────────────
+
+    #[test]
+    fn empty_creator_id_returns_error() {
+        let _home = crate::testutil::isolated_home();
+        let config = CliConfig::default();
+        let result = creator_auth_headers(&config, "");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must not be empty"),
+            "expected empty-id error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn whitespace_only_creator_id_returns_error() {
+        let _home = crate::testutil::isolated_home();
+        let config = CliConfig::default();
+        let result = creator_auth_headers(&config, "   \t  ");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must not be empty"),
+            "expected whitespace-id error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn valid_creator_id_proceeds_to_auth_check() {
+        let _home = crate::testutil::isolated_home();
+        let config = CliConfig::default();
+        // No credentials stored → should get "Authentication required", not "empty id"
+        let result = creator_auth_headers(&config, "ctr_valid");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Authentication required"),
+            "expected auth-required error for valid ID without credentials, got: {err}"
+        );
     }
 }
