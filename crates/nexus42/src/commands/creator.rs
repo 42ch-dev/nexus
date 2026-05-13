@@ -333,7 +333,8 @@ struct KbIndexEntry {
     created_at: String,
 }
 
-/// Read the KB index from disk. Returns default (empty) if file is missing or corrupt.
+/// Read the KB index from disk. Returns default (empty) if file is missing.
+/// Logs a warning if the file exists but contains invalid JSON.
 fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     if !index_path.exists() {
         return KbIndex::default();
@@ -341,7 +342,21 @@ fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     let Ok(content) = std::fs::read_to_string(index_path) else {
         return KbIndex::default();
     };
-    serde_json::from_str(&content).unwrap_or_default()
+    if content.trim().is_empty() {
+        return KbIndex::default();
+    }
+    match serde_json::from_str(&content) {
+        Ok(index) => index,
+        Err(e) => {
+            tracing::warn!(
+                "Corrupt KB index file {}: {e}. \
+                 The file will be treated as empty. \
+                 Consider deleting it or re-adding entries to rebuild the index.",
+                index_path.display()
+            );
+            KbIndex::default()
+        }
+    }
 }
 
 /// Write the KB index to disk atomically.
@@ -1654,6 +1669,40 @@ mod tests {
         let id = generate_entry_id();
         assert!(id.starts_with("kb_"));
         assert_eq!(id.len(), 15, "entry ID should be kb_ + 12 hex chars");
+    }
+
+    // ── R-KB-001: Corrupt index.json detection tests ──────────────────
+
+    #[test]
+    fn read_kb_index_returns_empty_for_corrupt_json() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let index_path = tmp.path().join("index.json");
+        std::fs::write(&index_path, "this is not valid json {{{").expect("write corrupt");
+
+        // Should return empty index (not panic)
+        let index = read_kb_index(&index_path);
+        assert!(index.entries.is_empty(), "corrupt index should return empty");
+    }
+
+    #[test]
+    fn read_kb_index_returns_empty_for_missing_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let index_path = tmp.path().join("nonexistent.json");
+
+        let index = read_kb_index(&index_path);
+        assert!(index.entries.is_empty());
+    }
+
+    #[test]
+    fn read_kb_index_parses_valid_json() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let index_path = tmp.path().join("index.json");
+        let content = r#"{"entries":[{"entry_id":"kb_test1234","title":"Test","created_at":"2026-01-01T00:00:00Z"}]}"#;
+        std::fs::write(&index_path, content).expect("write valid");
+
+        let index = read_kb_index(&index_path);
+        assert_eq!(index.entries.len(), 1);
+        assert_eq!(index.entries[0].entry_id, "kb_test1234");
     }
 
     // ── DF-14: Staged e2e verification harness (gate-B1/B2) ─────────
