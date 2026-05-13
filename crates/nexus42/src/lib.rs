@@ -16,6 +16,9 @@ pub mod errors;
 pub mod paths;
 pub mod session_capture;
 
+#[cfg(test)]
+mod testutil;
+
 // Re-export commonly used types for convenience
 pub use config::CliConfig;
 pub use errors::{CliError, Result};
