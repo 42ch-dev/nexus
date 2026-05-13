@@ -108,8 +108,7 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
     // so one thread's rename cannot remove another's tmp prematurely.
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_nanos());
     let tmp_path = path.with_extension(format!("json.tmp.{unique}"));
     std::fs::write(&tmp_path, &json)?;
     std::fs::rename(&tmp_path, &path)?;
