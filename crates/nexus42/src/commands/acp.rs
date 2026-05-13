@@ -704,7 +704,7 @@ fn cmd_skills_verify(verbose: bool) {
         }
     }
 
-    println!("✓ {valid}/{total} capabilities verified successfully.",);
+    println!("✓ {valid}/{total} capabilities verified successfully.");
 
     if verbose {
         println!();
