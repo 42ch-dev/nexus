@@ -375,6 +375,23 @@ fn generate_entry_id() -> String {
     format!("kb_{:08x}{:04x}", millis % 0xFFFF_FFFF, diversifier)
 }
 
+/// Ensure an entry ID is unique within the index by appending a counter suffix
+/// if the generated ID already exists. Best-effort guard — not cryptographic.
+fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
+    if !index.entries.iter().any(|e| e.entry_id == base_id) {
+        return base_id.to_string();
+    }
+    // Collision detected — append counter suffix (_1, _2, ...)
+    for counter in 1..100 {
+        let candidate = format!("{base_id}_{counter}");
+        if !index.entries.iter().any(|e| e.entry_id == candidate) {
+            return candidate;
+        }
+    }
+    // Extremely unlikely fallback: use a larger diversifier
+    format!("{base_id}_overflow")
+}
+
 /// `kb list` implementation.
 fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
     if scope == &KbScope::World {
@@ -500,14 +517,15 @@ fn kb_add(
     std::fs::create_dir_all(&entries_dir)?;
 
     // Generate entry ID and determine title
-    let entry_id = generate_entry_id();
+    let base_id = generate_entry_id();
+    let mut index = read_kb_index(&index_path);
+    let entry_id = deduplicate_entry_id(&base_id, &index);
     let entry_title = title
         .map(std::string::ToString::to_string)
         .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
         .unwrap_or_else(|| entry_id.clone());
 
     // Step 1: Write updated index to temp file (W2 — index update first)
-    let mut index = read_kb_index(&index_path);
     let created_at = chrono::Utc::now().to_rfc3339();
     index.entries.push(KbIndexEntry {
         entry_id: entry_id.clone(),
@@ -1589,6 +1607,53 @@ mod tests {
     fn name_65_chars_exceeds_max_length() {
         let name_65 = "a".repeat(65);
         assert!(name_65.len() > MAX_CREATOR_NAME_LENGTH);
+    }
+
+    // ── R-KB-002: ID collision guard tests ────────────────────────────
+
+    #[test]
+    fn deduplicate_entry_id_returns_base_when_no_collision() {
+        let index = KbIndex::default();
+        let result = deduplicate_entry_id("kb_abc12345", &index);
+        assert_eq!(result, "kb_abc12345");
+    }
+
+    #[test]
+    fn deduplicate_entry_id_appends_counter_on_collision() {
+        let mut index = KbIndex::default();
+        index.entries.push(KbIndexEntry {
+            entry_id: "kb_abc12345".to_string(),
+            title: "existing".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+        let result = deduplicate_entry_id("kb_abc12345", &index);
+        assert_eq!(result, "kb_abc12345_1");
+        // Verify the suffixed ID is not already in the index
+        assert!(index.entries.iter().all(|e| e.entry_id != result));
+    }
+
+    #[test]
+    fn deduplicate_entry_id_increments_counter_for_multiple_collisions() {
+        let mut index = KbIndex::default();
+        index.entries.push(KbIndexEntry {
+            entry_id: "kb_abc12345".to_string(),
+            title: "first".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+        index.entries.push(KbIndexEntry {
+            entry_id: "kb_abc12345_1".to_string(),
+            title: "second".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+        let result = deduplicate_entry_id("kb_abc12345", &index);
+        assert_eq!(result, "kb_abc12345_2");
+    }
+
+    #[test]
+    fn kb_generate_entry_id_format() {
+        let id = generate_entry_id();
+        assert!(id.starts_with("kb_"));
+        assert_eq!(id.len(), 15, "entry ID should be kb_ + 12 hex chars");
     }
 
     // ── DF-14: Staged e2e verification harness (gate-B1/B2) ─────────
