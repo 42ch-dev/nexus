@@ -477,6 +477,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_polling_exits_on_success() {
+        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -529,6 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_polling_handles_expired_token() {
+        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -582,6 +584,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_polling_handles_access_denied() {
+        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -636,6 +639,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_access_token_success() {
+        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -684,6 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_access_token_invalid_grant_clears_tokens() {
+        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -731,6 +736,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_access_token_no_refresh_token_errors() {
+        let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
         // Setup: store a token WITHOUT refresh_token
@@ -765,6 +771,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_valid_token_valid_token_skips_refresh() {
+        let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
         // Token expires far in the future
@@ -797,6 +804,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_valid_token_expiring_token_without_refresh_returns_error() {
+        let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
         // Token already expired, no refresh_token
@@ -826,6 +834,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_valid_token_no_token_returns_error() {
+        let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
         let mut store = AuthStore::load().unwrap_or_default();
         if store.clear_user_token().is_err() {
@@ -846,6 +855,7 @@ mod tests {
 
     #[tokio::test]
     async fn logout_clears_refresh_token_fields() {
+        let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
 
         let token = UserTokenState {
