@@ -266,6 +266,7 @@ mod tests {
 
     #[test]
     fn store_and_get_creator_api_key_in_memory() {
+        let _home = crate::testutil::isolated_home();
         let mut store = AuthStore::default();
         store
             .store_creator_api_key("crt_test", "nexus_live_test_key")
@@ -278,6 +279,7 @@ mod tests {
 
     #[test]
     fn store_creates_new_entry_when_not_exists() {
+        let _home = crate::testutil::isolated_home();
         let mut store = AuthStore::default();
         store
             .store_creator_api_key("crt_new", "nexus_live_new_key")
@@ -295,6 +297,7 @@ mod tests {
 
     #[test]
     fn store_updates_existing_entry() {
+        let _home = crate::testutil::isolated_home();
         let mut store = AuthStore {
             user_token: None,
             creators: Some({
@@ -326,6 +329,7 @@ mod tests {
 
     #[test]
     fn get_returns_none_for_unknown_creator() {
+        let _home = crate::testutil::isolated_home();
         let store = AuthStore::default();
         let key = store.get_creator_api_key("crt_unknown").expect("get");
         assert_eq!(key, None);
@@ -361,6 +365,7 @@ mod tests {
 
     #[test]
     fn store_and_get_roundtrip_with_file() {
+        let _home = crate::testutil::isolated_home();
         // store_creator_api_key calls self.save() which persists to disk.
         // We verify the in-memory portion works regardless of whether
         // file persistence succeeds (depends on test environment).
@@ -408,6 +413,7 @@ mod tests {
 
     #[test]
     fn auth_store_roundtrip_with_user_token() {
+        let _home = crate::testutil::isolated_home();
         let token = UserTokenState {
             access_token: "tok_roundtrip".to_string(),
             token_type: "Bearer".to_string(),
@@ -428,6 +434,7 @@ mod tests {
 
     #[test]
     fn auth_store_clear_user_token() {
+        let _home = crate::testutil::isolated_home();
         let token = UserTokenState {
             access_token: "tok_clear".to_string(),
             token_type: "Bearer".to_string(),

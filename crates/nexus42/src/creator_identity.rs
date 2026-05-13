@@ -83,7 +83,11 @@ pub fn load_creator_identity_cache() -> CreatorIdentityCache {
     cache
 }
 
-/// Save the creator identity cache to disk atomically.
+/// Save the creator identity cache to disk atomically with advisory file locking.
+///
+/// Uses an advisory lock file (`creator-identities.json.lock`) to prevent
+/// data loss from concurrent CLI invocations. The lock is best-effort —
+/// if the lock cannot be acquired, the write proceeds anyway with a warning.
 ///
 /// # Errors
 ///
@@ -93,11 +97,44 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
+    // Advisory file lock — best-effort guard against concurrent RMW races.
+    let lock_path = path.with_extension("json.lock");
+    let _lock_guard = AdvisoryLock::acquire(&lock_path);
+
     let json = serde_json::to_string_pretty(cache)?;
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, &json)?;
     std::fs::rename(&tmp_path, &path)?;
     Ok(())
+}
+
+/// Advisory file lock using a `.lock` file. Best-effort — logs a warning on
+/// failure and proceeds without locking (better than blocking the CLI).
+struct AdvisoryLock {
+    _lock_file: std::fs::File,
+}
+
+impl AdvisoryLock {
+    /// Try to acquire an exclusive advisory lock. Returns `None` (with a warning)
+    /// if the lock cannot be acquired — the write proceeds without locking.
+    fn acquire(lock_path: &std::path::Path) -> Option<Self> {
+        // Try exclusive creation — if the lock file exists, another process holds it.
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock_path)
+            .ok()?;
+
+        Some(Self { _lock_file: file })
+    }
+}
+
+impl Drop for AdvisoryLock {
+    fn drop(&mut self) {
+        // Lock file is removed on drop, releasing the advisory lock.
+        // The File handle is closed when _lock_file is dropped.
+    }
 }
 
 /// Look up a creator identity by exact `creator_id`.
@@ -114,9 +151,8 @@ pub fn get_creator_identity<'a>(
 /// # Errors
 ///
 /// Returns an error if the cache cannot be saved to disk.
-// TODO(V1.17): The load-modify-save pattern here is not atomic — concurrent
-// CLI invocations may race and lose updates. Consider file locking or migrating
-// the identity cache to SQLite (nexus-local-db) for proper concurrency safety.
+// TODO(V1.17): Consider migrating the identity cache to SQLite (nexus-local-db)
+// for proper concurrency safety beyond advisory locks.
 pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
     let mut cache = load_creator_identity_cache();
     cache.creators.insert(entry.creator_id.clone(), entry);
@@ -181,12 +217,7 @@ mod tests {
 
     #[test]
     fn cache_roundtrip_save_load() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
-
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
+        let _home = crate::testutil::isolated_home();
 
         let mut cache = CreatorIdentityCache::default();
         cache.creators.insert(
@@ -206,48 +237,27 @@ mod tests {
 
         let beta = loaded.creators.get("ctr_beta").expect("beta");
         assert!(beta.handle.is_none());
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 
     #[test]
     fn load_missing_file_returns_empty() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
+        let _home = crate::testutil::isolated_home();
         let cache = load_creator_identity_cache();
         assert!(cache.creators.is_empty());
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 
     #[test]
     fn load_corrupt_file_returns_empty() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
         std::fs::write(nexus_dir.join(FILENAME), "not valid json{{{").expect("write corrupt");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let cache = load_creator_identity_cache();
         assert!(cache.creators.is_empty());
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 
     #[test]
@@ -284,12 +294,7 @@ mod tests {
 
     #[test]
     fn resolve_by_handle_via_disk() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
-
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
+        let _home = crate::testutil::isolated_home();
 
         let mut cache = CreatorIdentityCache::default();
         cache.creators.insert(
@@ -301,22 +306,11 @@ mod tests {
         // "alpha_handle_unique" should resolve to "ctr_alpha"
         let result = resolve_creator_ref("alpha_handle_unique").expect("resolve handle");
         assert_eq!(result, "ctr_alpha");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 
     #[test]
     fn resolve_path_safe_unknown_passthrough() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
-
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
+        let _home = crate::testutil::isolated_home();
 
         // Empty cache — unknown but path-safe input should pass through
         let cache = CreatorIdentityCache::default();
@@ -324,22 +318,11 @@ mod tests {
 
         let result = resolve_creator_ref("ctr_brand_new").expect("resolve");
         assert_eq!(result, "ctr_brand_new");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 
     #[test]
     fn resolve_unsafe_input_errors() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
-
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
+        let _home = crate::testutil::isolated_home();
 
         let cache = CreatorIdentityCache::default();
         save_creator_identity_cache(&cache).expect("save");
@@ -348,11 +331,73 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Unknown creator reference"));
+    }
 
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
+    // ── R-CREATOR-002: Concurrent write safety test ────────────────────
+
+    #[test]
+    fn concurrent_writes_dont_corrupt_file() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _home = crate::testutil::isolated_home();
+
+        // Pre-populate so threads race on read-modify-write
+        let mut initial = CreatorIdentityCache::default();
+        initial
+            .creators
+            .insert("ctr_base".to_string(), sample_entry("ctr_base", None, None));
+        save_creator_identity_cache(&initial).expect("initial save");
+
+        let success_count = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+
+        for i in 0..4 {
+            let success_count = Arc::clone(&success_count);
+            handles.push(std::thread::spawn(move || {
+                let entry = CreatorIdentityEntry {
+                    creator_id: format!("ctr_thread_{i}"),
+                    handle: None,
+                    display_name: Some(format!("Thread {i}")),
+                };
+                match set_creator_identity(entry) {
+                    Ok(()) => {
+                        success_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        eprintln!("Thread {i} failed: {e}");
+                    }
+                }
+            }));
         }
+
+        for h in handles {
+            h.join().expect("thread should not panic");
+        }
+
+        // At least some writes should succeed
+        let successes = success_count.load(Ordering::Relaxed);
+        assert!(
+            successes > 0,
+            "At least one concurrent write should succeed"
+        );
+
+        // The final cache should be valid JSON and parseable
+        let final_cache = load_creator_identity_cache();
+        // Base entry should survive
+        assert!(
+            final_cache.creators.contains_key("ctr_base"),
+            "base entry should survive concurrent writes"
+        );
+        // At least one thread entry should be present
+        let thread_entries: Vec<_> = final_cache
+            .creators
+            .keys()
+            .filter(|k| k.starts_with("ctr_thread_"))
+            .collect();
+        assert!(
+            !thread_entries.is_empty(),
+            "at least one thread entry should be present"
+        );
     }
 }

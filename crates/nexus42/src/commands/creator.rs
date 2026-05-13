@@ -333,7 +333,8 @@ struct KbIndexEntry {
     created_at: String,
 }
 
-/// Read the KB index from disk. Returns default (empty) if file is missing or corrupt.
+/// Read the KB index from disk. Returns default (empty) if file is missing.
+/// Logs a warning if the file exists but contains invalid JSON.
 fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     if !index_path.exists() {
         return KbIndex::default();
@@ -341,7 +342,21 @@ fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     let Ok(content) = std::fs::read_to_string(index_path) else {
         return KbIndex::default();
     };
-    serde_json::from_str(&content).unwrap_or_default()
+    if content.trim().is_empty() {
+        return KbIndex::default();
+    }
+    match serde_json::from_str(&content) {
+        Ok(index) => index,
+        Err(e) => {
+            tracing::warn!(
+                "Corrupt KB index file {}: {e}. \
+                 The file will be treated as empty. \
+                 Consider deleting it or re-adding entries to rebuild the index.",
+                index_path.display()
+            );
+            KbIndex::default()
+        }
+    }
 }
 
 /// Write the KB index to disk atomically.
@@ -373,6 +388,23 @@ fn generate_entry_id() -> String {
     // to avoid collisions when called in rapid succession.
     let diversifier = ((millis << 16) ^ (now.subsec_nanos() >> 4)) as u16;
     format!("kb_{:08x}{:04x}", millis % 0xFFFF_FFFF, diversifier)
+}
+
+/// Ensure an entry ID is unique within the index by appending a counter suffix
+/// if the generated ID already exists. Best-effort guard — not cryptographic.
+fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
+    if !index.entries.iter().any(|e| e.entry_id == base_id) {
+        return base_id.to_string();
+    }
+    // Collision detected — append counter suffix (_1, _2, ...)
+    for counter in 1..100 {
+        let candidate = format!("{base_id}_{counter}");
+        if !index.entries.iter().any(|e| e.entry_id == candidate) {
+            return candidate;
+        }
+    }
+    // Extremely unlikely fallback: use a larger diversifier
+    format!("{base_id}_overflow")
 }
 
 /// `kb list` implementation.
@@ -500,14 +532,15 @@ fn kb_add(
     std::fs::create_dir_all(&entries_dir)?;
 
     // Generate entry ID and determine title
-    let entry_id = generate_entry_id();
+    let base_id = generate_entry_id();
+    let mut index = read_kb_index(&index_path);
+    let entry_id = deduplicate_entry_id(&base_id, &index);
     let entry_title = title
         .map(std::string::ToString::to_string)
         .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
         .unwrap_or_else(|| entry_id.clone());
 
     // Step 1: Write updated index to temp file (W2 — index update first)
-    let mut index = read_kb_index(&index_path);
     let created_at = chrono::Utc::now().to_rfc3339();
     index.entries.push(KbIndexEntry {
         entry_id: entry_id.clone(),
@@ -1589,6 +1622,90 @@ mod tests {
     fn name_65_chars_exceeds_max_length() {
         let name_65 = "a".repeat(65);
         assert!(name_65.len() > MAX_CREATOR_NAME_LENGTH);
+    }
+
+    // ── R-KB-002: ID collision guard tests ────────────────────────────
+
+    #[test]
+    fn deduplicate_entry_id_returns_base_when_no_collision() {
+        let index = KbIndex::default();
+        let result = deduplicate_entry_id("kb_abc12345", &index);
+        assert_eq!(result, "kb_abc12345");
+    }
+
+    #[test]
+    fn deduplicate_entry_id_appends_counter_on_collision() {
+        let mut index = KbIndex::default();
+        index.entries.push(KbIndexEntry {
+            entry_id: "kb_abc12345".to_string(),
+            title: "existing".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+        let result = deduplicate_entry_id("kb_abc12345", &index);
+        assert_eq!(result, "kb_abc12345_1");
+        // Verify the suffixed ID is not already in the index
+        assert!(index.entries.iter().all(|e| e.entry_id != result));
+    }
+
+    #[test]
+    fn deduplicate_entry_id_increments_counter_for_multiple_collisions() {
+        let mut index = KbIndex::default();
+        index.entries.push(KbIndexEntry {
+            entry_id: "kb_abc12345".to_string(),
+            title: "first".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+        index.entries.push(KbIndexEntry {
+            entry_id: "kb_abc12345_1".to_string(),
+            title: "second".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+        let result = deduplicate_entry_id("kb_abc12345", &index);
+        assert_eq!(result, "kb_abc12345_2");
+    }
+
+    #[test]
+    fn kb_generate_entry_id_format() {
+        let id = generate_entry_id();
+        assert!(id.starts_with("kb_"));
+        assert_eq!(id.len(), 15, "entry ID should be kb_ + 12 hex chars");
+    }
+
+    // ── R-KB-001: Corrupt index.json detection tests ──────────────────
+
+    #[test]
+    fn read_kb_index_returns_empty_for_corrupt_json() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let index_path = tmp.path().join("index.json");
+        std::fs::write(&index_path, "this is not valid json {{{").expect("write corrupt");
+
+        // Should return empty index (not panic)
+        let index = read_kb_index(&index_path);
+        assert!(
+            index.entries.is_empty(),
+            "corrupt index should return empty"
+        );
+    }
+
+    #[test]
+    fn read_kb_index_returns_empty_for_missing_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let index_path = tmp.path().join("nonexistent.json");
+
+        let index = read_kb_index(&index_path);
+        assert!(index.entries.is_empty());
+    }
+
+    #[test]
+    fn read_kb_index_parses_valid_json() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let index_path = tmp.path().join("index.json");
+        let content = r#"{"entries":[{"entry_id":"kb_test1234","title":"Test","created_at":"2026-01-01T00:00:00Z"}]}"#;
+        std::fs::write(&index_path, content).expect("write valid");
+
+        let index = read_kb_index(&index_path);
+        assert_eq!(index.entries.len(), 1);
+        assert_eq!(index.entries[0].entry_id, "kb_test1234");
     }
 
     // ── DF-14: Staged e2e verification harness (gate-B1/B2) ─────────
