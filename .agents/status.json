@@ -1,35 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-05-13T18:00:00Z",
-  "plans": [
-    {
-      "id": "2026-05-13-post-v1.16-tech-debt-batch1",
-      "title": "Post-V1.16 Tech Debt Batch 1 — Test Isolation & Data Integrity",
-      "file": ".agents/plans/2026-05-13-post-v1.16-tech-debt-batch1.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@fullstack-dev-2", "@qa-engineer"],
-      "progress": 85,
-      "tags": ["tech-debt", "test-isolation", "data-integrity", "trace-hardening"],
-      "created_at": "2026-05-13",
-      "updated_at": "2026-05-13",
-      "done_at": null,
-      "notes": "T1-T11 implemented. T12 (residual closure) deferred to PM. T13 (QA) pending.",
-      "metadata": {
-        "working_branch": "feature/post-v1.16-tech-debt-batch1",
-        "merge_target": "main",
-        "branch_policy": "create feature/post-v1.16-tech-debt-batch1 from main",
-        "phase": "post-v1.16",
-        "priority": "high",
-        "description": "Resolve 11 open residual findings across test isolation (HOME env races), data integrity (collision, corruption, locking, validation), and trace I/O hardening (buffered writer, size limits, structured logging).",
-        "gates": {
-          "tests": "PASS (539/539 nexus42 --test-threads=2)",
-          "clippy": "PASS",
-          "fmt": "PASS (nightly)"
-        }
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
