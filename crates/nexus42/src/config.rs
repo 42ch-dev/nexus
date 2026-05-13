@@ -567,8 +567,11 @@ mod tests {
 
     #[test]
     fn migration_converts_json_to_toml() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         // Write a legacy config.json with non-default values
@@ -580,18 +583,7 @@ mod tests {
 }"#;
         std::fs::write(nexus_dir.join("config.json"), json_content).expect("write json");
 
-        // Temporarily override HOME so CliConfig::load() finds our temp dir
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let result = CliConfig::load().expect("load should succeed");
-
-        // Restore HOME
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         // Verify values were loaded correctly
         assert_eq!(result.active_creator_id.as_deref(), Some("ctr_test"));
@@ -622,23 +614,17 @@ mod tests {
 
     #[test]
     fn migration_with_empty_json_returns_default() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         // Write an empty config.json
         std::fs::write(nexus_dir.join("config.json"), "").expect("write empty json");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let result = CliConfig::load().expect("load should succeed");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         // Should return defaults
         assert_eq!(result.active_creator_id, None);
@@ -649,8 +635,11 @@ mod tests {
 
     #[test]
     fn load_reads_toml_when_present() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         // Write a config.toml directly
@@ -659,16 +648,7 @@ platform_url = "https://direct.api.io"
 "#;
         std::fs::write(nexus_dir.join("config.toml"), toml_content).expect("write toml");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let result = CliConfig::load().expect("load should succeed");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         assert_eq!(result.active_creator_id.as_deref(), Some("ctr_direct"));
         assert_eq!(result.platform_url, "https://direct.api.io");
@@ -676,8 +656,11 @@ platform_url = "https://direct.api.io"
 
     #[test]
     fn save_writes_toml() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         let cfg = CliConfig {
@@ -686,16 +669,7 @@ platform_url = "https://direct.api.io"
             ..Default::default()
         };
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         cfg.save().expect("save should succeed");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         let config_path = nexus_dir.join("config.toml");
         assert!(config_path.exists(), "config.toml should exist after save");
@@ -712,28 +686,18 @@ platform_url = "https://direct.api.io"
 
     #[test]
     fn user_agents_config_loads_missing_file_as_default() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
-
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
+        let _home = crate::testutil::isolated_home();
         let cfg = UserAgentsConfig::load().expect("load should succeed");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-
         assert!(cfg.strategies.is_empty());
     }
 
     #[test]
     fn user_agents_config_loads_valid_toml() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         let toml_content = r#"
@@ -750,16 +714,7 @@ agent = "claude-sonnet-4-20250514"
 "#;
         std::fs::write(nexus_dir.join("agents.toml"), toml_content).expect("write toml");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let cfg = UserAgentsConfig::load().expect("load should succeed");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         assert_eq!(cfg.strategies.len(), 2);
 
@@ -785,45 +740,33 @@ agent = "claude-sonnet-4-20250514"
 
     #[test]
     fn user_agents_config_returns_defaults_on_corrupt_file() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         std::fs::write(nexus_dir.join("agents.toml"), "this is not toml {{{")
             .expect("write corrupt");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let cfg = UserAgentsConfig::load().expect("load should succeed with defaults");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         assert!(cfg.strategies.is_empty());
     }
 
     #[test]
     fn user_agents_config_empty_file_returns_default() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let nexus_dir = tmp.path().join(".nexus42");
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         std::fs::write(nexus_dir.join("agents.toml"), "").expect("write empty");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", tmp.path());
-
         let cfg = UserAgentsConfig::load().expect("load should succeed");
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         assert!(cfg.strategies.is_empty());
     }
