@@ -14,6 +14,7 @@
 //! against the platform and stages returned bundles (idempotent by `bundle_id`).
 
 use crate::api::DaemonClient;
+use crate::commands::world::WorldCommand;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
@@ -92,6 +93,18 @@ pub enum SyncCommand {
         /// Skip confirmation prompt (for automation/scripts)
         #[arg(long)]
         force: bool,
+    },
+
+    /// World fork and snapshot (migrated from `nexus42 world`)
+    World {
+        #[command(subcommand)]
+        command: WorldCommand,
+    },
+
+    /// Retry a failed sync operation (coming soon)
+    Retry {
+        /// Bundle ID to retry
+        bundle_id: Option<String>,
     },
 }
 
@@ -469,6 +482,17 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 }
             }
         }
+        SyncCommand::World { command } => {
+            super::world::run(command, config).await?;
+        }
+        SyncCommand::Retry { bundle_id } => match bundle_id {
+            Some(id) => {
+                println!("Coming soon: `sync retry` — retry failed bundle: {id}");
+            }
+            None => {
+                println!("Coming soon: `sync retry` — retry all failed bundles.");
+            }
+        },
     }
 
     Ok(())

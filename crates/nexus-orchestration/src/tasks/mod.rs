@@ -1,6 +1,18 @@
 //! Standard `Task` implementations for the orchestration engine.
 //!
 //! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.4.
+//!
+//! # TODO(V1.17): Run and capability-call trace correlation
+//!
+//! When the daemon orchestration API is implemented:
+//! - Engine/session start paths should read `_run_id` from `graph_flow::Context`
+//!   and propagate it to all child tasks.
+//! - `CapabilityTask::run` should generate a `capability_call_id` per invocation
+//!   and store `_last_capability_call_id` + capability call metadata in context.
+//! - `AcpPromptTask::run` should include `run_id` and `capability_call_id` in
+//!   `worker/acp_prompt` params when a worker handle exists.
+//! - If `_trace_file` is present in context, append start/finish trace events
+//!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;

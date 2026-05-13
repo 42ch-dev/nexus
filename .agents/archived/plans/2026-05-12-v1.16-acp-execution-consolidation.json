@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-05-12-v1.16-acp-execution-consolidation",
+  "title": "V1.16 ACP-first execution path consolidation",
+  "status": "Done",
+  "started_at": "2026-05-13T03:00:00Z",
+  "done_at": "2026-05-13T04:00:00Z",
+  "working_branch": "feature/v1.16-acp-execution-consolidation",
+  "theme": "B2",
+  "milestone": "M3",
+  "effort": "L",
+  "depends_on": ["2026-05-12-v1.16-daemon-acp-topology"],
+  "created_at": "2026-05-12T09:00:00Z",
+  "qc_verdict": "Approve (after 6 warnings fixed)",
+  "qa_verdict": "Pass"
+}

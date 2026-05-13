@@ -27,6 +27,7 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-acp-host = { path = "../nexus-acp-host" }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

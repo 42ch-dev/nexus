@@ -6,6 +6,14 @@
 //!
 //! Design: `orchestration-engine-v1.md` §6.3–§6.4, `acp-client-tech-spec-v2.md` §2.3.
 //!
+//! # TODO(V1.17): Correlation field echoing
+//!
+//! When trace correlation is propagated through the orchestration layer:
+//! - `worker/acp_prompt` params should accept optional `run_id` and `capability_call_id`.
+//! - `worker/acp_prompt_chunk` notifications should echo both fields when provided.
+//! - Final JSON-RPC results should echo both fields when provided.
+//! - This preserves backward compatibility because fields are optional.
+//!
 //! IPC methods (daemon → worker):
 //! - `worker/initialize` → `{ capabilities, worker_pid, sessions }`
 //! - `worker/acp_prompt` → streaming `worker/acp_prompt_chunk` + final reply
