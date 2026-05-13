@@ -51,7 +51,7 @@ hex = "0.4"
 # tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
 # nix — also used directly by daemon.rs for process management
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process", "fs"] }
+nix = { version = "0.28", features = ["signal", "process"] }
 
 dialoguer = "0.11"
 tempfile = "3"
