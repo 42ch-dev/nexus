@@ -1,28 +1,59 @@
 {
   "version": 1,
-  "updated_at": "2026-05-13T08:00:00Z",
-  "plans": [],
+  "updated_at": "2026-05-13T10:00:00Z",
+  "plans": [
+    {
+      "id": "2026-05-13-post-v1.16-tech-debt-batch1",
+      "title": "Post-V1.16 Tech Debt Batch 1 — Test Isolation & Data Integrity",
+      "file": ".agents/plans/2026-05-13-post-v1.16-tech-debt-batch1.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev", "@fullstack-dev-2", "@qa-engineer"],
+      "progress": 0,
+      "tags": ["tech-debt", "test-isolation", "data-integrity", "trace-hardening"],
+      "created_at": "2026-05-13",
+      "updated_at": "2026-05-13",
+      "done_at": null,
+      "notes": "",
+      "metadata": {
+        "working_branch": "feature/post-v1.16-tech-debt-batch1",
+        "merge_target": "main",
+        "branch_policy": "create feature/post-v1.16-tech-debt-batch1 from main",
+        "phase": "post-v1.16",
+        "priority": "high",
+        "description": "Resolve 11 open residual findings across test isolation (HOME env races), data integrity (collision, corruption, locking, validation), and trace I/O hardening (buffered writer, size limits, structured logging)."
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-05-11T12:30:00Z",
-      "total_open": 0,
+      "updated_at": "2026-05-13T10:00:00Z",
+      "total_open": 12,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 2,
-        "warning": 0,
+        "medium": 9,
+        "low": 3,
         "nit": 0
       },
       "by_target": {
-        "backlog": 2
+        "backlog": 3,
+        "post-v1.16": 9
       },
-      "by_plan": {},
-      "in_flight": {},
+      "by_plan": {
+        "v1.13": 2,
+        "v1.16-daemon": 1,
+        "v1.16-kb": 2,
+        "v1.16-creator": 3,
+        "v1.16-trace": 4
+      },
+      "in_flight": {
+        "2026-05-13-post-v1.16-tech-debt-batch1": 11
+      },
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
@@ -44,7 +75,7 @@
         "source": "QC3-S-003 (qc3 report)",
         "scope": "crates/nexus42/tests/creator_register_e2e.rs",
         "decision": "accept",
-        "owner": "qa-engineer",
+        "owner": "fullstack-dev",
         "target_date": "backlog",
         "tracking_link": ".agents/plans/residuals/2026-05-06-v1.13-oss-forward-delivery/r-v113-005-upstream-timeout-e2e-variance.md"
       },
@@ -64,12 +95,12 @@
       {
         "id": "R-DAEMON-ACP-001",
         "title": "config::tests::migration_converts_json_to_toml flaky under parallel test execution",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QA report — HOME env race condition between parallel tests",
         "scope": "crates/nexus42/src/config.rs",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "backlog",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-daemon-acp-topology/2026-05-12-v1.16-daemon-acp-topology-qa.md"
       }
     ],
@@ -77,7 +108,7 @@
       {
         "id": "R-KB-001",
         "title": "Corrupt index.json silently discarded on next add (best-effort recovery only)",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QA report — atomic write mitigates but corrupt file on disk is unrecoverable",
         "scope": "crates/nexus42/src/commands/creator.rs",
         "decision": "accept",
@@ -88,7 +119,7 @@
       {
         "id": "R-KB-002",
         "title": "Entry ID collision guard absent (millis+diversifier reduces but doesn't eliminate risk)",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QA report — collision detection not enforced at write time",
         "scope": "crates/nexus42/src/commands/creator.rs",
         "decision": "accept",
@@ -101,23 +132,23 @@
       {
         "id": "R-CREATOR-001",
         "title": "Test flakiness under --test-threads>1 due to HOME env manipulation on macOS (dirs::home_dir does not respect $HOME)",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QC1 W-001, QC2 W-001, QC3 W-4",
         "scope": "crates/nexus42/src/creator_identity.rs (tests module)",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
       },
       {
         "id": "R-CREATOR-002",
         "title": "RMW race on creator-identities.json under concurrent CLI invocations (no file locking)",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QC3 W-1",
         "scope": "crates/nexus42/src/creator_identity.rs:100-104 (set_creator_identity)",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
       },
       {
@@ -128,7 +159,7 @@
         "scope": "crates/nexus42/src/auth/creator_auth.rs:38-56",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-creator-identity-auth-compat/2026-05-12-v1.16-creator-identity-auth-compat-qa.md"
       }
     ],
@@ -136,45 +167,45 @@
       {
         "id": "R-TRACE-001",
         "title": "Trace files grow unbounded — no rotation, size limits, or TTL cleanup",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QC3 W-001",
         "scope": "crates/nexus42/src/commands/acp_trace.rs, crates/nexus-home-layout/src/lib.rs",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
       },
       {
         "id": "R-TRACE-002",
         "title": "Per-event file open/close overhead on hot path",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QC3 W-002",
         "scope": "crates/nexus42/src/commands/acp_trace.rs",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
       },
       {
         "id": "R-TRACE-003",
         "title": "Concurrent writes to same trace file risk interleaved bytes",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QC3 W-003",
         "scope": "crates/nexus42/src/commands/acp_trace.rs",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
       },
       {
         "id": "R-TRACE-004",
         "title": "Best-effort I/O errors lack structured observability (eprintln swallowed)",
-        "severity": "warning",
+        "severity": "medium",
         "source": "QC3 W-004",
         "scope": "crates/nexus42/src/commands/acp_trace.rs",
         "decision": "defer",
         "owner": "fullstack-dev",
-        "target_date": "v1.17",
+        "target_date": "post-v1.16",
         "tracking_link": ".agents/plans/reports/2026-05-12-v1.16-trace-correlation/2026-05-12-v1.16-trace-correlation-qa.md"
       }
     ]
