@@ -3,15 +3,28 @@
 //! Provides helpers for test isolation, including temporary HOME directory
 //! management to prevent race conditions under parallel test execution.
 
+use std::sync::Mutex;
+
+/// Global mutex to serialize HOME environment variable access.
+///
+/// Since `HOME` is a process-wide variable, concurrent tests that each set it
+/// to different temp directories will race. This mutex ensures only one
+/// `IsolatedHome` guard is active at a time, preventing flaky failures under
+/// `--test-threads>1`.
+static HOME_LOCK: Mutex<()> = Mutex::new(());
+
 /// RAII guard that sets `HOME` to a temp directory for the duration of the test.
 ///
 /// On macOS, `dirs::home_dir()` does NOT respect `$HOME` in all configurations,
 /// so this helper uses `std::env::set_var("HOME", ...)` which works for our
 /// internal `user_home_dir()` / `nexus_home_dir()` functions.
 ///
+/// Uses a global mutex to serialize access — only one `IsolatedHome` is active
+/// at a time, preventing race conditions under `--test-threads>1`.
+///
 /// # Panics
 ///
-/// Panics if a temporary directory cannot be created.
+/// Panics if a temporary directory cannot be created or the HOME_LOCK mutex is poisoned.
 ///
 /// # Example
 ///
@@ -20,12 +33,14 @@
 /// // HOME is now set to a temp dir; will be restored on drop
 /// ```
 pub fn isolated_home() -> IsolatedHome {
+    let lock = HOME_LOCK.lock().expect("HOME_LOCK not poisoned");
     let tmp = tempfile::TempDir::new().expect("tempdir for test");
     let original_home = std::env::var("HOME").ok();
     std::env::set_var("HOME", tmp.path());
     IsolatedHome {
         _tmp: tmp,
         original_home,
+        _lock: lock,
     }
 }
 
@@ -33,6 +48,8 @@ pub fn isolated_home() -> IsolatedHome {
 pub struct IsolatedHome {
     _tmp: tempfile::TempDir,
     original_home: Option<String>,
+    /// Held until drop to serialize HOME manipulation across test threads.
+    _lock: std::sync::MutexGuard<'static, ()>,
 }
 
 impl Drop for IsolatedHome {
