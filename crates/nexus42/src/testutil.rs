@@ -33,7 +33,11 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 /// // HOME is now set to a temp dir; will be restored on drop
 /// ```
 pub fn isolated_home() -> IsolatedHome {
-    let lock = HOME_LOCK.lock().expect("HOME_LOCK not poisoned");
+    // Recover from poisoned mutex — a panicking test should not cascade-fail
+    // all subsequent tests that use isolated_home().
+    let lock = HOME_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir for test");
     let original_home = std::env::var("HOME").ok();
     std::env::set_var("HOME", tmp.path());

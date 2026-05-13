@@ -103,7 +103,14 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
     let _lock_guard = AdvisoryLock::acquire(&lock_path);
 
     let json = serde_json::to_string_pretty(cache)?;
-    let tmp_path = path.with_extension("json.tmp");
+    // Use a unique temp path per call to avoid rename races when multiple
+    // threads/processes write concurrently. Each writer gets its own tmp file
+    // so one thread's rename cannot remove another's tmp prematurely.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = path.with_extension(format!("json.tmp.{unique}"));
     std::fs::write(&tmp_path, &json)?;
     std::fs::rename(&tmp_path, &path)?;
     Ok(())

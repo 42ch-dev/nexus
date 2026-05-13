@@ -48,7 +48,7 @@ impl TraceWriter {
         }
 
         // Check existing file size; truncate if over the limit.
-        let existing_size = std::fs::metadata(trace_file).map(|m| m.len()).unwrap_or(0);
+        let existing_size = std::fs::metadata(trace_file).map_or(0, |m| m.len());
 
         let file = if existing_size > TRACE_FILE_SIZE_LIMIT {
             // Truncate: open without append, which resets to zero length.
