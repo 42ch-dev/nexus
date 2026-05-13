@@ -77,7 +77,8 @@ mod tests {
             "HOME should point to an existing directory"
         );
         assert!(
-            home_path != dirs::home_dir().unwrap_or_default() || home_path.starts_with("/tmp")
+            home_path != dirs::home_dir().unwrap_or_default()
+                || home_path.starts_with("/tmp")
                 || home_path.starts_with("/var/folders"),
             "HOME should be a temp directory, not the real home"
         );
@@ -97,6 +98,9 @@ mod tests {
         }
         // After drop, HOME should be restored
         let after = std::env::var("HOME").ok();
-        assert_eq!(after, original, "HOME should be restored to its original value");
+        assert_eq!(
+            after, original,
+            "HOME should be restored to its original value"
+        );
     }
 }

@@ -126,22 +126,6 @@ impl AdvisoryLock {
             .open(lock_path)
             .ok()?;
 
-        // On Unix, set an exclusive flock for extra safety (NFS-aware).
-        #[cfg(unix)]
-        {
-            use std::os::unix::io::AsRawFd;
-            let fd = file.as_raw_fd();
-            // Non-blocking exclusive lock
-            if nix::fcntl::Flock::new(nix::fcntl::FlockArg::LockExclusiveNonblock)
-                .acquire(fd)
-                .is_err()
-            {
-                // Could not acquire flock — another process holds it.
-                // The create_new above succeeded, so we own the lock file;
-                // just proceed without the flock (best-effort).
-            }
-        }
-
         Some(Self { _lock_file: file })
     }
 }
@@ -353,17 +337,16 @@ mod tests {
 
     #[test]
     fn concurrent_writes_dont_corrupt_file() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
 
         let _home = crate::testutil::isolated_home();
 
         // Pre-populate so threads race on read-modify-write
         let mut initial = CreatorIdentityCache::default();
-        initial.creators.insert(
-            "ctr_base".to_string(),
-            sample_entry("ctr_base", None, None),
-        );
+        initial
+            .creators
+            .insert("ctr_base".to_string(), sample_entry("ctr_base", None, None));
         save_creator_identity_cache(&initial).expect("initial save");
 
         let success_count = Arc::new(AtomicUsize::new(0));
@@ -394,7 +377,10 @@ mod tests {
 
         // At least some writes should succeed
         let successes = success_count.load(Ordering::Relaxed);
-        assert!(successes > 0, "At least one concurrent write should succeed");
+        assert!(
+            successes > 0,
+            "At least one concurrent write should succeed"
+        );
 
         // The final cache should be valid JSON and parseable
         let final_cache = load_creator_identity_cache();

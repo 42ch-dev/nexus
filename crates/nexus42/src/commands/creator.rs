@@ -1681,7 +1681,10 @@ mod tests {
 
         // Should return empty index (not panic)
         let index = read_kb_index(&index_path);
-        assert!(index.entries.is_empty(), "corrupt index should return empty");
+        assert!(
+            index.entries.is_empty(),
+            "corrupt index should return empty"
+        );
     }
 
     #[test]
