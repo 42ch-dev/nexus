@@ -26,6 +26,7 @@ nexus-sync = { path = "../nexus-sync" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-acp-host = { path = "../nexus-acp-host" }
+nexus-daemon-runtime = { path = "../nexus-daemon-runtime" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }

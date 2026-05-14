@@ -1,0 +1,57 @@
+//! Hidden `__internal daemon-run` command — daemon subprocess entry point.
+//!
+//! This module provides the hidden internal command invoked by
+//! `nexus42 daemon start` (background mode) via self-spawn. It calls
+//! `nexus_daemon_runtime::boot::run_daemon()` directly.
+
+use crate::errors::Result;
+use clap::Args;
+
+/// Hidden internal command: run the daemon runtime directly.
+///
+/// This is not shown in help output. It is invoked by the parent
+/// `nexus42` process when background daemon start is requested.
+#[derive(Debug, Args)]
+#[command(hide = true)]
+pub struct DaemonRunArgs {
+    /// Port to listen on (default: 8420)
+    #[arg(long, default_value_t = 8420)]
+    pub port: u16,
+
+    /// Bind address (default: 127.0.0.1)
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Use Unix domain socket at the given path instead of HTTP
+    #[arg(long)]
+    pub socket_path: Option<std::path::PathBuf>,
+
+    /// Enable verbose logging
+    #[arg(long)]
+    pub verbose: bool,
+
+    /// Shutdown grace period in milliseconds (default: 20000)
+    #[arg(long, default_value_t = 20000)]
+    pub shutdown_grace_ms: u64,
+}
+
+/// Execute the internal daemon-run command.
+///
+/// # Errors
+///
+/// Propagates any error from the daemon runtime.
+pub async fn run(args: DaemonRunArgs) -> Result<()> {
+    let config = nexus_daemon_runtime::boot::DaemonConfig {
+        port: args.port,
+        host: args.host,
+        socket_path: args.socket_path,
+        verbose: args.verbose,
+        shutdown_grace_ms: args.shutdown_grace_ms,
+    };
+
+    nexus_daemon_runtime::boot::run_daemon(config)
+        .await
+        .map_err(|e| crate::errors::CliError::Daemon {
+            message: format!("Daemon runtime error: {e}"),
+        })
+}

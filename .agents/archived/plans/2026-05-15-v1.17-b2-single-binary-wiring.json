@@ -1,0 +1,29 @@
+{
+  "id": "2026-05-15-v1.17-b2-single-binary-wiring",
+  "title": "V1.17 B2: Single-Binary Wiring — wire CLI to runtime",
+  "file": ".agents/plans/2026-05-15-v1.17-b2-single-binary-wiring.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": ["@fullstack-dev"],
+  "progress": 100,
+  "tags": ["v1.17", "single-binary", "cli-wiring", "process-model"],
+  "created_at": "2026-05-15",
+  "updated_at": "2026-05-15",
+  "done_at": "2026-05-15",
+  "notes": "QC tri-review: all Approve (0C/4W/11S deferred to B4). No residuals.",
+  "metadata": {
+    "working_branch": "feature/v1.17-b2-single-binary-wiring",
+    "merge_target": "main",
+    "priority": "high",
+    "phase": "v1.17",
+    "primary_spec": ".agents/knowledge/nexus42-single-binary-daemon-runtime-architecture-v1.md",
+    "description": "Wire nexus42 daemon commands to runtime invocation, implement foreground/background process models",
+    "blocked_by_plan_id": "2026-05-15-v1.17-b1-runtime-extraction",
+    "task_category": "logic",
+    "gates": {
+      "qc": "PASS (tri-review: all Approve, 0C/4W/11S — warnings deferred to B4)",
+      "clippy": "PASS",
+      "tests": "PASS"
+    }
+  }
+}

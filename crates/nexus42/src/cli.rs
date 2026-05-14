@@ -7,8 +7,8 @@
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, auth::AuthCommand, clone::CloneArgs,
     config::ConfigCommand, context::ContextCommand, creator::CreatorCommand, daemon::DaemonCommand,
-    db::DbCommand, debug::DebugCommand, doctor::DoctorCommand, explore::ExploreCommand,
-    identity::IdentityCommand, init::InitCommand, memory::MemoryCommand,
+    daemon_run::DaemonRunArgs, db::DbCommand, debug::DebugCommand, doctor::DoctorCommand,
+    explore::ExploreCommand, identity::IdentityCommand, init::InitCommand, memory::MemoryCommand,
     permission::PermissionCommand, platform::PlatformCommand, policy::PolicyCommand,
     preset::PresetCommand, runtime_mode::RuntimeModeCommand, schedule::ScheduleCommand,
     session::SessionCommand, soul::SoulCommand, sync::SyncCommand, system::SystemCommand,
@@ -160,6 +160,10 @@ pub enum Commands {
     /// Hidden: ACP worker subprocess entry point (daemon-managed)
     #[command(hide = true)]
     AcpWorker(AcpWorkerArgs),
+
+    /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
+    #[command(hide = true)]
+    DaemonRun(DaemonRunArgs),
 
     /// ACP session persistence management (deprecated: use `nexus42 acp` commands)
     #[command(hide = true)]
