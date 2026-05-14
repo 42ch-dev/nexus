@@ -1,4 +1,4 @@
-//! Daemon Command — Manage the nexus42d daemon
+//! Daemon Command — Manage the nexus daemon runtime
 
 use crate::api::DaemonClient;
 use crate::commands::schedule::ScheduleCommand;
@@ -143,15 +143,23 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
 
 /// Start the daemon process.
 ///
+/// # Foreground mode (`--foreground`)
+///
+/// Invokes the daemon runtime directly in the current process.
+/// Blocks until the runtime terminates.
+///
+/// # Background mode (default)
+///
+/// Self-spawns a new `nexus42 __internal daemon-run` child process,
+/// writes the PID file, then polls the health endpoint until the
+/// runtime is confirmed running. The parent exits after the startup gate.
+///
 /// # Errors
 ///
 /// Returns an error if:
 /// - Health check fails to communicate with existing daemon
-/// - Daemon process cannot be spawned
+/// - Self-spawn fails
 /// - PID file operations fail
-/// - Process management fails
-///
-/// Note: This function is 102 lines; splitting would break the coherent daemon startup flow.
 #[allow(clippy::too_many_lines)]
 async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
     // Check if already running
@@ -161,94 +169,69 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("Starting nexus42d daemon on port {port}...");
+    if foreground {
+        // --- Foreground mode: run runtime directly in this process ---
+        println!("Starting daemon (foreground) on port {port}...");
 
-    // Spawn nexus42d as a detached background process.
-    // In development, we use `cargo run -p nexus42d`.
-    // In production builds, the installed binary is used directly.
-    let daemon_cmd = std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
-            // Check if we're running from cargo (debug build path contains target/debug)
-            let exe_str = exe.to_string_lossy();
-            if exe_str.contains("target/debug") || exe_str.contains("target/release") {
-                // Development: use cargo run so the daemon binary is up-to-date
-                Some((
-                    "cargo".to_string(),
-                    vec![
-                        "run".to_string(),
-                        "-p".to_string(),
-                        "nexus42d".to_string(),
-                        "--".to_string(),
-                        "--port".to_string(),
-                        port.to_string(),
-                    ],
-                ))
-            } else {
-                // Production: derive the daemon binary path from the CLI binary path
-                let parent = exe.parent()?;
-                let daemon_path = parent.join("nexus42d");
-                if daemon_path.exists() {
-                    Some((
-                        daemon_path.display().to_string(),
-                        vec!["--port".to_string(), port.to_string()],
-                    ))
-                } else {
-                    None
-                }
-            }
+        // Write PID file for this process
+        let pid = std::process::id();
+        write_pid_file(pid)?;
+
+        let config = nexus_daemon_runtime::boot::DaemonConfig {
+            port,
+            host: "127.0.0.1".to_string(),
+            socket_path: None,
+            verbose: false,
+            shutdown_grace_ms: 20_000,
+        };
+
+        let result = nexus_daemon_runtime::boot::run_daemon(config).await;
+
+        // Clean up PID file on exit
+        let _ = remove_pid_file();
+
+        result.map_err(|e| CliError::Daemon {
+            message: format!("Daemon runtime error: {e}"),
         })
-        .or_else(|| {
-            // Fallback: try cargo run
-            Some((
-                "cargo".to_string(),
-                vec![
-                    "run".to_string(),
-                    "-p".to_string(),
-                    "nexus42d".to_string(),
-                    "--".to_string(),
-                    "--port".to_string(),
-                    port.to_string(),
-                ],
-            ))
-        });
+    } else {
+        // --- Background mode: self-spawn into __internal daemon-run ---
+        println!("Starting daemon on port {port}...");
 
-    if let Some((program, args)) = daemon_cmd {
-        let mut child = std::process::Command::new(&program)
-            .args(&args)
+        let exe = std::env::current_exe().map_err(|e| CliError::Daemon {
+            message: format!("Cannot determine current executable: {e}"),
+        })?;
+
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("__internal")
+            .arg("daemon-run")
+            .arg("--port")
+            .arg(port.to_string())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            // Detach the process so it outlives the CLI
-            .process_group(0)
-            .spawn()
-            .map_err(|e| crate::errors::CliError::Daemon {
-                message: format!("Failed to spawn daemon process '{program}': {e}"),
-            })?;
+            .stderr(std::process::Stdio::null());
 
-        // Write the PID file so stop_daemon() can find the process
+        // Detach the process so it outlives the CLI
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
+
+        let mut child = cmd.spawn().map_err(|e| CliError::Daemon {
+            message: format!("Failed to spawn daemon process '{}': {e}", exe.display()),
+        })?;
+
+        // Write PID file so stop_daemon() can find the process
         let child_pid = child.id();
         if child_pid > 0 {
             write_pid_file(child_pid)?;
         }
 
-        if foreground {
-            // In foreground mode, wait for the child process to exit
-            let _ = child.wait();
-            return Ok(());
-        }
-
-        // On Unix, double-fork to fully detach; on other platforms the child
-        // already runs independently via process_group(0).
+        // On Unix, reap the intermediate process so it doesn't become a zombie.
         #[cfg(unix)]
         {
-            // Immediately reap the intermediate process so it doesn't become a zombie.
-            // The grandchild (actual daemon) continues running.
             let _ = child.wait();
         }
         #[cfg(not(unix))]
         {
-            // On non-Unix, we can't double-fork; the child will keep running.
-            // Prevent the CLI from waiting on it.
             let _ = child.try_wait();
         }
 
@@ -269,17 +252,10 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
                     "⚠ Daemon process was spawned but health check failed after {max_retries} retries."
                 );
                 println!("  The daemon may still be starting. Check with: nexus42 daemon status");
-                println!("  Or check logs: journalctl --user -u nexus42d");
             }
         }
 
         Ok(())
-    } else {
-        Err(crate::errors::CliError::Daemon {
-            message:
-                "Could not locate nexus42d binary. Please install it or run: cargo run -p nexus42d"
-                    .to_string(),
-        })
     }
 }
 
@@ -530,7 +506,7 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
 /// lsof to discover and kill the process. Polls with health check to
 /// confirm the old daemon is fully dead before starting the new one.
 async fn restart_daemon(port: u16, foreground: bool) -> Result<()> {
-    println!("Restarting nexus42d daemon...");
+    println!("Restarting daemon...");
 
     // Stop the old daemon
     stop_daemon(port).await?;
