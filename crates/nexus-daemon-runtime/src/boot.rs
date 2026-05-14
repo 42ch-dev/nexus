@@ -1,4 +1,4 @@
-//! Daemon boot sequence — extracted from `nexus42d` main.rs.
+//! Daemon boot sequence — extracted from the former standalone daemon binary.
 //!
 //! Provides `run_daemon()` as the single callable entry point for both
 //! the `nexus42 __internal daemon-run` hidden command and the
@@ -83,23 +83,23 @@ impl DaemonConfig {
 
 /// Run the daemon runtime to completion.
 ///
-/// This is the main daemon entry point, extracted from the former `nexus42d`
+/// This is the main daemon entry point, extracted from the former standalone daemon
 /// binary. It handles the full lifecycle: initialization → serve → shutdown.
-///
-/// # Panics
-///
-/// Panics if the schedule supervisor database pool cannot be opened.
-/// This mirrors the original binary behavior where a corrupted database
-/// is considered a fatal startup condition.
 ///
 /// # Errors
 ///
-/// Returns an error if workspace initialization, engine wiring, or the
-/// HTTP/Unix socket server fails to start.
+/// Returns an error if workspace initialization, database pool creation,
+/// engine wiring, or the HTTP/Unix socket server fails to start.
+///
+/// # Panics
+///
+/// Panics if Unix signal handlers (SIGTERM, SIGINT) cannot be registered,
+/// which should only happen in severely broken environments.
 // 250+ lines is inherent to the orchestrated initialization sequence.
 #[allow(clippy::too_many_lines)]
 pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
-    // Initialize logging
+    // --- Section 1: Logging ---
+    // Initialize tracing subscriber with configurable verbosity.
     let filter = if config.verbose {
         EnvFilter::new("debug")
     } else {
@@ -110,13 +110,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         .with_target(false)
         .init();
 
-    tracing::info!("Starting nexus42d v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
 
+    // --- Section 2: Workspace initialization ---
     // Initialize workspace state (async: initializes sync outbox)
     let mut state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
-    // --- WS2: Instantiate orchestration engine + worker manager ---
+    // --- Section 3: Orchestration engine + worker manager ---
     let db_pool: sqlx::SqlitePool = state.pool().clone();
     let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(db_pool)));
 
@@ -188,11 +189,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_capability_registry(capabilities);
     tracing::info!("Orchestration engine wired");
 
-    // --- WS7: Schedule supervisor + core context manager ---
+    // --- Section 4: Schedule supervisor + core context manager ---
+    // Replace .expect() with graceful error handling for database pool creation.
     let schedule_pool: sqlx::SqlitePool =
-        nexus_local_db::open_pool(std::path::Path::new(&state.database_path()))
-            .await
-            .expect("open pool for schedule supervisor");
+        match nexus_local_db::open_pool(std::path::Path::new(&state.database_path())).await {
+            Ok(pool) => pool,
+            Err(e) => {
+                tracing::error!("Fatal: failed to open database pool for schedule supervisor: {e}");
+                anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
+            }
+        };
     let schedule_supervisor = Arc::new(ScheduleSupervisor::new(Arc::new(schedule_pool)));
     state.set_schedule_supervisor(schedule_supervisor.clone());
 
@@ -214,7 +220,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     }
     tracing::info!("Schedule supervisor wired");
 
-    // Create lifecycle HSM with subsystems
+    // --- Section 5: Lifecycle HSM initialization ---
     let subsystems = create_subsystems(&state, config.port);
     let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
         subsystems,
@@ -224,7 +230,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_lifecycle(Arc::clone(&lifecycle));
     tracing::info!("Lifecycle HSM initialized");
 
-    // Set up signal handlers
+    // --- Section 6: Signal handlers and panic hook ---
     let lifecycle_for_signals = Arc::clone(&lifecycle);
     let state_for_signals = state.clone();
     tokio::spawn(async move {
@@ -263,7 +269,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         previous_hook(info);
     }));
 
-    // Spawn graceful shutdown watcher: drains engine sessions + terminates workers
+    // --- Section 7: Graceful shutdown watcher ---
     {
         let state_for_shutdown = state.clone();
         tokio::spawn(async move {
@@ -308,14 +314,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         });
     }
 
-    // Build the router with lifecycle-enabled state
+    // --- Section 8: HTTP/Unix server + lifecycle start ---
     let shutdown_notify = state.shutdown_notify();
     let app = api::create_router(state);
 
     // Resolve transport
     let transport = config.resolve_transport();
 
-    // Start the lifecycle
+    // --- Section 9: Start lifecycle and spawn server ---
     lifecycle.dispatch(Event::ProcessStarted);
     tracing::info!("Lifecycle started");
 

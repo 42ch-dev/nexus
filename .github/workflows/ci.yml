@@ -155,15 +155,15 @@ jobs:
         run: pnpm run typecheck
 
   verify-no-acp-in-daemon:
-    name: Verify nexus42d linkage matrix
+    name: Verify nexus-daemon-runtime linkage matrix
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Assert nexus42d does not link ACP host / SDK
+      - name: Assert nexus-daemon-runtime does not link ACP host / SDK
         run: |
           set -e
-          if rg -n '^\s*(nexus-acp-host|agent-client-protocol)\s*=' crates/nexus42d/Cargo.toml; then
-            echo "::error::nexus42d/Cargo.toml must not depend on nexus-acp-host or agent-client-protocol — see knowledge/acp-client-tech-spec-v2.md §11.3"
+          if rg -n '^\s*(nexus-acp-host|agent-client-protocol)\s*=' crates/nexus-daemon-runtime/Cargo.toml; then
+            echo "::error::nexus-daemon-runtime/Cargo.toml must not depend on nexus-acp-host or agent-client-protocol — see knowledge/acp-client-tech-spec-v2.md §11.3"
             exit 1
           fi
           echo "Linkage gate OK"

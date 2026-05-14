@@ -1,6 +1,6 @@
 //! Test utilities use expect() which is acceptable in test contexts.
 #![allow(clippy::missing_panics_doc)]
-//! Shared test utilities for nexus42d
+//! Shared test utilities for the daemon runtime
 //!
 //! This module provides common helpers for setting up test workspaces,
 //! reducing boilerplate across integration tests.

@@ -1,6 +1,6 @@
 //! Daemon lifecycle HSM (statig-based).
 //!
-//! Implements the 6-state hierarchical state machine for `nexus42d`
+//! Implements the 6-state hierarchical state machine for the daemon runtime
 //! per `knowledge/daemon-lifecycle-api-v2.md`.
 //!
 //! States: `Stopped → Starting → Running ⇄ Degraded → Stopping → Failed`.

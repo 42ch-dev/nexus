@@ -1,6 +1,6 @@
 //! `nexus42 acp-worker` — JSON-RPC main loop for the daemon-spawned worker.
 //!
-//! This is the long-lived CLI subprocess spawned by `nexus42d`'s Worker Manager
+//! This is the long-lived CLI subprocess spawned by the daemon's Worker Manager
 //! for each active creator. It hosts one or more ACP agent subprocesses and
 //! communicates with the daemon via stdin/stdout JSON-RPC 2.0.
 //!

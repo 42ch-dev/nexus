@@ -77,7 +77,7 @@ pub enum Commands {
         command: AuthCommand,
     },
 
-    /// Manage the nexus42d daemon
+    /// Manage the daemon runtime
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
