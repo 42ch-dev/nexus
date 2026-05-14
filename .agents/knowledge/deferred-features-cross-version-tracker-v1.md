@@ -52,6 +52,23 @@
 | BL-06 | Independent search microservice | V1.2 | Backlog | L | Compatible with old "not mandatory" principle. |
 | BL-07 | Explore ranking / cold-start strategy + Publish compliance determination matrix | V1.2 | Backlog | M | Elevated by ADR-011 + product spec in V1.2 matrix (originally V1.4). |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | ADR-011/012/013. |
+| BL-09 | V1.17 Prompt + Skills Compass v1 (planning package) | V1.16 | V1.17 (GATED) | M | Planning-only package for prompt/skills quality uplift; not executable until gate is met. |
+
+### 3.4 Gated planning package details (not executable scope yet)
+
+#### BL-09 — V1.17 Prompt + Skills Compass v1
+
+- **Status**: Draft, gated
+- **Gate**: Do not treat as active execution SSOT until V1.16 delivery compass is Done.
+- **Planning-only note**: Before V1.16 completion, this item is backlog research + scope preparation only. It must not be used as `{PLAN_DIR}` primary execution spec.
+- **Planned themes**:
+  - **S1 Embedded skills quality**: Trigger rules + evidence standards; skill versioning and change records.
+  - **S2 Preset prompt refinement**: `novel-writing` quality/consistency; `research` output structure + traceability.
+  - **S3 Output evaluation**: Golden outputs + regression comparison; optional evaluation harness requires a separate ADR if enabled.
+- **Entry criteria to activate execution planning**:
+  1. `v1.16-delivery-compass-v1.md` is marked Done.
+  2. Cross-repo contract updates are completed and traceable.
+  3. A new V1.17 row is added in `{PLAN_DIR}` and recorded in `status.json`.
 
 ### 3.3 Open tech-debt residuals (tracked in `status.json`)
 
@@ -190,7 +207,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Category | Position |
 |----------|----------|
 | Program | **Compass registered** — delivery SSOT：[v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md). `status.json` `plans[]` **empty**. |
-| Next version (gated) | V1.17 prompt-skills compass exists；`{PLAN_DIR}` 计划尚未开启。 |
+| Next version (gated) | V1.17 prompt-skills planning package tracked as **BL-09** in §3.4；`{PLAN_DIR}` plans not started. |
 
 ### Items targeting V2.0+
 
@@ -262,7 +279,7 @@ Internal (this repo):
 - V1.14 delivery compass: [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)
 - V1.15 delivery compass: [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)
 - V1.16 delivery compass: [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md)
-- V1.17 prompt-skills compass: [v1.17-prompt-skills-compass-v1.md](v1.17-prompt-skills-compass-v1.md)
+- V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
 - Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
 - ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
 - Creator schedule & core context: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)
@@ -276,4 +293,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-11**. Status: Active. V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）。*
+*Created: 2026-04-21. Last updated: **2026-05-14**. Status: Active. V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）。 V1.17 prompt-skills gated planning package consolidated as BL-09 (§3.4).*
