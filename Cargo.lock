@@ -2208,6 +2208,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-daemon-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "axum-test",
+ "chrono",
+ "clap",
+ "dirs",
+ "graph-flow",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-util",
+ "nexus-contracts",
+ "nexus-domain",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "nexus-orchestration",
+ "nexus-sync",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sqlx",
+ "statig",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-domain"
 version = "0.1.0"
 dependencies = [
@@ -2353,6 +2391,7 @@ dependencies = [
  "hyper 1.9.0",
  "hyper-util",
  "nexus-contracts",
+ "nexus-daemon-runtime",
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",

@@ -1,25 +1,16 @@
 [package]
-name = "nexus42d"
+name = "nexus-daemon-runtime"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Nexus Daemon — local supervisor for the CLI"
+description = "Nexus Daemon Runtime — lifecycle, subsystems, and local API"
 
 [lints]
 workspace = true
 
-[lib]
-name = "nexus42d"
-path = "src/lib.rs"
-
-[[bin]]
-name = "nexus42d"
-path = "src/main.rs"
-
 [dependencies]
-nexus-daemon-runtime = { path = "../nexus-daemon-runtime" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-domain = { path = "../nexus-domain" }
