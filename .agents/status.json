@@ -6,7 +6,7 @@
       "id": "2026-05-15-v1.17-b3-remove-daemon-crate",
       "title": "V1.17 B3: Remove Old Daemon Crate — delete nexus42d",
       "file": ".agents/plans/2026-05-15-v1.17-b3-remove-daemon-crate.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
       "progress": 0,

@@ -5,7 +5,7 @@ Domain-specific rules live in subdirectory AGENTS.md files listed below.
 
 ## Repository Identity
 
-This is the **public open-source monorepo** containing `nexus42` CLI (Rust), `nexus42d` daemon (Rust), JSON Schema wire contracts (truth source for TypeScript/Rust codegen), and published package `@42ch/nexus-contracts` (npm). Rust `nexus-contracts` crate is monorepo-internal only.
+This is the **public open-source monorepo** containing `nexus42` CLI (Rust, with integrated daemon runtime), JSON Schema wire contracts (truth source for TypeScript/Rust codegen), and published package `@42ch/nexus-contracts` (npm). Rust `nexus-contracts` crate is monorepo-internal only.
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
@@ -21,7 +21,7 @@ This is the **public open-source monorepo** containing `nexus42` CLI (Rust), `ne
 
 - Product: **Nexus**
 - CLI executable: **nexus42**
-- Daemon: **nexus42d**
+- Daemon: **nexus42d** (integrated into `nexus42` binary)
 - npm scope: **@42ch**
 - Contracts package: **@42ch/nexus-contracts**
 
@@ -34,7 +34,6 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `schemas/` | JSON Schema wire contracts | [`schemas/AGENTS.md`](schemas/AGENTS.md) |
 | `tooling/` | Codegen pipeline & CI | [`tooling/AGENTS.md`](tooling/AGENTS.md) |
 | `crates/nexus42/` | CLI executable | [`crates/nexus42/AGENTS.md`](crates/nexus42/AGENTS.md) |
-| `crates/nexus42d/` | Daemon / supervisor | [`crates/nexus42d/AGENTS.md`](crates/nexus42d/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
@@ -65,7 +64,7 @@ Breaking changes are expected and allowed — API shapes, CLI flags, on-disk pat
 
 ## Constraints & Pitfalls
 
-- **Do not treat `nexus42d` as an ACP Agent/Server** — it's a local supervisor, client-only
+- **Do not treat the daemon runtime as an ACP Agent/Server** — it's a local supervisor, client-only
 - **Do not sync full manuscript text by default** — only structured deltas/bundles
 - **World history is immutable** — changes go through Fork, not in-place mutation
 - **Wire contracts must match schemas** — no drift between `schemas/` and generated types
