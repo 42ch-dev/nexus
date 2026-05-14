@@ -2,6 +2,7 @@
 members = [
     "crates/nexus-acp-host",
     "crates/nexus-contracts",
+    "crates/nexus-daemon-runtime",
     "crates/nexus-domain",
     "crates/nexus-home-layout",
     "crates/nexus-orchestration",
