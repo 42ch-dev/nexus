@@ -5,4 +5,17 @@
 
 #![deny(clippy::unwrap_used)]
 
-// Modules will be populated by T2-T7
+pub mod api;
+pub mod auth;
+pub mod config;
+pub mod db;
+pub mod lifecycle;
+pub mod workspace;
+
+/// Helpers for integration tests (also used by `tests/*.rs` in this crate).
+pub mod test_utils;
+
+/// Helpers for building Axum apps with ephemeral engines for integration tests.
+/// Gated behind `#[cfg(test)]` because it uses dev-dependencies.
+#[cfg(test)]
+pub mod test_support;
