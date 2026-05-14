@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod boot;
 pub mod config;
 pub mod db;
 pub mod lifecycle;
