@@ -3,30 +3,6 @@
   "updated_at": "2026-05-15T13:00:00Z",
   "plans": [
     {
-      "id": "2026-05-15-v1.17-b3-remove-daemon-crate",
-      "title": "V1.17 B3: Remove Old Daemon Crate — delete nexus42d",
-      "file": ".agents/plans/2026-05-15-v1.17-b3-remove-daemon-crate.md",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.17", "single-binary", "cleanup", "nexus42d-removal"],
-      "created_at": "2026-05-15",
-      "updated_at": "2026-05-15",
-      "done_at": null,
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.17-b3-remove-daemon-crate",
-        "merge_target": "main",
-        "priority": "high",
-        "phase": "v1.17",
-        "primary_spec": ".agents/knowledge/nexus42-single-binary-daemon-runtime-architecture-v1.md",
-        "description": "Remove nexus42d from workspace, delete crate directory, clean all references",
-        "blocked_by_plan_id": "2026-05-15-v1.17-b2-single-binary-wiring",
-        "task_category": "logic"
-      }
-    },
-    {
       "id": "2026-05-15-v1.17-b4-naming-hardening",
       "title": "V1.17 B4: Naming and Hardening — unify logs, errors, reliability",
       "file": ".agents/plans/2026-05-15-v1.17-b4-naming-hardening.md",
