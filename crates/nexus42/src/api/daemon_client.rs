@@ -1,6 +1,6 @@
 //! Daemon HTTP Client
 //!
-//! Communicates with the nexus42d daemon via the Local API (HTTP JSON on port 8420).
+//! Communicates with the daemon runtime via the Local API (HTTP JSON on port 8420).
 //! Configurable timeouts prevent infinite hangs when the daemon is unresponsive.
 
 use crate::config::CliConfig;
@@ -30,7 +30,7 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default request timeout: 30 seconds
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Client for the nexus42d Local API
+/// Client for the daemon Local API
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
     base_url: String,

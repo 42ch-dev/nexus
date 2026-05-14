@@ -1,7 +1,7 @@
 //! nexus-daemon-runtime — Nexus Daemon Runtime
 //!
 //! Reusable runtime layer for daemon lifecycle, subsystem composition,
-//! and local API transport. Extracted from nexus42d.
+//! and local API transport. Extracted from the former standalone daemon binary.
 
 #![deny(clippy::unwrap_used)]
 

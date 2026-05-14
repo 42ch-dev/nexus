@@ -1,6 +1,6 @@
 //! Shared operational path layout (`ADR-014`) under the user home directory.
 //!
-//! Used by `nexus42` CLI and `nexus42d` so `SQLite` and workspace dirs resolve identically.
+//! Used by `nexus42` CLI and the daemon runtime so `SQLite` and workspace dirs resolve identically.
 
 #![allow(dead_code)]
 

@@ -1,6 +1,6 @@
 //! World fork and snapshot — daemon-mediated platform calls.
 //!
-//! Requires a running nexus42d and `NEXUS_SYNC_PLATFORM_URL` + `NEXUS_SYNC_PLATFORM_TOKEN`
+//! Requires a running daemon and `NEXUS_SYNC_PLATFORM_URL` + `NEXUS_SYNC_PLATFORM_TOKEN`
 //! on the daemon process. Workspace sync binding (if set) must match `parent` / `world-id`.
 
 use crate::api::DaemonClient;
