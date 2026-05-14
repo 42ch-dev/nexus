@@ -1,7 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-15T15:00:00Z",
+  "updated_at": "2026-05-15T16:00:00Z",
   "plans": [
+    {
+      "id": "2026-05-15-v1.17-b4-naming-hardening",
+      "title": "V1.17 B4: Naming and Hardening",
+      "done_at": "2026-05-15T16:00:00Z",
+      "plan_file": ".agents/plans/2026-05-15-v1.17-b4-naming-hardening.md",
+      "archived_record": ".agents/archived/plans/2026-05-15-v1.17-b4-naming-hardening.json"
+    },
     {
       "id": "2026-05-15-v1.17-b3-remove-daemon-crate",
       "title": "V1.17 B3: Remove Old Daemon Crate — delete nexus42d",

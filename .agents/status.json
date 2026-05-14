@@ -3,30 +3,6 @@
   "updated_at": "2026-05-15T13:00:00Z",
   "plans": [
     {
-      "id": "2026-05-15-v1.17-b4-naming-hardening",
-      "title": "V1.17 B4: Naming and Hardening — unify logs, errors, reliability",
-      "file": ".agents/plans/2026-05-15-v1.17-b4-naming-hardening.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.17", "single-binary", "naming", "hardening", "observability"],
-      "created_at": "2026-05-15",
-      "updated_at": "2026-05-15",
-      "done_at": null,
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.17-b4-naming-hardening",
-        "merge_target": "main",
-        "priority": "high",
-        "phase": "v1.17",
-        "primary_spec": ".agents/knowledge/nexus42-single-binary-daemon-runtime-architecture-v1.md",
-        "description": "Unify log naming, normalize error model, verify full spec Section 8 matrix",
-        "blocked_by_plan_id": "2026-05-15-v1.17-b3-remove-daemon-crate",
-        "task_category": "logic"
-      }
-    },
-    {
       "id": "2026-05-15-v1.18-agent-host-core",
       "title": "V1.18: Agent Host Core — Hybrid managed-only host subsystem",
       "file": ".agents/plans/2026-05-15-v1.18-agent-host-core.md",

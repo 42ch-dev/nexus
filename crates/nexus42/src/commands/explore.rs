@@ -1,6 +1,6 @@
 //! Explore browse/search — daemon-mediated read-only platform calls.
 //!
-//! Requires a running nexus42d and `NEXUS_SYNC_PLATFORM_URL` + `NEXUS_SYNC_PLATFORM_TOKEN`
+//! Requires a running daemon and `NEXUS_SYNC_PLATFORM_URL` + `NEXUS_SYNC_PLATFORM_TOKEN`
 //! on the daemon process (same pattern as `world`).
 
 use crate::api::DaemonClient;
