@@ -1,6 +1,6 @@
 //! Context Assembly Local API client.
 //!
-//! Calls POST /v1/local/context/assemble through the `DaemonClient` (nexus42d loopback).
+//! Calls POST /v1/local/context/assemble through the `DaemonClient` (daemon loopback).
 //!
 //! TODO(V1.10): This client wraps the daemon context endpoint which has been removed.
 //! The client and its tests are retained for reference but are dead code.
@@ -27,7 +27,7 @@ impl ContextClient {
 
     /// Request assembled context from the platform via the Local API.
     ///
-    /// Sends `POST /v1/local/context/assemble` through nexus42d.
+    /// Sends `POST /v1/local/context/assemble` through the daemon.
     /// The daemon proxies this request to the platform's Context Assembly service.
     ///
     /// # Errors

@@ -19,7 +19,7 @@
 //!           └─► HTTP POST to daemon
 //!               │   /v1/local/acp/tool/execute
 //!               │
-//!               └─► nexus42d daemon
+//!               └─► daemon runtime
 //!                   ├─ Permission check
 //!                   ├─ Path validation
 //!                   ├─ Execute tool

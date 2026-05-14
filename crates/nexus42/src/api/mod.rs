@@ -1,4 +1,4 @@
-//! API client for communicating with the nexus42d daemon
+//! API client for communicating with the daemon runtime
 
 pub mod daemon_client;
 pub mod models;

@@ -53,7 +53,7 @@ pub enum OrchestrateCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
-    /// Start the nexus42d daemon
+    /// Start the daemon runtime
     Start {
         /// Port to listen on (default: 8420)
         #[arg(long, default_value_t = DAEMON_PORT)]
@@ -248,6 +248,9 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
                 return Ok(());
             }
             if i == max_retries {
+                tracing::error!(
+                    "Daemon process was spawned (PID {child_pid}) but health check failed after {max_retries} retries"
+                );
                 println!(
                     "⚠ Daemon process was spawned but health check failed after {max_retries} retries."
                 );
@@ -255,7 +258,15 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
             }
         }
 
-        Ok(())
+        // Health check never succeeded — return error so callers know startup was not confirmed.
+        // The daemon process may still come up; `nexus42 daemon status` can confirm later.
+        Err(CliError::Daemon {
+            message: format!(
+                "Daemon process spawned (PID {child_pid}) but health endpoint never responded \
+                 after {max_retries} retries. The process may still be starting — check with \
+                 `nexus42 daemon status`."
+            ),
+        })
     }
 }
 
@@ -678,7 +689,7 @@ async fn daemon_logs(port: u16, lines: usize) -> Result<()> {
         );
         println!();
         println!("Logs may be available via:");
-        println!("  journalctl --user -u nexus42d");
+        println!("  journalctl --user -u nexus42");
     }
 
     Ok(())
