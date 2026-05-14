@@ -1,7 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-13T08:00:00Z",
+  "updated_at": "2026-05-15T13:00:00Z",
   "plans": [
+    {
+      "id": "2026-05-15-v1.17-b1-runtime-extraction",
+      "title": "V1.17 B1: Runtime Extraction — create nexus-daemon-runtime crate",
+      "done_at": "2026-05-15T13:00:00Z",
+      "plan_file": ".agents/plans/2026-05-15-v1.17-b1-runtime-extraction.md",
+      "archived_record": ".agents/archived/plans/2026-05-15-v1.17-b1-runtime-extraction.json"
+    },
     {
       "plan_id": "2026-05-12-v1.16-command-surface-contract",
       "title": "V1.16 command surface contract and regression matrix",
