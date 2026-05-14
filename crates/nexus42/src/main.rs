@@ -67,6 +67,7 @@ async fn main() {
         }
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
         Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
+        Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
         Some(Commands::Session { command }) => {
             eprintln!("Note: `nexus42 session` is deprecated. Use `nexus42 acp session` instead.");
             nexus42::commands::session::run(command, &config)

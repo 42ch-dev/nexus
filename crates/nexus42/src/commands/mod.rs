@@ -27,6 +27,8 @@ pub mod creator;
 #[deny(clippy::unwrap_used)]
 pub mod daemon;
 #[deny(clippy::unwrap_used)]
+pub mod daemon_run;
+#[deny(clippy::unwrap_used)]
 pub mod db;
 #[deny(clippy::unwrap_used)]
 pub mod debug;

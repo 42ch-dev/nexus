@@ -2349,6 +2349,7 @@ dependencies = [
  "hex",
  "nexus-acp-host",
  "nexus-contracts",
+ "nexus-daemon-runtime",
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",
