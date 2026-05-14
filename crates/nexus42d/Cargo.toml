@@ -19,6 +19,7 @@ name = "nexus42d"
 path = "src/main.rs"
 
 [dependencies]
+nexus-daemon-runtime = { path = "../nexus-daemon-runtime" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-domain = { path = "../nexus-domain" }
