@@ -19,8 +19,7 @@ cargo build --release
 
 | Component | Description |
 |-----------|-------------|
-| `nexus42` | CLI client |
-| `nexus42d` | Local daemon |
+| `nexus42` | CLI client with integrated daemon runtime |
 
 ## License
 
