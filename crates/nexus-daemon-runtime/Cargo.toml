@@ -17,6 +17,7 @@ nexus-domain = { path = "../nexus-domain" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-sync = { path = "../nexus-sync" }
 nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-agent-host = { path = "../nexus-agent-host" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

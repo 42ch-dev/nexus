@@ -17,6 +17,7 @@ pub enum SubsystemKind {
     Engine,
     WorkerMgr,
     AcpRegistry,
+    AgentHost,
 }
 
 impl SubsystemKind {
