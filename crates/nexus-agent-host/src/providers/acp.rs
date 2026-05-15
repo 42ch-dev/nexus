@@ -199,18 +199,15 @@ impl AcpProvider {
             })?;
 
             // Find the model config option by category
-            let config_id = state
-                .config_options
-                .as_ref()
-                .and_then(|opts| {
-                    opts.iter().find_map(|opt| {
-                        if opt.category.as_ref()? == &NexusConfigOptionCategory::Model {
-                            Some(opt.id.clone())
-                        } else {
-                            None
-                        }
-                    })
-                });
+            let config_id = state.config_options.as_ref().and_then(|opts| {
+                opts.iter().find_map(|opt| {
+                    if opt.category.as_ref()? == &NexusConfigOptionCategory::Model {
+                        Some(opt.id.clone())
+                    } else {
+                        None
+                    }
+                })
+            });
 
             let result = (state.acp_session_id.clone(), config_id);
             drop(sessions);
