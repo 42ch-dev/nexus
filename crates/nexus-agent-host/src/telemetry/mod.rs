@@ -1,3 +1,5 @@
 //! Telemetry and structured host event helpers.
-//!
-//! Implementation planned for Batch 2.
+
+pub mod events;
+
+pub use events::TelemetryContext;

@@ -45,9 +45,15 @@ use async_trait::async_trait;
 pub use error::{HostError, HostResult};
 pub use ids::{HostOperationId, HostSessionId, ProviderId};
 
+// Re-export key public types from submodules.
+pub use core::{HostSession, SessionRegistry, SessionState, TransitionResult};
+pub use discovery::ProviderCatalog;
+pub use policy::{AdmissionPolicy, HostPermissionResolver, PermissionOutcome};
+pub use telemetry::TelemetryContext;
+
 use capability::model::{
     CapabilityDescriptor, CreateSessionRequest, HostEventStream, HostHealth, HostOperation,
-    HostSession, HostStartConfig, LaunchSpec, ManagedSessionHandle, ProbeRequest, ProtocolKind,
+    HostStartConfig, LaunchSpec, ManagedSessionHandle, ProbeRequest, ProtocolKind,
     ProviderDescriptor, ProviderHealth,
 };
 use config::AgentHostConfig;
@@ -152,13 +158,6 @@ pub trait ProviderDiscovery: Send + Sync {
     /// Returns a catalog of discovered providers with their descriptors,
     /// capabilities, and health status.
     async fn discover(&self, config: &AgentHostConfig) -> HostResult<ProviderCatalog>;
-}
-
-/// Catalog of discovered providers.
-#[derive(Debug, Clone)]
-pub struct ProviderCatalog {
-    /// All discovered provider entries.
-    pub entries: Vec<ProviderCatalogEntry>,
 }
 
 /// A single entry in the provider catalog.
