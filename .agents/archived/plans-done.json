@@ -1,7 +1,16 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-15T16:30:00Z",
+  "updated_at": "2026-05-15T21:30:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-15-v1.19-agent-host-hardening",
+      "title": "V1.19 Agent Host Hardening — D-001~D-011 + V1.18 residual closure",
+      "done_at": "2026-05-15T21:30:00Z",
+      "plan_file": ".agents/plans/2026-05-15-v1.19-agent-host-hardening.md",
+      "archived_record": ".agents/archived/plans/2026-05-15-v1.19-agent-host-hardening.json",
+      "residual_count": 6,
+      "residual_target": "v1.20"
+    },
     {
       "plan_id": "2026-05-15-v1.18-agent-host-core",
       "title": "V1.18: Agent Host Core — Hybrid managed-only host subsystem",
