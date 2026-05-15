@@ -100,20 +100,28 @@ impl HostManager {
         &self,
         session_id: &HostSessionId,
     ) -> HostResult<(Arc<dyn ProviderAdapter>, ProviderId)> {
-        let session_providers = self.session_providers.read().await;
-        let provider_id = session_providers
-            .get(session_id)
-            .ok_or_else(|| {
-                HostError::internal(format!("no provider mapped for session {session_id}"))
-            })?
-            .clone();
+        let provider_id = {
+            let session_providers = self.session_providers.read().await;
+            session_providers
+                .get(session_id)
+                .ok_or_else(|| {
+                    HostError::internal(format!("no provider mapped for session {session_id}"))
+                })?
+                .clone()
+        };
 
-        let providers = self.providers.read().await;
-        let entry = providers.get(&provider_id).ok_or_else(|| {
-            HostError::provider_unavailable(provider_id.clone(), "provider not registered")
-        })?;
+        let adapter = {
+            let providers = self.providers.read().await;
+            providers
+                .get(&provider_id)
+                .ok_or_else(|| {
+                    HostError::provider_unavailable(provider_id.clone(), "provider not registered")
+                })?
+                .adapter
+                .clone()
+        };
 
-        Ok((entry.adapter.clone(), provider_id))
+        Ok((adapter, provider_id))
     }
 }
 
@@ -143,16 +151,15 @@ impl crate::HostFacade for HostManager {
         *self.running.write().await = true;
 
         let max_sessions = host_config.max_sessions;
-        tracing::info!(
-            max_sessions,
-            provider_count,
-            "Host manager started"
-        );
+        tracing::info!(max_sessions, provider_count, "Host manager started");
 
         Ok(())
     }
 
-    async fn create_session(&self, request: CreateSessionRequest) -> HostResult<crate::core::session::HostSession> {
+    async fn create_session(
+        &self,
+        request: CreateSessionRequest,
+    ) -> HostResult<crate::core::session::HostSession> {
         let running = self.running.read().await;
         if !*running {
             return Err(HostError::internal("host not started"));
@@ -162,10 +169,7 @@ impl crate::HostFacade for HostManager {
         // Find the provider
         let providers = self.providers.read().await;
         let entry = providers.get(&request.provider_id).ok_or_else(|| {
-            HostError::provider_unavailable(
-                request.provider_id.clone(),
-                "provider not registered",
-            )
+            HostError::provider_unavailable(request.provider_id.clone(), "provider not registered")
         })?;
 
         if !entry.available {
@@ -190,10 +194,8 @@ impl crate::HostFacade for HostManager {
 
         // Register in our session registry
         let mut sessions = self.sessions.write().await;
-        let session_id = sessions.register(
-            request.provider_id.clone(),
-            handle.capabilities.clone(),
-        );
+        let session_id =
+            sessions.register(request.provider_id.clone(), handle.capabilities.clone());
 
         // Transition to starting → ready
         sessions.transition_to_starting(&session_id)?;
@@ -206,6 +208,7 @@ impl crate::HostFacade for HostManager {
         }
 
         let session = sessions.get(&session_id).expect("just registered").clone();
+        drop(sessions);
         Ok(session)
     }
 
@@ -218,9 +221,9 @@ impl crate::HostFacade for HostManager {
 
         // Build the managed session handle
         let sessions = self.sessions.read().await;
-        let session = sessions.get(&session_id).ok_or_else(|| {
-            HostError::internal(format!("session {session_id} not found"))
-        })?;
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| HostError::internal(format!("session {session_id} not found")))?;
 
         let handle = ManagedSessionHandle {
             provider_id: session.provider_id.clone(),
@@ -253,7 +256,7 @@ impl crate::HostFacade for HostManager {
                 let sid = sid_for_wrap.clone();
                 let oid = oid.clone();
                 async move {
-                    if let Ok(HostEvent::OpFinished(_)) | Ok(HostEvent::OpFailed(_)) = &result {
+                    if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = &result {
                         let mut sess = sessions.write().await;
                         let _ = sess.transition_busy_to_ready(&sid, &oid);
                     }
@@ -274,9 +277,7 @@ impl crate::HostFacade for HostManager {
                 .iter()
                 .find(|s| s.active_op_id.as_ref() == Some(&op_id))
                 .cloned()
-                .ok_or_else(|| {
-                    HostError::internal(format!("no session found for op {op_id}"))
-                })?;
+                .ok_or_else(|| HostError::internal(format!("no session found for op {op_id}")))?;
         }
 
         // Transition to Cancelling
@@ -320,20 +321,22 @@ impl crate::HostFacade for HostManager {
         *self.running.write().await = false;
 
         // Shutdown all sessions
-        let mut sessions = self.sessions.write().await;
-        let session_ids: Vec<HostSessionId> = sessions.iter().map(|s| s.id.clone()).collect();
+        {
+            let mut sessions = self.sessions.write().await;
+            let session_ids: Vec<HostSessionId> = sessions.iter().map(|s| s.id.clone()).collect();
 
-        for session_id in &session_ids {
-            let _ = sessions.transition_to_stopping(session_id);
-            let _ = sessions.transition_to_stopped(
-                session_id,
-                crate::capability::model::SessionStopReason::GracefulShutdown,
-            );
-        }
+            for session_id in &session_ids {
+                let _ = sessions.transition_to_stopping(session_id);
+                let _ = sessions.transition_to_stopped(
+                    session_id,
+                    crate::capability::model::SessionStopReason::GracefulShutdown,
+                );
+            }
 
-        // Remove all stopped sessions from the registry
-        for session_id in &session_ids {
-            let _ = sessions.remove_stopped(session_id);
+            // Remove all stopped sessions from the registry
+            for session_id in &session_ids {
+                let _ = sessions.remove_stopped(session_id);
+            }
         }
 
         // Clear provider mappings
@@ -347,9 +350,9 @@ impl crate::HostFacade for HostManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HostFacade;
-    use crate::core::session::SessionState;
     use crate::capability::model::{LaunchSpec, ProbeRequest};
+    use crate::core::session::SessionState;
+    use crate::HostFacade;
 
     /// A minimal mock provider for testing the HostManager.
     struct MockProvider {
@@ -367,7 +370,10 @@ mod tests {
             }
         }
 
-        async fn probe(&self, _request: ProbeRequest) -> HostResult<crate::capability::model::ProviderHealth> {
+        async fn probe(
+            &self,
+            _request: ProbeRequest,
+        ) -> HostResult<crate::capability::model::ProviderHealth> {
             Ok(crate::capability::model::ProviderHealth {
                 provider_id: self.provider_id.clone(),
                 available: true,
@@ -390,15 +396,19 @@ mod tests {
             _op: crate::capability::model::HostOperation,
         ) -> HostResult<HostEventStream> {
             let stream = futures_util::stream::iter(vec![
-                Ok(HostEvent::OpStarted(crate::capability::model::OperationStartedEvent {
-                    op_id: HostOperationId::new(),
-                    session_id: HostSessionId::new(),
-                })),
-                Ok(HostEvent::OpFinished(crate::capability::model::OperationFinishedEvent {
-                    session_id: HostSessionId::new(),
-                    op_id: HostOperationId::new(),
-                    reason: crate::capability::model::FinishReason::EndTurn,
-                })),
+                Ok(HostEvent::OpStarted(
+                    crate::capability::model::OperationStartedEvent {
+                        op_id: HostOperationId::new(),
+                        session_id: HostSessionId::new(),
+                    },
+                )),
+                Ok(HostEvent::OpFinished(
+                    crate::capability::model::OperationFinishedEvent {
+                        session_id: HostSessionId::new(),
+                        op_id: HostOperationId::new(),
+                        reason: crate::capability::model::FinishReason::EndTurn,
+                    },
+                )),
             ])
             .boxed();
             Ok(stream)
@@ -441,7 +451,10 @@ mod tests {
             }))
             .await;
 
-        manager.start(start_config()).await.expect("start should succeed");
+        manager
+            .start(start_config())
+            .await
+            .expect("start should succeed");
 
         let health = manager.health().await.expect("health should succeed");
         assert!(health.running);

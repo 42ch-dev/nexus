@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 use crate::capability::model::{
     CapabilityDescriptor, FinishReason, HostContentBlock, HostEvent, HostEventStream,
     ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, OperationStartedEvent,
-    ProviderDescriptor, ProviderHealth, ProtocolKind, TextDeltaEvent,
+    ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
@@ -85,6 +85,88 @@ impl ClaudeCliProvider {
             HashMap::new(),
         )
     }
+
+    /// Build the event stream from stdout lines.
+    ///
+    /// Emits `OpStarted`, then `MessageDelta` per line, and a terminal
+    /// `OpFinished`/`OpFailed` when stdout reaches EOF or an I/O error occurs.
+    fn build_event_stream(
+        stdout: Option<tokio::process::ChildStdout>,
+        op_id: HostOperationId,
+        session_id: HostSessionId,
+    ) -> HostEventStream {
+        let started = futures_util::stream::once({
+            let op_id = op_id.clone();
+            let session_id = session_id.clone();
+            async move {
+                Ok(HostEvent::OpStarted(OperationStartedEvent {
+                    op_id,
+                    session_id,
+                }))
+            }
+        });
+
+        let stdout_stream: HostEventStream = if let Some(stdout) = stdout {
+            let reader = tokio::io::BufReader::new(stdout);
+            futures_util::stream::unfold(
+                (reader, op_id, session_id),
+                |(mut reader, op_id, session_id)| async move {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => {
+                            // EOF — emit terminal event
+                            Some((
+                                Ok(HostEvent::OpFinished(OperationFinishedEvent {
+                                    session_id,
+                                    op_id,
+                                    reason: FinishReason::EndTurn,
+                                })),
+                                (reader, HostOperationId::new(), HostSessionId::new()),
+                            ))
+                        }
+                        Ok(_) => {
+                            let text = line
+                                .trim_end_matches('\n')
+                                .trim_end_matches('\r')
+                                .to_string();
+                            let next_op = op_id.clone();
+                            let next_session = session_id.clone();
+                            Some((
+                                Ok(HostEvent::MessageDelta(TextDeltaEvent {
+                                    session_id,
+                                    op_id,
+                                    text,
+                                })),
+                                (reader, next_op, next_session),
+                            ))
+                        }
+                        Err(e) => Some((
+                            Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id,
+                                op_id,
+                                error_category: "io_error".to_string(),
+                                error_message: e.to_string(),
+                            })),
+                            (reader, HostOperationId::new(), HostSessionId::new()),
+                        )),
+                    }
+                },
+            )
+            .boxed()
+        } else {
+            futures_util::stream::once(async move {
+                Ok(HostEvent::OpFailed(OperationFailedEvent {
+                    session_id,
+                    op_id,
+                    error_category: "io_error".to_string(),
+                    error_message: "stdout not captured".to_string(),
+                }))
+            })
+            .boxed()
+        };
+
+        started.chain(stdout_stream).boxed()
+    }
 }
 
 #[async_trait]
@@ -98,7 +180,10 @@ impl ProviderAdapter for ClaudeCliProvider {
         }
     }
 
-    async fn probe(&self, _request: crate::capability::model::ProbeRequest) -> HostResult<ProviderHealth> {
+    async fn probe(
+        &self,
+        _request: crate::capability::model::ProbeRequest,
+    ) -> HostResult<ProviderHealth> {
         // Check if the command exists on PATH by attempting `which` / `where`
         let which_result = tokio::process::Command::new("which")
             .arg(&self.command)
@@ -124,7 +209,10 @@ impl ProviderAdapter for ClaudeCliProvider {
         }
     }
 
-    async fn launch(&self, spec: crate::capability::model::LaunchSpec) -> HostResult<ManagedSessionHandle> {
+    async fn launch(
+        &self,
+        spec: crate::capability::model::LaunchSpec,
+    ) -> HostResult<ManagedSessionHandle> {
         // For native CLI, "launch" means we prepare the session but don't spawn
         // the process yet — that happens in execute(). The session handle is
         // created here with a placeholder.
@@ -153,19 +241,16 @@ impl ProviderAdapter for ClaudeCliProvider {
         _session: &ManagedSessionHandle,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
-        let (op_id, content_blocks) = match op {
-            crate::capability::model::HostOperation::Prompt { op_id, content } => (op_id, content),
-            _ => {
-                return Err(HostError::capability_unsupported(
-                    self.provider_id.clone(),
-                    "non-prompt operation",
-                    "Native CLI provider only supports Prompt operations in Wave 1",
-                ));
-            }
+        let crate::capability::model::HostOperation::Prompt { op_id, content } = op else {
+            return Err(HostError::capability_unsupported(
+                self.provider_id.clone(),
+                "non-prompt operation",
+                "Native CLI provider only supports Prompt operations in Wave 1",
+            ));
         };
 
         // Build prompt text from content blocks
-        let prompt_text: String = content_blocks
+        let prompt_text: String = content
             .iter()
             .map(|block| match block {
                 HostContentBlock::Text { text } => text.as_str(),
@@ -181,8 +266,7 @@ impl ProviderAdapter for ClaudeCliProvider {
             ));
         }
 
-        // Spawn the subprocess: command [args...] -- <prompt>
-        // The prompt is passed as stdin to avoid shell escaping issues.
+        // Spawn the subprocess: command [args...] via stdin
         let mut cmd = tokio::process::Command::new(&self.command);
         cmd.args(&self.args)
             .stdin(std::process::Stdio::piped())
@@ -198,103 +282,27 @@ impl ProviderAdapter for ClaudeCliProvider {
             )
         })?;
 
-        // Write prompt to stdin
+        // Write prompt to stdin and close it
         let stdin = child.stdin.take();
         if let Some(mut stdin) = stdin {
             use tokio::io::AsyncWriteExt;
             stdin.write_all(prompt_text.as_bytes()).await.map_err(|e| {
                 HostError::protocol_error("failed to write prompt to stdin", Some(e.to_string()))
             })?;
-            drop(stdin); // Close stdin to signal EOF
+            drop(stdin);
         }
 
-        let op_id_for_stream = op_id.clone();
         let session_id = HostSessionId::new(); // Native: per-op session
-        let provider_id = self.provider_id.clone();
 
         // Take stdout and stderr before moving child
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        // Stream stdout lines as MessageDelta events, then wait for exit
-        let started_stream = futures_util::stream::once({
-            let op_id = op_id_for_stream.clone();
-            let session_id = session_id.clone();
-            async move {
-                Ok(HostEvent::OpStarted(OperationStartedEvent {
-                    op_id,
-                    session_id,
-                }))
-            }
-        });
-
-        // Create a line-by-line stream from stdout
-        let op_id = op_id_for_stream.clone();
-        let session_id_for_stdout = session_id.clone();
-
-        let stdout_stream: HostEventStream = if let Some(stdout) = stdout {
-            let reader = tokio::io::BufReader::new(stdout);
-            futures_util::stream::unfold(
-                (reader, op_id, session_id_for_stdout),
-                |(mut reader, op_id, session_id)| async move {
-                    let mut line = String::new();
-                    match reader.read_line(&mut line).await {
-                        Ok(0) => {
-                            // EOF — emit terminal event
-                            Some((
-                                Ok(HostEvent::OpFinished(OperationFinishedEvent {
-                                    session_id,
-                                    op_id,
-                                    reason: FinishReason::EndTurn,
-                                })),
-                                (reader, HostOperationId::new(), HostSessionId::new()),
-                            ))
-                        }
-                        Ok(_) => {
-                            let text = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
-                            let next_op = op_id.clone();
-                            let next_session = session_id.clone();
-                            Some((
-                                Ok(HostEvent::MessageDelta(TextDeltaEvent {
-                                    session_id,
-                                    op_id,
-                                    text,
-                                })),
-                                (reader, next_op, next_session),
-                            ))
-                        }
-                        Err(e) => {
-                            Some((
-                                Ok(HostEvent::OpFailed(OperationFailedEvent {
-                                    session_id,
-                                    op_id,
-                                    error_category: "io_error".to_string(),
-                                    error_message: e.to_string(),
-                                })),
-                                (reader, HostOperationId::new(), HostSessionId::new()),
-                            ))
-                        }
-                    }
-                },
-            )
-            .boxed()
-        } else {
-            futures_util::stream::once(async move {
-                Ok(HostEvent::OpFailed(OperationFailedEvent {
-                    session_id: session_id_for_stdout,
-                    op_id,
-                    error_category: "io_error".to_string(),
-                    error_message: "stdout not captured".to_string(),
-                }))
-            })
-            .boxed()
-        };
-
-        let stream = started_stream.chain(stdout_stream).boxed();
+        let stream = Self::build_event_stream(stdout, op_id, session_id);
 
         // Spawn a background task to drain stderr and log warnings
         if let Some(stderr) = stderr {
-            let provider_id = provider_id.clone();
+            let provider_id = self.provider_id.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stderr);
                 let mut lines = reader.lines();
@@ -334,10 +342,12 @@ impl ProviderAdapter for ClaudeCliProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(mut native_session) = sessions.remove(&session.session_id) {
-            // Kill the child process if still running
-            let _ = native_session.child.kill().await;
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(mut native_session) = sessions.remove(&session.session_id) {
+                // Kill the child process if still running
+                let _ = native_session.child.kill().await;
+            }
         }
         tracing::info!(
             session_id = %session.session_id,
