@@ -25,12 +25,12 @@ use nexus_contracts::local::acp::{
 
 use crate::capability::model::{
     CapabilityDescriptor, FinishReason, HostContentBlock, HostEvent, HostEventStream,
-    ManagedSessionHandle, OperationFinishedEvent, OperationStartedEvent,
-    ProviderDescriptor, ProviderHealth, ProtocolKind, TextDeltaEvent,
+    ManagedSessionHandle, OperationFinishedEvent, OperationStartedEvent, ProtocolKind,
+    ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
-use crate::{ProviderAdapter};
+use crate::ProviderAdapter;
 
 /// Internal state tracked per active ACP session.
 #[derive(Debug)]
@@ -84,12 +84,12 @@ impl AcpProvider {
                         text: text.clone(),
                     })
                 }
-                HostContentBlock::ResourceLink { name, uri } => {
-                    NexusContentBlock::ResourceLink(nexus_contracts::local::acp::NexusResourceLink {
+                HostContentBlock::ResourceLink { name, uri } => NexusContentBlock::ResourceLink(
+                    nexus_contracts::local::acp::NexusResourceLink {
                         name: name.clone(),
                         uri: uri.clone(),
-                    })
-                }
+                    },
+                ),
             })
             .collect()
     }
@@ -99,19 +99,18 @@ impl AcpProvider {
         update: AcpStreamUpdate,
         session_id: &HostSessionId,
         op_id: &HostOperationId,
-    ) -> Option<HostEvent> {
+    ) -> HostEvent {
         match update {
-            AcpStreamUpdate::TextDelta { text, .. } => Some(HostEvent::MessageDelta(TextDeltaEvent {
+            AcpStreamUpdate::TextDelta { text, .. } => HostEvent::MessageDelta(TextDeltaEvent {
                 session_id: session_id.clone(),
                 op_id: op_id.clone(),
                 text,
-            })),
+            }),
             AcpStreamUpdate::Stopped {
-                stop_reason: ref reason,
+                stop_reason: reason,
                 ..
             } => {
                 let finish = match reason {
-                    nexus_contracts::local::acp::NexusStopReason::EndTurn => FinishReason::EndTurn,
                     nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
                         FinishReason::MaxTokens
                     }
@@ -119,13 +118,16 @@ impl AcpProvider {
                         FinishReason::MaxTurnRequests
                     }
                     nexus_contracts::local::acp::NexusStopReason::Refusal => FinishReason::Refusal,
-                    _ => FinishReason::EndTurn,
+                    nexus_contracts::local::acp::NexusStopReason::EndTurn
+                    | nexus_contracts::local::acp::NexusStopReason::Cancelled => {
+                        FinishReason::EndTurn
+                    }
                 };
-                Some(HostEvent::OpFinished(OperationFinishedEvent {
+                HostEvent::OpFinished(OperationFinishedEvent {
                     session_id: session_id.clone(),
                     op_id: op_id.clone(),
                     reason: finish,
-                }))
+                })
             }
         }
     }
@@ -142,7 +144,10 @@ impl ProviderAdapter for AcpProvider {
         }
     }
 
-    async fn probe(&self, _request: crate::capability::model::ProbeRequest) -> HostResult<ProviderHealth> {
+    async fn probe(
+        &self,
+        _request: crate::capability::model::ProbeRequest,
+    ) -> HostResult<ProviderHealth> {
         // Attempt an initialize handshake to verify the agent is responsive.
         let init_request = NexusInitializeRequest::new().client_info(
             nexus_contracts::local::acp::NexusAgentInfo {
@@ -168,21 +173,20 @@ impl ProviderAdapter for AcpProvider {
         }
     }
 
-    async fn launch(&self, spec: crate::capability::model::LaunchSpec) -> HostResult<ManagedSessionHandle> {
+    async fn launch(
+        &self,
+        spec: crate::capability::model::LaunchSpec,
+    ) -> HostResult<ManagedSessionHandle> {
         // Create ACP session
         let acp_request = NexusNewSessionRequest::new(spec.cwd);
 
-        let session_created = self
-            .client
-            .create_session(acp_request)
-            .await
-            .map_err(|e| {
-                HostError::launch_failed(
-                    self.provider_id.clone(),
-                    "ACP session creation failed",
-                    Some(e.to_string()),
-                )
-            })?;
+        let session_created = self.client.create_session(acp_request).await.map_err(|e| {
+            HostError::launch_failed(
+                self.provider_id.clone(),
+                "ACP session creation failed",
+                Some(e.to_string()),
+            )
+        })?;
 
         let host_session_id = HostSessionId::new();
 
@@ -254,10 +258,7 @@ impl ProviderAdapter for AcpProvider {
             .stream_prompt(prompt_request)
             .await
             .map_err(|e| {
-                HostError::protocol_error(
-                    "ACP stream_prompt failed",
-                    Some(e.to_string()),
-                )
+                HostError::protocol_error("ACP stream_prompt failed", Some(e.to_string()))
             })?;
 
         // Convert the mpsc::Receiver into a futures Stream of HostEvent
@@ -276,22 +277,11 @@ impl ProviderAdapter for AcpProvider {
             }
         })
         .chain({
-            let session_id = session_id.clone();
-            let op_id = op_id_for_stream.clone();
-            tokio_stream::wrappers::ReceiverStream::new(rx)
-                .filter_map(move |update| {
-                    let sid = session_id.clone();
-                    let oid = op_id.clone();
-                    async move {
-                        match Self::stream_update_to_event(update, &sid, &oid) {
-                            Some(HostEvent::OpFinished(finished)) => {
-                                Some(Ok(HostEvent::OpFinished(finished)))
-                            }
-                            Some(event) => Some(Ok(event)),
-                            None => None,
-                        }
-                    }
-                })
+            tokio_stream::wrappers::ReceiverStream::new(rx).map(move |update| {
+                let sid = session_id.clone();
+                let oid = op_id_for_stream.clone();
+                Ok(Self::stream_update_to_event(update, &sid, &oid))
+            })
         })
         .boxed();
 
@@ -327,8 +317,10 @@ impl ProviderAdapter for AcpProvider {
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
         // Remove the session from tracking. The ACP SDK adapter handles
         // the underlying session cleanup when dropped.
-        let mut sessions = self.sessions.write().await;
-        sessions.remove(&session.session_id);
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(&session.session_id);
+        }
         tracing::info!(
             session_id = %session.session_id,
             provider_id = %self.provider_id,
@@ -414,10 +406,9 @@ mod tests {
         };
 
         let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
-        assert!(event.is_some());
 
         match event {
-            Some(HostEvent::MessageDelta(delta)) => {
+            HostEvent::MessageDelta(delta) => {
                 assert_eq!(delta.text, "Hello world");
                 assert_eq!(delta.session_id, session_id);
                 assert_eq!(delta.op_id, op_id);
@@ -437,10 +428,9 @@ mod tests {
         };
 
         let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
-        assert!(event.is_some());
 
         match event {
-            Some(HostEvent::OpFinished(finished)) => {
+            HostEvent::OpFinished(finished) => {
                 assert_eq!(finished.reason, FinishReason::EndTurn);
             }
             _ => panic!("expected OpFinished event"),

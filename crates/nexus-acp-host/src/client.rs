@@ -68,11 +68,11 @@ use agent_client_protocol::schema::SetSessionConfigOptionRequest;
 use agent_client_protocol::schema::SetSessionConfigOptionResponse;
 use agent_client_protocol::schema::{
     ContentBlock, ContentChunk, Implementation, InitializeRequest, McpServer, McpServerHttp,
-    McpServerSse, McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion,
-    ResourceLink, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
+    McpServerSse, McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink,
+    SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use agent_client_protocol::{ActiveSession, Agent, ByteStreams, ConnectionTo, SessionMessage};
 use agent_client_protocol::util::MatchDispatch;
+use agent_client_protocol::{ActiveSession, Agent, ByteStreams, ConnectionTo, SessionMessage};
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -850,10 +850,7 @@ impl AcpSdkAdapter {
 
         // If MatchDispatch itself errored, we still return None (non-fatal).
         let _ = result;
-        let text = captured
-            .lock()
-            .expect("mutex not poisoned")
-            .take();
+        let text = captured.lock().expect("mutex not poisoned").take();
         text
     }
 }
