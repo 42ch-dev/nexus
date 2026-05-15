@@ -42,8 +42,9 @@ pub struct HostManager {
     /// Active session → provider mapping.
     session_providers: RwLock<HashMap<HostSessionId, ProviderId>>,
     /// Admission policy gate.
-    #[allow(dead_code)]
     admission: RwLock<AdmissionPolicy>,
+    /// Whether admission was explicitly set via `with_admission()`.
+    admission_custom: bool,
     /// Host configuration (set on start).
     config: RwLock<Option<AgentHostConfig>>,
     /// Whether the host has been started.
@@ -65,6 +66,7 @@ impl HostManager {
                 &AgentHostConfig::default(),
                 HashSet::new(),
             )),
+            admission_custom: false,
             config: RwLock::new(None),
             running: RwLock::new(false),
         }
@@ -75,6 +77,7 @@ impl HostManager {
     pub fn with_admission(admission: AdmissionPolicy) -> Self {
         Self {
             admission: RwLock::new(admission),
+            admission_custom: true,
             ..Self::new()
         }
     }
@@ -138,14 +141,23 @@ impl crate::HostFacade for HostManager {
         let host_config = crate::config::load_config(&config.config_path)?;
         *self.config.write().await = Some(host_config.clone());
 
-        // Mark all registered providers as available
+        // Mark all registered providers as available and collect their IDs.
         let provider_count;
+        let registered_ids: HashSet<ProviderId>;
         {
             let mut providers = self.providers.write().await;
             provider_count = providers.len();
+            registered_ids = providers.keys().cloned().collect();
             for entry in providers.values_mut() {
                 entry.available = true;
             }
+        }
+
+        // Rebuild admission policy from loaded config + registered providers,
+        // but only if no custom policy was set via `with_admission()`.
+        if !self.admission_custom {
+            *self.admission.write().await =
+                AdmissionPolicy::from_config(&host_config, registered_ids);
         }
 
         *self.running.write().await = true;
@@ -165,6 +177,14 @@ impl crate::HostFacade for HostManager {
             return Err(HostError::internal("host not started"));
         }
         drop(running);
+
+        // Admission checks: provider allow/deny + session limit.
+        {
+            let admission = self.admission.read().await;
+            admission.check_provider(&request.provider_id)?;
+            let session_count = self.sessions.read().await.len();
+            admission.check_session_limit(session_count)?;
+        }
 
         // Find the provider
         let providers = self.providers.read().await;
@@ -218,6 +238,18 @@ impl crate::HostFacade for HostManager {
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
         let (adapter, _) = self.get_provider_for_session(&session_id).await?;
+
+        // Admission check: ops-per-session limit.
+        {
+            let admission = self.admission.read().await;
+            let active_ops: usize = {
+                let sessions = self.sessions.read().await;
+                sessions
+                    .get(&session_id)
+                    .map_or(0, |s| usize::from(s.state.is_busy()))
+            };
+            admission.check_before_exec(&session_id, active_ops)?;
+        }
 
         // Build the managed session handle
         let sessions = self.sessions.read().await;
@@ -760,7 +792,13 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not registered"));
+        let err = result.unwrap_err();
+        // Admission policy catches unknown providers before the registry lookup.
+        assert!(
+            err.to_string().contains("not in the known providers list"),
+            "expected admission denial, got: {err}"
+        );
+        assert_eq!(err.category(), "policy_denied");
     }
 
     #[tokio::test]
@@ -936,5 +974,202 @@ mod tests {
         let health = manager.health().await.expect("health");
         assert!(!health.running);
         assert_eq!(health.active_sessions, 0);
+    }
+
+    // ── Admission policy enforcement tests ──────────────────────────────
+
+    /// Verify that a provider denied by admission policy returns PolicyDenied.
+    #[tokio::test]
+    async fn create_session_denied_provider_returns_policy_denied() {
+        // Build a strict admission policy with no known providers.
+        let config = AgentHostConfig::default(); // deny_unknown_providers = true
+        let admission = AdmissionPolicy::from_config(&config, HashSet::new());
+        let manager = HostManager::with_admission(admission);
+        // Register a provider, but admission policy has empty known_providers.
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        manager.start(start_config()).await.expect("start");
+
+        let result = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.category(), "policy_denied");
+        assert!(
+            err.to_string().contains("not in the known providers list"),
+            "expected provider denial, got: {err}"
+        );
+    }
+
+    /// Verify that session limit is enforced by admission policy.
+    #[tokio::test]
+    async fn create_session_enforces_session_limit() {
+        // Build admission with max_sessions = 1.
+        let config = AgentHostConfig {
+            max_sessions: 1,
+            ..AgentHostConfig::default()
+        };
+        let mut known = HashSet::new();
+        known.insert(ProviderId::new("mock"));
+        let admission = AdmissionPolicy::from_config(&config, known);
+        let manager = HostManager::with_admission(admission);
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        manager.start(start_config()).await.expect("start");
+
+        // First session should succeed.
+        let _session1 = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .expect("first session should succeed");
+
+        // Second session should be denied by session limit.
+        let result = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.category(), "policy_denied");
+        assert!(
+            err.to_string().contains("session limit reached"),
+            "expected session limit denial, got: {err}"
+        );
+    }
+
+    /// Verify that ops-per-session limit is enforced by admission policy in exec().
+    #[tokio::test]
+    async fn exec_enforces_ops_per_session_limit() {
+        // Build admission with max_ops_per_session = 0 (zero → any exec denied).
+        let config = AgentHostConfig {
+            max_sessions: 4,
+            max_ops_per_session: 0,
+            ..AgentHostConfig::default()
+        };
+        let mut known = HashSet::new();
+        known.insert(ProviderId::new("mock"));
+        let admission = AdmissionPolicy::from_config(&config, known);
+        let manager = HostManager::with_admission(admission);
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        manager.start(start_config()).await.expect("start");
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .expect("session should be created");
+
+        let result = manager
+            .exec(
+                session.id,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![crate::capability::model::HostContentBlock::Text {
+                        text: "hello".to_string(),
+                    }],
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        assert_eq!(err.category(), "policy_denied");
+        assert!(
+            err.to_string().contains("operation limit reached"),
+            "expected ops limit denial, got: {err}"
+        );
+    }
+
+    /// Verify that an allowed provider within limits can create sessions and exec ops.
+    #[tokio::test]
+    async fn create_session_and_exec_allowed_when_within_limits() {
+        let config = AgentHostConfig {
+            max_sessions: 4,
+            max_ops_per_session: 2,
+            ..AgentHostConfig::default()
+        };
+        let mut known = HashSet::new();
+        known.insert(ProviderId::new("mock"));
+        let admission = AdmissionPolicy::from_config(&config, known);
+        let manager = HostManager::with_admission(admission);
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        manager.start(start_config()).await.expect("start");
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .expect("session should be created");
+
+        assert_eq!(session.state, SessionState::Ready);
+
+        let result = manager
+            .exec(
+                session.id.clone(),
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![crate::capability::model::HostContentBlock::Text {
+                        text: "hello".to_string(),
+                    }],
+                },
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "exec should succeed within ops limit"
+        );
     }
 }
