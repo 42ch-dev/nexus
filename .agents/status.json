@@ -1,32 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-15T13:00:00Z",
-  "plans": [
-    {
-      "id": "2026-05-15-v1.18-agent-host-core",
-      "title": "V1.18: Agent Host Core — Hybrid managed-only host subsystem",
-      "file": ".agents/plans/2026-05-15-v1.18-agent-host-core.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": ["@architect", "@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.18", "agent-host", "hybrid", "managed-only", "acp", "native-cli"],
-      "created_at": "2026-05-15",
-      "updated_at": "2026-05-15",
-      "done_at": null,
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.18-agent-host-core",
-        "merge_target": "main",
-        "priority": "medium",
-        "phase": "v1.18",
-        "primary_spec": ".agents/knowledge/nexus42-single-binary-daemon-runtime-architecture-v1.md",
-        "description": "Create nexus-agent-host crate with Hybrid host core, ACP + one native provider (Claude CLI), Managed-only",
-        "blocked_by_plan_id": "2026-05-15-v1.17-b3-remove-daemon-crate",
-        "task_category": "logic"
-      }
-    }
-  ],
+  "updated_at": "2026-05-15T16:30:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -57,5 +32,78 @@
       ]
     }
   },
-  "residual_findings": {}
+  "residual_findings": {
+    "2026-05-15-v1.18-agent-host-core": [
+      {
+        "id": "R1",
+        "title": "AdmissionPolicy not called in HostManager::create_session",
+        "severity": "medium",
+        "source": "qc1",
+        "scope": "core/manager.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      },
+      {
+        "id": "R2",
+        "title": "HostManager::shutdown doesn't call provider shutdown",
+        "severity": "medium",
+        "source": "qc1",
+        "scope": "core/manager.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      },
+      {
+        "id": "R3",
+        "title": "Native CLI probe uses Unix-only which command",
+        "severity": "low",
+        "source": "qc1+qc2",
+        "scope": "providers/native_cli",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      },
+      {
+        "id": "R4",
+        "title": "API handlers missing input validation on session ID path params",
+        "severity": "medium",
+        "source": "qc2",
+        "scope": "daemon-runtime/api",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      },
+      {
+        "id": "R5",
+        "title": "Config path not validated against traversal",
+        "severity": "medium",
+        "source": "qc2",
+        "scope": "config.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      },
+      {
+        "id": "R6",
+        "title": "Timeout config defined but not enforced in all paths",
+        "severity": "medium",
+        "source": "qc3",
+        "scope": "providers",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      },
+      {
+        "id": "R7",
+        "title": "Shutdown drain not bounded by agent-host shutdown_ms",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "core/manager.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "v1.19-wave2"
+      }
+    ]
+  }
 }

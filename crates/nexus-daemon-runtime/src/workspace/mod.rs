@@ -53,6 +53,8 @@ pub struct WorkspaceState {
     capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
     /// Schedule supervisor for WS7 schedule management (set at daemon startup).
     schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
+    /// Agent host facade (set at daemon startup when agent host subsystem is wired).
+    agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
@@ -90,6 +92,7 @@ impl WorkspaceState {
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
+            agent_host: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
         }
     }
@@ -133,6 +136,7 @@ impl WorkspaceState {
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
+            agent_host: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
         }
     }
@@ -191,6 +195,7 @@ impl WorkspaceState {
             worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
+            agent_host: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
         })
     }
@@ -220,6 +225,18 @@ impl WorkspaceState {
     /// Set the schedule supervisor (WS7).
     pub fn set_schedule_supervisor(&mut self, supervisor: Arc<ScheduleSupervisor>) {
         self.schedule_supervisor = Arc::new(Some(supervisor));
+    }
+
+    /// Set the agent host facade.
+    /// Called from boot.rs after constructing the agent host subsystem.
+    pub fn set_agent_host(&mut self, host: Arc<dyn nexus_agent_host::HostFacade>) {
+        self.agent_host = Arc::new(Some(host));
+    }
+
+    /// Get the agent host facade, if set.
+    #[must_use]
+    pub fn agent_host(&self) -> Option<Arc<dyn nexus_agent_host::HostFacade>> {
+        self.agent_host.as_ref().clone()
     }
 
     /// Get the orchestration engine, if set.

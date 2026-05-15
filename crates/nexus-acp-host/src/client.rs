@@ -67,10 +67,11 @@ use agent_client_protocol::schema::SessionModeState;
 use agent_client_protocol::schema::SetSessionConfigOptionRequest;
 use agent_client_protocol::schema::SetSessionConfigOptionResponse;
 use agent_client_protocol::schema::{
-    ContentBlock, Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerSse,
-    McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink, SessionId,
-    StopReason, TextContent,
+    ContentBlock, ContentChunk, Implementation, InitializeRequest, McpServer, McpServerHttp,
+    McpServerSse, McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink,
+    SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
+use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{ActiveSession, Agent, ByteStreams, ConnectionTo, SessionMessage};
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -381,6 +382,29 @@ fn sdk_set_config_option_response_to_nexus(
     NexusSetConfigOptionResponse::new(config_options)
 }
 
+/// Streaming update from an ACP prompt operation.
+///
+/// Emitted by [`NexusAcpClient::stream_prompt`] as the agent processes a prompt.
+/// Each update carries the session ID for routing. The stream ends after
+/// exactly one [`AcpStreamUpdate::Stopped`] variant.
+#[derive(Debug, Clone)]
+pub enum AcpStreamUpdate {
+    /// Agent emitted a text delta (partial output).
+    TextDelta {
+        /// The session ID that produced this delta.
+        session_id: String,
+        /// Incremental text content.
+        text: String,
+    },
+    /// Prompt processing completed with a stop reason.
+    Stopped {
+        /// The session ID that completed.
+        session_id: String,
+        /// Why the agent stopped generating.
+        stop_reason: NexusStopReason,
+    },
+}
+
 /// The nexus42 ACP client abstraction.
 ///
 /// All ACP communication from the CLI goes through this trait. The methods
@@ -388,10 +412,6 @@ fn sdk_set_config_option_response_to_nexus(
 ///
 /// **DTO boundary**: All types in trait signatures are Nexus-owned DTOs from
 /// `nexus_contracts::local::acp`. SDK types are confined to `AcpSdkAdapter`.
-///
-/// **`subscribe()`**: Removed in SDK v0.11.0 migration. The old `StreamReceiver`
-/// type no longer exists. Will be replaced with a proper DTO-wrapped streaming
-/// API in a future task.
 #[allow(async_fn_in_trait)]
 pub trait NexusAcpClient: Send + Sync {
     /// Perform the ACP `initialize` handshake with the agent.
@@ -406,11 +426,24 @@ pub trait NexusAcpClient: Send + Sync {
         request: NexusNewSessionRequest,
     ) -> impl Future<Output = AcpResult<NexusSessionCreated>> + Send;
 
-    /// Send a prompt to the agent within an existing session.
+    /// Send a prompt to the agent within an existing session (one-shot).
+    ///
+    /// Blocks until the prompt completes and returns the final result.
+    /// For streaming results, use [`stream_prompt`](Self::stream_prompt).
     fn prompt(
         &self,
         request: NexusPromptRequest,
     ) -> impl Future<Output = AcpResult<NexusPromptCompleted>> + Send;
+
+    /// Send a prompt and stream updates as they arrive.
+    ///
+    /// Returns a channel receiver that emits [`AcpStreamUpdate`] items.
+    /// The receiver is guaranteed to receive exactly one `Stopped` variant
+    /// before closing.
+    fn stream_prompt(
+        &self,
+        request: NexusPromptRequest,
+    ) -> impl Future<Output = AcpResult<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>> + Send;
 
     /// Cancel an in-progress prompt operation.
     fn cancel(
@@ -707,6 +740,119 @@ impl AcpSdkAdapter {
             }
         }
     }
+
+    /// Streaming variant of [`run_prompt`]: sends the prompt and forwards
+    /// `AcpStreamUpdate` items through the provided sender.
+    ///
+    /// The caller supplies an `mpsc::Sender` so it controls the channel
+    /// capacity. This method sends `TextDelta` for each text chunk and
+    /// exactly one `Stopped` before returning.
+    #[allow(clippy::significant_drop_tightening)]
+    async fn run_stream_prompt(
+        connection: Arc<RwLock<Option<SdkConnection>>>,
+        session_id_str: String,
+        prompt_text: String,
+        tx: tokio::sync::mpsc::Sender<AcpStreamUpdate>,
+    ) -> AcpResult<()> {
+        let mut guard = connection.write().await;
+        let Some(conn) = guard.as_mut() else {
+            return Err(crate::AcpError::connection_failed(
+                "Connection not established",
+            ));
+        };
+
+        let Some(active_session) = conn.sessions.get_mut(&session_id_str) else {
+            return Err(crate::AcpError::protocol(format!(
+                "No active session found for session_id: {session_id_str}",
+            )));
+        };
+
+        tracing::info!(
+            session_id = %session_id_str,
+            "Sending streaming prompt to agent"
+        );
+
+        active_session
+            .send_prompt(&prompt_text)
+            .map_err(|e| crate::AcpError::sdk(&e))?;
+
+        loop {
+            let update = active_session
+                .read_update()
+                .await
+                .map_err(|e| crate::AcpError::sdk(&e))?;
+
+            match update {
+                SessionMessage::SessionMessage(dispatch) => {
+                    // Use MatchDispatch to extract text from session notifications
+                    let text_result = Self::extract_text_from_dispatch(dispatch).await;
+                    if let Some(text) = text_result {
+                        let _ = tx
+                            .send(AcpStreamUpdate::TextDelta {
+                                session_id: session_id_str.clone(),
+                                text,
+                            })
+                            .await;
+                    }
+                }
+                SessionMessage::StopReason(reason) => {
+                    let nexus_reason = nexus_stop_reason_from_sdk(reason);
+                    tracing::info!(
+                        session_id = %session_id_str,
+                        stop_reason = ?nexus_reason,
+                        "Streaming prompt completed"
+                    );
+                    let _ = tx
+                        .send(AcpStreamUpdate::Stopped {
+                            session_id: session_id_str.clone(),
+                            stop_reason: nexus_reason,
+                        })
+                        .await;
+                    return Ok(());
+                }
+                _ => {
+                    tracing::trace!(
+                        session_id = %session_id_str,
+                        "Received unknown session message variant in streaming loop"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Extract text content from an SDK `Dispatch` using `MatchDispatch`.
+    ///
+    /// Returns `Some(text)` if the dispatch contained a text chunk, `None` otherwise.
+    async fn extract_text_from_dispatch(dispatch: acp::Dispatch) -> Option<String> {
+        // Use a shared container to capture text from the async closure.
+        // `MatchDispatch::if_notification` returns Result<(), Error>, so we
+        // cannot directly return the extracted value.
+        let captured: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let captured_clone = captured.clone();
+
+        let result = MatchDispatch::new(dispatch)
+            .if_notification(async move |notif: SessionNotification| {
+                let text = match notif.update {
+                    SessionUpdate::AgentMessageChunk(ContentChunk {
+                        content: ContentBlock::Text(text),
+                        ..
+                    }) => Some(text.text),
+                    _ => None,
+                };
+                if let Some(t) = text {
+                    *captured_clone.lock().expect("mutex not poisoned") = Some(t);
+                }
+                Ok(())
+            })
+            .await
+            .otherwise_ignore();
+
+        // If MatchDispatch itself errored, we still return None (non-fatal).
+        let _ = result;
+        let text = captured.lock().expect("mutex not poisoned").take();
+        text
+    }
 }
 
 impl Drop for AcpSdkAdapter {
@@ -924,6 +1070,50 @@ impl NexusAcpClient for AcpSdkAdapter {
                 })
                 .await
                 .and_then(|r| r)
+        }
+    }
+
+    fn stream_prompt(
+        &self,
+        request: NexusPromptRequest,
+    ) -> impl Future<Output = AcpResult<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>> + Send {
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
+
+        async move {
+            let session_id_str = request.session_id.0.clone();
+
+            let prompt_text = request
+                .prompt
+                .iter()
+                .map(|block| match block {
+                    nexus_contracts::local::acp::NexusContentBlock::Text(t) => t.text.clone(),
+                    nexus_contracts::local::acp::NexusContentBlock::ResourceLink(r) => {
+                        format!("resource:{}", r.uri)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Channel with capacity 64 — enough to buffer several text chunks
+            // without blocking the SDK dispatch loop.
+            let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
+
+                    Box::pin(Self::run_stream_prompt(
+                        connection,
+                        session_id_str,
+                        prompt_text,
+                        tx,
+                    ))
+                })
+                .await
+                .and_then(|r| r)?;
+
+            Ok(rx)
         }
     }
 
