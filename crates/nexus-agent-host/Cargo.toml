@@ -1,0 +1,30 @@
+[package]
+name = "nexus-agent-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hybrid managed-only host core for local agent execution."
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-acp-host = { path = "../nexus-acp-host" }
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-home-layout = { path = "../nexus-home-layout" }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

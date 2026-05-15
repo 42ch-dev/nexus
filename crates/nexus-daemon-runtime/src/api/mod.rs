@@ -184,6 +184,25 @@ pub fn create_router(state: WorkspaceState) -> Router {
             axum::routing::post(handlers::orchestration::schedules::signal_schedule),
         );
 
+    // Agent Host routes (unguarded — local-only API)
+    let agent_host_routes = Router::new()
+        .route(
+            "/v1/local/agent-host/health",
+            get(handlers::agent_host::health),
+        )
+        .route(
+            "/v1/local/agent-host/providers",
+            get(handlers::agent_host::list_providers),
+        )
+        .route(
+            "/v1/local/agent-host/sessions",
+            post(handlers::agent_host::create_session).get(handlers::agent_host::list_sessions),
+        )
+        .route(
+            "/v1/local/agent-host/sessions/{id}",
+            axum::routing::delete(handlers::agent_host::shutdown_session),
+        );
+
     Router::new()
         .merge(runtime_routes)
         .merge(monitoring_routes)
@@ -198,6 +217,7 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .merge(memory_routes)
         .merge(orchestration_routes)
         .merge(schedule_routes)
+        .merge(agent_host_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

@@ -4,9 +4,9 @@ Dev-process knowledge for the Nexus project. These documents are **inputs to** o
 
 For the distinction between this directory and user-facing `docs/`, see [AGENTS.md](../../../AGENTS.md) (same file explains the content boundary between `docs/` and `.agents/knowledge/`).
 
-### Current focus (as of 2026-05-13)
+### Current focus (as of 2026-05-15)
 
-- **Active delivery track**: **V1.17** (gated — prompt + embedded skills quality iteration; compass draft at [v1.17-prompt-skills-compass-v1.md](v1.17-prompt-skills-compass-v1.md)). V1.16 is **Done**.
+- **Active delivery track**: **V1.18** — Agent Host Core: Hybrid managed-only host subsystem for local agent execution. Stable design reference is [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md). V1.17 remains gated unless explicitly advanced by PM.
 - **V1.16 closure summary**: Big-bang V2 repositioning delivered — ACP-first control plane, Creator-owned knowledge plane, command IA reorg, trace correlation, creator identity cache, and multi-scope KB baseline. SSOT was [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md). 8 implementation plans + 1 verification/closeout plan completed.
 - **`status.json`**: `plans[]` holds only non-Done rows (Profile B); root `residual_findings` carries **11** open items across 5 plan sources (V1.13, V1.16 daemon-acp-topology, creator-kb-multiscope, creator-identity-auth-compat, trace-correlation), all deferred to `v1.17` or `backlog`.
 - **Cross-repo spec**: authoritative **`cli-spec-v1.md`** (CLI / workspace semantics) and **ADR-023 / ADR-024** live in the **private platform repository**'s frozen `v1-spec/` tree (not shipped inside this clone); wire contracts remain **`schemas/`** here.
@@ -15,6 +15,7 @@ For the distinction between this directory and user-facing `docs/`, see [AGENTS.
 
 | Document | Source Plan | Description | Status |
 | --- | --- | --- | --- |
+| [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md) | V1.18 (2026-05-15) | V1.18 delivery compass: Agent Host Core — Hybrid managed-only host subsystem for local agent execution. ACP + native CLI providers, discovery, capability negotiation, daemon-runtime integration. | **Active** |
 | [nexus42-single-binary-daemon-runtime-architecture-v1.md](nexus42-single-binary-daemon-runtime-architecture-v1.md) | PM brainstorming thread (2026-05-14) | Combined architecture spec for Topic #1 + Sub-spec #2: single-binary daemon runtime (`nexus42` + `nexus-daemon-runtime`) and `nexus-agent-host` Hybrid/Managed-only design for ACP + common Agent CLIs. | Active |
 | [canonical-hash-v1.md](canonical-hash-v1.md) | `2026-04-09-v1.1-arch-alignment-closure` | **OSS companion** to v1-spec **ADR-006** (Bundle content digest): implementation pointers, golden vector copy, D2 graph-tag vs digest note, parity checklist. Normative SSOT remains ADR-006. | Active |
 | [local-fs-layout-creator-workspace-v1.md](local-fs-layout-creator-workspace-v1.md) | `2026-04-10-local-fs-layout-ssot-and-implementation` | **Non-normative pointer** — definitions only in v1-spec (`adr-014`, `cli-spec` §6.2–§13, `local-db-schema`, `data-model` §5.14, `auth-session-model` §6). | Active — clone handoff only |

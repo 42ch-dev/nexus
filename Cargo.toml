@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/nexus-acp-host",
+    "crates/nexus-agent-host",
     "crates/nexus-contracts",
     "crates/nexus-daemon-runtime",
     "crates/nexus-domain",
@@ -78,5 +79,6 @@ http-body-util = "0.1"
 toml = "0.8"
 statig = { version = "0.3", features = ["async"] }
 futures-util = "0.3"
+tokio-stream = "0.1"
 blake3 = "1"
 handlebars = "6"
