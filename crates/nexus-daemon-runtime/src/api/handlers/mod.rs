@@ -1,6 +1,7 @@
 //! API handler modules
 
 pub mod acp;
+pub mod agent_host;
 pub mod creators;
 pub mod explore;
 pub mod memory;
