@@ -69,8 +69,10 @@ impl ToolRiskClassifier for StaticToolRiskClassifier {
 
 /// Destructive patterns — irreversible / highly dangerous operations.
 static DESTRUCTIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:^|[_\-\s])(?:drop|truncate|purge|erase|wipe|rm|force|kill|destroy)(?:$|[_\-\s])")
-        .expect("destructive regex is valid")
+    Regex::new(
+        r"(?i)(?:^|[_\-\s])(?:drop|truncate|purge|erase|wipe|rm|force|kill|destroy)(?:$|[_\-\s])",
+    )
+    .expect("destructive regex is valid")
 });
 
 /// Write patterns — state-mutating operations.
@@ -111,7 +113,7 @@ impl AutoToolRiskClassifier {
     ///
     /// Override entries take precedence over regex classification.
     #[must_use]
-    pub fn with_overrides(overrides: StaticToolRiskClassifier) -> Self {
+    pub const fn with_overrides(overrides: StaticToolRiskClassifier) -> Self {
         Self { overrides }
     }
 
@@ -183,15 +185,39 @@ mod tests {
     fn auto_classifier_destructive_patterns() {
         let classifier = AutoToolRiskClassifier::new();
         // Exact keywords
-        assert_eq!(classifier.classify("drop_table"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("truncate_log"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("purge_cache"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("erase_disk"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("wipe_data"), Some(ToolRisk::Destructive));
+        assert_eq!(
+            classifier.classify("drop_table"),
+            Some(ToolRisk::Destructive)
+        );
+        assert_eq!(
+            classifier.classify("truncate_log"),
+            Some(ToolRisk::Destructive)
+        );
+        assert_eq!(
+            classifier.classify("purge_cache"),
+            Some(ToolRisk::Destructive)
+        );
+        assert_eq!(
+            classifier.classify("erase_disk"),
+            Some(ToolRisk::Destructive)
+        );
+        assert_eq!(
+            classifier.classify("wipe_data"),
+            Some(ToolRisk::Destructive)
+        );
         assert_eq!(classifier.classify("rm_file"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("force_delete"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("kill_process"), Some(ToolRisk::Destructive));
-        assert_eq!(classifier.classify("destroy_resource"), Some(ToolRisk::Destructive));
+        assert_eq!(
+            classifier.classify("force_delete"),
+            Some(ToolRisk::Destructive)
+        );
+        assert_eq!(
+            classifier.classify("kill_process"),
+            Some(ToolRisk::Destructive)
+        );
+        assert_eq!(
+            classifier.classify("destroy_resource"),
+            Some(ToolRisk::Destructive)
+        );
     }
 
     #[test]
@@ -201,7 +227,10 @@ mod tests {
         assert_eq!(classifier.classify("update_record"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("delete_item"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("send_email"), Some(ToolRisk::Write));
-        assert_eq!(classifier.classify("manage_settings"), Some(ToolRisk::Write));
+        assert_eq!(
+            classifier.classify("manage_settings"),
+            Some(ToolRisk::Write)
+        );
         assert_eq!(classifier.classify("write_file"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("insert_row"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("modify_config"), Some(ToolRisk::Write));
@@ -222,7 +251,10 @@ mod tests {
         assert_eq!(classifier.classify("find_record"), Some(ToolRisk::Read));
         assert_eq!(classifier.classify("query_index"), Some(ToolRisk::Read));
         assert_eq!(classifier.classify("check_health"), Some(ToolRisk::Read));
-        assert_eq!(classifier.classify("describe_instance"), Some(ToolRisk::Read));
+        assert_eq!(
+            classifier.classify("describe_instance"),
+            Some(ToolRisk::Read)
+        );
     }
 
     #[test]
@@ -241,7 +273,10 @@ mod tests {
         // "delete" matches both destructive and write keywords — destructive wins
         // because destructive is checked first
         // "force" is destructive; "update" is write
-        assert_eq!(classifier.classify("force_update"), Some(ToolRisk::Destructive));
+        assert_eq!(
+            classifier.classify("force_update"),
+            Some(ToolRisk::Destructive)
+        );
     }
 
     #[test]
@@ -255,7 +290,10 @@ mod tests {
         // Override beats pattern
         assert_eq!(classifier.classify("drop_table"), Some(ToolRisk::Read));
         // Custom tool not matching any pattern but registered
-        assert_eq!(classifier.classify("custom_tool"), Some(ToolRisk::Destructive));
+        assert_eq!(
+            classifier.classify("custom_tool"),
+            Some(ToolRisk::Destructive)
+        );
         // Non-override still falls through to pattern matching
         assert_eq!(classifier.classify("get_user"), Some(ToolRisk::Read));
     }
@@ -264,7 +302,10 @@ mod tests {
     fn auto_classifier_register_override_method() {
         let mut classifier = AutoToolRiskClassifier::new();
         // Before override: "purge" matches destructive
-        assert_eq!(classifier.classify("purge_all"), Some(ToolRisk::Destructive));
+        assert_eq!(
+            classifier.classify("purge_all"),
+            Some(ToolRisk::Destructive)
+        );
 
         // Override to Read
         classifier.register_override("purge_all", ToolRisk::Read);
@@ -276,7 +317,10 @@ mod tests {
         let classifier = AutoToolRiskClassifier::new();
         assert_eq!(classifier.classify("GET_User"), Some(ToolRisk::Read));
         assert_eq!(classifier.classify("CREATE_Item"), Some(ToolRisk::Write));
-        assert_eq!(classifier.classify("DROP_Table"), Some(ToolRisk::Destructive));
+        assert_eq!(
+            classifier.classify("DROP_Table"),
+            Some(ToolRisk::Destructive)
+        );
     }
 
     #[test]

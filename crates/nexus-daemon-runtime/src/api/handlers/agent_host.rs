@@ -14,6 +14,7 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
@@ -90,6 +91,17 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
         code: "AGENT_HOST_ERROR".into(),
         message: e.to_string(),
     }
+}
+
+/// Parse a session ID path parameter as UUID.
+///
+/// Returns 400 Bad Request for malformed IDs.
+fn parse_session_id(raw: &str) -> Result<Uuid, NexusApiError> {
+    raw.parse::<Uuid>()
+        .map_err(|_| NexusApiError::InvalidInput {
+            field: "session_id".into(),
+            reason: format!("session_id must be a valid UUID, got: {raw}"),
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -180,10 +192,15 @@ pub async fn shutdown_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
 ) -> Result<Json<ShutdownSessionResponse>, NexusApiError> {
+    // Validate session ID format at handler boundary.
+    let uuid = parse_session_id(&session_id)?;
+
     let host = get_host(&state)?;
 
     // Wave 1: shutdown the entire host — per-session shutdown
     // requires session-to-provider routing exposed through the facade.
+    // Once per-session lookup is available, return 404 for valid-but-missing UUIDs.
+    let _ = uuid; // Used for validation only until per-session routing exists.
     host.shutdown().await.map_err(|e| map_host_error(&e))?;
 
     Ok(Json(ShutdownSessionResponse {
@@ -251,5 +268,50 @@ mod tests {
         };
         let result = create_session(State(state), Json(req)).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn shutdown_session_rejects_invalid_uuid() {
+        let state = state_with_host().await;
+        let result = shutdown_session(State(state), Path("not-a-uuid".to_string())).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn shutdown_session_rejects_empty_session_id() {
+        let state = state_with_host().await;
+        let result = shutdown_session(State(state), Path(String::new())).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn shutdown_session_rejects_partial_uuid() {
+        let state = state_with_host().await;
+        let result = shutdown_session(State(state), Path("550e8400-e29b-41d4".to_string())).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn parse_session_id_accepts_valid_uuid() {
+        let uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let result = parse_session_id(uuid);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().to_string(), uuid);
+    }
+
+    #[tokio::test]
+    async fn parse_session_id_rejects_invalid() {
+        assert!(parse_session_id("garbage").is_err());
+        assert!(parse_session_id("").is_err());
+        assert!(parse_session_id("12345").is_err());
+        assert!(parse_session_id("../../etc/passwd").is_err());
     }
 }
