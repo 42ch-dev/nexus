@@ -1,7 +1,110 @@
 {
   "version": 1,
-  "updated_at": "2026-05-15T16:30:00Z",
-  "plans": [],
+  "updated_at": "2026-05-15T06:35:29Z",
+  "plans": [
+    {
+      "id": "2026-05-15-v1.19-agent-host-hardening",
+      "title": "V1.19 Agent Host Hardening",
+      "file": ".agents/plans/2026-05-15-v1.19-agent-host-hardening.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@fullstack-dev",
+        "@qa-engineer",
+        "@qc-specialist",
+        "@qc-specialist-2",
+        "@qc-specialist-3"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.19",
+        "agent-host",
+        "hardening",
+        "managed-only",
+        "acp",
+        "native-cli"
+      ],
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15T06:35:29Z",
+      "done_at": null,
+      "notes": "Registered by architect from V1.19 delivery compass; docs-only plan creation branch.",
+      "compass": ".agents/knowledge/v1.19-delivery-compass-v1.md",
+      "branch": "feature/v1.19-agent-host-hardening",
+      "batch_count": 2,
+      "metadata": {
+        "working_branch": "feature/v1.19-agent-host-hardening",
+        "spec_integration_branch": "feature/v1.19-agent-host-hardening",
+        "merge_target": "main",
+        "priority": "high",
+        "phase": "v1.19",
+        "task_category": "docs",
+        "primary_spec": ".agents/knowledge/v1.19-delivery-compass-v1.md",
+        "spec_refs": [
+          ".agents/knowledge/deferred-features-cross-version-tracker-v1.md",
+          ".agents/archived/plans/2026-05-15-v1.18-agent-host-core.json"
+        ],
+        "description": "Close V1.18 agent-host functional gaps and residuals through V1.19 hardening.",
+        "item_count": 11,
+        "batch_count": 2,
+        "deferred_items": [
+          "DF-18",
+          "DF-19",
+          "DF-20",
+          "DF-21",
+          "DF-22",
+          "DF-23",
+          "DF-24",
+          "DF-25",
+          "DF-26",
+          "DF-27",
+          "DF-28"
+        ],
+        "v1_18_residual_closure_targets": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7"
+        ],
+        "batches": [
+          {
+            "index": 1,
+            "milestones": [
+              "M1",
+              "M2"
+            ],
+            "items": [
+              "D-007",
+              "D-008",
+              "D-009",
+              "D-011",
+              "D-001",
+              "D-003"
+            ],
+            "status": "planned"
+          },
+          {
+            "index": 2,
+            "milestones": [
+              "M3",
+              "M4"
+            ],
+            "items": [
+              "D-004",
+              "D-005",
+              "D-010",
+              "D-002",
+              "D-006"
+            ],
+            "status": "planned"
+          }
+        ]
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
