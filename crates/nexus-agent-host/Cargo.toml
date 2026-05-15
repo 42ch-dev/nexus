@@ -15,6 +15,7 @@ nexus-acp-host = { path = "../nexus-acp-host" }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
