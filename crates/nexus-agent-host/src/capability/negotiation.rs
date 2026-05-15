@@ -184,7 +184,14 @@ mod tests {
         let runtime_caps = CapabilityDescriptor::acp_full();
         let merged = merge_provider_capabilities(&static_caps, &runtime_caps);
         assert!(merged.streaming);
-        assert!(merged.set_model);
+        assert!(
+            !merged.set_model,
+            "acp_full() honestly declares set_model = false"
+        );
+        assert!(
+            merged.set_mode,
+            "acp_full() declares set_mode = true (stable RPC)"
+        );
     }
 
     #[test]
@@ -205,16 +212,19 @@ mod tests {
         let merged = merge_provider_capabilities(&static_caps, &runtime_caps);
         assert!(!merged.streaming);
         assert!(!merged.set_model);
-        assert!(!merged.session_restore);
+        assert!(
+            merged.session_restore,
+            "native CLI supports session_restore via --resume"
+        );
     }
 
     #[test]
     fn apply_policy_deny_removes_capabilities() {
         let caps = CapabilityDescriptor::acp_full();
-        let denied = vec!["streaming".to_string(), "set_model".to_string()];
+        let denied = vec!["streaming".to_string(), "set_mode".to_string()];
         let (result, actually_denied) = apply_policy_deny(&caps, &denied);
         assert!(!result.streaming);
-        assert!(!result.set_model);
+        assert!(!result.set_mode);
         assert!(result.text_prompt);
         assert_eq!(actually_denied.len(), 2);
     }
@@ -235,8 +245,8 @@ mod tests {
         let request = CreateSessionRequest {
             provider_id: pid.clone(),
             cwd: std::path::PathBuf::from("/tmp"),
-            model: Some("gpt-4".to_string()),
-            mode: Some("ask".to_string()),
+            model: None, // Model switching is via SetModel operation, not creation hint
+            mode: Some("ask".to_string()), // set_mode = true in acp_full()
             mcp_servers: vec![],
             metadata: serde_json::Value::Null,
         };
