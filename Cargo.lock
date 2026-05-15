@@ -2206,6 +2206,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-contracts",
  "nexus-home-layout",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
