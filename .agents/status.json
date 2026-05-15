@@ -8,18 +8,25 @@
       "fix": "fix/{name}"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-05-13T18:30:00Z",
-      "total_open": 0,
+      "updated_at": "2026-05-15T21:30:00Z",
+      "total_open": 6,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 0,
+        "medium": 1,
+        "low": 5,
         "nit": 0
       },
-      "by_target": {},
-      "by_plan": {},
-      "in_flight": {},
+      "by_target": {
+        "core/manager.rs": 3,
+        "providers/acp.rs": 3
+      },
+      "by_plan": {
+        "2026-05-15-v1.19-agent-host-hardening": 6
+      },
+      "in_flight": {
+        "v1.20": 6
+      },
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
@@ -32,5 +39,68 @@
       ]
     }
   },
-  "residual_findings": {}
+  "residual_findings": {
+    "2026-05-15-v1.19-agent-host-hardening": [
+      {
+        "id": "QC2-F002",
+        "title": "CreateSessionRequest.cwd not validated for path traversal",
+        "severity": "medium",
+        "source": "qc2",
+        "scope": "core/manager.rs:219-225",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.20"
+      },
+      {
+        "id": "QC2-F003",
+        "title": "TOCTOU in config path validation (exists() pre-check)",
+        "severity": "low",
+        "source": "qc2",
+        "scope": "core/manager.rs:143-146",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.20"
+      },
+      {
+        "id": "QC2-F004",
+        "title": "shutdown() constructs ManagedSessionHandle with hardcoded acp_full() capabilities",
+        "severity": "low",
+        "source": "qc2",
+        "scope": "core/manager.rs:405-409",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.20"
+      },
+      {
+        "id": "QC2-F005",
+        "title": "Permission handler race in AcpProvider::new() lacks explicit synchronization",
+        "severity": "low",
+        "source": "qc2",
+        "scope": "providers/acp.rs:108-112",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.20"
+      },
+      {
+        "id": "QC3-F002",
+        "title": "Orphaned ACP session on execute timeout (no cancel sent)",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "providers/acp.rs:581-593",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.20"
+      },
+      {
+        "id": "QC3-F003",
+        "title": "Permission handler registration is racy (spawn without await)",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "providers/acp.rs:78-107",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "v1.20"
+      }
+    ]
+  }
 }
