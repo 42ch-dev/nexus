@@ -348,7 +348,14 @@ pub struct CapabilityDescriptor {
 }
 
 impl CapabilityDescriptor {
-    /// ACP full capability descriptor (all capabilities enabled).
+    /// ACP full capability descriptor.
+    ///
+    /// Claims `set_mode = true` because the ACP protocol provides a stable
+    /// `session/set_mode` RPC. Sets `set_model = false` because model
+    /// switching depends on dynamic discovery of agent-specific config
+    /// options (not guaranteed). If a model config option is discovered at
+    /// runtime, `SetModel` will succeed; otherwise it returns
+    /// `CapabilityUnsupported`.
     #[must_use]
     pub const fn acp_full() -> Self {
         Self {
@@ -363,20 +370,24 @@ impl CapabilityDescriptor {
             images: true,
             audio: true,
             embedded_context: true,
-            set_model: true,
+            set_model: false,
             set_mode: true,
             diagnostics: true,
         }
     }
 
-    /// Native CLI limited capability descriptor (Wave 1 baseline).
+    /// Native CLI capability descriptor with multi-turn session restore.
+    ///
+    /// Supports `session_restore = true` because the Claude CLI provides
+    /// `--session-id` / `--resume` flags for conversation continuity across
+    /// process invocations.
     #[must_use]
     pub const fn native_cli_limited() -> Self {
         Self {
             text_prompt: true,
             streaming: true,
             cancellation: true,
-            session_restore: false,
+            session_restore: true,
             structured_tool_calls: false,
             mcp_http: false,
             mcp_sse: false,
