@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
 
-use nexus_acp_host::{AcpSdkAdapter, AcpStreamUpdate, NexusAcpClient};
+use nexus_acp_host::{AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, NexusAcpClient};
 use nexus_contracts::local::acp::{
     NexusConfigOption, NexusConfigOptionCategory, NexusContentBlock, NexusInitializeRequest,
     NexusNewSessionRequest, NexusPromptRequest, NexusSessionId, NexusSetConfigOptionRequest,
@@ -26,11 +26,13 @@ use nexus_contracts::local::acp::{
 use crate::capability::model::{
     CapabilityDescriptor, FinishReason, HostContentBlock, HostEvent, HostEventStream,
     ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, OperationStartedEvent,
-    ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
+    PlanUpdateEvent, ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
+    ToolCallEvent, ToolCallUpdateEvent,
 };
-use crate::config::TimeoutConfig;
+use crate::capability::risk::{AutoToolRiskClassifier, ToolRiskClassifier};use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
+use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
 use crate::ProviderAdapter;
 
 /// Internal state tracked per active ACP session.
@@ -69,18 +71,51 @@ impl AcpProvider {
     /// Create a new ACP provider adapter.
     ///
     /// The `client` should already have an established connection
-    /// (via `AcpSdkAdapter::with_connection`).
+    /// (via `AcpSdkAdapter::with_connection`). The `permission_resolver`
+    /// is used to evaluate ACP permission requests against policy.
     #[must_use]
     pub fn new(
         provider_id: ProviderId,
         display_name: String,
         client: AcpSdkAdapter,
         timeouts: TimeoutConfig,
+        permission_resolver: HostPermissionResolver,
     ) -> Self {
+        // Wire up the permission handler on the SDK adapter.
+        // The handler evaluates each tool permission request by:
+        // 1. Classifying the tool risk using AutoToolRiskClassifier
+        // 2. Resolving the permission via HostPermissionResolver
+        let pid = provider_id.clone();
+        let classifier = AutoToolRiskClassifier::new();
+
+        let handler: Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync> =
+            Arc::new(move |tool_name: &str| {
+                let risk = classifier.classify_or_default(tool_name);
+                let outcome =
+                    permission_resolver.resolve(ProtocolKind::Acp, &pid.0, tool_name, Some(risk));
+                match outcome {
+                    PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
+                    // In non-interactive host context, Ask defaults to Deny.
+                    // Interactive prompting will be added in a future release.
+                    PermissionOutcome::Ask | PermissionOutcome::Deny => {
+                        AcpPermissionOutcome::Deny
+                    }
+                }
+            });
+
+        // Set the handler asynchronously — we can't await in a constructor,
+        // so we spawn a task. The handler will be ready before any prompt
+        // operations because the session must be created first.
+        let client_arc = Arc::new(client);
+        let client_for_handler = Arc::clone(&client_arc);
+        tokio::spawn(async move {
+            client_for_handler.set_permission_handler(handler).await;
+        });
+
         Self {
             provider_id,
             display_name,
-            client: Arc::new(client),
+            client: client_arc,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
         }
@@ -118,6 +153,38 @@ impl AcpProvider {
                 op_id: op_id.clone(),
                 text,
             }),
+            AcpStreamUpdate::ThoughtDelta { text, .. } => HostEvent::ThoughtDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text,
+            }),
+            AcpStreamUpdate::ToolCall {
+                tool_call_id,
+                tool_name,
+                ..
+            } => HostEvent::ToolCall(ToolCallEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                tool_call_id,
+                tool_name,
+            }),
+            AcpStreamUpdate::ToolCallUpdate {
+                tool_call_id,
+                content,
+                ..
+            } => HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                tool_call_id,
+                content,
+            }),
+            AcpStreamUpdate::PlanUpdate { content, .. } => {
+                HostEvent::PlanUpdate(PlanUpdateEvent {
+                    session_id: session_id.clone(),
+                    op_id: op_id.clone(),
+                    content,
+                })
+            }
             AcpStreamUpdate::Stopped {
                 stop_reason: reason,
                 ..
@@ -139,6 +206,24 @@ impl AcpProvider {
                     session_id: session_id.clone(),
                     op_id: op_id.clone(),
                     reason: finish,
+                })
+            }
+            AcpStreamUpdate::PermissionResult {
+                tool_name,
+                approved,
+                ..
+            } => {
+                // Emit a ToolCallUpdate for the permission decision.
+                // This provides observability into tool permission evaluation.
+                HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
+                    session_id: session_id.clone(),
+                    op_id: op_id.clone(),
+                    tool_call_id: format!("perm-{tool_name}"),
+                    content: if approved {
+                        format!("Permission approved: {tool_name}")
+                    } else {
+                        format!("Permission denied: {tool_name}")
+                    },
                 })
             }
         }
@@ -616,6 +701,144 @@ mod tests {
                 assert_eq!(finished.reason, FinishReason::EndTurn);
             }
             _ => panic!("expected OpFinished event"),
+        }
+    }
+
+    #[test]
+    fn stream_update_permission_approved_to_event() {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+
+        let update = AcpStreamUpdate::PermissionResult {
+            session_id: "test".to_string(),
+            tool_name: "file_read".to_string(),
+            approved: true,
+        };
+
+        let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+
+        match event {
+            HostEvent::ToolCallUpdate(tc) => {
+                assert_eq!(tc.session_id, session_id);
+                assert_eq!(tc.op_id, op_id);
+                assert_eq!(tc.tool_call_id, "perm-file_read");
+                assert!(tc.content.contains("approved"));
+                assert!(tc.content.contains("file_read"));
+            }
+            _ => panic!("expected ToolCallUpdate event"),
+        }
+    }
+
+    #[test]
+    fn stream_update_permission_denied_to_event() {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+
+        let update = AcpStreamUpdate::PermissionResult {
+            session_id: "test".to_string(),
+            tool_name: "file_delete".to_string(),
+            approved: false,
+        };
+
+        let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+
+        match event {
+            HostEvent::ToolCallUpdate(tc) => {
+                assert_eq!(tc.tool_call_id, "perm-file_delete");
+                assert!(tc.content.contains("denied"));
+                assert!(tc.content.contains("file_delete"));
+            }
+            _ => panic!("expected ToolCallUpdate event"),
+        }
+    }
+
+    #[test]
+    fn stream_update_thought_delta_to_event() {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+
+        let update = AcpStreamUpdate::ThoughtDelta {
+            session_id: "test".to_string(),
+            text: "Let me think about this...".to_string(),
+        };
+
+        let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+
+        match event {
+            HostEvent::ThoughtDelta(delta) => {
+                assert_eq!(delta.text, "Let me think about this...");
+                assert_eq!(delta.session_id, session_id);
+                assert_eq!(delta.op_id, op_id);
+            }
+            _ => panic!("expected ThoughtDelta event"),
+        }
+    }
+
+    #[test]
+    fn stream_update_tool_call_to_event() {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+
+        let update = AcpStreamUpdate::ToolCall {
+            session_id: "test".to_string(),
+            tool_call_id: "tc-123".to_string(),
+            tool_name: "file_read".to_string(),
+        };
+
+        let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+
+        match event {
+            HostEvent::ToolCall(tc) => {
+                assert_eq!(tc.tool_call_id, "tc-123");
+                assert_eq!(tc.tool_name, "file_read");
+                assert_eq!(tc.session_id, session_id);
+                assert_eq!(tc.op_id, op_id);
+            }
+            _ => panic!("expected ToolCall event"),
+        }
+    }
+
+    #[test]
+    fn stream_update_tool_call_update_to_event() {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+
+        let update = AcpStreamUpdate::ToolCallUpdate {
+            session_id: "test".to_string(),
+            tool_call_id: "tc-456".to_string(),
+            content: "File contents: ...".to_string(),
+        };
+
+        let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+
+        match event {
+            HostEvent::ToolCallUpdate(tc) => {
+                assert_eq!(tc.tool_call_id, "tc-456");
+                assert_eq!(tc.content, "File contents: ...");
+            }
+            _ => panic!("expected ToolCallUpdate event"),
+        }
+    }
+
+    #[test]
+    fn stream_update_plan_update_to_event() {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+
+        let update = AcpStreamUpdate::PlanUpdate {
+            session_id: "test".to_string(),
+            content: "Step 1; Step 2; Step 3".to_string(),
+        };
+
+        let event = AcpProvider::stream_update_to_event(update, &session_id, &op_id);
+
+        match event {
+            HostEvent::PlanUpdate(plan) => {
+                assert_eq!(plan.content, "Step 1; Step 2; Step 3");
+                assert_eq!(plan.session_id, session_id);
+                assert_eq!(plan.op_id, op_id);
+            }
+            _ => panic!("expected PlanUpdate event"),
         }
     }
 }

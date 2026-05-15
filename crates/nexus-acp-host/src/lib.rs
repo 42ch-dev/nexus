@@ -16,7 +16,7 @@ pub mod transport;
 
 // Re-export the primary types at module level for convenience.
 #[allow(unused_imports)]
-pub use client::{AcpSdkAdapter, AcpStreamUpdate, NexusAcpClient};
+pub use client::{AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, NexusAcpClient};
 #[allow(unused_imports)]
 pub use error::{AcpError, AcpResult};
 

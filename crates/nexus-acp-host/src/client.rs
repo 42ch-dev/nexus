@@ -68,9 +68,10 @@ use agent_client_protocol::schema::SetSessionConfigOptionRequest;
 use agent_client_protocol::schema::SetSessionConfigOptionResponse;
 use agent_client_protocol::schema::{
     ContentBlock, ContentChunk, Implementation, InitializeRequest, McpServer, McpServerHttp,
-    McpServerSse, McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink,
-    SessionId, SessionModeId, SessionNotification, SessionUpdate, SetSessionModeRequest,
-    StopReason, TextContent,
+    McpServerSse, McpServerStdio, NewSessionRequest, PermissionOption, PermissionOptionKind,
+    PromptRequest, ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome, SessionId, SessionModeId,
+    SessionNotification, SessionUpdate, SetSessionModeRequest, StopReason, TextContent,
 };
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{ActiveSession, Agent, ByteStreams, ConnectionTo, SessionMessage};
@@ -397,6 +398,38 @@ pub enum AcpStreamUpdate {
         /// Incremental text content.
         text: String,
     },
+    /// Agent emitted a thinking/reasoning delta.
+    ThoughtDelta {
+        /// The session ID that produced this delta.
+        session_id: String,
+        /// Incremental thinking content.
+        text: String,
+    },
+    /// Agent initiated a tool call.
+    ToolCall {
+        /// The session ID for the tool call.
+        session_id: String,
+        /// Tool call ID (provider-assigned).
+        tool_call_id: String,
+        /// Tool name.
+        tool_name: String,
+    },
+    /// Agent updated a tool call (result or status).
+    ToolCallUpdate {
+        /// The session ID for the tool call update.
+        session_id: String,
+        /// Tool call ID.
+        tool_call_id: String,
+        /// Update content (partial result or status).
+        content: String,
+    },
+    /// Agent emitted a plan update.
+    PlanUpdate {
+        /// The session ID for the plan update.
+        session_id: String,
+        /// Plan content (structured or free text).
+        content: String,
+    },
     /// Prompt processing completed with a stop reason.
     Stopped {
         /// The session ID that completed.
@@ -404,7 +437,35 @@ pub enum AcpStreamUpdate {
         /// Why the agent stopped generating.
         stop_reason: NexusStopReason,
     },
+    /// Permission request was evaluated and responded to.
+    ///
+    /// Emitted for observability: the permission was already handled by the
+    /// SDK adapter's `on_receive_request` handler. This event lets the host
+    /// layer know a permission decision was made.
+    PermissionResult {
+        /// The session ID for the permission request.
+        session_id: String,
+        /// Tool name from the permission request.
+        tool_name: String,
+        /// Whether the permission was approved.
+        approved: bool,
+    },
 }
+
+/// Permission evaluation outcome for ACP permission requests.
+///
+/// Returned by the host-level permission callback to indicate whether
+/// the tool operation should be approved or denied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpPermissionOutcome {
+    /// Approve the permission request.
+    Approve,
+    /// Deny the permission request.
+    Deny,
+}
+
+/// Type alias for the boxed permission evaluation callback.
+type PermissionHandlerFn = Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync>;
 
 /// The nexus42 ACP client abstraction.
 ///
@@ -517,6 +578,19 @@ pub struct AcpSdkAdapter {
     connection: Arc<RwLock<Option<SdkConnection>>>,
     /// Handle to the connection setup task (must be joined during cleanup).
     setup_task: Option<tokio::task::JoinHandle<()>>,
+    /// Permission evaluation callback, set by the host layer.
+    ///
+    /// When an ACP agent sends a `session/request_permission` request, the
+    /// SDK's `on_receive_request` handler calls this callback with the tool
+    /// name. The callback returns `Approve` or `Deny`, and the handler
+    /// selects the matching `PermissionOption` from the request.
+    /// If `None`, all permission requests are cancelled (safe default).
+    permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>>,
+    /// Receiver for permission result events produced by the SDK's
+    /// `on_receive_request` handler. These events are merged into the
+    /// `stream_prompt` output so the host layer receives `PermissionResult`
+    /// updates alongside `TextDelta` and `Stopped`.
+    permission_events_rx: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>>>,
 }
 
 impl AcpSdkAdapter {
@@ -554,6 +628,8 @@ impl AcpSdkAdapter {
             bridge: LocalSetBridge::new(),
             connection: Arc::new(RwLock::new(None)),
             setup_task: None,
+            permission_handler: Arc::new(RwLock::new(None)),
+            permission_events_rx: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -563,11 +639,9 @@ impl AcpSdkAdapter {
     /// stdin/stdout pipes from the agent subprocess. The connection uses
     /// the SDK's `Client.builder().connect_with()` pattern.
     ///
-    /// In SDK v0.11.0, the connection lifecycle is managed by `connect_with`
-    /// which provides a `ConnectionTo<Agent>` handle inside the callback.
     /// We store this handle for use by trait methods. The connection is kept
     /// alive by the callback returning a pending future.
-    #[allow(clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
     pub fn with_connection(
         agent_id: String,
         agent_path: PathBuf,
@@ -576,6 +650,9 @@ impl AcpSdkAdapter {
     ) -> Self {
         let bridge = LocalSetBridge::new();
         let connection = Arc::new(RwLock::new(None));
+        let permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>> =
+            Arc::new(RwLock::new(None));
+        let (permission_events_tx, permission_events_rx) = tokio::sync::mpsc::channel(16);
 
         tracing::info!(
             agent_id = %agent_id,
@@ -584,7 +661,8 @@ impl AcpSdkAdapter {
 
         let connection_clone = connection.clone();
         let agent_id_for_log = agent_id.clone();
-        let agent_id_for_error = agent_id.clone();
+        let permission_handler_clone = permission_handler.clone();
+        let permission_events_for_handler = permission_events_tx;
 
         let bridge_clone = bridge.clone();
         let setup_task = tokio::spawn(async move {
@@ -592,6 +670,8 @@ impl AcpSdkAdapter {
                 .execute(move || {
                     let connection_clone = connection_clone.clone();
                     let agent_id = agent_id_for_log;
+                    let perm_handler = permission_handler_clone;
+                    let perm_events = permission_events_for_handler;
 
                     // Convert tokio pipes to futures-compatible traits inside the LocalSet
                     let stdin_compat = stdin.compat_write(); // ChildStdin → AsyncWrite (outgoing)
@@ -599,22 +679,73 @@ impl AcpSdkAdapter {
 
                     Box::pin(async move {
                         // Create the transport using SDK ByteStreams.
-                        // ByteStreams::new(outgoing, incoming): we write to agent's stdin
-                        // and read from agent's stdout.
                         let transport = ByteStreams::new(stdin_compat, stdout_compat);
 
-                        // Build the Client with a no-op handler (auto-grant all permissions)
+                        // Build the Client with permission request handler
                         let builder = acp::Client.builder().name(&agent_id);
 
-                        // Connect with the transport.
-                        // The callback receives ConnectionTo<Agent> which we clone into
-                        // our shared state. We then await a pending future to keep the
-                        // connection alive indefinitely.
+                        // Register permission request handler via on_receive_request.
+                        // The agent sends `session/request_permission` when it needs
+                        // approval for a tool operation. The handler evaluates using
+                        // the host-level permission callback and responds.
+                        let builder = builder.on_receive_request(
+                            async move |request: RequestPermissionRequest, responder, _connection| {
+                                let tool_name = request
+                                    .tool_call
+                                    .fields
+                                    .title
+                                    .clone()
+                                    .unwrap_or_default();
+
+                                tracing::info!(
+                                    session_id = %request.session_id,
+                                    tool_name = %tool_name,
+                                    option_count = request.options.len(),
+                                    "ACP permission request received"
+                                );
+
+                                let outcome = {
+                                    let handler_guard = perm_handler.read().await;
+                                    handler_guard.as_ref().map_or_else(
+                                        || {
+                                            tracing::warn!(
+                                                tool_name = %tool_name,
+                                                "No permission handler registered, denying"
+                                            );
+                                            AcpPermissionOutcome::Deny
+                                        },
+                                        |handler| handler(&tool_name),
+                                    )
+                                };
+
+                                let response = Self::build_permission_response(
+                                    &request.options,
+                                    outcome,
+                                );
+
+                                tracing::info!(
+                                    session_id = %request.session_id,
+                                    tool_name = %tool_name,
+                                    approved = matches!(outcome, AcpPermissionOutcome::Approve),
+                                    "Permission response sent"
+                                );
+
+                                let _ = perm_events.try_send(AcpStreamUpdate::PermissionResult {
+                                    session_id: request.session_id.to_string(),
+                                    tool_name: tool_name.clone(),
+                                    approved: matches!(outcome, AcpPermissionOutcome::Approve),
+                                });
+
+                                let _ = responder.respond(response);
+                                Ok(())
+                            },
+                            acp::on_receive_request!(),
+                        );
+
                         let connection_for_callback = connection_clone.clone();
                         let agent_id_for_connect = agent_id.clone();
                         let connect_result = builder
                             .connect_with(transport, async move |cx| {
-                                // Store the connection handle for use by trait methods
                                 let mut guard = connection_for_callback.write().await;
                                 *guard = Some(SdkConnection {
                                     connection: cx,
@@ -628,9 +759,7 @@ impl AcpSdkAdapter {
                                     "ACP SDK connection established, ConnectionTo<Agent> stored"
                                 );
 
-                                // Keep the connection alive by awaiting a pending future
                                 std::future::pending::<()>().await;
-
                                 Ok(())
                             })
                             .await;
@@ -651,7 +780,6 @@ impl AcpSdkAdapter {
 
             if let Err(e) = result {
                 tracing::error!(
-                    agent_id = %agent_id_for_error,
                     error = %e,
                     "Failed to establish ACP connection"
                 );
@@ -664,6 +792,8 @@ impl AcpSdkAdapter {
             bridge,
             connection,
             setup_task: Some(setup_task),
+            permission_handler,
+            permission_events_rx: Arc::new(tokio::sync::Mutex::new(Some(permission_events_rx))),
         }
     }
 
@@ -677,6 +807,59 @@ impl AcpSdkAdapter {
     #[must_use]
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+
+    /// Set the permission evaluation callback.
+    ///
+    /// Must be called before any prompt operations. The callback receives
+    /// the tool name from the ACP `session/request_permission` request and
+    /// returns `Approve` or `Deny`. If never called, all permission requests
+    /// are cancelled (safe default).
+    pub async fn set_permission_handler(
+        &self,
+        handler: Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync>,
+    ) {
+        let mut guard = self.permission_handler.write().await;
+        *guard = Some(handler);
+    }
+
+    /// Build a permission response from the evaluation outcome and available options.
+    ///
+    /// When approving, prefers `AllowAlways` over `AllowOnce`.
+    /// When denying, prefers `RejectAlways` over `RejectOnce`.
+    /// If no matching option is found, the response is `Cancelled`.
+    fn build_permission_response(
+        options: &[PermissionOption],
+        outcome: AcpPermissionOutcome,
+    ) -> RequestPermissionResponse {
+        let target_kinds: &[PermissionOptionKind] = match outcome {
+            AcpPermissionOutcome::Approve => &[
+                PermissionOptionKind::AllowAlways,
+                PermissionOptionKind::AllowOnce,
+            ],
+            AcpPermissionOutcome::Deny => &[
+                PermissionOptionKind::RejectAlways,
+                PermissionOptionKind::RejectOnce,
+            ],
+        };
+
+        for target_kind in target_kinds {
+            if let Some(option) = options.iter().find(|opt| opt.kind == *target_kind) {
+                return RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                        option.option_id.clone(),
+                    )),
+                );
+            }
+        }
+
+        // No matching option — cancel
+        tracing::warn!(
+            available_kinds = ?options.iter().map(|o| &o.kind).collect::<Vec<_>>(),
+            ?outcome,
+            "No matching permission option, cancelling"
+        );
+        RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
     }
 
     /// Send a prompt to an existing session and stream until completion.
@@ -794,15 +977,11 @@ impl AcpSdkAdapter {
 
             match update {
                 SessionMessage::SessionMessage(dispatch) => {
-                    // Use MatchDispatch to extract text from session notifications
-                    let text_result = Self::extract_text_from_dispatch(dispatch).await;
-                    if let Some(text) = text_result {
-                        let _ = tx
-                            .send(AcpStreamUpdate::TextDelta {
-                                session_id: session_id_str.clone(),
-                                text,
-                            })
-                            .await;
+                    // Use MatchDispatch to extract all streaming updates from the notification
+                    let updates =
+                        Self::extract_updates_from_dispatch(dispatch, &session_id_str).await;
+                    for acp_update in updates {
+                        let _ = tx.send(acp_update).await;
                     }
                 }
                 SessionMessage::StopReason(reason) => {
@@ -830,38 +1009,85 @@ impl AcpSdkAdapter {
         }
     }
 
-    /// Extract text content from an SDK `Dispatch` using `MatchDispatch`.
+    /// Extract streaming events from an SDK `Dispatch` using `MatchDispatch`.
     ///
-    /// Returns `Some(text)` if the dispatch contained a text chunk, `None` otherwise.
-    async fn extract_text_from_dispatch(dispatch: acp::Dispatch) -> Option<String> {
-        // Use a shared container to capture text from the async closure.
-        // `MatchDispatch::if_notification` returns Result<(), Error>, so we
-        // cannot directly return the extracted value.
-        let captured: std::sync::Arc<std::sync::Mutex<Option<String>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(None));
+    /// Returns a list of `AcpStreamUpdate` items extracted from the notification.
+    /// Handles all `SessionUpdate` variants: text, thought, tool calls, plans.
+    async fn extract_updates_from_dispatch(
+        dispatch: acp::Dispatch,
+        session_id: &str,
+    ) -> Vec<AcpStreamUpdate> {
+        let captured: std::sync::Arc<std::sync::Mutex<Vec<AcpStreamUpdate>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured_clone = captured.clone();
+        let sid = session_id.to_string();
 
         let result = MatchDispatch::new(dispatch)
             .if_notification(async move |notif: SessionNotification| {
-                let text = match notif.update {
-                    SessionUpdate::AgentMessageChunk(ContentChunk {
-                        content: ContentBlock::Text(text),
-                        ..
-                    }) => Some(text.text),
-                    _ => None,
-                };
-                if let Some(t) = text {
-                    *captured_clone.lock().expect("mutex not poisoned") = Some(t);
+                let updates = Self::session_update_to_acp_updates(notif.update, &sid);
+                if !updates.is_empty() {
+                    let mut guard = captured_clone.lock().expect("mutex not poisoned");
+                    guard.extend(updates);
                 }
                 Ok(())
             })
             .await
             .otherwise_ignore();
 
-        // If MatchDispatch itself errored, we still return None (non-fatal).
+        // If MatchDispatch itself errored, we still return whatever we captured (non-fatal).
         let _ = result;
-        let text = captured.lock().expect("mutex not poisoned").take();
-        text
+        let mut guard = captured.lock().expect("mutex not poisoned");
+        std::mem::take(&mut *guard)
+    }
+
+    /// Convert an SDK `SessionUpdate` to zero or more `AcpStreamUpdate` items.
+    fn session_update_to_acp_updates(update: SessionUpdate, session_id: &str) -> Vec<AcpStreamUpdate> {
+        match update {
+            SessionUpdate::AgentMessageChunk(ContentChunk {
+                content: ContentBlock::Text(text),
+                ..
+            }) => vec![AcpStreamUpdate::TextDelta {
+                session_id: session_id.to_string(),
+                text: text.text,
+            }],
+            SessionUpdate::AgentThoughtChunk(ContentChunk {
+                content: ContentBlock::Text(text),
+                ..
+            }) => vec![AcpStreamUpdate::ThoughtDelta {
+                session_id: session_id.to_string(),
+                text: text.text,
+            }],
+            SessionUpdate::ToolCall(tool_call) => vec![AcpStreamUpdate::ToolCall {
+                session_id: session_id.to_string(),
+                tool_call_id: tool_call.tool_call_id.to_string(),
+                tool_name: tool_call.title,
+            }],
+            SessionUpdate::ToolCallUpdate(tool_call_update) => {
+                let content = tool_call_update
+                    .fields
+                    .title
+                    .unwrap_or_default();
+                vec![AcpStreamUpdate::ToolCallUpdate {
+                    session_id: session_id.to_string(),
+                    tool_call_id: tool_call_update.tool_call_id.to_string(),
+                    content,
+                }]
+            }
+            SessionUpdate::Plan(plan) => {
+                let content = plan
+                    .entries
+                    .iter()
+                    .map(|e| e.content.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                vec![AcpStreamUpdate::PlanUpdate {
+                    session_id: session_id.to_string(),
+                    content,
+                }]
+            }
+            // Skip other variants (available commands, mode updates, config updates, etc.)
+            _ => vec![],
+        }
     }
 }
 
@@ -1101,6 +1327,7 @@ impl NexusAcpClient for AcpSdkAdapter {
     ) -> impl Future<Output = AcpResult<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
+        let permission_events_rx = self.permission_events_rx.clone();
 
         async move {
             let session_id_str = request.session_id.0.clone();
@@ -1120,6 +1347,12 @@ impl NexusAcpClient for AcpSdkAdapter {
             // Channel with capacity 64 — enough to buffer several text chunks
             // without blocking the SDK dispatch loop.
             let (tx, rx) = tokio::sync::mpsc::channel(64);
+            let tx_for_perm = tx.clone();
+
+            // Create a done signal so the permission-forwarding task knows
+            // when the prompt streaming has finished and it should stop
+            // keeping the output channel alive.
+            let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
             bridge
                 .execute(move || {
@@ -1134,6 +1367,56 @@ impl NexusAcpClient for AcpSdkAdapter {
                 })
                 .await
                 .and_then(|r| r)?;
+
+            // Spawn a task that forwards permission events from the SDK's
+            // `on_receive_request` handler into the stream output channel.
+            // Permission events arrive on a separate channel because the
+            // SDK's `on_receive_request` handler runs on the dispatch loop,
+            // not inside the `read_update()` streaming loop.
+            //
+            // When the `done_rx` signal fires (prompt streaming finished),
+            // the task drops `tx_for_perm` so the output channel can close
+            // after the final `Stopped` event is consumed.
+            tokio::spawn(async move {
+                // Take the receiver out of the Mutex — only one task can own it.
+                let mut perm_rx_guard = permission_events_rx.lock().await;
+                let Some(perm_rx) = perm_rx_guard.take() else {
+                    tracing::debug!("No permission events receiver available");
+                    // Drop tx_for_perm immediately since there's nothing to forward
+                    drop(tx_for_perm);
+                    return;
+                };
+                drop(perm_rx_guard);
+
+                // Forward permission events until the channel closes or
+                // the prompt streaming finishes.
+                let mut rx = perm_rx;
+                loop {
+                    tokio::select! {
+                        Some(update) = rx.recv() => {
+                            if tx_for_perm.send(update).await.is_err() {
+                                // Channel closed — the consumer has dropped the receiver.
+                                break;
+                            }
+                        }
+                        _ = &mut done_rx => {
+                            // Prompt streaming finished — stop forwarding and
+                            // drop our sender so the output channel can close.
+                            break;
+                        }
+                        else => {
+                            // Both channels closed
+                            break;
+                        }
+                    }
+                }
+                // Explicitly drop tx_for_perm to release the output channel
+                drop(tx_for_perm);
+            });
+
+            // Signal the forwarding task that streaming is done.
+            // The bridge has already completed, so the prompt has finished.
+            let _ = done_tx.send(());
 
             Ok(rx)
         }
@@ -1948,5 +2231,195 @@ mod tests {
         );
         let result = adapter.set_config_option(request).await;
         assert!(result.is_err());
+    }
+
+    // ── Permission handling tests ──────────────────────────────────────────
+
+    #[test]
+    fn build_permission_response_approve_prefers_allow_always() {
+        let options = vec![
+            PermissionOption::new(
+                agent_client_protocol::schema::PermissionOptionId::new("opt-1"),
+                "Allow Once",
+                PermissionOptionKind::AllowOnce,
+            ),
+            PermissionOption::new(
+                agent_client_protocol::schema::PermissionOptionId::new("opt-2"),
+                "Allow Always",
+                PermissionOptionKind::AllowAlways,
+            ),
+        ];
+
+        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
+
+        // Should prefer AllowAlways over AllowOnce
+        match response.outcome {
+            RequestPermissionOutcome::Selected(sel) => {
+                assert_eq!(sel.option_id.to_string(), "opt-2");
+            }
+            _ => panic!("Expected Selected outcome"),
+        }
+    }
+
+    #[test]
+    fn build_permission_response_approve_fallback_to_allow_once() {
+        let options = vec![PermissionOption::new(
+            agent_client_protocol::schema::PermissionOptionId::new("opt-1"),
+            "Allow Once",
+            PermissionOptionKind::AllowOnce,
+        )];
+
+        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
+
+        match response.outcome {
+            RequestPermissionOutcome::Selected(sel) => {
+                assert_eq!(sel.option_id.to_string(), "opt-1");
+            }
+            _ => panic!("Expected Selected outcome"),
+        }
+    }
+
+    #[test]
+    fn build_permission_response_deny_prefers_reject_always() {
+        let options = vec![
+            PermissionOption::new(
+                agent_client_protocol::schema::PermissionOptionId::new("opt-1"),
+                "Reject Once",
+                PermissionOptionKind::RejectOnce,
+            ),
+            PermissionOption::new(
+                agent_client_protocol::schema::PermissionOptionId::new("opt-2"),
+                "Reject Always",
+                PermissionOptionKind::RejectAlways,
+            ),
+        ];
+
+        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
+
+        match response.outcome {
+            RequestPermissionOutcome::Selected(sel) => {
+                assert_eq!(sel.option_id.to_string(), "opt-2");
+            }
+            _ => panic!("Expected Selected outcome"),
+        }
+    }
+
+    #[test]
+    fn build_permission_response_no_matching_option_cancels() {
+        let options = vec![PermissionOption::new(
+            agent_client_protocol::schema::PermissionOptionId::new("opt-1"),
+            "Allow Once",
+            PermissionOptionKind::AllowOnce,
+        )];
+
+        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
+
+        // No reject option available, so should cancel
+        assert!(matches!(response.outcome, RequestPermissionOutcome::Cancelled));
+    }
+
+    #[test]
+    fn acp_permission_outcome_equality() {
+        assert_eq!(AcpPermissionOutcome::Approve, AcpPermissionOutcome::Approve);
+        assert_eq!(AcpPermissionOutcome::Deny, AcpPermissionOutcome::Deny);
+        assert_ne!(AcpPermissionOutcome::Approve, AcpPermissionOutcome::Deny);
+    }
+
+    #[test]
+    fn acp_stream_update_permission_result_fields() {
+        let update = AcpStreamUpdate::PermissionResult {
+            session_id: "sess-1".to_string(),
+            tool_name: "terminal.create".to_string(),
+            approved: true,
+        };
+
+        match update {
+            AcpStreamUpdate::PermissionResult {
+                session_id,
+                tool_name,
+                approved,
+            } => {
+                assert_eq!(session_id, "sess-1");
+                assert_eq!(tool_name, "terminal.create");
+                assert!(approved);
+            }
+            _ => panic!("Expected PermissionResult variant"),
+        }
+    }
+
+    #[test]
+    fn acp_stream_update_thought_delta_fields() {
+        let update = AcpStreamUpdate::ThoughtDelta {
+            session_id: "sess-1".to_string(),
+            text: "I should check the file first".to_string(),
+        };
+
+        match update {
+            AcpStreamUpdate::ThoughtDelta { session_id, text } => {
+                assert_eq!(session_id, "sess-1");
+                assert_eq!(text, "I should check the file first");
+            }
+            _ => panic!("Expected ThoughtDelta variant"),
+        }
+    }
+
+    #[test]
+    fn acp_stream_update_tool_call_fields() {
+        let update = AcpStreamUpdate::ToolCall {
+            session_id: "sess-1".to_string(),
+            tool_call_id: "tc-1".to_string(),
+            tool_name: "file_read".to_string(),
+        };
+
+        match update {
+            AcpStreamUpdate::ToolCall {
+                session_id,
+                tool_call_id,
+                tool_name,
+            } => {
+                assert_eq!(session_id, "sess-1");
+                assert_eq!(tool_call_id, "tc-1");
+                assert_eq!(tool_name, "file_read");
+            }
+            _ => panic!("Expected ToolCall variant"),
+        }
+    }
+
+    #[test]
+    fn acp_stream_update_tool_call_update_fields() {
+        let update = AcpStreamUpdate::ToolCallUpdate {
+            session_id: "sess-1".to_string(),
+            tool_call_id: "tc-1".to_string(),
+            content: "result data".to_string(),
+        };
+
+        match update {
+            AcpStreamUpdate::ToolCallUpdate {
+                session_id,
+                tool_call_id,
+                content,
+            } => {
+                assert_eq!(session_id, "sess-1");
+                assert_eq!(tool_call_id, "tc-1");
+                assert_eq!(content, "result data");
+            }
+            _ => panic!("Expected ToolCallUpdate variant"),
+        }
+    }
+
+    #[test]
+    fn acp_stream_update_plan_update_fields() {
+        let update = AcpStreamUpdate::PlanUpdate {
+            session_id: "sess-1".to_string(),
+            content: "Step 1; Step 2".to_string(),
+        };
+
+        match update {
+            AcpStreamUpdate::PlanUpdate { session_id, content } => {
+                assert_eq!(session_id, "sess-1");
+                assert_eq!(content, "Step 1; Step 2");
+            }
+            _ => panic!("Expected PlanUpdate variant"),
+        }
     }
 }
