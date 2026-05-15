@@ -29,7 +29,8 @@ use crate::capability::model::{
     PlanUpdateEvent, ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
     ToolCallEvent, ToolCallUpdateEvent,
 };
-use crate::capability::risk::{AutoToolRiskClassifier, ToolRiskClassifier};use crate::config::TimeoutConfig;
+use crate::capability::risk::{AutoToolRiskClassifier, ToolRiskClassifier};
+use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
@@ -97,9 +98,7 @@ impl AcpProvider {
                     PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
                     // In non-interactive host context, Ask defaults to Deny.
                     // Interactive prompting will be added in a future release.
-                    PermissionOutcome::Ask | PermissionOutcome::Deny => {
-                        AcpPermissionOutcome::Deny
-                    }
+                    PermissionOutcome::Ask | PermissionOutcome::Deny => AcpPermissionOutcome::Deny,
                 }
             });
 
@@ -178,13 +177,11 @@ impl AcpProvider {
                 tool_call_id,
                 content,
             }),
-            AcpStreamUpdate::PlanUpdate { content, .. } => {
-                HostEvent::PlanUpdate(PlanUpdateEvent {
-                    session_id: session_id.clone(),
-                    op_id: op_id.clone(),
-                    content,
-                })
-            }
+            AcpStreamUpdate::PlanUpdate { content, .. } => HostEvent::PlanUpdate(PlanUpdateEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                content,
+            }),
             AcpStreamUpdate::Stopped {
                 stop_reason: reason,
                 ..

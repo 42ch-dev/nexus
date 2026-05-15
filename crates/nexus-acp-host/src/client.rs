@@ -590,7 +590,8 @@ pub struct AcpSdkAdapter {
     /// `on_receive_request` handler. These events are merged into the
     /// `stream_prompt` output so the host layer receives `PermissionResult`
     /// updates alongside `TextDelta` and `Stopped`.
-    permission_events_rx: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>>>,
+    permission_events_rx:
+        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>>>,
 }
 
 impl AcpSdkAdapter {
@@ -689,13 +690,11 @@ impl AcpSdkAdapter {
                         // approval for a tool operation. The handler evaluates using
                         // the host-level permission callback and responds.
                         let builder = builder.on_receive_request(
-                            async move |request: RequestPermissionRequest, responder, _connection| {
-                                let tool_name = request
-                                    .tool_call
-                                    .fields
-                                    .title
-                                    .clone()
-                                    .unwrap_or_default();
+                            async move |request: RequestPermissionRequest,
+                                        responder,
+                                        _connection| {
+                                let tool_name =
+                                    request.tool_call.fields.title.clone().unwrap_or_default();
 
                                 tracing::info!(
                                     session_id = %request.session_id,
@@ -718,10 +717,8 @@ impl AcpSdkAdapter {
                                     )
                                 };
 
-                                let response = Self::build_permission_response(
-                                    &request.options,
-                                    outcome,
-                                );
+                                let response =
+                                    Self::build_permission_response(&request.options, outcome);
 
                                 tracing::info!(
                                     session_id = %request.session_id,
@@ -845,11 +842,9 @@ impl AcpSdkAdapter {
 
         for target_kind in target_kinds {
             if let Some(option) = options.iter().find(|opt| opt.kind == *target_kind) {
-                return RequestPermissionResponse::new(
-                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                        option.option_id.clone(),
-                    )),
-                );
+                return RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                    SelectedPermissionOutcome::new(option.option_id.clone()),
+                ));
             }
         }
 
@@ -1041,7 +1036,10 @@ impl AcpSdkAdapter {
     }
 
     /// Convert an SDK `SessionUpdate` to zero or more `AcpStreamUpdate` items.
-    fn session_update_to_acp_updates(update: SessionUpdate, session_id: &str) -> Vec<AcpStreamUpdate> {
+    fn session_update_to_acp_updates(
+        update: SessionUpdate,
+        session_id: &str,
+    ) -> Vec<AcpStreamUpdate> {
         match update {
             SessionUpdate::AgentMessageChunk(ContentChunk {
                 content: ContentBlock::Text(text),
@@ -1063,10 +1061,7 @@ impl AcpSdkAdapter {
                 tool_name: tool_call.title,
             }],
             SessionUpdate::ToolCallUpdate(tool_call_update) => {
-                let content = tool_call_update
-                    .fields
-                    .title
-                    .unwrap_or_default();
+                let content = tool_call_update.fields.title.unwrap_or_default();
                 vec![AcpStreamUpdate::ToolCallUpdate {
                     session_id: session_id.to_string(),
                     tool_call_id: tool_call_update.tool_call_id.to_string(),
@@ -2250,7 +2245,8 @@ mod tests {
             ),
         ];
 
-        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
+        let response =
+            AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
 
         // Should prefer AllowAlways over AllowOnce
         match response.outcome {
@@ -2269,7 +2265,8 @@ mod tests {
             PermissionOptionKind::AllowOnce,
         )];
 
-        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
+        let response =
+            AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Approve);
 
         match response.outcome {
             RequestPermissionOutcome::Selected(sel) => {
@@ -2294,7 +2291,8 @@ mod tests {
             ),
         ];
 
-        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
+        let response =
+            AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
 
         match response.outcome {
             RequestPermissionOutcome::Selected(sel) => {
@@ -2312,10 +2310,14 @@ mod tests {
             PermissionOptionKind::AllowOnce,
         )];
 
-        let response = AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
+        let response =
+            AcpSdkAdapter::build_permission_response(&options, AcpPermissionOutcome::Deny);
 
         // No reject option available, so should cancel
-        assert!(matches!(response.outcome, RequestPermissionOutcome::Cancelled));
+        assert!(matches!(
+            response.outcome,
+            RequestPermissionOutcome::Cancelled
+        ));
     }
 
     #[test]
@@ -2415,7 +2417,10 @@ mod tests {
         };
 
         match update {
-            AcpStreamUpdate::PlanUpdate { session_id, content } => {
+            AcpStreamUpdate::PlanUpdate {
+                session_id,
+                content,
+            } => {
                 assert_eq!(session_id, "sess-1");
                 assert_eq!(content, "Step 1; Step 2");
             }
