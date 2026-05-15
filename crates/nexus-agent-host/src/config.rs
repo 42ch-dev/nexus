@@ -254,6 +254,101 @@ impl ProviderConfig {
     }
 }
 
+// ── Path validation helpers ──────────────────────────────────────────
+
+/// Validate that a user-supplied workspace path is absolute and does not
+/// contain directory traversal components (`..`).
+///
+/// Rejects paths with `..` components outright — a well-formed workspace
+/// root should never need parent-directory references.  After this check
+/// the path is canonicalised so callers receive a resolved, absolute form.
+///
+/// # Errors
+///
+/// Returns `HostError::PolicyDenied` when the path is relative, contains
+/// `..` components, or does not exist on disk.
+pub fn validate_workspace_path(workspace_root: &Path) -> HostResult<PathBuf> {
+    if !workspace_root.is_absolute() {
+        return Err(HostError::policy_denied(format!(
+            "workspace root must be an absolute path: {}",
+            workspace_root.display()
+        )));
+    }
+
+    // Reject any `..` components — workspace roots should not need traversal.
+    if workspace_root
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(HostError::policy_denied(format!(
+            "workspace root must not contain '..' traversal components: {}",
+            workspace_root.display()
+        )));
+    }
+
+    // canonicalize resolves symlinks and validates the path exists
+    let canonical = std::path::Path::canonicalize(workspace_root).map_err(|e| {
+        HostError::policy_denied(format!(
+            "workspace root cannot be resolved: {} ({})",
+            workspace_root.display(),
+            e
+        ))
+    })?;
+
+    Ok(canonical)
+}
+
+/// Validate that a config path is under the expected config directory.
+///
+/// # Errors
+///
+/// Returns `HostError::PolicyDenied` when the path escapes the config
+/// directory or cannot be resolved.
+pub fn validate_config_path(config_path: &Path, expected_config_dir: &Path) -> HostResult<PathBuf> {
+    let canonical_config = std::path::Path::canonicalize(config_path).map_err(|e| {
+        HostError::policy_denied(format!(
+            "config path cannot be resolved: {} ({})",
+            config_path.display(),
+            e
+        ))
+    })?;
+
+    let canonical_dir = std::path::Path::canonicalize(expected_config_dir).map_err(|e| {
+        HostError::policy_denied(format!(
+            "config directory cannot be resolved: {} ({})",
+            expected_config_dir.display(),
+            e
+        ))
+    })?;
+
+    if !canonical_config.starts_with(&canonical_dir) {
+        return Err(HostError::policy_denied(format!(
+            "config path '{}' escapes config directory '{}'",
+            config_path.display(),
+            expected_config_dir.display()
+        )));
+    }
+
+    Ok(canonical_config)
+}
+
+/// Normalize a path by collapsing `.` and `..` without touching the
+/// filesystem. Used only for comparison in tests.
+#[cfg(test)]
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            c => normalized.push(c),
+        }
+    }
+    normalized
+}
+
 // ── Path helpers ─────────────────────────────────────────────────────
 
 /// Get the agent-host config directory under the Nexus home.
@@ -516,5 +611,89 @@ enabled = true
             agent_host_config_path(&home),
             PathBuf::from("/fake/home/.nexus42/agent-host/config.toml")
         );
+    }
+
+    // ── Path validation tests (D-011) ──────────────────────────────────
+
+    #[test]
+    fn validate_workspace_path_accepts_absolute() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let result = validate_workspace_path(temp_dir.path());
+        assert!(result.is_ok(), "absolute existing dir should be accepted");
+    }
+
+    #[test]
+    fn validate_workspace_path_rejects_relative() {
+        let result = validate_workspace_path(Path::new("relative/path"));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.category(), "policy_denied");
+        assert!(
+            err.to_string().contains("absolute path"),
+            "should mention absolute path requirement"
+        );
+    }
+
+    #[test]
+    fn validate_workspace_path_rejects_traversal() {
+        let result = validate_workspace_path(Path::new("/tmp/../../etc/passwd"));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.category(), "policy_denied");
+        assert!(
+            err.to_string().contains("traversal"),
+            "should mention traversal: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_workspace_path_rejects_nonexistent() {
+        let result = validate_workspace_path(Path::new("/nonexistent/path/that/does/not/exist"));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().category(), "policy_denied");
+    }
+
+    #[test]
+    fn validate_config_path_accepts_valid() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_dir = temp_dir.path().join("config");
+        std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
+        let config_file = config_dir.join("config.toml");
+        std::fs::write(&config_file, "# config").expect("Failed to write config");
+
+        let result = validate_config_path(&config_file, &config_dir);
+        assert!(
+            result.is_ok(),
+            "config under expected dir should be accepted"
+        );
+    }
+
+    #[test]
+    fn validate_config_path_rejects_escape() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_dir = temp_dir.path().join("config");
+        std::fs::create_dir_all(&config_dir).expect("Failed to create config dir");
+
+        // Write a file outside the config dir to try to reference
+        let outside_file = temp_dir.path().join("secret.txt");
+        std::fs::write(&outside_file, "secret").expect("Failed to write file");
+
+        let result = validate_config_path(&outside_file, &config_dir);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.category(), "policy_denied");
+        assert!(
+            err.to_string().contains("escapes config directory"),
+            "should report escape"
+        );
+    }
+
+    #[test]
+    fn normalize_path_cleans_dots() {
+        assert_eq!(
+            normalize_path(Path::new("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
+        assert_eq!(normalize_path(Path::new("/a/./b")), PathBuf::from("/a/b"));
     }
 }

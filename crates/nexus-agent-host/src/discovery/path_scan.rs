@@ -93,11 +93,28 @@ pub fn scan_path(
 }
 
 /// Search PATH directories for a command.
+///
+/// On Windows, also tries appending each extension from the `PATHEXT`
+/// environment variable (e.g. `.exe`, `.cmd`) if the bare name is not found.
 fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
     for dir in path_dirs {
         let candidate = dir.join(command);
         if candidate.is_file() {
             return Some(candidate);
+        }
+
+        // Windows: try appending PATHEXT extensions when the bare name misses.
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(ext_var) = std::env::var_os("PATHEXT") {
+                for ext in std::env::split_paths(&ext_var) {
+                    let ext_str = ext.to_string_lossy();
+                    let with_ext = dir.join(format!("{command}{ext_str}"));
+                    if with_ext.is_file() {
+                        return Some(with_ext);
+                    }
+                }
+            }
         }
     }
     None
