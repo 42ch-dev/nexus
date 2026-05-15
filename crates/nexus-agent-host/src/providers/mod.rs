@@ -5,6 +5,7 @@
 //! create_session → prompt/stream → cancel → shutdown) and translates SDK
 //! events into normalized [`HostEvent`] items.
 //!
-//! Native CLI providers are planned for a future wave.
+//! The native CLI provider manages a subprocess for tools like Claude Code CLI.
 
 pub mod acp;
+pub mod native_cli;
