@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/nexus-acp-host",
+    "crates/nexus-agent-host",
     "crates/nexus-contracts",
     "crates/nexus-daemon-runtime",
     "crates/nexus-domain",

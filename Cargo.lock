@@ -2198,6 +2198,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-agent-host"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "nexus-acp-host",
+ "nexus-contracts",
+ "nexus-home-layout",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
