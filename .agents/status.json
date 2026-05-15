@@ -9,7 +9,7 @@
       "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@architect", "@fullstack-dev"],
-      "progress": 28,
+      "progress": 61,
       "tags": ["v1.18", "agent-host", "hybrid", "managed-only", "acp", "native-cli"],
       "created_at": "2026-05-15",
       "updated_at": "2026-05-15",
