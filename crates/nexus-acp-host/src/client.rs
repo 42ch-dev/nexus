@@ -69,7 +69,8 @@ use agent_client_protocol::schema::SetSessionConfigOptionResponse;
 use agent_client_protocol::schema::{
     ContentBlock, ContentChunk, Implementation, InitializeRequest, McpServer, McpServerHttp,
     McpServerSse, McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink,
-    SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
+    SessionId, SessionModeId, SessionNotification, SessionUpdate, SetSessionModeRequest,
+    StopReason, TextContent,
 };
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{ActiveSession, Agent, ByteStreams, ConnectionTo, SessionMessage};
@@ -467,6 +468,15 @@ pub trait NexusAcpClient: Send + Sync {
         &self,
         request: NexusSetConfigOptionRequest,
     ) -> impl Future<Output = AcpResult<NexusSetConfigOptionResponse>> + Send;
+
+    /// Set the session mode via the stable `session/set_mode` RPC.
+    ///
+    /// Sends a `SetSessionModeRequest` with the given session and mode IDs.
+    fn set_mode(
+        &self,
+        session_id: NexusSessionId,
+        mode_id: String,
+    ) -> impl Future<Output = AcpResult<()>> + Send;
 }
 
 /// Internal state for the SDK adapter.
@@ -1012,6 +1022,16 @@ impl NexusAcpClient for AcpSdkAdapter {
                             .as_ref()
                             .map(nexus_session_mode_state_from_sdk);
 
+                        // Convert config_options from the SDK response.
+                        // The SDK `NewSessionResponse` may include config_options
+                        // exposing agent-specific configuration IDs for model/mode
+                        // switching via `set_config_option`.
+                        let nexus_config_options = session_result
+                            .response()
+                            .config_options
+                            .as_ref()
+                            .map(|opts| opts.iter().map(sdk_config_option_to_nexus).collect());
+
                         // Store the active session (write lock, brief scope)
                         {
                             let mut guard = connection.write().await;
@@ -1023,12 +1043,14 @@ impl NexusAcpClient for AcpSdkAdapter {
                         tracing::info!(
                             agent_id = %agent_id,
                             session_id = %session_id_str,
+                            has_config_options = nexus_config_options.is_some(),
                             "Session created successfully"
                         );
 
                         Ok(NexusSessionCreated {
                             session_id: NexusSessionId::new(session_id_str),
                             modes: nexus_modes,
+                            config_options: nexus_config_options,
                         })
                     })
                 })
@@ -1291,6 +1313,72 @@ impl NexusAcpClient for AcpSdkAdapter {
                         );
 
                         Ok(nexus_response)
+                    })
+                })
+                .await
+                .and_then(|r| r)
+        }
+    }
+
+    fn set_mode(
+        &self,
+        session_id: NexusSessionId,
+        mode_id: String,
+    ) -> impl Future<Output = AcpResult<()>> + Send {
+        let connection = self.connection.clone();
+        let bridge = self.bridge.clone();
+        let agent_id = self.agent_id.clone();
+
+        async move {
+            bridge
+                .execute(move || {
+                    let connection = connection.clone();
+
+                    Box::pin(async move {
+                        let session_id_str = session_id.0.clone();
+
+                        tracing::info!(
+                            agent_id = %agent_id,
+                            session_id = %session_id_str,
+                            mode_id = %mode_id,
+                            "Sending set_mode request to agent"
+                        );
+
+                        let sdk_req = SetSessionModeRequest::new(
+                            SessionId::new(session_id_str.clone()),
+                            SessionModeId::new(mode_id),
+                        );
+
+                        let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let connection_for_spawn = connection_handle.clone();
+
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        connection_handle
+                            .spawn(async move {
+                                let result = connection_for_spawn
+                                    .send_request_to(Agent, sdk_req)
+                                    .block_task()
+                                    .await;
+                                let _ = tx.send(result);
+                                Ok(())
+                            })
+                            .map_err(|e| crate::AcpError::sdk(&e))?;
+
+                        rx.await
+                            .map_err(|_| {
+                                crate::AcpError::connection_failed(
+                                    "Set mode response channel closed",
+                                )
+                            })?
+                            .map_err(|e| crate::AcpError::sdk(&e))?;
+
+                        tracing::info!(
+                            agent_id = %agent_id,
+                            session_id = %session_id_str,
+                            "Set mode completed"
+                        );
+
+                        Ok(())
                     })
                 })
                 .await

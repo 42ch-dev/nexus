@@ -1,11 +1,14 @@
 //! Claude Code CLI native provider adapter.
 //!
 //! Manages a `claude` subprocess using `tokio::process::Command`.
-//! Wave 1 limitations:
-//! - Non-interactive single-turn prompt only
-//! - Streaming via stdout line/chunk normalization
-//! - Cancellation via process termination
-//! - No structured tool calls, session restore, or MCP transport
+//! Multi-turn session continuity via `--session-id` and `--resume` flags.
+//!
+//! # Session Model
+//!
+//! Each `launch()` generates a host-side UUID (the Claude CLI session ID).
+//! The first `execute()` invocation passes `--session-id <uuid>` to the CLI.
+//! Subsequent invocations pass `--resume <uuid>`, providing conversation
+//! continuity across separate process spawns.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,21 +27,24 @@ use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::ProviderAdapter;
 
-/// Internal state for a managed native CLI process.
+/// Internal state for a managed native CLI session.
 #[derive(Debug)]
 struct NativeSession {
-    /// The child process handle.
-    child: tokio::process::Child,
-    /// Stdin writer for sending prompts.
-    /// Wave 1 uses per-operation spawns; retained for future multi-turn support.
-    #[allow(dead_code)]
-    stdin: tokio::process::ChildStdin,
+    /// The Claude CLI session ID (UUID) used for `--session-id` / `--resume`.
+    /// Set at `launch()` time; used by `execute()` to pass the correct flags.
+    claude_session_id: String,
+    /// Whether the first `execute()` has been performed for this session.
+    /// `false` → pass `--session-id`, `true` → pass `--resume`.
+    first_exec_done: bool,
 }
 
 /// Claude Code CLI native provider.
 ///
 /// Spawns `claude` (or a configured command) as a subprocess and
 /// normalizes its stdout/stderr into `HostEvent` items.
+///
+/// Multi-turn session continuity is achieved by passing `--session-id <uuid>`
+/// on the first invocation and `--resume <uuid>` on subsequent ones.
 pub struct ClaudeCliProvider {
     /// Provider ID (typically `claude-native` to avoid collision with ACP registry).
     provider_id: ProviderId,
@@ -50,7 +56,7 @@ pub struct ClaudeCliProvider {
     args: Vec<String>,
     /// Environment variables to inject.
     env: HashMap<String, String>,
-    /// Active sessions: host session ID → managed process.
+    /// Active sessions: host session ID → native session state.
     sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
 }
 
@@ -207,14 +213,24 @@ impl ProviderAdapter for ClaudeCliProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // For native CLI, "launch" means we prepare the session but don't spawn
-        // the process yet — that happens in execute(). The session handle is
-        // created here with a placeholder.
         let host_session_id = HostSessionId::new();
 
-        // We don't start the process at launch; we just register the session.
-        // The actual subprocess is spawned per-operation in execute().
-        // This matches the "non-interactive single-turn" model.
+        // Generate a UUID for Claude CLI session continuity.
+        // This is passed as `--session-id <uuid>` on first execute and
+        // `--resume <uuid>` on subsequent ones.
+        let claude_session_id = uuid::Uuid::new_v4().to_string();
+
+        // Store session state (no process spawned yet — that happens in execute()).
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.insert(
+                host_session_id.clone(),
+                NativeSession {
+                    claude_session_id,
+                    first_exec_done: false,
+                },
+            );
+        }
 
         tracing::info!(
             session_id = %host_session_id,
@@ -232,14 +248,14 @@ impl ProviderAdapter for ClaudeCliProvider {
 
     async fn execute(
         &self,
-        _session: &ManagedSessionHandle,
+        session: &ManagedSessionHandle,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
         let crate::capability::model::HostOperation::Prompt { op_id, content } = op else {
             return Err(HostError::capability_unsupported(
                 self.provider_id.clone(),
                 "non-prompt operation",
-                "Native CLI provider only supports Prompt operations in Wave 1",
+                "Native CLI provider only supports Prompt operations",
             ));
         };
 
@@ -260,9 +276,41 @@ impl ProviderAdapter for ClaudeCliProvider {
             ));
         }
 
+        // Look up session state to determine session-continuity flags
+        let (claude_session_id, is_resume) = {
+            let mut sessions = self.sessions.write().await;
+            let native_session = sessions
+                .get_mut(&session.session_id)
+                .ok_or_else(|| {
+                    HostError::internal(format!(
+                        "session {} not found in native CLI provider",
+                        session.session_id
+                    ))
+                })?;
+
+            let id = native_session.claude_session_id.clone();
+            let resume = native_session.first_exec_done;
+            native_session.first_exec_done = true;
+            drop(sessions);
+            (id, resume)
+        };
+
+        // Build command arguments: base args + session-continuity flags
+        let mut full_args = self.args.clone();
+
+        if is_resume {
+            // Subsequent calls: --resume <session-id>
+            full_args.push("--resume".to_string());
+            full_args.push(claude_session_id.clone());
+        } else {
+            // First call: --session-id <uuid>
+            full_args.push("--session-id".to_string());
+            full_args.push(claude_session_id);
+        }
+
         // Spawn the subprocess: command [args...] via stdin
         let mut cmd = tokio::process::Command::new(&self.command);
-        cmd.args(&self.args)
+        cmd.args(&full_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -286,13 +334,11 @@ impl ProviderAdapter for ClaudeCliProvider {
             drop(stdin);
         }
 
-        let session_id = HostSessionId::new(); // Native: per-op session
-
         // Take stdout and stderr before moving child
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        let stream = Self::build_event_stream(stdout, op_id, session_id);
+        let stream = Self::build_event_stream(stdout, op_id, session.session_id.clone());
 
         // Spawn a background task to drain stderr and log warnings
         if let Some(stderr) = stderr {
@@ -338,10 +384,7 @@ impl ProviderAdapter for ClaudeCliProvider {
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
         {
             let mut sessions = self.sessions.write().await;
-            if let Some(mut native_session) = sessions.remove(&session.session_id) {
-                // Kill the child process if still running
-                let _ = native_session.child.kill().await;
-            }
+            sessions.remove(&session.session_id);
         }
         tracing::info!(
             session_id = %session.session_id,
@@ -371,7 +414,10 @@ mod tests {
         assert!(desc.capabilities.streaming);
         assert!(desc.capabilities.cancellation);
         assert!(!desc.capabilities.structured_tool_calls);
-        assert!(!desc.capabilities.session_restore);
+        assert!(
+            desc.capabilities.session_restore,
+            "native CLI now supports session_restore via --resume"
+        );
         assert!(!desc.capabilities.mcp_http);
     }
 
@@ -415,5 +461,101 @@ mod tests {
         assert_eq!(provider.command, "/opt/claude/bin/claude");
         assert_eq!(provider.args.len(), 2);
         assert_eq!(provider.env.get("ANTHROPIC_API_KEY").unwrap(), "sk-test");
+    }
+
+    #[test]
+    fn native_cli_limited_descriptor_session_restore() {
+        let caps = CapabilityDescriptor::native_cli_limited();
+        assert!(
+            caps.session_restore,
+            "native_cli_limited should claim session_restore since --resume is supported"
+        );
+    }
+
+    #[tokio::test]
+    async fn launch_generates_session_id_and_registers_state() {
+        let provider = ClaudeCliProvider::default_config();
+
+        let handle = provider
+            .launch(crate::capability::model::LaunchSpec {
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+            })
+            .await
+            .expect("launch should succeed");
+
+        // Verify the session was registered
+        let sessions = provider.sessions.read().await;
+        let native_session = sessions.get(&handle.session_id);
+        assert!(native_session.is_some(), "session should be registered");
+
+        let ns = native_session.unwrap();
+        assert!(
+            !ns.claude_session_id.is_empty(),
+            "claude_session_id should be set"
+        );
+        assert!(
+            !ns.first_exec_done,
+            "first_exec_done should be false initially"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_uses_session_id_flag_on_first_call() {
+        let provider = ClaudeCliProvider::new(
+            ProviderId::new("test-native"),
+            "Test".to_string(),
+            "echo".to_string(), // `echo` is available on all platforms
+            vec!["--print".to_string()],
+            HashMap::new(),
+        );
+
+        let handle = provider
+            .launch(crate::capability::model::LaunchSpec {
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+            })
+            .await
+            .expect("launch");
+
+        // First execute should succeed (echo just prints the prompt)
+        let result = provider
+            .execute(
+                &handle,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "hello".to_string(),
+                    }],
+                },
+            )
+            .await;
+
+        assert!(result.is_ok(), "first execute should succeed");
+
+        // Verify first_exec_done is now true
+        let sessions = provider.sessions.read().await;
+        let ns = sessions.get(&handle.session_id).expect("session exists");
+        assert!(
+            ns.first_exec_done,
+            "first_exec_done should be true after first execute"
+        );
+    }
+
+    #[test]
+    fn acp_full_descriptor_set_model_false_set_mode_true() {
+        let caps = CapabilityDescriptor::acp_full();
+        assert!(
+            !caps.set_model,
+            "acp_full should claim set_model = false (depends on dynamic discovery)"
+        );
+        assert!(
+            caps.set_mode,
+            "acp_full should claim set_mode = true (stable RPC available)"
+        );
     }
 }

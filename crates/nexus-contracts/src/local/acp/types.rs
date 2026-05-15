@@ -365,6 +365,13 @@ pub struct NexusSessionCreated {
     pub session_id: NexusSessionId,
     /// Session mode state (if the agent reports modes).
     pub modes: Option<NexusSessionModeState>,
+    /// Configuration options exposed by the agent at session creation.
+    ///
+    /// Used for dynamic capability discovery (e.g. model switching via
+    /// `set_config_option`). May be `None` if the agent does not report
+    /// config options or the response did not include them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_options: Option<Vec<NexusConfigOption>>,
 }
 
 /// Response from sending a prompt to the agent.

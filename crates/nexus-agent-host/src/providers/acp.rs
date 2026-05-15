@@ -19,14 +19,14 @@ use tokio::sync::RwLock;
 
 use nexus_acp_host::{AcpSdkAdapter, AcpStreamUpdate, NexusAcpClient};
 use nexus_contracts::local::acp::{
-    NexusContentBlock, NexusInitializeRequest, NexusNewSessionRequest, NexusPromptRequest,
-    NexusSessionId,
+    NexusConfigOption, NexusConfigOptionCategory, NexusContentBlock, NexusInitializeRequest,
+    NexusNewSessionRequest, NexusPromptRequest, NexusSessionId, NexusSetConfigOptionRequest,
 };
 
 use crate::capability::model::{
     CapabilityDescriptor, FinishReason, HostContentBlock, HostEvent, HostEventStream,
-    ManagedSessionHandle, OperationFinishedEvent, OperationStartedEvent, ProtocolKind,
-    ProviderDescriptor, ProviderHealth, TextDeltaEvent,
+    ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, OperationStartedEvent,
+    ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
@@ -37,6 +37,9 @@ use crate::ProviderAdapter;
 struct AcpSessionState {
     /// The ACP session ID (from the SDK).
     acp_session_id: NexusSessionId,
+    /// Configuration options exposed by the agent at session creation.
+    /// Used for dynamic model switching via `set_config_option`.
+    config_options: Option<Vec<NexusConfigOption>>,
     /// Map of active operation IDs to their cancel signal.
     /// Wave 1 enforces one op per session; this field supports future multi-op.
     #[allow(dead_code)]
@@ -131,6 +134,148 @@ impl AcpProvider {
             }
         }
     }
+
+    /// Handle `SetMode` operation via the stable `session/set_mode` RPC.
+    async fn handle_set_mode(
+        &self,
+        session: &ManagedSessionHandle,
+        mode: String,
+    ) -> HostResult<HostEventStream> {
+        let acp_session_id = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(&session.session_id)
+                .map(|s| s.acp_session_id.clone())
+                .ok_or_else(|| {
+                    HostError::internal(format!(
+                        "session {} not found in ACP provider",
+                        session.session_id
+                    ))
+                })?
+        };
+
+        self.client
+            .set_mode(acp_session_id, mode)
+            .await
+            .map_err(|e| {
+                HostError::capability_unsupported(
+                    self.provider_id.clone(),
+                    "set_mode",
+                    format!("ACP set_mode failed: {e}"),
+                )
+            })?;
+
+        // Emit a single OpFinished event to signal success.
+        let op_id = HostOperationId::new();
+        let stream =
+            futures_util::stream::iter(vec![Ok(HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session.session_id.clone(),
+                op_id,
+                reason: FinishReason::EndTurn,
+            }))])
+            .boxed();
+
+        Ok(stream)
+    }
+
+    /// Handle `SetModel` operation via `set_config_option` with dynamic discovery.
+    ///
+    /// Searches the session's `config_options` for an option with
+    /// `category == Model`. If found, uses its `id` as the `config_id` in
+    /// `set_config_option`. If not found (agent does not expose model config),
+    /// returns `CapabilityUnsupported`.
+    async fn handle_set_model(
+        &self,
+        session: &ManagedSessionHandle,
+        model: String,
+    ) -> HostResult<HostEventStream> {
+        let (acp_session_id, model_config_id) = {
+            let sessions = self.sessions.read().await;
+            let state = sessions.get(&session.session_id).ok_or_else(|| {
+                HostError::internal(format!(
+                    "session {} not found in ACP provider",
+                    session.session_id
+                ))
+            })?;
+
+            // Find the model config option by category
+            let config_id = state
+                .config_options
+                .as_ref()
+                .and_then(|opts| {
+                    opts.iter().find_map(|opt| {
+                        if opt.category.as_ref()? == &NexusConfigOptionCategory::Model {
+                            Some(opt.id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+            let result = (state.acp_session_id.clone(), config_id);
+            drop(sessions);
+            result
+        };
+
+        let Some(config_id) = model_config_id else {
+            return Err(HostError::capability_unsupported(
+                self.provider_id.clone(),
+                "set_model",
+                "No model config option discovered for this session's agent",
+            ));
+        };
+
+        // Attempt to set the model config option
+        let request = NexusSetConfigOptionRequest::new(acp_session_id, config_id, model);
+
+        match self.client.set_config_option(request).await {
+            Ok(_) => {
+                // Emit a single OpFinished event to signal success.
+                let op_id = HostOperationId::new();
+                let stream = futures_util::stream::iter(vec![Ok(HostEvent::OpFinished(
+                    OperationFinishedEvent {
+                        session_id: session.session_id.clone(),
+                        op_id,
+                        reason: FinishReason::EndTurn,
+                    },
+                ))])
+                .boxed();
+
+                Ok(stream)
+            }
+            Err(e) => {
+                // Graceful fallback: emit a Status warning and then OpFailed.
+                let op_id = HostOperationId::new();
+                let session_id = session.session_id.clone();
+                let provider_id = self.provider_id.clone();
+                let error_msg = e.to_string();
+
+                tracing::warn!(
+                    provider_id = %provider_id,
+                    session_id = %session_id,
+                    error = %error_msg,
+                    "set_config_option for model failed"
+                );
+
+                let stream = futures_util::stream::iter(vec![
+                    Ok(HostEvent::Status(crate::capability::model::StatusEvent {
+                        session_id: Some(session_id.clone()),
+                        level: crate::capability::model::StatusLevel::Warning,
+                        message: format!("SetModel failed: {error_msg}"),
+                    })),
+                    Ok(HostEvent::OpFailed(OperationFailedEvent {
+                        session_id,
+                        op_id,
+                        error_category: "set_model_failed".to_string(),
+                        error_message: format!("set_config_option for model failed: {error_msg}"),
+                    })),
+                ])
+                .boxed();
+
+                Ok(stream)
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -197,6 +342,7 @@ impl ProviderAdapter for AcpProvider {
                 host_session_id.clone(),
                 AcpSessionState {
                     acp_session_id: session_created.session_id,
+                    config_options: session_created.config_options,
                     active_ops: HashMap::new(),
                 },
             );
@@ -216,19 +362,11 @@ impl ProviderAdapter for AcpProvider {
     ) -> HostResult<HostEventStream> {
         let (op_id, content_blocks) = match op {
             crate::capability::model::HostOperation::Prompt { op_id, content } => (op_id, content),
-            crate::capability::model::HostOperation::SetModel { model } => {
-                return Err(HostError::capability_unsupported(
-                    self.provider_id.clone(),
-                    "set_model",
-                    format!("ACP provider does not support inline SetModel (model={model})"),
-                ));
-            }
             crate::capability::model::HostOperation::SetMode { mode } => {
-                return Err(HostError::capability_unsupported(
-                    self.provider_id.clone(),
-                    "set_mode",
-                    format!("ACP provider does not support inline SetMode (mode={mode})"),
-                ));
+                return self.handle_set_mode(session, mode).await;
+            }
+            crate::capability::model::HostOperation::SetModel { model } => {
+                return self.handle_set_model(session, model).await;
             }
         };
 
