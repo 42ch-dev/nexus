@@ -220,8 +220,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     }
     tracing::info!("Schedule supervisor wired");
 
-    // --- Section 5: Lifecycle HSM initialization ---
-    let subsystems = create_subsystems(&state, config.port);
+    // --- Section 5: Agent Host subsystem ---
+    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
+        let manager = nexus_agent_host::core::manager::HostManager::new();
+        Arc::new(manager)
+    };
+    state.set_agent_host(Arc::clone(&agent_host_facade));
+    tracing::info!("Agent host facade wired");
+
+    // --- Section 6: Lifecycle HSM initialization ---
+    let subsystems = create_subsystems(&state, config.port, agent_host_facade);
     let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
         subsystems,
         config.shutdown_grace_ms,
@@ -230,7 +238,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_lifecycle(Arc::clone(&lifecycle));
     tracing::info!("Lifecycle HSM initialized");
 
-    // --- Section 6: Signal handlers and panic hook ---
+    // --- Section 7: Signal handlers and panic hook ---
     let lifecycle_for_signals = Arc::clone(&lifecycle);
     let state_for_signals = state.clone();
     tokio::spawn(async move {
@@ -269,7 +277,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         previous_hook(info);
     }));
 
-    // --- Section 7: Graceful shutdown watcher ---
+    // --- Section 8: Graceful shutdown watcher ---
     {
         let state_for_shutdown = state.clone();
         tokio::spawn(async move {
@@ -314,14 +322,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         });
     }
 
-    // --- Section 8: HTTP/Unix server + lifecycle start ---
+    // --- Section 9: HTTP/Unix server + lifecycle start ---
     let shutdown_notify = state.shutdown_notify();
     let app = api::create_router(state);
 
     // Resolve transport
     let transport = config.resolve_transport();
 
-    // --- Section 9: Start lifecycle and spawn server ---
+    // --- Section 10: Start lifecycle and spawn server ---
     lifecycle.dispatch(Event::ProcessStarted);
     tracing::info!("Lifecycle started");
 
@@ -424,15 +432,33 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 fn create_subsystems(
     state: &WorkspaceState,
     port: u16,
+    agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
-    use crate::lifecycle::{DbSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem};
+    use crate::lifecycle::{
+        AgentHostSubsystem, DbSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem,
+    };
 
-    vec![
+    let nexus_home = state.nexus_home();
+    let agent_host_config_path = nexus_home.join("agent-host").join("config.toml");
+    let workspace_root = state
+        .workspace_path()
+        .map_or_else(|| nexus_home.clone(), std::path::PathBuf::from);
+
+    let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
         Arc::new(HttpSubsystem::new(port)),
         Arc::new(DbSubsystem::new(Some(state.database_path()))),
         Arc::new(SyncSubsystem::new()),
         Arc::new(WorkerMgrSubsystem::new()),
-    ]
+    ];
+
+    // Agent Host is an optional subsystem — failure does not block daemon startup
+    subsystems.push(Arc::new(AgentHostSubsystem::new(
+        agent_host_facade,
+        agent_host_config_path,
+        workspace_root,
+    )));
+
+    subsystems
 }
 
 #[cfg(test)]

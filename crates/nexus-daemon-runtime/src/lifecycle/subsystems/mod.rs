@@ -6,12 +6,14 @@
 //! lifecycle-controlled startup/shutdown. Real implementations where possible,
 //! mock stubs for WS2 components (Engine, `WorkerMgr`) not yet available.
 
+mod agent_host;
 mod db;
 mod http;
 mod mock_all;
 mod sync;
 mod worker_mgr;
 
+pub use agent_host::AgentHostSubsystem;
 pub use db::DbSubsystem;
 pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
