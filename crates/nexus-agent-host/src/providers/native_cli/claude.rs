@@ -279,14 +279,12 @@ impl ProviderAdapter for ClaudeCliProvider {
         // Look up session state to determine session-continuity flags
         let (claude_session_id, is_resume) = {
             let mut sessions = self.sessions.write().await;
-            let native_session = sessions
-                .get_mut(&session.session_id)
-                .ok_or_else(|| {
-                    HostError::internal(format!(
-                        "session {} not found in native CLI provider",
-                        session.session_id
-                    ))
-                })?;
+            let native_session = sessions.get_mut(&session.session_id).ok_or_else(|| {
+                HostError::internal(format!(
+                    "session {} not found in native CLI provider",
+                    session.session_id
+                ))
+            })?;
 
             let id = native_session.claude_session_id.clone();
             let resume = native_session.first_exec_done;
