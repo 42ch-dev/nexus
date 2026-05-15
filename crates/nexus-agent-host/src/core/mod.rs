@@ -1,3 +1,5 @@
 //! Core host management: session registry, operation registry, lifecycle.
-//!
-//! Implementation planned for Batch 2.
+
+pub mod session;
+
+pub use session::{HostSession, SessionRegistry, SessionState, TransitionResult};
