@@ -102,18 +102,15 @@ impl AdmissionPolicy {
 
     /// Check workspace root validity.
     ///
-    /// The workspace root must be an absolute, existing path.
+    /// The workspace root must be an absolute path that does not escape
+    /// above its own trust boundary via directory traversal (e.g. `../../`).
     ///
     /// # Errors
     ///
-    /// Returns `HostError::PolicyDenied` if the workspace root is invalid.
+    /// Returns `HostError::PolicyDenied` if the workspace root is invalid
+    /// or contains traversal components.
     pub fn check_workspace_root(&self, workspace_root: &std::path::Path) -> HostResult<()> {
-        if !workspace_root.is_absolute() {
-            return Err(HostError::policy_denied(format!(
-                "workspace root must be an absolute path: {}",
-                workspace_root.display()
-            )));
-        }
+        crate::config::validate_workspace_path(workspace_root)?;
         Ok(())
     }
 

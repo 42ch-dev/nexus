@@ -137,6 +137,21 @@ impl Default for HostManager {
 #[async_trait]
 impl crate::HostFacade for HostManager {
     async fn start(&self, config: HostStartConfig) -> HostResult<()> {
+        // Validate config_path does not escape its parent directory.
+        // Only validate if the path actually exists on disk — canonicalize
+        // requires an existing path, and config files are optional.
+        if config.config_path.exists() {
+            if let Some(expected_dir) = config.config_path.parent() {
+                crate::config::validate_config_path(&config.config_path, expected_dir)?;
+            }
+        }
+
+        // Validate workspace_root against traversal.
+        {
+            let admission = self.admission.read().await;
+            admission.check_workspace_root(&config.workspace_root)?;
+        }
+
         // Load config
         let host_config = crate::config::load_config(&config.config_path)?;
         *self.config.write().await = Some(host_config.clone());
@@ -353,22 +368,22 @@ impl crate::HostFacade for HostManager {
         *self.running.write().await = false;
 
         // Read the configured shutdown timeout (default 5s if config was never set).
-        let shutdown_timeout = self
-            .config
-            .read()
-            .await
-            .as_ref()
-            .map_or_else(
-                || crate::config::TimeoutConfig::default().shutdown_duration(),
-                |c| c.timeouts.shutdown_duration(),
-            );
+        let shutdown_timeout = self.config.read().await.as_ref().map_or_else(
+            || crate::config::TimeoutConfig::default().shutdown_duration(),
+            |c| c.timeouts.shutdown_duration(),
+        );
 
         // Collect active sessions and their provider mappings before clearing state.
         let session_ids: Vec<HostSessionId>;
         let provider_map: HashMap<HostSessionId, ProviderId>;
         {
-            let session_ids_raw: Vec<HostSessionId> =
-                self.sessions.read().await.iter().map(|s| s.id.clone()).collect();
+            let session_ids_raw: Vec<HostSessionId> = self
+                .sessions
+                .read()
+                .await
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
             let sp = self.session_providers.read().await;
             provider_map = session_ids_raw
                 .iter()
@@ -390,8 +405,7 @@ impl crate::HostFacade for HostManager {
                     let handle = ManagedSessionHandle {
                         provider_id: provider_id.clone(),
                         session_id: session_id.clone(),
-                        capabilities:
-                            crate::capability::model::CapabilityDescriptor::acp_full(),
+                        capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
                     };
                     Some((adapter, handle))
                 })
@@ -625,10 +639,7 @@ mod tests {
         }
 
         async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-            self.shutdown_calls
-                .lock()
-                .unwrap()
-                .push(session.session_id);
+            self.shutdown_calls.lock().unwrap().push(session.session_id);
             Ok(())
         }
 
@@ -719,7 +730,7 @@ mod tests {
         use std::path::PathBuf;
         HostStartConfig {
             config_path: PathBuf::from("/tmp/nonexistent"),
-            workspace_root: PathBuf::from("/tmp/workspace"),
+            workspace_root: PathBuf::from("/tmp"),
             max_sessions: 4,
             max_ops_per_session: 1,
             timeouts: crate::config::TimeoutConfig::default(),
@@ -883,7 +894,11 @@ mod tests {
         manager.shutdown().await.expect("shutdown");
 
         let shutdown_ids = provider.take_shutdown_calls();
-        assert_eq!(shutdown_ids.len(), 2, "shutdown should be called for both sessions");
+        assert_eq!(
+            shutdown_ids.len(),
+            2,
+            "shutdown should be called for both sessions"
+        );
         assert!(
             shutdown_ids.contains(&session1.id),
             "session1 should have been shut down"
@@ -903,21 +918,16 @@ mod tests {
 
         // Create a temp config file with a very short shutdown timeout.
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let config_path =
-            crate::config::agent_host_config_path(temp_dir.path());
+        let config_path = crate::config::agent_host_config_path(temp_dir.path());
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent).expect("create config dir");
         }
-        std::fs::write(
-            &config_path,
-            "[timeouts]\nshutdown_ms = 100\n",
-        )
-        .expect("write config");
+        std::fs::write(&config_path, "[timeouts]\nshutdown_ms = 100\n").expect("write config");
 
         manager
             .start(HostStartConfig {
                 config_path: config_path.clone(),
-                workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+                workspace_root: std::path::PathBuf::from("/tmp"),
                 max_sessions: 4,
                 max_ops_per_session: 1,
                 timeouts: crate::config::TimeoutConfig::default(),
@@ -940,15 +950,18 @@ mod tests {
         // shutdown should complete within a reasonable total time even though the
         // provider's shutdown() hangs forever.  The per-session timeout is 100ms,
         // so the whole thing should finish well within 5s.
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            manager.shutdown(),
-        )
-        .await
-        .expect("shutdown should not hang");
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), manager.shutdown())
+            .await
+            .expect("shutdown should not hang");
 
-        assert!(result.is_ok(), "shutdown should succeed even with a hanging provider");
-        assert!(provider.was_shutdown_called(), "provider shutdown() should have been invoked");
+        assert!(
+            result.is_ok(),
+            "shutdown should succeed even with a hanging provider"
+        );
+        assert!(
+            provider.was_shutdown_called(),
+            "provider shutdown() should have been invoked"
+        );
 
         let health = manager.health().await.expect("health");
         assert!(!health.running);
@@ -1167,9 +1180,6 @@ mod tests {
             )
             .await;
 
-        assert!(
-            result.is_ok(),
-            "exec should succeed within ops limit"
-        );
+        assert!(result.is_ok(), "exec should succeed within ops limit");
     }
 }

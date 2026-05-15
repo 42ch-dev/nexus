@@ -184,29 +184,23 @@ impl ProviderAdapter for ClaudeCliProvider {
         &self,
         _request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // Check if the command exists on PATH by attempting `which` / `where`
-        let which_result = tokio::process::Command::new("which")
-            .arg(&self.command)
-            .output()
-            .await;
-
-        match which_result {
-            Ok(output) if output.status.success() => {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                Ok(ProviderHealth {
-                    provider_id: self.provider_id.clone(),
-                    available: true,
-                    latency_ms: None,
-                    message: Some(path),
-                })
-            }
-            _ => Ok(ProviderHealth {
+        // Cross-platform command lookup: `which` crate handles PATH scanning
+        // and Windows PATHEXT resolution automatically.
+        let health = which::which(&self.command).map_or_else(
+            |_| ProviderHealth {
                 provider_id: self.provider_id.clone(),
                 available: false,
                 latency_ms: None,
                 message: Some(format!("command '{}' not found on PATH", self.command)),
-            }),
-        }
+            },
+            |resolved_path| ProviderHealth {
+                provider_id: self.provider_id.clone(),
+                available: true,
+                latency_ms: None,
+                message: Some(resolved_path.to_string_lossy().into_owned()),
+            },
+        );
+        Ok(health)
     }
 
     async fn launch(
