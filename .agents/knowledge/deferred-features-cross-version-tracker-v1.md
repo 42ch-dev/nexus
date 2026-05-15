@@ -46,6 +46,9 @@
 | DF-23 | Provider-level streaming adaptation | V1.18 | V1.19 (Batch 2) | L | V1.18 §9 D-006 | ACP streaming events not yet translated to `StreamingChunk`. Scaffold exists (`into_event_stream`) but not wired. |
 | DF-24 | HostManager shutdown → ProviderAdapter::shutdown() | V1.18 | V1.19 (Batch 1) | S | V1.18 §9 D-007 | `HostManager::shutdown()` never calls `ProviderAdapter::shutdown()` — orphan processes on daemon stop. Safety fix. |
 | DF-25 | AdmissionPolicy enforcement wiring | V1.18 | V1.19 (Batch 1) | S | V1.18 §9 D-008 | `AdmissionPolicy` methods exist but never invoked from `create_session()` or `exec()`. Correctness fix. |
+| DF-26 | Cross-platform command probe (replace Unix-only `which`) | V1.18 QC R3 | V1.19 (Batch 1) | S | V1.18 status.json R3 | `path_scan.rs` uses Unix-only `which` command. Breaks on Windows. |
+| DF-27 | API handler input validation on session ID path params | V1.18 QC R4 | V1.19 (Batch 2) | S | V1.18 status.json R4 | Malformed/non-UUID session IDs in `/v1/local/agent-host/sessions/{id}/*` routes. |
+| DF-28 | Config path traversal protection | V1.18 QC R5 | V1.19 (Batch 2) | S | V1.18 status.json R5 | `config_path` and `workspace_root` not validated against directory traversal. |
 
 ### 3.2 Backlog (no committed target version)
 
@@ -217,7 +220,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Delivery SSOT | [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md)（§0 scope lock, R-001–R-010 requirements, §9 deferred D-001–D-008） |
 | Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` includes V1.18 code-quality residuals + V1.19 deferred functional gaps |
 | Plan | `2026-05-15-v1.18-agent-host-core` — **Done** (archived to `archived/plans/`) |
-| New tracker items | 8 | DF-18 through DF-25 (deferred from V1.18 §9 → V1.19 hardening backlog) |
+| New tracker items | 11 | DF-18 through DF-28 (deferred from V1.18 §9 + QC residuals → V1.19 hardening backlog) |
 | Post-implementation audit | §9 of compass updated with R-003/R-005/R-006/R-007 audit notes, 3 new risk rows |
 
 ### V1.16+ horizon
@@ -231,9 +234,9 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Count | IDs |
 |----------|-------|-----|
-| Features (Batch 1 — safety/correctness) | 5 | DF-18 (multi-turn), DF-19 (ACP permissions), DF-20 (capability truthfulness), DF-24 (shutdown wiring), DF-25 (admission wiring) |
-| Features (Batch 2 — hardening) | 3 | DF-21 (timeout enforcement), DF-22 (risk classification), DF-23 (streaming adaptation) |
-| **Total** | **8** | All deferred from V1.18 §9 |
+| Features (Batch 1 — safety/correctness) | 6 | DF-18 (multi-turn), DF-19 (ACP permissions), DF-20 (capability truthfulness), DF-24 (shutdown wiring), DF-25 (admission wiring), DF-26 (cross-platform probe) |
+| Features (Batch 2 — hardening) | 5 | DF-21 (timeout enforcement), DF-22 (risk classification), DF-23 (streaming adaptation), DF-27 (API validation), DF-28 (path traversal) |
+| **Total** | **11** | All deferred from V1.18 §9 + QC residuals |
 
 ### Items targeting V2.0+
 
@@ -307,6 +310,7 @@ Internal (this repo):
 - V1.16 delivery compass: [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md)
 - V1.17 delivery compass: [v1.17-delivery-compass-v1.md](v1.17-delivery-compass-v1.md)
 - V1.18 delivery compass: [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md)
+- V1.19 delivery compass: [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
 - Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
 - ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
@@ -321,4 +325,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-15**. Status: Active. V1.18 Done (agent-host-core, 8 deferred → V1.19); V1.17 Done (prompt-skills, BL-09 gate met); V1.16 Done; V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）+ V1.18 code-quality residuals. V1.19 hardening backlog: DF-18–DF-25 (8 items, 2 batches).*
+*Created: 2026-04-21. Last updated: **2026-05-15**. Status: Active. V1.18 Done (agent-host-core, 11 deferred → V1.19); V1.19 Draft (hardening, 11 items, 2 batches); V1.17 Done (prompt-skills, BL-09 gate met); V1.16 Done; V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）+ V1.18 code-quality residuals (R1-R7, closing via V1.19). V1.19 hardening backlog: DF-18–DF-28 (11 items, 2 batches).*
