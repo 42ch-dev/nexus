@@ -23,6 +23,7 @@ use crate::capability::model::{
     ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, OperationStartedEvent,
     ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
+use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::ProviderAdapter;
@@ -58,6 +59,8 @@ pub struct ClaudeCliProvider {
     env: HashMap<String, String>,
     /// Active sessions: host session ID → native session state.
     sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
+    /// Timeout configuration for stage-level enforcement.
+    timeouts: TimeoutConfig,
 }
 
 impl ClaudeCliProvider {
@@ -69,6 +72,7 @@ impl ClaudeCliProvider {
         command: String,
         args: Vec<String>,
         env: HashMap<String, String>,
+        timeouts: TimeoutConfig,
     ) -> Self {
         Self {
             provider_id,
@@ -77,6 +81,7 @@ impl ClaudeCliProvider {
             args,
             env,
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            timeouts,
         }
     }
 
@@ -89,6 +94,7 @@ impl ClaudeCliProvider {
             "claude".to_string(),
             vec!["--print".to_string()],
             HashMap::new(),
+            TimeoutConfig::default(),
         )
     }
 
@@ -173,6 +179,46 @@ impl ClaudeCliProvider {
 
         started.chain(stdout_stream).boxed()
     }
+
+    /// Spawn the CLI subprocess and write prompt to stdin.
+    ///
+    /// Returns `(stdout, stderr, child)` ready for event stream construction.
+    async fn spawn_and_write_stdin(
+        &self,
+        full_args: &[String],
+        prompt_text: &str,
+    ) -> HostResult<(
+        Option<tokio::process::ChildStdout>,
+        Option<tokio::process::ChildStderr>,
+        tokio::process::Child,
+    )> {
+        let mut cmd = tokio::process::Command::new(&self.command);
+        cmd.args(full_args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .envs(&self.env);
+
+        let mut child = cmd.spawn().map_err(|e| {
+            HostError::launch_failed(
+                self.provider_id.clone(),
+                format!("failed to spawn '{}'", self.command),
+                Some(e.to_string()),
+            )
+        })?;
+
+        // Write prompt to stdin and close it
+        let stdin = child.stdin.take();
+        if let Some(mut stdin) = stdin {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(prompt_text.as_bytes()).await.map_err(|e| {
+                HostError::protocol_error("failed to write prompt to stdin", Some(e.to_string()))
+            })?;
+            drop(stdin);
+        }
+
+        Ok((child.stdout.take(), child.stderr.take(), child))
+    }
 }
 
 #[async_trait]
@@ -191,21 +237,43 @@ impl ProviderAdapter for ClaudeCliProvider {
         _request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
         // Cross-platform command lookup: `which` crate handles PATH scanning
-        // and Windows PATHEXT resolution automatically.
-        let health = which::which(&self.command).map_or_else(
-            |_| ProviderHealth {
-                provider_id: self.provider_id.clone(),
-                available: false,
-                latency_ms: None,
-                message: Some(format!("command '{}' not found on PATH", self.command)),
-            },
-            |resolved_path| ProviderHealth {
-                provider_id: self.provider_id.clone(),
+        // and Windows PATHEXT resolution automatically. Wrapped in
+        // spawn_blocking to keep the async runtime responsive, and
+        // enforced with launch_ms timeout.
+        let command = self.command.clone();
+        let provider_id = self.provider_id.clone();
+        let launch_dur = self.timeouts.launch_duration();
+
+        let result = tokio::time::timeout(
+            launch_dur,
+            tokio::task::spawn_blocking(move || which::which(&command)),
+        )
+        .await
+        .map_err(|_| {
+            HostError::timeout(
+                "probe",
+                format!(
+                    "command lookup timed out after {}ms",
+                    self.timeouts.launch_ms
+                ),
+            )
+            .with_provider(self.provider_id.clone())
+        })?;
+
+        let health = match result {
+            Ok(Ok(resolved_path)) => ProviderHealth {
+                provider_id,
                 available: true,
                 latency_ms: None,
                 message: Some(resolved_path.to_string_lossy().into_owned()),
             },
-        );
+            _ => ProviderHealth {
+                provider_id,
+                available: false,
+                latency_ms: None,
+                message: Some(format!("command '{}' not found on PATH", self.command)),
+            },
+        };
         Ok(health)
     }
 
@@ -213,6 +281,8 @@ impl ProviderAdapter for ClaudeCliProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
+        // For native CLI providers, launch() only registers session state
+        // (no process spawned yet — the actual process spawns in execute()).
         let host_session_id = HostSessionId::new();
 
         // Generate a UUID for Claude CLI session continuity.
@@ -246,6 +316,10 @@ impl ProviderAdapter for ClaudeCliProvider {
         })
     }
 
+    // Multi-turn execute involves session-state lookup, CLI flag assembly,
+    // process spawn, stdin write, and stdout streaming — splitting would
+    // reduce clarity, so allow the line count here.
+    #[allow(clippy::too_many_lines)]
     async fn execute(
         &self,
         session: &ManagedSessionHandle,
@@ -306,35 +380,29 @@ impl ProviderAdapter for ClaudeCliProvider {
             full_args.push(claude_session_id);
         }
 
-        // Spawn the subprocess: command [args...] via stdin
-        let mut cmd = tokio::process::Command::new(&self.command);
-        cmd.args(&full_args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .envs(&self.env);
+        // Spawn the subprocess with prompt_ms timeout for the setup phase
+        // (spawn + stdin write). The streaming phase runs until EOF.
+        let prompt_dur = self.timeouts.prompt_duration();
 
-        let mut child = cmd.spawn().map_err(|e| {
-            HostError::launch_failed(
-                self.provider_id.clone(),
-                format!("failed to spawn '{}'", self.command),
-                Some(e.to_string()),
+        let spawn_result = tokio::time::timeout(
+            prompt_dur,
+            self.spawn_and_write_stdin(&full_args, &prompt_text),
+        )
+        .await
+        .map_err(|_| {
+            HostError::timeout(
+                "prompt",
+                format!(
+                    "CLI process setup timed out after {}ms",
+                    self.timeouts.prompt_ms
+                ),
             )
-        })?;
+            .with_provider(self.provider_id.clone())
+            .with_session(session.session_id.clone())
+            .with_op(op_id.clone())
+        })??;
 
-        // Write prompt to stdin and close it
-        let stdin = child.stdin.take();
-        if let Some(mut stdin) = stdin {
-            use tokio::io::AsyncWriteExt;
-            stdin.write_all(prompt_text.as_bytes()).await.map_err(|e| {
-                HostError::protocol_error("failed to write prompt to stdin", Some(e.to_string()))
-            })?;
-            drop(stdin);
-        }
-
-        // Take stdout and stderr before moving child
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+        let (stdout, stderr, mut child) = spawn_result;
 
         let stream = Self::build_event_stream(stdout, op_id, session.session_id.clone());
 
@@ -434,6 +502,7 @@ mod tests {
             "nonexistent_cli_xyz_12345".to_string(),
             vec![],
             HashMap::new(),
+            TimeoutConfig::default(),
         );
 
         let health = provider
@@ -453,6 +522,7 @@ mod tests {
             "/opt/claude/bin/claude".to_string(),
             vec!["-p".to_string(), "--verbose".to_string()],
             HashMap::from([("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string())]),
+            TimeoutConfig::default(),
         );
 
         assert_eq!(provider.provider_id.0, "my-claude");
@@ -508,6 +578,7 @@ mod tests {
             "echo".to_string(), // `echo` is available on all platforms
             vec!["--print".to_string()],
             HashMap::new(),
+            TimeoutConfig::default(),
         );
 
         let handle = provider

@@ -28,6 +28,7 @@ use crate::capability::model::{
     ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, OperationStartedEvent,
     ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
+use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::ProviderAdapter;
@@ -60,6 +61,8 @@ pub struct AcpProvider {
     client: Arc<AcpSdkAdapter>,
     /// Active sessions: host session ID → ACP session state.
     sessions: Arc<RwLock<HashMap<HostSessionId, AcpSessionState>>>,
+    /// Timeout configuration for stage-level enforcement.
+    timeouts: TimeoutConfig,
 }
 
 impl AcpProvider {
@@ -68,12 +71,18 @@ impl AcpProvider {
     /// The `client` should already have an established connection
     /// (via `AcpSdkAdapter::with_connection`).
     #[must_use]
-    pub fn new(provider_id: ProviderId, display_name: String, client: AcpSdkAdapter) -> Self {
+    pub fn new(
+        provider_id: ProviderId,
+        display_name: String,
+        client: AcpSdkAdapter,
+        timeouts: TimeoutConfig,
+    ) -> Self {
         Self {
             provider_id,
             display_name,
             client: Arc::new(client),
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            timeouts,
         }
     }
 
@@ -299,18 +308,29 @@ impl ProviderAdapter for AcpProvider {
             },
         );
 
-        match self.client.initialize(init_request).await {
-            Ok(_) => Ok(ProviderHealth {
+        let launch_dur = self.timeouts.launch_duration();
+
+        match tokio::time::timeout(launch_dur, self.client.initialize(init_request)).await {
+            Ok(Ok(_)) => Ok(ProviderHealth {
                 provider_id: self.provider_id.clone(),
                 available: true,
                 latency_ms: None,
                 message: None,
             }),
-            Err(e) => Ok(ProviderHealth {
+            Ok(Err(e)) => Ok(ProviderHealth {
                 provider_id: self.provider_id.clone(),
                 available: false,
                 latency_ms: None,
                 message: Some(format!("probe failed: {e}")),
+            }),
+            Err(_) => Ok(ProviderHealth {
+                provider_id: self.provider_id.clone(),
+                available: false,
+                latency_ms: None,
+                message: Some(format!(
+                    "probe timed out after {}ms",
+                    self.timeouts.launch_ms
+                )),
             }),
         }
     }
@@ -319,16 +339,31 @@ impl ProviderAdapter for AcpProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // Create ACP session
+        let launch_dur = self.timeouts.launch_duration();
+
+        // Create ACP session with launch timeout
         let acp_request = NexusNewSessionRequest::new(spec.cwd);
 
-        let session_created = self.client.create_session(acp_request).await.map_err(|e| {
-            HostError::launch_failed(
-                self.provider_id.clone(),
-                "ACP session creation failed",
-                Some(e.to_string()),
-            )
-        })?;
+        let session_created =
+            tokio::time::timeout(launch_dur, self.client.create_session(acp_request))
+                .await
+                .map_err(|_| {
+                    HostError::timeout(
+                        "launch",
+                        format!(
+                            "ACP session creation timed out after {}ms",
+                            self.timeouts.launch_ms
+                        ),
+                    )
+                    .with_provider(self.provider_id.clone())
+                })?
+                .map_err(|e| {
+                    HostError::launch_failed(
+                        self.provider_id.clone(),
+                        "ACP session creation failed",
+                        Some(e.to_string()),
+                    )
+                })?;
 
         let host_session_id = HostSessionId::new();
 
@@ -387,11 +422,23 @@ impl ProviderAdapter for AcpProvider {
             prompt: Self::to_acp_content(&content_blocks),
         };
 
-        // Start streaming
-        let rx = self
-            .client
-            .stream_prompt(prompt_request)
+        // Start streaming with prompt_ms timeout for the initial stream setup
+        let prompt_dur = self.timeouts.prompt_duration();
+
+        let rx = tokio::time::timeout(prompt_dur, self.client.stream_prompt(prompt_request))
             .await
+            .map_err(|_| {
+                HostError::timeout(
+                    "prompt",
+                    format!(
+                        "stream_prompt setup timed out after {}ms",
+                        self.timeouts.prompt_ms
+                    ),
+                )
+                .with_provider(self.provider_id.clone())
+                .with_session(session.session_id.clone())
+                .with_op(op_id.clone())
+            })?
             .map_err(|e| {
                 HostError::protocol_error("ACP stream_prompt failed", Some(e.to_string()))
             })?;
