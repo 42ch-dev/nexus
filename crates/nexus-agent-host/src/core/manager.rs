@@ -138,11 +138,20 @@ impl Default for HostManager {
 impl crate::HostFacade for HostManager {
     async fn start(&self, config: HostStartConfig) -> HostResult<()> {
         // Validate config_path does not escape its parent directory.
-        // Only validate if the path actually exists on disk — canonicalize
-        // requires an existing path, and config files are optional.
-        if config.config_path.exists() {
-            if let Some(expected_dir) = config.config_path.parent() {
-                crate::config::validate_config_path(&config.config_path, expected_dir)?;
+        // We call validate_config_path() directly and only propagate the
+        // error if the path exists — canonicalize() failing for a
+        // non-existent path is expected (config is optional), so we silently
+        // skip validation in that case. This avoids the TOCTOU race from
+        // checking .exists() separately (QC2 F-003).
+        if let Some(expected_dir) = config.config_path.parent() {
+            if let Err(e) = crate::config::validate_config_path(&config.config_path, expected_dir) {
+                // If the config file actually exists on disk now, the validation
+                // failure is real (escape or resolution error). If it doesn't
+                // exist, the failure is just "canonicalize failed" which is
+                // expected for optional config — skip it.
+                if config.config_path.exists() {
+                    return Err(e);
+                }
             }
         }
 
@@ -216,9 +225,10 @@ impl crate::HostFacade for HostManager {
         let adapter = entry.adapter.clone();
         drop(providers);
 
-        // Build launch spec
+        // Build launch spec with validated cwd (QC2 F-002)
+        let validated_cwd = crate::config::validate_workspace_path(&request.cwd)?;
         let launch_spec = crate::capability::model::LaunchSpec {
-            cwd: request.cwd,
+            cwd: validated_cwd,
             model: request.model,
             mode: request.mode,
             mcp_servers: request.mcp_servers,
@@ -290,8 +300,20 @@ impl crate::HostFacade for HostManager {
             sessions.transition_to_busy(&session_id, op_id.clone())?;
         }
 
-        // Execute on the provider
-        let stream = adapter.execute(&handle, op).await?;
+        // Execute on the provider. If execute() returns an error (not a stream),
+        // the session is stuck in Busy — transition back to Ready before
+        // propagating the error (QC3 F-001 defense-in-depth).
+        let stream = match adapter.execute(&handle, op).await {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = self
+                    .sessions
+                    .write()
+                    .await
+                    .transition_busy_to_ready(&session_id, &op_id);
+                return Err(e);
+            }
+        };
 
         // Wrap the stream to transition back to Ready on terminal event
         let sessions_arc = self.sessions.clone();
@@ -394,7 +416,9 @@ impl crate::HostFacade for HostManager {
 
         // Collect (adapter, handle) pairs while holding the provider read lock briefly,
         // then call shutdown outside the lock to avoid holding it across .await points.
+        // Use the actual negotiated capabilities from the session registry (QC2 F-004).
         let shutdown_tasks: Vec<(Arc<dyn ProviderAdapter>, ManagedSessionHandle)> = {
+            let sessions = self.sessions.read().await;
             let providers = self.providers.read().await;
             session_ids
                 .iter()
@@ -402,10 +426,14 @@ impl crate::HostFacade for HostManager {
                     let provider_id = provider_map.get(session_id)?;
                     let entry = providers.get(provider_id)?;
                     let adapter = entry.adapter.clone();
+                    let capabilities = sessions.get(session_id).map_or_else(
+                        crate::capability::model::CapabilityDescriptor::acp_full,
+                        |s| s.negotiated_capabilities.clone(),
+                    );
                     let handle = ManagedSessionHandle {
                         provider_id: provider_id.clone(),
                         session_id: session_id.clone(),
-                        capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                        capabilities,
                     };
                     Some((adapter, handle))
                 })

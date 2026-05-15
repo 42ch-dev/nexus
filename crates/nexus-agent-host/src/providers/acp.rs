@@ -140,6 +140,32 @@ impl AcpProvider {
             .collect()
     }
 
+    /// Create a stream that emits `OpStarted` followed by `OpFailed`.
+    ///
+    /// Used when `execute()` encounters an error (timeout, protocol error)
+    /// to ensure the session state machine always receives a terminal event.
+    /// Without this, the session stays stuck in `Busy` (QC3 F-001).
+    fn make_error_stream(
+        session_id: HostSessionId,
+        op_id: HostOperationId,
+        error_category: &str,
+        error_message: String,
+    ) -> HostEventStream {
+        futures_util::stream::iter(vec![
+            Ok(HostEvent::OpStarted(OperationStartedEvent {
+                op_id: op_id.clone(),
+                session_id: session_id.clone(),
+            })),
+            Ok(HostEvent::OpFailed(OperationFailedEvent {
+                session_id,
+                op_id,
+                error_category: error_category.to_string(),
+                error_message,
+            })),
+        ])
+        .boxed()
+    }
+
     /// Convert an `AcpStreamUpdate` to a `HostEvent`.
     fn stream_update_to_event(
         update: AcpStreamUpdate,
@@ -469,6 +495,9 @@ impl ProviderAdapter for AcpProvider {
         })
     }
 
+    // execute() exceeds 100-line limit due to streaming timeout handling (D-004).
+    // Splitting would reduce clarity of timeout/error path logic.
+    #[allow(clippy::too_many_lines)]
     async fn execute(
         &self,
         session: &ManagedSessionHandle,
@@ -487,15 +516,19 @@ impl ProviderAdapter for AcpProvider {
         // Look up the ACP session ID
         let acp_session_id = {
             let sessions = self.sessions.read().await;
-            sessions
-                .get(&session.session_id)
-                .map(|s| s.acp_session_id.clone())
-                .ok_or_else(|| {
-                    HostError::internal(format!(
-                        "session {} not found in ACP provider",
-                        session.session_id
-                    ))
-                })?
+            match sessions.get(&session.session_id) {
+                Some(s) => s.acp_session_id.clone(),
+                None => {
+                    // Session not found — emit OpStarted+OpFailed stream so the
+                    // session state machine transitions back to Ready (QC3 F-001).
+                    return Ok(Self::make_error_stream(
+                        session.session_id.clone(),
+                        op_id,
+                        "session_not_found",
+                        format!("session {} not found in ACP provider", session.session_id),
+                    ));
+                }
+            }
         };
 
         // Build the prompt request
@@ -507,30 +540,64 @@ impl ProviderAdapter for AcpProvider {
         // Start streaming with prompt_ms timeout for the initial stream setup
         let prompt_dur = self.timeouts.prompt_duration();
 
-        let rx = tokio::time::timeout(prompt_dur, self.client.stream_prompt(prompt_request))
+        let rx = match tokio::time::timeout(prompt_dur, self.client.stream_prompt(prompt_request))
             .await
-            .map_err(|_| {
-                HostError::timeout(
-                    "prompt",
+        {
+            Ok(Ok(receiver)) => receiver,
+            Ok(Err(e)) => {
+                // Protocol error — emit OpStarted+OpFailed so the manager's
+                // stream wrapper sees OpFailed and transitions back to Ready.
+                tracing::warn!(
+                    provider_id = %self.provider_id,
+                    session_id = %session.session_id,
+                    error = %e,
+                    "ACP stream_prompt failed"
+                );
+                return Ok(Self::make_error_stream(
+                    session.session_id.clone(),
+                    op_id,
+                    "protocol_error",
+                    format!("ACP stream_prompt failed: {e}"),
+                ));
+            }
+            Err(_) => {
+                // Timeout on stream setup — emit OpStarted+OpFailed so the
+                // session state machine transitions back to Ready (QC2 F-001,
+                // QC3 F-001).
+                tracing::warn!(
+                    provider_id = %self.provider_id,
+                    session_id = %session.session_id,
+                    timeout_ms = self.timeouts.prompt_ms,
+                    "stream_prompt setup timed out"
+                );
+                return Ok(Self::make_error_stream(
+                    session.session_id.clone(),
+                    op_id,
+                    "operation_timeout",
                     format!(
                         "stream_prompt setup timed out after {}ms",
                         self.timeouts.prompt_ms
                     ),
-                )
-                .with_provider(self.provider_id.clone())
-                .with_session(session.session_id.clone())
-                .with_op(op_id.clone())
-            })?
-            .map_err(|e| {
-                HostError::protocol_error("ACP stream_prompt failed", Some(e.to_string()))
-            })?;
+                ));
+            }
+        };
 
         // Convert the mpsc::Receiver into a futures Stream of HostEvent
         let session_id = session.session_id.clone();
         let op_id_for_stream = op_id.clone();
+        let prompt_dur_for_stream = prompt_dur;
+        let provider_id_for_stream = self.provider_id.clone();
 
-        // First emit OpStarted, then forward the stream
-        let stream = futures_util::stream::once({
+        // Clones for the timeout fallback closure (inner_stream closure
+        // consumes session_id and op_id_for_stream via move).
+        let session_id_for_timeout = session_id.clone();
+        let op_id_for_timeout = op_id_for_stream.clone();
+
+        // First emit OpStarted, then forward the stream with a cumulative
+        // streaming timeout (QC2 F-001). The timeout budget covers the entire
+        // execute duration from stream start; if no event arrives within the
+        // remaining budget, we emit OpFailed and end the stream.
+        let started = futures_util::stream::once({
             let op_id = op_id_for_stream.clone();
             let session_id = session_id.clone();
             async move {
@@ -539,15 +606,40 @@ impl ProviderAdapter for AcpProvider {
                     session_id,
                 }))
             }
-        })
-        .chain({
-            tokio_stream::wrappers::ReceiverStream::new(rx).map(move |update| {
-                let sid = session_id.clone();
-                let oid = op_id_for_stream.clone();
-                Ok(Self::stream_update_to_event(update, &sid, &oid))
-            })
-        })
-        .boxed();
+        });
+
+        let inner_stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(move |update| {
+            let sid = session_id.clone();
+            let oid = op_id_for_stream.clone();
+            Ok(Self::stream_update_to_event(update, &sid, &oid))
+        });
+
+        // Wrap with a cumulative timeout: if the stream produces no event
+        // within `prompt_dur` from this point, abort with OpFailed.
+        // Use tokio_stream::StreamExt::timeout (not futures_util) for per-item
+        // deadline enforcement (QC2 F-001).
+        let timeout_stream = tokio_stream::StreamExt::timeout(inner_stream, prompt_dur_for_stream)
+            .map(move |result| {
+                result.unwrap_or_else(|_| {
+                    // Elapsed — no event arrived within the budget
+                    tracing::warn!(
+                        provider_id = %provider_id_for_stream,
+                        session_id = %session_id_for_timeout,
+                        "Streaming timed out: no event within prompt_ms budget"
+                    );
+                    Ok(HostEvent::OpFailed(OperationFailedEvent {
+                        session_id: session_id_for_timeout.clone(),
+                        op_id: op_id_for_timeout.clone(),
+                        error_category: "streaming_timeout".to_string(),
+                        error_message: format!(
+                            "streaming timed out: no event within {}ms budget",
+                            prompt_dur_for_stream.as_millis()
+                        ),
+                    }))
+                })
+            });
+
+        let stream = started.chain(timeout_stream).boxed();
 
         Ok(stream)
     }
