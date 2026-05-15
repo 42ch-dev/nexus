@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
-**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.15), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
+**Status**: Active (V1.18 **Done**; V1.17 **Done**; V1.16 **Done**; V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
+**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.18), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
-**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.15) and the v1.2 reclassification matrix.
+**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.18) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-11
+**Last updated**: 2026-05-15
 
 ---
 
@@ -38,6 +38,14 @@
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture-v1.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
+| DF-18 | Native multi-turn conversation (persistent child process) | V1.18 | V1.19 (Batch 1) | M | V1.18 §9 D-001 | `NativeSession` scaffolded but unused; `ClaudeCliProvider::execute()` spawns per-op. HIGH priority — multi-turn is a basic feature, not a simplification. |
+| DF-19 | ACP session/request_permission handling | V1.18 | V1.19 (Batch 1) | M | V1.18 §9 D-002 | `AcpProvider::execute()` ignores `session/request_permission`; provider will hang/timeout. Depends on DF-23 (risk classifier). |
+| DF-20 | SetModel/SetMode capability truthfulness | V1.18 | V1.19 (Batch 1) | S | V1.18 §9 D-003 | `CapabilityDescriptor::acp_full()` claims `set_model/set_mode=true` but `AcpProvider` returns `CapabilityUnsupported`. Must implement or remove claim. |
+| DF-21 | TimeoutConfig enforcement | V1.18 | V1.19 (Batch 2) | S | V1.18 §9 D-004 | `TimeoutConfig` values defined in `config.rs` but never enforced in any provider code path. |
+| DF-22 | Auto tool-risk classification | V1.18 | V1.19 (Batch 2) | M | V1.18 §9 D-005 | Only `StaticToolRiskClassifier` (hardcoded deny list). `ToolRiskClassifier` trait is an extension point needing real implementation. |
+| DF-23 | Provider-level streaming adaptation | V1.18 | V1.19 (Batch 2) | L | V1.18 §9 D-006 | ACP streaming events not yet translated to `StreamingChunk`. Scaffold exists (`into_event_stream`) but not wired. |
+| DF-24 | HostManager shutdown → ProviderAdapter::shutdown() | V1.18 | V1.19 (Batch 1) | S | V1.18 §9 D-007 | `HostManager::shutdown()` never calls `ProviderAdapter::shutdown()` — orphan processes on daemon stop. Safety fix. |
+| DF-25 | AdmissionPolicy enforcement wiring | V1.18 | V1.19 (Batch 1) | S | V1.18 §9 D-008 | `AdmissionPolicy` methods exist but never invoked from `create_session()` or `exec()`. Correctness fix. |
 
 ### 3.2 Backlog (no committed target version)
 
@@ -52,16 +60,16 @@
 | BL-06 | Independent search microservice | V1.2 | Backlog | L | Compatible with old "not mandatory" principle. |
 | BL-07 | Explore ranking / cold-start strategy + Publish compliance determination matrix | V1.2 | Backlog | M | Elevated by ADR-011 + product spec in V1.2 matrix (originally V1.4). |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | ADR-011/012/013. |
-| BL-09 | V1.17 Prompt + Skills Compass v1 (planning package) | V1.16 | V1.17 (GATED) | M | Planning-only package for prompt/skills quality uplift; not executable until gate is met. |
+| BL-09 | V1.17 Prompt + Skills Compass v1 (planning package) | V1.16 | V1.17 (GATED) | M | **Gate met** — V1.16 compass Done. Planning-only package activated for V1.17 execution scope. |
 
 ### 3.4 Gated planning package details (not executable scope yet)
 
 #### BL-09 — V1.17 Prompt + Skills Compass v1
 
-- **Status**: Draft, gated
-- **Gate**: Do not treat as active execution SSOT until V1.16 delivery compass is Done.
-- **Planning-only note**: Before V1.16 completion, this item is backlog research + scope preparation only. It must not be used as `{PLAN_DIR}` primary execution spec.
-- **Planned themes**:
+- **Status**: Execution complete (V1.17 shipped)
+- **Gate**: ✅ Met — `v1.16-delivery-compass-v1.md` is Done.
+- **Outcome**: V1.17 prompt/skills work delivered. See V1.17 delivery snapshot in §5.
+- **Planned themes** (for reference):
   - **S1 Embedded skills quality**: Trigger rules + evidence standards; skill versioning and change records.
   - **S2 Preset prompt refinement**: `novel-writing` quality/consistency; `research` output structure + traceability.
   - **S3 Output evaluation**: Golden outputs + regression comparison; optional evaluation harness requires a separate ADR if enabled.
@@ -202,12 +210,30 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | New tracker items | None — all V1.15 work was new features, no DF-* items from tracker were in scope |
 | New residuals | None formally filed — QC3 warnings (skill_sync I/O, skill_link TOCTOU, sync_module unbounded memory, embedded_skills linear search) accepted in-place |
 
+### V1.18 delivery snapshot (Done)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md)（§0 scope lock, R-001–R-010 requirements, §9 deferred D-001–D-008） |
+| Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` includes V1.18 code-quality residuals + V1.19 deferred functional gaps |
+| Plan | `2026-05-15-v1.18-agent-host-core` — **Done** (archived to `archived/plans/`) |
+| New tracker items | 8 | DF-18 through DF-25 (deferred from V1.18 §9 → V1.19 hardening backlog) |
+| Post-implementation audit | §9 of compass updated with R-003/R-005/R-006/R-007 audit notes, 3 new risk rows |
+
 ### V1.16+ horizon
 
 | Category | Position |
 |----------|----------|
 | Program | **Compass registered** — delivery SSOT：[v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md). `status.json` `plans[]` **empty**. |
-| Next version (gated) | V1.17 prompt-skills planning package tracked as **BL-09** in §3.4；`{PLAN_DIR}` plans not started. |
+| Next version (gated) | ~~V1.17 prompt-skills planning package tracked as **BL-09** in §3.4~~ → V1.17 **Done**; BL-09 gate met and executed. |
+
+### Items targeting V1.19
+
+| Category | Count | IDs |
+|----------|-------|-----|
+| Features (Batch 1 — safety/correctness) | 5 | DF-18 (multi-turn), DF-19 (ACP permissions), DF-20 (capability truthfulness), DF-24 (shutdown wiring), DF-25 (admission wiring) |
+| Features (Batch 2 — hardening) | 3 | DF-21 (timeout enforcement), DF-22 (risk classification), DF-23 (streaming adaptation) |
+| **Total** | **8** | All deferred from V1.18 §9 |
 
 ### Items targeting V2.0+
 
@@ -279,6 +305,8 @@ Internal (this repo):
 - V1.14 delivery compass: [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)
 - V1.15 delivery compass: [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)
 - V1.16 delivery compass: [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md)
+- V1.17 delivery compass: [v1.17-delivery-compass-v1.md](v1.17-delivery-compass-v1.md)
+- V1.18 delivery compass: [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
 - Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
 - ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
@@ -293,4 +321,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-14**. Status: Active. V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）。 V1.17 prompt-skills gated planning package consolidated as BL-09 (§3.4).*
+*Created: 2026-04-21. Last updated: **2026-05-15**. Status: Active. V1.18 Done (agent-host-core, 8 deferred → V1.19); V1.17 Done (prompt-skills, BL-09 gate met); V1.16 Done; V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）+ V1.18 code-quality residuals. V1.19 hardening backlog: DF-18–DF-25 (8 items, 2 batches).*
