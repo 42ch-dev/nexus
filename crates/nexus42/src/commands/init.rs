@@ -168,21 +168,24 @@ pub fn persist_cli_workspace_selection(
 }
 
 /// Create workspace structure
+///
+/// Tries daemon API first; falls back to direct FS operations if daemon is not running.
+#[allow(clippy::too_many_lines)]
 async fn init_workspace(
     name: Option<String>,
     creator_id: Option<String>,
     workspace_slug: Option<String>,
     creative_root_arg: Option<PathBuf>,
 ) -> Result<()> {
-    let current_dir = std::env::current_dir()?;
-    let user_home = dirs::home_dir()
-        .ok_or_else(|| CliError::Other("Cannot determine home directory".into()))?;
-
     let creator_id = creator_id.unwrap_or_else(|| "local".to_string());
     let workspace_slug = workspace_slug.unwrap_or_else(|| DEFAULT_WORKSPACE_SLUG.to_string());
     validate_slug("creator_id", &creator_id)?;
     validate_slug("workspace_slug", &workspace_slug)?;
 
+    let user_home = dirs::home_dir()
+        .ok_or_else(|| CliError::Other("Cannot determine home directory".into()))?;
+
+    // Check if workspace already exists (pre-flight)
     let op_meta = crate::paths::operational_workspace_dir(&user_home, &creator_id, &workspace_slug)
         .join("meta.json");
     if op_meta.exists() {
@@ -195,6 +198,50 @@ async fn init_workspace(
         return Ok(());
     }
 
+    let display_name = name.unwrap_or_else(|| workspace_slug.clone());
+
+    // Try daemon API first (T25: CLI → daemon migration)
+    let client = crate::api::DaemonClient::from_config(&CliConfig::load()?);
+    if client.health_check().await? {
+        let req = crate::api::models::CreateWorkspaceRequest {
+            creator_id: creator_id.clone(),
+            workspace_slug: workspace_slug.clone(),
+            creative_root: creative_root_arg.clone(),
+            display_name: Some(display_name.clone()),
+        };
+
+        match client.create_workspace(&req).await {
+            Ok(resp) => {
+                // Set as active workspace
+                let active_req = crate::api::models::SetActiveWorkspaceRequest {
+                    creator_id: Some(creator_id.clone()),
+                    workspace_slug: workspace_slug.clone(),
+                };
+                if let Err(e) = client.set_active_workspace(&active_req).await {
+                    eprintln!(
+                        "nexus42: warning — workspace created but active selection failed: {e}"
+                    );
+                }
+
+                println!("✓ Workspace initialized: {display_name}");
+                println!("  Creative root: {}", resp.creative_root);
+                println!("  Operational: {}", resp.operational_dir);
+                println!("  state.db: {}", resp.state_db_path);
+                println!("  .nexus42/  — workspace configuration (creative root)");
+                print_next_steps();
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!(
+                    "nexus42: daemon workspace creation failed, falling back to local init: {e}"
+                );
+                // Fall through to local init
+            }
+        }
+    }
+
+    // Fallback: direct FS operations (daemon not running)
+    let current_dir = std::env::current_dir()?;
     let creative_root = match creative_root_arg {
         Some(p) => {
             if p.is_absolute() {
@@ -206,19 +253,12 @@ async fn init_workspace(
         None => default_creative_root(&creator_id, &workspace_slug)?,
     };
 
-    let workspace_name = name.unwrap_or_else(|| {
-        creative_root.file_name().map_or_else(
-            || "unnamed".to_string(),
-            |n| n.to_string_lossy().to_string(),
-        )
-    });
-
     let db_path = materialize_adr014_workspace(
         &user_home,
         &creator_id,
         &workspace_slug,
         &creative_root,
-        &workspace_name,
+        &display_name,
     )
     .await?;
 
@@ -232,7 +272,6 @@ async fn init_workspace(
     std::fs::create_dir_all(&nh)?;
 
     // Best-effort: sync embedded skills to ~/.nexus42/skills/.
-    // Failure is non-fatal — log a warning and continue.
     match nexus_orchestration::skill_sync::sync_embedded_skills(&nh) {
         Ok(result) => {
             if !result.installed.is_empty() {
@@ -254,11 +293,18 @@ async fn init_workspace(
 
     let op_dir = crate::paths::operational_workspace_dir(&user_home, &creator_id, &workspace_slug);
 
-    println!("✓ Workspace initialized: {workspace_name}");
+    println!("✓ Workspace initialized: {display_name}");
     println!("  Creative root: {}", creative_root.display());
     println!("  Operational: {}", op_dir.display());
     println!("  state.db: {}", db_path.display());
     println!("  .nexus42/  — workspace configuration (creative root)");
+    print_next_steps();
+
+    Ok(())
+}
+
+/// Print next steps after workspace initialization.
+fn print_next_steps() {
     println!();
     println!("Next steps:");
     println!("  nexus42 preset list           — see available workflow presets");
@@ -269,6 +315,4 @@ async fn init_workspace(
     println!();
     println!("Workspace artifacts (stories, research reports) are created");
     println!("automatically by preset workflows as needed.");
-
-    Ok(())
 }
