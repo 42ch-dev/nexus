@@ -27,7 +27,7 @@
       "2026-04-14-v1.2-local-only-identity"
     ],
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "scope": "Runtime mode behavior and constraints, minimal runnable flow, fallback rules, no-platform guard enforcement",
     "deliverables": [
       "Runtime mode enforcement implementation",

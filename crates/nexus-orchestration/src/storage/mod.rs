@@ -4,7 +4,7 @@
 //! The `orchestration_sessions` table is created by migration
 //! `crates/nexus-local-db/migrations/<N>_orchestration_sessions.sql`.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.3.
+//! Design: `.agents/knowledge/orchestration-engine.md` §4.3.
 
 pub mod sqlite;
 

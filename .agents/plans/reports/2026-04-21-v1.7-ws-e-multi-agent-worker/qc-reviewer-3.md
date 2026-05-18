@@ -172,7 +172,7 @@ The IPC handlers in `acp_worker/mod.rs` (lines 864-1509) have inline unit tests 
 
 ### ✅ Good: Module-level docs with design references
 
-All key files reference `orchestration-engine-v1.md` sections. Version history (e.g., "WS-E T4", "WS-E T5", "T8") is consistently noted on new types and methods.
+All key files reference `orchestration-engine.md` sections. Version history (e.g., "WS-E T4", "WS-E T5", "T8") is consistently noted on new types and methods.
 
 ### ✅ Good: `RpcTransport` doc with framing requirement
 

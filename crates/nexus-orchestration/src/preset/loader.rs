@@ -3,7 +3,7 @@
 //! Parses `preset.yaml` → `PresetManifest` → validates per §7.6 → produces
 //! a `LoadedPreset` with outer/inner `graph-flow::Graph` instances.
 //!
-//! Design: `orchestration-engine-v1.md` §8.1.
+//! Design: `orchestration-engine.md` §8.1.
 
 use crate::capability::CapabilityRegistry;
 use crate::preset::manifest::{
@@ -20,7 +20,7 @@ use thiserror::Error;
 
 /// A fully validated preset ready for execution.
 ///
-/// Design: `orchestration-engine-v1.md` §8.1.
+/// Design: `orchestration-engine.md` §8.1.
 #[derive(Clone)]
 pub struct LoadedPreset {
     /// Preset identifier.

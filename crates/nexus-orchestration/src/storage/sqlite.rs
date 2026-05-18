@@ -24,7 +24,7 @@
 //! with status `running`, `paused`, or `waiting_for_input` so the in-memory
 //! tracker can be repopulated.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.3.
+//! Design: `.agents/knowledge/orchestration-engine.md` §4.3.
 
 use async_trait::async_trait;
 use graph_flow::{Session, SessionStorage};

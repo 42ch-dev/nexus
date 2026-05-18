@@ -215,7 +215,7 @@ Based on code inspection (note: unable to run `cargo clippy` due to permission r
 
 ### Tech Spec Alignment ✅
 
-- Implementation matches `acp-client-tech-spec-v1.md` §1-§7
+- Implementation matches `acp-client-tech-spec-legacy.md` §1-§7
 - Deferred capabilities documented per §5.2 and §Appendix B
 - SDK selection rationale matches §1.1 decision matrix
 

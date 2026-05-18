@@ -1,7 +1,7 @@
 //! Local database schema version constants
 //!
 //! DB schema version is independent from contract `schema_version`.
-//! See `.agents/plans/knowledge/local-db-refactor-v1.md` for version line separation.
+//! See `.agents/archived/knowledge/local-db-refactor-legacy.md` for version line separation.
 
 /// Current local database schema version
 ///

@@ -12,8 +12,8 @@
 
 ## Authoritative design input
 
-- [.agents/knowledge/v1.1-overview-v2.md](knowledge/v1.1-overview-v2.md) — program overview (capability symmetry **B**).
-- [.agents/knowledge/architecture-alignment-review-v1.md](knowledge/architecture-alignment-review-v1.md) — alignment narrative.
+- [.agents/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md) — program overview (capability symmetry **B**).
+- [.agents/knowledge/architecture-alignment-review.md](knowledge/architecture-alignment-review.md) — alignment narrative.
 - In-repo: `schemas/*sync*`, `crates/nexus-sync/`, `crates/nexus42/src/commands/sync*.rs` (paths may vary — locate with `rg 'sync' crates/nexus42`).
 
 **Cross-repo:** Platform HTTP routes and error semantics are defined in the private **v1-spec** / platform API docs. Do not paste out-of-repo paths into committed artifacts; copy minimal acceptance bullets into this plan when locked.
@@ -40,7 +40,7 @@
 ## Acceptance criteria (ship gate)
 
 - [x] `sync pull` applies server bundles to the local outbox via `Outbox::stage_if_absent` (wire: `SyncPullRequest` / `SyncPullResponse`); daemon returns structured JSON; CLI prints summary or daemon error text.
-- [x] `sync push` path unchanged for canonical bundle rules ([`knowledge/canonical-hash-v1.md`](knowledge/canonical-hash-v1.md)) (still `BundleBuilder` + precheck + `Outbox::stage`).
+- [x] `sync push` path unchanged for canonical bundle rules ([`knowledge/canonical-hash.md`](knowledge/canonical-hash.md)) (still `BundleBuilder` + precheck + `Outbox::stage`).
 - [x] `cargo test -p nexus-sync` includes wiremock pull tests and `sync_push_pull_loop` (mock push + pull); see `crates/nexus-sync/tests/`.
 - [x] `cargo clippy --all -- -D warnings` and `pnpm run codegen` + generated dirs committed for new schemas.
 

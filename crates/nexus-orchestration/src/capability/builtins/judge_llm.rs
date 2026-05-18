@@ -1,6 +1,6 @@
 //! `judge.llm` capability — evaluate a go/nogo prompt using a judge agent.
 //!
-//! Design: `orchestration-engine-v1.md` §5.2.
+//! Design: `orchestration-engine.md` §5.2.
 //!
 //! Implementation: delegates to `acp.prompt` with `tool_policy: deny_all`,
 //! then parses the response as a boolean.

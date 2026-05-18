@@ -27,4 +27,4 @@ This split predates a single “unified outbox” migration and carries **schema
 
 ## Related
 
-- [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) (TD-8 source)
+- [architecture-alignment-review.md](architecture-alignment-review.md) (TD-8 source)

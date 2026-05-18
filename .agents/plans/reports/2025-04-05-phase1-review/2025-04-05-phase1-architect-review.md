@@ -7,7 +7,7 @@
 - `open-source-and-repo-architecture.md` (repo boundary & open-source split)
 - `nexus-platform-monorepo-v1.md` (platform monorepo layout)
 - `roadmap.md` (V1.0 deliverables & frozen constraints)
-- `restructured-context-assembly-v1.md` (CLI-side context assembly spec)
+- `restructured-context-assembly.md` (CLI-side context assembly spec)
 - `status.json` residual findings (CLI-R1..R4, SYNC-R1..R3, ACP-R1..R2, CTX-R1)
 
 ---
@@ -114,7 +114,7 @@ The plan mentions "HTTP/gRPC" for the Local API between CLI and daemon. **Recomm
 
 | ID | Finding | Severity | Current Decision | Review Recommendation | Must Resolve Before Implementation? |
 |----|---------|----------|-----------------|----------------------|-------------------------------------|
-| SYNC-R1 | Missing bundle metadata fields | **High** | defer | **Must add to plan** | **Yes** — `submitting_creator_id`, `manuscript_phase`, `output_manuscript` are V1.0 frozen deliverables (roadmap §3.1.1, §3.1.2). These fields are also **prerequisites** for context-assembly (CTX dependency in `restructured-context-assembly-v1.md` §6). Without SYNC-R1, `context-assembly` cannot be unblocked |
+| SYNC-R1 | Missing bundle metadata fields | **High** | defer | **Must add to plan** | **Yes** — `submitting_creator_id`, `manuscript_phase`, `output_manuscript` are V1.0 frozen deliverables (roadmap §3.1.1, §3.1.2). These fields are also **prerequisites** for context-assembly (CTX dependency in `restructured-context-assembly.md` §6). Without SYNC-R1, `context-assembly` cannot be unblocked |
 | SYNC-R2 | Missing partial apply semantics | **Medium** | defer | **Should add to plan** | **Recommended** — Roadmap §3.1.4 (P1) explicitly calls for `bundle_apply_status=partial` or equivalent. Phase A/B pipeline requires distinguishing "A succeeded, B failed" from total failure. CLI must be able to handle partial responses |
 | SYNC-R3 | Missing local precheck (Stage 0) | **Medium** | defer | **Should add to plan** | **Recommended** — Local precheck prevents pushing invalid bundles to platform. This is a sync client quality improvement: validate command consistency, schema compliance, and sequencing locally before HTTP upload |
 
@@ -130,7 +130,7 @@ The plan's Task 1 says "Define Command types" but doesn't explicitly reference `
 
 The plan proposes `$HOME/.nexus42/outbox.json` for outbox persistence. **Concern**: JSON file for a queue is fragile (partial writes on crash, no atomicity). **Recommendation**: use **SQLite** for outbox persistence, which:
 - Provides atomic transactions
-- Aligns with CLI using SQLite for local structured state (per `restructured-context-assembly-v1.md` §2.3)
+- Aligns with CLI using SQLite for local structured state (per `restructured-context-assembly.md` §2.3)
 - Can share the same SQLite database as workspace state
 - JSON file is acceptable for V1.0 only if a migration note is added
 
@@ -168,7 +168,7 @@ SYNC-R1 (high) must be resolved before implementation. SYNC-R2 and SYNC-R3 (medi
 The plan is relatively complete for its scope. Minor observations:
 
 1. **Task 3 (Local API Contract)**: The plan says "Define minimum Local API endpoints (per frozen Local API contract)" but doesn't list the specific endpoints. The Local API contract should include at minimum:
-   - `POST /v1/local/context/assemble` (per `restructured-context-assembly-v1.md` §3.2)
+   - `POST /v1/local/context/assemble` (per `restructured-context-assembly.md` §3.2)
    - `POST /v1/local/sync/push` (bundle upload via daemon proxy)
    - `GET /v1/local/status` (daemon health + workspace state)
    
@@ -193,7 +193,7 @@ The plan is architecturally sound. ACP-R1 and ACP-R2 can be addressed at impleme
 
 ### 3.4 Context Assembly (Contextual — Not Primary Review Target)
 
-The context-assembly plan (`2025-04-05-context-assembly`) is **Blocked** in `status.json`. The restructured spec (`restructured-context-assembly-v1.md`) has already resolved the critical issues (5 conflicts with frozen specs). Key observations:
+The context-assembly plan (`2025-04-05-context-assembly`) is **Blocked** in `status.json`. The restructured spec (`restructured-context-assembly.md`) has already resolved the critical issues (5 conflicts with frozen specs). Key observations:
 
 | Aspect | Status |
 |--------|--------|
@@ -202,7 +202,7 @@ The context-assembly plan (`2025-04-05-context-assembly`) is **Blocked** in `sta
 | Dependency on sync-contract | ⚠️ Hard dependency on SYNC-R1 resolution (bundle metadata fields) |
 | Dependency on CLI commands | ⚠️ Requires `nexus42 context assemble` command (not yet in CLI plan — see CLI-R2 gap) |
 
-**Recommendation**: After `sync-contract` plan resolves SYNC-R1 and `cli-daemon-foundation` plan expands to include context-related commands, rewrite the context-assembly plan file from `restructured-context-assembly-v1.md`.
+**Recommendation**: After `sync-contract` plan resolves SYNC-R1 and `cli-daemon-foundation` plan expands to include context-related commands, rewrite the context-assembly plan file from `restructured-context-assembly.md`.
 
 ---
 
@@ -276,8 +276,8 @@ context-assembly ──────────────┘
 | Rust-first for CLI/daemon | AGENTS.md | ✅ | ✅ | ✅ |
 | JSON Schema as wire truth source | `codegen-strategy-v1.md` | ✅ | ⚠️ (needs explicit anchor) | ✅ |
 | CLI is ACP client, not agent/server | AGENTS.md | ✅ | N/A | ✅ |
-| CLI uses SQLite for local state | `restructured-context-assembly-v1.md` §2.3 | ⚠️ (outbox uses JSON file) | ⚠️ (outbox.json) | N/A |
-| No Neo4j/Postgres/pgvector on CLI side | `restructured-context-assembly-v1.md` §2.3 | ✅ | ✅ | ✅ |
+| CLI uses SQLite for local state | `restructured-context-assembly.md` §2.3 | ⚠️ (outbox uses JSON file) | ⚠️ (outbox.json) | N/A |
+| No Neo4j/Postgres/pgvector on CLI side | `restructured-context-assembly.md` §2.3 | ✅ | ✅ | ✅ |
 | `@42ch/nexus-contracts` for wire types | `open-source-and-repo-architecture.md` §5 | ✅ | ⚠️ (should use generated) | ✅ |
 | V1.0 Creator as first-class citizen | roadmap §3.1.1, §3.1.2 | ❌ (missing) | ⚠️ (missing `submitting_creator_id`) | N/A |
 | `manuscript_phase` V1.0 deliverable | roadmap §3.1.1 | ❌ (missing commands) | ❌ (missing in bundle) | N/A |
@@ -337,7 +337,7 @@ context-assembly ──────────────┘
 
 ### 6.4 For `context-assembly`
 
-**Blocked** — rewrite plan file from `restructured-context-assembly-v1.md` after:
+**Blocked** — rewrite plan file from `restructured-context-assembly.md` after:
 - CLI plan includes `nexus42 context assemble` command
 - Sync plan includes `story_manifest` delta + bundle metadata fields
 - ACP plan includes Local API proxy for `POST /v1/local/context/assemble`

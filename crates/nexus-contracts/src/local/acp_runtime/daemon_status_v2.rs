@@ -1,7 +1,7 @@
 //! `DaemonStatusV2` — local-only daemon status response.
 //!
 //! Response shape for `GET /v1/local/daemon/status`. Superset of v1 running-probe,
-//! wire-compatible. Per daemon-lifecycle-api-v2.md §7.1.
+//! wire-compatible. Per daemon-lifecycle-api.md §7.1.
 
 use serde::{Deserialize, Serialize};
 

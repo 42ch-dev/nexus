@@ -3,7 +3,7 @@
 **Date**: 2026-04-06
 **Reviewer**: @product-manager
 **Scope**: All Phase 0 + V1.0-phase1 user-facing features
-**Status**: Archived — command analysis summarized in `v1.1-overview-v1.md` §2.1; retained for detailed reference
+**Status**: Archived — command analysis summarized in `program-overview-legacy.md` §2.1; retained for detailed reference
 
 ---
 

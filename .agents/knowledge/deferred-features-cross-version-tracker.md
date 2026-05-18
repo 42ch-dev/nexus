@@ -35,7 +35,7 @@
 
 | ID | Feature | First deferred | Target | Effort est. | Deferral history | Blocking reason / Notes |
 |----|---------|---------------|--------|-------------|-----------------|----------------------|
-| DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture-v1.md`. Single-writer rule follow-up. |
+| DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
 | DF-18 | Native multi-turn conversation (persistent child process) | V1.18 | V1.19 (Batch 1) | M | V1.18 §9 D-001 | `NativeSession` scaffolded but unused; `ClaudeCliProvider::execute()` spawns per-op. HIGH priority — multi-turn is a basic feature, not a simplification. |
@@ -195,7 +195,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Position |
 |----------|----------|
-| Delivery SSOT | [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)（§0 scope lock **合并于**本 compass） |
+| Delivery SSOT | [v1.14-delivery-compass-v1.md](../iterations/v1.14-delivery-compass-v1.md)（§0 scope lock **合并于**本 compass） |
 | Machine state | `status.json` `plans[]` **空**；`residual_findings` 仅 **R-V113-005** / **R-V113-007**（accepted / backlog） |
 | Platform execution | **Done** — `nexus-platform` Plans **86–87**（rate-limit/JWKS + OpenAPI doc batch）；详见平台仓 `status.json` `metadata.tech_debt_summary.note` |
 | Cross-repo gates | Canonical: `nexus-platform/.agents/knowledge/v1.14-program-compass-v1.md` §5 |
@@ -204,7 +204,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Position |
 |----------|----------|
-| Delivery SSOT | [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)（§0 scope lock, D1-D7 architecture decisions） |
+| Delivery SSOT | [v1.15-delivery-compass-v1.md](../iterations/v1.15-delivery-compass-v1.md)（§0 scope lock, D1-D7 architecture decisions） |
 | Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` unchanged — **R-V113-005** / **R-V113-007**（accepted / backlog） |
 | Plan | `2026-05-10-v1.15-orchestration-first-pipeline` — **Done** (archived to `archived/plans/`) |
 | PR | [#23](https://github.com/42ch-dev/nexus/pull/23) merged to `main` |
@@ -217,7 +217,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Position |
 |----------|----------|
-| Delivery SSOT | [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md)（§0 scope lock, R-001–R-010 requirements, §9 deferred D-001–D-008） |
+| Delivery SSOT | [v1.18-delivery-compass-v1.md](../iterations/v1.18-delivery-compass-v1.md)（§0 scope lock, R-001–R-010 requirements, §9 deferred D-001–D-008） |
 | Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` includes V1.18 code-quality residuals + V1.19 deferred functional gaps |
 | Plan | `2026-05-15-v1.18-agent-host-core` — **Done** (archived to `archived/plans/`) |
 | New tracker items | 11 | DF-18 through DF-28 (deferred from V1.18 §9 + QC residuals → V1.19 hardening backlog) |
@@ -227,7 +227,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 | Category | Position |
 |----------|----------|
-| Program | **Compass registered** — delivery SSOT：[v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md). `status.json` `plans[]` **empty**. |
+| Program | **Compass registered** — delivery SSOT：[v1.16-delivery-compass-v1.md](../iterations/v1.16-delivery-compass-v1.md). `status.json` `plans[]` **empty**. |
 | Next version (gated) | ~~V1.17 prompt-skills planning package tracked as **BL-09** in §3.4~~ → V1.17 **Done**; BL-09 gate met and executed. |
 
 ### Items targeting V1.19
@@ -294,28 +294,28 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 
 Internal (this repo):
 
-- V1.2 delivery compass: [v1.2-delivery-compass-v1.md](v1.2-delivery-compass-v1.md)
-- V1.2 reclassification matrix: [v1.2-reclassification-matrix-v1.md](v1.2-reclassification-matrix-v1.md)
-- V1.3 delivery compass: [v1.3-delivery-compass-v1.md](v1.3-delivery-compass-v1.md)
-- V1.4 delivery compass: [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md)
-- V1.5 delivery compass: [v1.5-nexus-delivery-compass-v1.md](v1.5-nexus-delivery-compass-v1.md)
-- V1.6 delivery compass: [v1.6-delivery-compass-v1.md](v1.6-delivery-compass-v1.md)
-- V1.7 delivery compass: [v1.7-delivery-compass-v1.md](v1.7-delivery-compass-v1.md)
-- V1.8 delivery compass: [v1.8-delivery-compass-v1.md](v1.8-delivery-compass-v1.md)
-- V1.9 delivery compass: [v1.9-delivery-compass-v1.md](v1.9-delivery-compass-v1.md)
-- V1.10 delivery compass: [v1.10-delivery-compass-v1.md](v1.10-delivery-compass-v1.md)
-- V1.13 delivery compass: [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md)
-- V1.14 delivery compass: [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md)
-- V1.15 delivery compass: [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md)
-- V1.16 delivery compass: [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md)
-- V1.17 delivery compass: [v1.17-delivery-compass-v1.md](v1.17-delivery-compass-v1.md)
-- V1.18 delivery compass: [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md)
-- V1.19 delivery compass: [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md)
+- V1.2 delivery compass: [v1.2-delivery-compass-v1.md](../iterations/v1.2-delivery-compass-v1.md)
+- V1.2 reclassification matrix: [v1.2-reclassification-matrix-v1.md](../iterations/v1.2-reclassification-matrix-v1.md)
+- V1.3 delivery compass: [v1.3-delivery-compass-v1.md](../iterations/v1.3-delivery-compass-v1.md)
+- V1.4 delivery compass: [v1.4-delivery-compass-v1.md](../iterations/v1.4-delivery-compass-v1.md)
+- V1.5 delivery compass: [v1.5-nexus-delivery-compass-v1.md](../iterations/v1.5-nexus-delivery-compass-v1.md)
+- V1.6 delivery compass: [v1.6-delivery-compass-v1.md](../iterations/v1.6-delivery-compass-v1.md)
+- V1.7 delivery compass: [v1.7-delivery-compass-v1.md](../iterations/v1.7-delivery-compass-v1.md)
+- V1.8 delivery compass: [v1.8-delivery-compass-v1.md](../iterations/v1.8-delivery-compass-v1.md)
+- V1.9 delivery compass: [v1.9-delivery-compass-v1.md](../iterations/v1.9-delivery-compass-v1.md)
+- V1.10 delivery compass: [v1.10-delivery-compass-v1.md](../iterations/v1.10-delivery-compass-v1.md)
+- V1.13 delivery compass: [v1.13-delivery-compass-v1.md](../iterations/v1.13-delivery-compass-v1.md)
+- V1.14 delivery compass: [v1.14-delivery-compass-v1.md](../iterations/v1.14-delivery-compass-v1.md)
+- V1.15 delivery compass: [v1.15-delivery-compass-v1.md](../iterations/v1.15-delivery-compass-v1.md)
+- V1.16 delivery compass: [v1.16-delivery-compass-v1.md](../iterations/v1.16-delivery-compass-v1.md)
+- V1.17 delivery compass: [v1.17-delivery-compass-v1.md](../iterations/v1.17-delivery-compass-v1.md)
+- V1.18 delivery compass: [v1.18-delivery-compass-v1.md](../iterations/v1.18-delivery-compass-v1.md)
+- V1.19 delivery compass: [v1.19-delivery-compass-v1.md](../iterations/v1.19-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
-- Orchestration engine design: [../archived/knowledge/orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)
-- ACP client tech spec v2: [../archived/knowledge/acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md)
-- Creator schedule & core context: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)
-- Crate selection best practices: [crate-selection-best-practices-v1.md](crate-selection-best-practices-v1.md)
+- Orchestration engine design: [../knowledge/orchestration-engine.md](../knowledge/orchestration-engine.md)
+- ACP client tech spec v2: [../archived/../archived/knowledge/acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md)
+- Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
+- Crate selection best practices: [crate-selection-best-practices.md](crate-selection-best-practices.md)
 - `status.json` (machine-state residuals): [../status.json](../status.json)
 
 External (v1-spec, resolved via `.agents/local-paths.json`):

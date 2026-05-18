@@ -7,9 +7,9 @@
 - **Scope**: `nexus` repository — `crates/nexus-agent-host`, ACP integration, native CLI providers, discovery, policy, streaming
 - **Supersedes**: V1.18 compass §3–§5 (architecture, research, PM notes), V1.19 compass §3–§4 (item details referencing OpenDesign/Multica patterns)
 - **Referenced by**:
-  - [V1.18 Delivery Compass](v1.18-delivery-compass-v1.md) — original implementation context
-  - [V1.19 Delivery Compass](v1.19-delivery-compass-v1.md) — hardening context
-  - [V1.20 Delivery Compass](v1.20-delivery-compass-v1.md) — API layer redesign
+  - [V1.18 Delivery Compass](../iterations/v1.18-delivery-compass-v1.md) — original implementation context
+  - [V1.19 Delivery Compass](../iterations/v1.19-delivery-compass-v1.md) — hardening context
+  - [V1.20 Delivery Compass](../iterations/v1.20-delivery-compass-v1.md) — API layer redesign
 - **External references**:
   - Multica: <https://github.com/multica-ai/multica>
   - OpenDesign: <https://github.com/nexu-io/open-design>

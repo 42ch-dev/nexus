@@ -41,7 +41,7 @@ This implementation delivers a well-architected foundation for ACP client integr
   - `cargo clippy --all -- -D warnings` → PASS (0 warnings)
   - `cargo fmt --check` → PASS for new code (generated code uses nightly ignore)
   - `cargo test --all` → PASS (38 unit + 16 integration tests)
-  - Manual code review against tech spec `acp-client-tech-spec-v1.md`
+  - Manual code review against tech spec `acp-client-tech-spec-legacy.md`
 
 ## Findings
 

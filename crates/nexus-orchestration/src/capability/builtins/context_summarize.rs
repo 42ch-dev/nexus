@@ -5,7 +5,7 @@
 //! result for the engine to write as a new `core_context_versions` row with
 //! `derivation_kind = 'llm_summarize'`.
 //!
-//! Design: `creator-schedule-and-core-context-v1.md` §11.
+//! Design: `creator-schedule-and-core-context.md` §11.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;

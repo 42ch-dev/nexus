@@ -20,7 +20,7 @@
 //!
 //! The sync `outbox_entries` table, its relationship to the daemon `outbox` queue,
 //! and the planned `schema_version` rollout are documented under the repository
-//! root at `.agents/plans/archived/knowledge/outbox-schema-v2.md` (v1.1 → v1.2 steps, safety rules,
+//! root at `.agents/plans/archived/knowledge/outbox-schema.md` (v1.1 → v1.2 steps, safety rules,
 //! and future evolution).
 
 use std::path::Path;

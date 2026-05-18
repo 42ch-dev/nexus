@@ -1,6 +1,6 @@
 //! Capability trait + registry.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §5.1–5.2.
+//! Design: `.agents/knowledge/orchestration-engine.md` §5.1–5.2.
 
 pub mod builtins;
 

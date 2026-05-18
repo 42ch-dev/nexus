@@ -8,7 +8,7 @@
       "title": "Audit table header says 11 local but 10 were actually moved",
       "severity": "nit",
       "source": "qc3 S1",
-      "scope": "schemas-boundary-v1.md \u00a75.2",
+      "scope": "schemas-boundary.md \u00a75.2",
       "decision": "accept",
       "owner": "fullstack-dev",
       "target_date": "V1.5",

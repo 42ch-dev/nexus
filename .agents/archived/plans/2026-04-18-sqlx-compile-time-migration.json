@@ -13,9 +13,9 @@
     "phase": "V1.4",
     "working_branch": "feature/v1.4",
     "merge_target": "main",
-    "description": "Migrate all ~79 runtime sqlx::query() calls to compile-time checked macros (query!/query_as!/query_scalar!), establish .sqlx/ offline workflow, codify AGENTS.md convention. Spec: knowledge/sqlx-compile-time-migration-v1.md",
-    "wave_0_spec": ".agents/knowledge/sqlx-compile-time-migration-v1.md",
-    "spec_refs": [".agents/knowledge/sqlx-compile-time-migration-v1.md"],
+    "description": "Migrate all ~79 runtime sqlx::query() calls to compile-time checked macros (query!/query_as!/query_scalar!), establish .sqlx/ offline workflow, codify AGENTS.md convention. Spec: knowledge/sqlx-compile-time-migration.md",
+    "wave_0_spec": ".agents/knowledge/sqlx-compile-time-migration.md",
+    "spec_refs": [".agents/knowledge/sqlx-compile-time-migration.md"],
     "effort_agent_oriented": "M (5 agent sessions, 5 tasks)",
     "commits": [
       "df6a293 chore(sqlx): initialize .sqlx offline workflow and reference database setup",

@@ -2,7 +2,7 @@
 
 **Status**: Active — design SSOT for challenge-solver module
 **Source plan**: V1.3 Creator Register CLI
-**Compass**: [v1.3-delivery-compass-v1.md](v1.3-delivery-compass-v1.md)
+**Compass**: [v1.3-delivery-compass-v1.md](../../iterations/v1.3-delivery-compass-v1.md)
 **Platform spec reference**: v1.3-spec §4.3–4.5 (challenge generation rules)
 **Created**: 2026-04-16
 

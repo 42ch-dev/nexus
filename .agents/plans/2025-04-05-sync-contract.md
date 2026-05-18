@@ -47,7 +47,7 @@
 - **Persistence recommendation**: Use SQLite (`$HOME/.nexus42/state.db`) instead of JSON file for:
   - Atomic transactions
   - Crash consistency
-  - Alignment with CLI SQLite usage (per `restructured-context-assembly-v1.md` §2.3)
+  - Alignment with CLI SQLite usage (per `restructured-context-assembly.md` §2.3)
 - If using JSON file for V1.0: `$HOME/.nexus42/outbox.json` (add migration note for future SQLite migration)
 
 ### Task 3: Implement Bundle Builder (NEW: Bundle Metadata Fields)
@@ -142,7 +142,7 @@
 |-------|------|---------|-------------|
 | `submitting_creator_id` | `CreatorId` | Identifies which Creator submitted this bundle | roadmap §3.1.1, §3.1.2 (Creator first-class citizen) |
 | `manuscript_phase` | `ManuscriptPhase` | Current manuscript lifecycle phase | roadmap §3.1.1, `data-model-v1.md` |
-| `output_manuscript` | `bool` | Whether this execution requires manuscript output | `story-manifest.schema.json`, `restructured-context-assembly-v1.md` §3.4 |
+| `output_manuscript` | `bool` | Whether this execution requires manuscript output | `story-manifest.schema.json`, `restructured-context-assembly.md` §3.4 |
 
 **Dependency**: These fields are prerequisites for `context-assembly` plan (unblocks CTX-R1).
 
@@ -154,8 +154,8 @@
 |------------|--------|------------|
 | Rust-first for sync library | AGENTS.md | ✅ |
 | JSON Schema as wire truth source | `codegen-strategy-v1.md` | ✅ (Task 1: anchor to schemas, use generated types) |
-| CLI uses SQLite for local state | `restructured-context-assembly-v1.md` §2.3 | ✅ (Task 2: SQLite outbox) |
-| No Neo4j/Postgres/pgvector on CLI side | `restructured-context-assembly-v1.md` §2.3 | ✅ |
+| CLI uses SQLite for local state | `restructured-context-assembly.md` §2.3 | ✅ (Task 2: SQLite outbox) |
+| No Neo4j/Postgres/pgvector on CLI side | `restructured-context-assembly.md` §2.3 | ✅ |
 | V1.0 `submitting_creator_id` | roadmap §3.1.1, §3.1.2 | ✅ (Task 3) |
 | V1.0 `manuscript_phase` | roadmap §3.1.1 | ✅ (Task 3) |
 | Phase A/B partial apply | roadmap §3.1.4 (P1) | ✅ (Task 6) |

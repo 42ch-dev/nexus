@@ -12,7 +12,7 @@
 //! `EngineSharedState`, eliminating duplication between `GraphFlowEngine` and
 //! `EngineProxy`. Both hold an `Arc<EngineSharedState>`.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.2.
+//! Design: `.agents/knowledge/orchestration-engine.md` §4.2.
 
 use async_trait::async_trait;
 use graph_flow::{ExecutionStatus, FlowRunner, Graph, SessionStorage};

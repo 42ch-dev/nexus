@@ -16,7 +16,7 @@ generated_at: "2026-04-06"
 
 ## Summary
 
-The implementation follows the architecture spec in `.agents/archived/knowledge/acp-client-tech-spec-v1.md` (archived 2026-04-17 — current design in `knowledge/acp-client-tech-spec-v2.md`) with correct module structure and appropriate use of the adapter pattern. However, **the ACP SDK integration is incomplete** — `AcpSdkAdapter` methods are placeholders with `TODO` comments for the `LocalSet` thread integration that the spec §2.3 identifies as critical for handling `!Send` futures. This is a **blocking issue** because the V1.0 ACP client cannot actually communicate with agents until the full SDK integration is implemented.
+The implementation follows the architecture spec in `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17 — current design in `archived/archived/knowledge/acp-client-tech-spec.md`) with correct module structure and appropriate use of the adapter pattern. However, **the ACP SDK integration is incomplete** — `AcpSdkAdapter` methods are placeholders with `TODO` comments for the `LocalSet` thread integration that the spec §2.3 identifies as critical for handling `!Send` futures. This is a **blocking issue** because the V1.0 ACP client cannot actually communicate with agents until the full SDK integration is implemented.
 
 **Progress assessment**: According to `status.json`, the plan is at 42% with Tasks 1, 2, 5 done and Tasks 3, 4, 6 remaining. The code diff shows `agent.rs` and `transport.rs` exist, suggesting partial implementation of Tasks 3 and 4, but the SDK adapter remains a stub.
 

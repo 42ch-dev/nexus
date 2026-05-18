@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, sqlx (compile-time macros), SQLite, cargo-sqlx CLI
 
-**Spec:** `.agents/knowledge/sqlx-compile-time-migration-v1.md` (authoritative technical spec — read before implementing)
+**Spec:** `.agents/archived/knowledge/sqlx-compile-time-migration.md` (authoritative technical spec — read before implementing)
 
 ---
 

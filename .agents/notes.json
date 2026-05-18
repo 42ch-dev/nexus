@@ -156,7 +156,7 @@
     },
     {
       "updated_at": "2026-04-17",
-      "message": "V1.4 compass scope extended: (a) schemas/ boundary refactor tightened to 'platform HTTP observability only' — local types move to crates/nexus-contracts/src/local/ (schemas-boundary-v1.md); (b) B-track folded in as WS7 — Creator Schedule + immutable versioned core_context (creator-schedule-and-core-context-v1.md) with V1.5 LlmSummarize forward-compat; (c) §10 SSOT allocation matrix formalised."
+      "message": "V1.4 compass scope extended: (a) schemas/ boundary refactor tightened to 'platform HTTP observability only' — local types move to crates/nexus-contracts/src/local/ (schemas-boundary.md); (b) B-track folded in as WS7 — Creator Schedule + immutable versioned core_context (creator-schedule-and-core-context.md) with V1.5 LlmSummarize forward-compat; (c) §10 SSOT allocation matrix formalised."
     },
     {
       "updated_at": "2026-04-17",
@@ -172,11 +172,11 @@
     },
     {
       "updated_at": "2026-04-20",
-      "message": "V1.6 delivery compass created (knowledge/v1.6-delivery-compass-v1.md). 4 tracks: Track A (residual governance R1/R2/R3/R6), Track B (ACP SDK DTO decoupling — 16 hand-written DTOs + subscribe extraction), Track C (permission CLI — add/revoke/list/reset), Track D (multi-preset scheduler). Architect + PM dual review integrated. 8 risks registered. DEBT-RAND-073 moved from V1.6 to backlog (accept). Branch: feature/v1.6."
+      "message": "V1.6 delivery compass created (iterations/v1.6-delivery-compass-v1.md). 4 tracks: Track A (residual governance R1/R2/R3/R6), Track B (ACP SDK DTO decoupling — 16 hand-written DTOs + subscribe extraction), Track C (permission CLI — add/revoke/list/reset), Track D (multi-preset scheduler). Architect + PM dual review integrated. 8 risks registered. DEBT-RAND-073 moved from V1.6 to backlog (accept). Branch: feature/v1.6."
     },
     {
       "updated_at": "2026-04-21",
-      "message": "V1.7 delivery compass drafted (knowledge/v1.7-delivery-compass-v1.md) + deferred-features-cross-version-tracker-v1.md committed. 6 workstreams: WS-A/B/C (close 8 residuals — DTO-C1/C2/W1, PERM-W1/W2/W3, R4, R7), WS-D (ACP SDK v0.11.0+ migration), WS-E (multi-agent worker — XL, OQ-7), WS-F (capability schema registry sharing — M). Branch: feature/v1.7. Draft — pending user confirmation."
+      "message": "V1.7 delivery compass drafted (iterations/v1.7-delivery-compass-v1.md) + deferred-features-cross-version-tracker.md committed. 6 workstreams: WS-A/B/C (close 8 residuals — DTO-C1/C2/W1, PERM-W1/W2/W3, R4, R7), WS-D (ACP SDK v0.11.0+ migration), WS-E (multi-agent worker — XL, OQ-7), WS-F (capability schema registry sharing — M). Branch: feature/v1.7. Draft — pending user confirmation."
     }
   ]
 }

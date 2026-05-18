@@ -38,7 +38,7 @@ For wire shapes, see `schemas/domain/` (`delta.schema.json`, `bundle.schema.json
 | **Bundle content digest** | Hash of **only** `deltas[]` per §3 above | Bundle `canonical_hash`, platform Postgres `SyncCommand.canonical_hash` |
 | **Graph entity provenance tag** | Neo4j Phase B **placeholder** `sha256:<bundleId>:<entityId>` — **not** content-addressed | Neo4j node property `canonical_hash` |
 
-They **must not** be conflated. Context Assembly / graph reads default to the **graph tag** unless stated otherwise. **Neo4j-only** operational detail lives in the **nexus-platform** repo under its own `plans/knowledge/canonical-hash-v1.md` (ADR-006 §4.4).
+They **must not** be conflated. Context Assembly / graph reads default to the **graph tag** unless stated otherwise. **Neo4j-only** operational detail lives in the **nexus-platform** repo under its own `plans/knowledge/canonical-hash.md` (ADR-006 §4.4).
 
 ---
 

@@ -5,11 +5,11 @@
 **Scope**: Multi-Schedule lifecycle per creator + the immutable versioned `core_context` that stabilises preset execution across edits.
 **Wave-0 design inputs consumed**:
 
-- [orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) — Task/Capability/Session primitives this spec builds on
-- [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) — program-level scope and milestones
-- [schemas-boundary-v1.md](../archived/knowledge/schemas-boundary-v1.md) — confirms Schedule / core_context types are **local** (not wire)
+- [orchestration-engine.md](../knowledge/orchestration-engine.md) — Task/Capability/Session primitives this spec builds on
+- [v1.4-delivery-compass-v1.md](../iterations/v1.4-delivery-compass-v1.md) — program-level scope and milestones
+- [schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md) — confirms Schedule / core_context types are **local** (not wire)
 
-**Answers for open questions originally parked in `orchestration-engine-v1.md` §11**: OQ-1, OQ-2, OQ-3, OQ-4, OQ-5 are resolved here (see §2 "Confirmed Decisions"). OQ-6 is scoped for V1.4; OQ-7/OQ-8 remain V1.5+.
+**Answers for open questions originally parked in `orchestration-engine.md` §11**: OQ-1, OQ-2, OQ-3, OQ-4, OQ-5 are resolved here (see §2 "Confirmed Decisions"). OQ-6 is scoped for V1.4; OQ-7/OQ-8 remain V1.5+.
 
 ---
 
@@ -34,7 +34,7 @@
 
 ## 1. Problem Statement
 
-The orchestration engine ([orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md)) ships a `Session` primitive that can run one preset to completion. It does **not** answer:
+The orchestration engine ([orchestration-engine.md](../knowledge/orchestration-engine.md)) ships a `Session` primitive that can run one preset to completion. It does **not** answer:
 
 1. **When** should the daemon start running preset `X` for creator `C`? ("daemon knows when to begin")
 2. **What** does a user see when asking "what does my creator have planned for the next while?"
@@ -56,8 +56,8 @@ From the 2026-04-17 brainstorming and its follow-up (item 3 of the 2026-04-17 PM
 - **`core_context` is immutable-versioned** — every derivation step produces a new `core_context_version` row; the Schedule holds a pointer to the current version; history is user-queryable.
 - **`iterated_experience` in V1.4 is "preset `context_update` hook only"** (Q1=D answer, 2026-04-17) — the derivation trace enum **reserves** `kind: "llm_summarize"` but V1.4 does not emit that kind; **V1.5 implemented** a `context.summarize` capability (`crates/nexus-orchestration/src/capability/builtins/context_summarize.rs`) that writes this kind without schema migration.
 - **Seed → first `core_context` semantics governed by preset** (Q2=C answer, 2026-04-17) — preset YAML declares the initial-action behaviour; V1.4 built-in presets default to "seed content becomes `core_context` v0 verbatim"; a future preset may declare a one-shot LLM expansion step and the engine will execute it.
-- **Trigger model**: V1.4 supported on-demand triggers (`schedule start`, auto-advance, `timer.wait_until`). **V1.5 WS-D added wall-clock / cron triggers** via a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz` (see [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §2.7 for the four hard constraints this implementation satisfies).
-- **Schedule and core_context types are local** — per [schemas-boundary-v1.md](../archived/knowledge/schemas-boundary-v1.md) §2, platform never observes these; they live as hand-coded Rust in `crates/nexus-contracts/src/local/schedule/` (or the appropriate local submodule).
+- **Trigger model**: V1.4 supported on-demand triggers (`schedule start`, auto-advance, `timer.wait_until`). **V1.5 WS-D added wall-clock / cron triggers** via a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz` (see [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.7 for the four hard constraints this implementation satisfies).
+- **Schedule and core_context types are local** — per [schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md) §2, platform never observes these; they live as hand-coded Rust in `crates/nexus-contracts/src/local/schedule/` (or the appropriate local submodule).
 
 ## 3. Data Model
 
@@ -147,7 +147,7 @@ pub enum CoreContextAuthor {
 
 ### 3.3 Relationship to `orchestration_sessions`
 
-The orchestration engine's `Session` (from [orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) §4.3) **does not change**. A Schedule **owns zero or one active Session** at a time:
+The orchestration engine's `Session` (from [orchestration-engine.md](../knowledge/orchestration-engine.md) §4.3) **does not change**. A Schedule **owns zero or one active Session** at a time:
 
 - `Schedule.status = Pending | Paused (pre-exec)` ⇒ no Session yet.
 - `Schedule.status = Running` ⇒ `Schedule.current_session_id` points at an active row in `orchestration_sessions`.
@@ -180,7 +180,7 @@ digraph schedule_lifecycle {
 Rules:
 
 - Only the engine's Session terminal events flip a Schedule to `Completed` / `Failed`. The engine signals the Schedule supervisor (new module in `nexus-orchestration`; see §12).
-- `cancel` is always available non-terminally; it cascades to the active Session via `engine.signal(session, Cancel)` ([orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) §4.5).
+- `cancel` is always available non-terminally; it cascades to the active Session via `engine.signal(session, Cancel)` ([orchestration-engine.md](../knowledge/orchestration-engine.md) §4.5).
 - A Schedule's dependency set (`depends_on`) gates `Pending → Running`: the Schedule cannot auto-start until every dep is `Completed` or `Cancelled`. A `Failed` dependency blocks auto-start (escalates to user: "dependency failed; resolve or remove").
 
 ## 5. Multi-Schedule Concurrency (per creator)
@@ -199,7 +199,7 @@ The Schedule supervisor (new in `nexus-orchestration`) maintains a per-creator q
 
 ### 5.2 Single-worker-per-creator constraint
 
-Per [orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) §6.2, one creator has one ACP worker subprocess in V1.4 MVP, and that worker holds **one** ACP session. This puts a hard cap on **parallel ACP-calling** Schedules for the same creator:
+Per [orchestration-engine.md](../knowledge/orchestration-engine.md) §6.2, one creator has one ACP worker subprocess in V1.4 MVP, and that worker holds **one** ACP session. This puts a hard cap on **parallel ACP-calling** Schedules for the same creator:
 
 - At most **one** Schedule is doing `acp.prompt` at any instant for a given creator.
 - A `ParallelWith` / `ParallelAny` admission is architecturally legal, but if both running Schedules hit an `acp.prompt` node at the same wall-clock tick, the second one enters a per-creator "ACP busy" queue (short wait, not a pause).
@@ -252,7 +252,7 @@ The **content** of historical versions is returned on request (`schedule context
 
 ## 7. Preset YAML Additions
 
-Extensions to the preset bundle format ([orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) §7.2) that WS7 introduces. These are **additive** and optional — existing V1.4-era presets without these fields behave as if they had the defaults.
+Extensions to the preset bundle format ([orchestration-engine.md](../knowledge/orchestration-engine.md) §7.2) that WS7 introduces. These are **additive** and optional — existing V1.4-era presets without these fields behave as if they had the defaults.
 
 ### 7.1 `initial_action` (preset root)
 
@@ -359,7 +359,7 @@ nexus42 schedule start <schedule-id>              # force pending→running if e
 nexus42 schedule pause <schedule-id>              # non-terminal only
 nexus42 schedule resume <schedule-id>             # from paused
 nexus42 schedule cancel <schedule-id>             # non-terminal only
-nexus42 schedule advance <schedule-id>            # (existing, from orchestration-engine-v1.md §10.4) — manual state advance on a running Schedule
+nexus42 schedule advance <schedule-id>            # (existing, from orchestration-engine.md §10.4) — manual state advance on a running Schedule
 ```
 
 ### 8.6 Introspection
@@ -372,7 +372,7 @@ Returns a human-readable summary of the creator's Schedule timeline (past N days
 
 ## 9. HTTP Surface (`/v1/local/orchestration/schedules/*`)
 
-Following the pattern established in [acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md) §4.3 (orchestration control endpoints), the new endpoints:
+Following the pattern established in [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md) §4.3 (orchestration control endpoints), the new endpoints:
 
 | Method | Path                                                                  | Purpose                                                     |
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -385,11 +385,11 @@ Following the pattern established in [acp-client-tech-spec-v2.md](../archived/kn
 | GET    | `/v1/local/orchestration/schedules/{schedule_id}/core-context-history`| Full derivation trace (meta by default, content with flag)  |
 | DELETE | `/v1/local/orchestration/schedules/{schedule_id}`                     | Remove Schedule (if terminal)                               |
 
-Per [schemas-boundary-v1.md](../archived/knowledge/schemas-boundary-v1.md) §2, these request/response types are **local** (platform never observes them). Request/response Rust types live in `crates/nexus-contracts/src/local/schedule/http.rs` — hand-written, no JSON Schema file.
+Per [schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md) §2, these request/response types are **local** (platform never observes them). Request/response Rust types live in `crates/nexus-contracts/src/local/schedule/http.rs` — hand-written, no JSON Schema file.
 
 ## 10. SQLite Schema Additions
 
-Migration under `crates/nexus-local-db/migrations/` (coordinated with the orchestration_sessions migration from [orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) §4.3):
+Migration under `crates/nexus-local-db/migrations/` (coordinated with the orchestration_sessions migration from [orchestration-engine.md](../knowledge/orchestration-engine.md) §4.3):
 
 ```sql
 CREATE TABLE IF NOT EXISTS creator_schedules (
@@ -546,11 +546,11 @@ Schedule and core_context Rust types in `crates/nexus-contracts/src/local/schedu
 
 Internal:
 
-- [orchestration-engine-v1.md](../archived/knowledge/orchestration-engine-v1.md) — engine primitives; §11 OQ list now answered here
-- [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) — program scope (WS7)
-- [schemas-boundary-v1.md](../archived/knowledge/schemas-boundary-v1.md) — confirms Schedule types are local
-- [acp-client-tech-spec-v2.md](../archived/knowledge/acp-client-tech-spec-v2.md) §4.3 — orchestration HTTP surface pattern
-- [daemon-lifecycle-api-v2.md](../archived/knowledge/daemon-lifecycle-api-v2.md) — supervisor start/stop coupled to `Running`/`Stopping`
+- [orchestration-engine.md](../knowledge/orchestration-engine.md) — engine primitives; §11 OQ list now answered here
+- [v1.4-delivery-compass-v1.md](../iterations/v1.4-delivery-compass-v1.md) — program scope (WS7)
+- [schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md) — confirms Schedule types are local
+- [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
+- [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`
 
 External:
 

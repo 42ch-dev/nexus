@@ -13,7 +13,7 @@
       "decision": "resolved",
       "owner": "@fullstack-dev",
       "target": "Before V1.1 release",
-      "closure_evidence": "Commit 6f88cb6: Added docs/migrations/outbox-schema-v2.md; outbox.rs points to repo-root guide",
+      "closure_evidence": "Commit 6f88cb6: Added docs/migrations/outbox-schema.md; outbox.rs points to repo-root guide",
       "closed_at": "2026-04-10"
     },
     {

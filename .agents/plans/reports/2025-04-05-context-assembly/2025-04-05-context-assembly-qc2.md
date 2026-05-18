@@ -251,7 +251,7 @@ pub fn generate(&self) -> std::io::Result<Option<GeneratedSummary>> {
 
 | Check | Command/Evidence | Result |
 |-------|------------------|--------|
-| Spec alignment | Compared implementation against `restructured-context-assembly-v1.md` §3, §5 | ✅ CLI-side scope correct; no Neo4j/Postgres/pgvector access |
+| Spec alignment | Compared implementation against `restructured-context-assembly.md` §3, §5 | ✅ CLI-side scope correct; no Neo4j/Postgres/pgvector access |
 | Architecture boundary | Reviewed module structure: `crates/nexus42/src/context/` contains only summary, client, types | ✅ No platform-side concerns leaked in |
 | Schema compliance | Compared `types.rs` fields against `context-assembly-v1.schema.json` definitions | ❌ Pattern validation, enum validation, and type constraints missing |
 | Rust formatting | `cargo fmt --check` output | ❌ Fails — see `client.rs` lines 61-211 |
@@ -313,7 +313,7 @@ Findings CTX-M1 through CTX-L3 are recommendations for improved robustness and m
 - Ran `cargo fmt --check` (found violations in `client.rs`)
 - Verified no Neo4j/Postgres/pgvector dependencies introduced  
 **Source Attribution**:
-- Primary Evidence: git diff `main...HEAD`, spec document `restructured-context-assembly-v1.md`, schema files
+- Primary Evidence: git diff `main...HEAD`, spec document `restructured-context-assembly.md`, schema files
 - Evidence Quality: High
 - Traceability: CTX-C1→schema file lines 8-160; CTX-C2→types.rs lines 11-18; CTX-C3→schema lines 52-62 vs types.rs lines 26-27  
 **Issues/Risks**: 

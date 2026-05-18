@@ -27,7 +27,7 @@
     "milestone": "M1",
     "dependency": [],
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "scope": "Dual local identity schema, store, CRUD; anonymous temporary + local persistent identity implementation",
     "deliverables": [
       "Identity schema and store implementation",

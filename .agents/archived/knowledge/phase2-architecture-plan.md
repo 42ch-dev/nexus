@@ -3,7 +3,7 @@
 **Date**: 2026-04-06
 **Author**: @architect
 **Based on**: V1.0-phase1 Architecture Review V1, V1.0-phase1 Product Review V1
-**Status**: Superseded — merged into `v1.1-overview-v1.md`. Key decisions and residual matrix retained as historical reference.
+**Status**: Superseded — merged into `program-overview-legacy.md`. Key decisions and residual matrix retained as historical reference.
 
 ---
 
@@ -174,7 +174,7 @@ Resolve the 4 DEBT-X cross-cutting items and standardize error handling across t
 **Dependencies**: Plan A (Foundation Hardening) — needs error strategy to handle ACP errors properly
 **Owner**: @fullstack-dev
 **Tags**: `V1.0-phase2`, `acp`, `sdk`, `agent-interaction`
-**Spec input**: `.agents/archived/knowledge/acp-client-tech-spec-v1.md` (archived 2026-04-17)
+**Spec input**: `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17)
 
 #### Description
 
@@ -747,9 +747,9 @@ LEGEND:
 
 | Document | Path | Relevance |
 |----------|------|-----------|
-| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review-v1.md` | Primary input — 36 findings |
-| V1.0-phase1 Product Review | `.agents/archived/knowledge/phase1-product-review-v1.md` | Feature completeness and UX assessment |
-| ACP Client Tech Spec | `.agents/archived/knowledge/acp-client-tech-spec-v1.md` (archived 2026-04-17) | Detailed ACP SDK integration design |
+| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review.md` | Primary input — 36 findings |
+| V1.0-phase1 Product Review | `.agents/archived/knowledge/phase1-product-review.md` | Feature completeness and UX assessment |
+| ACP Client Tech Spec | `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | Detailed ACP SDK integration design |
 | Plan Status (residuals) | `.agents/status.json` | 38 open residuals, metadata |
 | Knowledge Index | `.agents/knowledge/README.md` | Index of all knowledge documents |
 | Project AGENTS.md | `AGENTS.md` | Development workflow, constraints, CI |

@@ -5,13 +5,13 @@
 **SSOT last reconciled**: 2026-04-09  
 **Status**: Active — **resolution SSOT** for architecture-alignment technical debt (TD-1…TD-13) and its mapping to program plans; **baseline analysis** for §2 dimension tables remains the 2026-04-08 snapshot unless a row is explicitly updated below.  
 **Scope**: `crates/nexus-contracts`, `nexus-domain`, `nexus-local-db`, `nexus-sync`, `nexus42` (CLI), `nexus42d` (daemon)  
-**Benchmark**: `v1-spec/` (architecture/v1.md, domain/data-model-v1.md, cli-sync/cli-spec-v1.md, acp-runtime/acp-client-tech-spec-v1.md, cli-sync/sync-contract-v1.md)
+**Benchmark**: `v1-spec/` (architecture/v1.md, domain/data-model-v1.md, cli-sync/cli-spec-v1.md, acp-runtime/acp-client-tech-spec-legacy.md, cli-sync/sync-contract-v1.md)
 
 **Authoritative execution SSOT**: Open **residual rows** and plan lifecycle live in [`.agents/status.json`](../status.json) (**root** `residual_findings`, `plans[]`). This document states **intent and narrative**; if a statement here disagrees with `status.json`, **fix this document** in the same change set that updates the SSOT file.
 
 **Related Documents**:
 
-- [v1.1-overview-v2.md](v1.1-overview-v2.md) — V1.1 program overview (nexus OSS); long-form legacy tables in [archived `v1.1-overview-v1.md`](../archived/knowledge/v1.1-overview-v1.md)
+- [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md) — V1.1 program overview (nexus OSS); long-form legacy tables in [program-overview-legacy.md](program-overview-legacy.md)
 - [README.md](README.md) — Knowledge base index and maintenance guidelines
 - [2026-04-09-v1.1-arch-alignment-closure.md](../2026-04-09-v1.1-arch-alignment-closure.md) — Plan to **fully close** remaining open alignment residuals (canonical_hash cross-stack parity; optional daemon eager push)
 
@@ -51,7 +51,7 @@ At baseline, several **critical and high gaps** were recorded (verbatim historic
 | TD-4 | High — String enums in contracts | **Resolved** — schema/codegen alignment delivered under blocker plan (no open row under this plan for TD-4). | — |
 | TD-5 | High — `canonical_hash` | **Partial** — in-repo computation exists; **cross-stack preimage**, golden vectors, and platform parity **not** closed. | `2026-04-09-v1.1-arch-alignment-blockers` → **ALIGN-HASH-01** (medium, open) |
 | TD-6 | High — User aggregate | **Resolved** — closed under blocker plan (no open row). | — |
-| TD-9 | Medium — Daemon state machine | **Resolved (v2)** — WS4 implemented full statig-based HSM with 6 states, entry/exit actions, subsystem bootstrap trait, v2 HTTP endpoint, signal handlers, panic bridge. See [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md). | — |
+| TD-9 | Medium — Daemon state machine | **Resolved (v2)** — WS4 implemented full statig-based HSM with 6 states, entry/exit actions, subsystem bootstrap trait, v2 HTTP endpoint, signal handlers, panic bridge. See [daemon-lifecycle-api.md](daemon-lifecycle-api.md). | — |
 | TD-7…TD-13 | Medium / Low / N/A | **Treated as in-scope for** `2026-04-08-v1.1-tech-debt-mitigation` **per blocker plan text**; **TD-12** was “no issue” at baseline. Other program debt (e.g. QC warnings on that plan) may still appear under **different** `residual_findings` keys — see SSOT file. | See `status.json` keys `2026-04-08-v1.1-tech-debt-mitigation`, `2025-04-05-domain-models`, etc. |
 
 **Counting helper**
@@ -113,7 +113,7 @@ At baseline, several **critical and high gaps** were recorded (verbatim historic
 
 **Summary**: 12 of 17 aggregates have domain implementations. 5 are missing domain logic (SyncCommand, DeltaBundle/Delta, OutboxEntry, WorkspaceBinding, AgentProfile). Of the 12 implemented, aggregate tables above are **Aligned** as of 2026-04-10 (historical enum gaps TD-2/TD-3 closed under arch-alignment blockers).
 
-*Table last refreshed: 2026-04-10 — see [v1.1-specs-align-review-v1.md](../archived/knowledge/v1.1-specs-align-review-v1.md) (archived 2026-04-17 after remediation plan Done).*
+*Table last refreshed: 2026-04-10 — see [specs-align-review.md](archived/knowledge/specs-align-review.md) (archived 2026-04-17 after remediation plan Done).*
 
 #### Enum Alignment (§7 of data-model-v1.md)
 
@@ -236,7 +236,7 @@ Full enum-by-enum comparison:
 ### 2.4 ACP Integration
 
 
-| Spec Requirement (acp-client-tech-spec-v1.md)         | Implementation                                                                                         | Alignment                                          |
+| Spec Requirement (acp-client-tech-spec-legacy.md)         | Implementation                                                                                         | Alignment                                          |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
 | Use `agent-client-protocol` v0.10.4                   | `nexus42/Cargo.toml` pins `agent-client-protocol = "=0.10.4"`                                          | **Aligned**                                        |
 | ACP Client-only (nexus42d is NOT an ACP Agent/Server) | Confirmed: daemon has no ACP server code; CLI spawns agent subprocesses directly                       | **Aligned**                                        |
@@ -322,7 +322,7 @@ Full enum-by-enum comparison:
 | Priority | ID    | Action                                                                                                     | Effort |
 | -------- | ----- | ---------------------------------------------------------------------------------------------------------- | ------ |
 | **P2**   | TD-8  | Consolidate dual outbox: migrate daemon's `outbox` table to use or delegate to `nexus-sync::Outbox` schema | M      |
-| **P2**   | TD-9  | **Done (WS4)** — Implement daemon lifecycle state machine — see daemon-lifecycle-api-v2.md               | —      |
+| **P2**   | TD-9  | **Done (WS4)** — Implement daemon lifecycle state machine — see daemon-lifecycle-api.md               | —      |
 | **P2**   | TD-10 | Implement real device flow OAuth (replace mock tokens with platform auth endpoints)                        | M      |
 | **P2**   | TD-7  | Verify ForkBranch field naming consistency across all three layers (spec, domain, contracts)               | XS     |
 
@@ -360,7 +360,7 @@ After TD-2/TD-3/TD-4 delivery, regenerate or spot-check codegen and update this 
 
 The technical debt items identified in this review are tracked and addressed in:
 
-- **[v1.1-overview-v2.md](v1.1-overview-v2.md)** — Authoritative V1.1 program overview (status-aligned); residual tables and platform coordination narrative. Deep historical matrices: [archived `v1.1-overview-v1.md`](../archived/knowledge/v1.1-overview-v1.md).
+- **[v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md)** — Authoritative V1.1 program overview (status-aligned); residual tables and platform coordination narrative. Deep historical matrices: [program-overview-legacy.md](program-overview-legacy.md).
 - **[2026-04-09-v1.1-arch-alignment-closure.md](../2026-04-09-v1.1-arch-alignment-closure.md)** — Closes remaining **ALIGN-HASH-01** and **ARCH-SYNC-D1**; after Done, update **§1.2** in this file
 
 ### Knowledge Base Index

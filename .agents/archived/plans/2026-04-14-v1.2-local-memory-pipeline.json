@@ -30,7 +30,7 @@
       "2026-04-14-v1.2-soul-lifecycle"
     ],
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "scope": "Local long-term memory, KB load, output generation — completing the local truth chain from SOUL through to user-facing output",
     "deliverables": [
       "Long-term memory lifecycle implementation",

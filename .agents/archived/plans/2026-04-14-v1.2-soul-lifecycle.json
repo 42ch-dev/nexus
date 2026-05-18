@@ -27,7 +27,7 @@
       "2026-04-14-v1.2-local-only-runtime"
     ],
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "scope": "SOUL lifecycle implementation \u2014 creation, accumulation, retrieval as local source-of-truth; state transitions and data ownership",
     "deliverables": [
       "SOUL lifecycle path implementation",

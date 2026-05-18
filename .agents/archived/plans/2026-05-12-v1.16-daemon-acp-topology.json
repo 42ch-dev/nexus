@@ -14,7 +14,7 @@
   "working_branch": "feature/v1.16-daemon-acp-topology",
   "qa_verdict": "Approve with residuals",
   "metadata": {
-    "primary_spec": ".agents/knowledge/v1.16-delivery-compass-v1.md",
+    "primary_spec": ".agents/iterations/v1.16-delivery-compass-v1.md",
     "spec_refs": [
       "nexus-platform/.agents/designs/v1-spec/cli-sync/cli-spec-v1.md"
     ]

@@ -48,4 +48,4 @@ User-installed presets are fully supported. The composable search order (highest
 
 ## Design Reference
 
-Full design: `.agents/knowledge/orchestration-engine-v1.md` (sections 7–9 cover presets, loader, validation).
+Full design: `.agents/knowledge/orchestration-engine.md` (sections 7–9 cover presets, loader, validation).

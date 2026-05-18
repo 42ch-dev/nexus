@@ -32,8 +32,8 @@
       "description": "Resolve DEBT-X1..X4, standardize error propagation, SQLite schema dedup, workspace validation middleware, unwrap cleanup",
       "dependency": "P0 bug fixes (fix/v1.0-p0-bugs)",
       "spec_refs": [
-        ".agents/archived/knowledge/phase1-architecture-review-v1.md",
-        ".agents/archived/knowledge/phase2-architecture-plan-v1.md"
+        ".agents/archived/knowledge/phase1-architecture-review.md",
+        ".agents/archived/knowledge/phase2-architecture-plan.md"
       ],
       "effort": "M — ~2-4 agent sessions",
       "residual_summary": "15 addressed (7 HIGH, 4 MEDIUM resolved; 1 HIGH, 3 MEDIUM partially)",

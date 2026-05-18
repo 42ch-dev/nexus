@@ -17,7 +17,7 @@
     "working_branch": "feature/v1.5-stabilization",
     "dependency": [],
     "blocks": [],
-    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "primary_spec": "iterations/v1.5-nexus-delivery-compass-v1.md",
     "gates": {
       "tests": "passed",
       "clippy": "clean",

@@ -16,7 +16,7 @@
     "merge_target": "main",
     "priority": "high",
     "phase": "v1.17",
-    "primary_spec": ".agents/knowledge/nexus42-single-binary-daemon-runtime-architecture-v1.md",
+    "primary_spec": ".agents/knowledge/nexus42-single-binary-daemon-runtime-architecture.md",
     "description": "Create nexus-daemon-runtime library crate, migrate modules from nexus42d, keep parallel compile path",
     "task_category": "logic",
     "gates": {

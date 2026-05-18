@@ -3,7 +3,7 @@
 //! Capability input/output schemas and related types that are local-only
 //! (not observed by `nexus-platform`).
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §5.3.
+//! Design: `.agents/knowledge/orchestration-engine.md` §5.3.
 
 pub mod http;
 pub mod preset;

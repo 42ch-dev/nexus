@@ -1,4 +1,4 @@
-//! Hand-written local types per `.agents/plans/knowledge/schemas-boundary-v1.md` §3.
+//! Hand-written local types per `.agents/archived/knowledge/schemas-boundary.md` §3.
 //! These types are NOT codegen'd; edit by hand.
 //!
 //! Local types are those that `nexus-platform` never observes over any wire channel.

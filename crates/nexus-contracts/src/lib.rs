@@ -3,7 +3,7 @@
 //! This crate contains type definitions generated from `schemas/` JSON Schema files.
 //! All wire types are auto-generated - do not modify manually.
 //!
-//! Hand-written local types live in `local/` — see `schemas-boundary-v1.md` §3.
+//! Hand-written local types live in `local/` — see `schemas-boundary.md` §3.
 
 pub mod enum_conversions;
 pub mod generated;

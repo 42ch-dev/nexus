@@ -4,7 +4,7 @@
 //! for each active creator. It hosts one or more ACP agent subprocesses and
 //! communicates with the daemon via stdin/stdout JSON-RPC 2.0.
 //!
-//! Design: `orchestration-engine-v1.md` §6.3–§6.4, `acp-client-tech-spec-v2.md` §2.3.
+//! Design: `orchestration-engine.md` §6.3–§6.4, `acp-client-tech-spec.md` §2.3.
 //!
 //! # TODO(V1.17): Correlation field echoing
 //!

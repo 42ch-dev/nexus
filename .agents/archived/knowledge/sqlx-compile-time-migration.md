@@ -245,7 +245,7 @@ cargo sqlx migrate run --source crates/nexus-local-db/migrations
 **Important caveat — nexus-sync's outbox schema**: The `outbox_entries` and `partial_apply_states` tables are created via DDL in `crates/nexus-sync/src/outbox.rs` (`init_pool_with_schema`), not via `sqlx::migrate!()`. For `cargo sqlx prepare` to work for nexus-sync queries, these tables must exist in the reference database. Two approaches:
 
 1. **Add a SQL file** to `.sqlx/` (e.g., `.sqlx/sync-schema.sql`) containing the DDL statements, and run it after migrations.
-2. **Migrate the DDL into `nexus-local-db/migrations/`** — this is the preferred long-term solution (already tracked as dual-outbox consolidation in `dual-outbox-architecture-v1.md`), but can be deferred. For the migration, use approach 1.
+2. **Migrate the DDL into `nexus-local-db/migrations/`** — this is the preferred long-term solution (already tracked as dual-outbox consolidation in `dual-outbox-architecture.md`), but can be deferred. For the migration, use approach 1.
 
 ### 2.3 `cargo sqlx prepare` Workflow
 
