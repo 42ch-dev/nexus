@@ -437,22 +437,73 @@ pub async fn cancel_operation(
 ///
 /// SSE endpoint that delivers `HostEvent` variants for a session.
 /// Compatible with the browser `EventSource` API.
+///
+/// Subscribes to the broadcast channel in `HostManager` and filters events
+/// by the requested session ID. Events are serialized as JSON in `data:` lines.
 pub async fn session_events(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
-    // For now, return an empty SSE stream.
-    // Full implementation requires wiring up a session event broadcaster
-    // that accumulates events from HostFacade::exec streams.
-    // The SSE transport is defined here so the route exists and the
-    // EventSource-compatible response shape is correct.
-    let _uuid = parse_session_id(&session_id)?;
-    let _host = get_host(&state)?;
+    let uuid = parse_session_id(&session_id)?;
+    let host = get_host(&state)?;
 
-    // Empty keep-alive stream so clients can connect and maintain the SSE channel.
-    let stream = tokio_stream::pending::<Result<Event, Infallible>>();
+    let sid = nexus_agent_host::HostSessionId(uuid);
+    let rx = host.subscribe_events(sid.clone());
+
+    // Convert the broadcast receiver into a filtered SSE stream using unfold.
+    // We manually recv() from the broadcast receiver and yield matching events.
+    let stream = futures_util::stream::unfold(rx, move |mut rx| {
+        let sid = sid.clone();
+        async move {
+            // Keep receiving until we get a session-matching event or the channel closes.
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if event_matches_session(&event, &sid) {
+                            let json = serde_json::to_string(&event).unwrap_or_default();
+                            return Some((
+                                Ok::<Event, Infallible>(Event::default().data(json)),
+                                rx,
+                            ));
+                        }
+                        // Not our session — skip and continue
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(
+                            skipped = n,
+                            "SSE broadcast lagged — client may have missed events"
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Channel closed — end the stream
+                        return None;
+                    }
+                }
+            }
+        }
+    });
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// Check if a host event belongs to the given session.
+fn event_matches_session(
+    event: &nexus_agent_host::capability::model::HostEvent,
+    sid: &nexus_agent_host::HostSessionId,
+) -> bool {
+    use nexus_agent_host::capability::model::HostEvent;
+    match event {
+        HostEvent::OpStarted(e) => &e.session_id == sid,
+        HostEvent::OpFinished(e) => &e.session_id == sid,
+        HostEvent::OpFailed(e) => &e.session_id == sid,
+        HostEvent::ThoughtDelta(e) | HostEvent::MessageDelta(e) => &e.session_id == sid,
+        HostEvent::ToolCall(e) => &e.session_id == sid,
+        HostEvent::ToolCallUpdate(e) => &e.session_id == sid,
+        HostEvent::PlanUpdate(e) => &e.session_id == sid,
+        HostEvent::SessionCreated(e) => &e.session_id == sid,
+        HostEvent::SessionStopped(e) => &e.session_id == sid,
+        HostEvent::Status(_) => true, // global events pass through
+    }
 }
 
 // ---------------------------------------------------------------------------
