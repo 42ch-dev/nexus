@@ -249,6 +249,82 @@ impl DaemonClient {
         Ok(data)
     }
 
+    /// Send a PUT request with JSON body.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network/deserialization error if the request or parsing fails.
+    #[allow(clippy::future_not_send)]
+    pub async fn put<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .send_authenticated(self.http.put(&url).json(body), path)
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: T = resp.json().await?;
+        Ok(data)
+    }
+
+    // ─── Workspace management methods (V1.20 Batch 4) ──────────────────
+
+    /// List workspaces via daemon API (`GET /v1/local/workspaces`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status.
+    pub async fn list_workspaces(
+        &self,
+        creator_id: Option<&str>,
+    ) -> Result<crate::api::models::ListWorkspacesResponse> {
+        let path = creator_id.map_or_else(
+            || "/v1/local/workspaces".to_string(),
+            |cid| format!("/v1/local/workspaces?creator_id={cid}"),
+        );
+        self.get(&path).await
+    }
+
+    /// Create a workspace via daemon API (`POST /v1/local/workspaces`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status
+    /// (e.g., 409 CONFLICT if workspace already exists).
+    pub async fn create_workspace(
+        &self,
+        req: &crate::api::models::CreateWorkspaceRequest,
+    ) -> Result<crate::api::models::CreateWorkspaceResponse> {
+        self.post("/v1/local/workspaces", req).await
+    }
+
+    /// Get the active workspace selection (`GET /v1/local/workspaces/active`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 409 if no workspace is initialized.
+    pub async fn get_active_workspace(
+        &self,
+    ) -> Result<crate::api::models::ActiveWorkspaceResponse> {
+        self.get("/v1/local/workspaces/active").await
+    }
+
+    /// Set the active workspace (`PUT /v1/local/workspaces/active`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 404 if the workspace doesn't exist.
+    pub async fn set_active_workspace(
+        &self,
+        req: &crate::api::models::SetActiveWorkspaceRequest,
+    ) -> Result<crate::api::models::SetActiveWorkspaceResponse> {
+        self.put("/v1/local/workspaces/active", req).await
+    }
+
     /// Attach `X-API-Key` header (if configured and path is guarded) and send the request.
     async fn send_authenticated(
         &self,

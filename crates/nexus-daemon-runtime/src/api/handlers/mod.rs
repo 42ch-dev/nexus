@@ -12,3 +12,4 @@ pub mod references;
 pub mod runtime;
 pub mod sync;
 pub mod workspace;
+pub mod workspaces;

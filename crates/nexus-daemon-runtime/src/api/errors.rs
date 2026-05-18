@@ -94,6 +94,10 @@ pub enum NexusApiError {
     /// Session expired
     #[error("Session expired")]
     SessionExpired,
+
+    /// Resource conflict (e.g., duplicate workspace)
+    #[error("Conflict: {0}")]
+    Conflict(String),
 }
 
 impl NexusApiError {
@@ -101,7 +105,7 @@ impl NexusApiError {
     #[must_use]
     pub const fn status_code(&self) -> StatusCode {
         match self {
-            Self::Uninitialized => StatusCode::CONFLICT,
+            Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::AuthRequired | Self::ApiKeyExpired | Self::SessionExpired => {
@@ -128,6 +132,7 @@ impl NexusApiError {
             Self::ApiKeyExpired => "API_KEY_EXPIRED",
             Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
             Self::SessionExpired => "SESSION_EXPIRED",
+            Self::Conflict(_) => "CONFLICT",
         }
     }
 
