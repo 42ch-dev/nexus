@@ -1,7 +1,18 @@
 {
   "version": 1,
-  "updated_at": "2026-05-18T23:00:00Z",
+  "updated_at": "2026-05-19T00:00:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-19-v1.19-residuals-v1.20-fix",
+      "title": "V1.19 Residual Findings — V1.20 Fix (6 open residuals from agent-host-hardening)",
+      "status": "Todo",
+      "primary_spec": ".agents/iterations/v1.20-delivery-compass-v1.md",
+      "plan_file": ".agents/plans/2026-05-19-v1.19-residuals-v1.20-fix.md",
+      "working_branch": "feature/v1.20-v1.19-residuals",
+      "merge_target": "feature/v1.20",
+      "created_at": "2026-05-19T00:00:00Z",
+      "progress": "specification"
+    },
     {
       "plan_id": "2026-05-18-v1.20-daemon-local-api-redesign",
       "title": "V1.20 Daemon Local API Redesign — auth, route cleanup, agent-host completion, CLI-to-daemon migration",
@@ -9,6 +20,7 @@
       "primary_spec": ".agents/iterations/v1.20-delivery-compass-v1.md",
       "plan_file": ".agents/plans/2026-05-18-v1.20-daemon-local-api-redesign.md",
       "working_branch": "feature/v1.20-daemon-local-api-redesign",
+      "merge_target": "feature/v1.20",
       "created_at": "2026-05-18T23:00:00Z",
       "progress": "specification"
     }
