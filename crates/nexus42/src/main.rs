@@ -50,14 +50,14 @@ async fn main() {
             nexus42::commands::doctor::run(command, &config).await
         }
         Some(Commands::Sync { command }) => nexus42::commands::sync::run(command, &config).await,
-        Some(Commands::World { command }) => nexus42::commands::world::run(command, &config).await,
+        Some(Commands::World { command }) => nexus42::commands::world::run(command).await,
         Some(Commands::Clone { args }) => nexus42::commands::clone::run(args, &config).await,
         Some(Commands::Config { command }) => nexus42::commands::config::run(command, &config),
         Some(Commands::Explore { command }) => {
             eprintln!(
                 "Note: `nexus42 explore` is deprecated. Use `nexus42 platform explore` instead."
             );
-            nexus42::commands::explore::run(command, &config, &output_format).await
+            nexus42::commands::explore::run(command).await
         }
         Some(Commands::Creator { command }) => {
             nexus42::commands::creator::run(command, &config).await

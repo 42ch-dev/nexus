@@ -33,7 +33,7 @@ use tower_http::cors::CorsLayer;
 ///
 /// **Protected routes** (behind `require_api_key` middleware):
 /// - All other routes (workspace, creators, sync, ACP, memory,
-///   orchestration, agent-host, monitoring, world, explore).
+///   orchestration, agent-host, monitoring).
 pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Router {
     // --- Unguarded: runtime liveness / status (always accessible) ---
     let runtime_routes = Router::new()
@@ -66,12 +66,6 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .route("/v1/local/sync/pull", post(handlers::sync::pull))
         .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
         .route("/v1/local/sync/replay", get(handlers::sync::replay))
-        // World (Batch 2 will remove these)
-        .route("/v1/local/world/fork", post(handlers::world::fork))
-        .route("/v1/local/world/snapshot", post(handlers::world::snapshot))
-        // Explore (Batch 2 will remove these)
-        .route("/v1/local/explore/browse", post(handlers::explore::browse))
-        .route("/v1/local/explore/search", post(handlers::explore::search))
         // ACP tool execution
         .route(
             "/v1/local/acp/tool/execute",
