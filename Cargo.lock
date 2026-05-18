@@ -2256,6 +2256,7 @@ dependencies = [
  "serial_test",
  "sqlx",
  "statig",
+ "subtle",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

@@ -2,29 +2,22 @@
 #![allow(clippy::too_many_lines)]
 //! Local API — HTTP JSON endpoints for CLI communication
 //!
-//! Endpoints:
-//! - GET  /v1/local/runtime/health   — Health check
-//! - GET  /v1/local/runtime/status   — Runtime status
-//! - GET  /v1/local/daemon/status   — Daemon lifecycle snapshot (minimal; see knowledge doc)
-//! - GET  /v1/local/monitoring/pool  — Database pool status (QC-W3)
-//! - GET  /v1/local/workspace        — Workspace info
-//! - POST /v1/local/workspace/init   — Initialize workspace
-//! - GET  /v1/local/creators         — List creators (auth required)
-//! - GET  /v1/local/references       — List reference sources (auth required)
-//! - GET  /v1/local/sync/status      — Sync status
-//! - POST /v1/local/acp/tool/execute — ACP tool execution (daemon-mediated)
-//! - GET  /v1/local/acp/sessions     — List ACP sessions
-//! - DELETE /v1/local/acp/sessions/{id} — Delete an ACP session
-//! - POST /v1/local/memory/pending-review — Create pending review entry (session-end capture)
-//! - GET  /v1/local/memory/pending-review — List pending reviews for creator
-//! - GET  /v1/local/memory/pending-review/count — Count pending reviews
-//! - DELETE /v1/local/memory/pending-review/{id} — Delete pending review
+//! # Route protection model (V1.20+)
+//!
+//! **Unguarded routes** (no auth even in keyed-all mode):
+//! - `GET /v1/local/runtime/health` — minimal liveness check
+//! - `GET /v1/local/runtime/status` — runtime diagnostic status
+//! - `GET /v1/local/daemon/status` — daemon lifecycle snapshot
+//!
+//! All other routes are behind `require_api_key` middleware.
+//! See [`auth_middleware::DaemonApiConfig`] for dual-mode startup.
 
 pub mod auth_middleware;
 pub mod errors;
 pub mod handlers;
 pub mod middleware;
 
+use crate::api::auth_middleware::DaemonApiConfig;
 use crate::workspace::WorkspaceState;
 use axum::{
     middleware as axum_mw,
@@ -35,13 +28,14 @@ use tower_http::cors::CorsLayer;
 
 /// Create the Local API router
 ///
-/// **Unguarded routes** (no auth, no workspace init):
-/// - runtime health & status, daemon lifecycle snapshot (`/v1/local/daemon/status`)
-/// - workspace info & init
+/// **Unguarded routes** (no auth, always reachable):
+/// - runtime health, status, daemon lifecycle snapshot
 ///
-/// **Auth-guarded routes** (require valid Bearer token):
-/// - creators, references
-pub fn create_router(state: WorkspaceState) -> Router {
+/// **Protected routes** (behind `require_api_key` middleware):
+/// - All other routes (workspace, creators, sync, ACP, memory,
+///   orchestration, agent-host, monitoring, world, explore).
+pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Router {
+    // --- Unguarded: runtime liveness / status (always accessible) ---
     let runtime_routes = Router::new()
         .route("/v1/local/runtime/health", get(handlers::runtime::health))
         .route("/v1/local/runtime/status", get(handlers::runtime::status))
@@ -50,58 +44,40 @@ pub fn create_router(state: WorkspaceState) -> Router {
             get(handlers::runtime::daemon_status),
         );
 
-    let monitoring_routes = Router::new().route(
-        "/v1/local/monitoring/pool",
-        get(handlers::monitoring::pool_status),
-    );
-
-    let workspace_routes = Router::new()
+    // --- Protected: everything else behind require_api_key ---
+    let protected_routes = Router::new()
+        // Monitoring
+        .route(
+            "/v1/local/monitoring/pool",
+            get(handlers::monitoring::pool_status),
+        )
+        // Workspace
         .route("/v1/local/workspace", get(handlers::workspace::info))
         .route(
             "/v1/local/workspace/init",
             post(handlers::workspace::init_workspace),
-        );
-
-    // Auth-guarded routes (require valid Bearer token)
-    let creator_routes = Router::new()
+        )
+        // Creators & references
         .route("/v1/local/creators", get(handlers::creators::list))
-        .route_layer(axum_mw::from_fn_with_state(
-            state.clone(),
-            auth_middleware::require_auth,
-        ));
-
-    let reference_routes = Router::new()
         .route("/v1/local/references", get(handlers::references::list))
-        .route_layer(axum_mw::from_fn_with_state(
-            state.clone(),
-            auth_middleware::require_auth,
-        ));
-
-    // Sync routes (unguarded — status and replay can checked without auth)
-    // Push and resolve are also available via daemon (auth is for platform communication)
-    let sync_routes = Router::new()
+        // Sync
         .route("/v1/local/sync/status", get(handlers::sync::status))
         .route("/v1/local/sync/push", post(handlers::sync::push))
         .route("/v1/local/sync/pull", post(handlers::sync::pull))
         .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
-        .route("/v1/local/sync/replay", get(handlers::sync::replay));
-
-    let world_routes = Router::new()
+        .route("/v1/local/sync/replay", get(handlers::sync::replay))
+        // World (Batch 2 will remove these)
         .route("/v1/local/world/fork", post(handlers::world::fork))
-        .route("/v1/local/world/snapshot", post(handlers::world::snapshot));
-
-    let explore_routes = Router::new()
+        .route("/v1/local/world/snapshot", post(handlers::world::snapshot))
+        // Explore (Batch 2 will remove these)
         .route("/v1/local/explore/browse", post(handlers::explore::browse))
-        .route("/v1/local/explore/search", post(handlers::explore::search));
-
-    // ACP tool execution routes (unguarded — workspace validation in handler)
-    let acp_routes = Router::new().route(
-        "/v1/local/acp/tool/execute",
-        post(handlers::acp::tool_execute),
-    );
-
-    // ACP session management routes (unguarded — session data in SQLite)
-    let session_routes = Router::new()
+        .route("/v1/local/explore/search", post(handlers::explore::search))
+        // ACP tool execution
+        .route(
+            "/v1/local/acp/tool/execute",
+            post(handlers::acp::tool_execute),
+        )
+        // ACP session management
         .route(
             "/v1/local/acp/sessions",
             get(handlers::sessions::list_sessions),
@@ -109,10 +85,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/acp/sessions/{id}",
             axum::routing::delete(handlers::sessions::delete_session),
-        );
-
-    // Memory pending review routes (unguarded — for session-end capture)
-    let memory_routes = Router::new()
+        )
+        // Memory pending review
         .route(
             "/v1/local/memory/pending-review",
             post(handlers::memory::create_pending_review),
@@ -128,10 +102,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/memory/pending-review/{id}",
             axum::routing::delete(handlers::memory::delete_pending_review),
-        );
-
-    // Orchestration engine-session routes (unguarded — local-only API)
-    let orchestration_routes = Router::new()
+        )
+        // Orchestration engine-session routes
         .route(
             "/v1/local/orchestration/sessions",
             get(handlers::orchestration::sessions::list_sessions)
@@ -156,10 +128,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/orchestration/presets/{id}:reload",
             axum::routing::post(handlers::orchestration::presets::reload_preset),
-        );
-
-    // Schedule management routes (WS7) — unguarded, local-only API
-    let schedule_routes = Router::new()
+        )
+        // Schedule management routes (WS7)
         .route(
             "/v1/local/orchestration/schedules",
             axum::routing::post(handlers::orchestration::schedules::add_schedule)
@@ -182,10 +152,8 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/orchestration/schedules/{schedule_id}/signal",
             axum::routing::post(handlers::orchestration::schedules::signal_schedule),
-        );
-
-    // Agent Host routes (unguarded — local-only API)
-    let agent_host_routes = Router::new()
+        )
+        // Agent Host routes
         .route(
             "/v1/local/agent-host/health",
             get(handlers::agent_host::health),
@@ -201,23 +169,16 @@ pub fn create_router(state: WorkspaceState) -> Router {
         .route(
             "/v1/local/agent-host/sessions/{id}",
             axum::routing::delete(handlers::agent_host::shutdown_session),
-        );
+        )
+        // Apply require_api_key middleware to all protected routes
+        .route_layer(axum_mw::from_fn_with_state(
+            auth_config,
+            auth_middleware::require_api_key,
+        ));
 
     Router::new()
         .merge(runtime_routes)
-        .merge(monitoring_routes)
-        .merge(workspace_routes)
-        .merge(creator_routes)
-        .merge(reference_routes)
-        .merge(sync_routes)
-        .merge(world_routes)
-        .merge(explore_routes)
-        .merge(acp_routes)
-        .merge(session_routes)
-        .merge(memory_routes)
-        .merge(orchestration_routes)
-        .merge(schedule_routes)
-        .merge(agent_host_routes)
+        .merge(protected_routes)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

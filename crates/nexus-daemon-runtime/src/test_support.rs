@@ -35,5 +35,7 @@ pub async fn axum_app_with_ephemeral_engine() -> Router {
     // We need to leak tmp to avoid early drop — acceptable for tests.
     std::mem::forget(tmp);
 
-    api::create_router(state)
+    // Use keyless-localhost mode for tests (loopback connections accepted without key).
+    let auth_config = api::auth_middleware::DaemonApiConfig::keyless();
+    api::create_router(state, auth_config)
 }
