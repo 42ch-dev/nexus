@@ -74,8 +74,11 @@ impl AcpProvider {
     /// The `client` should already have an established connection
     /// (via `AcpSdkAdapter::with_connection`). The `permission_resolver`
     /// is used to evaluate ACP permission requests against policy.
-    #[must_use]
-    pub fn new(
+    ///
+    /// This constructor awaits the permission handler registration so
+    /// the provider is ready to use immediately upon return (QC2 F-005,
+    /// QC3 F-003: no spawn-without-await race).
+    pub async fn new(
         provider_id: ProviderId,
         display_name: String,
         client: AcpSdkAdapter,
@@ -102,14 +105,10 @@ impl AcpProvider {
                 }
             });
 
-        // Set the handler asynchronously — we can't await in a constructor,
-        // so we spawn a task. The handler will be ready before any prompt
-        // operations because the session must be created first.
+        // Await the handler registration — the provider is not usable until
+        // the handler is installed (QC2 F-005, QC3 F-003).
         let client_arc = Arc::new(client);
-        let client_for_handler = Arc::clone(&client_arc);
-        tokio::spawn(async move {
-            client_for_handler.set_permission_handler(handler).await;
-        });
+        client_arc.set_permission_handler(handler).await;
 
         Self {
             provider_id,
@@ -531,7 +530,8 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
-        // Build the prompt request
+        // Build the prompt request — clone acp_session_id for potential cancel.
+        let acp_sid_for_cancel = acp_session_id.clone();
         let prompt_request = NexusPromptRequest {
             session_id: acp_session_id,
             prompt: Self::to_acp_content(&content_blocks),
@@ -561,15 +561,21 @@ impl ProviderAdapter for AcpProvider {
                 ));
             }
             Err(_) => {
-                // Timeout on stream setup — emit OpStarted+OpFailed so the
-                // session state machine transitions back to Ready (QC2 F-001,
-                // QC3 F-001).
+                // Timeout on stream setup — best-effort cancel the orphaned ACP
+                // session before emitting OpFailed (QC3 F-002).
                 tracing::warn!(
                     provider_id = %self.provider_id,
                     session_id = %session.session_id,
+                    acp_session_id = %acp_sid_for_cancel.0,
                     timeout_ms = self.timeouts.prompt_ms,
-                    "stream_prompt setup timed out"
+                    "stream_prompt setup timed out, sending best-effort cancel"
                 );
+                if let Err(cancel_err) = self.client.cancel(acp_sid_for_cancel).await {
+                    tracing::warn!(
+                        error = %cancel_err,
+                        "Best-effort cancel failed on stream setup timeout"
+                    );
+                }
                 return Ok(Self::make_error_stream(
                     session.session_id.clone(),
                     op_id,
@@ -592,6 +598,11 @@ impl ProviderAdapter for AcpProvider {
         // consumes session_id and op_id_for_stream via move).
         let session_id_for_timeout = session_id.clone();
         let op_id_for_timeout = op_id_for_stream.clone();
+
+        // Clone client and ACP session ID for best-effort cancel on streaming
+        // timeout (QC3 F-002).
+        let client_for_cancel = Arc::clone(&self.client);
+        let acp_sid_for_stream_cancel = acp_sid_for_cancel;
 
         // First emit OpStarted, then forward the stream with a cumulative
         // streaming timeout (QC2 F-001). The timeout budget covers the entire
@@ -618,25 +629,47 @@ impl ProviderAdapter for AcpProvider {
         // within `prompt_dur` from this point, abort with OpFailed.
         // Use tokio_stream::StreamExt::timeout (not futures_util) for per-item
         // deadline enforcement (QC2 F-001).
+        //
+        // On streaming timeout, send a best-effort ACP cancel to avoid
+        // orphaned sessions (QC3 F-002). We use .then() to await the cancel
+        // before yielding the terminal OpFailed.
         let timeout_stream = tokio_stream::StreamExt::timeout(inner_stream, prompt_dur_for_stream)
-            .map(move |result| {
-                result.unwrap_or_else(|_| {
-                    // Elapsed — no event arrived within the budget
-                    tracing::warn!(
-                        provider_id = %provider_id_for_stream,
-                        session_id = %session_id_for_timeout,
-                        "Streaming timed out: no event within prompt_ms budget"
-                    );
-                    Ok(HostEvent::OpFailed(OperationFailedEvent {
-                        session_id: session_id_for_timeout.clone(),
-                        op_id: op_id_for_timeout.clone(),
-                        error_category: "streaming_timeout".to_string(),
-                        error_message: format!(
-                            "streaming timed out: no event within {}ms budget",
-                            prompt_dur_for_stream.as_millis()
-                        ),
-                    }))
-                })
+            .then(move |result| {
+                let client = client_for_cancel.clone();
+                let acp_sid = acp_sid_for_stream_cancel.clone();
+                let sid = session_id_for_timeout.clone();
+                let oid = op_id_for_timeout.clone();
+                let provider_id = provider_id_for_stream.clone();
+                let dur = prompt_dur_for_stream;
+
+                async move {
+                    if let Ok(event) = result {
+                        event
+                    } else {
+                        // Elapsed — no event arrived within the budget.
+                        // Best-effort cancel the orphaned ACP session (QC3 F-002).
+                        tracing::warn!(
+                            provider_id = %provider_id,
+                            session_id = %sid,
+                            "Streaming timed out: no event within prompt_ms budget, sending best-effort cancel"
+                        );
+                        if let Err(cancel_err) = client.cancel(acp_sid).await {
+                            tracing::warn!(
+                                error = %cancel_err,
+                                "Best-effort cancel failed on streaming timeout"
+                            );
+                        }
+                        Ok(HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: sid,
+                            op_id: oid,
+                            error_category: "streaming_timeout".to_string(),
+                            error_message: format!(
+                                "streaming timed out: no event within {}ms budget",
+                                dur.as_millis()
+                            ),
+                        }))
+                    }
+                }
             });
 
         let stream = started.chain(timeout_stream).boxed();
