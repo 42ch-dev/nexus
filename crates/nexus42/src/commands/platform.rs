@@ -2,7 +2,7 @@
 //!
 //! Implements the `nexus42 platform` top-level command with subcommands:
 //! - `auth` — User authentication (login/logout/status)
-//! - `explore` — Browse and search platform content
+//! - `explore` — Browse and search platform content (platform-only, not proxied)
 //! - `context` — Context assembly
 //! - `publish` — Publish content (stub, coming soon)
 //!
@@ -23,7 +23,7 @@ pub enum PlatformCommand {
         command: super::auth::AuthCommand,
     },
 
-    /// Explore browse and search (read-only, platform via daemon)
+    /// Explore browse and search (platform-only, not proxied through local daemon)
     Explore {
         #[command(subcommand)]
         command: super::explore::ExploreCommand,
@@ -44,12 +44,10 @@ pub enum PlatformCommand {
 /// # Errors
 ///
 /// Returns `CliError` if the delegated command fails.
-pub async fn run(cmd: PlatformCommand, config: &CliConfig, output_format: &str) -> Result<()> {
+pub async fn run(cmd: PlatformCommand, config: &CliConfig, _output_format: &str) -> Result<()> {
     match cmd {
         PlatformCommand::Auth { command } => super::auth::run(command, config).await,
-        PlatformCommand::Explore { command } => {
-            super::explore::run(command, config, output_format).await
-        }
+        PlatformCommand::Explore { command } => super::explore::run(command).await,
         PlatformCommand::Context { command } => super::context::run(command, config).await,
         PlatformCommand::Publish => {
             println!("publish command coming soon");
