@@ -13,6 +13,7 @@ use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use nexus_domain::AssembleResponse;
 use serde::{de::DeserializeOwned, Serialize};
+use std::fmt::Write;
 use std::time::Duration;
 
 /// Structured error response from the daemon API
@@ -28,6 +29,12 @@ struct DaemonErrorResponse {
 struct DaemonErrorDetail {
     code: String,
     message: String,
+    /// Optional structured details (field-level info for validation errors).
+    #[serde(default)]
+    details: Option<serde_json::Value>,
+    /// Optional request correlation ID.
+    #[serde(default)]
+    request_id: Option<String>,
 }
 
 /// Default connection timeout: 10 seconds
@@ -503,16 +510,38 @@ impl DaemonClient {
     /// Parse an error response from the daemon, attempting structured parsing first
     /// and falling back to raw body text for backward compatibility.
     ///
-    /// Includes the requested URL and HTTP status code in the error for easier debugging.
+    /// The error message format prioritizes the structured error code and message,
+    /// with optional request ID for debugging and details for field-level context.
     async fn parse_error_response(url: &str, status: u16, resp: reqwest::Response) -> CliError {
         let body = resp.text().await.unwrap_or_default();
 
         // Try structured error parsing first
         if let Ok(parsed) = serde_json::from_str::<DaemonErrorResponse>(&body) {
             if let Some(detail) = parsed.error {
+                let mut message = format!("[{}] {}", detail.code, detail.message);
+
+                // Append field details for validation errors if available
+                if let Some(ref details) = detail.details {
+                    if let Some(field) = details.get("field").and_then(|v| v.as_str()) {
+                        write!(message, " (field: {field})").expect("infallible");
+                    }
+                }
+
+                // Append request ID if available for support correlation
+                if let Some(ref req_id) = detail.request_id {
+                    write!(message, " (request_id: {req_id})").expect("infallible");
+                }
+
+                // User-friendly guidance for common error codes
+                if detail.code == "AUTH_REQUIRED" {
+                    message.push_str(
+                        "\n\n  Suggestion: Set the NEXUS42_DAEMON_API_KEY environment variable.",
+                    );
+                }
+
                 return CliError::Api {
                     status,
-                    message: format!("GET {} → [{}] {}", url, detail.code, detail.message),
+                    message: format!("{url} → {message}"),
                 };
             }
         }
@@ -520,7 +549,7 @@ impl DaemonClient {
         // Fallback to raw body (backward compatible with old daemon versions)
         CliError::Api {
             status,
-            message: format!("GET {url} → HTTP {status} — {body}"),
+            message: format!("{url} → HTTP {status} — {body}"),
         }
     }
 

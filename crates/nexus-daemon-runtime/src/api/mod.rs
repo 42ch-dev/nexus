@@ -267,5 +267,8 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(runtime_routes)
         .merge(protected_routes)
         .layer(CorsLayer::permissive())
+        // Request ID middleware: runs on ALL requests (before auth),
+        // so error responses from auth middleware also include request_id.
+        .route_layer(axum_mw::from_fn(middleware::attach_request_id))
         .with_state(state)
 }

@@ -21,11 +21,32 @@ use std::path::PathBuf;
 pub struct ListWorkspacesQuery {
     /// Optional filter: only show workspaces for this creator.
     pub creator_id: Option<String>,
+    /// Maximum number of items to return (1–250, default 50).
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    /// Opaque cursor for pagination; pass `next_cursor` from the previous page.
+    pub cursor: Option<String>,
 }
+
+const fn default_limit() -> usize {
+    50
+}
+
+/// Maximum items per page.
+const MAX_LIMIT: usize = 250;
 
 #[derive(Debug, Serialize)]
 pub struct ListWorkspacesResponse {
     pub items: Vec<WorkspaceSummary>,
+    pub pagination: PaginationEnvelope,
+}
+
+/// Cursor-based pagination envelope.
+#[derive(Debug, Serialize)]
+pub struct PaginationEnvelope {
+    pub limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -413,9 +434,34 @@ pub async fn list_workspaces(
         })?;
     }
 
-    let items = scan_workspaces(nexus_home, query.creator_id.as_deref());
+    let limit = query.limit.clamp(1, MAX_LIMIT);
+    let all_items = scan_workspaces(nexus_home, query.creator_id.as_deref());
 
-    Ok(Json(ListWorkspacesResponse { items }))
+    // Apply cursor-based pagination (cursor = "<creator_id>/<workspace_slug>")
+    let mut items = all_items;
+    if let Some(ref cursor) = query.cursor {
+        // Skip past the cursor entry
+        let pos = items
+            .iter()
+            .position(|i| format!("{}/{}", i.creator_id, i.workspace_slug) == *cursor);
+        if let Some(idx) = pos {
+            items = items.split_off(idx + 1);
+        }
+    }
+
+    let next_cursor = if items.len() > limit {
+        items.truncate(limit);
+        items
+            .last()
+            .map(|i| format!("{}/{}", i.creator_id, i.workspace_slug))
+    } else {
+        None
+    };
+
+    Ok(Json(ListWorkspacesResponse {
+        items,
+        pagination: PaginationEnvelope { limit, next_cursor },
+    }))
 }
 
 /// `POST /v1/local/workspaces` — create/materialize workspace (T22)
@@ -593,7 +639,11 @@ mod tests {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
 
-        let query = ListWorkspacesQuery { creator_id: None };
+        let query = ListWorkspacesQuery {
+            creator_id: None,
+            limit: 50,
+            cursor: None,
+        };
         let result = list_workspaces(AxumState(state), Query(query)).await;
         assert!(result.is_ok(), "list_workspaces should succeed");
         let body = result.expect("ok");
