@@ -26,7 +26,7 @@
   "updated_at": "2026-05-15T21:30:00Z",
   "done_at": "2026-05-15T21:30:00Z",
   "notes": "All 11 V1.19 items (D-001-D-011) implemented. QC triple review APPROVE (Critical findings pre-existing). QA verification PASS. V1.18 residuals (R1-R7) all closed.",
-  "compass": ".agents/knowledge/v1.19-delivery-compass-v1.md",
+  "compass": ".agents/iterations/v1.19-delivery-compass-v1.md",
   "branch": "feature/v1.19-agent-host-hardening",
   "batch_count": 2,
   "metadata": {
@@ -36,9 +36,9 @@
     "priority": "high",
     "phase": "v1.19",
     "task_category": "logic",
-    "primary_spec": ".agents/knowledge/v1.19-delivery-compass-v1.md",
+    "primary_spec": ".agents/iterations/v1.19-delivery-compass-v1.md",
     "spec_refs": [
-      ".agents/knowledge/deferred-features-cross-version-tracker-v1.md",
+      ".agents/knowledge/deferred-features-cross-version-tracker.md",
       ".agents/archived/plans/2026-05-15-v1.18-agent-host-core.json"
     ],
     "description": "Close V1.18 agent-host functional gaps and residuals through V1.19 hardening.",

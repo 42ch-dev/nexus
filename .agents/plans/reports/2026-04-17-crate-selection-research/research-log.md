@@ -1,7 +1,7 @@
 # Crate Selection Research Log — 2026-04-17
 
 **Scope**: Third-party Rust crate evaluation for seven `nexus` OSS modules (plus one optional dev-experience topic).
-**Companion doc (SSOT for decisions)**: [`../../knowledge/crate-selection-best-practices-v1.md`](../../knowledge/crate-selection-best-practices-v1.md)
+**Companion doc (SSOT for decisions)**: [`../../knowledge/crate-selection-best-practices.md`](../../knowledge/crate-selection-best-practices.md)
 **Research method**: Side-by-side comparison produced by an external LLM (anonymised; no account, URL, or user-identifying metadata recorded per repo reachability rules).
 **Reachability note**: This file is fully in-repo; external links have been stripped. Readers who freshly `git clone` this repo can open every referenced path.
 
@@ -11,7 +11,7 @@
 
 - Each section below captures the **technical substance** of the external comparison for one module.
 - Pleasantries, offers to generate code snippets, and marketing language have been trimmed.
-- Each section ends with a **"Final decision (this repo)"** box that **mirrors** the corresponding row in `crate-selection-best-practices-v1.md §2`. If the two ever drift, the knowledge doc wins (it is the SSOT; this log is archival context).
+- Each section ends with a **"Final decision (this repo)"** box that **mirrors** the corresponding row in `crate-selection-best-practices.md §2`. If the two ever drift, the knowledge doc wins (it is the SSOT; this log is archival context).
 
 ---
 
@@ -77,9 +77,9 @@
 
 ### Post-decision note (2026-04-17, afternoon)
 
-The original external comparison framed this as "new separate DB file for orchestration, keep rusqlite for state.db" — the cheapest path in the short term. In reviewing how it would intersect with `orchestration-engine-v1.md` §4.3 (which says the orchestration pool *reuses* the nexus-local-db pool), PM flagged that two engines at the same file is technically unstable (rusqlite sync + sqlx async write-lock contention), and two files at two engines leaves permanent operational complexity.
+The original external comparison framed this as "new separate DB file for orchestration, keep rusqlite for state.db" — the cheapest path in the short term. In reviewing how it would intersect with `orchestration-engine.md` §4.3 (which says the orchestration pool *reuses* the nexus-local-db pool), PM flagged that two engines at the same file is technically unstable (rusqlite sync + sqlx async write-lock contention), and two files at two engines leaves permanent operational complexity.
 
-PM pivoted to full sqlx unification. This log preserves the original comparison for archival completeness; the decision above reflects the revised final state. `crate-selection-best-practices-v1.md` §2.3 and §3.3 are the forward-facing SSOT.
+PM pivoted to full sqlx unification. This log preserves the original comparison for archival completeness; the decision above reflects the revised final state. `crate-selection-best-practices.md` §2.3 and §3.3 are the forward-facing SSOT.
 
 ---
 
@@ -122,7 +122,7 @@ PM pivoted to full sqlx unification. This log preserves the original comparison 
 
 > **Keep the hand-written challenge evaluator.** No new crate introduced.
 >
-> **Three DoS guards are registered as a follow-up TODO** (documented in `crate-selection-best-practices-v1.md §3 Challenge`; **not** opened as a `residual_finding` in `status.json`, per PM directive 3c=iii):
+> **Three DoS guards are registered as a follow-up TODO** (documented in `crate-selection-best-practices.md §3 Challenge`; **not** opened as a `residual_finding` in `status.json`, per PM directive 3c=iii):
 >
 > 1. `max_input_len` (≤ 512–1024 chars)
 > 2. `max_paren_depth` (≤ 20–30, tracked inside parser via a depth counter — iterative, not recursive)
@@ -166,7 +166,7 @@ PM pivoted to full sqlx unification. This log preserves the original comparison 
 
 ### Repo constraint (predating the research)
 
-`orchestration-engine-v1.md` **explicitly defers** wall-clock cron to **V1.5+**; V1.4 reserves only the schema. `creator-schedule-and-core-context-v1.md` (WS7) specifies the Schedule state machine and data model but does not implement time triggers.
+`orchestration-engine.md` **explicitly defers** wall-clock cron to **V1.5+**; V1.4 reserves only the schema. `creator-schedule-and-core-context.md` (WS7) specifies the Schedule state machine and data model but does not implement time triggers.
 
 ### Comparison summary (deferred, recorded for later)
 
@@ -252,8 +252,8 @@ PM pivoted to full sqlx unification. This log preserves the original comparison 
 ## 9. Notes / meta
 
 - **Attribution**: the source of the external comparison is not named here, per the "no local privacy in committed text" clause of `AGENTS.md`. The value captured in this log is the **technical content**, not the provenance.
-- **Drift rule**: if a decision here is revised, update `crate-selection-best-practices-v1.md` first, then amend this log with a dated entry. Never silently diverge.
-- **Consumers**: `crate-selection-best-practices-v1.md`, `v1.4-delivery-compass-v1.md`, `orchestration-engine-v1.md`, `creator-schedule-and-core-context-v1.md`, `2026-04-17-v1.4-ws2-orchestration-skeleton.md`.
+- **Drift rule**: if a decision here is revised, update `crate-selection-best-practices.md` first, then amend this log with a dated entry. Never silently diverge.
+- **Consumers**: `crate-selection-best-practices.md`, `v1.4-delivery-compass-v1.md`, `orchestration-engine.md`, `creator-schedule-and-core-context.md`, `2026-04-17-v1.4-ws2-orchestration-skeleton.md`.
 
 ---
 

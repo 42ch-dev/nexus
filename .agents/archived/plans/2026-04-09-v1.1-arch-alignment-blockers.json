@@ -37,9 +37,9 @@
       "merge_target": "main",
       "branch_policy": "create v1.1-arch-alignment-blockers from current",
       "effort": "L \u2014 4 task groups (~6-10 agent sessions total: B1 XS, B2 M, B3 L, B4 S+M)",
-      "primary_spec": ".agents/knowledge/architecture-alignment-review-v1.md",
+      "primary_spec": ".agents/knowledge/architecture-alignment-review.md",
       "spec_refs": [
-        ".agents/knowledge/v1.1-overview-v1.md"
+        ".agents/iterations/program-overview-legacy.md"
       ],
       "gates": {
         "tests": "pass",

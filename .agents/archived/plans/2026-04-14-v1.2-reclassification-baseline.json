@@ -17,7 +17,7 @@
   "created_at": "2026-04-14",
   "updated_at": "2026-04-14",
   "done_at": "2026-04-14",
-  "notes": "WS1 done. Reclassification matrix (knowledge/v1.2-reclassification-matrix-v1.md) committed with version-tagging rules and blocking map. QC skipped — product-docs only.",
+  "notes": "WS1 done. Reclassification matrix (iterations/v1.2-reclassification-matrix-v1.md) committed with version-tagging rules and blocking map. QC skipped — product-docs only.",
   "metadata": {
     "phase": "Done",
     "priority": "high",
@@ -25,10 +25,10 @@
     "milestone": "M1",
     "dependency": [],
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "scope": "Reclassification matrix, blocking/non-blocking map, version-tagging rules for future plan rows",
     "deliverables": [
-      "knowledge/v1.2-reclassification-matrix-v1.md",
+      "iterations/v1.2-reclassification-matrix-v1.md",
       "knowledge/README.md updated",
       "Plan Tasks section updated"
     ],

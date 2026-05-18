@@ -4,7 +4,7 @@
 //! `AcpSdkAdapter`. This module provides the state machine and channel-based
 //! communication pattern.
 //!
-//! Design: `orchestration-engine-v1.md` §6.3.
+//! Design: `orchestration-engine.md` §6.3.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

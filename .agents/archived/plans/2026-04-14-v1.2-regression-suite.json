@@ -28,7 +28,7 @@
       "2026-04-14-v1.2-runtime-compatibility"
     ],
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "scope": "Minimum automated regression set",
     "deliverables": [
       "R1–R5 automated test implementations",

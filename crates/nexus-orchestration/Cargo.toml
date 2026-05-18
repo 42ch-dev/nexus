@@ -18,7 +18,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "pr
 # This crate re-uses the workspace dep; do not add local features.
 sqlx = { workspace = true }
 chrono = { workspace = true }
-# jsonrpsee: per crate-selection-best-practices-v1.md §3.1.
+# jsonrpsee: per crate-selection-best-practices.md §3.1.
 # Features: server-core, client-core, macros. NO http-server, NO ws-server.
 jsonrpsee = { workspace = true }
 tokio-util = { workspace = true }

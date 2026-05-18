@@ -4,7 +4,7 @@
 //! SDK. SDK types remain internal to `AcpSdkAdapter`; consumers only see these
 //! Nexus DTOs through the trait signatures.
 //!
-//! Placement follows `schemas-boundary-v1.md` §3: local types are hand-written
+//! Placement follows `schemas-boundary.md` §3: local types are hand-written
 //! in `crates/nexus-contracts/src/local/` — no JSON Schema, no codegen.
 //!
 //! Design choices:

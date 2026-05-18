@@ -8,7 +8,7 @@
 //! - `db_schema_version`: Local `SQLite` structure version (managed by migrations)
 //! - `schema_version`: Contract schema version (from nexus-contracts, network compatibility)
 //!
-//! See `.agents/plans/knowledge/local-db-refactor-v1.md` for design baseline.
+//! See `.agents/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
 pub mod identity;
 pub mod memory_fragment;

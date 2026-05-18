@@ -1,7 +1,7 @@
 //! Daemon lifecycle HSM (statig-based).
 //!
 //! Implements the 6-state hierarchical state machine for the daemon runtime
-//! per `knowledge/daemon-lifecycle-api-v2.md`.
+//! per `knowledge/daemon-lifecycle-api.md`.
 //!
 //! States: `Stopped → Starting → Running ⇄ Degraded → Stopping → Failed`.
 //! The `Alive` superstate groups `Running` and `Degraded`.

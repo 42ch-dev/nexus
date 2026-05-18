@@ -33,7 +33,7 @@ generated_at: 2026-04-10T23:59:59Z
 
 ### 🟡 Warning
 
-- **TD-9 scope**: `GET /v1/local/daemon/status` reports `lifecycle_state: "running"` whenever the API is up; this is not a full cli-spec §10.1 state machine. Mitigation: `implementation_scope` field + knowledge doc `daemon-lifecycle-api-v1.md` state the gap explicitly for API consumers.
+- **TD-9 scope**: `GET /v1/local/daemon/status` reports `lifecycle_state: "running"` whenever the API is up; this is not a full cli-spec §10.1 state machine. Mitigation: `implementation_scope` field + knowledge doc `daemon-lifecycle-api-legacy.md` state the gap explicitly for API consumers.
 
 ### 🟢 Suggestion
 
@@ -43,7 +43,7 @@ generated_at: 2026-04-10T23:59:59Z
 
 - Finding ID: W-TD9-SCOPE
 - Source Type: manual-reasoning
-- Source Reference: `.agents/archived/knowledge/daemon-lifecycle-api-v1.md` (archived 2026-04-17), `crates/nexus42d/src/api/handlers/runtime.rs`
+- Source Reference: `.agents/archived/knowledge/daemon-lifecycle-api-legacy.md` (archived 2026-04-17), `crates/nexus42d/src/api/handlers/runtime.rs`
 - Confidence: High
 
 ## Summary
@@ -60,8 +60,8 @@ generated_at: 2026-04-10T23:59:59Z
 
 | Criterion / task | Done / Partial / Not done | Evidence |
 | ---------------- | ------------------------- | -------- |
-| TD-7 ForkBranch alignment | Done | `test_fork_branch_parent_branch_and_event_ids_roundtrip`; `archived/knowledge/fork-branch-contract-alignment-v1.md` (archived 2026-04-17) |
-| TD-8 dual outbox consolidation | Not done (waived) | `knowledge/dual-outbox-architecture-v1.md`; `archived/residuals/v1-tech-debt-cleanup-batch-d.json` |
+| TD-7 ForkBranch alignment | Done | `test_fork_branch_parent_branch_and_event_ids_roundtrip`; `archived/knowledge/fork-branch-contract-alignment.md` (archived 2026-04-17) |
+| TD-8 dual outbox consolidation | Not done (waived) | `knowledge/dual-outbox-architecture.md`; `archived/residuals/v1-tech-debt-cleanup-batch-d.json` |
 | TD-9 daemon lifecycle | Partial | `GET /v1/local/daemon/status` + tests; full §10.1 FSM deferred per knowledge doc |
 | TD-10 real OAuth | Not done (waived) | `device_flow.rs` module docs; `knowledge/device-flow-oauth-scope-v1.md`; batch-d archive |
 | Milestone C+D bookkeeping | Done (superseded for plan lifecycle) | Was: `status.json` slim Done row + `archived/plans/v1-tech-debt-cleanup.json` — **reverted 2026-04-11** (see Postscript) |

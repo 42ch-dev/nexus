@@ -3,7 +3,7 @@
 **Date**: 2026-04-06
 **Author**: @product-manager
 **Based on**: V1.0-phase1 Product Review V1, V1.0-phase1 Architecture Review V1
-**Status**: Superseded — merged into `v1.1-overview-v1.md`. P0/P1/P2 features, user stories, and competitive analysis fully retained.
+**Status**: Superseded — merged into `program-overview-legacy.md`. P0/P1/P2 features, user stories, and competitive analysis fully retained.
 
 ---
 
@@ -410,9 +410,9 @@ See §4 "Command-by-Command Status Plan" table above.
 
 | Document | Location | Purpose |
 |----------|----------|---------|
-| V1.0-phase1 Product Review | `.agents/archived/knowledge/phase1-product-review-v1.md` | Feature completeness analysis, user journey mapping |
-| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review-v1.md` | Technical findings, bug list, debt items |
-| ACP Client Tech Spec | `.agents/archived/knowledge/acp-client-tech-spec-v1.md` (archived 2026-04-17) | ACP integration details |
+| V1.0-phase1 Product Review | `.agents/archived/knowledge/phase1-product-review.md` | Feature completeness analysis, user journey mapping |
+| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review.md` | Technical findings, bug list, debt items |
+| ACP Client Tech Spec | `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | ACP integration details |
 | status.json | `.agents/status.json` | Residual findings, plan tracking |
 | AGENTS.md | Repository root | Development workflow, CI requirements |
 

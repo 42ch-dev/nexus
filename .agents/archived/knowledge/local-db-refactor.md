@@ -3,10 +3,10 @@
 **Source**: Inline design spec for local SQLite (`state.db`) refactoring.
 **Status**: Active design baseline
 **Plan**: 2026-04-08-local-db-refactor
-**Supersedes**: [local-db-refactor-v1.md](../archived/knowledge/local-db-refactor-v1.md) (archived)
+**Supersedes**: [local-db-refactor-legacy.md](archived/knowledge/local-db-refactor-legacy.md) (archived)
 **Updated**: 2026-04-18 — WS8 T9 revision: engine migrated from `rusqlite` + `deadpool-sqlite` to `sqlx`.
 
-**On-disk path (per-workspace):** Defined only in **v1-spec** — `adr/adr-014-…`, `cli-sync/local-db-schema-v1.md` §0, `cli-sync/cli-spec-v1.md` §13 (resolve `specs_root.v1-spec` via `.agents/local-paths.json`). [local-fs-layout-creator-workspace-v1.md](local-fs-layout-creator-workspace-v1.md) is a non-normative pointer. Module ownership and schema rules **in this document** are unchanged.
+**On-disk path (per-workspace):** Defined only in **v1-spec** — `adr/adr-014-…`, `cli-sync/local-db-schema-v1.md` §0, `cli-sync/cli-spec-v1.md` §13 (resolve `specs_root.v1-spec` via `.agents/local-paths.json`). [local-fs-layout-creator-workspace.md](local-fs-layout-creator-workspace.md) is a non-normative pointer. Module ownership and schema rules **in this document** are unchanged.
 
 ---
 
@@ -179,7 +179,7 @@ pub async fn validate(pool: &SqlitePool) -> Result<()>;
 - **Migrations**: `.sql` files under `crates/nexus-local-db/migrations/`, driven by `sqlx::migrate!()`
 - **All callers async**: 34 files (~193 references) ported from `rusqlite`/`deadpool-sqlite` to async sqlx
 - **Legacy deps removed**: `rusqlite` and `deadpool-sqlite` removed from workspace dependencies
-- **Decision SSOT**: [crate-selection-best-practices-v1.md](crate-selection-best-practices-v1.md) §2.3 + §3.3
+- **Decision SSOT**: [crate-selection-best-practices.md](crate-selection-best-practices.md) §2.3 + §3.3
 
 ### 10.2 Archived: Pre-WS8 State
 
@@ -214,4 +214,4 @@ pub async fn validate(pool: &SqlitePool) -> Result<()>;
 - Inline design spec for `state.db` refactoring
 - Aligned with V1 product semantics: local-first, structured sync, ACP client-only
 - V1.4 WS8 plan: [2026-04-17-v1.4-ws8-local-db-sqlx-migration.md](../2026-04-17-v1.4-ws8-local-db-sqlx-migration.md)
-- Crate selection SSOT: [crate-selection-best-practices-v1.md](crate-selection-best-practices-v1.md) §2.3 + §3.3
+- Crate selection SSOT: [crate-selection-best-practices.md](crate-selection-best-practices.md) §2.3 + §3.3

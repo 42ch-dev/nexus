@@ -19,7 +19,7 @@ This document does **not** override:
 
 - `AGENTS.md` — release discipline, codegen rules, reachability rules.
 - `v1-spec/` (ADRs / codegen strategy / wire schemas) — wire and protocol decisions (e.g. `agent-client-protocol` SDK pin) remain owned there.
-- Architecture SSOTs — `orchestration-engine-v1.md`, `daemon-lifecycle-api-v2.md`, `creator-schedule-and-core-context-v1.md`, `acp-client-tech-spec-v2.md`, `schemas-boundary-v1.md`, `local-db-refactor-v2.md`, `architecture-alignment-review-v1.md`.
+- Architecture SSOTs — `orchestration-engine.md`, `daemon-lifecycle-api.md`, `creator-schedule-and-core-context.md`, `acp-client-tech-spec.md`, `schemas-boundary.md`, `local-db-refactor.md`, `architecture-alignment-review.md`.
 
 **Conflict order**: `AGENTS.md` > `v1-spec` / ADR > architecture SSOTs > this document > other knowledge.
 
@@ -65,13 +65,13 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 
 | # | Module | Decision | Alternative(s) considered | Plan / SSOT linkage |
 |---|--------|----------|---------------------------|---------------------|
-| 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) | `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec` | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 5; `orchestration-engine-v1.md` §6 |
+| 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) | `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec` | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 5; `orchestration-engine.md` §6 |
 | 2.2 | **Orchestration SessionStorage** | `sqlx` (sqlite + runtime-tokio + macros + migrate + chrono + uuid) on the unified **`state.db`** via the `Arc<SqlitePool>` exposed by `nexus-local-db` (post-WS8). `orchestration_sessions` table added through the same `sqlx migrate` pipeline. | Keep `rusqlite` + `deadpool-sqlite`; separate `.db` file; `sea-orm` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 3 (depends on WS8) |
-| 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) | `2026-04-17-v1.4-ws8-local-db-sqlx-migration.md` (new plan row); `local-db-refactor-v2.md` revised at WS8 T9 |
+| 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) | `2026-04-17-v1.4-ws8-local-db-sqlx-migration.md` (new plan row); `local-db-refactor.md` revised at WS8 T9 |
 | 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | `device-flow-oauth-scope-v1.md` (TD-10 deferral) |
 | 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `crates/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here, not in `status.json`) |
 | 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | `crates/nexus42d/src/workspace/mod.rs` (deferral note) |
-| 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See `creator-schedule-and-core-context-v1.md` for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | `creator-schedule-and-core-context-v1.md` |
+| 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See `creator-schedule-and-core-context.md` for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | `creator-schedule-and-core-context.md` |
 | 2.8 | **Layered config** (future) | `figment` + `secrecy` for redaction (when needed) | `config-rs`; hand-rolled | — (not yet scheduled) |
 | 2.9 | **Snapshot testing** (dev) | Recommended: `insta` + redactions for new CLI/HTTP integration tests | Hand-rolled golden files | — (optional; per-test-author discretion) |
 
@@ -126,7 +126,7 @@ jsonrpsee = { version = "<pin-at-intro>", default-features = false, features = [
 - Single DB engine (`sqlx`) across the whole workspace → one async model, one migration runner, one pool implementation.
 - Eliminates the "two pools at the same file" correctness risk (SQLite write-lock contention between `rusqlite` and `sqlx` pools).
 - Eliminates the "two files, two migration stories" operational complexity.
-- Makes the `// reuses nexus-local-db pool` comment in `orchestration-engine-v1.md` §4.3 technically correct (the two pools become **one** pool).
+- Makes the `// reuses nexus-local-db pool` comment in `orchestration-engine.md` §4.3 technically correct (the two pools become **one** pool).
 
 **Feature flags** (shared with `nexus-local-db` at the workspace level):
 
@@ -167,12 +167,12 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 **Impact on other SSOTs** (handled in WS8 T9 — done):
 
-- `local-db-refactor-v2.md` → updated (engine choice, migration strategy section, API shape) at WS8 T9.
-- `orchestration-engine-v1.md` §4.3 → the "reuses nexus-local-db pool" comment became literal (both sides now `sqlx::SqlitePool`); the "new tables in existing state.db" phrasing is reinforced.
+- `local-db-refactor.md` → updated (engine choice, migration strategy section, API shape) at WS8 T9.
+- `orchestration-engine.md` §4.3 → the "reuses nexus-local-db pool" comment became literal (both sides now `sqlx::SqlitePool`); the "new tables in existing state.db" phrasing is reinforced.
 
 **What does NOT change**:
 
-- Table classifications (shared vs daemon-only — per `local-db-refactor-v2.md` §3) are preserved.
+- Table classifications (shared vs daemon-only — per `local-db-refactor.md` §3) are preserved.
 - On-disk file path, `workspace_meta` key semantics, and row-level migration content are preserved.
 - V1.2/V1.3 features (`local_identities`, `soul_meta`, memory pipeline, challenge solver) **must** still pass regression after the port — WS8 acceptance gates enforce this explicitly.
 
@@ -230,7 +230,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 ### 3.7 Cron / scheduler — V1.4 defers; V1.5 decides
 
-**Decision**: V1.4 does **not** select a scheduler crate. `orchestration-engine-v1.md` defers wall-clock cron to V1.5+; `creator-schedule-and-core-context-v1.md` (WS7) delivers only the data model + state machine.
+**Decision**: V1.4 does **not** select a scheduler crate. `orchestration-engine.md` defers wall-clock cron to V1.5+; `creator-schedule-and-core-context.md` (WS7) delivers only the data model + state machine.
 
 **Constraints any future implementation must satisfy** (binding on V1.5 design):
 
@@ -303,8 +303,8 @@ Breaking crate upgrades (e.g. `sqlx 0.8 → 0.9` with API churn) follow the same
 Documents and plans that cite this best-practices file:
 
 - `v1.4-delivery-compass-v1.md` — Tech Stack / Risk sections.
-- `orchestration-engine-v1.md` — §4 (graph-flow integration), §5 (capability store), §6 (worker IPC).
-- `creator-schedule-and-core-context-v1.md` — wall-clock deferral clause.
+- `orchestration-engine.md` — §4 (graph-flow integration), §5 (capability store), §6 (worker IPC).
+- `creator-schedule-and-core-context.md` — wall-clock deferral clause.
 - `2026-04-17-v1.4-ws2-orchestration-skeleton.md` — Tech Stack + Task 1 (sqlx features) + Task 5 (IPC implementation).
 - `2026-04-17-crate-selection-research/research-log.md` — the archival source of the comparisons behind §2 rows.
 
@@ -315,10 +315,10 @@ Before editing any of the above in a way that changes crate selection, update **
 ## 6. References
 
 - Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
-- V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](v1.4-delivery-compass-v1.md)
-- Orchestration engine SSOT: [`orchestration-engine-v1.md`](../archived/knowledge/orchestration-engine-v1.md)
-- Schedule / core context SSOT: [`creator-schedule-and-core-context-v1.md`](creator-schedule-and-core-context-v1.md)
-- Local DB ownership: [`local-db-refactor-v2.md`](../archived/knowledge/local-db-refactor-v2.md)
+- V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](../iterations/v1.4-delivery-compass-v1.md)
+- Orchestration engine SSOT: [`orchestration-engine.md`](../knowledge/orchestration-engine.md)
+- Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md)
+- Local DB ownership: [`local-db-refactor.md`](archived/knowledge/local-db-refactor.md)
 - Device flow deferral: [`device-flow-oauth-scope-v1.md`](device-flow-oauth-scope-v1.md)
 - Repository-wide rules: [`AGENTS.md`](../../../AGENTS.md) — §"Documentation & plans", dependency / release discipline.
 

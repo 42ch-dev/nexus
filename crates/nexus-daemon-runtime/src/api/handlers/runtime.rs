@@ -50,7 +50,7 @@ pub struct AcpStatusInfo {
 
 /// GET /v1/local/daemon/status — v2 full FSM response.
 ///
-/// Returns the full lifecycle state per daemon-lifecycle-api-v2.md §7.
+/// Returns the full lifecycle state per daemon-lifecycle-api.md §7.
 /// Wire-compatible with v1: v1 clients only see `lifecycle_state` field.
 /// v2 clients can check `schema_version: 2` for the full shape.
 pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonStatusV2> {

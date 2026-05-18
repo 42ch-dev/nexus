@@ -1,7 +1,7 @@
 //! Preset loader module.
 //!
 //! Loads preset bundles (YAML manifest + optional prompt templates) and
-//! validates them per `orchestration-engine-v1.md` §7.6.
+//! validates them per `orchestration-engine.md` §7.6.
 //!
 //! Types: `nexus-contracts::local::orchestration::preset`.
 //! Loader + validation: this module (`loader.rs`).

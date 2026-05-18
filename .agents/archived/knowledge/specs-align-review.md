@@ -6,7 +6,7 @@
 **Scope**: Frozen **v1-spec** tree (resolve locally via `.agents/local-paths.json` → private design checkout; **do not** paste that path into committed artifacts) vs **this repository** (`schemas/`, `crates/`, `packages/`, CLI/daemon).  
 **Non-scope**: `nexus-platform` runtime code, production OpenAPI YAML, Web UI — except **explicit cross-repo caveats** in §6.
 
-**Related**: [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) (§2.2 refreshed 2026-04-10), [v1.1-overview-v2.md](v1.1-overview-v2.md), [canonical-hash-v1.md](canonical-hash-v1.md), [`.agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`](../reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md), [`.agents/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md`](../reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md).
+**Related**: [architecture-alignment-review.md](architecture-alignment-review.md) (§2.2 refreshed 2026-04-10), [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md), [canonical-hash.md](canonical-hash.md), [`.agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`](../reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md), [`.agents/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md`](../reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md).
 
 ---
 
@@ -45,8 +45,8 @@
 
 ### 3.2 Knowledge / overview SSOT — **largely resolved (2026-04-10)**
 
-- [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) §2.2 and enum narrative updated for User / ForkBranch / TD-2 / TD-3 closure.  
-- [v1.1-overview-v2.md](v1.1-overview-v2.md) §2–§3 refreshed from `status.json` (counts, Done vs Todo, residuals).  
+- [architecture-alignment-review.md](architecture-alignment-review.md) §2.2 and enum narrative updated for User / ForkBranch / TD-2 / TD-3 closure.  
+- [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md) §2–§3 refreshed from `status.json` (counts, Done vs Todo, residuals).  
 - **Ongoing rule**: after material `status.json` edits, re-run §2–§3 refresh per `v1.1-overview-v2.md` §7.
 
 ### 3.3 SQLite path vs cli-spec — **still a documented deferral**

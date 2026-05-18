@@ -19,4 +19,4 @@ Module-level documentation in `device_flow.rs` states the production dependency;
 
 ## Related
 
-- [architecture-alignment-review-v1.md](../archived/knowledge/architecture-alignment-review-v1.md) (TD-10 source)
+- [architecture-alignment-review.md](archived/knowledge/architecture-alignment-review.md) (TD-10 source)

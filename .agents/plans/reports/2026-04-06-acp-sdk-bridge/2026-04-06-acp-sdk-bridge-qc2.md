@@ -169,7 +169,7 @@ Cross-referencing with `2025-04-05-acp-client-qc*.md`:
 **Cross-verification points**:
 - ✅ Public API documentation coverage (should match QC-#1's findings)
 - ✅ Test coverage completeness (QA should verify edge cases)
-- ✅ Spec compliance (all findings align with `acp-client-tech-spec-v1.md`)
+- ✅ Spec compliance (all findings align with `acp-client-tech-spec-legacy.md`)
 
 **Unique to this review**:
 - Trait ergonomics and `Send` boundary analysis

@@ -1,6 +1,6 @@
 //! `acp.prompt` capability — send a prompt to this creator's active ACP session.
 //!
-//! Design: `orchestration-engine-v1.md` §5.2.
+//! Design: `orchestration-engine.md` §5.2.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;

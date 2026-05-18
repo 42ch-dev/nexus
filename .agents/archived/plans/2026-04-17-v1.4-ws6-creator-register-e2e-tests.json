@@ -23,9 +23,9 @@
     "merge_target": "main",
     "description": "Close the legacy V1.3 Todo row (formerly 2026-04-17-v1.3-creator-register-e2e-tests). wiremock-driven E2E for creator register -> challenge solve -> verify -> credential store. Happy path + negative paths (bad challenge, verify reject, HTTP 500, challenge expiry, no-credential-leak-on-failure) + idempotency guard (stored-token absence).",
     "spec_refs": [
-      ".agents/archived/knowledge/challenge-solver-design-v1.md",
+      ".agents/archived/knowledge/challenge-solver-design.md",
       ".agents/archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json",
-      ".agents/knowledge/v1.4-delivery-compass-v1.md"
+      ".agents/iterations/v1.4-delivery-compass-v1.md"
     ],
     "dependency": "platform M10 (creator register + verify API reachable in test environment; mocked here via wiremock)",
     "supersedes": "2026-04-17-v1.3-creator-register-e2e-tests (prior Todo row; this plan is the V1.4 work item that closes it)",

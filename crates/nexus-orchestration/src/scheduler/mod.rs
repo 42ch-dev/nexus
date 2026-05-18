@@ -3,7 +3,7 @@
 //! A background poller that periodically triggers `ScheduleSupervisor::tick_clocked()`
 //! for admission of due schedules.
 //!
-//! **Four hard constraints** (from crate-selection-best-practices-v1.md §3.7):
+//! **Four hard constraints** (from crate-selection-best-practices.md §3.7):
 //! 1. **Wall-clock + tz-aware**: uses `ClockSource` trait returning Unix timestamp.
 //! 2. **Graceful shutdown**: `CancellationToken` cancels background poll loop.
 //!

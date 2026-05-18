@@ -134,7 +134,7 @@ This document is the in-repo binding: we read v1-spec §3 as **"objects which MA
 
 ### 4.2 Items to note back to v1-spec (low-priority, not required for V1.4 ship)
 
-When V1.4 WS5 lands, the platform-side `{v1-spec}/schema/codegen-strategy-v1.md` can optionally gain a footnote pointing to this `schemas-boundary-v1.md` as the in-repo binding for §3's delegation clause. Landing that footnote is a nice-to-have for traceability; not a V1.4 release-gate item.
+When V1.4 WS5 lands, the platform-side `{v1-spec}/schema/codegen-strategy-v1.md` can optionally gain a footnote pointing to this `schemas-boundary.md` as the in-repo binding for §3's delegation clause. Landing that footnote is a nice-to-have for traceability; not a V1.4 release-gate item.
 
 ### 4.3 What this doc is NOT
 
@@ -274,10 +274,10 @@ This sketch is the PM's best-guess starting point for WS5's auditor. It is **not
 **Expected orchestration-era additions (V1.4 WS2/WS3 new; all local):**
 
 - Preset manifest types (`PresetManifest`, `StateDefinition`, `GraphNode`, …)
-- Capability input/output schemas (declared in Rust constants per orchestration-engine-v1.md §5.3)
+- Capability input/output schemas (declared in Rust constants per ../../knowledge/orchestration-engine.md §5.3)
 - Orchestration session state records (rows in `orchestration_sessions` table)
 - Worker IPC frame types
-- Creator Schedule types (V1.4 WS7; see [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md))
+- Creator Schedule types (V1.4 WS7; see [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md))
 
 ## 7. Migration Steps (for WS5)
 
@@ -357,9 +357,9 @@ If this doc's rule changes in a way that materially affects platform (e.g. recla
 
 Internal:
 
-- [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) §4 WS5 — scope, milestones, evidence
-- [orchestration-engine-v1.md](orchestration-engine-v1.md) §5.3 — capability schemas are local per this doc
-- [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) — live TD resolution matrix
+- [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 — scope, milestones, evidence
+- [orchestration-engine.md](../../knowledge/orchestration-engine.md) §5.3 — capability schemas are local per this doc
+- [architecture-alignment-review.md](architecture-alignment-review.md) — live TD resolution matrix
 
 External (v1-spec, read via `.agents/local-paths.json → specs_root.v1-spec`):
 

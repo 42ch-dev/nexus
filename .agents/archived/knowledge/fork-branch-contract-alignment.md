@@ -29,4 +29,4 @@ Align naming and semantics for fork provenance fields across:
 
 ## Related
 
-- Architecture alignment baseline: [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md)
+- Architecture alignment baseline: [architecture-alignment-review.md](architecture-alignment-review.md)

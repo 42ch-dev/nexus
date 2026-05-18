@@ -17,7 +17,7 @@
 //!
 //! Responses are routed to the correct pending caller via the JSON-RPC `id`.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §6.4.
+//! Design: `.agents/knowledge/orchestration-engine.md` §6.4.
 
 use crate::worker::transport::{RpcTransport, RpcTransportRead, RpcTransportWrite};
 use serde_json::Value;

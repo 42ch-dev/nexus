@@ -4,7 +4,7 @@
 **Created**: 2026-05-10
 **Author**: fullstack-dev (research + design task)
 **Plan ref**: `.agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md`
-**Compass ref**: `.agents/knowledge/v1.15-delivery-compass-v1.md`
+**Compass ref**: `.agents/iterations/v1.15-delivery-compass-v1.md`
 
 ---
 

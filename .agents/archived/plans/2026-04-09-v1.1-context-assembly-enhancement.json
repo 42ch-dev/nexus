@@ -25,7 +25,7 @@
     "working_branch": "feature/v1.1-context-assembly",
     "dependency": "2026-04-09-v1.1-cli-daemon-hardening",
     "spec_refs": [
-      ".agents/knowledge/restructured-context-assembly-v1.md"
+      ".agents/knowledge/restructured-context-assembly.md"
     ],
     "residual_ids": [
       "CTX-R2",

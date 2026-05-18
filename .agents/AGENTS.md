@@ -8,6 +8,8 @@
 |--------|---------|------|
 | `{HARNESS_DIR}` | Root of agent/engineering infrastructure | `.agents/` |
 | `{PLAN_DIR}` | Plan documents and QC/QA reports | `.agents/plans/` |
+| `{ITERATION_DIR}` | Iteration-level compass specs (version scope/acceptance/risk) | `.agents/iterations/` |
+| `{KNOWLEDGE_DIR}` | Implementation-detail SSOT and long-lived technical specs | `.agents/knowledge/` |
 
 ## Upstream Harness
 
@@ -20,10 +22,11 @@ All in-repo documentation and agent plans MUST be reachable from a fresh `git cl
 - **Do not** reference `.gitignore`-excluded or out-of-repo paths (e.g., `~/.config/...`, absolute home paths, sibling directories). Inline external context or link to stable public URLs.
 - **Do not** paste machine-specific paths (`/Users/<you>/...`) in tracked artifacts — use repo-relative paths or neutral placeholders.
 
-## Content Boundary: `docs/` vs `.agents/knowledge/`
+## Content Boundary: `docs/` vs `.agents/iterations/` vs `.agents/knowledge/`
 
 - **`docs/`**: end-user and contributor documentation (installation, quickstart, architecture overview, contributing). **Do NOT** place architecture review reports, per-plan design decisions, or plan inputs/outputs here.
-- **`.agents/knowledge/`**: dev-process artifacts (architecture review reports, design decision records, gap analyses, plan implementation context). Indexed in [`.agents/knowledge/README.md`](knowledge/README.md).
+- **`.agents/iterations/`**: iteration-level specs for a delivery version — including `*-delivery-compass-*.md` and legacy `v1.*` compass artifacts (overview, matrix, program notes). Indexed in [`.agents/iterations/README.md`](iterations/README.md).
+- **`.agents/knowledge/`**: implementation-detail SSOT and reusable technical design artifacts (architecture specs, contracts, cross-version trackers, matrices). Index: [`.agents/knowledge/README.md`](knowledge/README.md). Maintenance and naming: [`.agents/knowledge/AGENTS.md`](knowledge/AGENTS.md).
 
 ## Plan Lifecycle
 

@@ -20,10 +20,10 @@
     "working_branch": "feature/v1.4-ws5-schemas-boundary",
     "merge_target": "feature/v1.4",
     "description": "Audit every schemas/**/*.schema.json, classify as wire (kept) or local (moved to crates/nexus-contracts/src/local/ as hand-written Rust — no codegen). Regenerate contracts (deletions only), bump @42ch/nexus-contracts minor, post cross-repo handoff note. Per schemas-boundary-v1 §2 rule (platform HTTP observability).",
-    "wave_0_spec": ".agents/knowledge/schemas-boundary-v1.md",
+    "wave_0_spec": ".agents/archived/knowledge/schemas-boundary.md",
     "spec_refs": [
-      ".agents/knowledge/schemas-boundary-v1.md",
-      ".agents/knowledge/v1.4-delivery-compass-v1.md"
+      ".agents/archived/knowledge/schemas-boundary.md",
+      ".agents/iterations/v1.4-delivery-compass-v1.md"
     ],
     "parallelism": "fully parallel with WS1/WS2/WS3/WS4/WS6/WS7",
     "effort_agent_oriented": "S (1 agent session)",

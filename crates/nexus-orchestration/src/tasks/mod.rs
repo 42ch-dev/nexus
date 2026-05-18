@@ -1,6 +1,6 @@
 //! Standard `Task` implementations for the orchestration engine.
 //!
-//! Design: `.agents/plans/knowledge/orchestration-engine-v1.md` §4.4.
+//! Design: `.agents/knowledge/orchestration-engine.md` §4.4.
 //!
 //! # TODO(V1.17): Run and capability-call trace correlation
 //!
@@ -812,7 +812,7 @@ impl Task for InnerGraphNodeTask {
 
 /// Tool policy for ACP prompt sessions.
 ///
-/// Design: `orchestration-engine-v1.md` §6.5.
+/// Design: `orchestration-engine.md` §6.5.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolPolicy {
     /// All tools auto-granted (V1.0 behavior).
@@ -853,7 +853,7 @@ impl ToolPolicy {
 
 /// A task that sends a prompt to an ACP agent via the Worker Manager IPC.
 ///
-/// Design: `orchestration-engine-v1.md` §4.4 (`AcpPromptTask` row) + §6.4 (IPC shapes).
+/// Design: `orchestration-engine.md` §4.4 (`AcpPromptTask` row) + §6.4 (IPC shapes).
 ///
 /// `run(ctx)`:
 /// 1. Renders the template with `handlebars` against `ctx` bindings.

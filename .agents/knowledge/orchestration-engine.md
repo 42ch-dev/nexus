@@ -1,25 +1,25 @@
 # Orchestration Engine — Design Specification v1
 
-**Status**: Active — authoritative design input for V1.4 Orchestration track (creates no open plan row yet; this doc is the ***wave-0 spec*** to be cited by the first plan that implements any of §9 phases).
+**Status**: Active — orchestration engine SSOT (`nexus-orchestration`, preset loader, worker IPC, capability registry). Primary wave-0 spec for V1.4; still cited by ongoing schedule/cron/multi-agent work.
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17
 **Scope**: `nexus42d` (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
-- [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) — §2.3 worker-delegated hosting amendment; §4 Local API additions; §11 `nexus-acp-host` crate spec
-- [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md) — full 6-state statig HSM closing TD-9
-- [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
+- [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Local API additions; §11 `nexus-acp-host` crate spec
+- [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — full 6-state statig HSM closing TD-9
+- [architecture-alignment-review.md](archived/knowledge/architecture-alignment-review.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
 
 **Non-goals** (explicit):
 
-- Creator **Schedule** (multi-Schedule queueing, priority, preemption, CRUD by ID, `core_context` derivation and versioning) — **now folded into V1.4 as WS7**, designed separately in [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md). This document defines the engine primitives that WS7 builds on.
-- LLM-driven `core_context` summarisation / auto-iteration — V1.4 reserves the data-model variant but does not implement the capability (see [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §11); V1.5+.
+- Creator **Schedule** (multi-Schedule queueing, priority, preemption, CRUD by ID, `core_context` derivation and versioning) — **now folded into V1.4 as WS7**, designed separately in [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md). This document defines the engine primitives that WS7 builds on.
+- LLM-driven `core_context` summarisation / auto-iteration — V1.4 reserves the data-model variant but does not implement the capability (see [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §11); V1.5+.
 - Schedule cron / wall-clock triggers — V1.5+ (schema ready in V1.4).
 - Preset third-party registry / signing / publish — V1.5+.
-- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in [schemas-boundary-v1.md](schemas-boundary-v1.md); parallel to WS2 of that compass.
+- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in [schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md); parallel to WS2 of that compass.
 
-> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 ([schemas-boundary-v1.md](schemas-boundary-v1.md)); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
+> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 ([schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md)); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
 
 ---
 
@@ -66,7 +66,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 3. `nexus42d` gains: orchestration engine runtime, statig lifecycle HSM, Worker Manager, IPC server.
 4. `nexus42` gains: `acp-worker` hidden subcommand (worker entrypoint); `schedule` command group (B-track — not in A's deliverables except a stub that surfaces engine state).
 5. First built-in preset: `_system.maintenance` (mandatory) and one user-facing sample `novel-writing`.
-6. Knowledge docs revised: [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md), [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md).
+6. Knowledge docs revised: [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md), [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md).
 
 ### 1.4 Effort (agent-oriented)
 
@@ -103,12 +103,12 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 | `nexus42 schedule` CLI command family semantics                                | B-track                                                           |
 | Seed-prompt → stable core-context derivation & versioning                      | B-track                                                           |
 | Preset distribution / registry / signing                                       | Future (V1.5+)                                                   |
-| Wire schemas vs local types boundary refactor                                  | [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) §4 WS5 |
-| ACP SDK migration (e.g. to `sacp` v1.0)                                        | Governed by [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) §1.2 adapter-layer policy |
+| Wire schemas vs local types boundary refactor                                  | [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 |
+| ACP SDK migration (e.g. to `sacp` v1.0)                                        | Governed by [acp-client-tech-spec.md](acp-client-tech-spec.md) §1.2 adapter-layer policy |
 
 ### 2.3 Non-goals (explicit)
 
-- **Not an ACP Agent/Server promotion**: `nexus42d` remains not-an-ACP-host. See [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) §2.3 (*worker-delegated hosting*).
+- **Not an ACP Agent/Server promotion**: `nexus42d` remains not-an-ACP-host. See [acp-client-tech-spec.md](acp-client-tech-spec.md) §2.3 (*worker-delegated hosting*).
 - **Not a LangChain-style in-memory pipeline**: all engine execution is **durable** and **resumable across daemon restart**; in-memory-only pipelines are explicitly rejected.
 - **Not a replacement for interactive `nexus42 agent run`**: that path stays direct stdio CLI-to-agent; orchestration does not route through it.
 
@@ -186,7 +186,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ## 4. Orchestration Engine (graph-flow integration)
 
-> **Crate selection cross-reference**: `graph-flow = "=0.2.3"` pinning, `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
+> **Crate selection cross-reference**: `graph-flow = "=0.2.3"` pinning, `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices.md`](crate-selection-best-practices.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
 
 ### 4.1 Library adoption decision
 
@@ -232,7 +232,7 @@ impl graph_flow::SessionStorage for SqliteSessionStorage {
 }
 ```
 
-**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
+**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
 
 Schema (new table in the unified `state.db` owned by `nexus-local-db`; schema migration file added under `crates/nexus-local-db/migrations/`):
 
@@ -285,7 +285,7 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 ## 5. Capability Registry
 
-> **Crate selection cross-reference**: Capability implementations MAY depend on third-party crates (e.g. `notify` for file-watch capabilities, `jsonwebtoken` for auth-related capabilities). Any new crate introduced here follows [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §1 (conventions) — in particular §1.5 (PM introduction gate) and §1.3 (feature flag whitelist).
+> **Crate selection cross-reference**: Capability implementations MAY depend on third-party crates (e.g. `notify` for file-watch capabilities, `jsonwebtoken` for auth-related capabilities). Any new crate introduced here follows [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §1 (conventions) — in particular §1.5 (PM introduction gate) and §1.3 (feature flag whitelist).
 
 ### 5.1 `Capability` trait
 
@@ -333,7 +333,7 @@ All capabilities below are registered at `nexus42d` startup. Adding a new capabi
 
 ### 5.3 Capability input/output schemas
 
-Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per the wire/local rule in [schemas-boundary-v1.md](schemas-boundary-v1.md) §2) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
+Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per the wire/local rule in [schemas-boundary.md](schemas-boundary.md) §2) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
 ### 5.4 Capability errors
 
@@ -347,7 +347,7 @@ Each capability ships its `input_schema` and `output_schema` as constants (JSON 
 
 - **Spawn**: Worker Manager starts `nexus42 acp-worker --creator <id>` when the first ACP-kind capability is invoked for that creator (lazy start) or when the statig HSM enters `Running` **and** a creator has an active Schedule requiring one (eager start — B-track decides policy; A-track defaults to **lazy**).
 - **Supervise**: Worker Manager monitors exit status and writes to `tracing`; on unexpected exit during an active Session, the corresponding engine signal is `AcpSessionLost` — preset may have a retry path; if none, Session flips to `failed`.
-- **Graceful stop**: lifecycle HSM `Stopping` state sends a terminal IPC `shutdown` frame; worker finalises current prompt if any, closes ACP session via `cancel`, exits within 5 s; otherwise `SIGTERM` → `SIGKILL` path per `acp-client-tech-spec-v2.md` §2.3.
+- **Graceful stop**: lifecycle HSM `Stopping` state sends a terminal IPC `shutdown` frame; worker finalises current prompt if any, closes ACP session via `cancel`, exits within 5 s; otherwise `SIGTERM` → `SIGKILL` path per `acp-client-tech-spec.md` §2.3.
 - **Crash recovery**: `daemon` restart reads `orchestration_sessions` table, finds sessions in `running` / `waiting_for_input` state that were owned by a now-dead worker, marks them `paused` with reason `worker_crash`, and exposes them to the user for manual resume (B-track may auto-resume on configured strategies).
 
 ### 6.2 One worker per creator (MVP)
@@ -360,7 +360,7 @@ Each capability ships its `input_schema` and `output_schema` as constants (JSON 
 
 Selected transport: **parent↔child stdin/stdout** with **JSON-RPC 2.0** framing.
 
-**Implementation crate selection (closed 2026-04-17)**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + newline-delimited framing via `tokio_util::codec::LinesCodec`. Decision SSOT: [`crate-selection-best-practices-v1.md`](crate-selection-best-practices-v1.md) §2.1 + §3.1. The `RpcTransport` trait is the insurance layer if jsonrpsee-core ever needs replacement — callers depend on the trait, not on `jsonrpsee::*` directly.
+**Implementation crate selection (closed 2026-04-17)**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + newline-delimited framing via `tokio_util::codec::LinesCodec`. Decision SSOT: [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.1 + §3.1. The `RpcTransport` trait is the insurance layer if jsonrpsee-core ever needs replacement — callers depend on the trait, not on `jsonrpsee::*` directly.
 
 Rationale:
 
@@ -402,7 +402,7 @@ Notifications (worker → daemon, unsolicited):
 - `deny_all`
 - `request_policy` (every tool triggers upcall)
 
-The permission *decision engine* is out-of-scope here; V1.4 ships the plumbing and `auto_grant_read_only` default for preset-driven work. ACP-R7 (permission policy engine) becomes **partially addressed** — see [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) Appendix B.
+The permission *decision engine* is out-of-scope here; V1.4 ships the plumbing and `auto_grant_read_only` default for preset-driven work. ACP-R7 (permission policy engine) becomes **partially addressed** — see [acp-client-tech-spec.md](acp-client-tech-spec.md) Appendix B.
 
 ### 6.6 Backpressure and streaming
 
@@ -666,7 +666,7 @@ pub fn load_preset(
 
 A Creator Schedule is a persistent, user-addressable wrapper around zero or one active engine `Session`. It adds user-facing CRUD (`schedule add/edit/list/inspect/remove`), multi-Schedule per creator, dependency chains, and immutable `core_context` versioning that the engine reads at each state transition.
 
-- **Design SSOT**: [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md).
+- **Design SSOT**: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md).
 - **Session relationship**: a Schedule holds `current_session_id: Option<SessionId>` pointing at an active row in `orchestration_sessions` while `Schedule.status == Running`; terminal Schedules retain the Session row for history.
 - **Engine primitives consumed** — `new_session`, `run_step`, `signal`, `list_active` are sufficient for the supervisor module defined in WS7; this spec adds no new engine API.
 - **Concurrency contract** — multi-Schedule per creator is supported; at most one ACP-calling Schedule may touch the worker at any instant (§6.2 "one worker per creator" constraint). Capability-only Schedules may fully parallel.
@@ -702,7 +702,7 @@ Phase 3 (preset loader + novel-writing E2E)
 Phase 5 (knowledge doc revisions + spec amendments in place)
 ```
 
-Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependencies on this spec's phases — see [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) §4 WS5 for detailed scope.
+Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependencies on this spec's phases — see [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 for detailed scope.
 
 ### 10.2 Phase 1 — `nexus-acp-host` crate extraction (M; 1–2 agent sessions)
 
@@ -713,7 +713,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - Update `crates/nexus42` to `use nexus_acp_host as acp` and re-export for existing call-sites in `commands/agent.rs`.
 - Add `nexus42 acp-worker` subcommand as **hidden** (not in `--help`) entrypoint — minimal body for this phase (echo back `worker/initialize` OK). Full worker logic in Phase 2.
 - `Cargo.toml` workspace updates; update `rust-toolchain`, CI matrix, and `verify-codegen` (no codegen impact expected).
-- Update `acp-client-tech-spec-v2.md` §11 with final crate layout.
+- Update `acp-client-tech-spec.md` §11 with final crate layout.
 
 **Acceptance**
 
@@ -734,7 +734,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - `Capability` trait + registry; register **built-ins listed in §5.2 except `acp.*` and `judge.llm`** (those land Phase 3).
 - Worker Manager (spawn/supervise/shutdown) + stdin/stdout JSON-RPC IPC codec.
 - `nexus42d` wires engine at startup (outside any HSM state changes — that's Phase 4).
-- New HTTP endpoints (authoritative list added to `acp-client-tech-spec-v2.md` §4.3):
+- New HTTP endpoints (authoritative list added to `acp-client-tech-spec.md` §4.3):
   - `GET  /v1/local/orchestration/sessions`
   - `GET  /v1/local/orchestration/sessions/{session_id}`
   - `POST /v1/local/orchestration/sessions/{session_id}/signal`  (`pause` | `resume` | `cancel` | `advance`)
@@ -772,7 +772,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 
 ### 10.5 Phase 4 — statig daemon lifecycle (S+; 1 agent session; parallel with Phase 2)
 
-Owned by [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md); A-track just consumes it. See that doc for state graph, entry/exit actions, event catalogue, and HTTP surface migration (status field now exposes real 6-state values).
+Owned by [daemon-lifecycle-api.md](daemon-lifecycle-api.md); A-track just consumes it. See that doc for state graph, entry/exit actions, event catalogue, and HTTP surface migration (status field now exposes real 6-state values).
 
 **Integration point with engine**: HSM `Running.entry` calls `engine.start()`; `Stopping.entry` calls `engine.shutdown(grace_ms)`; `Degraded` is entered when any of `{sync, acp_registry, worker_manager}` report sustained failures (threshold defined in v2 lifecycle doc).
 
@@ -780,12 +780,12 @@ Owned by [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md); A-track just 
 
 In the same change window as each phase:
 
-- Phase 1 → commit [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) §11 (crate layout).
+- Phase 1 → commit [acp-client-tech-spec.md](acp-client-tech-spec.md) §11 (crate layout).
 - Phase 2 → commit §4.3 (Local API additions) in the same spec.
-- Phase 4 → commit [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md).
+- Phase 4 → commit [daemon-lifecycle-api.md](daemon-lifecycle-api.md).
 - Phase 3 → this document updated: move sections to "Delivered" once implemented.
-- **Phase 5b (new)** → WS7 lands [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) implementation; engine consumes the `ScheduleSupervisor` signal path added in that spec's §4.
-- [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) §2.6 row for TD-9 updated from "Partial" to "Resolved (v2)".
+- **Phase 5b (new)** → WS7 lands [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) implementation; engine consumes the `ScheduleSupervisor` signal path added in that spec's §4.
+- [architecture-alignment-review.md](architecture-alignment-review.md) §2.6 row for TD-9 updated from "Partial" to "Resolved (v2)".
 
 ---
 
@@ -795,10 +795,10 @@ The following questions were originally parked as B-track in this document. Afte
 
 | ID    | Question                                                                                               | V1.4 Resolution                                                                                       |
 | ----- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| OQ-1  | How many concurrent Schedules can one creator have active at once?                                      | **Answered in WS7** — multi-Schedule; concurrency declared per-add; ACP-calling Schedules serialised per-creator via worker mutex. See [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §5. |
+| OQ-1  | How many concurrent Schedules can one creator have active at once?                                      | **Answered in WS7** — multi-Schedule; concurrency declared per-add; ACP-calling Schedules serialised per-creator via worker mutex. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §5. |
 | OQ-2  | Schedule priority and preemption semantics                                                              | **Answered in WS7** — no priority / no preemption in V1.4; explicit `schedule pause/resume/cancel` only. See §2 decisions in the schedule spec. |
 | OQ-3  | What happens when all creator Schedules complete                                                        | **Answered in WS7** — creator returns to idle (no default loop). See §2 decisions.                    |
-| OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context-v1.md](creator-schedule-and-core-context-v1.md) §6 + §11. |
+| OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §6 + §11. |
 | OQ-5  | `nexus42 schedule add/update/remove/inspect` semantics — editing in-flight                              | **Answered in WS7** — full CRUD; in-flight edits accepted but take effect at next state transition ("core_context is stable during execution"). See §3.3 + §6.4. |
 | OQ-6  | Timer / clock model for wall-clock triggers                                                             | **Partially answered** — V1.4 on-demand only; `scheduled_at` column reserved; V1.5 adds clock poller zero-migration. See WS7 §2 + §10. |
 | OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13).                                                            |
@@ -808,7 +808,7 @@ The following questions were originally parked as B-track in this document. Afte
 
 ## 12. Coordinated Work Tracks and Knowledge Doc Revisions
 
-This document defines the **orchestration engine design itself** — workstream ordering, effort estimation, and program-level coordination with the `schemas/` boundary refactor live in **[v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md)**. Refer to that compass for:
+This document defines the **orchestration engine design itself** — workstream ordering, effort estimation, and program-level coordination with the `schemas/` boundary refactor live in **[v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md)**. Refer to that compass for:
 
 - How WS1–WS4 of this spec map to V1.4 waves and milestones.
 - How the `schemas/` boundary refactor (formerly noted here as a "parallel small plan") is formalised as **WS5** of the V1.4 delivery compass.
@@ -820,10 +820,10 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 | v1 (preserved, now carries superseded-by pointer) | v2 (new; authoritative)                                         |
 | ------------------------------------------------- | --------------------------------------------------------------- |
-| [daemon-lifecycle-api-v1.md](../archived/knowledge/daemon-lifecycle-api-v1.md) (archived) | [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md)  |
-| [acp-client-tech-spec-v1.md](../archived/knowledge/acp-client-tech-spec-v1.md) (archived) | [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md)  |
+| [daemon-lifecycle-api-legacy.md](archived/knowledge/daemon-lifecycle-api-legacy.md) (archived) | [daemon-lifecycle-api.md](daemon-lifecycle-api.md)  |
+| [acp-client-tech-spec-legacy.md](archived/knowledge/acp-client-tech-spec-legacy.md) (archived) | [acp-client-tech-spec.md](acp-client-tech-spec.md)  |
 
-**Archived 2026-04-17** (same merge as this spec): v1 files moved to `.agents/archived/knowledge/`. Active docs (README index, `v1.3-delivery-compass-v1.md`, `v1.2-reclassification-matrix-v1.md`, `architecture-alignment-review-v1.md`, the three v2/orchestration specs) updated to point at the archived path. References inside Done plan `.md` files under `.agents/plans/` root were also refreshed for reachability.
+**Archived 2026-04-17** (historical): v1 lifecycle/ACP companion files moved to `.agents/archived/knowledge/`. This orchestration-engine spec remains **active** under `.agents/knowledge/` (restored after mistaken archival — structure paths in §3–§8 may lag implementation; semantics remain authoritative).
 
 ---
 
@@ -848,12 +848,12 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 Internal:
 
-- [acp-client-tech-spec-v2.md](acp-client-tech-spec-v2.md) — companion spec for ACP host split and worker-delegated hosting
-- [daemon-lifecycle-api-v2.md](daemon-lifecycle-api-v2.md) — companion spec for the 6-state HSM (closes TD-9)
-- [architecture-alignment-review-v1.md](architecture-alignment-review-v1.md) — TD matrix; §2.6 TD-9 row updated to "Resolved via v2" after Phase 4 ships
-- [local-db-refactor-v2.md](local-db-refactor-v2.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See [local-db-refactor-v2.md §4](local-db-refactor-v2.md#4-modularization-plan) for pool sharing model.
-- [acp-client-tech-spec-v1.md](../archived/knowledge/acp-client-tech-spec-v1.md) — archived; do not rely on directly (see Superseded header)
-- [daemon-lifecycle-api-v1.md](../archived/knowledge/daemon-lifecycle-api-v1.md) — archived; do not rely on directly (see Superseded header)
+- [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md) — companion spec for ACP host split and worker-delegated hosting
+- [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — companion spec for the 6-state HSM (closes TD-9)
+- [architecture-alignment-review.md](archived/knowledge/architecture-alignment-review.md) — TD matrix; §2.6 TD-9 row updated to "Resolved via v2" after Phase 4 ships
+- [local-db-refactor.md](archived/knowledge/local-db-refactor.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See [local-db-refactor.md §4](archived/knowledge/local-db-refactor.md#4-modularization-plan) for pool sharing model.
+- [acp-client-tech-spec-legacy.md](archived/knowledge/acp-client-tech-spec-legacy.md) — archived; do not rely on directly (see Superseded header)
+- [daemon-lifecycle-api-legacy.md](archived/knowledge/daemon-lifecycle-api-legacy.md) — archived; do not rely on directly (see Superseded header)
 
 External (stable, public):
 
@@ -861,8 +861,8 @@ External (stable, public):
 - statig: https://github.com/mdeloof/statig — v0.3.x (hierarchical state machines)
 - ACP Protocol: https://agentclientprotocol.com/
 - ACP Registry (public CDN): https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json
-- `agent-client-protocol` crate: https://crates.io/crates/agent-client-protocol — `=0.10.4` per `acp-client-tech-spec-v2.md` §1.2
+- `agent-client-protocol` crate: https://crates.io/crates/agent-client-protocol — `=0.10.4` per `acp-client-tech-spec.md` §1.2
 
 ---
 
-*End of specification. The companion v2 knowledge documents (`daemon-lifecycle-api-v2.md`, `acp-client-tech-spec-v2.md`) fill in details that would otherwise clutter this document; read all three together before starting Phase 1.*
+*End of specification. The companion knowledge documents ([daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md), [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*

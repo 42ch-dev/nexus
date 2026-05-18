@@ -17,7 +17,7 @@
     "working_branch": "feature/v1.5-stabilization",
     "dependency": [],
     "blocks": ["2026-04-18-v1.5-ws-c-context-summarize", "2026-04-18-v1.5-ws-d-cron-triggers"],
-    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "primary_spec": "iterations/v1.5-nexus-delivery-compass-v1.md",
     "residual_coverage": {
       "plan_id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
       "residual_ids": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]

@@ -43,7 +43,7 @@
     "workstream": "WS5",
     "milestone": "parallel (non-blocking for M3) — complete",
     "v1.2_scope": true,
-    "compass_ref": "knowledge/v1.2-delivery-compass-v1.md",
+    "compass_ref": "iterations/v1.2-delivery-compass-v1.md",
     "commits": [
       "76dd924 feat(cli): add nexus42 clone command (E1)",
       "f11c541 feat(cli): add nexus42 identity unlink command (E2)",

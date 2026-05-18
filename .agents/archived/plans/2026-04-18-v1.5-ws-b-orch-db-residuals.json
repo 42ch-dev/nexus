@@ -17,7 +17,7 @@
     "working_branch": "feature/v1.5-stabilization",
     "dependency": [],
     "blocks": [],
-    "primary_spec": "knowledge/v1.5-nexus-delivery-compass-v1.md",
+    "primary_spec": "iterations/v1.5-nexus-delivery-compass-v1.md",
     "residual_coverage": {
       "plans": {
         "2026-04-17-v1.4-ws2-orchestration-skeleton": ["R1", "R3", "R4"],

@@ -193,7 +193,7 @@ None — No blocking security vulnerabilities or architecture violations detecte
 |------------|--------|--------|----------|
 | Rust-first for CLI/daemon | AGENTS.md | ✅ PASS | Pure Rust 1.75+, clap, tokio, axum |
 | HTTP-only Local API | Architecture Review §3.1.4 | ✅ PASS | axum on port 8420, JSON wire format, no gRPC |
-| SQLite workspace state | restructured-context-assembly-v1.md §2.3 | ✅ PASS | `$HOME/.nexus42/state.db` with WAL mode |
+| SQLite workspace state | restructured-context-assembly.md §2.3 | ✅ PASS | `$HOME/.nexus42/state.db` with WAL mode |
 | No Neo4j/Postgres/pgvector | AGENTS.md | ✅ PASS | Cargo.toml clean, only rusqlite dependency |
 | JSON Schema truth source | codegen-strategy-v1.md | ✅ PASS | Uses `nexus-contracts` generated types (Creator, ManuscriptPhase) |
 | CLI is ACP client | AGENTS.md | ✅ PASS | No ACP server code in CLI/daemon |

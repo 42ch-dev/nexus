@@ -31,7 +31,7 @@
       "description": "Fix CommonTypes codegen to read from schema, generate context assembly types, generate registry manifest types",
       "dependency": "none (can run in parallel with all plans)",
       "spec_refs": [
-        ".agents/archived/knowledge/phase2-architecture-plan-v1.md"
+        ".agents/archived/knowledge/phase2-architecture-plan.md"
       ],
       "effort": "S — ~1-2 agent sessions",
       "residual_summary": "5 addressed (2 HIGH, 3 MEDIUM resolved)",

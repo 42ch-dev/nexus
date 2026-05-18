@@ -1,6 +1,6 @@
 # Nexus V1.1 Development Overview
 
-> **Archived**: Superseded by [`../../knowledge/v1.1-overview-v2.md`](../../knowledge/v1.1-overview-v2.md) on **2026-04-09**. Retained for historical product tables, command matrix, and residual-integration narrative.
+> **Archived**: Superseded by [`../../iterations/v1.1-overview-v2.md`](../../iterations/v1.1-overview-v2.md) on **2026-04-09**. Retained for historical product tables, command matrix, and residual-integration narrative.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement each sub-plan task-by-task.
 
@@ -699,11 +699,11 @@ All P0 features must be functional and tested:
 
 | Document                        | Location                                                            | Purpose                                                  |
 | ------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
-| V1.0-phase1 Product Review      | `.agents/archived/knowledge/phase1-product-review-v1.md`      | Feature completeness analysis, user journey mapping      |
-| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review-v1.md` | Technical findings, bug list, debt items                 |
-| ACP Client Tech Spec            | `.agents/archived/knowledge/acp-client-tech-spec-v1.md` (archived 2026-04-17) | ACP integration details                                  |
-| V1.0-phase2 Product Plan        | `.agents/archived/knowledge/phase2-product-plan-v1.md`        | Product features, priorities, user stories               |
-| V1.0-phase2 Architecture Plan   | `.agents/archived/knowledge/phase2-architecture-plan-v1.md`   | Architecture decisions, residual matrix, risk mitigation |
+| V1.0-phase1 Product Review      | `.agents/archived/knowledge/phase1-product-review.md`      | Feature completeness analysis, user journey mapping      |
+| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review.md` | Technical findings, bug list, debt items                 |
+| ACP Client Tech Spec            | `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | ACP integration details                                  |
+| V1.0-phase2 Product Plan        | `.agents/archived/knowledge/phase2-product-plan.md`        | Product features, priorities, user stories               |
+| V1.0-phase2 Architecture Plan   | `.agents/archived/knowledge/phase2-architecture-plan.md`   | Architecture decisions, residual matrix, risk mitigation |
 | Plan Status                     | `.agents/status.json`                                         | Residual findings, plan tracking                         |
 | Knowledge Index                 | `.agents/knowledge/README.md`                                 | Index of all knowledge documents                         |
 | AGENTS.md                       | Repository root                                                     | Development workflow, constraints, CI                    |

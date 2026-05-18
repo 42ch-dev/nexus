@@ -30,7 +30,7 @@
       "merge_commit": "9301529",
       "dependency": null,
       "spec_refs": [
-        ".agents/knowledge/local-db-refactor-v1.md"
+        ".agents/knowledge/local-db-refactor-legacy.md"
       ],
       "effort": "M (~8 sessions across 6 phases)",
       "gates": {

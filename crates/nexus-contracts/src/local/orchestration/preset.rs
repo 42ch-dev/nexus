@@ -1,7 +1,7 @@
-//! Preset manifest types — hand-written, per `schemas-boundary-v1.md` §3.
+//! Preset manifest types — hand-written, per `schemas-boundary.md` §3.
 //!
 //! These types represent the YAML schema for `preset.yaml` as defined in
-//! `orchestration-engine-v1.md` §7.2 and §7.5.
+//! `orchestration-engine.md` §7.2 and §7.5.
 //!
 //! **NOT** in `schemas/` — this is a local type; `nexus-platform` never
 //! observes it over any wire channel.

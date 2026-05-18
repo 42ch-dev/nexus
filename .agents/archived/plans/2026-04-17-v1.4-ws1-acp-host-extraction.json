@@ -13,12 +13,12 @@
     "phase": "V1.4-M1",
     "working_branch": "feature/v1.4-ws1-acp-host",
     "merge_target": "main",
-    "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec-v2.md §11.",
-    "wave_0_spec": ".agents/knowledge/acp-client-tech-spec-v2.md",
+    "description": "Extract ACP client implementation from crates/nexus42/src/acp/ into new crates/nexus-acp-host crate (worker-only linkage; enforced by CI gate verify-no-acp-in-daemon). Ship nexus42 acp-worker hidden subcommand stub for WS2 to grow into the JSON-RPC loop. Wave-0 spec: acp-client-tech-spec.md §11.",
+    "wave_0_spec": ".agents/archived/knowledge/acp-client-tech-spec.md",
     "spec_refs": [
-      ".agents/knowledge/acp-client-tech-spec-v2.md",
-      ".agents/knowledge/orchestration-engine-v1.md",
-      ".agents/knowledge/v1.4-delivery-compass-v1.md"
+      ".agents/archived/knowledge/acp-client-tech-spec.md",
+      ".agents/knowledge/orchestration-engine.md",
+      ".agents/iterations/v1.4-delivery-compass-v1.md"
     ],
     "effort_agent_oriented": "M (1-2 agent sessions)",
     "gates": {

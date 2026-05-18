@@ -52,7 +52,7 @@ generated_at: "2026-04-10"
 
 | Criterion / Task ID | Done / Partial / Not done | Evidence |
 |---------------------|---------------------------|----------|
-| QC-W1 Migration doc extraction | Done | `docs/migrations/outbox-schema-v2.md`; `crates/nexus-sync/src/outbox.rs` summary pointer |
+| QC-W1 Migration doc extraction | Done | `docs/migrations/outbox-schema.md`; `crates/nexus-sync/src/outbox.rs` summary pointer |
 | QC-W9 CI script extraction | Done | `tooling/check-schema-drift.sh`; `.github/workflows/ci.yml` single step |
 | Residual closure + archive | Done | Removed from `residual_findings`; `archived/residuals/2026-04-08-v1.1-tech-debt-mitigation-batch-c-w1-w9.json` |
 | status.json + plan doc sync | Done | `plans[].progress`, `batch_status`, `tech_debt_summary` |

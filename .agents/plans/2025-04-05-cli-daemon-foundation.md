@@ -205,8 +205,8 @@
 | Rust-first for CLI/daemon              | AGENTS.md                                  | ✅                                         |
 | JSON Schema as wire truth source       | `codegen-strategy-v1.md`                   | ✅ (consume from `crates/nexus-contracts`) |
 | CLI is ACP client, not agent/server    | AGENTS.md                                  | ✅                                         |
-| CLI uses SQLite for local state        | `restructured-context-assembly-v1.md` §2.3 | ✅ (Task 4)                                |
-| No Neo4j/Postgres/pgvector on CLI side | `restructured-context-assembly-v1.md` §2.3 | ✅                                         |
+| CLI uses SQLite for local state        | `restructured-context-assembly.md` §2.3 | ✅ (Task 4)                                |
+| No Neo4j/Postgres/pgvector on CLI side | `restructured-context-assembly.md` §2.3 | ✅                                         |
 | V1.0 Creator as first-class citizen    | roadmap §3.1.1, §3.1.2                     | ✅ (Task 6)                                |
 | `manuscript_phase` V1.0 deliverable    | roadmap §3.1.1                             | ✅ (Task 7)                                |
 | Dual-subject auth (User + Creator)     | roadmap §2.2, review CLI-R4                | ✅ (Task 3)                                |
