@@ -518,6 +518,131 @@ impl crate::HostFacade for HostManager {
         );
         Ok(())
     }
+
+    async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
+        // Verify session exists
+        let session = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(&session_id)
+                .cloned()
+                .ok_or_else(|| HostError::internal(format!("session {session_id} not found")))?
+        };
+
+        // Get provider for this session
+        let (adapter, _) = self.get_provider_for_session(&session_id).await?;
+
+        // Build handle from registry data
+        let handle = ManagedSessionHandle {
+            provider_id: session.provider_id.clone(),
+            session_id: session_id.clone(),
+            capabilities: session.negotiated_capabilities.clone(),
+        };
+
+        // Read configured shutdown timeout
+        let shutdown_timeout = self.config.read().await.as_ref().map_or_else(
+            || crate::config::TimeoutConfig::default().shutdown_duration(),
+            |c| c.timeouts.shutdown_duration(),
+        );
+
+        // Call provider adapter shutdown with timeout
+        match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
+            Ok(Ok(())) => {
+                tracing::info!(
+                    session_id = %session_id,
+                    provider_id = %session.provider_id,
+                    "Per-session shutdown succeeded"
+                );
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %e,
+                    "Per-session provider shutdown returned error"
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    timeout_ms = shutdown_timeout.as_millis(),
+                    "Per-session provider shutdown timed out"
+                );
+            }
+        }
+
+        // Transition session through Stopping → Stopped
+        {
+            let mut sessions = self.sessions.write().await;
+            let _ = sessions.transition_to_stopping(&session_id);
+            let _ = sessions.transition_to_stopped(
+                &session_id,
+                crate::capability::model::SessionStopReason::GracefulShutdown,
+            );
+            let _ = sessions.remove_stopped(&session_id);
+        }
+
+        // Remove session → provider mapping
+        {
+            let mut session_providers = self.session_providers.write().await;
+            session_providers.remove(&session_id);
+        }
+
+        Ok(())
+    }
+
+    async fn list_sessions(&self) -> HostResult<Vec<crate::core::session::HostSession>> {
+        let sessions = self.sessions.read().await;
+        Ok(sessions.iter().cloned().collect())
+    }
+
+    async fn provider_catalog(&self) -> HostResult<crate::discovery::ProviderCatalog> {
+        // Collect adapter descriptors under a short-lived read lock.
+        let descs: Vec<(
+            ProviderId,
+            bool,
+            crate::capability::model::ProviderDescriptor,
+        )> = {
+            let providers = self.providers.read().await;
+            providers
+                .iter()
+                .map(|(pid, entry)| (pid.clone(), entry.available, entry.adapter.descriptor()))
+                .collect()
+        };
+
+        let mut entries = Vec::new();
+        for (provider_id, available, desc) in descs {
+            entries.push(crate::ProviderCatalogEntry {
+                provider_id: provider_id.clone(),
+                display_name: desc.display_name.clone(),
+                protocol_kind: desc.protocol_kind,
+                launch: match desc.protocol_kind {
+                    crate::capability::model::ProtocolKind::Acp => crate::LaunchStrategy::Acp {
+                        command: String::new(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                    crate::capability::model::ProtocolKind::NativeCli => {
+                        crate::LaunchStrategy::NativeCli {
+                            command: String::new(),
+                            args: vec![],
+                            env: std::collections::HashMap::new(),
+                        }
+                    }
+                },
+                source: crate::DiscoverySource::Config,
+                trust: crate::TrustLevel::Explicit,
+                capabilities: desc.capabilities,
+                health: crate::capability::model::ProviderHealth {
+                    provider_id: provider_id.clone(),
+                    available,
+                    latency_ms: None,
+                    message: None,
+                },
+            });
+        }
+
+        Ok(crate::discovery::ProviderCatalog { entries })
+    }
 }
 
 #[cfg(test)]
