@@ -3,7 +3,8 @@
 ## Document Metadata
 
 - Scope: `nexus` repository only
-- Type: Architecture design (dev-process knowledge)
+- Type: Implementation architecture (dev-process knowledge SSOT)
+- **Normative upstream** (architecture boundaries): `nexus-platform` `.agents/designs/v1-spec/local/daemon-runtime-v1.md`, **ADR-026**, **ADR-027**
 - Status: Active
 - Spec readiness: Ready for implementation handoff
 - Decision mode: Break-change allowed, no compatibility migration required
