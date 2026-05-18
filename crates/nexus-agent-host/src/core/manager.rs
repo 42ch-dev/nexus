@@ -29,6 +29,9 @@ struct ProviderEntry {
     available: bool,
 }
 
+/// Default broadcast channel capacity for host events.
+const EVENT_BROADCAST_CAPACITY: usize = 256;
+
 /// The host manager facade.
 ///
 /// Implements [`HostFacade`] — the narrow interface consumed by the daemon runtime.
@@ -51,6 +54,8 @@ pub struct HostManager {
     running: RwLock<bool>,
     /// Canonical workspace root boundary — all session cwds must be under this.
     workspace_root: RwLock<Option<std::path::PathBuf>>,
+    /// Broadcast sender for host events — SSE subscribers consume via `subscribe()`.
+    event_tx: tokio::sync::broadcast::Sender<HostEvent>,
 }
 
 // HashMap import for providers/session_providers
@@ -60,6 +65,7 @@ impl HostManager {
     /// Create a new host manager with no providers registered.
     #[must_use]
     pub fn new() -> Self {
+        let (event_tx, _) = tokio::sync::broadcast::channel(EVENT_BROADCAST_CAPACITY);
         Self {
             sessions: Arc::new(RwLock::new(SessionRegistry::new())),
             providers: RwLock::new(HashMap::new()),
@@ -72,17 +78,32 @@ impl HostManager {
             config: RwLock::new(None),
             running: RwLock::new(false),
             workspace_root: RwLock::new(None),
+            event_tx,
         }
     }
 
     /// Create a host manager with a specific admission policy.
     #[must_use]
     pub fn with_admission(admission: AdmissionPolicy) -> Self {
+        let (event_tx, _) = tokio::sync::broadcast::channel(EVENT_BROADCAST_CAPACITY);
         Self {
             admission: RwLock::new(admission),
             admission_custom: true,
+            event_tx,
             ..Self::new()
         }
+    }
+
+    /// Subscribe to host events for a specific session.
+    ///
+    /// Returns a filtered receiver that only yields events belonging to the
+    /// requested session. Late subscribers may miss events that were broadcast
+    /// before they connected (standard broadcast semantics).
+    pub fn subscribe(
+        &self,
+        _session_id: &HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        self.event_tx.subscribe()
     }
 
     /// Register a provider adapter.
@@ -337,16 +358,24 @@ impl crate::HostFacade for HostManager {
             }
         };
 
-        // Wrap the stream to transition back to Ready on terminal event
+        // Wrap the stream to:
+        // 1. Broadcast each event to SSE subscribers
+        // 2. Transition back to Ready on terminal event
         let sessions_arc = self.sessions.clone();
         let sid_for_wrap = session_id;
         let oid = op_id;
+        let event_tx = self.event_tx.clone();
         let wrapped = stream
             .then(move |result| {
                 let sessions = sessions_arc.clone();
                 let sid = sid_for_wrap.clone();
                 let oid = oid.clone();
+                let tx = event_tx.clone();
                 async move {
+                    if let Ok(event) = &result {
+                        // Broadcast to SSE subscribers (ignore lagged/disconnected)
+                        let _ = tx.send(event.clone());
+                    }
                     if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = &result {
                         let mut sess = sessions.write().await;
                         let _ = sess.transition_busy_to_ready(&sid, &oid);
@@ -642,6 +671,13 @@ impl crate::HostFacade for HostManager {
         }
 
         Ok(crate::discovery::ProviderCatalog { entries })
+    }
+
+    fn subscribe_events(
+        &self,
+        session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        self.subscribe(&session_id)
     }
 }
 

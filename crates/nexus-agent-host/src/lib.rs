@@ -162,6 +162,15 @@ pub trait HostFacade: Send + Sync {
     ///
     /// Returns provider entries discovered from config, PATH scan, and ACP registry.
     async fn provider_catalog(&self) -> HostResult<ProviderCatalog>;
+
+    /// Subscribe to host events for a specific session.
+    ///
+    /// Returns a broadcast receiver yielding [`HostEvent`] items.
+    /// The SSE endpoint consumes this to relay real-time events to clients.
+    fn subscribe_events(
+        &self,
+        session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<capability::model::HostEvent>;
 }
 
 /// Provider discovery trait.
