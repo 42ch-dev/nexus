@@ -332,6 +332,112 @@ pub fn validate_config_path(config_path: &Path, expected_config_dir: &Path) -> H
     Ok(canonical_config)
 }
 
+/// Validate that a candidate workspace path (e.g. a session cwd) is under a
+/// trusted boundary directory.
+///
+/// Both paths are canonicalized (resolving symlinks) and the function checks
+/// that the canonical `candidate` starts with the canonical `boundary`.
+/// Rejects relative paths, `..` components, nonexistent paths, and symlink
+/// escapes outside the boundary.
+///
+/// # Errors
+///
+/// Returns `HostError::PolicyDenied` when the candidate is not under the
+/// boundary or either path cannot be resolved.
+pub fn validate_workspace_path_under(candidate: &Path, boundary: &Path) -> HostResult<PathBuf> {
+    if !candidate.is_absolute() {
+        return Err(HostError::policy_denied(format!(
+            "session cwd must be an absolute path: {}",
+            candidate.display()
+        )));
+    }
+
+    if candidate
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(HostError::policy_denied(format!(
+            "session cwd must not contain '..' traversal components: {}",
+            candidate.display()
+        )));
+    }
+
+    let canonical_candidate = std::path::Path::canonicalize(candidate).map_err(|e| {
+        HostError::policy_denied(format!(
+            "session cwd cannot be resolved: {} ({})",
+            candidate.display(),
+            e
+        ))
+    })?;
+
+    let canonical_boundary = std::path::Path::canonicalize(boundary).map_err(|e| {
+        HostError::policy_denied(format!(
+            "workspace boundary cannot be resolved: {} ({})",
+            boundary.display(),
+            e
+        ))
+    })?;
+
+    if !canonical_candidate.starts_with(&canonical_boundary) {
+        return Err(HostError::policy_denied(format!(
+            "session cwd '{}' is outside workspace boundary '{}'",
+            canonical_candidate.display(),
+            canonical_boundary.display()
+        )));
+    }
+
+    Ok(canonical_candidate)
+}
+
+/// Load agent host config from a specific file path.
+///
+/// This is the TOCTOU-safe replacement for calling `load_config()` with a
+/// home directory. Instead of checking `exists()` and then reading, it
+/// attempts to read directly:
+/// - `io::ErrorKind::NotFound` → returns safe defaults (config is optional).
+/// - Other read errors → returns `HostError::InternalHostError`.
+/// - Valid TOML → parsed config.
+/// - Invalid TOML → returns `HostError::InternalHostError`.
+///
+/// # Errors
+///
+/// Returns `HostError::InternalHostError` if the config file exists but
+/// cannot be read or parsed.
+pub fn load_config_from_path(config_path: &Path) -> HostResult<AgentHostConfig> {
+    let content = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!(
+                path = %config_path.display(),
+                "Config file not found, using defaults"
+            );
+            return Ok(AgentHostConfig::default());
+        }
+        Err(e) => {
+            return Err(HostError::internal(format!(
+                "failed to read config from {}: {e}",
+                config_path.display()
+            )));
+        }
+    };
+
+    let config: AgentHostConfig = toml::from_str(&content).map_err(|e| {
+        HostError::internal(format!(
+            "failed to parse config from {}: {e}",
+            config_path.display()
+        ))
+    })?;
+
+    tracing::info!(
+        path = %config_path.display(),
+        max_sessions = config.max_sessions,
+        providers = config.providers.len(),
+        "Loaded agent host config"
+    );
+
+    Ok(config)
+}
+
 /// Normalize a path by collapsing `.` and `..` without touching the
 /// filesystem. Used only for comparison in tests.
 #[cfg(test)]
@@ -695,5 +801,137 @@ enabled = true
             PathBuf::from("/a/c")
         );
         assert_eq!(normalize_path(Path::new("/a/./b")), PathBuf::from("/a/b"));
+    }
+
+    // ── validate_workspace_path_under tests (QC2 F-002) ────────────────
+
+    #[test]
+    fn validate_workspace_path_under_accepts_child() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let child = temp_dir.path().join("workspace");
+        std::fs::create_dir_all(&child).expect("create child dir");
+
+        let canonical_boundary = temp_dir
+            .path()
+            .canonicalize()
+            .expect("canonicalize boundary");
+        let result = validate_workspace_path_under(&child, temp_dir.path());
+        assert!(result.is_ok(), "child under boundary should be accepted");
+        assert!(
+            result.unwrap().starts_with(&canonical_boundary),
+            "canonical result should start with canonical boundary"
+        );
+    }
+
+    #[test]
+    fn validate_workspace_path_under_accepts_boundary_itself() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let result = validate_workspace_path_under(temp_dir.path(), temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "boundary itself should be accepted as valid cwd"
+        );
+    }
+
+    #[test]
+    fn validate_workspace_path_under_rejects_escape() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let child = temp_dir.path().join("workspace");
+        std::fs::create_dir_all(&child).expect("create child dir");
+
+        // Try to use /tmp as cwd when boundary is the temp dir
+        let result = validate_workspace_path_under(Path::new("/tmp"), temp_dir.path());
+        assert!(result.is_err(), "/tmp should be outside temp dir boundary");
+        assert_eq!(result.unwrap_err().category(), "policy_denied");
+    }
+
+    #[test]
+    fn validate_workspace_path_under_rejects_relative() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let result = validate_workspace_path_under(Path::new("relative/path"), temp_dir.path());
+        assert!(result.is_err(), "relative path should be rejected");
+        assert_eq!(result.unwrap_err().category(), "policy_denied");
+    }
+
+    #[test]
+    fn validate_workspace_path_under_rejects_traversal() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let cwd_with_traversal = temp_dir.path().join("../../../etc/passwd");
+        let result = validate_workspace_path_under(&cwd_with_traversal, temp_dir.path());
+        assert!(result.is_err(), ".. traversal should be rejected");
+        assert_eq!(result.unwrap_err().category(), "policy_denied");
+    }
+
+    #[test]
+    fn validate_workspace_path_under_rejects_nonexistent() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let nonexistent = temp_dir.path().join("does/not/exist");
+        let result = validate_workspace_path_under(&nonexistent, temp_dir.path());
+        assert!(result.is_err(), "nonexistent path should be rejected");
+        assert_eq!(result.unwrap_err().category(), "policy_denied");
+    }
+
+    #[test]
+    fn validate_workspace_path_under_rejects_symlink_escape() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let child = temp_dir.path().join("workspace");
+        std::fs::create_dir_all(&child).expect("create child dir");
+
+        // Create a symlink inside the workspace pointing outside
+        let link = child.join("escape_link");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/tmp", &link).expect("create symlink");
+        }
+        #[cfg(not(unix))]
+        {
+            // Symlink test not applicable on non-unix; skip by passing
+            return;
+        }
+
+        // The symlink resolves to /tmp which is outside the boundary
+        let result = validate_workspace_path_under(&link, &child);
+        assert!(
+            result.is_err(),
+            "symlink escaping boundary should be rejected"
+        );
+        assert_eq!(result.unwrap_err().category(), "policy_denied");
+    }
+
+    // ── load_config_from_path tests (QC2 F-003) ───────────────────────
+
+    #[test]
+    fn load_config_from_path_missing_returns_defaults() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp_dir.path().join("nonexistent.toml");
+
+        let config = load_config_from_path(&config_path).expect("missing file → defaults");
+        assert_eq!(config.max_sessions, 4);
+        assert!(config.providers.is_empty());
+    }
+
+    #[test]
+    fn load_config_from_path_valid_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp_dir.path().join("config.toml");
+        std::fs::write(&config_path, "max_sessions = 8\n").expect("write config");
+
+        let config = load_config_from_path(&config_path).expect("valid file should load");
+        assert_eq!(config.max_sessions, 8);
+    }
+
+    #[test]
+    fn load_config_from_path_invalid_toml_returns_error() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp_dir.path().join("config.toml");
+        std::fs::write(&config_path, "this is not valid toml {{{{").expect("write config");
+
+        let result = load_config_from_path(&config_path);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().category(), "internal_host_error");
     }
 }

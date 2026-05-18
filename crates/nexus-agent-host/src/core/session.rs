@@ -398,6 +398,11 @@ impl SessionRegistry {
         self.sessions.get(session_id)
     }
 
+    /// Get a mutable reference to a session by ID.
+    pub fn get_mut(&mut self, session_id: &HostSessionId) -> Option<&mut HostSession> {
+        self.sessions.get_mut(session_id)
+    }
+
     /// Get current session count.
     #[must_use]
     pub fn len(&self) -> usize {

@@ -49,6 +49,8 @@ pub struct HostManager {
     config: RwLock<Option<AgentHostConfig>>,
     /// Whether the host has been started.
     running: RwLock<bool>,
+    /// Canonical workspace root boundary — all session cwds must be under this.
+    workspace_root: RwLock<Option<std::path::PathBuf>>,
 }
 
 // HashMap import for providers/session_providers
@@ -69,6 +71,7 @@ impl HostManager {
             admission_custom: false,
             config: RwLock::new(None),
             running: RwLock::new(false),
+            workspace_root: RwLock::new(None),
         }
     }
 
@@ -138,32 +141,46 @@ impl Default for HostManager {
 impl crate::HostFacade for HostManager {
     async fn start(&self, config: HostStartConfig) -> HostResult<()> {
         // Validate config_path does not escape its parent directory.
-        // We call validate_config_path() directly and only propagate the
-        // error if the path exists — canonicalize() failing for a
-        // non-existent path is expected (config is optional), so we silently
-        // skip validation in that case. This avoids the TOCTOU race from
-        // checking .exists() separately (QC2 F-003).
+        // We canonicalize the parent dir first, then validate the config path
+        // is under it — no TOCTOU from checking .exists() separately (QC2 F-003).
         if let Some(expected_dir) = config.config_path.parent() {
-            if let Err(e) = crate::config::validate_config_path(&config.config_path, expected_dir) {
-                // If the config file actually exists on disk now, the validation
-                // failure is real (escape or resolution error). If it doesn't
-                // exist, the failure is just "canonicalize failed" which is
-                // expected for optional config — skip it.
-                if config.config_path.exists() {
-                    return Err(e);
+            // Only validate containment if the parent directory exists on disk.
+            // If the parent doesn't exist, the config file can't either, so
+            // load_config_from_path will simply return defaults.
+            if let Ok(canonical_dir) = std::path::Path::canonicalize(expected_dir) {
+                // Lexical containment check before attempting to canonicalize
+                // the config path — reject obvious escapes early.
+                let normalized_config = crate::config::validate_workspace_path(&config.config_path);
+                if let Ok(canonical_config) = normalized_config {
+                    if !canonical_config.starts_with(&canonical_dir) {
+                        return Err(HostError::policy_denied(format!(
+                            "config path '{}' escapes config directory '{}'",
+                            config.config_path.display(),
+                            expected_dir.display()
+                        )));
+                    }
                 }
+                // If canonicalize of config_path fails, the file doesn't exist
+                // (optional config) — load_config_from_path handles this correctly.
             }
         }
 
-        // Validate workspace_root against traversal.
+        // Validate and store the canonical workspace_root (QC2 F-002).
+        let canonical_workspace_root =
+            crate::config::validate_workspace_path(&config.workspace_root)?;
+
         {
             let admission = self.admission.read().await;
             admission.check_workspace_root(&config.workspace_root)?;
         }
 
-        // Load config
-        let host_config = crate::config::load_config(&config.config_path)?;
+        // Load config using TOCTOU-safe direct read (QC2 F-003).
+        // load_config_from_path reads the file directly — NotFound → defaults.
+        let host_config = crate::config::load_config_from_path(&config.config_path)?;
         *self.config.write().await = Some(host_config.clone());
+
+        // Store canonical workspace boundary for session cwd validation.
+        *self.workspace_root.write().await = Some(canonical_workspace_root);
 
         // Mark all registered providers as available and collect their IDs.
         let provider_count;
@@ -225,8 +242,13 @@ impl crate::HostFacade for HostManager {
         let adapter = entry.adapter.clone();
         drop(providers);
 
-        // Build launch spec with validated cwd (QC2 F-002)
-        let validated_cwd = crate::config::validate_workspace_path(&request.cwd)?;
+        // Build launch spec with cwd validated against workspace boundary (QC2 F-002).
+        let boundary = {
+            let ws = self.workspace_root.read().await;
+            ws.clone()
+                .ok_or_else(|| HostError::internal("workspace root not set — host not started"))?
+        };
+        let validated_cwd = crate::config::validate_workspace_path_under(&request.cwd, &boundary)?;
         let launch_spec = crate::capability::model::LaunchSpec {
             cwd: validated_cwd,
             model: request.model,
@@ -417,6 +439,8 @@ impl crate::HostFacade for HostManager {
         // Collect (adapter, handle) pairs while holding the provider read lock briefly,
         // then call shutdown outside the lock to avoid holding it across .await points.
         // Use the actual negotiated capabilities from the session registry (QC2 F-004).
+        // If a session has no registry entry, skip it rather than fabricating
+        // full capabilities (QC2 F-004 fix: no acp_full() fallback).
         let shutdown_tasks: Vec<(Arc<dyn ProviderAdapter>, ManagedSessionHandle)> = {
             let sessions = self.sessions.read().await;
             let providers = self.providers.read().await;
@@ -426,14 +450,11 @@ impl crate::HostFacade for HostManager {
                     let provider_id = provider_map.get(session_id)?;
                     let entry = providers.get(provider_id)?;
                     let adapter = entry.adapter.clone();
-                    let capabilities = sessions.get(session_id).map_or_else(
-                        crate::capability::model::CapabilityDescriptor::acp_full,
-                        |s| s.negotiated_capabilities.clone(),
-                    );
+                    let session = sessions.get(session_id)?;
                     let handle = ManagedSessionHandle {
                         provider_id: provider_id.clone(),
                         session_id: session_id.clone(),
-                        capabilities,
+                        capabilities: session.negotiated_capabilities.clone(),
                     };
                     Some((adapter, handle))
                 })
@@ -502,7 +523,7 @@ impl crate::HostFacade for HostManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::model::{LaunchSpec, ProbeRequest};
+    use crate::capability::model::{CapabilityDescriptor, LaunchSpec, ProbeRequest};
     use crate::core::session::SessionState;
     use crate::HostFacade;
 
@@ -587,6 +608,7 @@ mod tests {
     struct TrackingMockProvider {
         provider_id: ProviderId,
         shutdown_calls: Arc<std::sync::Mutex<Vec<HostSessionId>>>,
+        shutdown_capabilities: Arc<std::sync::Mutex<Vec<CapabilityDescriptor>>>,
     }
 
     impl TrackingMockProvider {
@@ -594,11 +616,17 @@ mod tests {
             Self {
                 provider_id,
                 shutdown_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+                shutdown_capabilities: Arc::new(std::sync::Mutex::new(Vec::new())),
             }
         }
 
         fn take_shutdown_calls(&self) -> Vec<HostSessionId> {
             let mut guard = self.shutdown_calls.lock().unwrap();
+            std::mem::take(&mut *guard)
+        }
+
+        fn take_shutdown_capabilities(&self) -> Vec<CapabilityDescriptor> {
+            let mut guard = self.shutdown_capabilities.lock().unwrap();
             std::mem::take(&mut *guard)
         }
     }
@@ -668,6 +696,10 @@ mod tests {
 
         async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
             self.shutdown_calls.lock().unwrap().push(session.session_id);
+            self.shutdown_capabilities
+                .lock()
+                .unwrap()
+                .push(session.capabilities);
             Ok(())
         }
 
@@ -1017,6 +1049,69 @@ mod tests {
         assert_eq!(health.active_sessions, 0);
     }
 
+    /// Verify shutdown uses actual negotiated capabilities, not acp_full() fallback (QC2 F-004).
+    #[tokio::test]
+    async fn shutdown_uses_negotiated_capabilities_not_acp_full() {
+        // Use custom capabilities that differ from acp_full()
+        let custom_caps = CapabilityDescriptor {
+            text_prompt: true,
+            streaming: true,
+            cancellation: false, // differs from acp_full
+            session_restore: false,
+            structured_tool_calls: true,
+            mcp_http: false,
+            mcp_sse: false,
+            mcp_stdio: false,
+            images: false,
+            audio: false,
+            embedded_context: false,
+            set_model: false,
+            set_mode: false,
+            diagnostics: false,
+        };
+        let expected_caps = custom_caps.clone();
+
+        let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
+        let manager = HostManager::new();
+        manager.register_provider(provider.clone()).await;
+        manager.start(start_config()).await.expect("start");
+
+        // Create a session
+        let session = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .expect("create session");
+
+        // Override the negotiated capabilities to something non-standard
+        {
+            let mut sessions = manager.sessions.write().await;
+            if let Some(s) = sessions.get_mut(&session.id) {
+                s.negotiated_capabilities = custom_caps;
+            }
+        }
+
+        manager.shutdown().await.expect("shutdown");
+
+        let caps = provider.take_shutdown_capabilities();
+        assert_eq!(caps.len(), 1, "should have one shutdown call");
+        let received = &caps[0];
+        assert!(
+            !received.cancellation,
+            "shutdown should use negotiated capabilities, not acp_full() — cancellation should be false"
+        );
+        assert_eq!(
+            received.cancellation, expected_caps.cancellation,
+            "capabilities should match the negotiated (non-acp-full) descriptor"
+        );
+    }
+
     // ── Admission policy enforcement tests ──────────────────────────────
 
     /// Verify that a provider denied by admission policy returns PolicyDenied.
@@ -1209,5 +1304,52 @@ mod tests {
             .await;
 
         assert!(result.is_ok(), "exec should succeed within ops limit");
+    }
+
+    /// Verify that create_session rejects a cwd outside the workspace boundary (QC2 F-002).
+    #[tokio::test]
+    async fn create_session_rejects_cwd_outside_workspace_boundary() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_path = temp_dir.path().join("config.toml");
+        std::fs::write(&config_path, "").expect("write config");
+
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+
+        // Start with workspace_root = temp_dir
+        manager
+            .start(HostStartConfig {
+                config_path,
+                workspace_root: temp_dir.path().to_path_buf(),
+                max_sessions: 4,
+                max_ops_per_session: 1,
+                timeouts: crate::config::TimeoutConfig::default(),
+            })
+            .await
+            .expect("start");
+
+        // Try to create a session with cwd = /tmp (outside temp_dir)
+        let result = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await;
+
+        assert!(result.is_err(), "cwd outside boundary should be rejected");
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.category(),
+            "policy_denied",
+            "expected policy_denied, got: {err}"
+        );
     }
 }
