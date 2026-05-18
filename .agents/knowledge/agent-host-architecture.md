@@ -3,7 +3,8 @@
 ## Document Metadata
 
 - **Date**: 2026-05-18
-- **Status**: Active SSOT — authoritative design for `nexus-agent-host` subsystem
+- **Status**: Active SSOT — **implementation detail** for `nexus-agent-host` subsystem
+- **Normative upstream** (architecture boundaries): `nexus-platform` `.agents/designs/v1-spec/local/agent-host-v1.md`, **ADR-026**, **ADR-027**
 - **Scope**: `nexus` repository — `crates/nexus-agent-host`, ACP integration, native CLI providers, discovery, policy, streaming
 - **Supersedes**: V1.18 compass §3–§5 (architecture, research, PM notes), V1.19 compass §3–§4 (item details referencing OpenDesign/Multica patterns)
 - **Referenced by**:

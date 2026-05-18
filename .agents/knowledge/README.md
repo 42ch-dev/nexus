@@ -10,8 +10,8 @@ For boundaries, naming, and maintenance rules, see [AGENTS.md](AGENTS.md). Harne
 
 | Document | Source Plan | Description | Status |
 | --- | --- | --- | --- |
-| [nexus42-single-binary-daemon-runtime-architecture.md](nexus42-single-binary-daemon-runtime-architecture.md) | PM brainstorming thread (2026-05-14) | Combined architecture spec for single-binary daemon runtime (`nexus42` + `nexus-daemon-runtime`) and `nexus-agent-host` Hybrid managed-only design. | Active |
-| [agent-host-architecture.md](agent-host-architecture.md) | V1.18 planning | Agent host architecture detail and adapter model baseline. | Active |
+| [nexus42-single-binary-daemon-runtime-architecture.md](nexus42-single-binary-daemon-runtime-architecture.md) | PM brainstorming thread (2026-05-14) | **Implementation SSOT**: daemon runtime crates, batches, verification. Normative: `nexus-platform` `v1-spec/local/daemon-runtime-v1.md` (ADR-026/027). | Active |
+| [agent-host-architecture.md](agent-host-architecture.md) | V1.18 planning | **Implementation SSOT**: `nexus-agent-host` crate, traits, routes. Normative: `v1-spec/local/agent-host-v1.md` (ADR-026/027). | Active |
 | [daemon-api-workspace-write-architecture.md](daemon-api-workspace-write-architecture.md) | V1.15 | Daemon local API / workspace-write architecture (D1–D7). | Active |
 | [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | V1.15 | Novel-writing sync module contract and workspace artifact discovery rules. | Active |
 | [canonical-hash.md](canonical-hash.md) | `2026-04-09-v1.1-arch-alignment-closure` | OSS companion to v1-spec ADR-006 (bundle content digest) with parity checklist and implementation notes. | Active |
