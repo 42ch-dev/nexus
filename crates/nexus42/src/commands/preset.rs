@@ -64,6 +64,11 @@ pub enum PresetCommand {
         /// Path to the preset.yaml file to validate
         path: String,
     },
+    /// Reload a preset from disk (re-read preset.yaml)
+    Reload {
+        /// Preset ID to reload
+        preset_id: String,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -81,19 +86,169 @@ struct PresetCli {
 /// - Nexus home directory cannot be resolved
 /// - Preset name validation fails
 /// - File I/O operations fail
-pub fn run(cmd: PresetCommand, _config: &CliConfig) -> Result<()> {
+/// - Daemon API calls fail and fallback also fails
+pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         PresetCommand::Init { name } => {
             let home = nexus_home()?;
+
+            // Try daemon API first (T38: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                let req = crate::api::models::ScaffoldPresetRequest { name: name.clone() };
+                match client.scaffold_preset(&req).await {
+                    Ok(resp) => {
+                        println!("✓ Created preset '{}' at {}", resp.id, resp.path);
+                        println!("  preset.yaml  — manifest (edit to define your strategy)");
+                        println!("  prompts/     — prompt templates");
+                        println!();
+                        println!(
+                            "Next: edit {}/preset.yaml to customize your strategy.",
+                            resp.path
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon preset init failed, falling back: {e}");
+                    }
+                }
+            }
+
+            // Fallback: direct FS scaffold
             init_preset_at(&home, &name)
         }
         PresetCommand::List => {
+            // Try daemon API first (T38: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                match client.list_presets().await {
+                    Ok(resp) => {
+                        list_presets_from_daemon(&resp);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon preset list failed, falling back: {e}");
+                    }
+                }
+            }
+
+            // Fallback: offline list
             let home = crate::config::user_home_dir()?;
             list_presets_offline(&home);
             Ok(())
         }
-        PresetCommand::Validate { path } => validate_preset(&path),
+        PresetCommand::Validate { path } => {
+            // Try daemon API first (T38: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                let req = crate::api::models::ValidatePresetRequest { path: path.clone() };
+                match client.validate_preset(&req).await {
+                    Ok(resp) => {
+                        if resp.valid {
+                            println!("✓ Preset is valid");
+                            if let Some(id) = &resp.id {
+                                println!("  ID: {id}");
+                            }
+                            if let Some(ver) = resp.version {
+                                println!("  Version: {ver}");
+                            }
+                            if let Some(count) = resp.state_count {
+                                println!("  States: {count}");
+                            }
+                        } else {
+                            println!("✗ Preset validation failed:");
+                            for err in &resp.errors {
+                                println!("  - {err}");
+                            }
+                            return Err(CliError::Other("Preset validation failed".to_string()));
+                        }
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon preset validate failed, falling back: {e}");
+                    }
+                }
+            }
+
+            // Fallback: local validation
+            validate_preset(&path)
+        }
+        PresetCommand::Reload { preset_id } => {
+            // Try daemon API first (T38: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                match client.reload_preset(&preset_id).await {
+                    Ok(resp) => {
+                        println!("✓ Preset '{}' reloaded: {}", resp.id, resp.reloaded);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon preset reload failed: {e}");
+                        return Err(e);
+                    }
+                }
+            }
+
+            Err(CliError::Other(
+                "Preset reload requires a running daemon. Start with `nexus42 daemon start`."
+                    .to_string(),
+            ))
+        }
     }
+}
+
+/// Print presets grouped by source from daemon response.
+fn list_presets_from_daemon(resp: &crate::api::models::ListPresetsGroupedResponse) {
+    println!("Available presets:\n");
+
+    // Embedded section
+    println!("[embedded]");
+    if resp.embedded.is_empty() {
+        println!("  (none)");
+    } else {
+        for p in &resp.embedded {
+            let user_override = resp.user.iter().any(|u| u.id == p.id);
+            if user_override {
+                println!("  {}  (overridden by user preset)", p.id);
+            } else {
+                println!("  {}", p.id);
+            }
+        }
+    }
+
+    // System section
+    println!("\n[system]");
+    if resp.system.is_empty() {
+        println!("  (none)");
+    } else {
+        for p in &resp.system {
+            println!("  {}", p.id);
+        }
+    }
+
+    // User section
+    println!("\n[user]");
+    if resp.user.is_empty() {
+        println!("  (none)");
+    } else {
+        for p in &resp.user {
+            let embedded_override = resp.embedded.iter().any(|e| e.id == p.id);
+            if embedded_override {
+                println!("  {}  (overrides embedded)", p.id);
+            } else {
+                println!("  {}", p.id);
+            }
+        }
+    }
+
+    let total = resp.embedded.len() + resp.system.len() + resp.user.len();
+    println!(
+        "\n{} preset(s) total ({} embedded, {} system, {} user)",
+        total,
+        resp.embedded.len(),
+        resp.system.len(),
+        resp.user.len()
+    );
 }
 
 /// Internal: scaffold a preset at a specific nexus home path.
@@ -501,6 +656,15 @@ mod tests {
         match cmd.command {
             PresetCommand::Validate { path } => assert_eq!(path, "path/to/preset.yaml"),
             _ => panic!("expected Validate variant"),
+        }
+    }
+
+    #[test]
+    fn preset_reload_parses() {
+        let cmd = PresetCli::try_parse_from(["preset", "reload", "my-strategy"]).expect("parse");
+        match cmd.command {
+            PresetCommand::Reload { preset_id } => assert_eq!(preset_id, "my-strategy"),
+            _ => panic!("expected Reload variant"),
         }
     }
 

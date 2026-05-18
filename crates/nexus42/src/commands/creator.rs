@@ -176,6 +176,15 @@ pub enum KbCommand {
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
+
+    /// Remove a knowledge base entry
+    Remove {
+        /// Entry ID to remove (e.g. `kb_a1b2c3d4`)
+        entry_id: String,
+        /// KB scope: `work` (local) or `world` (platform, future)
+        #[arg(long, value_enum, default_value_t = KbScope::default())]
+        scope: KbScope,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -255,8 +264,8 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             source,
             handle,
         } => register_creator(config, name, source, handle).await,
-        CreatorCommand::Status { creator_id } => creator_status(config, creator_id),
-        CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()),
+        CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
+        CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()).await,
         CreatorCommand::List => list_creators(config),
         CreatorCommand::Pair { creator_id } => {
             pair_creator(config, creator_id.as_str());
@@ -274,8 +283,8 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
         CreatorCommand::Soul { command } => super::soul::run(command, config).await,
         CreatorCommand::Memory { command } => super::memory::run(command, config).await,
-        CreatorCommand::Kb { command } => run_kb(command, config),
-        CreatorCommand::Logout => logout_creator(config),
+        CreatorCommand::Kb { command } => run_kb(command, config).await,
+        CreatorCommand::Logout => logout_creator(config).await,
     }
 }
 
@@ -288,17 +297,20 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
 }
 
 /// Handle knowledge base commands.
-fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
+async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     // F002: Validate active_creator_id before constructing any paths.
     // This prevents path traversal if config is corrupted or malicious.
     if let Some(cid) = &config.active_creator_id {
         paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
     }
     match cmd {
-        KbCommand::List { scope } => kb_list(config, &scope),
-        KbCommand::Search { query, scope } => kb_search(config, &query, &scope),
-        KbCommand::Show { entry_id, scope } => kb_show(config, &entry_id, &scope),
-        KbCommand::Add { file, title, scope } => kb_add(config, &file, title.as_deref(), &scope),
+        KbCommand::List { scope } => kb_list(config, &scope).await,
+        KbCommand::Search { query, scope } => kb_search(config, &query, &scope).await,
+        KbCommand::Show { entry_id, scope } => kb_show(config, &entry_id, &scope).await,
+        KbCommand::Add { file, title, scope } => {
+            kb_add(config, &file, title.as_deref(), &scope).await
+        }
+        KbCommand::Remove { entry_id, scope } => kb_remove(config, &entry_id, &scope).await,
     }
 }
 
@@ -408,12 +420,39 @@ fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
 }
 
 /// `kb list` implementation.
-fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
+async fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
     if scope == &KbScope::World {
         world_scope_deferred();
         return Ok(());
     }
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
+
+    // Try daemon API first (T40: migration)
+    let client = crate::api::DaemonClient::from_config(config);
+    if client.health_check().await? {
+        match client.list_kb_entries(&creator_id, Some(&slug), None).await {
+            Ok(resp) => {
+                if resp.items.is_empty() {
+                    println!("No KB entries in workspace {slug}.");
+                } else {
+                    println!("KB entries in workspace {slug}:");
+                    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
+                    for entry in &resp.items {
+                        println!(
+                            "{:<20} {:<40} {}",
+                            entry.entry_id, entry.title, entry.created_at
+                        );
+                    }
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("nexus42: daemon KB list failed, falling back: {e}");
+            }
+        }
+    }
+
+    // Fallback: direct FS read
     let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
     let index_path = kb_dir.join("index.json");
 
@@ -440,12 +479,42 @@ fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
 }
 
 /// `kb search` implementation — case-insensitive substring match on title.
-fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<()> {
+async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<()> {
     if scope == &KbScope::World {
         world_scope_deferred();
         return Ok(());
     }
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
+
+    // Try daemon API first (T40: migration)
+    let client = crate::api::DaemonClient::from_config(config);
+    if client.health_check().await? {
+        match client
+            .list_kb_entries(&creator_id, Some(&slug), Some(query))
+            .await
+        {
+            Ok(resp) => {
+                if resp.items.is_empty() {
+                    println!("No KB entries matching \"{query}\" in workspace {slug}.");
+                } else {
+                    println!("KB entries matching \"{query}\" in workspace {slug}:");
+                    println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
+                    for entry in &resp.items {
+                        println!(
+                            "{:<20} {:<40} {}",
+                            entry.entry_id, entry.title, entry.created_at
+                        );
+                    }
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("nexus42: daemon KB search failed, falling back: {e}");
+            }
+        }
+    }
+
+    // Fallback: local search
     let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
     let index_path = kb_dir.join("index.json");
 
@@ -479,13 +548,29 @@ fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<()> {
 }
 
 /// `kb show` implementation — read and print a single entry file.
-fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
     if scope == &KbScope::World {
         world_scope_deferred();
         return Ok(());
     }
     // F001: Validate entry_id before constructing file path to prevent path traversal.
     paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
+
+    // Try daemon API first (T40: migration)
+    let client = crate::api::DaemonClient::from_config(config);
+    if client.health_check().await? {
+        match client.get_kb_entry(entry_id).await {
+            Ok(resp) => {
+                println!("{}", resp.content);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("nexus42: daemon KB show failed, falling back: {e}");
+            }
+        }
+    }
+
+    // Fallback: direct FS read
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
     let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
     let entry_path = entries_dir.join(format!("{entry_id}.md"));
@@ -506,7 +591,7 @@ fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
 /// Writes the index update to a temp file first, then copies the entry file,
 /// then atomically renames the index. This prevents orphan entry files on
 /// partial failure (W2).
-fn kb_add(
+async fn kb_add(
     config: &CliConfig,
     file: &std::path::Path,
     title: Option<&str>,
@@ -523,7 +608,32 @@ fn kb_add(
         )));
     }
 
-    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let (creator_id, slug, _home) = resolve_kb_paths(config)?;
+
+    // Try daemon API first (T40: migration)
+    let client = crate::api::DaemonClient::from_config(config);
+    if client.health_check().await? {
+        let content = std::fs::read_to_string(file)?;
+        let req = crate::api::models::AddKbEntryRequest {
+            creator_id: creator_id.clone(),
+            workspace_slug: Some(slug.clone()),
+            title: title.map(std::string::ToString::to_string),
+            content: Some(content),
+            file_path: None,
+        };
+        match client.add_kb_entry(&req).await {
+            Ok(resp) => {
+                println!("✓ KB entry added: {}", resp.entry_id);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("nexus42: daemon KB add failed, falling back: {e}");
+            }
+        }
+    }
+
+    // Fallback: direct FS operations
+    let (_, _, home) = resolve_kb_paths(config)?;
     let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
     let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
     let index_path = kb_dir.join("index.json");
@@ -564,6 +674,67 @@ fn kb_add(
     std::fs::rename(&tmp_index_path, &index_path)?;
 
     println!("✓ KB entry added: {entry_id}");
+    Ok(())
+}
+
+/// `kb remove` implementation — delete a KB entry.
+///
+/// Tries the daemon API first; falls back to direct FS removal
+/// (delete entry file + update index atomically).
+async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+    if scope == &KbScope::World {
+        world_scope_deferred();
+        return Ok(());
+    }
+    // F001: Validate entry_id before use.
+    paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
+
+    // Try daemon API first (T40: migration)
+    let client = crate::api::DaemonClient::from_config(config);
+    if client.health_check().await? {
+        match client.delete_kb_entry(entry_id).await {
+            Ok(_resp) => {
+                println!("✓ KB entry removed: {entry_id}");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("nexus42: daemon KB remove failed, falling back: {e}");
+            }
+        }
+    }
+
+    // Fallback: direct FS removal
+    let (creator_id, slug, home) = resolve_kb_paths(config)?;
+    let entries_dir = paths::creator_kb_entries_dir(&home, &creator_id, &slug);
+    let entry_path = entries_dir.join(format!("{entry_id}.md"));
+
+    if !entry_path.exists() {
+        return Err(CliError::Other(format!(
+            "KB entry {entry_id} not found in workspace {slug}."
+        )));
+    }
+
+    // Remove the entry file
+    std::fs::remove_file(&entry_path)?;
+
+    // Update index to remove the entry
+    let kb_dir = paths::creator_kb_dir(&home, &creator_id, &slug);
+    let index_path = kb_dir.join("index.json");
+    let mut index = read_kb_index(&index_path);
+    let original_len = index.entries.len();
+    index.entries.retain(|e| e.entry_id != entry_id);
+    if index.entries.len() == original_len {
+        // Entry was not in index but file existed — still report success
+        tracing::warn!("KB entry {entry_id} file existed but was not in index");
+    } else if !index.entries.is_empty() {
+        // Write updated index
+        write_kb_index(&index_path, &index)?;
+    } else if index_path.exists() {
+        // Last entry removed — clean up empty index
+        let _ = std::fs::remove_file(&index_path);
+    }
+
+    println!("✓ KB entry removed: {entry_id}");
     Ok(())
 }
 
@@ -1027,7 +1198,10 @@ fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
 }
 
 /// Show Creator status with three-layer identity model (V1.16).
-fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
+///
+/// Tries the daemon API for active creator info first (T33: migration),
+/// falls back to local-only display on daemon failure.
+async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> {
     let id = creator_id.unwrap_or_else(|| {
         config
             .active_creator_id
@@ -1041,6 +1215,46 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
         return Ok(());
     }
 
+    // Try daemon API for enriched info when checking active creator
+    if config.active_creator_id.as_deref() == Some(id.as_str()) {
+        let client = crate::api::DaemonClient::from_config(config);
+        if client.health_check().await? {
+            match client.get_active_creator().await {
+                Ok(daemon_resp) => {
+                    // Still read local auth state for credential indicators
+                    let store = crate::auth::AuthStore::load()?;
+                    let has_creator_api_key =
+                        store.get_creator_api_key(&id).unwrap_or(None).is_some();
+                    let has_cached_token = store.is_creator_authenticated(&id);
+
+                    let creator_key_indicator = if has_creator_api_key {
+                        "✓ Creator API key"
+                    } else {
+                        "✗ No Creator API key"
+                    };
+                    let token_indicator = if has_cached_token {
+                        "✓ Token cached"
+                    } else {
+                        "✗ No cached token"
+                    };
+
+                    let handle_str = daemon_resp.handle.as_deref().unwrap_or("-");
+                    let display_name_str = daemon_resp.display_name.as_deref().unwrap_or("-");
+
+                    println!("Creator ID:    {id}");
+                    println!("Handle:        {handle_str}");
+                    println!("Display Name:  {display_name_str}");
+                    println!("Auth:          {creator_key_indicator} | {token_indicator}");
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("nexus42: daemon creator status failed, falling back: {e}");
+                }
+            }
+        }
+    }
+
+    // Fallback: local-only status
     let store = crate::auth::AuthStore::load()?;
     let cache = creator_identity::load_creator_identity_cache();
     let entry = creator_identity::get_creator_identity(&cache, &id);
@@ -1078,9 +1292,50 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
 /// 2. Exact `handle` match → use the matched `creator_id`.
 /// 3. Path-safe but unknown → persist as explicit ID (backward compat).
 /// 4. Unsafe characters → error.
-fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
+///
+/// Tries daemon API first (T33: migration), falls back to local config update.
+async fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
     let resolved_id = creator_identity::resolve_creator_ref(creator_ref)?;
 
+    // Try daemon API first
+    let daemon_config = CliConfig::load()?;
+    let client = crate::api::DaemonClient::from_config(&daemon_config);
+    if client.health_check().await? {
+        let req = crate::api::models::SetActiveCreatorRequest {
+            creator_id: resolved_id.clone(),
+        };
+        match client.set_active_creator(&req).await {
+            Ok(_resp) => {
+                // Also update local config so CLI works without daemon
+                let mut cli_config = CliConfig::load()?;
+                cli_config.active_creator_id = Some(resolved_id.clone());
+                cli_config
+                    .active_workspace_slug_by_creator
+                    .remove(creator_ref);
+                cli_config
+                    .active_workspace_slug_by_creator
+                    .remove(&resolved_id);
+                cli_config.save()?;
+
+                if resolved_id == creator_ref {
+                    println!("✓ Active Creator set to: {resolved_id}");
+                } else {
+                    println!(
+                        "✓ Active Creator set to: {resolved_id} (resolved from: {creator_ref})"
+                    );
+                }
+                println!(
+                    "  Workspace slug: {DEFAULT_WORKSPACE_SLUG} (use `nexus42 creator workspace use <slug>` after the directory exists)"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("nexus42: daemon set active creator failed, falling back: {e}");
+            }
+        }
+    }
+
+    // Fallback: direct config update
     let mut cli_config = CliConfig::load()?;
     cli_config.active_creator_id = Some(resolved_id.clone());
     // Clear workspace slug for the old creator ref and the resolved ID.
@@ -1162,13 +1417,14 @@ fn unpair_creator(_config: &CliConfig, creator_id: &str) {
 
 /// Logout — clear active creator credentials from local config and auth store.
 ///
-/// Removes the `active_creator_id` from CLI config and clears the creator
-/// entry from the auth store (tokens + API key).
+/// Tries daemon API first (T33: migration), then clears local state.
+/// Local state is always cleared regardless of daemon result to ensure
+/// CLI works even when daemon is unreachable.
 ///
 /// # Errors
 ///
 /// Returns I/O errors if config or auth store cannot be read or written.
-fn logout_creator(config: &CliConfig) -> Result<()> {
+async fn logout_creator(config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref();
 
     if creator_id.is_none() {
@@ -1178,7 +1434,15 @@ fn logout_creator(config: &CliConfig) -> Result<()> {
 
     let creator_id = creator_id.expect("checked above");
 
-    // Clear creator credentials from auth store
+    // Try daemon API first (T33: migration)
+    let client = crate::api::DaemonClient::from_config(config);
+    if client.health_check().await? {
+        if let Err(e) = client.logout_creator(creator_id).await {
+            eprintln!("nexus42: daemon logout failed, continuing with local cleanup: {e}");
+        }
+    }
+
+    // Always clear local state
     let mut store = auth::AuthStore::load()?;
     if let Some(creators) = &mut store.creators {
         if creators.remove(creator_id).is_some() {
