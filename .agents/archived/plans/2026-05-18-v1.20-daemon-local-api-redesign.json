@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-05-18-v1.20-daemon-local-api-redesign",
+  "title": "V1.20 Daemon Local API Redesign — auth, route cleanup, agent-host completion, CLI-to-daemon migration",
+  "status": "Done",
+  "primary_spec": ".agents/iterations/v1.20-delivery-compass-v1.md",
+  "plan_file": ".agents/plans/2026-05-18-v1.20-daemon-local-api-redesign.md",
+  "working_branch": "feature/v1.20-daemon-local-api-redesign",
+  "merge_target": "feature/v1.20",
+  "created_at": "2026-05-18T23:00:00Z",
+  "done_at": "2026-05-19T03:00:00Z",
+  "progress": "done",
+  "batches_completed": ["Batch 1: Auth refactor (T1-T7)", "Batch 2: Remove platform routes (T8-T11)", "Batch 3: Agent-host completion (T12-T20)", "Batch 4: Workspace migration (T21-T26)", "Batch 5: Creator/Preset/KB migration (T27-T40)", "Batch 6: API polish (T41-T44)"],
+  "total_tasks": 44
+}
