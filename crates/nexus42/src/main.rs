@@ -82,7 +82,9 @@ async fn main() {
             );
             nexus42::commands::permission::run(command)
         }
-        Some(Commands::Preset { command }) => nexus42::commands::preset::run(command, &config),
+        Some(Commands::Preset { command }) => {
+            nexus42::commands::preset::run(command, &config).await
+        }
         Some(Commands::Identity { command }) => {
             nexus42::commands::identity::run(command, &config).await
         }

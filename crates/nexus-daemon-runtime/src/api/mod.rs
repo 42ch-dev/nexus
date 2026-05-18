@@ -111,6 +111,109 @@ fn orchestration_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Creator registration and management routes (V1.20 Batch 5, T27–T32).
+fn creator_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/creators/registrations",
+            post(handlers::creator_registrations::initiate_registration),
+        )
+        .route(
+            "/v1/local/creators/registrations/{code}:verify",
+            post(handlers::creator_registrations::verify_registration),
+        )
+        .route(
+            "/v1/local/creators/{creator_id}",
+            get(handlers::creator_registrations::get_creator),
+        )
+        .route(
+            "/v1/local/creators/{creator_id}:logout",
+            post(handlers::creator_registrations::logout_creator),
+        )
+        .route(
+            "/v1/local/creators/active",
+            get(handlers::creator_registrations::get_active_creator)
+                .put(handlers::creator_registrations::set_active_creator),
+        )
+}
+
+/// Preset management routes (V1.20 Batch 5, T34–T37).
+fn preset_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/presets",
+            get(handlers::preset_management::list_presets)
+                .post(handlers::preset_management::scaffold_preset),
+        )
+        .route(
+            "/v1/local/presets:validate",
+            post(handlers::preset_management::validate_preset),
+        )
+        .route(
+            "/v1/local/presets/{id}:reload",
+            post(handlers::preset_management::reload_preset),
+        )
+}
+
+/// KB routes (V1.20 Batch 5, T39).
+fn kb_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/kb/entries",
+            get(handlers::kb::list_entries).post(handlers::kb::add_entry),
+        )
+        .route(
+            "/v1/local/kb/entries/{entry_id}",
+            get(handlers::kb::get_entry).delete(handlers::kb::delete_entry),
+        )
+}
+
+/// Workspace management routes (V1.20 Batch 4, T21–T24) + legacy single-workspace.
+fn workspace_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route("/v1/local/workspace", get(handlers::workspace::info))
+        .route(
+            "/v1/local/workspace/init",
+            post(handlers::workspace::init_workspace),
+        )
+        .route(
+            "/v1/local/workspaces",
+            get(handlers::workspaces::list_workspaces).post(handlers::workspaces::create_workspace),
+        )
+        .route(
+            "/v1/local/workspaces/active",
+            get(handlers::workspaces::get_active_workspace)
+                .put(handlers::workspaces::set_active_workspace),
+        )
+}
+
+/// Memory and sync routes.
+fn memory_and_sync_routes() -> Router<WorkspaceState> {
+    Router::new()
+        // Sync
+        .route("/v1/local/sync/status", get(handlers::sync::status))
+        .route("/v1/local/sync/push", post(handlers::sync::push))
+        .route("/v1/local/sync/pull", post(handlers::sync::pull))
+        .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
+        .route("/v1/local/sync/replay", get(handlers::sync::replay))
+        // Memory pending review
+        .route(
+            "/v1/local/memory/pending-review",
+            post(handlers::memory::create_pending_review),
+        )
+        .route(
+            "/v1/local/memory/pending-review",
+            get(handlers::memory::list_pending_reviews),
+        )
+        .route(
+            "/v1/local/memory/pending-review/count",
+            get(handlers::memory::count_pending_reviews),
+        )
+        .route(
+            "/v1/local/memory/pending-review/{id}",
+            delete(handlers::memory::delete_pending_review),
+        )
+}
 /// Create the Local API router
 ///
 /// **Unguarded routes** (no auth, always reachable):
@@ -136,52 +239,19 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             "/v1/local/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
-        // Workspace (legacy single-workspace routes)
-        .route("/v1/local/workspace", get(handlers::workspace::info))
-        .route(
-            "/v1/local/workspace/init",
-            post(handlers::workspace::init_workspace),
-        )
-        // Workspace management (V1.20 Batch 4, T21–T24)
-        .route(
-            "/v1/local/workspaces",
-            get(handlers::workspaces::list_workspaces).post(handlers::workspaces::create_workspace),
-        )
-        .route(
-            "/v1/local/workspaces/active",
-            get(handlers::workspaces::get_active_workspace)
-                .put(handlers::workspaces::set_active_workspace),
-        )
-        // Creators & references
+        // Workspace + Creator + Preset + KB + Memory/Sync (Batch 4–5 route groups)
+        .merge(workspace_routes())
+        .merge(creator_routes())
+        .merge(preset_routes())
+        .merge(kb_routes())
+        .merge(memory_and_sync_routes())
+        // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))
-        // Sync
-        .route("/v1/local/sync/status", get(handlers::sync::status))
-        .route("/v1/local/sync/push", post(handlers::sync::push))
-        .route("/v1/local/sync/pull", post(handlers::sync::pull))
-        .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
-        .route("/v1/local/sync/replay", get(handlers::sync::replay))
         // ACP tool execution — internal route only (not public ACP routes)
         .route(
             "/v1/local/agent-host/internal/tool-executions",
             post(handlers::acp::tool_execute),
-        )
-        // Memory pending review
-        .route(
-            "/v1/local/memory/pending-review",
-            post(handlers::memory::create_pending_review),
-        )
-        .route(
-            "/v1/local/memory/pending-review",
-            get(handlers::memory::list_pending_reviews),
-        )
-        .route(
-            "/v1/local/memory/pending-review/count",
-            get(handlers::memory::count_pending_reviews),
-        )
-        .route(
-            "/v1/local/memory/pending-review/{id}",
-            delete(handlers::memory::delete_pending_review),
         )
         // Orchestration routes
         .merge(orchestration_routes())

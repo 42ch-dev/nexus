@@ -44,6 +44,8 @@ tokio-util = { workspace = true }
 subtle = { workspace = true }
 futures-util = { workspace = true }
 tokio-stream = { workspace = true }
+regex = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"

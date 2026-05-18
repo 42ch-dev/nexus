@@ -325,6 +325,161 @@ impl DaemonClient {
         self.put("/v1/local/workspaces/active", req).await
     }
 
+    // ─── Creator management methods (V1.20 Batch 5) ───────────────────
+
+    /// Get the active creator (`GET /v1/local/creators/active`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 409 if no creator is active.
+    pub async fn get_active_creator(&self) -> Result<crate::api::models::ActiveCreatorResponse> {
+        self.get("/v1/local/creators/active").await
+    }
+
+    /// Set the active creator (`PUT /v1/local/creators/active`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 404 if the creator doesn't exist.
+    pub async fn set_active_creator(
+        &self,
+        req: &crate::api::models::SetActiveCreatorRequest,
+    ) -> Result<crate::api::models::SetActiveCreatorResponse> {
+        self.put("/v1/local/creators/active", req).await
+    }
+
+    /// Logout a creator (`POST /v1/local/creators/{id}:logout`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` on failure.
+    pub async fn logout_creator(
+        &self,
+        creator_id: &str,
+    ) -> Result<crate::api::models::LogoutCreatorResponse> {
+        self.post(&format!("/v1/local/creators/{creator_id}:logout"), &())
+            .await
+    }
+
+    // ─── Preset management methods (V1.20 Batch 5) ────────────────────
+
+    /// List presets grouped by source (`GET /v1/local/presets`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` on failure.
+    pub async fn list_presets(&self) -> Result<crate::api::models::ListPresetsGroupedResponse> {
+        self.get("/v1/local/presets").await
+    }
+
+    /// Scaffold a user preset (`POST /v1/local/presets`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 409 if the preset already exists.
+    pub async fn scaffold_preset(
+        &self,
+        req: &crate::api::models::ScaffoldPresetRequest,
+    ) -> Result<crate::api::models::ScaffoldPresetResponse> {
+        self.post("/v1/local/presets", req).await
+    }
+
+    /// Validate a preset YAML (`POST /v1/local/presets:validate`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` on failure.
+    pub async fn validate_preset(
+        &self,
+        req: &crate::api::models::ValidatePresetRequest,
+    ) -> Result<crate::api::models::ValidatePresetResponse> {
+        self.post("/v1/local/presets:validate", req).await
+    }
+
+    /// Reload a preset (`POST /v1/local/presets/{id}:reload`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 404 if the preset doesn't exist.
+    pub async fn reload_preset(
+        &self,
+        preset_id: &str,
+    ) -> Result<crate::api::models::ReloadPresetResponse> {
+        self.post(&format!("/v1/local/presets/{preset_id}:reload"), &())
+            .await
+    }
+
+    // ─── KB methods (V1.20 Batch 5) ────────────────────────────────────
+
+    /// List KB entries (`GET /v1/local/kb/entries`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` on failure.
+    pub async fn list_kb_entries(
+        &self,
+        creator_id: &str,
+        workspace_slug: Option<&str>,
+        query: Option<&str>,
+    ) -> Result<crate::api::models::ListKbEntriesResponse> {
+        let mut path = format!("/v1/local/kb/entries?creator_id={creator_id}");
+        if let Some(slug) = workspace_slug {
+            path.push_str("&workspace_slug=");
+            path.push_str(slug);
+        }
+        if let Some(q) = query {
+            path.push_str("&q=");
+            // Simple percent-encoding for common characters
+            for ch in q.chars() {
+                match ch {
+                    ' ' => path.push_str("%20"),
+                    '&' => path.push_str("%26"),
+                    '=' => path.push_str("%3D"),
+                    '#' => path.push_str("%23"),
+                    c => path.push(c),
+                }
+            }
+        }
+        self.get(&path).await
+    }
+
+    /// Add a KB entry (`POST /v1/local/kb/entries`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` on failure.
+    pub async fn add_kb_entry(
+        &self,
+        req: &crate::api::models::AddKbEntryRequest,
+    ) -> Result<crate::api::models::AddKbEntryResponse> {
+        self.post("/v1/local/kb/entries", req).await
+    }
+
+    /// Get a KB entry (`GET /v1/local/kb/entries/{id}`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 404 if the entry doesn't exist.
+    pub async fn get_kb_entry(
+        &self,
+        entry_id: &str,
+    ) -> Result<crate::api::models::GetKbEntryResponse> {
+        self.get(&format!("/v1/local/kb/entries/{entry_id}")).await
+    }
+
+    /// Delete a KB entry (`DELETE /v1/local/kb/entries/{id}`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` with 404 if the entry doesn't exist.
+    pub async fn delete_kb_entry(
+        &self,
+        entry_id: &str,
+    ) -> Result<crate::api::models::DeleteKbEntryResponse> {
+        self.delete(&format!("/v1/local/kb/entries/{entry_id}"))
+            .await
+    }
+
     /// Attach `X-API-Key` header (if configured and path is guarded) and send the request.
     async fn send_authenticated(
         &self,
