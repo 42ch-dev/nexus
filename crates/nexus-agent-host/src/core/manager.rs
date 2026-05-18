@@ -245,7 +245,8 @@ impl crate::HostFacade for HostManager {
         // Build launch spec with cwd validated against workspace boundary (QC2 F-002).
         let boundary = {
             let ws = self.workspace_root.read().await;
-            ws.clone().ok_or_else(|| HostError::internal("workspace root not set — host not started"))?
+            ws.clone()
+                .ok_or_else(|| HostError::internal("workspace root not set — host not started"))?
         };
         let validated_cwd = crate::config::validate_workspace_path_under(&request.cwd, &boundary)?;
         let launch_spec = crate::capability::model::LaunchSpec {
@@ -1346,7 +1347,8 @@ mod tests {
         assert!(result.is_err(), "cwd outside boundary should be rejected");
         let err = result.unwrap_err();
         assert_eq!(
-            err.category(), "policy_denied",
+            err.category(),
+            "policy_denied",
             "expected policy_denied, got: {err}"
         );
     }
