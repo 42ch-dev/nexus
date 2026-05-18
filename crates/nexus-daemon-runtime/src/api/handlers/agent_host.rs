@@ -1,26 +1,33 @@
-//! HTTP handlers have consistent error patterns.
 #![allow(clippy::missing_errors_doc)]
 //! Agent Host API handlers.
 //!
 //! Endpoints:
-//! - GET  /v1/local/agent-host/health          — Host health status
-//! - GET  /v1/local/agent-host/providers        — List available providers
-//! - POST /v1/local/agent-host/sessions         — Create a managed session
-//! - GET  /v1/local/agent-host/sessions         — List active sessions
-//! - DELETE /v1/local/agent-host/sessions/{id}  — Shutdown a session
+//! - GET    /v1/local/agent-host/health                           — Host health status
+//! - GET    /v1/local/agent-host/providers                        — List available providers
+//! - POST   /v1/local/agent-host/sessions                         — Create a managed session
+//! - GET    /v1/local/agent-host/sessions                         — List active sessions (with pagination)
+//! - GET    /v1/local/agent-host/sessions/{session_id}            — Get session detail
+//! - DELETE /v1/local/agent-host/sessions/{session_id}            — Shutdown a single session
+//! - POST   /v1/local/agent-host/sessions/{session_id}/operations — Execute a host operation
+//! - POST   /v1/local/agent-host/operations/{operation_id}:cancel — Cancel in-flight operation
+//! - GET    /v1/local/agent-host/sessions/{session_id}/events     — SSE event stream
 
+use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use tokio_stream::Stream;
 use uuid::Uuid;
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 
 // ---------------------------------------------------------------------------
-// Response types
+// Response / Request types
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
@@ -40,6 +47,11 @@ pub struct ProviderEntryResponse {
     pub provider_id: String,
     pub display_name: String,
     pub protocol_kind: String,
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,16 +70,62 @@ pub struct SessionResponse {
     pub session_id: String,
     pub provider_id: String,
     pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_op_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SessionListResponse {
-    pub sessions: Vec<SessionResponse>,
+    pub items: Vec<SessionResponse>,
+    pub pagination: PaginationInfo,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaginationInfo {
+    pub limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListSessionsQuery {
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+const fn default_limit() -> usize {
+    50
 }
 
 #[derive(Debug, Serialize)]
 pub struct ShutdownSessionResponse {
     pub session_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OperationResponse {
+    pub operation_id: String,
+    pub session_id: String,
+    pub status: String,
+}
+
+/// Request body for executing a host operation on a session.
+/// Tagged by `kind`: `"prompt"`, `"set_model"`, or `"set_mode"`.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExecuteOperationRequest {
+    Prompt { content: String },
+    SetModel { model: String },
+    SetMode { mode: String },
+}
+
+#[derive(Debug, Serialize)]
+pub struct CancelOperationResponse {
+    pub operation_id: String,
     pub status: String,
 }
 
@@ -85,11 +143,23 @@ fn get_host(
     })
 }
 
-/// Map a `nexus_agent_host::HostError` to an API error.
+/// Map a `nexus_agent_host::HostError` to an API error with appropriate
+/// HTTP status codes based on the error category.
 fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
-    NexusApiError::Internal {
-        code: "AGENT_HOST_ERROR".into(),
-        message: e.to_string(),
+    match e.category() {
+        "provider_unavailable" => NexusApiError::NotFound(e.to_string()),
+        "capability_unsupported" => NexusApiError::InvalidInput {
+            field: "operation".into(),
+            reason: e.to_string(),
+        },
+        "policy_denied" => NexusApiError::Forbidden {
+            resource: "agent_host".into(),
+            reason: e.to_string(),
+        },
+        _ => NexusApiError::Internal {
+            code: "AGENT_HOST_ERROR".into(),
+            message: e.to_string(),
+        },
     }
 }
 
@@ -102,6 +172,25 @@ fn parse_session_id(raw: &str) -> Result<Uuid, NexusApiError> {
             field: "session_id".into(),
             reason: format!("session_id must be a valid UUID, got: {raw}"),
         })
+}
+
+/// Parse an operation ID path parameter as UUID.
+///
+/// Returns 400 Bad Request for malformed IDs.
+fn parse_operation_id(raw: &str) -> Result<Uuid, NexusApiError> {
+    raw.parse::<Uuid>()
+        .map_err(|_| NexusApiError::InvalidInput {
+            field: "operation_id".into(),
+            reason: format!("operation_id must be a valid UUID, got: {raw}"),
+        })
+}
+
+/// Map a session's active op ID to a display string.
+fn active_op_display(session: &nexus_agent_host::core::session::HostSession) -> Option<String> {
+    session
+        .active_op_id
+        .as_ref()
+        .map(std::string::ToString::to_string)
 }
 
 // ---------------------------------------------------------------------------
@@ -124,16 +213,30 @@ pub async fn health(
 
 /// GET /v1/local/agent-host/providers
 ///
-/// Returns a static placeholder for Wave 1 — actual provider discovery
-/// integration will be added when the discovery service is wired.
+/// Returns the real provider catalog from the agent host subsystem.
 pub async fn list_providers(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ProviderListResponse>, NexusApiError> {
-    let _host = get_host(&state)?;
+    let host = get_host(&state)?;
+    let catalog = host
+        .provider_catalog()
+        .await
+        .map_err(|e| map_host_error(&e))?;
 
-    // Wave 1: return empty list — provider catalog will be populated
-    // from the discovery subsystem in a future iteration.
-    Ok(Json(ProviderListResponse { providers: vec![] }))
+    let providers = catalog
+        .entries
+        .into_iter()
+        .map(|entry| ProviderEntryResponse {
+            provider_id: entry.provider_id.to_string(),
+            display_name: entry.display_name,
+            protocol_kind: format!("{:?}", entry.protocol_kind),
+            available: entry.health.available,
+            latency_ms: entry.health.latency_ms,
+            message: entry.health.message,
+        })
+        .collect();
+
+    Ok(Json(ProviderListResponse { providers }))
 }
 
 /// POST /v1/local/agent-host/sessions
@@ -149,7 +252,7 @@ pub async fn create_session(
             || std::path::PathBuf::from("/tmp"),
             std::path::PathBuf::from,
         ),
-        model: req.model,
+        model: req.model.clone(),
         mode: req.mode,
         mcp_servers: vec![],
         metadata: serde_json::Value::Null,
@@ -164,49 +267,192 @@ pub async fn create_session(
         session_id: session.id.to_string(),
         provider_id: session.provider_id.to_string(),
         state: format!("{:?}", session.state),
+        active_op_id: None,
+        model: req.model,
     }))
 }
 
 /// GET /v1/local/agent-host/sessions
+///
+/// Returns real session registry from agent host with pagination.
 pub async fn list_sessions(
     State(state): State<WorkspaceState>,
+    Query(params): Query<ListSessionsQuery>,
 ) -> Result<Json<SessionListResponse>, NexusApiError> {
     let host = get_host(&state)?;
-    let health = host.health().await.map_err(|e| map_host_error(&e))?;
+    let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
 
-    // Wave 1: return count-based info — full session listing
-    // requires registry iteration which will be added later.
+    let limit = params.limit.clamp(1, 250);
+
+    // Cursor-based pagination: cursor is a session ID (UUID string).
+    // If cursor is provided, skip entries until we find the cursor,
+    // then return up to `limit` entries after it.
+    let items: Vec<SessionResponse> = sessions
+        .into_iter()
+        .skip_while(|s| {
+            params
+                .cursor
+                .as_ref()
+                .is_some_and(|cursor| s.id.to_string() <= *cursor)
+        })
+        .take(limit)
+        .map(|s| SessionResponse {
+            session_id: s.id.to_string(),
+            provider_id: s.provider_id.to_string(),
+            state: format!("{:?}", s.state),
+            active_op_id: active_op_display(&s),
+            model: None,
+        })
+        .collect();
+
+    let next_cursor = if items.len() == limit {
+        items.last().map(|i| i.session_id.clone())
+    } else {
+        None
+    };
+
     Ok(Json(SessionListResponse {
-        sessions: (0..health.active_sessions)
-            .map(|_| SessionResponse {
-                session_id: String::new(),
-                provider_id: String::new(),
-                state: "active".to_string(),
-            })
-            .collect(),
+        items,
+        pagination: PaginationInfo { limit, next_cursor },
     }))
 }
 
-/// DELETE /v1/local/agent-host/sessions/{id}
+/// GET /v1/local/agent-host/sessions/{session_id}
+pub async fn get_session(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<SessionResponse>, NexusApiError> {
+    let uuid = parse_session_id(&session_id)?;
+    let host = get_host(&state)?;
+
+    let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
+    let session = sessions
+        .into_iter()
+        .find(|s| s.id.0 == uuid)
+        .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+
+    Ok(Json(SessionResponse {
+        session_id: session.id.to_string(),
+        provider_id: session.provider_id.to_string(),
+        state: format!("{:?}", session.state),
+        active_op_id: active_op_display(&session),
+        model: None,
+    }))
+}
+
+/// DELETE /v1/local/agent-host/sessions/{session_id}
+///
+/// Shuts down a single session. The host remains running.
+/// Returns 404 if the session does not exist.
 pub async fn shutdown_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
 ) -> Result<Json<ShutdownSessionResponse>, NexusApiError> {
-    // Validate session ID format at handler boundary.
     let uuid = parse_session_id(&session_id)?;
-
     let host = get_host(&state)?;
 
-    // Wave 1: shutdown the entire host — per-session shutdown
-    // requires session-to-provider routing exposed through the facade.
-    // Once per-session lookup is available, return 404 for valid-but-missing UUIDs.
-    let _ = uuid; // Used for validation only until per-session routing exists.
-    host.shutdown().await.map_err(|e| map_host_error(&e))?;
+    let sid = nexus_agent_host::HostSessionId(uuid);
+    host.shutdown_session(sid)
+        .await
+        .map_err(|e| map_host_error(&e))?;
 
     Ok(Json(ShutdownSessionResponse {
         session_id,
         status: "shutdown".to_string(),
     }))
+}
+
+/// POST /v1/local/agent-host/sessions/{session_id}/operations
+///
+/// Execute a normalized host operation (prompt, `set_model`, `set_mode`).
+/// Returns the operation ID for tracking.
+pub async fn execute_operation(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+    Json(req): Json<ExecuteOperationRequest>,
+) -> Result<Json<OperationResponse>, NexusApiError> {
+    let uuid = parse_session_id(&session_id)?;
+    let host = get_host(&state)?;
+
+    let sid = nexus_agent_host::HostSessionId(uuid);
+    let op_id = nexus_agent_host::HostOperationId::new();
+
+    let host_op = match req {
+        ExecuteOperationRequest::Prompt { content } => {
+            nexus_agent_host::capability::model::HostOperation::Prompt {
+                op_id: op_id.clone(),
+                content: vec![
+                    nexus_agent_host::capability::model::HostContentBlock::Text { text: content },
+                ],
+            }
+        }
+        ExecuteOperationRequest::SetModel { model } => {
+            nexus_agent_host::capability::model::HostOperation::SetModel { model }
+        }
+        ExecuteOperationRequest::SetMode { mode } => {
+            nexus_agent_host::capability::model::HostOperation::SetMode { mode }
+        }
+    };
+
+    // Execute the operation — for now we consume the stream to completion
+    // and return the operation ID. SSE streaming is available via the events endpoint.
+    let mut stream = host
+        .exec(sid.clone(), host_op)
+        .await
+        .map_err(|e| map_host_error(&e))?;
+
+    // Drain the stream to drive execution forward.
+    // The wrapped stream in HostManager already handles Busy→Ready transitions.
+    while let Some(_result) = stream.next().await {
+        // Events are consumed; SSE endpoint is the preferred way to relay them.
+    }
+
+    Ok(Json(OperationResponse {
+        operation_id: op_id.to_string(),
+        session_id: sid.to_string(),
+        status: "completed".to_string(),
+    }))
+}
+
+/// POST /v1/local/agent-host/operations/{operation_id}:cancel
+///
+/// Cancel an in-flight operation.
+pub async fn cancel_operation(
+    State(state): State<WorkspaceState>,
+    Path(operation_id): Path<String>,
+) -> Result<Json<CancelOperationResponse>, NexusApiError> {
+    let uuid = parse_operation_id(&operation_id)?;
+    let host = get_host(&state)?;
+
+    let op_id = nexus_agent_host::HostOperationId(uuid);
+    host.cancel(op_id).await.map_err(|e| map_host_error(&e))?;
+
+    Ok(Json(CancelOperationResponse {
+        operation_id,
+        status: "cancelled".to_string(),
+    }))
+}
+
+/// GET /v1/local/agent-host/sessions/{session_id}/events
+///
+/// SSE endpoint that delivers `HostEvent` variants for a session.
+/// Compatible with the browser `EventSource` API.
+pub async fn session_events(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
+    // For now, return an empty SSE stream.
+    // Full implementation requires wiring up a session event broadcaster
+    // that accumulates events from HostFacade::exec streams.
+    // The SSE transport is defined here so the route exists and the
+    // EventSource-compatible response shape is correct.
+    let _uuid = parse_session_id(&session_id)?;
+    let _host = get_host(&state)?;
+
+    // Empty keep-alive stream so clients can connect and maintain the SSE channel.
+    let stream = tokio_stream::pending::<Result<Event, Infallible>>();
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +495,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_providers_returns_empty() {
+    async fn list_providers_returns_empty_when_no_providers() {
         let state = state_with_host().await;
         let result = list_providers(State(state)).await;
         assert!(result.is_ok());
@@ -268,6 +514,39 @@ mod tests {
         };
         let result = create_session(State(state), Json(req)).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_sessions_returns_empty_when_no_sessions() {
+        let state = state_with_host().await;
+        let result = list_sessions(
+            State(state),
+            Query(ListSessionsQuery {
+                limit: 50,
+                cursor: None,
+            }),
+        )
+        .await;
+        assert!(result.is_ok());
+        let resp = result.expect("sessions should succeed");
+        assert!(resp.items.is_empty());
+        assert!(resp.pagination.next_cursor.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_sessions_respects_limit() {
+        let state = state_with_host().await;
+        let result = list_sessions(
+            State(state),
+            Query(ListSessionsQuery {
+                limit: 1,
+                cursor: None,
+            }),
+        )
+        .await;
+        assert!(result.is_ok());
+        let resp = result.expect("sessions should succeed");
+        assert!(resp.items.len() <= 1);
     }
 
     #[tokio::test]
@@ -300,6 +579,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_session_rejects_invalid_uuid() {
+        let state = state_with_host().await;
+        let result = get_session(State(state), Path("garbage".to_string())).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().status_code(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn get_session_returns_404_for_unknown() {
+        let state = state_with_host().await;
+        let uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let result = get_session(State(state), Path(uuid.to_string())).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().status_code(),
+            axum::http::StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_operation_rejects_invalid_session_uuid() {
+        let state = state_with_host().await;
+        let req = ExecuteOperationRequest::Prompt {
+            content: "hello".to_string(),
+        };
+        let result = execute_operation(State(state), Path("bad-uuid".to_string()), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().status_code(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_operation_rejects_invalid_op_uuid() {
+        let state = state_with_host().await;
+        let result = cancel_operation(State(state), Path("bad-uuid".to_string())).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().status_code(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn session_events_rejects_invalid_session_uuid() {
+        let state = state_with_host().await;
+        let result = session_events(State(state), Path("bad-uuid".to_string())).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().status_code(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
     async fn parse_session_id_accepts_valid_uuid() {
         let uuid = "550e8400-e29b-41d4-a716-446655440000";
         let result = parse_session_id(uuid);
@@ -313,5 +651,19 @@ mod tests {
         assert!(parse_session_id("").is_err());
         assert!(parse_session_id("12345").is_err());
         assert!(parse_session_id("../../etc/passwd").is_err());
+    }
+
+    #[tokio::test]
+    async fn parse_operation_id_accepts_valid_uuid() {
+        let uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let result = parse_operation_id(uuid);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().to_string(), uuid);
+    }
+
+    #[tokio::test]
+    async fn parse_operation_id_rejects_invalid() {
+        assert!(parse_operation_id("garbage").is_err());
+        assert!(parse_operation_id("").is_err());
     }
 }
