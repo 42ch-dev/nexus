@@ -324,7 +324,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     // --- Section 9: HTTP/Unix server + lifecycle start ---
     let shutdown_notify = state.shutdown_notify();
-    let app = api::create_router(state);
+
+    // Resolve daemon API key configuration (T1: DaemonApiConfig)
+    let auth_config = api::auth_middleware::DaemonApiConfig::from_env();
+    // T7: startup warning is logged inside from_env() for keyless-localhost mode.
+
+    let app = api::create_router(state, auth_config);
 
     // Resolve transport
     let transport = config.resolve_transport();

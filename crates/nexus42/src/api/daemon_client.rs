@@ -2,6 +2,12 @@
 //!
 //! Communicates with the daemon runtime via the Local API (HTTP JSON on port 8420).
 //! Configurable timeouts prevent infinite hangs when the daemon is unresponsive.
+//!
+//! # API Key (V1.20+)
+//!
+//! The client reads `NEXUS42_DAEMON_API_KEY` from the environment at construction
+//! time and attaches it as `X-API-Key` header on all requests except health/status
+//! probes. When the key is empty or unset, no header is attached (keyless-localhost mode).
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
@@ -30,11 +36,24 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default request timeout: 30 seconds
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Environment variable for the daemon API key.
+const DAEMON_API_KEY_ENV: &str = "NEXUS42_DAEMON_API_KEY";
+
+/// Unguarded paths that skip the `X-API-Key` header.
+const UNGUARDED_PATHS: &[&str] = &[
+    "/v1/local/runtime/health",
+    "/v1/local/runtime/status",
+    "/v1/local/daemon/status",
+];
+
 /// Client for the daemon Local API
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
     base_url: String,
     http: reqwest::Client,
+    /// Daemon API key read from `NEXUS42_DAEMON_API_KEY` env var.
+    /// `None` when unset/empty (keyless-localhost mode).
+    api_key: Option<String>,
 }
 
 impl DaemonClient {
@@ -65,9 +84,17 @@ impl DaemonClient {
                 tracing::error!(error = %e, "Failed to build reqwest Client, using default");
                 reqwest::Client::new()
             });
+
+        // Read API key from environment (trimmed; empty becomes None)
+        let api_key = std::env::var(DAEMON_API_KEY_ENV)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
         Self {
             base_url: base_url.to_string(),
             http,
+            api_key,
         }
     }
 
@@ -89,6 +116,7 @@ impl DaemonClient {
     /// This function never returns an error; it absorbs all failures and returns `Ok(false)`.
     pub async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/v1/local/runtime/health", self.base_url);
+        // Health check is unguarded — no API key needed
         self.http
             .get(&url)
             .send()
@@ -117,7 +145,7 @@ impl DaemonClient {
     /// or a network/deserialization error if the request or parsing fails.
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.send_authenticated(self.http.get(&url), path).await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -138,7 +166,9 @@ impl DaemonClient {
     #[allow(clippy::future_not_send)]
     pub async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.http.post(&url).json(body).send().await?;
+        let resp = self
+            .send_authenticated(self.http.post(&url).json(body), path)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -159,7 +189,9 @@ impl DaemonClient {
     #[allow(clippy::future_not_send)]
     pub async fn post_raw<B: Serialize>(&self, path: &str, body: &B) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.http.post(&url).json(body).send().await?;
+        let resp = self
+            .send_authenticated(self.http.post(&url).json(body), path)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -183,7 +215,9 @@ impl DaemonClient {
         body: &B,
     ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.http.patch(&url).json(body).send().await?;
+        let resp = self
+            .send_authenticated(self.http.patch(&url).json(body), path)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -202,7 +236,9 @@ impl DaemonClient {
     /// or a network/deserialization error if the request or parsing fails.
     pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.http.delete(&url).send().await?;
+        let resp = self
+            .send_authenticated(self.http.delete(&url), path)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -211,6 +247,26 @@ impl DaemonClient {
 
         let data: T = resp.json().await?;
         Ok(data)
+    }
+
+    /// Attach `X-API-Key` header (if configured and path is guarded) and send the request.
+    async fn send_authenticated(
+        &self,
+        req: reqwest::RequestBuilder,
+        path: &str,
+    ) -> Result<reqwest::Response> {
+        let req = self.with_api_key(req, path);
+        req.send().await.map_err(Into::into)
+    }
+
+    /// Attach `X-API-Key` header if a key is configured and the path is guarded.
+    fn with_api_key(&self, req: reqwest::RequestBuilder, path: &str) -> reqwest::RequestBuilder {
+        if let Some(ref key) = self.api_key {
+            if !UNGUARDED_PATHS.contains(&path) {
+                return req.header("X-API-Key", key.as_str());
+            }
+        }
+        req
     }
 
     /// Parse an error response from the daemon, attempting structured parsing first
@@ -258,7 +314,8 @@ impl DaemonClient {
         runtime_mode: &str,
         prompt_hint: Option<&str>,
     ) -> Result<Option<AssembleResponse>> {
-        let url = format!("{}/v1/local/context/assemble", self.base_url);
+        let path = "/v1/local/context/assemble";
+        let url = format!("{}{}", self.base_url, path);
 
         let body = serde_json::json!({
             "creator_id": creator_id,
@@ -267,7 +324,9 @@ impl DaemonClient {
             "prompt_hint": prompt_hint,
         });
 
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = self
+            .send_authenticated(self.http.post(&url).json(&body), path)
+            .await?;
 
         let status = resp.status().as_u16();
 
@@ -309,15 +368,18 @@ impl DaemonClient {
         let body = serde_json::json!({ "creator_id": creator_id });
 
         let url = format!("{}{}", self.base_url, path);
-        let resp = match self.http.post(&url).json(&body).send().await {
+        let resp = match self
+            .send_authenticated(self.http.post(&url).json(&body), path)
+            .await
+        {
             Ok(resp) => resp,
             Err(e) => {
-                if e.is_connect() {
-                    return Err(CliError::daemon_not_reachable(
-                        "Start the daemon with `nexus42 daemon start` and retry.",
-                    ));
+                if let CliError::Api { .. } = &e {
+                    return Err(e);
                 }
-                return Err(CliError::from(e));
+                return Err(CliError::daemon_not_reachable(
+                    "Start the daemon with `nexus42 daemon start` and retry.",
+                ));
             }
         };
 
@@ -346,15 +408,15 @@ impl DaemonClient {
         let path = "/v1/local/memory/fragments";
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
-        let resp = match self.http.get(&url).send().await {
+        let resp = match self.send_authenticated(self.http.get(&url), path).await {
             Ok(resp) => resp,
             Err(e) => {
-                if e.is_connect() {
-                    return Err(CliError::daemon_not_reachable(
-                        "Start the daemon with `nexus42 daemon start` and retry.",
-                    ));
+                if let CliError::Api { .. } = &e {
+                    return Err(e);
                 }
-                return Err(CliError::from(e));
+                return Err(CliError::daemon_not_reachable(
+                    "Start the daemon with `nexus42 daemon start` and retry.",
+                ));
             }
         };
 
@@ -446,4 +508,54 @@ mod tests {
         assert!(result.is_ok(), "health_check should absorb timeout errors");
         assert!(!result.expect("health check timeout test"));
     }
+
+    #[test]
+    fn test_api_key_read_from_env() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var(DAEMON_API_KEY_ENV, "test-key-123");
+        let client = DaemonClient::new("http://127.0.0.1:8420");
+        assert_eq!(client.api_key.as_deref(), Some("test-key-123"));
+        std::env::remove_var(DAEMON_API_KEY_ENV);
+    }
+
+    #[test]
+    fn test_api_key_none_when_unset() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        std::env::remove_var(DAEMON_API_KEY_ENV);
+        let client = DaemonClient::new("http://127.0.0.1:8420");
+        assert!(client.api_key.is_none());
+    }
+
+    #[test]
+    fn test_api_key_none_when_empty() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var(DAEMON_API_KEY_ENV, "");
+        let client = DaemonClient::new("http://127.0.0.1:8420");
+        assert!(client.api_key.is_none());
+        std::env::remove_var(DAEMON_API_KEY_ENV);
+    }
+
+    #[test]
+    fn test_api_key_trimmed() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var(DAEMON_API_KEY_ENV, "  my-key  ");
+        let client = DaemonClient::new("http://127.0.0.1:8420");
+        assert_eq!(client.api_key.as_deref(), Some("my-key"));
+        std::env::remove_var(DAEMON_API_KEY_ENV);
+    }
+
+    #[test]
+    fn test_unguarded_paths_skip_header() {
+        let _client = DaemonClient::new("http://127.0.0.1:8420");
+        for path in UNGUARDED_PATHS {
+            assert!(
+                UNGUARDED_PATHS.contains(path),
+                "{path} should be in UNGUARDED_PATHS"
+            );
+        }
+    }
+
+    /// Lock to serialize env-var tests that read `NEXUS42_DAEMON_API_KEY`.
+    static ENV_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 }

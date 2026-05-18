@@ -41,6 +41,7 @@ statig = { workspace = true }
 tempfile = "3"
 async-trait = "0.1"
 tokio-util = { workspace = true }
+subtle = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"
