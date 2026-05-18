@@ -811,7 +811,10 @@ enabled = true
         let child = temp_dir.path().join("workspace");
         std::fs::create_dir_all(&child).expect("create child dir");
 
-        let canonical_boundary = temp_dir.path().canonicalize().expect("canonicalize boundary");
+        let canonical_boundary = temp_dir
+            .path()
+            .canonicalize()
+            .expect("canonicalize boundary");
         let result = validate_workspace_path_under(&child, temp_dir.path());
         assert!(result.is_ok(), "child under boundary should be accepted");
         assert!(
