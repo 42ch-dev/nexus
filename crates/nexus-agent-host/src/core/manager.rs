@@ -438,6 +438,8 @@ impl crate::HostFacade for HostManager {
         // Collect (adapter, handle) pairs while holding the provider read lock briefly,
         // then call shutdown outside the lock to avoid holding it across .await points.
         // Use the actual negotiated capabilities from the session registry (QC2 F-004).
+        // If a session has no registry entry, skip it rather than fabricating
+        // full capabilities (QC2 F-004 fix: no acp_full() fallback).
         let shutdown_tasks: Vec<(Arc<dyn ProviderAdapter>, ManagedSessionHandle)> = {
             let sessions = self.sessions.read().await;
             let providers = self.providers.read().await;
@@ -447,14 +449,11 @@ impl crate::HostFacade for HostManager {
                     let provider_id = provider_map.get(session_id)?;
                     let entry = providers.get(provider_id)?;
                     let adapter = entry.adapter.clone();
-                    let capabilities = sessions.get(session_id).map_or_else(
-                        crate::capability::model::CapabilityDescriptor::acp_full,
-                        |s| s.negotiated_capabilities.clone(),
-                    );
+                    let session = sessions.get(session_id)?;
                     let handle = ManagedSessionHandle {
                         provider_id: provider_id.clone(),
                         session_id: session_id.clone(),
-                        capabilities,
+                        capabilities: session.negotiated_capabilities.clone(),
                     };
                     Some((adapter, handle))
                 })
@@ -523,7 +522,7 @@ impl crate::HostFacade for HostManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::model::{LaunchSpec, ProbeRequest};
+    use crate::capability::model::{CapabilityDescriptor, LaunchSpec, ProbeRequest};
     use crate::core::session::SessionState;
     use crate::HostFacade;
 
@@ -608,6 +607,7 @@ mod tests {
     struct TrackingMockProvider {
         provider_id: ProviderId,
         shutdown_calls: Arc<std::sync::Mutex<Vec<HostSessionId>>>,
+        shutdown_capabilities: Arc<std::sync::Mutex<Vec<CapabilityDescriptor>>>,
     }
 
     impl TrackingMockProvider {
@@ -615,11 +615,17 @@ mod tests {
             Self {
                 provider_id,
                 shutdown_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+                shutdown_capabilities: Arc::new(std::sync::Mutex::new(Vec::new())),
             }
         }
 
         fn take_shutdown_calls(&self) -> Vec<HostSessionId> {
             let mut guard = self.shutdown_calls.lock().unwrap();
+            std::mem::take(&mut *guard)
+        }
+
+        fn take_shutdown_capabilities(&self) -> Vec<CapabilityDescriptor> {
+            let mut guard = self.shutdown_capabilities.lock().unwrap();
             std::mem::take(&mut *guard)
         }
     }
@@ -689,6 +695,10 @@ mod tests {
 
         async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
             self.shutdown_calls.lock().unwrap().push(session.session_id);
+            self.shutdown_capabilities
+                .lock()
+                .unwrap()
+                .push(session.capabilities);
             Ok(())
         }
 
@@ -1036,6 +1046,69 @@ mod tests {
         let health = manager.health().await.expect("health");
         assert!(!health.running);
         assert_eq!(health.active_sessions, 0);
+    }
+
+    /// Verify shutdown uses actual negotiated capabilities, not acp_full() fallback (QC2 F-004).
+    #[tokio::test]
+    async fn shutdown_uses_negotiated_capabilities_not_acp_full() {
+        // Use custom capabilities that differ from acp_full()
+        let custom_caps = CapabilityDescriptor {
+            text_prompt: true,
+            streaming: true,
+            cancellation: false, // differs from acp_full
+            session_restore: false,
+            structured_tool_calls: true,
+            mcp_http: false,
+            mcp_sse: false,
+            mcp_stdio: false,
+            images: false,
+            audio: false,
+            embedded_context: false,
+            set_model: false,
+            set_mode: false,
+            diagnostics: false,
+        };
+        let expected_caps = custom_caps.clone();
+
+        let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
+        let manager = HostManager::new();
+        manager.register_provider(provider.clone()).await;
+        manager.start(start_config()).await.expect("start");
+
+        // Create a session
+        let session = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .expect("create session");
+
+        // Override the negotiated capabilities to something non-standard
+        {
+            let mut sessions = manager.sessions.write().await;
+            if let Some(s) = sessions.get_mut(&session.id) {
+                s.negotiated_capabilities = custom_caps;
+            }
+        }
+
+        manager.shutdown().await.expect("shutdown");
+
+        let caps = provider.take_shutdown_capabilities();
+        assert_eq!(caps.len(), 1, "should have one shutdown call");
+        let received = &caps[0];
+        assert!(
+            !received.cancellation,
+            "shutdown should use negotiated capabilities, not acp_full() — cancellation should be false"
+        );
+        assert_eq!(
+            received.cancellation, expected_caps.cancellation,
+            "capabilities should match the negotiated (non-acp-full) descriptor"
+        );
     }
 
     // ── Admission policy enforcement tests ──────────────────────────────
