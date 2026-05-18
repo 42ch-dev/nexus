@@ -588,10 +588,37 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         .active_creator_id
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?;
-    let home = user_home()?;
 
     match cmd {
         CreatorWorkspaceCommand::List => {
+            let home = user_home()?;
+            // Try daemon API first (T26: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                match client.list_workspaces(Some(creator_id)).await {
+                    Ok(resp) => {
+                        println!("Workspaces for creator {creator_id}:");
+                        if resp.items.is_empty() {
+                            println!("  (none)");
+                        }
+                        let active = config.workspace_slug_for_creator(creator_id);
+                        for ws in &resp.items {
+                            let mark = if ws.workspace_slug == active {
+                                " (active)"
+                            } else {
+                                ""
+                            };
+                            println!("  {}{mark}", ws.workspace_slug);
+                        }
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon workspace list failed, falling back: {e}");
+                    }
+                }
+            }
+
+            // Fallback: direct FS scan
             let root = paths::creator_workspaces_root(&home, creator_id);
             if !root.is_dir() {
                 println!("No workspaces directory yet ({}).", root.display());
@@ -621,6 +648,41 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             name,
         } => {
             validate_workspace_slug(&workspace_slug)?;
+
+            // Try daemon API first (T26: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                let req = crate::api::models::CreateWorkspaceRequest {
+                    creator_id: creator_id.to_string(),
+                    workspace_slug: workspace_slug.clone(),
+                    creative_root: creative_root_arg.clone(),
+                    display_name: name.clone(),
+                };
+                match client.create_workspace(&req).await {
+                    Ok(resp) => {
+                        // Set as active workspace
+                        let active_req = crate::api::models::SetActiveWorkspaceRequest {
+                            creator_id: Some(creator_id.to_string()),
+                            workspace_slug: workspace_slug.clone(),
+                        };
+                        if let Err(e) = client.set_active_workspace(&active_req).await {
+                            eprintln!("nexus42: warning — active selection failed: {e}");
+                        }
+                        println!(
+                            "✓ Workspace {workspace_slug:?} created for creator {creator_id}."
+                        );
+                        println!("  Creative root: {}", resp.creative_root);
+                        println!("  state.db: {}", resp.state_db_path);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon workspace create failed, falling back: {e}");
+                    }
+                }
+            }
+
+            // Fallback: direct FS operations
+            let home = user_home()?;
             let op_meta = paths::operational_workspace_dir(&home, creator_id, &workspace_slug)
                 .join("meta.json");
             if op_meta.exists() {
@@ -655,6 +717,29 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         }
         CreatorWorkspaceCommand::Use { workspace_slug } => {
             validate_workspace_slug(&workspace_slug)?;
+
+            // Try daemon API first (T26: migration)
+            let client = crate::api::DaemonClient::from_config(config);
+            if client.health_check().await? {
+                let req = crate::api::models::SetActiveWorkspaceRequest {
+                    creator_id: Some(creator_id.to_string()),
+                    workspace_slug: workspace_slug.clone(),
+                };
+                match client.set_active_workspace(&req).await {
+                    Ok(_resp) => {
+                        println!(
+                            "✓ Active workspace slug for {creator_id} set to: {workspace_slug}"
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("nexus42: daemon set active failed, falling back: {e}");
+                    }
+                }
+            }
+
+            // Fallback: direct config update
+            let home = user_home()?;
             let dir = paths::operational_workspace_dir(&home, creator_id, &workspace_slug);
             if !dir.is_dir() {
                 return Err(CliError::Other(format!(

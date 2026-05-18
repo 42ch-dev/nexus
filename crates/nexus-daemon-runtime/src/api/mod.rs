@@ -136,11 +136,21 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             "/v1/local/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
-        // Workspace
+        // Workspace (legacy single-workspace routes)
         .route("/v1/local/workspace", get(handlers::workspace::info))
         .route(
             "/v1/local/workspace/init",
             post(handlers::workspace::init_workspace),
+        )
+        // Workspace management (V1.20 Batch 4, T21–T24)
+        .route(
+            "/v1/local/workspaces",
+            get(handlers::workspaces::list_workspaces).post(handlers::workspaces::create_workspace),
+        )
+        .route(
+            "/v1/local/workspaces/active",
+            get(handlers::workspaces::get_active_workspace)
+                .put(handlers::workspaces::set_active_workspace),
         )
         // Creators & references
         .route("/v1/local/creators", get(handlers::creators::list))
