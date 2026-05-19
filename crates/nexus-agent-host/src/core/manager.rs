@@ -29,8 +29,12 @@ struct ProviderEntry {
     available: bool,
 }
 
-/// Default broadcast channel capacity for host events.
-const EVENT_BROADCAST_CAPACITY: usize = 256;
+/// Broadcast channel capacity for host events.
+///
+/// Increased to 1024 to reduce silent event loss risk under multi-session load
+/// (QC3 W-001). The shared buffer is consumed by all SSE subscribers; higher
+/// capacity gives each subscriber more headroom before `RecvError::Lagged`.
+const EVENT_BROADCAST_CAPACITY: usize = 1024;
 
 /// The host manager facade.
 ///

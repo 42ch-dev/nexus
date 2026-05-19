@@ -14,6 +14,9 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_home_layout::validate_entry_id_safe;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::LazyLock;
+use std::sync::Mutex;
 use tracing::info;
 
 // ─── Request / Response types ──────────────────────────────────────────────
@@ -178,6 +181,112 @@ fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
     format!("{base_id}_overflow")
 }
 
+// ─── KB Entry Index (QC3 W-005) ──────────────────────────────────────────
+
+/// Key for the KB entry index: [`String`] → (`creator_id`, `workspace_slug`).
+type EntryLocationMap = HashMap<String, (String, String)>;
+
+/// Daemon-wide KB entry index.
+/// Built lazily on first get/delete, invalidated on add/delete.
+/// Converts O(n) filesystem scans to O(1) hash lookups.
+static KB_ENTRY_INDEX: LazyLock<Mutex<Option<EntryLocationMap>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Rebuild the KB entry index by scanning all workspace index.json files.
+fn rebuild_kb_entry_index(home: &std::path::Path) -> EntryLocationMap {
+    let creators_root = home.join(".nexus42").join("creators");
+    let mut index = HashMap::new();
+
+    let Ok(creator_entries) = std::fs::read_dir(&creators_root) else {
+        return index;
+    };
+
+    for creator_entry in creator_entries.flatten() {
+        if !creator_entry.path().is_dir() {
+            continue;
+        }
+        let Ok(creator_id) = creator_entry.file_name().into_string() else {
+            continue;
+        };
+
+        let ws_root = creators_root.join(&creator_id).join("workspaces");
+        let Ok(ws_entries) = std::fs::read_dir(&ws_root) else {
+            continue;
+        };
+
+        for ws_entry in ws_entries.flatten() {
+            if !ws_entry.path().is_dir() {
+                continue;
+            }
+            let Ok(workspace_slug) = ws_entry.file_name().into_string() else {
+                continue;
+            };
+
+            let index_path = ws_entry.path().join("kb").join("index.json");
+            let kb_index = read_kb_index(&index_path);
+            for entry in &kb_index.entries {
+                index.insert(
+                    entry.entry_id.clone(),
+                    (creator_id.clone(), workspace_slug.clone()),
+                );
+            }
+        }
+    }
+
+    index
+}
+
+/// Look up `entry_id` in the KB entry index. Rebuilds index on first access.
+/// Returns `(creator_id, workspace_slug)` or `None`.
+fn lookup_entry_location(entry_id: &str, home: &std::path::Path) -> Option<(String, String)> {
+    {
+        let index = KB_ENTRY_INDEX
+            .lock()
+            .expect("KB entry index lock should not be poisoned");
+        if let Some(ref map) = *index {
+            return map.get(entry_id).cloned();
+        }
+    }
+    // Index not built yet — rebuild it.
+    let new_index = rebuild_kb_entry_index(home);
+    let result = new_index.get(entry_id).cloned();
+    *KB_ENTRY_INDEX
+        .lock()
+        .expect("KB entry index lock should not be poisoned") = Some(new_index);
+    result
+}
+
+/// Invalidate the KB entry index (call after add/delete).
+fn invalidate_kb_entry_index() {
+    *KB_ENTRY_INDEX
+        .lock()
+        .expect("KB entry index lock should not be poisoned") = None;
+}
+
+/// Add an entry to the KB entry index (if already built).
+fn add_to_kb_entry_index(entry_id: &str, creator_id: &str, workspace_slug: &str) {
+    let mut index = KB_ENTRY_INDEX
+        .lock()
+        .expect("KB entry index lock should not be poisoned");
+    if let Some(ref mut map) = *index {
+        map.insert(
+            entry_id.to_string(),
+            (creator_id.to_string(), workspace_slug.to_string()),
+        );
+    }
+    // If None, index will be rebuilt lazily on next access.
+}
+
+/// Remove an entry from the KB entry index (if already built).
+fn remove_from_kb_entry_index(entry_id: &str) {
+    let mut index = KB_ENTRY_INDEX
+        .lock()
+        .expect("KB entry index lock should not be poisoned");
+    if let Some(ref mut map) = *index {
+        map.remove(entry_id);
+    }
+}
+
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
 /// `GET /v1/local/kb/entries` — list/search KB entries (T39)
@@ -304,7 +413,7 @@ pub async fn add_entry(
     let entry_id = deduplicate_entry_id(&base_id, &index);
     let entry_title = req.title.unwrap_or_else(|| entry_id.clone());
 
-    // Step 1: Write updated index to temp file (W2 — index update first)
+    // Step 1: Write updated index to temp file
     let created_at = chrono::Utc::now().to_rfc3339();
     index.entries.push(KbIndexEntry {
         entry_id: entry_id.clone(),
@@ -330,18 +439,33 @@ pub async fn add_entry(
         })?;
     }
 
-    // Step 2: Write entry content file
+    // Step 2: Write entry content to temp file first (QC3 W-006: crash-consistency).
+    // Write to .tmp, then atomic rename after index commit.
     let dest = entries_dir.join(format!("{entry_id}.md"));
-    std::fs::write(&dest, &content).map_err(|e| NexusApiError::Internal {
+    let tmp_content_path = entries_dir.join(format!("{entry_id}.md.tmp"));
+    std::fs::write(&tmp_content_path, &content).map_err(|e| NexusApiError::Internal {
         code: "FILE_WRITE_ERROR".into(),
         message: e.to_string(),
     })?;
 
-    // Step 3: Atomically rename temp index to final
+    // Step 3: Atomically rename temp index to final — this commits the metadata.
     std::fs::rename(&tmp_index_path, &index_path).map_err(|e| NexusApiError::Internal {
         code: "FILE_RENAME_ERROR".into(),
         message: e.to_string(),
     })?;
+
+    // Step 4: Atomically rename temp content to final — entry is now fully committed.
+    std::fs::rename(&tmp_content_path, &dest).map_err(|e| NexusApiError::Internal {
+        code: "FILE_RENAME_ERROR".into(),
+        message: e.to_string(),
+    })?;
+
+    // Update KB entry index (W-005).
+    let workspace_slug = req
+        .workspace_slug
+        .as_deref()
+        .unwrap_or(DEFAULT_WORKSPACE_SLUG);
+    add_to_kb_entry_index(&entry_id, &req.creator_id, workspace_slug);
 
     Ok(Json(AddKbEntryResponse {
         entry_id,
@@ -350,16 +474,14 @@ pub async fn add_entry(
 }
 
 /// `GET /v1/local/kb/entries/{id}` — get single KB entry (T39)
+///
+/// Uses the KB entry index for O(1) lookup (QC3 W-005).
 pub async fn get_entry(
     State(_state): State<WorkspaceState>,
     Path(entry_id): Path<String>,
 ) -> Result<Json<GetKbEntryResponse>, NexusApiError> {
     info!(entry_id = %entry_id, "Getting KB entry");
 
-    // Require query params via headers — but we need creator_id + workspace_slug.
-    // For this endpoint, we'll look them up from active selection.
-    // The path-only approach requires the client to specify in query params,
-    // but since this is a path-only handler, we search all KB dirs.
     validate_entry_id_safe(&entry_id).map_err(|reason| NexusApiError::InvalidInput {
         field: "entry_id".to_string(),
         reason,
@@ -370,7 +492,42 @@ pub async fn get_entry(
         message: "Cannot determine home directory".to_string(),
     })?;
 
-    // Search across all creator/workspace combos
+    // Try index lookup first (O(1)), fall back to filesystem scan.
+    let location = lookup_entry_location(&entry_id, &home);
+
+    if let Some((creator_id, workspace_slug)) = location {
+        // Fast path: read entry from known location.
+        let (_, entries_dir) = resolve_kb_paths(&home, &creator_id, Some(&workspace_slug));
+        let candidate = entries_dir.join(format!("{entry_id}.md"));
+        if candidate.exists() {
+            let content =
+                std::fs::read_to_string(&candidate).map_err(|e| NexusApiError::Internal {
+                    code: "FILE_READ_ERROR".into(),
+                    message: e.to_string(),
+                })?;
+
+            let (kb_dir, _) = resolve_kb_paths(&home, &creator_id, Some(&workspace_slug));
+            let index_path = kb_dir.join("index.json");
+            let index = read_kb_index(&index_path);
+            let index_entry = index.entries.iter().find(|e| e.entry_id == entry_id);
+
+            let (title, created_at) = index_entry.map_or_else(
+                || (entry_id.clone(), String::new()),
+                |ie| (ie.title.clone(), ie.created_at.clone()),
+            );
+
+            return Ok(Json(GetKbEntryResponse {
+                entry_id,
+                title,
+                created_at,
+                content,
+            }));
+        }
+        // Entry was in index but file missing — stale index, fall through.
+        invalidate_kb_entry_index();
+    }
+
+    // Slow path: filesystem scan (used when index is stale or on first access).
     let creators_root = home.join(".nexus42").join("creators");
     if !creators_root.is_dir() {
         return Err(NexusApiError::NotFound(format!(
@@ -430,6 +587,8 @@ pub async fn get_entry(
 }
 
 /// `DELETE /v1/local/kb/entries/{id}` — delete KB entry (T39)
+///
+/// Uses the KB entry index for O(1) lookup (QC3 W-005).
 pub async fn delete_entry(
     State(_state): State<WorkspaceState>,
     Path(entry_id): Path<String>,
@@ -446,6 +605,40 @@ pub async fn delete_entry(
         message: "Cannot determine home directory".to_string(),
     })?;
 
+    // Try index lookup first (O(1)).
+    let location = lookup_entry_location(&entry_id, &home);
+
+    if let Some((creator_id, workspace_slug)) = location {
+        let (_, entries_dir) = resolve_kb_paths(&home, &creator_id, Some(&workspace_slug));
+        let candidate = entries_dir.join(format!("{entry_id}.md"));
+        if candidate.exists() {
+            std::fs::remove_file(&candidate).map_err(|e| NexusApiError::Internal {
+                code: "FILE_DELETE_ERROR".into(),
+                message: e.to_string(),
+            })?;
+
+            let (kb_dir, _) = resolve_kb_paths(&home, &creator_id, Some(&workspace_slug));
+            let index_path = kb_dir.join("index.json");
+            let mut index = read_kb_index(&index_path);
+            index.entries.retain(|e| e.entry_id != entry_id);
+            if index.entries.is_empty() {
+                let _ = std::fs::remove_file(&index_path);
+            } else {
+                write_kb_index(&index_path, &index)?;
+            }
+
+            remove_from_kb_entry_index(&entry_id);
+
+            return Ok(Json(DeleteKbEntryResponse {
+                entry_id,
+                deleted: true,
+            }));
+        }
+        // Stale index — invalidate and fall through.
+        invalidate_kb_entry_index();
+    }
+
+    // Slow path: filesystem scan.
     let creators_root = home.join(".nexus42").join("creators");
     if !creators_root.is_dir() {
         return Err(NexusApiError::NotFound(format!(
@@ -489,6 +682,8 @@ pub async fn delete_entry(
                 } else {
                     write_kb_index(&index_path, &index)?;
                 }
+
+                remove_from_kb_entry_index(&entry_id);
 
                 return Ok(Json(DeleteKbEntryResponse {
                     entry_id,
