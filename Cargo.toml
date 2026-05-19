@@ -84,3 +84,4 @@ blake3 = "1"
 handlebars = "6"
 which = "8"
 regex = "1"
+subtle = { version = "2", default-features = false }
