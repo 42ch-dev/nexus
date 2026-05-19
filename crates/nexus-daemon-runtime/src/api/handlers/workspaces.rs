@@ -14,6 +14,8 @@ use nexus_home_layout::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use std::sync::Mutex;
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
@@ -49,7 +51,7 @@ pub struct PaginationEnvelope {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct WorkspaceSummary {
     pub creator_id: String,
     pub workspace_slug: String,
@@ -94,6 +96,48 @@ pub struct SetActiveWorkspaceRequest {
 pub struct SetActiveWorkspaceResponse {
     pub creator_id: String,
     pub workspace_slug: String,
+}
+
+// ─── Workspace List Cache (QC3 W-004) ──────────────────────────────────────
+
+/// TTL for workspace list cache (60 seconds).
+const WORKSPACE_CACHE_TTL_SECS: u64 = 60;
+
+/// Cached workspace list with a timestamp.
+type WorkspaceCache = (std::time::Instant, Vec<WorkspaceSummary>);
+
+/// Module-level workspace list cache.
+/// Stores unfiltered list + timestamp; invalidated on create/delete.
+static WORKSPACE_CACHE: LazyLock<Mutex<Option<WorkspaceCache>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Invalidate the workspace list cache (call after create/delete).
+fn invalidate_workspace_cache() {
+    *WORKSPACE_CACHE
+        .lock()
+        .expect("workspace cache lock should not be poisoned") = None;
+}
+
+/// Try to get cached workspaces. Returns `None` if cache is empty or expired.
+/// The cache stores the full unfiltered list; callers apply their own filters.
+fn get_cached_workspaces() -> Option<Vec<WorkspaceSummary>> {
+    let cache = WORKSPACE_CACHE
+        .lock()
+        .expect("workspace cache lock should not be poisoned");
+    match *cache {
+        Some((instant, ref items)) if instant.elapsed().as_secs() < WORKSPACE_CACHE_TTL_SECS => {
+            Some(items.clone())
+        }
+        _ => None,
+    }
+}
+
+/// Store workspaces in cache (unfiltered, full list).
+fn cache_workspaces(items: Vec<WorkspaceSummary>) {
+    *WORKSPACE_CACHE
+        .lock()
+        .expect("workspace cache lock should not be poisoned") =
+        Some((std::time::Instant::now(), items));
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -435,10 +479,23 @@ pub async fn list_workspaces(
     }
 
     let limit = query.limit.clamp(1, MAX_LIMIT);
-    let all_items = scan_workspaces(nexus_home, query.creator_id.as_deref());
 
-    // Apply cursor-based pagination (cursor = "<creator_id>/<workspace_slug>")
-    let mut items = all_items;
+    // Use cached workspace list if within TTL, otherwise rescan (QC3 W-004).
+    let all_items = get_cached_workspaces().unwrap_or_else(|| {
+        let items = scan_workspaces(nexus_home, None); // unfiltered scan
+        cache_workspaces(items.clone());
+        items
+    });
+
+    // Apply creator_id filter to the full list.
+    let mut items: Vec<WorkspaceSummary> = if let Some(ref filter) = query.creator_id {
+        all_items
+            .into_iter()
+            .filter(|i| i.creator_id == *filter)
+            .collect()
+    } else {
+        all_items
+    };
     if let Some(ref cursor) = query.cursor {
         // Skip past the cursor entry
         let pos = items
@@ -520,6 +577,9 @@ pub async fn create_workspace(
     .await?;
 
     let op_dir = operational_workspace_dir(&user_home, &req.creator_id, &req.workspace_slug);
+
+    // Invalidate workspace cache after creating a new workspace (QC3 W-004).
+    invalidate_workspace_cache();
 
     Ok(Json(CreateWorkspaceResponse {
         creator_id: req.creator_id,

@@ -394,23 +394,27 @@ pub async fn execute_operation(
         }
     };
 
-    // Execute the operation — for now we consume the stream to completion
-    // and return the operation ID. SSE streaming is available via the events endpoint.
-    let mut stream = host
+    // Execute the operation and return immediately (QC3 W-003: fire-and-forget).
+    // The wrapped stream in HostManager handles Busy→Ready state transitions.
+    // SSE subscribers receive events via the broadcast channel.
+    let stream = host
         .exec(sid.clone(), host_op)
         .await
         .map_err(|e| map_host_error(&e))?;
 
-    // Drain the stream to drive execution forward.
-    // The wrapped stream in HostManager already handles Busy→Ready transitions.
-    while let Some(_result) = stream.next().await {
-        // Events are consumed; SSE endpoint is the preferred way to relay them.
-    }
+    // Spawn background task to drain the event stream and drive the state machine.
+    // This prevents blocking the HTTP handler for the duration of long-running operations.
+    tokio::spawn(async move {
+        let mut s = stream;
+        while let Some(_result) = s.next().await {
+            // Events are broadcast by HostManager; draining drives the state machine.
+        }
+    });
 
     Ok(Json(OperationResponse {
         operation_id: op_id.to_string(),
         session_id: sid.to_string(),
-        status: "completed".to_string(),
+        status: "started".to_string(),
     }))
 }
 
@@ -452,18 +456,28 @@ pub async fn session_events(
 
     // Convert the broadcast receiver into a filtered SSE stream using unfold.
     // We manually recv() from the broadcast receiver and yield matching events.
-    let stream = futures_util::stream::unfold(rx, move |mut rx| {
+    // The unfold state is (receiver, done_flag) — once `done` is true the stream
+    // terminates on the next poll (QC3 W-002: prevent zombie SSE connections).
+    let stream = futures_util::stream::unfold((rx, false), move |(mut rx, done)| {
         let sid = sid.clone();
         async move {
+            if done {
+                return None;
+            }
             // Keep receiving until we get a session-matching event or the channel closes.
             loop {
                 match rx.recv().await {
                     Ok(event) => {
                         if event_matches_session(&event, &sid) {
                             let json = serde_json::to_string(&event).unwrap_or_default();
+                            let is_terminal = matches!(
+                                &event,
+                                nexus_agent_host::capability::model::HostEvent::SessionStopped(e)
+                                if e.session_id == sid
+                            );
                             return Some((
                                 Ok::<Event, Infallible>(Event::default().data(json)),
-                                rx,
+                                (rx, is_terminal),
                             ));
                         }
                         // Not our session — skip and continue
