@@ -38,7 +38,16 @@ pub struct CreatePendingReviewResponse {
 /// Response body for listing pending reviews.
 #[derive(Debug, Serialize)]
 pub struct ListPendingReviewsResponse {
-    pub pending_reviews: Vec<PendingReviewInfo>,
+    pub items: Vec<PendingReviewInfo>,
+    pub pagination: PaginationEnvelope,
+}
+
+/// Cursor-based pagination envelope.
+#[derive(Debug, Serialize)]
+pub struct PaginationEnvelope {
+    pub limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 /// Pending review info for API responses.
@@ -199,7 +208,7 @@ fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(),
 
 /// GET /v1/local/memory/pending-review?creator_id=...
 ///
-/// Lists all pending reviews for a creator.
+/// Lists all pending reviews for a creator with cursor-based pagination.
 pub async fn list_pending_reviews(
     State(state): State<WorkspaceState>,
     Query(params): Query<ListPendingReviewsQuery>,
@@ -214,8 +223,9 @@ pub async fn list_pending_reviews(
         });
     }
 
+    let limit = params.limit.clamp(1, MAX_LIMIT);
     let creator_id_filter = params.creator_id.clone();
-    let pending_reviews = sqlx::query_as!(
+    let all_reviews = sqlx::query_as!(
         PendingReviewInfo,
         r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
          FROM memory_pending_review WHERE creator_id = ? ORDER BY created_at DESC"#,
@@ -228,16 +238,48 @@ pub async fn list_pending_reviews(
         message: format!("failed to list pending reviews: {e}"),
     })?;
 
-    debug!(count = pending_reviews.len(), "Pending reviews retrieved");
+    let mut items = all_reviews;
 
-    Ok(Json(ListPendingReviewsResponse { pending_reviews }))
+    // Apply cursor-based pagination (cursor = pending_id)
+    if let Some(ref cursor) = params.cursor {
+        let pos = items.iter().position(|i| i.pending_id == *cursor);
+        if let Some(idx) = pos {
+            items = items.split_off(idx + 1);
+        }
+    }
+
+    let next_cursor = if items.len() > limit {
+        items.truncate(limit);
+        items.last().map(|i| i.pending_id.clone())
+    } else {
+        None
+    };
+
+    debug!(count = items.len(), "Pending reviews retrieved");
+
+    Ok(Json(ListPendingReviewsResponse {
+        items,
+        pagination: PaginationEnvelope { limit, next_cursor },
+    }))
 }
 
 /// Query parameters for listing pending reviews.
 #[derive(Debug, Deserialize)]
 pub struct ListPendingReviewsQuery {
     pub creator_id: String,
+    /// Maximum number of items to return (1–250, default 50).
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    /// Opaque cursor for pagination; pass `next_cursor` from the previous page.
+    pub cursor: Option<String>,
 }
+
+const fn default_limit() -> usize {
+    50
+}
+
+/// Maximum items per page.
+const MAX_LIMIT: usize = 250;
 
 /// GET /v1/local/memory/pending-review/count?creator_id=...
 ///

@@ -483,7 +483,7 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
             }
         }
         SyncCommand::World { command } => {
-            super::world::run(command, config).await?;
+            super::world::run(command).await?;
         }
         SyncCommand::Retry { bundle_id } => match bundle_id {
             Some(id) => {

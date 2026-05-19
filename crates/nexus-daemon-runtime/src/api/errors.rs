@@ -3,6 +3,28 @@
 //! Standardized error type for all daemon API handlers.
 //! Maps domain errors to proper HTTP status codes with structured JSON responses.
 //!
+//! # Error Response Shape (V1.20+)
+//!
+//! All error responses follow a consistent structure:
+//!
+//! ```json
+//! {
+//!   "success": false,
+//!   "error": {
+//!     "code": "INVALID_INPUT",
+//!     "message": "Human-readable description",
+//!     "details": { "field": "workspace_slug", "reason": "must be a single path segment" },
+//!     "request_id": "req_01h..."
+//!   }
+//! }
+//! ```
+//!
+//! - `success`: always `false` for errors.
+//! - `error.code`: stable public `UPPER_SNAKE_CASE` code.
+//! - `error.message`: human-readable, safe for CLI/UI display.
+//! - `error.details`: optional structured data for field highlighting.
+//! - `error.request_id`: correlation ID when request-tracing middleware is active.
+//!
 //! # Error Code Design
 //!
 //! This module follows a two-tier error code strategy:
@@ -28,19 +50,33 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use serde_json::Value;
 
-/// Standardized API error response body
+/// Standardized API error response body.
+///
+/// Every error from the daemon API returns this shape.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ApiErrorResponse {
     pub success: bool,
     pub error: ApiErrorDetail,
 }
 
+/// Error detail with optional `details` and `request_id`.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ApiErrorDetail {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
+
+/// Request ID extension injected by `attach_request_id` middleware.
+///
+/// When present, error responses include this ID in `error.request_id`.
+#[derive(Debug, Clone)]
+pub struct RequestId(pub String);
 
 /// Nexus API Error — unified error type for all daemon endpoints
 #[derive(Debug, thiserror::Error)]
@@ -94,6 +130,10 @@ pub enum NexusApiError {
     /// Session expired
     #[error("Session expired")]
     SessionExpired,
+
+    /// Resource conflict (e.g., duplicate workspace)
+    #[error("Conflict: {0}")]
+    Conflict(String),
 }
 
 impl NexusApiError {
@@ -101,7 +141,7 @@ impl NexusApiError {
     #[must_use]
     pub const fn status_code(&self) -> StatusCode {
         match self {
-            Self::Uninitialized => StatusCode::CONFLICT,
+            Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::AuthRequired | Self::ApiKeyExpired | Self::SessionExpired => {
@@ -128,6 +168,25 @@ impl NexusApiError {
             Self::ApiKeyExpired => "API_KEY_EXPIRED",
             Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
             Self::SessionExpired => "SESSION_EXPIRED",
+            Self::Conflict(_) => "CONFLICT",
+        }
+    }
+
+    /// Build structured `details` from the error variant.
+    ///
+    /// Only variants that carry structured field data produce non-`None` details.
+    #[must_use]
+    pub fn error_details(&self) -> Option<Value> {
+        match self {
+            Self::InvalidInput { field, reason } => Some(serde_json::json!({
+                "field": field,
+                "reason": reason,
+            })),
+            Self::Forbidden { resource, reason } => Some(serde_json::json!({
+                "resource": resource,
+                "reason": reason,
+            })),
+            _ => None,
         }
     }
 
@@ -139,8 +198,18 @@ impl NexusApiError {
             error: ApiErrorDetail {
                 code: self.error_code().to_string(),
                 message: self.to_string(),
+                details: self.error_details(),
+                request_id: None,
             },
         }
+    }
+
+    /// Build the full error response body with a request ID attached.
+    #[must_use]
+    pub fn to_response_body_with_request_id(&self, request_id: &str) -> ApiErrorResponse {
+        let mut body = self.to_response_body();
+        body.error.request_id = Some(request_id.to_string());
+        body
     }
 }
 
@@ -236,6 +305,44 @@ mod tests {
         assert!(!body.success);
         assert_eq!(body.error.code, "UNINITIALIZED");
         assert_eq!(body.error.message, "Workspace not initialized");
+        assert!(body.error.details.is_none());
+        assert!(body.error.request_id.is_none());
+    }
+
+    #[test]
+    fn response_body_includes_details_for_invalid_input() {
+        let err = NexusApiError::InvalidInput {
+            field: "workspace_slug".to_string(),
+            reason: "must be a single path segment".to_string(),
+        };
+        let body = err.to_response_body();
+        assert!(!body.success);
+        assert_eq!(body.error.code, "INVALID_INPUT");
+        let details = body.error.details.expect("details should be present");
+        assert_eq!(details["field"], "workspace_slug");
+        assert_eq!(details["reason"], "must be a single path segment");
+    }
+
+    #[test]
+    fn response_body_includes_details_for_forbidden() {
+        let err = NexusApiError::Forbidden {
+            resource: "daemon-local-api".to_string(),
+            reason: "non-loopback connections require an API key".to_string(),
+        };
+        let body = err.to_response_body();
+        let details = body.error.details.expect("details should be present");
+        assert_eq!(details["resource"], "daemon-local-api");
+        assert_eq!(
+            details["reason"],
+            "non-loopback connections require an API key"
+        );
+    }
+
+    #[test]
+    fn response_body_with_request_id() {
+        let err = NexusApiError::Uninitialized;
+        let body = err.to_response_body_with_request_id("req_abc123");
+        assert_eq!(body.error.request_id.as_deref(), Some("req_abc123"));
     }
 
     #[test]
@@ -336,7 +443,6 @@ mod tests {
         assert_eq!(body.error.code, "SESSION_EXPIRED");
         assert_eq!(body.error.message, "Session expired");
     }
-
     /// Integration test: POST /v1/local/workspace/init with empty path → 400
     #[tokio::test]
     async fn init_workspace_with_empty_path_returns_400() {
@@ -379,6 +485,7 @@ mod tests {
     #[tokio::test]
     async fn creators_without_workspace_returns_empty_list() {
         use crate::api::handlers::creators::list;
+        use crate::api::handlers::creators::ListCreatorsQuery;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;
@@ -386,13 +493,17 @@ mod tests {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-        let result = list(State(state)).await;
+        let query = ListCreatorsQuery {
+            limit: 50,
+            cursor: None,
+        };
+        let result = list(State(state), axum::extract::Query(query)).await;
         assert!(
             result.is_ok(),
             "Handler should succeed when called directly (no middleware)"
         );
         let body = result.expect("result should be Ok");
-        assert!(body.creators.is_empty());
+        assert!(body.items.is_empty());
     }
 
     /// Integration test: GET /v1/local/references when no workspace → returns empty list.

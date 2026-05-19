@@ -146,6 +146,31 @@ pub trait HostFacade: Send + Sync {
     ///
     /// Drains active operations with configured grace timeout.
     async fn shutdown(&self) -> HostResult<()>;
+
+    /// Shut down a single managed session by ID.
+    ///
+    /// The host remains running; only the specified session is stopped.
+    /// Returns `HostError` if the session is not found.
+    async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()>;
+
+    /// List all active managed sessions.
+    ///
+    /// Returns snapshot of sessions currently tracked by the host.
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>>;
+
+    /// Get the provider catalog.
+    ///
+    /// Returns provider entries discovered from config, PATH scan, and ACP registry.
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog>;
+
+    /// Subscribe to host events for a specific session.
+    ///
+    /// Returns a broadcast receiver yielding [`HostEvent`] items.
+    /// The SSE endpoint consumes this to relay real-time events to clients.
+    fn subscribe_events(
+        &self,
+        session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<capability::model::HostEvent>;
 }
 
 /// Provider discovery trait.
