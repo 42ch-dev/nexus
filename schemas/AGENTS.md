@@ -1,6 +1,8 @@
 # Schemas — JSON Schema Wire Contracts
 
-This directory is the **single truth source** for all Nexus wire types. All Rust and TypeScript types are generated from here.
+This directory is the **single truth source** for **wire** types (CLI/daemon ↔ platform and platform HTTP). All Rust and TypeScript types here are generated from JSON Schema.
+
+**Not in `schemas/`**: local-only types (`/v1/local/*`, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. See [`.agents/knowledge/schemas-wire-platform-sync-boundary.md`](../.agents/knowledge/schemas-wire-platform-sync-boundary.md).
 
 ## Schema URI Placeholder
 

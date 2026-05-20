@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-19T03:00:00Z",
+  "updated_at": "2026-05-20T00:00:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -8,6 +8,8 @@
       "fix": "fix/{name}"
     },
     "spec_integration_branch": "feature/v1.20",
+    "latest_shipped_iteration": "v1.20",
+    "latest_shipped_at": "2026-05-19T03:00:00Z",
     "tech_debt_summary": {
       "updated_at": "2026-05-19T01:00:00Z",
       "total_open": 0,
