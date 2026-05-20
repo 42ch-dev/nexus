@@ -6,7 +6,7 @@
 //!
 //! # Wiring (TD-1)
 //!
-//! CLI sync commands call daemon HTTP endpoints backed by `nexus-sync` (**Outbox**,
+//! CLI sync commands call daemon HTTP endpoints backed by `nexus-cloud-sync` (**Outbox**,
 //! **`BundleBuilder`**, **precheck**). Push builds a bundle (including `canonical_hash`),
 //! runs precheck, then **`Outbox::stage`** (`ready`). HTTP upload to the platform via
 //! **`SyncClient`** is offline-first (queued locally; optional daemon follow-up).
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 /// Supported conflict resolution strategies.
 ///
-/// Mirrors `nexus_sync::conflict::ConflictResolution` for CLI use,
+/// Mirrors `nexus_cloud_sync::conflict::ConflictResolution` for CLI use,
 /// avoiding a direct dependency on the sync crate in the CLI layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ResolutionStrategy {

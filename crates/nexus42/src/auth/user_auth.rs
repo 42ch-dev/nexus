@@ -12,7 +12,7 @@
 use crate::auth::{AuthStore, UserTokenState};
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use nexus_sync::device_flow_client::{DeviceFlowClient, DeviceFlowError};
+use nexus_cloud_sync::device_flow_client::{DeviceFlowClient, DeviceFlowError};
 
 /// Buffer before expiry to trigger proactive refresh (60 seconds).
 const REFRESH_BUFFER_SECS: i64 = 60;
@@ -335,7 +335,7 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
     let data = envelope.get("data").cloned().unwrap_or(envelope);
 
     // Reuse DeviceTokenResponse for parsing (it now has refresh fields)
-    let token_response: nexus_sync::device_flow_client::DeviceTokenResponse =
+    let token_response: nexus_cloud_sync::device_flow_client::DeviceTokenResponse =
         serde_json::from_value(data)
             .map_err(|e| CliError::Other(format!("Failed to parse token response: {e}")))?;
 

@@ -5,9 +5,9 @@
 
 use nexus_contracts::generated::SyncPullRequest;
 use nexus_contracts::{DeltaOperation, DeltaType};
-use nexus_sync::delta_bundle::{BundleBuilder, LocalDelta};
-use nexus_sync::sync_client::SyncClient;
-use nexus_sync::SyncError;
+use nexus_cloud_sync::delta_bundle::{BundleBuilder, LocalDelta};
+use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_cloud_sync::SyncError;
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

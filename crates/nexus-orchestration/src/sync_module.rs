@@ -2,7 +2,7 @@
 //!
 //! Defines how workspace artifacts map to platform sync bundles.
 //! This module only defines types and discovery logic — actual sync
-//! transport is handled by `nexus-sync` crate.
+//! transport is handled by `nexus-cloud-sync` crate.
 
 use std::path::Path;
 

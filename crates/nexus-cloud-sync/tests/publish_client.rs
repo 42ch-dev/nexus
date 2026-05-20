@@ -1,7 +1,7 @@
 //! Integration tests: platform Publish story/history clients (wiremock).
 
 use nexus_contracts::{PublishHistoryRequest, PublishStoryRequest};
-use nexus_sync::sync_client::SyncClient;
+use nexus_cloud_sync::sync_client::SyncClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -75,7 +75,7 @@ async fn publish_story_maps_422_to_platform_error() {
 
     let err = client.publish_story(&req).await.expect_err("expect 422");
     match err {
-        nexus_sync::SyncError::PlatformError { status, .. } => assert_eq!(status, 422),
+        nexus_cloud_sync::SyncError::PlatformError { status, .. } => assert_eq!(status, 422),
         other => panic!("unexpected error: {other:?}"),
     }
 }

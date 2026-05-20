@@ -1,4 +1,4 @@
-//! `SQLite` connection pool for nexus-sync
+//! `SQLite` connection pool for nexus-cloud-sync
 //!
 //! Provides async connection pooling via `sqlx::SqlitePool`, re-exported from
 //! `nexus-local-db`. The pool uses WAL mode for better concurrent read/write
@@ -7,7 +7,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use nexus_sync::pool::{OutboxPool, DEFAULT_POOL_SIZE};
+//! use nexus_cloud_sync::pool::{OutboxPool, DEFAULT_POOL_SIZE};
 //!
 //! let pool = OutboxPool::new(&db_path, DEFAULT_POOL_SIZE).await?;
 //! let outbox = Outbox::with_pool(pool).await?;
@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-/// Default pool size for nexus-sync
+/// Default pool size for nexus-cloud-sync
 pub const DEFAULT_POOL_SIZE: usize = 4;
 
 /// Connection pool wrapper for `SQLite` outbox operations

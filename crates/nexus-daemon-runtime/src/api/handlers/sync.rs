@@ -4,7 +4,7 @@
 #![allow(clippy::missing_errors_doc)]
 //! Sync handler — sync status, push, and resolve endpoints
 //!
-//! Uses `nexus-sync` **Outbox**, **`BundleBuilder`**, and **precheck** on the push path:
+//! Uses `nexus-cloud-sync` **Outbox**, **`BundleBuilder`**, and **precheck** on the push path:
 //! builds a minimal bundle (with `canonical_hash`), runs `precheck_bundle_with_auth`,
 //! then persists via **`Outbox::stage`** (`ready`). This is **offline-first** by default.
 //!
@@ -16,7 +16,7 @@
 //!
 //! **Pull:** `POST /v1/local/sync/pull` uses the same `NEXUS_SYNC_PLATFORM_*` credentials
 //! (no `NEXUS_SYNC_EAGER_PUSH` gate) to call `SyncClient::pull_bundles` (`POST /v1/sync/pull`),
-//! then applies bundles with `nexus_sync::apply_pull_response_to_outbox` and
+//! then applies bundles with `nexus_cloud_sync::apply_pull_response_to_outbox` and
 //! `Outbox::stage_if_absent`.
 
 use crate::api::errors::NexusApiError;
@@ -27,13 +27,13 @@ use nexus_contracts::{
     CommandOrigin, CommandStatus, CommandType, DeltaOperation, DeltaType, ManuscriptPhase,
     SyncCommand, SyncPullRequest,
 };
-use nexus_sync::delta_bundle::{BundleBuilder, LocalDelta};
-use nexus_sync::precheck::{
+use nexus_cloud_sync::delta_bundle::{BundleBuilder, LocalDelta};
+use nexus_cloud_sync::precheck::{
     precheck_bundle_with_auth, AuthContext, LocalState, PrecheckReport, PrecheckResult,
     PrecheckSeverity,
 };
-use nexus_sync::pull_apply::apply_pull_response_to_outbox;
-use nexus_sync::sync_client::SyncClient;
+use nexus_cloud_sync::pull_apply::apply_pull_response_to_outbox;
+use nexus_cloud_sync::sync_client::SyncClient;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -223,7 +223,7 @@ pub(crate) fn try_platform_sync_credentials_from_env() -> Option<(String, String
     Some((base, token))
 }
 
-fn map_sync_client_error(e: &nexus_sync::SyncError) -> NexusApiError {
+fn map_sync_client_error(e: &nexus_cloud_sync::SyncError) -> NexusApiError {
     NexusApiError::Internal {
         code: e.error_code().to_string(),
         message: e.to_string(),
@@ -345,7 +345,7 @@ pub async fn pull(
 
 /// GET /v1/local/sync/status
 ///
-/// Returns real outbox state counts using `nexus-sync::Outbox`.
+/// Returns real outbox state counts using `nexus-cloud-sync::Outbox`.
 pub async fn status(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<SyncStatusResponse>, NexusApiError> {
@@ -406,7 +406,7 @@ pub async fn status(
 /// POST /v1/local/sync/push
 ///
 /// Build a bundle via [`BundleBuilder`] (includes `canonical_hash`), run
-/// `nexus_sync::precheck`, then **`Outbox::stage`** so the entry is `ready`
+/// `nexus_cloud_sync::precheck`, then **`Outbox::stage`** so the entry is `ready`
 /// for a later upload. When precheck reports errors and `force` is false, no
 /// row is written.
 pub async fn push(
