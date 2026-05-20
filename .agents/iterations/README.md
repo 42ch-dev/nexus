@@ -33,6 +33,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md) | V1.18 | Shipped |
 | [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md) | V1.19 | Shipped |
 | [v1.20-delivery-compass-v1.md](v1.20-delivery-compass-v1.md) | V1.20 | **Shipped** (2026-05-19) |
+| [v1.21-local-platform-isolation-delivery-compass-v1.md](v1.21-local-platform-isolation-delivery-compass-v1.md) | V1.21 | **Draft** — local/cloud isolation + crate split |
 
 ### Legacy `v1.*` iteration artifacts
 

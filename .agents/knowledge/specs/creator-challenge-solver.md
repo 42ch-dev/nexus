@@ -2,12 +2,12 @@
 
 **状态**: Frozen  
 **创建**: 2026-04-23  
-**上游 spec**: [`v1.3-spec.md`](../stages/v1.3-spec.md) §9  
 **平台侧对照**: nexus-platform `v1-spec/platform/creator-agent-registration-v1.md` §3–§4  
 **实现仓库**: `nexus`（CLI），**非** `nexus-platform`  
 **CLI Spec**: [`cli-spec.md`](./cli-spec.md) §6.2B  
+**集成边界**: [`local-cloud-crate-architecture.md`](./local-cloud-crate-architecture.md) §6 — registration via **`nexus-cloud-sync`** (CLI → platform HTTP), **not** daemon Local API.
 
-> **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**，从 `v1.3-spec.md` §9 提取并精炼。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。
+> **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**（原 V1.3 程序提取；历史计划见 `.agents/archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json`）。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。
 
 ---
 
@@ -280,4 +280,5 @@ Answer: "47"
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| v1 | 2026-04-23 | 从 v1.3-spec §9 提取为独立冻结 spec |
+| v1 | 2026-04-23 | 从 V1.3 程序提取为独立冻结 spec |
+| v1.1 | 2026-05-20 | 对齐 cloud line：注册走 `nexus-cloud-sync`，修上游链接 |

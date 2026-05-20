@@ -7,6 +7,7 @@
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
+- [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
 - [acp-client-tech-spec.md](acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Local API additions; §11 `nexus-acp-host` crate spec
 - [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — full 6-state statig HSM closing TD-9
 - [architecture-alignment-review.md](../../archived/knowledge/architecture-alignment-review.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
@@ -161,7 +162,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 | `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`               |
 | `crates/nexus-daemon-runtime`                                 | Ext. | No             | Orchestration engine host, statig lifecycle, Worker Manager, HTTP surface (trigger/query)  |
 | `crates/nexus42`                                  | Ext. | Yes (via host) | Interactive ACP commands, `acp-worker` subcommand, `schedule` command group (B-track stub) |
-| `crates/nexus-contracts`, `nexus-domain`, …       | Ext. | No             | Unchanged unless compass WS5 (`schemas/` refactor) touches enum/wire surfaces              |
+| `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates per [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md); legacy monolith `nexus-domain` retired after V1.21 |
 
 ### 3.3 Data flow for one strategy tick
 
@@ -313,18 +314,18 @@ pub struct CapabilityCtx<'a> {
 
 All capabilities below are registered at daemon runtime startup. Adding a new capability is a Rust code change (not user-config) for V1.4. User-authored capabilities are **out of scope** (residual for V1.5+).
 
-| Name                        | Purpose                                                        | Owner crate            |
-| --------------------------- | -------------------------------------------------------------- | ---------------------- |
-| `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-sync`           |
-| `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-sync`           |
-| `outbox.flush`              | Flush pending outbox entries                                   | `nexus-sync`           |
-| `outbox.compact`            | Compact outbox table                                           | `nexus-local-db`       |
-| `workspace.open`            | Ensure workspace dir is present and valid                      | `nexus-home-layout`    |
-| `workspace.commit`          | Commit manuscript diff into working copy                       | `nexus-home-layout`    |
-| `registry.refresh`          | Refresh ACP registry cache                                     | `nexus-acp-host`       |
-| `creator.read_memory`       | Read entries from creator memory store                         | `nexus-domain`         |
-| `creator.write_memory`      | Append/update creator memory                                   | `nexus-domain`         |
-| `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-domain`         |
+| Name                        | Purpose                                                        | Owner crate (target)   | Legacy owner (pre–V1.21) |
+| --------------------------- | -------------------------------------------------------------- | ---------------------- | ------------------------ |
+| `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-cloud-sync`     | `nexus-sync`             |
+| `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-cloud-sync`     | `nexus-sync`             |
+| `outbox.flush`              | Flush pending outbox entries                                   | `nexus-cloud-sync`     | `nexus-sync`             |
+| `outbox.compact`            | Compact outbox table                                           | `nexus-local-db`       | —                      |
+| `workspace.open`            | Ensure workspace dir is present and valid                      | `nexus-home-layout`    | —                      |
+| `workspace.commit`          | Commit manuscript diff into working copy                       | `nexus-home-layout`    | —                      |
+| `registry.refresh`          | Refresh ACP registry cache                                     | `nexus-acp-host`       | —                      |
+| `creator.read_memory`       | Read entries from creator memory store                         | `nexus-creator-memory` | `nexus-domain`         |
+| `creator.write_memory`      | Append/update creator memory                                   | `nexus-creator-memory` | `nexus-domain`         |
+| `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-creator`        | `nexus-domain`         |
 | `acp.prompt`                | Send a prompt to this creator's active ACP session             | `nexus-orchestration`  |
 | `acp.session_load`          | Resume a named ACP session id on the creator's worker          | `nexus-orchestration`  |
 | `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  |
@@ -333,7 +334,9 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 
 ### 5.3 Capability input/output schemas
 
-Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per the wire/local rule in [schemas-boundary.md](schemas-boundary.md) §2) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
+Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
+
+> **Daemon builds:** `sync.*` / `outbox.flush` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §7.
 
 ### 5.4 Capability errors
 

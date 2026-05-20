@@ -38,8 +38,10 @@ V1.20 removed **daemon local HTTP proxies** for `world/*` and `explore/*`; those
 
 ## Related
 
-- [daemon-api-workspace-write-architecture.md](daemon-api-workspace-write-architecture.md) — local API vs workspace writes (route inventory → V1.20 compass)
+- [local-cloud-crate-architecture.md](specs/local-cloud-crate-architecture.md) — local vs cloud product lines, crate graph, daemon API classes
+- [archived/knowledge/daemon-api-workspace-write-architecture.md](../archived/knowledge/daemon-api-workspace-write-architecture.md) — **superseded** route table (use V1.20 compass + `daemon-runtime` / crate architecture SSOT)
 - [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) — shipped local API redesign
+- [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) — daemon sync route removal program
 
 ---
 
