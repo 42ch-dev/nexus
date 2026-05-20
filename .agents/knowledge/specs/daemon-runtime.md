@@ -21,13 +21,15 @@ Pre-release posture: no compatibility migration layer required; local state may 
 
 ```text
 nexus42 (CLI — entry, routing, UX)
-  └─ nexus-daemon-runtime (library — lifecycle, subsystems, local API)
-       ├─ local DB / workspace handles
-       ├─ sync client (push/pull; wire: shared/sync-contract-v1)
-       ├─ schedule / worker supervision
-       ├─ loopback Local API (/v1/local/*)
-       └─ AgentHostSubsystem → nexus-agent-host (see agent-host)
+  ├─ nexus-daemon-runtime (library — lifecycle, subsystems, local API)
+  │    ├─ local DB / workspace handles
+  │    ├─ schedule / worker supervision
+  │    ├─ loopback Local API (/v1/local/*) — local product only
+  │    └─ AgentHostSubsystem → nexus-agent-host (see agent-host)
+  └─ nexus-cloud-sync (CLI-only; platform HTTP + optional legacy-sync)
 ```
+
+Platform sync and registration **must not** live in daemon-runtime. See [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md).
 
 **Rules**:
 
@@ -42,8 +44,9 @@ nexus42 (CLI — entry, routing, UX)
 | Subsystem | Owns | Does not own |
 | --- | --- | --- |
 | CLI | Parsing, one-shot commands, spawning daemon mode, user errors | Long-lived agent protocol details |
-| Daemon runtime | SQLite handles, sync scheduler, Local API listener, graceful shutdown | Human confirmation UX for destructive ops |
+| Daemon runtime | SQLite handles, Local API listener, orchestration/agent-host, graceful shutdown | Platform HTTP, sync outbox, creator registration |
 | Agent host | Managed agent sessions (see agent-host) | Platform HTTP |
+| Cloud sync (CLI) | Platform HTTP, legacy bundle sync (`nexus-cloud-sync`) | Daemon Local API |
 
 ---
 

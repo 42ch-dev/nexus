@@ -21,6 +21,19 @@ When a spec needs platform architecture, shared contracts, or ADRs, cite **`nexu
 
 **Wire JSON in this repo:** `schemas/` → `nexus-contracts`.
 
+## Normative hierarchy (read order)
+
+When specs overlap, use this order (higher wins on conflict):
+
+1. **`AGENTS.md`** (repo root) — naming, contracts, release discipline.
+2. **[local-cloud-crate-architecture.md](local-cloud-crate-architecture.md)** — local vs cloud product lines, crate graph, contracts-first, forbidden daemon deps/API classes.
+3. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — what belongs in `schemas/` vs `nexus-contracts/src/local/`.
+4. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
+5. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
+6. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
+
+**Former filename:** `local-platform-isolation-and-crate-architecture.md` → renamed **2026-05-20** to `local-cloud-crate-architecture.md`.
+
 ## Index — local runtime (normative)
 
 | Document | Description |
@@ -29,6 +42,7 @@ When a spec needs platform architecture, shared contracts, or ADRs, cite **`nexu
 | [daemon-runtime.md](daemon-runtime.md) | Single-binary daemon layering and process model |
 | [agent-host.md](agent-host.md) | Hybrid Managed-only `nexus-agent-host` |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | CLI / daemon / Local API / ACP topology |
+| [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Long-term SSOT: local/cloud split, crate graph, contracts-first; delivery → [v1.21 compass](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
 | [acp-client-tech-spec.md](acp-client-tech-spec.md) | ACP Client technical spec |
 | [acp-capability-set.md](acp-capability-set.md) | Logical `nexus.*` capability surface |
 | [registry-integration.md](registry-integration.md) | ACP Registry integration |

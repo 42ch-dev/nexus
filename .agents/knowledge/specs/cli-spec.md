@@ -307,6 +307,8 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 操作主体：`sync` 的 `creator_id` 与 `workspace_slug` 必须对应当前活跃上下文；HTTP 优先 `Authorization: Bearer <creator_api_key>`，User 代操时使用 `Authorization: Bearer <user_access_token>` + `X-Creator-Id`。
 
+**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；daemon Local API **不得**承载 `/v1/local/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
+
 ### 6.6 `nexus42 platform`（平台能力命令组）
 
 - `nexus42 platform auth login|logout|status|profiles`

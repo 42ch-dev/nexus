@@ -44,8 +44,9 @@ Owns:
 
 - Workspace-scoped SQLite open handles
 - Long-lived agent session supervision
-- Background sync scheduler
 - Local IPC listener
+
+Does **not** own platform sync or registration (see [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md)).
 
 Does not own:
 
@@ -74,23 +75,27 @@ ACP is for agent integration. Nexus still needs a stable internal interface for:
 ### 3.2 Local API characteristics
 
 - Loopback-only by default
-- Minimal surface: workspace status, daemon health, trigger sync, open log paths, restart agent session
+- Minimal surface: workspace status, daemon health, orchestration/agent-host, local KB/memory — **no** sync or platform registration proxy (see [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md))
 - Auth: OS user boundary, with optional token / IPC artifacts under **`$HOME/.nexus42/run/`** (or workspace-scoped subpaths still rooted at `$HOME/.nexus42/`, never under `<workspace>/`)
 - Versioned schema: all stable endpoints live under `/v1/local/*` so TS / Rust codegen can share one contract
 
-### 3.2.1 Minimal v1 Local API contract (frozen)
+### 3.2.1 Local API endpoint families
 
-The Local API is the **codegen-ready** internal contract between CLI, daemon, and local automation. v1 freezes the following endpoint families:
+The Local API is the **codegen-ready** internal contract between CLI, daemon, and local automation.
 
-- `GET /v1/local/runtime/health`
-- `GET /v1/local/workspaces/{workspace_id}/status`
-- `POST /v1/local/sync/push`
-- `POST /v1/local/sync/pull`
-- `POST /v1/local/sync/retry`
-- `POST /v1/local/context/assemble`
-- `GET /v1/local/research/sources`
-- `POST /v1/local/research/scan`
-- `POST /v1/local/agent-sessions/restart`
+**Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** [v1.21 delivery compass](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md).
+
+| Endpoint | Status on daemon | Notes |
+| --- | --- | --- |
+| `GET /v1/local/runtime/health` | Active | |
+| `GET /v1/local/workspaces/{workspace_id}/status` | Active | |
+| `POST /v1/local/context/assemble` | Active | Wire-aligned with platform context assembly (§3.2.1 rules below) |
+| `GET /v1/local/research/sources` | Active | |
+| `POST /v1/local/research/scan` | Active | |
+| `POST /v1/local/agent-sessions/restart` | Active | Prefer agent-host namespace where shipped |
+| `POST /v1/local/sync/push` | **Retired (target)** | **Cloud line:** `nexus42 sync push` → `nexus-cloud-sync`. Legacy daemon route until V1.21 removal. |
+| `POST /v1/local/sync/pull` | **Retired (target)** | **Cloud line:** `nexus42 sync pull` |
+| `POST /v1/local/sync/retry` | **Retired (target)** | **Cloud line:** `nexus42 sync retry` |
 
 Each write-style endpoint should accept a small request envelope:
 
@@ -132,9 +137,10 @@ Rules:
 
 ```text
 CLI --Local API--> daemon runtime mode --ACP Client--> ACP Agent
-                    |
-                    +--> Platform HTTPS
-                    +--> Registry fetch
+  |
+  +-- sync / register / platform HTTP --> nexus-cloud-sync --> Platform HTTPS
+  |
+  +-- Registry fetch (CLI or daemon-local cache refresh)
 ```
 
 ---
@@ -217,7 +223,7 @@ Skills packages let ecosystems without ACP call Nexus operations through their n
 | --- | --- |
 | Agent reasons & writes manuscript via tools | ACP session |
 | User/script checks daemon health | Local API / CLI |
-| Sync structured deltas to platform | Nexus runtime HTTPS client |
+| Sync structured deltas to platform | `nexus42 sync …` → **`nexus-cloud-sync`** (CLI/cloud line; not daemon Local API) |
 | Discover agents | Registry integration |
 | Non-ACP tool ecosystem | Skills -> CLI/Local API |
 
