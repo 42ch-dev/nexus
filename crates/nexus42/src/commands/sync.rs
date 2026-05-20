@@ -192,8 +192,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
             // Build a minimal bundle
-            let bundle = BundleBuilder::new(&workspace_id, &world_id, &creator_id)
-                .build()?;
+            let bundle = BundleBuilder::new(&workspace_id, &world_id, &creator_id).build()?;
 
             // Push directly to platform via cloud-sync
             let sync_client = SyncClient::new(&config.platform_url, &auth_token)?;
@@ -223,9 +222,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             runtime_guard::require_platform(&config.runtime_mode(), "sync pull")?;
 
             let world_id = world_id.unwrap_or_else(|| {
-                eprintln!(
-                    "Warning: sync pull without --world-id uses placeholder \"unknown\"."
-                );
+                eprintln!("Warning: sync pull without --world-id uses placeholder \"unknown\".");
                 "unknown".to_string()
             });
 
