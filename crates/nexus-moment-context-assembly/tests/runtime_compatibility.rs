@@ -3,8 +3,10 @@
 //! Integration tests for TwoStageAssembly with mocked platform responses.
 
 #![allow(clippy::manual_string_new, clippy::doc_markdown)]
-use nexus_domain::{
-    AssembleMetadata, AssembleResponse, DomainRuntimeMode, KbEntry, LongTermMemory, MemoryItemRef,
+use nexus_creator_memory::LongTermMemory;
+use nexus_contracts::local::domain::RuntimeMode;
+use nexus_moment_context_assembly::cloud_stage::{
+    AssembleMetadata, AssembleResponse, AssemblyRuntimeMode, KbEntry, MemoryItemRef,
     TwoStageAssembly,
 };
 
@@ -18,7 +20,6 @@ fn make_memory(kind: &str, body: &str, updated_at: &str) -> LongTermMemory {
 
 #[test]
 fn two_stage_assembly_with_mock_platform_response() {
-    // Mock successful platform response
     let mock_response = AssembleResponse {
         memory_items: vec![MemoryItemRef {
             memory_id: "mem-platform-1".into(),
@@ -46,7 +47,7 @@ fn two_stage_assembly_with_mock_platform_response() {
         user_prompt: "Write chapter 1".into(),
         system_prefix: "".into(),
         max_tokens: None,
-        runtime_mode: DomainRuntimeMode::parse("cloud_enhanced").unwrap(),
+        runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
     };
 
     let output = assembly.assemble();
@@ -58,7 +59,6 @@ fn two_stage_assembly_with_mock_platform_response() {
 
 #[test]
 fn two_stage_fallback_empty_response() {
-    // Empty platform response (local_first typical)
     let empty_response = AssembleResponse {
         memory_items: vec![],
         kb: vec![],
@@ -78,7 +78,7 @@ fn two_stage_fallback_empty_response() {
         user_prompt: "Task".into(),
         system_prefix: "".into(),
         max_tokens: None,
-        runtime_mode: DomainRuntimeMode::parse("local_first").unwrap(),
+        runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::LocalFirst),
     };
 
     let output = assembly.assemble();
@@ -88,12 +88,11 @@ fn two_stage_fallback_empty_response() {
 
 #[test]
 fn dedup_platform_memory_with_local_priority() {
-    // Local memory with same ID as platform item
     let mut local_mem = make_memory("note", "Local content", "2026-04-15");
     local_mem.frontmatter.memory_id = "mem-1".into();
 
     let platform_item = MemoryItemRef {
-        memory_id: "mem-1".into(), // Same ID
+        memory_id: "mem-1".into(),
         content_summary: "Platform content".into(),
         relevance_score: Some(0.8),
     };
@@ -115,11 +114,10 @@ fn dedup_platform_memory_with_local_priority() {
         user_prompt: "".into(),
         system_prefix: "".into(),
         max_tokens: None,
-        runtime_mode: DomainRuntimeMode::parse("cloud_enhanced").unwrap(),
+        runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
     };
 
     let output = assembly.assemble();
-    // Local wins (§9.1.1)
     assert!(output.contains("Local content"));
     assert!(!output.contains("Platform content"));
 }

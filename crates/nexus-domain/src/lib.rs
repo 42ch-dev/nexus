@@ -15,7 +15,6 @@
 //! - `nexus-cloud-domain` — User + pairing (cloud sync domain)
 //!
 //! Modules still owned by this crate:
-//! - `context_assembly` — Stage-0 / two-stage context assembly (Batch C)
 //! - `degradation` — Degradation guard + policy
 //! - `runtime_guard` — Runtime mode guard
 //! - `runtime_mode` — Domain runtime mode enum
@@ -51,7 +50,6 @@
 pub mod consistency {
     pub use nexus_narrative::consistency::*;
 }
-pub mod context_assembly;
 #[cfg(test)]
 pub mod contract_assertions;
 pub mod creator {
@@ -132,11 +130,6 @@ pub use errors::DomainError;
 pub use local_identity::is_valid_creator_id;
 
 // ── Re-export domain types ─────────────────────────────────────────
-pub use context_assembly::Stage0Assembly;
-pub use context_assembly::TwoStageAssembly;
-pub use context_assembly::{
-    AssembleMetadata, AssembleResponse, KbEntry, MemoryItemRef, TimelineEventRef,
-};
 pub use degradation::{
     DegradationGuard, DegradationPolicy, DegradationSnapshot, HealthCheckSnapshot,
 };

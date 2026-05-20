@@ -9,12 +9,12 @@
       "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev", "@qa-engineer", "@qc-specialist"],
-      "progress": 14,
+      "progress": 43,
       "tags": ["v1.21", "architecture", "local-cloud-isolation"],
       "created_at": "2026-05-20",
-      "updated_at": "2026-05-20",
+      "updated_at": "2026-05-21",
       "done_at": null,
-      "notes": "Batch A ✅ (5 commits: 1838ee5..11bf194). Batches B–F remaining.",
+      "notes": "Batch A ✅. Batch B mostly ✅ (B8 partial — nexus-domain facade remains for context_assembly/degradation/runtime_guard/runtime_mode pending Batch C). Batches C–F remaining.",
       "metadata": {
         "working_branch": "feature/local-daemon-platform-isolation",
         "spec_integration_branch": "feature/local-daemon-platform-isolation",
@@ -35,7 +35,7 @@
         ],
         "batches": [
           { "index": 1, "name": "A — nexus-cloud-sync rename", "covers": ["A1", "A2", "A3", "A4", "A5"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-20: 5 commits (1838ee5..11bf194); legacy-sync feature gates 6 modules; all tests + clippy green" },
-          { "index": 2, "name": "B — domain crate split", "covers": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"], "status": "planned", "owner": "@fullstack-dev" },
+          { "index": 2, "name": "B — domain crate split", "covers": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"], "status": "in_progress", "owner": "@fullstack-dev", "notes": "B1–B7 ✅ (012b742..3654b67). B8 partial — nexus-domain reduced to facade (23 pub use + 5 source files). Remaining modules (context_assembly, degradation, runtime_guard, runtime_mode) blocked on Batch C extraction. B9 → final QC." },
           { "index": 3, "name": "C — moment-context-assembly", "covers": ["C1", "C2", "C3"], "status": "planned", "owner": "@fullstack-dev" },
           { "index": 4, "name": "D — daemon isolation", "covers": ["D1", "D2", "D3", "D4", "D5", "D6"], "status": "planned", "owner": "@fullstack-dev" },
           { "index": 5, "name": "E — CLI cloud-line wiring", "covers": ["E1", "E2", "E3", "E4"], "status": "planned", "owner": "@fullstack-dev" },
@@ -48,7 +48,7 @@
           "tests": "pending",
           "lint": "pending"
         },
-        "next_action": "Execute Batch B (domain crate split — nexus-creator, nexus-cloud-domain, nexus-kb, nexus-knowledge, nexus-narrative, retire nexus-domain)."
+        "next_action": "Execute Batch C (nexus-moment-context-assembly) to unblock B8, then finish B8 and proceed to D."
       }
     }
   ],

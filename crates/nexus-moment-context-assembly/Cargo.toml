@@ -22,3 +22,6 @@ nexus-cloud-sync = { path = "../nexus-cloud-sync", optional = true }
 [features]
 default = []
 cloud-stage = ["dep:nexus-cloud-sync"]
+
+[dev-dependencies]
+chrono = { workspace = true }

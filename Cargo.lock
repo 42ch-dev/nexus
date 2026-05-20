@@ -2408,6 +2408,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-moment-context-assembly"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-cloud-sync",
+ "nexus-contracts",
+ "nexus-creator-memory",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus-narrative"
 version = "0.1.0"
 dependencies = [
@@ -2472,6 +2484,7 @@ dependencies = [
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",
+ "nexus-moment-context-assembly",
  "nexus-orchestration",
  "nix 0.28.0",
  "predicates",
