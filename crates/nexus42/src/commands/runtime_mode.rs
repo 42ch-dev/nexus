@@ -1,9 +1,9 @@
 //! Runtime mode management command.
 
 use crate::config::CliConfig;
+use crate::domain::runtime_mode::DomainRuntimeMode;
 use crate::errors::Result;
 use clap::Subcommand;
-use crate::domain::runtime_mode::DomainRuntimeMode;
 
 #[derive(Debug, Subcommand)]
 pub enum RuntimeModeCommand {

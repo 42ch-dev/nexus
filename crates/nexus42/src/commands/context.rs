@@ -13,7 +13,9 @@ use crate::domain::{DegradationGuard, DomainRuntimeMode};
 #[cfg(test)]
 use crate::domain::DegradationPolicy;
 #[cfg(test)]
-use nexus_moment_context_assembly::cloud_stage::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
+use nexus_moment_context_assembly::cloud_stage::{
+    AssembleMetadata, MemoryItemRef, TimelineEventRef,
+};
 
 /// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
 ///
@@ -711,7 +713,10 @@ mod tests {
         assert_eq!(two_stage.experience, "10 years of writing.");
         assert_eq!(two_stage.fragment_keywords, vec!["plot".to_string()]);
         assert_eq!(two_stage.user_prompt, "Write chapter 3.");
-        assert_eq!(two_stage.runtime_mode, mode);
+        assert_eq!(
+            two_stage.runtime_mode,
+            AssemblyRuntimeMode::new(RuntimeMode::LocalFirst)
+        );
     }
 
     /// `create_degradation_guard` restores from persisted snapshot.

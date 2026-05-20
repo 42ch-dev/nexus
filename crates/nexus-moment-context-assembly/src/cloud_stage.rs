@@ -7,8 +7,8 @@
 
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_creator_memory::LongTermMemory;
-use std::collections::HashSet;
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 /// Section heading for personality (matches SOUL.md).
 const PERSONALITY_HEADING: &str = "## Personality";

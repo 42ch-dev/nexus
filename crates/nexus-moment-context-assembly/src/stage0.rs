@@ -104,9 +104,8 @@ impl Stage0Assembly {
     /// they are still included (we never drop Personality).
     #[must_use]
     pub fn assemble_with_truncation(&self) -> String {
-        let budget = match self.max_tokens {
-            Some(b) => b,
-            None => return self.assemble(),
+        let Some(budget) = self.max_tokens else {
+            return self.assemble();
         };
 
         let sorted = self.sorted_memories();
@@ -277,7 +276,7 @@ fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
     let truncated: String = text.chars().take(max_chars).collect();
     match truncated.rfind(' ') {
         Some(pos) if pos > 0 => format!("{}…", &truncated[..pos]),
-        _ => format!("{}…", truncated),
+        _ => format!("{truncated}…"),
     }
 }
 
@@ -319,7 +318,10 @@ mod tests {
         let prompt_pos = output.find("Write chapter 3.").unwrap();
 
         assert!(sys_pos < pers_pos, "system should come before personality");
-        assert!(pers_pos < mem_pos, "personality should come before memories");
+        assert!(
+            pers_pos < mem_pos,
+            "personality should come before memories"
+        );
         assert!(mem_pos < kw_pos, "memories should come before keywords");
         assert!(kw_pos < exp_pos, "keywords should come before experience");
         assert!(exp_pos < prompt_pos, "experience should come before prompt");
@@ -395,7 +397,10 @@ mod tests {
 
         assert!(bob_pos < alice_pos, "Bob (newer) before Alice (older)");
         assert!(bob_pos < summary_pos, "character_note before story_summary");
-        assert!(summary_pos < world_pos, "story_summary before world_building");
+        assert!(
+            summary_pos < world_pos,
+            "story_summary before world_building"
+        );
     }
 
     #[test]

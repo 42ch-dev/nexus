@@ -21,6 +21,6 @@ pub mod stage0;
 pub mod cloud_stage;
 
 // Re-export primary types
-pub use stage0::Stage0Assembly;
 #[cfg(feature = "cloud-stage")]
 pub use cloud_stage::TwoStageAssembly;
+pub use stage0::Stage0Assembly;
