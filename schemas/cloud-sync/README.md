@@ -1,6 +1,6 @@
-# CLI ↔ Platform Sync Wire Schemas (Cloud Line)
+# Cloud Sync Wire Schemas
 
-JSON Schemas for the **structured sync protocol** between OSS CLI (`nexus42 sync …`) and platform.
+JSON Schemas for the **structured sync protocol** between OSS CLI (`nexus42 sync …`) and platform (cloud product line).
 
 | File | Role |
 | --- | --- |
@@ -11,8 +11,6 @@ JSON Schemas for the **structured sync protocol** between OSS CLI (`nexus42 sync
 
 **Consumer:** `nexus-cloud-sync` crate (`legacy-sync` feature). **Not** daemon Local API — `/v1/local/sync/*` is retired per [local-cloud-crate-architecture.md](../../.agents/knowledge/specs/local-cloud-crate-architecture.md).
 
-## Target directory name
+**Platform protocol docs:** `nexus-platform` `v1-spec/cli-sync/sync-contract-v1.md` (platform repo folder name; OSS wire tree uses `schemas/cloud-sync/`).
 
-Long-term folder name **`cloud-sync/`** (aligned with crate `nexus-cloud-sync`). Physical path may remain **`cli-sync/`** until a coordinated `$id`/`$ref` rename — see [schemas-directory-layout.md](../../.agents/knowledge/specs/schemas-directory-layout.md) §5.
-
-**Platform protocol docs:** `nexus-platform` `v1-spec/cli-sync/sync-contract-v1.md` (folder name in platform repo is independent of OSS directory rename).
+**Layout:** [schemas-directory-layout.md](../../.agents/knowledge/specs/schemas-directory-layout.md) §3.2.

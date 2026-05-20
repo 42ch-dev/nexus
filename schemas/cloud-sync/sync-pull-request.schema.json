@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus42.invalid/schemas/cli-sync/sync-pull-request.schema.json",
+  "$id": "https://nexus42.invalid/schemas/cloud-sync/sync-pull-request.schema.json",
   "schema_version": 1,
   "title": "Nexus SyncPullRequest",
   "description": "Request body for POST /v1/sync/pull — incremental bundle fetch from the platform (CLI/daemon client contract).",

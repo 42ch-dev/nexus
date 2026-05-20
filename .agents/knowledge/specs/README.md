@@ -28,7 +28,7 @@ When specs overlap, use this order (higher wins on conflict):
 1. **`AGENTS.md`** (repo root) — naming, contracts, release discipline.
 2. **[local-cloud-crate-architecture.md](local-cloud-crate-architecture.md)** — local vs cloud product lines, crate graph, contracts-first, forbidden daemon deps/API classes.
 3. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — what belongs in `schemas/` vs `nexus-contracts/src/local/`.
-4. **[schemas-directory-layout.md](schemas-directory-layout.md)** — `schemas/` folder names, README rules, `cli-sync` → `cloud-sync` rename policy.
+4. **[schemas-directory-layout.md](schemas-directory-layout.md)** — `schemas/` folder tree (`cloud-sync/`, `platform/`, …) and removed paths.
 5. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
 6. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
 7. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
