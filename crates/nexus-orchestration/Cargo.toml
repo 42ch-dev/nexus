@@ -43,4 +43,3 @@ nix = { version = "0.29", features = ["signal"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-nexus-domain = { path = "../nexus-domain" }

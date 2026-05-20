@@ -4,7 +4,7 @@ use crate::config;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_domain::soul_io;
+use nexus_creator_memory::soul_io;
 use nexus_local_db::{
     get_soul_meta as db_get_soul_meta, upsert_soul_meta as db_upsert_soul_meta, SoulMeta,
 };
@@ -167,7 +167,7 @@ fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let soul = soul_io::load(&home, creator_id)?;
 
     let memory =
-        nexus_domain::personality_sync::push_personality_to_memory(&home, creator_id, &soul)?;
+        nexus_creator_memory::personality_sync::push_personality_to_memory(&home, creator_id, &soul)?;
 
     println!("Personality pushed to long-term memory for creator '{creator_id}'.");
     println!("  Memory ID: {}", memory.frontmatter.memory_id);

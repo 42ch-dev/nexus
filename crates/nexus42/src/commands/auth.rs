@@ -4,7 +4,7 @@ use crate::auth;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_domain::runtime_guard;
+use crate::domain::runtime_guard;
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {

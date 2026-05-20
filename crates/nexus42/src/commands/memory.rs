@@ -8,8 +8,8 @@ use crate::config;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_domain::memory_io;
-use nexus_domain::LongTermMemory;
+use nexus_creator_memory::long_term_memory::LongTermMemory;
+use nexus_creator_memory::memory_io;
 use std::io::Write;
 use std::str::FromStr;
 
@@ -126,7 +126,7 @@ fn create(
     let home = config::user_home_dir()?;
 
     // Validate slug
-    if !nexus_domain::long_term_memory::slug_is_safe(slug) {
+    if !nexus_creator_memory::long_term_memory::slug_is_safe(slug) {
         return Err(crate::errors::CliError::Other(format!(
             "Invalid slug '{slug}': must not contain '..', '/', '\\\\', or control characters."
         )));
@@ -140,11 +140,11 @@ fn create(
     }
 
     // Validate kind
-    if nexus_domain::memory_item::MemoryKind::from_str(kind).is_err() {
+    if nexus_creator_memory::memory_item::MemoryKind::from_str(kind).is_err() {
         return Err(crate::errors::CliError::Other(format!(
             "Invalid memory kind '{}'. Valid kinds: {}",
             kind,
-            nexus_domain::memory_item::MemoryKind::all_as_strings().join(", ")
+            nexus_creator_memory::memory_item::MemoryKind::all_as_strings().join(", ")
         )));
     }
 

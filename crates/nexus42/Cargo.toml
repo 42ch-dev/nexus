@@ -21,9 +21,9 @@ path = "src/main.rs"
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-orchestration = { path = "../nexus-orchestration" }
-nexus-domain = { path = "../nexus-domain" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly", features = ["cloud-stage"] }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-creator = { path = "../nexus-creator" }
 nexus-cloud-sync = { path = "../nexus-cloud-sync", features = ["legacy-sync"] }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
