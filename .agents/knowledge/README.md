@@ -21,6 +21,10 @@ For boundaries, naming, and maintenance rules, see [AGENTS.md](AGENTS.md). Harne
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | V1.4 WS7 | Schedule/core-context data model, state machine, CLI/API surface, and extension rules. | Active |
 | [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) | V1.7 planning | Cross-version deferred-feature tracker (open/shipped/cancelled/superseded lifecycle). | Active |
 | [local-fs-layout-creator-workspace.md](local-fs-layout-creator-workspace.md) | `2026-04-10-local-fs-layout-ssot-and-implementation` | Local filesystem layout guidance and v1-spec anchor mapping. | Active |
+| [daemon-local-api-routes.md](daemon-local-api-routes.md) | V1.20–V1.21 route audit | **Implementation SSOT**: `/v1/local/*` wired in `nexus-daemon-runtime` (auth, agent-host, removed sync). | Active |
+| [cloud-sync-and-local-sync-status.md](cloud-sync-and-local-sync-status.md) | V1.21 sync refactor | `nexus-cloud-sync` vs `nexus-sync`, daemon sync HTTP removal, CLI wiring gap. | Active |
+| [crate-layout-oss.md](crate-layout-oss.md) | Workspace audit | OSS workspace members and legacy path deps. | Active |
+| [local-db-schema-implementation.md](local-db-schema-implementation.md) | ADR-005 / sqlx | SQLite migrations truth vs `local-db-schema-v1.md` prose. | Active |
 
 ## Archived
 
