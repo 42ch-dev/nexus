@@ -16,7 +16,7 @@
     "merge_target": "main",
     "priority": "high",
     "phase": "v1.17",
-    "primary_spec": ".agents/knowledge/specs/daemon-runtime-v1.md",
+    "primary_spec": ".agents/knowledge/specs/daemon-runtime.md",
     "description": "Wire nexus42 daemon commands to runtime invocation, implement foreground/background process models",
     "blocked_by_plan_id": "2026-05-15-v1.17-b1-runtime-extraction",
     "task_category": "logic",

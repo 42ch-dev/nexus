@@ -21,7 +21,7 @@ This is the **public open-source monorepo** containing `nexus42` CLI (Rust, with
 
 - Product: **Nexus**
 - CLI executable: **nexus42**
-- Daemon: **nexus42d** (integrated into `nexus42` binary)
+- Daemon runtime: integrated into **`nexus42`** binary (`nexus42 daemon start` → `nexus-daemon-runtime`; no separate `nexus42d` product binary)
 - npm scope: **@42ch**
 - Contracts package: **@42ch/nexus-contracts**
 

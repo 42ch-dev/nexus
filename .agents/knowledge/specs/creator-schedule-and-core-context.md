@@ -1,4 +1,4 @@
-# Creator Schedule and Core Context — Specification v1
+# Creator Schedule and Core Context — Specification
 
 **Status**: Active — authoritative design input for V1.4 WS7 (formerly B-track, now folded into V1.4 per 2026-04-17 user direction).
 **Author**: @project-manager (2026-04-17 prep-phase spec); to be co-signed by @architect before WS7 implement.
@@ -372,7 +372,7 @@ Returns a human-readable summary of the creator's Schedule timeline (past N days
 
 ## 9. HTTP Surface (`/v1/local/orchestration/schedules/*`)
 
-Following the pattern established in [acp-client-tech-spec-v1.md](local/acp-client-tech-spec-v1.md) §4.3 (orchestration control endpoints), the new endpoints:
+Following the pattern established in [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 (orchestration control endpoints), the new endpoints:
 
 | Method | Path                                                                  | Purpose                                                     |
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -505,7 +505,7 @@ Follows the V1.4 delivery compass WS7 ordering.
 
 ### Step 5 — HTTP endpoints
 
-- Axum handlers under `crates/nexus42d/src/api/handlers/orchestration/schedules.rs`.
+- Axum handlers under `crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs`.
 - All endpoints per §9.
 - **Evidence**: HTTP smoke tests (add → list → edit → signal → history).
 
@@ -549,10 +549,10 @@ Internal:
 - [orchestration-engine.md](orchestration-engine.md) — engine primitives; §11 OQ list now answered here
 - [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) — program scope (WS7)
 - [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) — confirms Schedule types are local
-- [acp-client-tech-spec-v1.md](local/acp-client-tech-spec-v1.md) §4.3 — orchestration HTTP surface pattern
+- [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
 - [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`
 
 External:
 
 - `graph-flow` v0.2.3 — no direct usage here; Schedule supervisor talks to the `OrchestrationEngine` trait.
-- `{v1-spec}/cli-sync/cli-spec-v1.md` §10 — daemon API baseline (this doc's endpoints extend the `/v1/local/*` namespace; no new v1-spec clause needed for V1.4 since endpoints are local-only).
+- `cli-spec.md` §10 — daemon API baseline (this doc's endpoints extend the `/v1/local/*` namespace; no new v1-spec clause needed for V1.4 since endpoints are local-only).

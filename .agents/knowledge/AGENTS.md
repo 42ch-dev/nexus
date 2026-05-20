@@ -6,7 +6,7 @@ Harness knowledge directory for the Nexus OSS repo.
 
 | Subtree | Path | Use for |
 | --- | --- | --- |
-| **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon, ACP, orchestration, sync feature contracts, frozen `v1` local module (flat under `specs/`) |
+| **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon runtime, ACP, orchestration, sync feature contracts (flat under `specs/`) |
 | **Knowledge (root)** | This directory (files directly under `knowledge/`, not under `specs/`) | **Rules and reference**: dependency conventions, schema↔platform boundary, cross-version trackers, maintenance indexes |
 
 **Not here:** iteration compasses → [`.agents/iterations/`](../iterations/README.md). End-user docs → `docs/`.
@@ -17,7 +17,7 @@ Harness knowledge directory for the Nexus OSS repo.
 
 | Document kind | Location | Naming |
 | --- | --- | --- |
-| CLI / daemon / ACP / local DB **normative** v1 | `specs/` | `*-v1.md` (frozen module convention) |
+| CLI / daemon / ACP / local DB **normative** | `specs/` | kebab-case `.md` (no version suffix in filename) |
 | Feature or subsystem **architecture / contract** | `specs/` | `<topic>-<qualifier>.md` (kebab-case) |
 | Workspace dependency / codegen boundary / trackers | `knowledge/` (root) | same kebab-case pattern |
 
@@ -26,7 +26,7 @@ Put `Status`, `Supersedes`, or `Revision` in the document header — not in the 
 ## Reading during implementation
 
 1. Read `status.json` `metadata.wave_0_spec` / `metadata.spec_refs` (paths may point to `knowledge/specs/` or `iterations/`).
-2. For OSS runtime behavior, start with **`specs/*-v1.md`** when a frozen v1 doc exists; then related **`specs/*.md`**.
+2. For OSS runtime behavior, start with **`specs/`** (e.g. `cli-spec.md`, `daemon-runtime.md`); platform ADRs live under **`nexus-platform`** `v1-spec/adr/` when needed.
 3. Use **knowledge-root** docs for schema boundary and crate policy only.
 4. Do not silently diverge; escalate via plan residual or spec update.
 
@@ -40,4 +40,4 @@ When a spec is superseded:
 
 ## OSS local normative SSOT (2026-05-20)
 
-Former `nexus-platform` `.agents/designs/v1-spec/local/*.md` live **flat** under **`specs/`**. Edit OSS local normative text **here** only. Platform removed that tree per **ADR-029**; platform `v1-spec/README.md` §2 links back to this directory.
+OSS local normative specs live **flat** under **`specs/`** (SSOT for this repo). Platform `v1-spec/local/` was removed; see nexus-platform `v1-spec/adr/adr-029-oss-local-specs-in-nexus-knowledge-v1.md` for migration context.

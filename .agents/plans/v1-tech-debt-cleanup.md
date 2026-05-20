@@ -421,7 +421,7 @@
 
 **Priority**: Medium
 **Source**: Architecture alignment review TD-9, `.agents/knowledge/architecture-alignment-review.md`
-**Scope**: `crates/nexus42d/src/main.rs`, spec `cli-spec-v1.md` §10.1
+**Scope**: `crates/nexus-daemon-runtime`, spec `.agents/knowledge/specs/cli-spec.md` §10.1
 
 **Context**: Spec §10.1 defines 6 daemon lifecycle states (Stopped, Starting, Running, Degraded, Stopping, Failed) with explicit transition rules. Current implementation has a simple start-and-serve model with no state machine. This limits graceful degradation, status tracking, and recovery capabilities.
 

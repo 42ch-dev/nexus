@@ -1,12 +1,11 @@
-# Nexus Agent Host Architecture v1
+# Nexus Agent Host Architecture
 
 ## 0. Document position
 
 | Attribute | Value |
 | --- | --- |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
-| **ADR** | `nexus-platform` `v1-spec/adr/` — ADR-026, ADR-027 ([cross-repo links](./README.md)) |
-| **Related** | [daemon-runtime-v1.md](./daemon-runtime-v1.md), [local-runtime-boundary-v1.md](./local-runtime-boundary-v1.md), [acp-client-tech-spec-v1.md](./acp-client-tech-spec-v1.md) |
+| **Related** | [daemon-runtime.md](./daemon-runtime.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [acp-client-tech-spec.md](./acp-client-tech-spec.md) |
 
 ---
 
@@ -29,7 +28,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 ## 3. Topology
 
 ```text
-OSS CLI (cli-spec-v1)
+OSS CLI (cli-spec)
   └─ nexus-daemon-runtime
        ├─ /v1/local/agent-host/*  (Local API — normative surface TBD in knowledge SSOT)
        └─ Arc<dyn HostFacade>
@@ -71,7 +70,7 @@ Host discovers providers via:
 
 - Explicit configuration
 - PATH / known command scan
-- ACP Registry client (see [registry-integration-v1](./registry-integration-v1.md))
+- ACP Registry client (see [registry-integration](./registry-integration.md))
 
 Admission policy limits sessions, concurrent ops, and risky tool classes (detail in implementation SSOT).
 
@@ -84,11 +83,11 @@ Admission policy limits sessions, concurrent ops, and risky tool classes (detail
 3. No code path advertises daemon or host as ACP Registry agent.
 4. Local API consumers use host-mediated operations only.
 
-Crate file tree, trait signatures, route list, and test matrix: **§8** below.
+Crate file tree, trait signatures, route list, and test matrix: **Appendix** below.
 
 ---
 
-## 8. Implementation detail (consolidated)
+## Appendix — Implementation detail (consolidated)
 
 ## 2. Crate Architecture
 

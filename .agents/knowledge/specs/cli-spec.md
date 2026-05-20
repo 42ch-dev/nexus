@@ -1,8 +1,8 @@
-# Nexus CLI Spec v1
+# Nexus CLI Spec
 
 ## 0. 文档定位
 
-本稿是 [`architecture.md`](../architecture.md) 的下钻文档，聚焦 Nexus 本地 CLI / runtime 的产品行为、运行模型与集成边界。
+本稿是 nexus-platform `v1-spec/architecture.md` 的下钻文档，聚焦 Nexus 本地 CLI / runtime 的产品行为、运行模型与集成边界。
 
 当前冻结实现前提：
 
@@ -35,19 +35,9 @@
 - **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。本地 daemon 采用 **single-binary runtime mode**（由 `nexus42 daemon start` 进入内部 daemon 进程模式，例如 `daemon-run`），不再要求独立对外产品二进制名。
 - **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、Local API / ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
-### 0.2 规范补丁（与 ADR 对齐）
+### 0.2 V2 重定位（pre-release）
 
-下列 ADR 与程序 compass **收窄**本稿 §6 / §11 / §13 中关于固定目录骨架与顶层 `research` / `manuscript` / `publish` CLI 的叙述，并接受 V1.16 的 V2 Big-bang 命令面重排；**pre-release** 下允许硬移除对应 CLI 命令组（见 ADR-023）。
-
-- [`../adr/adr-023-pre-release-cli-breaking-refactor-v1.md`](../adr/adr-023-pre-release-cli-breaking-refactor-v1.md) — pre-release CLI 破坏性重构立场
-- [`../adr/adr-024-preset-driven-workspace-acp-skills-v1.md`](../adr/adr-024-preset-driven-workspace-acp-skills-v1.md) — preset 驱动产物目录、`recommended_skills`、`novel-writing` 默认路径与 research 输出约定
-- [`../adr/adr-025-acp-first-creator-knowledge-plane-v2.md`](../adr/adr-025-acp-first-creator-knowledge-plane-v2.md) — V1.16 接受的 ACP-first 控制面与 Creator-owned knowledge plane；顶层命令收敛为 `daemon` / `acp` / `creator` / `sync` / `platform` / `system`
-- [`../adr/adr-026-single-binary-daemon-runtime-and-hybrid-agent-host-v1.md`](../adr/adr-026-single-binary-daemon-runtime-and-hybrid-agent-host-v1.md) — single-binary daemon runtime（不要求独立 `nexus42d`）+ Hybrid managed `nexus-agent-host` 边界
-- 程序意图（非字段级 wire 合同）以 `roadmap` 与相关 delivery compass 为准。
-
-### 0.3 V2 重定位预案（Big-bang，V1.16 accepted）
-
-本节记录 V2（pre-release）重定位方向；V1.16 已通过 ADR-025 接受该方向。与旧 v1 叙述冲突时，以 ADR-025 与本稿 §6.0A–§6.0B 为准。
+本节记录 V2（pre-release）重定位方向。与旧叙述冲突时，以本稿 §6.0A–§6.0B 为准。
 
 - **定位**：Nexus CLI 是 **ACP-first 控制面** + **Creator 本地知识面**，不是执行逻辑聚合层。
 - **执行边界**：推理、工具调用、文件输出等执行能力统一经 ACP capability invocation。
@@ -186,13 +176,13 @@ CLI 不默认同步：
 
 ### 6.0A 与 Platform Creator 三层标识兼容约束（V2 权威约束）
 
-对齐 [`platform/creator-agent-registration-v1.md`](../platform/creator-agent-registration-v1.md) §「三层标识体系」，CLI 在 V2 命令重组中 **必须** 保持以下不变量：
+对齐 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md` §「三层标识体系」，CLI 在 V2 命令重组中 **必须** 保持以下不变量：
 
 1. **内部主键始终是 `creator_id`**（`creator.id`）；CLI 不得把 `display_name` 当身份主键。
 2. `creator use` 可接受 `creator_id` 或 `handle` 输入，但落盘活跃主体时必须规范化为 `creator_id`。
 3. `creator status` / `creator list` 需稳定显示三层标识：`creator_id`（权威）、`handle`（可路由别名）、`display_name`（UI 展示）。
 4. 任何 `creator soul|memory|kb` 子命令，均绑定当前活跃 `creator_id`，不得以 `display_name` 隐式路由。
-5. `sync` / `context` / `publish` 等 Creator-context 请求，仍遵守 [`platform/auth-session-model-v1.md`](../platform/auth-session-model-v1.md) §4 的身份头约束（Creator API key 路径 vs User+`X-Creator-Id` 路径）。
+5. `sync` / `context` / `publish` 等 Creator-context 请求，仍遵守 nexus-platform `v1-spec/platform/auth-session-model-v1.md` §4 的身份头约束（Creator API key 路径 vs User+`X-Creator-Id` 路径）。
 
 ### 6.0B V2 Big-bang 命令信息架构（权威）
 
@@ -225,10 +215,10 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 ### 6.2A Creator 身份模型（与平台合同）
 
-与 **User** 会话并列，平台将 **Creator** 作为独立认证主体：**独立注册**（可无 User）、**统一** `creator_id` + **`creator_api_key`**（HTTPS，`Authorization: Bearer`）+ **`api_key_ref`**（落库引用 / ACP 侧，不明文存完整密钥）（见 [`platform/auth-session-model-v1.md`](../platform/auth-session-model-v1.md) §1.1、§2.2–§2.5）、再经 **Pairing** 可选绑定 User。HTTP 资源见 [`platform/platform-api-v1.md`](../platform/platform-api-v1.md) §1.1、§1.5、§3.0、§3、§3A。
+与 **User** 会话并列，平台将 **Creator** 作为独立认证主体：**独立注册**（可无 User）、**统一** `creator_id` + **`creator_api_key`**（HTTPS，`Authorization: Bearer`）+ **`api_key_ref`**（落库引用 / ACP 侧，不明文存完整密钥）（见 nexus-platform `v1-spec/platform/auth-session-model-v1.md` §1.1、§2.2–§2.5）、再经 **Pairing** 可选绑定 User。HTTP 资源见 nexus-platform `v1-spec/platform/platform-api-v1.md` §1.1、§1.5、§3.0、§3、§3A。
 
 - **HTTP 层（合同一致）**：**同一路由**的 JSON body / 成功响应 **不因**使用 User 还是 Creator 凭证而变；差别只在头。**User** 调用 Sync / Context / Publish 等 **Creator-context** 接口时须带 **`X-Creator-Id`**，且与 body 内 `creator_id`（若有）一致（`platform-api` §1.5、`auth-session-model` §4.0–§4.1）。**Creator** 仅带 **`Authorization: Bearer <creator_api_key>`** 即可解析 `creator_id`，**不要**求 `X-Creator-Id`（§4.2）。业务层始终按 **Creator 对世界与资源的权限**校验。
-- **独立注册**：对齐 **`POST /api/v1/creators/register`**；注册前可用 **`nexus42 acp probe`** 采集能力与传输元数据（[`registry-integration-v1.md`](./registry-integration-v1.md) §2.1）。
+- **独立注册**：对齐 **`POST /api/v1/creators/register`**；注册前可用 **`nexus42 acp probe`** 采集能力与传输元数据（[`registry-integration.md`](./registry-integration.md) §2.1）。
 
 ### 6.2B `nexus42 creator` 身份子命令（权威）
 
@@ -346,7 +336,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 ## 7. 首次使用路径
 
-推荐的首次使用流程（**User-first**，与 [`architecture.md`](../architecture.md) §10.3 路径 A 一致）：
+推荐的首次使用流程（**User-first**，与 nexus-platform `v1-spec/architecture.md` §10.3 路径 A 一致）：
 
 1. 安装 `nexus42`
 2. 执行 `nexus42 system doctor`
@@ -499,7 +489,7 @@ daemon 可以允许部分能力降级，例如：
 
 Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
-- 从 ACP Registry 拉取或读取 agent manifest（默认远程索引与上游仓库见 [`references-learnings.md`](../../references-learnings.md) §0.1；集成合同见 [`registry-integration-v1.md`](./registry-integration-v1.md) §0.1）
+- 从 ACP Registry 拉取或读取 agent manifest（默认远程索引与上游仓库见 [`references-learnings.md`](../../references-learnings.md) §0.1；集成合同见 [`registry-integration.md`](./registry-integration.md) §0.1）
 - 根据协议版本和 capability 过滤可用 agent
 - 选择默认 agent
 - 通过本地 stdio 启动或连接 agent
@@ -553,7 +543,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 约束：
 
-- 只允许操作工作区白名单路径；**默认**正文树根为 **`Stories/<StoryRef>/`**（章节文件如 **`<chapter-id>.md`**）；**`StoryRef`** 与 **`world_id`** 的映射以 **preset + 本地 DB / workspace 配置** 为准（ADR-024），不得仅靠目录名推断
+- 只允许操作工作区白名单路径；**默认**正文树根为 **`Stories/<StoryRef>/`**（章节文件如 **`<chapter-id>.md`**）；**`StoryRef`** 与 **`world_id`** 的映射以 **preset + 本地 DB / workspace 配置** 为准，不得仅靠目录名推断
 - **研究型产出**默认在 **`{$workspace_dir}/.nexus42/references/<run-id>/`**（见 §6.6B）；历史布局 **`References/<creator_ref>/`** 仅作为兼容叙述，**不再**由 `init` 默认创建
 - **`research.*`**（若暴露为 ACP 工具名）与 **`ReferenceSource`** 索引合同仍与 `manuscript.*` 分离，防止越权读写任意文件
 - 当 `output_manuscript=false` 时，`manuscript.write` 不作为默认创作路径，但能力本身仍存在；平台托管与本地 Agent 的能力面保持一致
@@ -606,15 +596,15 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 - **`<workspace>/`**：仅承载**用户意图可见**的创作资料（宜纳入用户自己的 Git 或同步盘）。
 - **`$HOME/.nexus42/`**：承载**系统与 runtime** 数据（索引、SQLite、缓存、日志、IPC、机读配置），**不得**再放到每个 `<workspace>` 根下。
 - **v1-spec 内规范真源链（本地 operational + 活跃上下文）** — 定义与变更 **只认下列文件**（冲突时按 **ADR → 本节命令面 → 下钻 spec** 顺序解释）：
-  1. [`adr/adr-014-local-fs-creator-workspace-layout-v1.md`](../adr/adr-014-local-fs-creator-workspace-layout-v1.md)（架构决策：目录、`workspace_slug`、`creator use` / `creator workspace` 双层指针）
-  2. [`adr/adr-023-pre-release-cli-breaking-refactor-v1.md`](../adr/adr-023-pre-release-cli-breaking-refactor-v1.md)、[`adr/adr-024-preset-driven-workspace-acp-skills-v1.md`](../adr/adr-024-preset-driven-workspace-acp-skills-v1.md)（CLI 面收窄、preset 产物与 ACP skills）
+  1. nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`（架构决策：目录、`workspace_slug`、`creator use` / `creator workspace` 双层指针）
+  2. nexus-platform `v1-spec/adr/adr-023-pre-release-cli-breaking-refactor-v1.md`、nexus-platform `v1-spec/adr/adr-024-preset-driven-workspace-acp-skills-v1.md`（CLI 面收窄、preset 产物与 ACP skills）
   3. **本节** §0.2、§6.2B–§6.2C、§6.2C **C2**、**§13.2**（CLI 用户面与目录树）
-  4. [`local-db-schema-v1.md`](./local-db-schema-v1.md) §0（`state.db` 路径与模块边界）
-  5. [`shared/domain/data-model-v1.md`](../shared/domain/data-model-v1.md) §5.14（`WorkspaceBinding` 与本地不变量）
+  4. [`local-db-schema.md`](./local-db-schema.md) §0（`state.db` 路径与模块边界）
+  5. nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14（`WorkspaceBinding` 与本地不变量）
 
 ### 13.1 用户工作区（`<workspace>/`）
 
-按 ADR-024：`<workspace>` **默认不**包含固定业务子树；首次 `init` 只登记创作根与配置，**不**默认创建 `Stories/`、`References/`。用户可见目录由 **preset 产物策略** 在运行中创建。
+`<workspace>` **默认不**包含固定业务子树；首次 `init` 只登记创作根与配置，**不**默认创建 `Stories/`、`References/`。用户可见目录由 **preset 产物策略** 在运行中创建。
 
 **`novel-writing` 预设（示例）** — 默认小说正文布局：
 
@@ -668,12 +658,12 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 **Contract-source references**：
 
 - Bundle / Delta / idempotency / conflict semantics: §15.1–§15.4 and generated `@42ch/nexus-contracts` wire types.
-- Workspace binding and local state: §6.2C, §13.2, [`shared/domain/data-model-v1.md`](../shared/domain/data-model-v1.md) §5.14.
-- Publish APIs / ACP publish capabilities: §11.6, §17, [`platform/platform-api-v1.md`](../platform/platform-api-v1.md) publish routes, and generated contracts (`PublishStoryRequest`, `PublishChapterRequest`, etc.).
+- Workspace binding and local state: §6.2C, §13.2, nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14.
+- Publish APIs / ACP publish capabilities: §11.6, §17, nexus-platform `v1-spec/platform/platform-api-v1.md` publish routes, and generated contracts (`PublishStoryRequest`, `PublishChapterRequest`, etc.).
 
 ### 13.1B Creator SOUL 与长期记忆
 
-**真源**：[`platform/creator-memory-soul-lifecycle-v1.md`](../platform/creator-memory-soul-lifecycle-v1.md)。
+**真源**：nexus-platform `v1-spec/platform/creator-memory-soul-lifecycle-v1.md`。
 
 - **`SOUL.md`**（单文件 Markdown）：推荐路径 **`$HOME/.nexus42/creators/<creator_id>/SOUL.md`**，**必须**包含二级标题 **`## Personality`**（人格轨，人改、为锚）与 **`## Experience`**（经验轨，由长期记忆聚合生成）。  
 - **规范性警告**：在 **`## Experience`** 标题下至下一个同级 `##` 或 EOF 的范围内，**用户手改会在下一次经验聚合时被覆盖**；持久内容应写入 **`## Personality`** 或 **`creators/<creator_id>/memory/long-term/*.md`**（路径与 frontmatter 见该规格 §3–§5）。  
@@ -720,7 +710,7 @@ $HOME/.nexus42/
         <workspace_slug>/  # 用户可读、每 Creator 唯一；默认目录名 **default**
           meta.json        # 不可变：local_root、creator_id、workspace_slug、可选 wire workspace_id、created_at 等
           config.toml      # 与该 workspace 绑定的本地配置（可选）
-          state.db         # 结构化 working copy、outbox、ReferenceSource 索引等（与 local-db-schema-v1 一致）
+          state.db         # 结构化 working copy、outbox、ReferenceSource 索引等（与 local-db-schema 一致）
 ```
 
 职责：
@@ -870,6 +860,6 @@ v1 至少应保证：
 - ACP 最终线协议与本地认证方式
 - ACP Registry manifest 拉取与缓存策略
 - Nexus local API 是否需要独立暴露，以及与 ACP Client-only 拓扑的边界
-- ~~workspace 是否支持多 world 共存~~。**Closed（C2）**：支持；以 `world_id` 显式参数隔离并发；单运行时 **一个活跃 `creator_id`（`creator use`）** + 在该 Creator 下 **一个活跃 `workspace_slug`（`creator workspace use`，默认 `default`）**（见 §6.2C C2、`data-model` §5.14、ADR-014）。
+- ~~workspace 是否支持多 world 共存~~。**Closed（C2）**：支持；以 `world_id` 显式参数隔离并发；单运行时 **一个活跃 `creator_id`（`creator use`）** + 在该 Creator 下 **一个活跃 `workspace_slug`（`creator workspace use`，默认 `default`）**（见 §6.2C C2、nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14、nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`）。
 - `sync` 是否允许默认后台定时拉取
 - skills export 的目标格式优先级

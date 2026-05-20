@@ -1,13 +1,9 @@
-# ACP Client Integration — Technical Specification v1
+# ACP Client Integration — Technical Specification
 
-> **Source**: `nexus/.agents/archived/knowledge/acp-client-tech-spec.md`
-> **ADR**: [ADR-004](../adr/adr-004-acp-client-tech-spec.md)
-> **Status**: Accepted — 2026-04-07 · **v2 amendment pending** post-nexus-V1.4（worker-delegated ACP hosting: `nexus42d` 不再 link `agent-client-protocol`，ACP 会话由 per-creator `nexus42 acp-worker` 子进程承载；见 `nexus/.agents/knowledge/acp-client-tech-spec-v2.md` §2.3）
+**Status**: Accepted — worker-delegated ACP hosting: daemon runtime does not link `agent-client-protocol`; ACP sessions run in per-creator `nexus42 acp-worker` child processes.
 
 **Source Plan**: `2025-04-05-acp-client`
-**Author**: @architect
 **Date**: 2026-04-06
-**Supersedes**: Sections 3.3 of the V1.0 engineering-period architecture review (knowledge: `phase1-architecture-review-v1.md`; filename is a legacy label, not a separate product release).
 
 ---
 
@@ -92,14 +88,14 @@ If `agent-client-protocol` v0.10.4 lacks a critical feature (e.g., missing `sess
 
 
 ┌─────────────────────────────────────────────────────────┐
-│                   nexus42d Daemon                       │
+│                   daemon runtime Daemon                       │
 │                                                         │
 │  ┌──────────┐   ┌──────────┐   ┌──────────────────┐    │
 │  │ HTTP     │──▶│ Handlers │──▶│ WorkspaceState   │    │
 │  │ Router   │   │          │   │ (SQLite)         │    │
 │  │ (axum)   │   │ + ACP    │   └──────────────────┘    │
 │  └──────────┘   │ proxy    │                           │
-│                 │ routes   │   (nexus42d is NOT an     │
+│                 │ routes   │   (daemon runtime is NOT an     │
 │                 └──────────┘    ACP Agent/Server)       │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -154,7 +150,7 @@ nexus42 agent run <agent-ref>
 - The `tokio::task::LocalSet` requirement: ACP SDK futures are `!Send`, requiring `spawn_local`. The CLI's `#[tokio::main]` creates a multi-threaded runtime by default. We must use `tokio::task::LocalSet` within the agent session to bridge this gap.
 - **Timeout**: Default 30-second timeout for `initialize`, 5-minute for `session/prompt` (configurable).
 - **Error handling**: Non-zero exit code, broken pipe, timeout — all map to `AcpError` variants with user-friendly messages.
-- **Daemon relationship**: `nexus42d` is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. The daemon may expose Local API endpoints that agents can call (via `request_permission` tool grants), but this is V1.1+ scope.
+- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. The daemon may expose Local API endpoints that agents can call (via `request_permission` tool grants), but this is V1.1+ scope.
 
 ### 2.4 Connection Management
 
@@ -311,7 +307,7 @@ For V1.0, installation is **lazy** — agents are launched on demand. No pre-ins
 | Option | Description | Pros | Cons |
 |--------|-------------|------|------|
 | **A: Direct stdio** (Recommended) | CLI spawns agent, communicates via stdin/stdout JSON-RPC | Simple, matches ACP spec, no extra infra | Agent cannot access daemon services |
-| **B: Daemon-mediated** | CLI → daemon HTTP → agent stdio | Centralized, daemon can enforce policies | Adds latency, complexity, violates "nexus42d is not ACP server" |
+| **B: Daemon-mediated** | CLI → daemon HTTP → agent stdio | Centralized, daemon can enforce policies | Adds latency, complexity, violates "daemon runtime is not ACP server" |
 | **C: Local API as tool server** | Agent calls Local API for workspace/file access | Rich tool access | V1.1+ scope, requires tool permission handling |
 
 **Decision: Option A for V1.0.**
@@ -851,13 +847,3 @@ For implementer reference, the ACP protocol lifecycle:
 | ACP-R10 | Binary agent auto-update mechanism | low | V1.1 |
 | ACP-R11 | Session modes (ask/act) switching | low | V1.1 |
 
----
-
-## Related ADR Index
-
-| ADR | Title | Section |
-|-----|-------|---------|
-| [ADR-001](../adr/adr-001-memory-kind-expansion.md) | MemoryKind expansion | MemoryItem |
-| [ADR-002](../adr/adr-002-domain-models-g1-g6-fixes.md) | Domain Models G1-G6 fixes | KeyBlock, SourceAnchor |
-| [ADR-003](../adr/adr-003-context-assembly-cli-spec.md) | Context Assembly CLI spec | §5.1 |
-| [ADR-004](../adr/adr-004-acp-client-tech-spec.md) | ACP Client Tech Spec | 本文档 |

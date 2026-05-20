@@ -1,18 +1,18 @@
-# Nexus Local Runtime Boundary v1
+# Nexus Local Runtime Boundary
 
 ## 0. Document position
 
 This document defines boundaries between:
 
-- `nexus42` CLI（产品名 Nexus；见 [`cli-spec-v1.md`](./cli-spec-v1.md) §0.1）
+- `nexus42` CLI（产品名 Nexus；见 [`cli-spec.md`](./cli-spec.md) §0.1）
 - daemon runtime mode (single-binary `nexus42`)
 - Nexus Local API / IPC
 - ACP sessions
 - Skills compatibility layer
 
-It preserves the ACP client-only topology from [`architecture.md`](../architecture.md) §6.2.1 and applies the single-binary daemon runtime boundary from ADR-026.
+It preserves the ACP client-only topology from nexus-platform `v1-spec/architecture.md` §6.2.1 and the single-binary daemon runtime boundary (see nexus-platform `v1-spec/adr/adr-026-single-binary-daemon-runtime-and-hybrid-agent-host.md`).
 
-ACP Registry 默认上游索引与仓库入口见 [`registry-integration-v1.md`](./registry-integration-v1.md) §0.1、[`references-learnings.md`](../../references-learnings.md) §0.1。
+ACP Registry 默认上游索引与仓库入口见 [`registry-integration.md`](./registry-integration.md) §0.1、[`references-learnings.md`](../../references-learnings.md) §0.1。
 
 Logical `nexus.*` capabilities are shared with platform-hosted creators; this document only defines the **local** runtime boundary, not a separate capability model.
 
@@ -120,7 +120,7 @@ Rules:
 - `error_code` should align with sync / conflict schemas where applicable
 - Context assembly and research-specific routes stay under the same `/v1/local/*` namespace
 - **C4 Closed（V1.0）**：`POST /v1/local/context/assemble` 的 request/response **必须与** `ContextAssembleRequestV1` / `ContextAssembleResponseV1` 字段级同构（不允许 local 子集或私有别名字段），见 `shared/schema/context-assembly-wire-v1.md` §3.1。
-- **V1.2（ADR-009）**：若请求体支持可选 **`as_of`**，Local 与 Platform HTTP **须**共享 **同一**字段语义与校验；不得仅在一侧出现私有历史参数。
+- **V1.2**：若请求体支持可选 **`as_of`**，Local 与 Platform HTTP **须**共享 **同一**字段语义与校验；不得仅在一侧出现私有历史参数。
 
 ### 3.3 Forbidden patterns
 
