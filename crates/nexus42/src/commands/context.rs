@@ -8,10 +8,10 @@ use nexus_contracts::local::domain::RuntimeMode;
 use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
 use nexus_moment_context_assembly::{Stage0Assembly, TwoStageAssembly};
 
-use nexus_domain::{DegradationGuard, DomainRuntimeMode};
+use crate::domain::{DegradationGuard, DomainRuntimeMode};
 
 #[cfg(test)]
-use nexus_domain::DegradationPolicy;
+use crate::domain::DegradationPolicy;
 #[cfg(test)]
 use nexus_moment_context_assembly::cloud_stage::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
 
@@ -156,7 +156,7 @@ pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
     // If snapshot exists with non-Normal state, restore directly without
     // replaying failures (avoids unintended re-degradation — C-001).
     if let Some(snap) = config.degradation_snapshot() {
-        if snap.state != nexus_domain::degradation::DegradationState::Normal {
+        if snap.state != crate::domain::degradation::DegradationState::Normal {
             return DegradationGuard::restore_from_snapshot(snap, mode);
         }
         // Normal state with failures: replay to restore failure_count only
@@ -172,7 +172,7 @@ pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
 
 /// Persist degradation guard state to config.
 fn save_degradation_guard(config: &mut CliConfig, guard: &DegradationGuard) -> Result<()> {
-    use nexus_domain::DegradationSnapshot;
+    use crate::domain::DegradationSnapshot;
     config.degradation_snapshot = Some(DegradationSnapshot::from_guard(guard));
     config.save()?;
     Ok(())
@@ -286,13 +286,13 @@ async fn build_stage0_from_local(
     let home = crate::config::user_home_dir()?;
 
     // 1. Load SOUL.md
-    let soul = nexus_domain::soul_io::load(&home, creator_id)?;
+    let soul = nexus_creator_memory::soul_io::load(&home, creator_id)?;
 
     // 2. List long-term memories (skip personality_core — already in SOUL personality)
-    let slugs = nexus_domain::memory_io::list_memories(&home, creator_id)?;
+    let slugs = nexus_creator_memory::memory_io::list_memories(&home, creator_id)?;
     let mut long_term_memories = Vec::new();
     for slug in &slugs {
-        if let Ok(mem) = nexus_domain::memory_io::load_memory(&home, creator_id, slug) {
+        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, creator_id, slug) {
             if mem.frontmatter.memory_kind == "personality_core" {
                 continue;
             }
@@ -578,7 +578,7 @@ mod tests {
         // Guard should remain in Normal state (no platform call attempted)
         assert_eq!(
             guard.degradation_state(),
-            nexus_domain::degradation::DegradationState::Normal
+            crate::domain::degradation::DegradationState::Normal
         );
         assert_eq!(guard.failure_count(), 0);
     }
@@ -619,7 +619,7 @@ mod tests {
         // Guard should be in Normal state (platform succeeded)
         assert_eq!(
             guard.degradation_state(),
-            nexus_domain::degradation::DegradationState::Normal
+            crate::domain::degradation::DegradationState::Normal
         );
         assert_eq!(guard.failure_count(), 0);
     }
@@ -651,7 +651,7 @@ mod tests {
         // Not yet at threshold (default is 3), so still Normal
         assert_eq!(
             guard.degradation_state(),
-            nexus_domain::degradation::DegradationState::Normal
+            crate::domain::degradation::DegradationState::Normal
         );
     }
 
@@ -670,7 +670,7 @@ mod tests {
         // Should have degraded to level 1
         assert_eq!(
             guard.degradation_state(),
-            nexus_domain::degradation::DegradationState::DegradedLevel1
+            crate::domain::degradation::DegradationState::DegradedLevel1
         );
         assert_eq!(guard.failure_count(), 0); // reset after degradation
 
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(guard.failure_count(), 1);
         assert_eq!(
             guard.degradation_state(),
-            nexus_domain::degradation::DegradationState::Normal
+            crate::domain::degradation::DegradationState::Normal
         );
     }
 
@@ -720,12 +720,12 @@ mod tests {
     /// (which would trigger unintended re-degradation).
     #[test]
     fn create_guard_restores_from_snapshot() {
-        use nexus_domain::degradation::DegradationState;
+        use crate::domain::degradation::DegradationState;
 
         // Non-Normal state: should restore directly without replaying failures
         let mut config = CliConfig::default();
         config.runtime_mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
-        config.degradation_snapshot = Some(nexus_domain::DegradationSnapshot {
+        config.degradation_snapshot = Some(crate::domain::DegradationSnapshot {
             state: DegradationState::DegradedLevel1,
             failure_count: 2,
             last_health_check: None,
@@ -746,7 +746,7 @@ mod tests {
         // Normal state with failures: should replay to restore failure_count
         let mut config2 = CliConfig::default();
         config2.runtime_mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
-        config2.degradation_snapshot = Some(nexus_domain::DegradationSnapshot {
+        config2.degradation_snapshot = Some(crate::domain::DegradationSnapshot {
             state: DegradationState::Normal,
             failure_count: 1,
             last_health_check: None,

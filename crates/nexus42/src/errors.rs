@@ -285,10 +285,10 @@ impl From<chrono::ParseError> for CliError {
     }
 }
 
-impl From<nexus_domain::errors::DomainError> for CliError {
-    fn from(err: nexus_domain::errors::DomainError) -> Self {
+impl From<crate::domain::DomainError> for CliError {
+    fn from(err: crate::domain::DomainError) -> Self {
         match err {
-            nexus_domain::errors::DomainError::PlatformOperationProhibited { mode, operation } => {
+            crate::domain::DomainError::PlatformOperationProhibited { mode, operation } => {
                 Self::PlatformOperationProhibited { mode, operation }
             }
             other => Self::Other(format!("Domain error: {other}")),
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     fn domain_error_platform_prohibited_maps_to_cli_variant() {
-        let domain_err = nexus_domain::errors::DomainError::PlatformOperationProhibited {
+        let domain_err = crate::domain::DomainError::PlatformOperationProhibited {
             mode: "local_only".to_string(),
             operation: "sync push".to_string(),
         };
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn domain_error_other_maps_to_cli_other() {
-        let domain_err = nexus_domain::errors::DomainError::ValidationError("test".to_string());
+        let domain_err = crate::domain::DomainError::ValidationError("test".to_string());
         let cli_err: CliError = domain_err.into();
         match cli_err {
             CliError::Other(msg) => {

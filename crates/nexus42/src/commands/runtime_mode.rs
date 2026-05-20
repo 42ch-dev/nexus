@@ -3,7 +3,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_domain::runtime_mode::DomainRuntimeMode;
+use crate::domain::runtime_mode::DomainRuntimeMode;
 
 #[derive(Debug, Subcommand)]
 pub enum RuntimeModeCommand {
@@ -122,7 +122,7 @@ fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_domain::degradation::{DegradationSnapshot, DegradationState, HealthCheckSnapshot};
+    use crate::domain::degradation::{DegradationSnapshot, DegradationState, HealthCheckSnapshot};
 
     /// Helper: build a `CliConfig` with a degradation snapshot.
     fn config_with_degradation(

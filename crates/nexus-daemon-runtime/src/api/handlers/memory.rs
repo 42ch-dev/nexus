@@ -162,7 +162,7 @@ fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(),
     }
 
     // creator_id: non-empty, must match ctr_<alphanumeric> pattern
-    if !nexus_domain::is_valid_creator_id(&req.creator_id) {
+    if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
             reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
@@ -216,7 +216,7 @@ pub async fn list_pending_reviews(
     info!(creator_id = %params.creator_id, "Listing pending reviews");
 
     // Validate creator_id format
-    if !nexus_domain::is_valid_creator_id(&params.creator_id) {
+    if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
             reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
@@ -291,7 +291,7 @@ pub async fn count_pending_reviews(
     info!(creator_id = %params.creator_id, "Counting pending reviews");
 
     // Validate creator_id format
-    if !nexus_domain::is_valid_creator_id(&params.creator_id) {
+    if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
             reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
@@ -343,7 +343,7 @@ pub async fn delete_pending_review(
     );
 
     // Validate creator_id format
-    if !nexus_domain::is_valid_creator_id(&params.creator_id) {
+    if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
             reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
