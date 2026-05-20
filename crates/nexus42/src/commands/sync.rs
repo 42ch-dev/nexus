@@ -171,7 +171,8 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
 
             let Some(creator_id) = creator_id.or_else(|| config.active_creator_id.clone()) else {
                 return Err(crate::errors::CliError::Other(
-                    "Creator ID required for sync push. Use --creator-id or set active creator.".to_string(),
+                    "Creator ID required for sync push. Use --creator-id or set active creator."
+                        .to_string(),
                 ));
             };
 
