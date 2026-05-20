@@ -40,7 +40,7 @@
           { "index": 4, "name": "D — daemon isolation", "covers": ["D1", "D2", "D3", "D4", "D5", "D6"], "status": "planned", "owner": "@fullstack-dev" },
           { "index": 5, "name": "E — CLI cloud-line wiring", "covers": ["E1", "E2", "E3", "E4"], "status": "planned", "owner": "@fullstack-dev" },
           { "index": 6, "name": "F — stubs, tests, docs", "covers": ["F1", "F2", "F3", "F4", "F5"], "status": "planned", "owner": "@qa-engineer" },
-          { "index": 7, "name": "G — schemas layout & READMEs", "covers": ["G1", "G2", "G3"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-20: cli-sync→cloud-sync rename, meta/ removed, validate-schemas + drift OK; G4 audit deferred" }
+          { "index": 7, "name": "G — schemas layout & READMEs", "covers": ["G1", "G2", "G3", "G4"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-20: cloud-sync/ rename, meta/ removed; specs/plan/compass/tooling docs synced; layout §7 inventory" }
         ],
         "gates": {
           "qc": "pending",

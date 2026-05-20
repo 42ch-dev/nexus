@@ -127,4 +127,21 @@ Platform prose may still say `v1-spec/cli-sync/` for sync **protocol** documents
 
 ---
 
-*Layout SSOT. Implementation: V1.21 plan Batch G; wire/local rule: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md).*
+## 7. Wire file inventory (2026-05)
+
+Authoritative count: run `pnpm run validate-schemas` (currently **54** `*.schema.json`).
+
+| Directory | Files | Notes |
+| --- | --- | --- |
+| `cloud-sync/` | 4 | `bundle`, `sync-pull-request`, `sync-pull-response`, `conflict-response` |
+| `common/` | 3 | `common`, `source-anchor`, `version-ref` |
+| `domain/` | 12 | Wire entities (see §3.3 table) |
+| `platform/` | 33 | Platform HTTP bodies (flat; prefix grouping in [platform/README.md](../../../schemas/platform/README.md)) |
+
+**Not in tree:** `acp-runtime/`, `meta/`, `cli-sync/` (renamed).
+
+Historical audit (pre-rename paths): [archived schemas-boundary §5.2](../archived/knowledge/schemas-boundary.md) — use this section for current paths.
+
+---
+
+*Layout SSOT. Implementation: V1.21 plan Batch G (complete). Wire/local rule: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md).*

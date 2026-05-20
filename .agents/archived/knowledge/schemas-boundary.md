@@ -1,6 +1,8 @@
 # `schemas/` Boundary — Specification v1
 
-**Status**: Active — authoritative SSOT for what belongs in `schemas/` vs what belongs in hand-written Rust under `crates/nexus-contracts/src/local/`.
+> **Superseded for directory layout (2026-05-20):** Current OSS tree and folder names → [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md). Sync wire lives under **`schemas/cloud-sync/`** (formerly `schemas/cli-sync/`). **`schemas/meta/`** removed (type in `src/local/meta.rs`). The audit table in §5.2 below uses updated paths where mechanically aligned; treat this file as historical boundary methodology + audit snapshot.
+
+**Status**: Archived — boundary methodology; layout SSOT is [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md) + [schemas-wire-platform-sync-boundary.md](../../knowledge/schemas-wire-platform-sync-boundary.md).
 **Author**: @project-manager (2026-04-17 prep-phase spec) — to be co-signed by @architect before WS5 implement.
 **Scope**: The **boundary rule** and **local-type placement convention** for nexus OSS contracts.
 **Alignment source**: `{v1-spec}/schema/codegen-strategy-v1.md` §3 — this document is the in-repo SSOT for the decision that v1-spec §3 explicitly **delegates to the contract repo** ("是否在 `nexus` JSON Schema + `@42ch/nexus-contracts` 生成，由合约仓单独推进并对齐本稿"). No v1-spec update is required for the boundary rule itself; a future v1.4 roadmap / ADR update may cite this doc for traceability.
@@ -37,7 +39,7 @@ The fix is one rule: `schemas/` hosts **only** what crosses a process boundary t
 A schema is **wire** and belongs in `schemas/` iff **both** of the following hold:
 
 1. It appears — **directly, or transitively via `$ref`** — in a contract that is **observed by `nexus-platform`**:
-   - **platform HTTP request / response body** (`schemas/platform/*`, or the platform-consumed members of `schemas/cli-sync/*` like `bundle` / `sync-pull-*` / `conflict-response`);
+   - **platform HTTP request / response body** (`schemas/platform/*`, or the platform-consumed members of `schemas/cloud-sync/*` like `bundle` / `sync-pull-*` / `conflict-response`);
    - **sync bundle payload** transmitted from CLI to platform (`POST /sync/bundles`);
    - **delta / outbox payload** sent to platform;
    - **any future payload** that nexus OSS hands to platform over any channel.
@@ -163,10 +165,10 @@ When V1.4 WS5 lands, the platform-side `{v1-spec}/schema/codegen-strategy-v1.md`
 | -------------------------------------------------------- | ------------------------------------------- | ------------------ | -------- | ------------------------------------------------------------------ | ---------------------------------------------- |
 | `schemas/acp-runtime/daemon-status-v2.schema.json`       | self-only (internal defs)                    | No                 | local    | `crates/nexus-contracts/src/local/acp_runtime/daemon_status_v2.rs` | §2.2: `/v1/local/daemon/status`, CLI↔daemon only |
 | `schemas/acp-runtime/registry-manifest.schema.json`      | self-only (internal defs)                    | No                 | local    | `crates/nexus-contracts/src/local/acp_runtime/registry_manifest.rs` | External CDN; Rust-only parser                    |
-| `schemas/cli-sync/bundle.schema.json`                    | refs domain/bundle, domain/delta             | Yes (via Bundle)   | wire     | —                                                                  | Sync protocol wire                               |
-| `schemas/cli-sync/conflict-response.schema.json`         | refs common/common                           | Yes                | wire     | —                                                                  | Sync protocol wire                               |
-| `schemas/cli-sync/sync-pull-request.schema.json`         | refs common/common                           | Yes                | wire     | —                                                                  | Sync protocol wire                               |
-| `schemas/cli-sync/sync-pull-response.schema.json`        | refs domain/bundle                           | Yes                | wire     | —                                                                  | Sync protocol wire                               |
+| `schemas/cloud-sync/bundle.schema.json`                    | refs domain/bundle, domain/delta             | Yes (via Bundle)   | wire     | —                                                                  | Sync protocol wire                               |
+| `schemas/cloud-sync/conflict-response.schema.json`         | refs common/common                           | Yes                | wire     | —                                                                  | Sync protocol wire                               |
+| `schemas/cloud-sync/sync-pull-request.schema.json`         | refs common/common                           | Yes                | wire     | —                                                                  | Sync protocol wire                               |
+| `schemas/cloud-sync/sync-pull-response.schema.json`        | refs domain/bundle                           | Yes                | wire     | —                                                                  | Sync protocol wire                               |
 | `schemas/common/common.schema.json`                      | $ref'd by 20+ wire schemas                   | Yes (indirect)     | wire     | —                                                                  | §2.4 shared value object                        |
 | `schemas/common/source-anchor.schema.json`               | refs delta, key-block (both wire)            | Yes (indirect)     | wire     | —                                                                  | §2.4: $ref'd by wire delta + key-block           |
 | `schemas/common/version-ref.schema.json`                 | not $ref'd by any schema                     | Yes (2 files)      | wire     | —                                                                  | Platform imports VersionRef directly             |
@@ -246,10 +248,10 @@ This sketch is the PM's best-guess starting point for WS5's auditor. It is **not
 **Likely wire (keep in `schemas/`):**
 
 - `schemas/platform/**/*.schema.json` (33 files): all platform BFF HTTP contracts
-- `schemas/cli-sync/bundle.schema.json`
-- `schemas/cli-sync/sync-pull-request.schema.json`
-- `schemas/cli-sync/sync-pull-response.schema.json`
-- `schemas/cli-sync/conflict-response.schema.json`
+- `schemas/cloud-sync/bundle.schema.json`
+- `schemas/cloud-sync/sync-pull-request.schema.json`
+- `schemas/cloud-sync/sync-pull-response.schema.json`
+- `schemas/cloud-sync/conflict-response.schema.json`
 - `schemas/domain/bundle.schema.json` (if different from `cli-sync/bundle`; otherwise consolidate)
 - `schemas/domain/delta.schema.json` (carried in bundle)
 - `schemas/domain/sync-command.schema.json` (sync protocol)
