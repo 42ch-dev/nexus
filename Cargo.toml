@@ -8,7 +8,7 @@ members = [
     "crates/nexus-home-layout",
     "crates/nexus-orchestration",
     "crates/nexus42",
-    "crates/nexus-sync",
+    "crates/nexus-cloud-sync",
     "crates/nexus-local-db",
 ]
 resolver = "2"

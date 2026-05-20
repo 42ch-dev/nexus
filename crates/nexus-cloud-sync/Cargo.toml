@@ -1,5 +1,5 @@
 [package]
-name = "nexus-sync"
+name = "nexus-cloud-sync"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

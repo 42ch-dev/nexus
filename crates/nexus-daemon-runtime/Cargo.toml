@@ -15,7 +15,7 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-domain = { path = "../nexus-domain" }
 nexus-local-db = { path = "../nexus-local-db" }
-nexus-sync = { path = "../nexus-sync" }
+nexus-cloud-sync = { path = "../nexus-cloud-sync" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-agent-host = { path = "../nexus-agent-host" }
 tokio = { workspace = true }
