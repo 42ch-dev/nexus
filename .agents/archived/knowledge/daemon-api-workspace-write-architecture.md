@@ -1,7 +1,7 @@
 # V1.15 Daemon Local API & Workspace 写入架构设计
 
 **Status**: Active (workspace-write principles); **§1 API route inventory superseded**
-**Supersedes (API inventory only)**: [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) §3–§7 (shipped 2026-05-19) — authoritative for `/v1/local/*` routes, auth (`X-API-Key`), agent-host namespace, removed world/explore daemon proxies
+**Supersedes (API inventory only)**: [v1.20-delivery-compass-v1.md](../../iterations/v1.20-delivery-compass-v1.md) §3–§7 (shipped 2026-05-19) — authoritative for `/v1/local/*` routes, auth (`X-API-Key`), agent-host namespace, removed world/explore daemon proxies
 **Created**: 2026-05-10
 **Author**: fullstack-dev (research + design task)
 **Plan ref**: `.agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md`

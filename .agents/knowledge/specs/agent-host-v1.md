@@ -1,56 +1,94 @@
-# Agent-Host Architecture Spec v1
+# Nexus Agent Host Architecture v1
 
-## Document Metadata
+## 0. Document position
 
-- **Date**: 2026-05-18
-- **Status**: Active SSOT — **implementation detail** for `nexus-agent-host` subsystem; HTTP route inventory aligned with **V1.20 Shipped** ([v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) §4)
-- **Normative upstream** (architecture boundaries): `nexus-platform` `.agents/designs/v1-spec/local/agent-host-v1.md`, **ADR-026**, **ADR-027**
-- **Scope**: `nexus` repository — `crates/nexus-agent-host`, ACP integration, native CLI providers, discovery, policy, streaming
-- **Supersedes**: V1.18 compass §3–§5 (architecture, research, PM notes), V1.19 compass §3–§4 (item details referencing OpenDesign/Multica patterns)
-- **Referenced by**:
-  - [V1.18 Delivery Compass](../iterations/v1.18-delivery-compass-v1.md) — original implementation context
-  - [V1.19 Delivery Compass](../iterations/v1.19-delivery-compass-v1.md) — hardening context
-  - [V1.20 Delivery Compass](../iterations/v1.20-delivery-compass-v1.md) — API layer redesign
-- **External references**:
-  - Multica: <https://github.com/multica-ai/multica>
-  - OpenDesign: <https://github.com/nexu-io/open-design>
+| Attribute | Value |
+| --- | --- |
+| **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
+| **ADR** | `nexus-platform` `v1-spec/adr/` — ADR-026, ADR-027 ([cross-repo links](./README.md)) |
+| **Related** | [daemon-runtime-v1.md](./daemon-runtime-v1.md), [local-runtime-boundary-v1.md](./local-runtime-boundary-v1.md), [acp-client-tech-spec-v1.md](./acp-client-tech-spec-v1.md) |
 
 ---
 
-## 1. Overview
+## 1. Purpose
 
-### 1.1 Purpose
+Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI adapters, hosted by daemon runtime under **Managed-only** supervision.
 
-Single source of truth for the `nexus-agent-host` subsystem architecture. This document consolidates all design decisions, provider implementation patterns, streaming transport design, policy/security model, and reference architecture research (Multica, OpenDesign) from V1.18 and V1.19 into one authoritative location.
+---
 
-### 1.2 Design principles
+## 2. Frozen decisions
 
-1. **The daemon runtime stays a supervisor/client**, not an ACP server or provider-specific implementation host.
-2. **`nexus-agent-host` is the orchestration/facade layer** above `nexus-acp-host` and native CLI process adapters.
-3. **ACP-first remains preferred**, while Hybrid means the host can also launch selected native CLIs under a narrower capability contract.
-4. **Managed-only is the safety boundary**: every session and provider process is host-owned, observable, cancellable, and shut down by lifecycle hooks.
-5. **Provider-native streaming, unified relay**: each provider uses its own transport internally; the daemon exposes a single `HostEvent`-based SSE endpoint to HTTP clients.
-6. **Tool execution is always mediated through a host layer**, never exposed as raw provider protocol to external clients (borrowed from OpenDesign connector system).
+1. **Managed-only** — every session and provider process is host-owned, observable, cancellable; no unmanaged attach in v1 scope.
+2. **Hybrid providers** — ACP-backed adapters **and** selected native CLI adapters under a narrower capability contract.
+3. **ACP-first preferred** — native CLI is supplementary, not a second control plane.
+4. **Daemon is not an ACP Server** — hosting agents does not make the daemon runtime an ACP Agent advertised on Registry.
+5. **Tool execution is mediated** — external clients never speak raw provider protocol; normalized host operations only.
 
-### 1.3 Crate relationship
+---
+
+## 3. Topology
 
 ```text
-nexus42 CLI
-  └─ nexus-daemon-runtime          (local HTTP API + lifecycle supervisor)
-       ├─ lifecycle: AgentHostSubsystem
-       ├─ Axum routes: /v1/local/agent-host/*
+OSS CLI (cli-spec-v1)
+  └─ nexus-daemon-runtime
+       ├─ /v1/local/agent-host/*  (Local API — normative surface TBD in knowledge SSOT)
        └─ Arc<dyn HostFacade>
-            └─ nexus-agent-host     (orchestration/facade — this spec)
-                 ├─ core: HostManager, SessionRegistry, OpRegistry
-                 ├─ capability: normalized ops + negotiation + risk
-                 ├─ discovery: config + PATH + ACP registry
-                 ├─ policy: admission + permission delegation
-                 ├─ providers/acp: official SDK via nexus-acp-host
-                 ├─ providers/native_cli/claude: Wave 1 native adapter
-                 └─ telemetry: structured host events
+            └─ nexus-agent-host
+                 ├─ core: sessions, operations, lifecycle
+                 ├─ capability: negotiation, risk classes
+                 ├─ discovery: config, PATH, ACP registry
+                 ├─ policy: admission, permissions
+                 ├─ providers/acp → nexus-acp-host
+                 └─ providers/native_cli → managed processes
 ```
 
+Multica / OpenDesign are **reference architectures only**, not runtime dependencies ([references-learnings.md](../../references-learnings.md)).
+
 ---
+
+## 4. Provider model
+
+| Kind | Role | Notes |
+| --- | --- | --- |
+| ACP adapter | Official SDK path via `nexus-acp-host` | Preferred for Registry-listed agents |
+| Native CLI adapter | Managed subprocess (e.g. Claude CLI wave 1) | Narrower capability surface; same HostOperation contract |
+
+**Runtime rule**: `nexus-daemon-runtime` depends only on **`HostFacade` traits**, never on provider-specific crates.
+
+---
+
+## 5. Capability & streaming
+
+1. Execution flows through normalized **`HostOperation`** / **`HostEvent`** (wire shapes in knowledge SSOT and future contracts).
+2. **Provider-native streaming, unified relay**: providers may use internal transports; daemon exposes a **single host event stream** to HTTP clients (e.g. SSE over Local API).
+3. Cancel and health are **control-plane** actions on `HostFacade`, not execution operations.
+
+---
+
+## 6. Discovery
+
+Host discovers providers via:
+
+- Explicit configuration
+- PATH / known command scan
+- ACP Registry client (see [registry-integration-v1](./registry-integration-v1.md))
+
+Admission policy limits sessions, concurrent ops, and risky tool classes (detail in implementation SSOT).
+
+---
+
+## 7. Acceptance criteria (architecture level)
+
+1. Daemon can start/stop host subsystem with drain semantics.
+2. At least one ACP-backed session and one native adapter path (wave scope per program compass) under Managed-only rules.
+3. No code path advertises daemon or host as ACP Registry agent.
+4. Local API consumers use host-mediated operations only.
+
+Crate file tree, trait signatures, route list, and test matrix: **§8** below.
+
+---
+
+## 8. Implementation detail (consolidated)
 
 ## 2. Crate Architecture
 
