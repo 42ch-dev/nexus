@@ -1,15 +1,15 @@
-# Skills Export Compatibility v1
+# Skills Export Compatibility
 
 ## 0. 文档定位
 
 - **版本**：v1
 - **状态**：Draft（V1.3 facing）
 - **定位**：定义 ACP-first、skills-second 前提下，skills 能力导出与兼容声明的规范边界。
-- **运行时归属（Normative）**：本规范描述的导出清单、兼容等级与 `nexus.*` 映射适用于 **Nexus CLI / 本地 daemon（`nexus42` / `nexus42d`）及 ACP Client 路径**。**Nexus Platform（HTTP / `platform-api-v1`）不实现 ACP 协议**，也 **不** 提供 skills-export 的 HTTP 真源；平台集成方以 **OpenAPI + REST** 为准。对应 **nexus-platform** 侧 plan `43-v1.5-skills-export-l0` 已 **Cancelled**。
+- **运行时归属（Normative）**：本规范描述的导出清单、兼容等级与 `nexus.*` 映射适用于 **Nexus CLI / 本地 daemon（`nexus42` / daemon runtime）及 ACP Client 路径**。**Nexus Platform（HTTP / `platform-api-v1`）不实现 ACP 协议**，也 **不** 提供 skills-export 的 HTTP 真源；平台集成方以 **OpenAPI + REST** 为准。对应 **nexus-platform** 侧 plan `43-v1.5-skills-export-l0` 已 **Cancelled**。
 - **对齐文档**：
-  - [`acp-capability-set-v1.md`](./acp-capability-set-v1.md)
-  - [`local-runtime-boundary-v1.md`](./local-runtime-boundary-v1.md)
-  - [`../local/cli-spec-v1.md`](./cli-spec-v1.md)
+  - [`acp-capability-set.md`](./acp-capability-set.md)
+  - [`local-runtime-boundary.md`](./local-runtime-boundary.md)
+  - [`../local/cli-spec.md`](./cli-spec.md)
   - [`../pre-freeze-spec-log.md`](../pre-freeze-spec-log.md)
 
 ---
@@ -38,7 +38,7 @@
 ### 3.1 核心原则
 
 1. **协议优先级固定**：ACP 为主，skills 为兼容；不得反向要求 ACP 语义迁就 skills 包格式。
-2. **能力名真源**：导出描述中的能力标识必须可回链到 `acp-capability-set-v1` 定义的逻辑能力。
+2. **能力名真源**：导出描述中的能力标识必须可回链到 `acp-capability-set` 定义的逻辑能力。
 3. **输入输出语义一致**：同一逻辑能力在 ACP 与 skills 两条路径下应保持等价语义（允许载体差异，不允许行为差异）。
 
 ### 3.2 兼容等级（Normative）
@@ -71,9 +71,9 @@ CLI/runtime 在导出清单中必须声明等级，未声明视为 **不兼容**
 
 ## 4. 与现有规范的关系
 
-- ACP 能力集合：[`acp-capability-set-v1.md`](./acp-capability-set-v1.md)
-- 运行时边界：[`local-runtime-boundary-v1.md`](./local-runtime-boundary-v1.md)
-- CLI 能力入口与工作区语义：[`../local/cli-spec-v1.md`](./cli-spec-v1.md)
+- ACP 能力集合：[`acp-capability-set.md`](./acp-capability-set.md)
+- 运行时边界：[`local-runtime-boundary.md`](./local-runtime-boundary.md)
+- CLI 能力入口与工作区语义：[`../local/cli-spec.md`](./cli-spec.md)
 - 程序梯映射：[`../pre-freeze-spec-log.md`](../pre-freeze-spec-log.md) §0
 
 本稿仅定义兼容与导出治理，不重写能力行为合同。
@@ -92,6 +92,6 @@ CLI/runtime 在导出清单中必须声明等级，未声明视为 **不兼容**
 
 ## 6. 子规格补丁清单（如果需要）
 
-1. `local/local-runtime-boundary-v1.md`：补充“skills compatibility descriptor”读取顺序。
+1. `local/local-runtime-boundary.md`：补充“skills compatibility descriptor”读取顺序。
 2. `shared/platform-capability-map-v1.md`：增加 ACP vs skills 兼容等级列。
 3. `pre-freeze-spec-log.md`：将 skills export 由待补齐项迁移到 V1.3 已立项规格清单。

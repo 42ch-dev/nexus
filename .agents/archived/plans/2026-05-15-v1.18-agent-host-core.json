@@ -21,7 +21,7 @@
     "phase": "v1.18",
     "primary_spec": ".agents/iterations/v1.18-delivery-compass-v1.md",
     "spec_refs": [
-      ".agents/knowledge/specs/daemon-runtime-v1.md"
+      ".agents/knowledge/specs/daemon-runtime.md"
     ],
     "description": "Create nexus-agent-host crate with Hybrid host core, ACP + one native provider (Claude CLI), Managed-only",
     "blocked_by_plan_id": null,

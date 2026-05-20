@@ -1,4 +1,4 @@
-# Nexus ACP Capability Set v1
+# Nexus ACP Capability Set
 
 ## 0. Document position
 
@@ -10,11 +10,11 @@ The same logical `nexus.*` IDs may appear in **platform REST** contracts for **n
 
 - **Nexus runtime** participates on the ACP wire only as ACP Client.
 - **User-side agent** is the ACP Agent.
-- **`nexus42d` / daemon** is a local helper / supervisor. It is not an ACP Agent, not an ACP Server, and must not be advertised via ACP Registry as an agent.
+- **daemon runtime / daemon** is a local helper / supervisor. It is not an ACP Agent, not an ACP Server, and must not be advertised via ACP Registry as an agent.
 
-Related docs: [`architecture.md`](../architecture.md), [`cli-spec-v1.md`](./cli-spec-v1.md).
+Related docs: nexus-platform `v1-spec/architecture.md`, [`cli-spec.md`](./cli-spec.md).
 
-**Naming note**: local binaries use the **`nexus42`** prefix: CLI **`nexus42`**, supervisor daemon **`nexus42d`** (product name **Nexus**; 42ch / Creative Hub). **`nexus.*`** remains the **stable logical capability ID prefix** on this contract surface; capability IDs are not required to match executable names.
+**Naming note**: CLI executable **`nexus42`**; local supervisor is the **daemon runtime** (single-binary mode via `nexus42 daemon start`, crate `nexus-daemon-runtime`). Product name **Nexus** (42ch / Creative Hub). **`nexus.*`** is the stable logical capability ID prefix; capability IDs need not match executable names.
 
 ---
 
@@ -37,7 +37,7 @@ Related docs: [`architecture.md`](../architecture.md), [`cli-spec-v1.md`](./cli-
 ## 2. Topology
 
 ```text
-[User] -> [nexus42 / nexus42d] --ACP Client--> [Local/Remote ACP Agent]
+[User] -> [nexus42 / daemon runtime] --ACP Client--> [Local/Remote ACP Agent]
                |
                +-> [Nexus Local API / IPC]
                +-> [ACP Registry]

@@ -1,10 +1,10 @@
-# Nexus ACP Registry Integration v1
+# Nexus ACP Registry Integration
 
 ## 0. Document position
 
 This document specifies how **Nexus CLI runtime (ACP Client)** integrates with **ACP Registry** for agent discovery, selection, caching, and transport choice.
 
-Related docs: [`architecture.md`](../architecture.md) §6.4–6.5, [`cli-spec-v1.md`](./cli-spec-v1.md) §6.8、§11。
+Related docs: nexus-platform `v1-spec/architecture.md` §6.4–6.5, [`cli-spec.md`](./cli-spec.md) §6.8、§11。
 
 ### 0.1 Upstream registry (canonical source)
 

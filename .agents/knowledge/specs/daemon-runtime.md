@@ -1,20 +1,19 @@
-# Nexus Daemon Runtime Architecture v1
+# Nexus Daemon Runtime Architecture
 
 ## 0. Document position
 
 | Attribute | Value |
 | --- | --- |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
-| **ADR** | `nexus-platform` `v1-spec/adr/` — ADR-026, ADR-027 ([cross-repo links](./README.md)) |
-| **Related** | [cli-spec-v1.md](./cli-spec-v1.md), [local-runtime-boundary-v1.md](./local-runtime-boundary-v1.md), [agent-host-v1.md](./agent-host-v1.md) |
+| **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
 
 ---
 
 ## 1. Objective
 
-Converge on **one user-facing binary** (`nexus42`) with **daemon runtime** as an internal process mode — not a separate product binary (`nexus42d`).
+Converge on **one user-facing binary** (`nexus42`) with **daemon runtime** as an internal process mode — not a separate product binary (daemon runtime).
 
-Pre-release posture (**ADR-023**): no compatibility migration layer required; local state may be wiped.
+Pre-release posture: no compatibility migration layer required; local state may be wiped (see nexus-platform `v1-spec/adr/adr-023-pre-release-cli-breaking-refactor-v1.md` if needed).
 
 ---
 
@@ -27,7 +26,7 @@ nexus42 (CLI — entry, routing, UX)
        ├─ sync client (push/pull; wire: shared/sync-contract-v1)
        ├─ schedule / worker supervision
        ├─ loopback Local API (/v1/local/*)
-       └─ AgentHostSubsystem → nexus-agent-host (see agent-host-v1)
+       └─ AgentHostSubsystem → nexus-agent-host (see agent-host)
 ```
 
 **Rules**:
@@ -44,7 +43,7 @@ nexus42 (CLI — entry, routing, UX)
 | --- | --- | --- |
 | CLI | Parsing, one-shot commands, spawning daemon mode, user errors | Long-lived agent protocol details |
 | Daemon runtime | SQLite handles, sync scheduler, Local API listener, graceful shutdown | Human confirmation UX for destructive ops |
-| Agent host | Managed agent sessions (see agent-host-v1) | Platform HTTP |
+| Agent host | Managed agent sessions (see agent-host) | Platform HTTP |
 
 ---
 
@@ -66,23 +65,23 @@ Default `nexus42 daemon start`: preflight → spawn internal daemon-run mode →
 
 ## 5. ACP role invariant
 
-Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Server and must **not** be advertised via ACP Registry as an agent. ACP Client role stays on the Nexus control plane path ([local-runtime-boundary-v1](./local-runtime-boundary-v1.md) §1).
+Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Server and must **not** be advertised via ACP Registry as an agent. ACP Client role stays on the Nexus control plane path ([local-runtime-boundary](./local-runtime-boundary.md) §1).
 
 ---
 
 ## 6. Observability & errors
 
-- User-facing logs refer to **Nexus daemon runtime**, not legacy `nexus42d` product naming.
+- User-facing logs refer to **Nexus daemon runtime**, not legacy daemon runtime product naming.
 - Errors are owned by layer: CLI (misuse) → runtime (orchestration) → API handlers (request validation).
 
 ---
 
 ## 7. Acceptance criteria (architecture level)
 
-1. Specs and docs do not **require** a standalone `nexus42d` product binary.
+1. Specs and docs do not **require** a standalone daemon runtime product binary.
 2. Health endpoint reachable after foreground and background start.
 3. Stop/restart leaves no orphan runtime without documented force path.
-4. Agent-host subsystem can start under Managed-only rules ([agent-host-v1](./agent-host-v1.md)).
+4. Agent-host subsystem can start under Managed-only rules ([agent-host](./agent-host.md)).
 
 ---
 
@@ -100,7 +99,7 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 
 ### Batch 1: Runtime extraction
 
-- Create `nexus-daemon-runtime`; migrate modules from legacy `nexus42d` layout
+- Create `nexus-daemon-runtime`; migrate modules from legacy daemon runtime layout
 
 ### Batch 2: Single-binary wiring
 
@@ -108,7 +107,7 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 
 ### Batch 3: Remove old daemon crate
 
-- Remove `nexus42d` workspace member and references
+- Remove daemon runtime workspace member and references
 
 ### Batch 4: Naming and hardening
 

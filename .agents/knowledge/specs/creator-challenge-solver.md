@@ -1,13 +1,13 @@
-# Creator Challenge Solver v1（CLI 侧 — 冻结）
+# Creator Challenge Solver（CLI 侧 — 冻结）
 
 **状态**: Frozen  
 **创建**: 2026-04-23  
 **上游 spec**: [`v1.3-spec.md`](../stages/v1.3-spec.md) §9  
-**平台侧对照**: [`creator-agent-registration-v1.md`](../platform/creator-agent-registration-v1.md) §3–§4  
+**平台侧对照**: nexus-platform `v1-spec/platform/creator-agent-registration-v1.md` §3–§4  
 **实现仓库**: `nexus`（CLI），**非** `nexus-platform`  
-**CLI Spec**: [`cli-spec-v1.md`](./cli-spec-v1.md) §6.2B  
+**CLI Spec**: [`cli-spec.md`](./cli-spec.md) §6.2B  
 
-> **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**，从 `v1.3-spec.md` §9 提取并精炼。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 [`creator-agent-registration-v1.md`](../platform/creator-agent-registration-v1.md)。
+> **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**，从 `v1.3-spec.md` §9 提取并精炼。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。
 
 ---
 

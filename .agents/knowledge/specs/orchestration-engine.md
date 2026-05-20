@@ -1,9 +1,9 @@
-# Orchestration Engine — Design Specification v1
+# Orchestration Engine — Design Specification
 
 **Status**: Active — orchestration engine SSOT (`nexus-orchestration`, preset loader, worker IPC, capability registry). Primary wave-0 spec for V1.4; still cited by ongoing schedule/cron/multi-agent work.
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17
-**Scope**: `nexus42d` (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
+**Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
@@ -46,7 +46,7 @@
 
 ### 1.1 Problem Statement
 
-Nexus currently drives ACP agents through **one-shot, human-initiated CLI commands** (`nexus42 agent run <ref>`). The daemon (`nexus42d`) is a passive HTTP backend that holds workspace state, sync plumbing, and the ACP tool-mediation endpoint — it does **not** drive creators, does **not** run scheduled work, and has **no notion of a strategy** that spans multiple ACP sessions and multiple days.
+Nexus currently drives ACP agents through **one-shot, human-initiated CLI commands** (`nexus42 agent run <ref>`). The daemon (daemon runtime) is a passive HTTP backend that holds workspace state, sync plumbing, and the ACP tool-mediation endpoint — it does **not** drive creators, does **not** run scheduled work, and has **no notion of a strategy** that spans multiple ACP sessions and multiple days.
 
 Users need to express creator workflows as configurable, prompt-driven strategies — e.g. *"collect inspiration → brainstorm → outline → draft"* — that the daemon executes **autonomously** across creator activations, with stable promptable identity and resumable execution across daemon restarts.
 
@@ -54,7 +54,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 
 - **Daemon becomes `orchestration engine + capability registry`**: existing HTTP-era capabilities (sync, workspace ops, outbox flush, registry refresh) are **reclassified as first-class capabilities** invokable as graph nodes; HTTP API retreats to a *trigger/query surface* over the same engine.
 - **Strategy shape is hierarchical**: an outer **state machine** (long-lived, cross-session) containing inner **DAG graphs** (short, in-memory prompt/tool call chains) — *graph-of-graphs*.
-- **ACP remains external, but its *execution locus* moves**: the CLI retains interactive `agent run/list/show/probe`; *orchestration-driven* ACP sessions move to **per-creator long-lived CLI worker subprocesses**. `nexus42d` never links the ACP SDK directly.
+- **ACP remains external, but its *execution locus* moves**: the CLI retains interactive `agent run/list/show/probe`; *orchestration-driven* ACP sessions move to **per-creator long-lived CLI worker subprocesses**. daemon runtime never links the ACP SDK directly.
 - **Runtime is `graph-flow` (outer + inner) + custom SQLite `SessionStorage`**: adapted behind a thin trait layer so the upstream `0.2.x` crate is swappable.
 - **Daemon lifecycle is `statig` HSM**: 6-state process lifecycle (`Stopped`/`Starting`/`Running`/`Degraded`/`Stopping`/`Failed`) — closes TD-9.
 - **Presets are filesystem bundles**: YAML manifest + companion Markdown prompt templates; loaded dynamically by name; decoupled from compiled Rust code.
@@ -63,7 +63,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 
 1. New crate `crates/nexus-acp-host`: ACP client logic extracted from `crates/nexus42/src/acp/`, linked by worker only.
 2. New crate `crates/nexus-orchestration`: graph-flow adapter, capability registry, preset loader, SQLite `SessionStorage` impl.
-3. `nexus42d` gains: orchestration engine runtime, statig lifecycle HSM, Worker Manager, IPC server.
+3. daemon runtime gains: orchestration engine runtime, statig lifecycle HSM, Worker Manager, IPC server.
 4. `nexus42` gains: `acp-worker` hidden subcommand (worker entrypoint); `schedule` command group (B-track — not in A's deliverables except a stub that surfaces engine state).
 5. First built-in preset: `_system.maintenance` (mandatory) and one user-facing sample `novel-writing`.
 6. Knowledge docs revised: [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md), [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md).
@@ -108,7 +108,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ### 2.3 Non-goals (explicit)
 
-- **Not an ACP Agent/Server promotion**: `nexus42d` remains not-an-ACP-host. See [acp-client-tech-spec.md](acp-client-tech-spec.md) §2.3 (*worker-delegated hosting*).
+- **Not an ACP Agent/Server promotion**: daemon runtime remains not-an-ACP-host. See [acp-client-tech-spec.md](acp-client-tech-spec.md) §2.3 (*worker-delegated hosting*).
 - **Not a LangChain-style in-memory pipeline**: all engine execution is **durable** and **resumable across daemon restart**; in-memory-only pipelines are explicitly rejected.
 - **Not a replacement for interactive `nexus42 agent run`**: that path stays direct stdio CLI-to-agent; orchestration does not route through it.
 
@@ -120,7 +120,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         nexus42d                                │
+│                         daemon runtime                                │
 │                                                                 │
 │  ┌────────────────┐   ┌──────────────────────┐   ┌───────────┐  │
 │  │   statig HSM   │   │  Orchestration       │   │Capability │  │
@@ -159,7 +159,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 | ------------------------------------------------- | ---- | -------------- | ------------------------------------------------------------------------------------------ |
 | `crates/nexus-acp-host`                           | New  | Yes            | All ACP client logic; used by worker + CLI interactive commands                            |
 | `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`               |
-| `crates/nexus42d`                                 | Ext. | No             | Orchestration engine host, statig lifecycle, Worker Manager, HTTP surface (trigger/query)  |
+| `crates/nexus-daemon-runtime`                                 | Ext. | No             | Orchestration engine host, statig lifecycle, Worker Manager, HTTP surface (trigger/query)  |
 | `crates/nexus42`                                  | Ext. | Yes (via host) | Interactive ACP commands, `acp-worker` subcommand, `schedule` command group (B-track stub) |
 | `crates/nexus-contracts`, `nexus-domain`, …       | Ext. | No             | Unchanged unless compass WS5 (`schemas/` refactor) touches enum/wire surfaces              |
 
@@ -311,7 +311,7 @@ pub struct CapabilityCtx<'a> {
 
 ### 5.2 Built-in capabilities (first release)
 
-All capabilities below are registered at `nexus42d` startup. Adding a new capability is a Rust code change (not user-config) for V1.4. User-authored capabilities are **out of scope** (residual for V1.5+).
+All capabilities below are registered at daemon runtime startup. Adding a new capability is a Rust code change (not user-config) for V1.4. User-authored capabilities are **out of scope** (residual for V1.5+).
 
 | Name                        | Purpose                                                        | Owner crate            |
 | --------------------------- | -------------------------------------------------------------- | ---------------------- |
@@ -733,7 +733,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - `SqliteSessionStorage` + migration added to `nexus-local-db`.
 - `Capability` trait + registry; register **built-ins listed in §5.2 except `acp.*` and `judge.llm`** (those land Phase 3).
 - Worker Manager (spawn/supervise/shutdown) + stdin/stdout JSON-RPC IPC codec.
-- `nexus42d` wires engine at startup (outside any HSM state changes — that's Phase 4).
+- daemon runtime wires engine at startup (outside any HSM state changes — that's Phase 4).
 - New HTTP endpoints (authoritative list added to `acp-client-tech-spec.md` §4.3):
   - `GET  /v1/local/orchestration/sessions`
   - `GET  /v1/local/orchestration/sessions/{session_id}`
@@ -833,7 +833,7 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 | ----------------------------------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
 | `graph-flow` breaking change on 0.3.x / 0.4.x before we reach V1.5             | Medium     | Medium | Adapter trait (§4.2); pin `=0.2.3`; isolated in `nexus-orchestration`; swap impl if needed                           |
 | `statig` breaking change                                                      | Low        | Low    | statig is 0.3.x; HSM description is small (~200 LOC); trivial to re-implement by hand if library diverges            |
-| LocalSet contagion into `nexus42d` axum runtime                               | Low        | High   | **Structural**: `nexus-acp-host` never linked from `nexus42d` (§3.2 crate matrix); enforced by `Cargo.toml` review   |
+| LocalSet contagion into daemon runtime axum runtime                               | Low        | High   | **Structural**: `nexus-acp-host` never linked from daemon runtime (§3.2 crate matrix); enforced by `Cargo.toml` review   |
 | IPC protocol ambiguity → worker hangs                                          | Medium     | High   | Strict JSON-RPC 2.0; request id matching; `worker/health` heartbeat every 5 s; daemon-side timeout 30 s per request   |
 | SQLite session table growth (many paused sessions)                            | Medium     | Low    | Capability `session.compact`; configurable retention for `completed`/`failed` sessions (default: keep 30 days)        |
 | Preset bundle path traversal                                                  | Low        | High   | Loader validates every `template_file` with `path_clean` + `canonicalize` + "within bundle root" check              |
