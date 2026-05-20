@@ -439,7 +439,8 @@ fn r5_platform_guard_sync_status_works() {
         .assert()
         .success();
 
-    // Verify sync status still works (local query, no platform)
+    // Verify sync status still works (local outbox query, no platform needed)
+    // With no active creator configured, it should still respond gracefully.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("sync")
@@ -447,7 +448,7 @@ fn r5_platform_guard_sync_status_works() {
         .env("HOME", home)
         .assert()
         .success()
-        .stdout(predicate::str::contains("Daemon"));
+        .stdout(predicate::str::contains("Sync Status"));
 }
 
 /// Regression R5: `local_only` mode persists across sessions
