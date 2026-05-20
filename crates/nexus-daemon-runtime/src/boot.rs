@@ -113,7 +113,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
 
     // --- Section 2: Workspace initialization ---
-    // Initialize workspace state (async: initializes sync outbox)
+    // Initialize workspace state (database only; no cloud-sync outbox on daemon).
     let mut state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
@@ -440,7 +440,7 @@ fn create_subsystems(
     agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
     use crate::lifecycle::{
-        AgentHostSubsystem, DbSubsystem, HttpSubsystem, SyncSubsystem, WorkerMgrSubsystem,
+        AgentHostSubsystem, DbSubsystem, HttpSubsystem, WorkerMgrSubsystem,
     };
 
     let nexus_home = state.nexus_home();
@@ -452,7 +452,6 @@ fn create_subsystems(
     let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
         Arc::new(HttpSubsystem::new(port)),
         Arc::new(DbSubsystem::new(Some(state.database_path()))),
-        Arc::new(SyncSubsystem::new()),
         Arc::new(WorkerMgrSubsystem::new()),
     ];
 
