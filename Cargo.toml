@@ -7,9 +7,12 @@ members = [
     "crates/nexus-daemon-runtime",
     "crates/nexus-domain",
     "crates/nexus-home-layout",
+    "crates/nexus-kb",
+    "crates/nexus-knowledge",
     "crates/nexus-orchestration",
     "crates/nexus42",
     "crates/nexus-cloud-sync",
+    "crates/nexus-cloud-domain",
     "crates/nexus-local-db",
 ]
 resolver = "2"
