@@ -111,29 +111,24 @@ fn orchestration_routes() -> Router<WorkspaceState> {
         )
 }
 
-/// Creator registration and management routes (V1.20 Batch 5, T27–T32).
+/// Creator management routes — local-only (registration proxy removed in V1.21).
+///
+/// Registration now lives in the CLI via `nexus-cloud-sync`.
+/// The daemon only provides local creator status, active selection, and logout.
 fn creator_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/creators/registrations",
-            post(handlers::creator_registrations::initiate_registration),
-        )
-        .route(
-            "/v1/local/creators/registrations/{code}:verify",
-            post(handlers::creator_registrations::verify_registration),
-        )
-        .route(
             "/v1/local/creators/{creator_id}",
-            get(handlers::creator_registrations::get_creator),
+            get(handlers::creators::get_creator),
         )
         .route(
             "/v1/local/creators/{creator_id}:logout",
-            post(handlers::creator_registrations::logout_creator),
+            post(handlers::creators::logout_creator),
         )
         .route(
             "/v1/local/creators/active",
-            get(handlers::creator_registrations::get_active_creator)
-                .put(handlers::creator_registrations::set_active_creator),
+            get(handlers::creators::get_active_creator)
+                .put(handlers::creators::set_active_creator),
         )
 }
 
@@ -187,15 +182,9 @@ fn workspace_routes() -> Router<WorkspaceState> {
         )
 }
 
-/// Memory and sync routes.
-fn memory_and_sync_routes() -> Router<WorkspaceState> {
+/// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
+fn memory_routes() -> Router<WorkspaceState> {
     Router::new()
-        // Sync
-        .route("/v1/local/sync/status", get(handlers::sync::status))
-        .route("/v1/local/sync/push", post(handlers::sync::push))
-        .route("/v1/local/sync/pull", post(handlers::sync::pull))
-        .route("/v1/local/sync/resolve", post(handlers::sync::resolve))
-        .route("/v1/local/sync/replay", get(handlers::sync::replay))
         // Memory pending review
         .route(
             "/v1/local/memory/pending-review",
@@ -244,7 +233,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(creator_routes())
         .merge(preset_routes())
         .merge(kb_routes())
-        .merge(memory_and_sync_routes())
+        .merge(memory_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))
