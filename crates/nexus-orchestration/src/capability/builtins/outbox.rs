@@ -1,12 +1,17 @@
-//! `outbox.flush` and `outbox.compact` capabilities.
+//! `outbox.flush` and `outbox.compact` capability stubs.
 //!
-//! Owner crate: `nexus-cloud-sync` (flush), `nexus-local-db` (compact).
+//! `outbox.flush` requires the cloud line (`nexus-cloud-sync`).
+//! In the default (local-only) build it returns a permanent error.
+//! `outbox.compact` is a local-only operation (DB cleanup) and
+//! remains a no-op stub until DB wiring is added.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_contracts::local::orchestration::{OutboxCompactInput, OutboxCompactOutput};
-use nexus_contracts::local::orchestration::{OutboxFlushInput, OutboxFlushOutput};
 use serde_json::Value;
+
+/// Cloud-sync-disabled error message (shared with sync.rs).
+const CLOUD_LINE_DISABLED: &str =
+    "cloud line disabled: outbox flush requires nexus-cloud-sync (enable legacy-sync feature)";
 
 // ---------------------------------------------------------------------------
 // outbox.flush
@@ -14,7 +19,8 @@ use serde_json::Value;
 
 /// Flush pending outbox entries.
 ///
-/// **Stub**: returns zero flushed until `nexus-cloud-sync` integration is wired.
+/// **Stub**: returns `PermanentExternal` error in local-only builds.
+/// The real implementation lives in `nexus-cloud-sync`.
 pub struct OutboxFlush;
 
 #[async_trait]
@@ -31,12 +37,8 @@ impl Capability for OutboxFlush {
         r#"{"type":"object","properties":{"flushed":{"type":"integer","minimum":0}},"required":["flushed"],"additionalProperties":false}"#
     }
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: OutboxFlushInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("outbox.flush input: {e}")))?;
-        let output = OutboxFlushOutput { flushed: 0 };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        Err(CapabilityError::PermanentExternal(CLOUD_LINE_DISABLED.to_string()))
     }
 }
 
@@ -47,6 +49,7 @@ impl Capability for OutboxFlush {
 /// Compact outbox table by removing old completed entries.
 ///
 /// **Stub**: returns zero removed until DB integration is wired.
+/// This is a local-only operation and does not require cloud-sync.
 pub struct OutboxCompact;
 
 #[async_trait]
@@ -63,15 +66,10 @@ impl Capability for OutboxCompact {
         r#"{"type":"object","properties":{"removed":{"type":"integer","minimum":0},"retained":{"type":"integer","minimum":0}},"required":["removed","retained"],"additionalProperties":false}"#
     }
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: OutboxCompactInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("outbox.compact input: {e}")))?;
-        let output = OutboxCompactOutput {
-            removed: 0,
-            retained: 0,
-        };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        // Local-only stub: no DB wiring yet.
+        let output = serde_json::json!({"removed": 0, "retained": 0});
+        Ok(output)
     }
 }
 
@@ -80,10 +78,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn outbox_flush_smoke() {
+    async fn outbox_flush_returns_cloud_disabled_error() {
         let cap = OutboxFlush;
-        let out = cap.run(serde_json::json!({"limit": 100})).await.unwrap();
-        assert_eq!(out["flushed"], 0);
+        let err = cap.run(serde_json::json!({"limit": 100})).await.unwrap_err();
+        match err {
+            CapabilityError::PermanentExternal(msg) => {
+                assert!(msg.contains("cloud line disabled"));
+            }
+            other => panic!("expected PermanentExternal, got {other:?}"),
+        }
     }
 
     #[tokio::test]
