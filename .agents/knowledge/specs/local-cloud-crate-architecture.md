@@ -28,7 +28,7 @@
 
 ## 2. Contracts boundary (frozen)
 
-All **wire shapes** and **platform-aligned DTOs** come from the **`nexus-contracts`** crate (§3.1): generated from `schemas/` or hand-written under `src/local/` per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md).
+All **wire shapes** and **platform-aligned DTOs** come from the **`nexus-contracts`** crate (§3.1): generated from `schemas/` (layout: [schemas-directory-layout.md](./schemas-directory-layout.md)) or hand-written under `src/local/` per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md).
 
 | Rule | Detail |
 | --- | --- |
