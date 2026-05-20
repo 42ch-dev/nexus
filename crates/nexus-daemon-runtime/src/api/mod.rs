@@ -127,8 +127,7 @@ fn creator_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/local/creators/active",
-            get(handlers::creators::get_active_creator)
-                .put(handlers::creators::set_active_creator),
+            get(handlers::creators::get_active_creator).put(handlers::creators::set_active_creator),
         )
 }
 
@@ -209,7 +208,7 @@ fn memory_routes() -> Router<WorkspaceState> {
 /// - runtime health, status, daemon lifecycle snapshot
 ///
 /// **Protected routes** (behind `require_api_key` middleware):
-/// - All other routes (workspace, creators, sync, memory,
+/// - All other routes (workspace, creators, memory,
 ///   orchestration, agent-host, monitoring).
 pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Router {
     // --- Unguarded: runtime liveness / status (always accessible) ---
@@ -228,7 +227,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             "/v1/local/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
-        // Workspace + Creator + Preset + KB + Memory/Sync (Batch 4–5 route groups)
+        // Workspace + Creator + Preset + KB + Memory (Batch 4–5 route groups)
         .merge(workspace_routes())
         .merge(creator_routes())
         .merge(preset_routes())
