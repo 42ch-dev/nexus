@@ -1,10 +1,12 @@
-# Meta Schemas
+# Meta Schemas (pointer)
 
-This directory contains meta schemas defining structure and validation rules for all Nexus schemas.
+**There is no `meta.schema.json` under `schemas/`** — the meta-schema type is **local-only** Rust:
 
-## Files
+- `crates/nexus-contracts/src/local/meta.rs` (`nexus_contracts::local::meta::Meta`)
 
-- `meta.schema.json`: Defines required fields (`$schema`, `$id`, `schema_version`, `title`, `type`) for all Nexus schemas
+Moved in V1.4 WS5 per [schemas-wire-platform-sync-boundary.md](../../.agents/knowledge/schemas-wire-platform-sync-boundary.md). Platform does not observe this type on the wire.
+
+This directory remains as a **documentation anchor** only. Do not add wire JSON here unless CI gains a committed meta-schema file for repo-internal validation (still not npm wire surface).
 
 ## Schema URIs and `{NEXUS42_BASE_URL}`
 

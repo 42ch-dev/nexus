@@ -15,6 +15,7 @@ Iteration compasses: [`.agents/iterations/`](../iterations/README.md). Conventio
 | --- | --- | --- |
 | [crate-selection-best-practices.md](crate-selection-best-practices.md) | Rust workspace dependency conventions | Active |
 | [schemas-wire-platform-sync-boundary.md](schemas-wire-platform-sync-boundary.md) | Which `schemas/` types ship to contracts vs local-only Rust | Active |
+| [specs/schemas-directory-layout.md](specs/schemas-directory-layout.md) | `schemas/` folder tree, cloud vs local, rename policy | Active |
 | [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) | Cross-version deferred-feature lifecycle | Active |
 
 ## Specs

@@ -28,9 +28,10 @@ When specs overlap, use this order (higher wins on conflict):
 1. **`AGENTS.md`** (repo root) — naming, contracts, release discipline.
 2. **[local-cloud-crate-architecture.md](local-cloud-crate-architecture.md)** — local vs cloud product lines, crate graph, contracts-first, forbidden daemon deps/API classes.
 3. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — what belongs in `schemas/` vs `nexus-contracts/src/local/`.
-4. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
-5. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
-6. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
+4. **[schemas-directory-layout.md](schemas-directory-layout.md)** — `schemas/` folder names, README rules, `cli-sync` → `cloud-sync` rename policy.
+5. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
+6. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
+7. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → renamed **2026-05-20** to `local-cloud-crate-architecture.md`.
 
@@ -58,6 +59,7 @@ When specs overlap, use this order (higher wins on conflict):
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Schedules and core-context model |
 | [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | Novel-writing sync module |
 | [canonical-hash.md](canonical-hash.md) | Bundle canonical hash (OSS implementation notes) |
+| [schemas-directory-layout.md](schemas-directory-layout.md) | `schemas/` tree layout, cloud vs local folders, rename policy |
 
 ## Archived (superseded)
 

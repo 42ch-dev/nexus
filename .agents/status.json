@@ -28,6 +28,7 @@
         "spec_refs": [
           ".agents/knowledge/specs/local-cloud-crate-architecture.md",
           ".agents/knowledge/schemas-wire-platform-sync-boundary.md",
+          ".agents/knowledge/specs/schemas-directory-layout.md",
           ".agents/knowledge/specs/daemon-runtime.md",
           ".agents/knowledge/specs/creator-challenge-solver.md",
           ".agents/knowledge/specs/orchestration-engine.md"
@@ -38,7 +39,8 @@
           { "index": 3, "name": "C — moment-context-assembly", "covers": ["C1", "C2", "C3"], "status": "planned", "owner": "@fullstack-dev" },
           { "index": 4, "name": "D — daemon isolation", "covers": ["D1", "D2", "D3", "D4", "D5", "D6"], "status": "planned", "owner": "@fullstack-dev" },
           { "index": 5, "name": "E — CLI cloud-line wiring", "covers": ["E1", "E2", "E3", "E4"], "status": "planned", "owner": "@fullstack-dev" },
-          { "index": 6, "name": "F — stubs, tests, docs", "covers": ["F1", "F2", "F3", "F4", "F5"], "status": "planned", "owner": "@qa-engineer" }
+          { "index": 6, "name": "F — stubs, tests, docs", "covers": ["F1", "F2", "F3", "F4", "F5"], "status": "planned", "owner": "@qa-engineer" },
+          { "index": 7, "name": "G — schemas layout & READMEs", "covers": ["G1", "G2", "G3", "G4"], "status": "in_progress", "owner": "@project-manager", "notes": "G1–G2 doc pass landed 2026-05-20; G3 cli-sync→cloud-sync rename optional" }
         ],
         "gates": {
           "qc": "pending",
