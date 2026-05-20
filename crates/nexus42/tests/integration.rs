@@ -183,7 +183,7 @@ fn daemon_status_not_running() {
         .stdout(predicate::str::contains("Not running"));
 }
 
-/// Test sync status works in `local_only` mode (local-only query, no platform guard)
+/// Test sync status works without daemon — now queries local outbox directly
 #[test]
 fn sync_status_without_daemon() {
     Command::cargo_bin("nexus42")
@@ -192,7 +192,7 @@ fn sync_status_without_daemon() {
         .arg("status")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Daemon: not running"));
+        .stdout(predicate::str::contains("Sync Status"));
 }
 
 /// Test sync push is blocked in `local_only` mode with `PlatformOperationProhibited` error
