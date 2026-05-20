@@ -2220,6 +2220,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-cloud-sync"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "nexus-contracts",
+ "nexus-home-layout",
+ "nexus-local-db",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
@@ -2246,12 +2268,12 @@ dependencies = [
  "hyper 1.9.0",
  "hyper-util",
  "nexus-agent-host",
+ "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",
  "nexus-orchestration",
- "nexus-sync",
  "regex",
  "serde",
  "serde_json",
@@ -2341,28 +2363,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-sync"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "hex",
- "nexus-contracts",
- "nexus-home-layout",
- "nexus-local-db",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "nexus42"
 version = "0.1.0"
 dependencies = [
@@ -2376,13 +2376,13 @@ dependencies = [
  "dirs",
  "hex",
  "nexus-acp-host",
+ "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-daemon-runtime",
  "nexus-domain",
  "nexus-home-layout",
  "nexus-local-db",
  "nexus-orchestration",
- "nexus-sync",
  "nix 0.28.0",
  "predicates",
  "regex",
