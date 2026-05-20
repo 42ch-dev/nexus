@@ -35,3 +35,32 @@ sha2 = "0.10"
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
 tempfile = "3"
 wiremock = "0.5"
+
+# Integration tests that require legacy-sync modules (sync_client, platform_client, etc.)
+[[test]]
+name = "body_size_limit"
+required-features = ["legacy-sync"]
+
+[[test]]
+name = "explore_client"
+required-features = ["legacy-sync"]
+
+[[test]]
+name = "publish_client"
+required-features = ["legacy-sync"]
+
+[[test]]
+name = "sync_conflict_resolve"
+required-features = ["legacy-sync"]
+
+[[test]]
+name = "sync_pull_client"
+required-features = ["legacy-sync"]
+
+[[test]]
+name = "sync_push_pull_loop"
+required-features = ["legacy-sync"]
+
+[[test]]
+name = "world_fork_snapshot_client"
+required-features = ["legacy-sync"]
