@@ -7,7 +7,7 @@
 | **Status** | Active — long-term normative SSOT |
 | **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, Local API *classes* allowed/forbidden |
 | **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → [v1.21-local-platform-isolation-delivery-compass-v1.md](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
-| **Related** | [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [../schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) |
+| **Related** | [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) |
 
 **This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and `.agents/plans/`.
 

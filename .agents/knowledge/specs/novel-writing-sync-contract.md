@@ -67,4 +67,4 @@ struct ChapterContent {
 - The sync module produces `StoryBundle`s
 - **Target (long-term):** platform upload is handled by **`nexus-cloud-sync`** when the CLI runs `nexus42 sync push` (cloud product line). The module does **not** call platform HTTP directly.
 - **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6.
-- Contract types follow `@42ch/nexus-contracts` patterns (no duplicate DTOs)
+- Wire bundles use types from `@42ch/nexus-contracts` / `schemas/domain/` + `schemas/cloud-sync/` (no duplicate DTOs)

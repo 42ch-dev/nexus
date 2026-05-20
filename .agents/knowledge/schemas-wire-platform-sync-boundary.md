@@ -36,7 +36,8 @@ V1.20 removed **daemon local HTTP proxies** for `world/*` and `explore/*`; those
 
 ## Drift / housekeeping
 
-- **Stale README risk**: `schemas/domain/README.md` may list schemas that already moved to `local/` — verify against `schemas/domain/*.json` on disk.
+- **README SSOT**: [schemas/README.md](../../schemas/README.md) + per-folder READMEs; layout rules in [specs/schemas-directory-layout.md](specs/schemas-directory-layout.md). Re-verify after moves.
+- **Stale path risk**: do not reference `schemas/cli-sync/`, `schemas/meta/`, or `schemas/acp-runtime/` — removed or renamed (see layout spec §1).
 - **Codegen**: only files under `schemas/` generate TS in `@42ch/nexus-contracts`; platform upgrades follow npm semver + `schema_version`.
 - **Full 64-file audit table**: [archived/knowledge/schemas-boundary.md](../archived/knowledge/schemas-boundary.md) §5.2 (53 wire / 10 local at audit time). Re-run audit before further moves; `rg <TypeName>` on `nexus-platform` before deleting generated TS.
 
