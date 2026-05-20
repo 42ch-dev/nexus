@@ -133,7 +133,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldMembership
         ),
-        // Bundle: generated ONLY from domain/bundle.schema.json (cli-sync variant is
+        // Bundle: generated ONLY from domain/bundle.schema.json (cloud-sync variant is
         // allOf-only, skipped by codegen per SKIP_STRUCT_GENERATION_REL_PATHS)
         entry!("schemas/domain/bundle.schema.json", Strict, Bundle),
         // ── common/ ──────────────────────────────────────────────────────
@@ -144,19 +144,19 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SourceAnchor
         ),
-        // ── cli-sync/ ────────────────────────────────────────────────────
+        // ── cloud-sync/ ──────────────────────────────────────────────────
         entry!(
-            "schemas/cli-sync/conflict-response.schema.json",
+            "schemas/cloud-sync/conflict-response.schema.json",
             Strict,
             ConflictResponse
         ),
         entry!(
-            "schemas/cli-sync/sync-pull-request.schema.json",
+            "schemas/cloud-sync/sync-pull-request.schema.json",
             Strict,
             SyncPullRequest
         ),
         entry!(
-            "schemas/cli-sync/sync-pull-response.schema.json",
+            "schemas/cloud-sync/sync-pull-response.schema.json",
             Strict,
             SyncPullResponse
         ),

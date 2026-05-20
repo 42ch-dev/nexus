@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus42.invalid/schemas/cli-sync/conflict-response.schema.json",
+  "$id": "https://nexus42.invalid/schemas/cloud-sync/conflict-response.schema.json",
   "schema_version": 1,
   "title": "Nexus Sync Conflict Response",
   "description": "Platform conflict response for bundle push operations. HTTP 200 with success:false indicates a conflict requiring resolution. See hard-vs-soft-validation-v1.md §7.",

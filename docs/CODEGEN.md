@@ -22,7 +22,7 @@ All wire types are **generated**, not handwritten. This ensures:
 
 Write JSON Schema in `schemas/domain/*.schema.json`.
 
-**Schema URIs:** committed files use `https://nexus42.invalid/schemas/...` (valid URI placeholder, RFC 6761). In documentation for a future public deployment, the same path is written as **`{NEXUS42_BASE_URL}/schemas/...`** (origin only, no trailing slash). See `schemas/meta/README.md`.
+**Schema URIs:** committed files use `https://nexus42.invalid/schemas/...` (valid URI placeholder, RFC 6761). In documentation for a future public deployment, the same path is written as **`{NEXUS42_BASE_URL}/schemas/...`** (origin only, no trailing slash). Layout: [schemas/README.md](../schemas/README.md).
 
 ```json
 {

@@ -28,14 +28,15 @@ schemas/
 ├── common/                # shared identifiers, enums, timestamps ($ref'd by wire)
 ├── domain/                # wire domain entities + bundle/delta/sync-command
 ├── platform/              # platform HTTP request/response bodies (BFF contracts)
-├── cli-sync/              # CLI ↔ platform sync protocol envelopes (cloud line)
-└── meta/                  # POINTER ONLY — meta-schema moved to local Rust (see §4)
+└── cloud-sync/            # CLI ↔ platform sync protocol (cloud line; was cli-sync/)
 ```
 
-**Removed (do not recreate):**
+**Removed paths (do not recreate):**
 
-- `schemas/acp-runtime/` — local-only; types in `crates/nexus-contracts/src/local/acp_runtime/`.
-- Any daemon `/v1/local/*` DTO as JSON Schema — use `src/local/` (orchestration, schedule, daemon status, registry manifest).
+- `schemas/acp-runtime/` — → `crates/nexus-contracts/src/local/acp_runtime/`
+- `schemas/meta/` — → `crates/nexus-contracts/src/local/meta.rs`
+- `schemas/cli-sync/` — renamed **`cloud-sync/`** (2026-05-20; update `$id` URIs under `https://nexus42.invalid/schemas/cloud-sync/`)
+- Any daemon `/v1/local/*` DTO as JSON Schema — use `src/local/` (orchestration, schedule, daemon status, registry manifest)
 
 ---
 
@@ -44,10 +45,9 @@ schemas/
 | Directory | Product line | Platform observes? | Primary Rust consumer | npm `@42ch/nexus-contracts` |
 | --- | --- | --- | --- | --- |
 | **`platform/`** | Cloud enhancement (platform HTTP) | **Yes** — BFF bodies | `nexus-cloud-sync` (HTTP client), platform TS | **Yes** |
-| **`cli-sync/`** | Cloud enhancement (bundle / pull / conflict) | **Yes** — sync wire | `nexus-cloud-sync` (`legacy-sync`) | **Yes** |
+| **`cloud-sync/`** | Cloud enhancement (bundle / pull / conflict) | **Yes** — sync wire | `nexus-cloud-sync` (`legacy-sync`) | **Yes** |
 | **`domain/`** | Wire entities embedded in bundles & platform bodies | **Yes** (transitive via `$ref`) | All cloud-line crates + generated imports | **Yes** |
 | **`common/`** | Shared wire value objects | **Yes** (when `$ref`'d) | Generated | **Yes** |
-| **`meta/`** | *(none — see §4)* | **No** | — | **No** |
 
 **Local product line** (daemon, orchestration, agent-host) MUST NOT add new subtrees under `schemas/`. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`.
 
@@ -62,11 +62,12 @@ schemas/
 - Grouping is **flat** (no `platform/explore/` subfolders in V1.21) — use filename prefix: `explore-*`, `world-*`, `publish-*`, `notifications-*`, `context-assembly-v1`, etc.
 - Maintain [`platform/README.md`](../../../schemas/platform/README.md) index when adding files.
 
-### 3.2 `cli-sync/` (target rename: `cloud-sync/`)
+### 3.2 `cloud-sync/`
 
 - Sync protocol: bundle envelope view, pull request/response, conflict response.
-- **`domain/bundle.schema.json`** is the **codegen canonical** `Bundle` type; `cli-sync/bundle.schema.json` is a **validation refinement** (see `tooling/codegen/src/schema-loader.ts` `SKIP_STRUCT_GENERATION_REL_PATHS`).
-- **Target folder name (post–V1.21):** `schemas/cloud-sync/` to align with crate `nexus-cloud-sync` and [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md). Rename requires updating every `$id` / `$ref` URI and coordinated `@42ch/nexus-contracts` release (see §5).
+- **`domain/bundle.schema.json`** is the **codegen canonical** `Bundle` type; `cloud-sync/bundle.schema.json` is a **validation refinement** (see `tooling/codegen/src/schema-loader.ts` `SKIP_STRUCT_GENERATION_REL_PATHS`).
+- `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/cloud-sync/...`.
+- Maintain [`cloud-sync/README.md`](../../../schemas/cloud-sync/README.md).
 
 ### 3.3 `domain/`
 
@@ -90,10 +91,7 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 - `source-anchor.schema.json`, `version-ref.schema.json` — value objects §6.
 - Do not add local-only enums here; if platform never observes a enum, put it in `src/local/`.
 
-### 3.5 `meta/` (deprecated path)
-
-- **`meta.schema.json` is not in `schemas/`** — moved to hand-written `crates/nexus-contracts/src/local/meta.rs` (V1.4 WS5).
-- Keep `schemas/meta/README.md` as a **pointer** only; do not restore JSON unless CI validation requires a committed meta-schema file (then document as repo-internal, still **not** wire).
+**Meta schema (local, not a `schemas/` folder):** `crates/nexus-contracts/src/local/meta.rs`. Removed `schemas/meta/` (V1.4 WS5 + V1.21 cleanup).
 
 ---
 
@@ -111,13 +109,13 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 
 ---
 
-## 5. Rename policy: `cli-sync/` → `cloud-sync/`
+## 5. Historical renames
 
-| Phase | Action |
-| --- | --- |
-| **V1.21 (docs)** | Specs and READMEs may say **target** name `cloud-sync/` while disk remains `cli-sync/` |
-| **V1.21 (optional code)** | Mechanical rename + `$id`/`$ref` URI update + `pnpm run codegen` + platform contracts bump |
-| **If deferred** | Document in plan residual; physical path stays `cli-sync/` until next semver-coordinated change |
+| Old path | Current | Done |
+| --- | --- | --- |
+| `schemas/cli-sync/` | `schemas/cloud-sync/` | 2026-05-20 — `$id` URIs updated |
+| `schemas/acp-runtime/` | `src/local/acp_runtime/` | V1.4 WS5 |
+| `schemas/meta/` | `src/local/meta.rs` | V1.4 WS5; directory removed V1.21 |
 
 **Do not rename** `platform/` → `cloud-platform/` (platform HTTP naming is stable in v1-spec).
 
@@ -125,7 +123,7 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 
 ## 6. Related platform paths
 
-Platform prose may still say `v1-spec/cli-sync/` for sync **protocol** documents. That is the **platform repo folder name**, independent of OSS `schemas/cli-sync/` directory name. When renaming OSS folders, add a one-line cross-reference in platform ADR or sync-contract doc in the **same release train**.
+Platform prose may still say `v1-spec/cli-sync/` for sync **protocol** documents. That is the **platform repo folder name**, independent of OSS `schemas/cloud-sync/`. Coordinate `@42ch/nexus-contracts` semver when platform consumes regenerated types after URI path changes.
 
 ---
 

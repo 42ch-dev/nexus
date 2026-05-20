@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus42.invalid/schemas/cli-sync/bundle.schema.json",
+  "$id": "https://nexus42.invalid/schemas/cloud-sync/bundle.schema.json",
   "schema_version": 1,
   "title": "Nexus CLI Sync Bundle (V1.0)",
   "description": "V1.0 sync-specific bundle view for CLI <-> Platform synchronization. Reuses domain bundle envelope with sync-specific constraints.\n\nVERIFICATION NOTE (SYNC-R8): allOf + properties pattern is intentional. Codegen skips this schema (schema-loader.ts SKIP_STRUCT_GENERATION_REL_PATHS). Domain bundle.schema.json generates the canonical Bundle type. This schema validates CLI-specific constraints at runtime but does not create duplicate types. Property overrides add sync-context descriptions; bundle_type enum matches common.schema.json#/definitions/BundleType. Verified 2026-04-08.",

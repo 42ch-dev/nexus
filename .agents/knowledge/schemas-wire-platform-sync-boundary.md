@@ -11,7 +11,7 @@
 A JSON Schema file belongs in `schemas/` **only if** `nexus-platform` observes the type on a **wire** boundary:
 
 - Platform HTTP BFF bodies (`schemas/platform/*`)
-- CLI ↔ platform sync payloads (`schemas/cli-sync/*`, bundle/delta types in `schemas/domain/*` carried on sync)
+- CLI ↔ platform sync payloads (`schemas/cloud-sync/*`, bundle/delta types in `schemas/domain/*` carried on sync)
 - Any payload the OSS CLI/daemon sends to platform that platform must parse
 
 Everything else is **local**: hand-written Rust under `crates/nexus-contracts/src/local/` — **no** `pnpm run codegen` entry in `@42ch/nexus-contracts` npm surface for platform.
@@ -20,18 +20,17 @@ Everything else is **local**: hand-written Rust under `crates/nexus-contracts/sr
 
 ## Directory layout (normative)
 
-Folder names, product-line mapping, and rename policy (`cli-sync/` → target `cloud-sync/`): **[specs/schemas-directory-layout.md](specs/schemas-directory-layout.md)**. On-disk index: [schemas/README.md](../../schemas/README.md).
+Folder names and product-line mapping: **[specs/schemas-directory-layout.md](specs/schemas-directory-layout.md)**. On-disk index: [schemas/README.md](../../schemas/README.md).
 
 ## What still lives in `schemas/` today (2026-05)
 
 | Tree | Platform sync? | Notes |
 | --- | --- | --- |
 | `schemas/platform/*` | **Yes** | Platform HTTP request/response contracts (flat; prefix grouping) |
-| `schemas/cli-sync/*` | **Yes** | Bundle envelope, pull, conflict — cloud sync wire (target dir name `cloud-sync/`) |
+| `schemas/cloud-sync/*` | **Yes** | Bundle envelope, pull, conflict — cloud sync wire |
 | `schemas/domain/*` | **Yes** | Wire entities in bundles / platform bodies — **not** the Rust `nexus-domain` crate |
 | `schemas/common/*` | **Yes** (when `$ref`'d by wire) | Shared identifiers and value objects |
-| `schemas/meta/` | **No** | README pointer only; `Meta` type is `src/local/meta.rs` |
-| *(removed from `schemas/`)* | **No** | `acp-runtime/`, `outbox_entry`, `daemon_status_v2`, `registry_manifest`, schedule/orchestration HTTP types → `src/local/` |
+| *(removed from `schemas/`)* | **No** | `cli-sync/` (→ `cloud-sync/`), `acp-runtime/`, `meta/`, `outbox_entry`, daemon/orchestration types → `src/local/` |
 
 V1.20 removed **daemon local HTTP proxies** for `world/*` and `explore/*`; those operations use **platform HTTP** directly. The `schemas/platform/world-*` and `schemas/platform/explore-*` files remain **wire** for platform — they were never “daemon-only” contracts.
 
