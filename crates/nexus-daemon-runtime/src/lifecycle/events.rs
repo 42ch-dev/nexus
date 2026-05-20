@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 /// Subsystem identifier for health tracking and event payloads.
 ///
-/// Note: `Http`, `Db`, `Sync`, `Engine`, `WorkerMgr` are mandatory;
-/// `AcpRegistry` is optional (not required for `Running` transition).
+/// Note: `Http`, `Db`, `Engine`, `WorkerMgr` are mandatory;
+/// `Sync`, `AcpRegistry` are optional (not required for `Running` transition).
+/// `Sync` retained for backward-compatible health reporting (always Down on local daemon).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubsystemKind {
@@ -27,7 +28,6 @@ impl SubsystemKind {
         &[
             Self::Http,
             Self::Db,
-            Self::Sync,
             Self::Engine,
             Self::WorkerMgr,
         ]
