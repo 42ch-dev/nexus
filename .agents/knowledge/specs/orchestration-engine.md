@@ -7,9 +7,9 @@
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
-- [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Local API additions; §11 `nexus-acp-host` crate spec
-- [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — full 6-state statig HSM closing TD-9
-- [architecture-alignment-review.md](archived/knowledge/architecture-alignment-review.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
+- [acp-client-tech-spec.md](acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Local API additions; §11 `nexus-acp-host` crate spec
+- [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — full 6-state statig HSM closing TD-9
+- [architecture-alignment-review.md](../../archived/knowledge/architecture-alignment-review.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
 
 **Non-goals** (explicit):
 
@@ -17,9 +17,9 @@
 - LLM-driven `core_context` summarisation / auto-iteration — V1.4 reserves the data-model variant but does not implement the capability (see [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §11); V1.5+.
 - Schedule cron / wall-clock triggers — V1.5+ (schema ready in V1.4).
 - Preset third-party registry / signing / publish — V1.5+.
-- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in [schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md); parallel to WS2 of that compass.
+- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in [schemas-boundary.md](../../archived/knowledge/schemas-boundary.md); parallel to WS2 of that compass.
 
-> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 ([schemas-boundary.md](../archived/../archived/knowledge/schemas-boundary.md)); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
+> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 ([schemas-boundary.md](../../archived/knowledge/schemas-boundary.md)); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
 
 ---
 
@@ -66,7 +66,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 3. daemon runtime gains: orchestration engine runtime, statig lifecycle HSM, Worker Manager, IPC server.
 4. `nexus42` gains: `acp-worker` hidden subcommand (worker entrypoint); `schedule` command group (B-track — not in A's deliverables except a stub that surfaces engine state).
 5. First built-in preset: `_system.maintenance` (mandatory) and one user-facing sample `novel-writing`.
-6. Knowledge docs revised: [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md), [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md).
+6. Knowledge docs revised: [acp-client-tech-spec.md](acp-client-tech-spec.md), [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md).
 
 ### 1.4 Effort (agent-oriented)
 
@@ -232,7 +232,7 @@ impl graph_flow::SessionStorage for SqliteSessionStorage {
 }
 ```
 
-**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
+**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../../plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices.md`](../crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
 
 Schema (new table in the unified `state.db` owned by `nexus-local-db`; schema migration file added under `crates/nexus-local-db/migrations/`):
 
@@ -820,8 +820,8 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 | v1 (preserved, now carries superseded-by pointer) | v2 (new; authoritative)                                         |
 | ------------------------------------------------- | --------------------------------------------------------------- |
-| [daemon-lifecycle-api-legacy.md](archived/knowledge/daemon-lifecycle-api-legacy.md) (archived) | [daemon-lifecycle-api.md](daemon-lifecycle-api.md)  |
-| [acp-client-tech-spec-legacy.md](archived/knowledge/acp-client-tech-spec-legacy.md) (archived) | [acp-client-tech-spec.md](acp-client-tech-spec.md)  |
+| [daemon-lifecycle-api-legacy.md](../../archived/knowledge/daemon-lifecycle-api-legacy.md) (archived) | [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md)  |
+| [acp-client-tech-spec-legacy.md](../../archived/knowledge/acp-client-tech-spec-legacy.md) (archived) | [acp-client-tech-spec.md](acp-client-tech-spec.md)  |
 
 **Archived 2026-04-17** (historical): v1 lifecycle/ACP companion files moved to `.agents/archived/knowledge/`. This orchestration-engine spec remains **active** under `.agents/knowledge/specs/` (structure paths in §3–§8 may lag implementation; semantics remain authoritative).
 
@@ -848,12 +848,12 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 Internal:
 
-- [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md) — companion spec for ACP host split and worker-delegated hosting
-- [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — companion spec for the 6-state HSM (closes TD-9)
-- [architecture-alignment-review.md](archived/knowledge/architecture-alignment-review.md) — TD matrix; §2.6 TD-9 row updated to "Resolved via v2" after Phase 4 ships
-- [local-db-refactor.md](archived/knowledge/local-db-refactor.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See [local-db-refactor.md §4](archived/knowledge/local-db-refactor.md#4-modularization-plan) for pool sharing model.
-- [acp-client-tech-spec-legacy.md](archived/knowledge/acp-client-tech-spec-legacy.md) — archived; do not rely on directly (see Superseded header)
-- [daemon-lifecycle-api-legacy.md](archived/knowledge/daemon-lifecycle-api-legacy.md) — archived; do not rely on directly (see Superseded header)
+- [acp-client-tech-spec.md](acp-client-tech-spec.md) — companion spec for ACP host split and worker-delegated hosting
+- [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — companion spec for the 6-state HSM (closes TD-9)
+- [architecture-alignment-review.md](../../archived/knowledge/architecture-alignment-review.md) — TD matrix; §2.6 TD-9 row updated to "Resolved via v2" after Phase 4 ships
+- [local-db-refactor.md](../../archived/knowledge/local-db-refactor.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See [local-db-refactor.md §4](../../archived/knowledge/local-db-refactor.md#4-modularization-plan) for pool sharing model.
+- [acp-client-tech-spec-legacy.md](../../archived/knowledge/acp-client-tech-spec-legacy.md) — archived; do not rely on directly (see Superseded header)
+- [daemon-lifecycle-api-legacy.md](../../archived/knowledge/daemon-lifecycle-api-legacy.md) — archived; do not rely on directly (see Superseded header)
 
 External (stable, public):
 
@@ -865,4 +865,4 @@ External (stable, public):
 
 ---
 
-*End of specification. The companion knowledge documents ([daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md), [acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
+*End of specification. The companion knowledge documents ([daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*

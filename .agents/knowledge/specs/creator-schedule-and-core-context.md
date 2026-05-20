@@ -550,7 +550,7 @@ Internal:
 - [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) — program scope (WS7)
 - [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) — confirms Schedule types are local
 - [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
-- [daemon-lifecycle-api.md](archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`
+- [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`
 
 External:
 
