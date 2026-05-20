@@ -4,8 +4,6 @@ Implementation-detail specs and reusable technical design artifacts for the Nexu
 
 **Not here:** iteration compasses (`*-delivery-compass-*`, legacy `v1.*` program docs) → [`.agents/iterations/`](../iterations/README.md). **Not here:** end-user docs → `docs/`. Harness boundaries: [`.agents/AGENTS.md`](../AGENTS.md).
 
-**Local OSS authority split:** Frozen product/architecture contracts remain in `nexus-platform` `v1-spec/local/`. **This directory** is SSOT for what is **wired today** (daemon routes, migrations, crate members, sync pipeline status). Superseded snapshots → [`.agents/archived/knowledge/`](../archived/knowledge/README.md) only.
-
 **Index:** active documents in [README.md](README.md); archived documents in [`.agents/archived/knowledge/README.md`](archived/knowledge/README.md).
 
 ## File naming

@@ -65,6 +65,6 @@ struct ChapterContent {
 ## 5. Platform Handoff Boundary
 
 - The sync module produces `StoryBundle`s
-- Platform upload uses the cloud sync pipeline (`nexus-cloud-sync`, migrating from `nexus-sync`). Daemon **no longer** exposes `POST /v1/local/sync/push` (V1.21+); see [cloud-sync-and-local-sync-status.md](./cloud-sync-and-local-sync-status.md).
+- The actual platform upload is handled by the existing `nexus-sync` crate via `POST /v1/local/sync/push`
 - The sync module does NOT call platform APIs directly
 - Contract types follow `@42ch/nexus-contracts` patterns (no duplicate DTOs)
