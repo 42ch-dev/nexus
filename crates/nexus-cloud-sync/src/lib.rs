@@ -33,7 +33,7 @@
 //! - [`sync_client`]: HTTP client for platform sync API
 //! - [`platform_client`]: HTTP client for platform registration/verification
 //! - [`pull_apply`]: Apply platform pull responses to local outbox
-//! - [`pool`]: SQLite connection pool for outbox
+//! - [`pool`]: `SQLite` connection pool for outbox
 //! - [`partial_apply`]: Partial apply semantics (Phase A/B)
 
 // ── Always-available modules ──────────────────────────────────────────

@@ -1,7 +1,7 @@
 //! Integration tests: platform Explore browse/search clients (wiremock).
 
-use nexus_contracts::{ExploreBrowseRequest, ExploreSearchRequest};
 use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_contracts::{ExploreBrowseRequest, ExploreSearchRequest};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

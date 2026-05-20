@@ -1,9 +1,9 @@
 //! Golden-style integration: mock platform accepts push then returns an empty pull window.
 
-use nexus_contracts::generated::SyncPullRequest;
-use nexus_contracts::{DeltaOperation, DeltaType};
 use nexus_cloud_sync::delta_bundle::{BundleBuilder, LocalDelta};
 use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_contracts::generated::SyncPullRequest;
+use nexus_contracts::{DeltaOperation, DeltaType};
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

@@ -15,8 +15,8 @@ use crate::creator_identity::{self, CreatorIdentityEntry};
 use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
-use nexus_contracts::Creator;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
+use nexus_contracts::Creator;
 use std::path::PathBuf;
 
 /// Default registration source for the CLI.
@@ -1509,7 +1509,9 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
 mod tests {
     use super::*;
     use crate::auth::{AuthStore, CreatorAuthState};
-    use nexus_cloud_sync::platform_client::{classify_platform_error, StagedPlatformError, VerifyStatus};
+    use nexus_cloud_sync::platform_client::{
+        classify_platform_error, StagedPlatformError, VerifyStatus,
+    };
 
     /// Helper: create an `AuthStore` with a known access token.
     fn store_with_token(creator_id: &str, token: &str) -> AuthStore {
@@ -2078,11 +2080,16 @@ mod tests {
     #[derive(Debug)]
     struct StagedE2eResult {
         /// Gate-B1 outcome: platform register call result.
-        register:
-            std::result::Result<nexus_cloud_sync::platform_client::RegisterResponse, StagedPlatformError>,
+        register: std::result::Result<
+            nexus_cloud_sync::platform_client::RegisterResponse,
+            StagedPlatformError,
+        >,
         /// Gate-B2 outcome: platform verify call result (None if register failed).
         verify: Option<
-            std::result::Result<nexus_cloud_sync::platform_client::VerifyResponse, StagedPlatformError>,
+            std::result::Result<
+                nexus_cloud_sync::platform_client::VerifyResponse,
+                StagedPlatformError,
+            >,
         >,
     }
 

@@ -23,10 +23,6 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
-use nexus_contracts::{
-    CommandOrigin, CommandStatus, CommandType, DeltaOperation, DeltaType, ManuscriptPhase,
-    SyncCommand, SyncPullRequest,
-};
 use nexus_cloud_sync::delta_bundle::{BundleBuilder, LocalDelta};
 use nexus_cloud_sync::precheck::{
     precheck_bundle_with_auth, AuthContext, LocalState, PrecheckReport, PrecheckResult,
@@ -34,6 +30,10 @@ use nexus_cloud_sync::precheck::{
 };
 use nexus_cloud_sync::pull_apply::apply_pull_response_to_outbox;
 use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_contracts::{
+    CommandOrigin, CommandStatus, CommandType, DeltaOperation, DeltaType, ManuscriptPhase,
+    SyncCommand, SyncPullRequest,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
