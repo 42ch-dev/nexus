@@ -9,6 +9,12 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+## Enable the legacy cloud sync pipeline (outbox, push/pull, platform HTTP).
+## Daemon consumers should NOT enable this — it's for CLI/cloud-line only.
+legacy-sync = []
+
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
