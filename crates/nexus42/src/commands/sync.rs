@@ -169,14 +169,10 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
         } => {
             runtime_guard::require_platform(&config.runtime_mode(), "sync push")?;
 
-            let creator_id = creator_id.or_else(|| config.active_creator_id.clone());
-            let creator_id = match creator_id {
-                Some(id) => id,
-                None => {
-                    return Err(crate::errors::CliError::Other(
-                        "Creator ID required for sync push. Use --creator-id or set active creator.".to_string(),
-                    ));
-                }
+            let Some(creator_id) = creator_id.or_else(|| config.active_creator_id.clone()) else {
+                return Err(crate::errors::CliError::Other(
+                    "Creator ID required for sync push. Use --creator-id or set active creator.".to_string(),
+                ));
             };
 
             let workspace_id = workspace_id.unwrap_or_else(|| {
