@@ -16,6 +16,7 @@ members = [
     "crates/nexus-cloud-sync",
     "crates/nexus-cloud-domain",
     "crates/nexus-local-db",
+    "crates/nexus-moment-context-assembly",
 ]
 resolver = "2"
 
