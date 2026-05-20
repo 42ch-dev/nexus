@@ -2211,7 +2211,6 @@ dependencies = [
  "hyper 1.9.0",
  "hyper-util",
  "nexus-agent-host",
- "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator",
  "nexus-home-layout",

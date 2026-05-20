@@ -25,12 +25,7 @@ impl SubsystemKind {
     /// Returns all mandatory subsystems (required for `Running` transition).
     #[must_use]
     pub const fn mandatory() -> &'static [Self] {
-        &[
-            Self::Http,
-            Self::Db,
-            Self::Engine,
-            Self::WorkerMgr,
-        ]
+        &[Self::Http, Self::Db, Self::Engine, Self::WorkerMgr]
     }
 
     /// Returns true if this subsystem is mandatory.

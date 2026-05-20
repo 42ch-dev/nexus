@@ -439,9 +439,7 @@ fn create_subsystems(
     port: u16,
     agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
-    use crate::lifecycle::{
-        AgentHostSubsystem, DbSubsystem, HttpSubsystem, WorkerMgrSubsystem,
-    };
+    use crate::lifecycle::{AgentHostSubsystem, DbSubsystem, HttpSubsystem, WorkerMgrSubsystem};
 
     let nexus_home = state.nexus_home();
     let agent_host_config_path = nexus_home.join("agent-host").join("config.toml");
