@@ -316,7 +316,7 @@ Before editing any of the above in a way that changes crate selection, update **
 
 - Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
 - V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](../iterations/v1.4-delivery-compass-v1.md)
-- Orchestration engine SSOT: [`orchestration-engine.md`](../knowledge/orchestration-engine.md)
+- Orchestration engine SSOT: [`orchestration-engine.md`](../knowledge/specs/orchestration-engine.md)
 - Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md)
 - Local DB ownership: [`local-db-refactor.md`](archived/knowledge/local-db-refactor.md)
 - Device flow deferral: [`device-flow-oauth-scope-v1.md`](device-flow-oauth-scope-v1.md)

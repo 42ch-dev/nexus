@@ -274,7 +274,7 @@ This sketch is the PM's best-guess starting point for WS5's auditor. It is **not
 **Expected orchestration-era additions (V1.4 WS2/WS3 new; all local):**
 
 - Preset manifest types (`PresetManifest`, `StateDefinition`, `GraphNode`, …)
-- Capability input/output schemas (declared in Rust constants per ../../knowledge/orchestration-engine.md §5.3)
+- Capability input/output schemas (declared in Rust constants per ../../knowledge/specs/orchestration-engine.md §5.3)
 - Orchestration session state records (rows in `orchestration_sessions` table)
 - Worker IPC frame types
 - Creator Schedule types (V1.4 WS7; see [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md))
@@ -358,7 +358,7 @@ If this doc's rule changes in a way that materially affects platform (e.g. recla
 Internal:
 
 - [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 — scope, milestones, evidence
-- [orchestration-engine.md](../../knowledge/orchestration-engine.md) §5.3 — capability schemas are local per this doc
+- [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §5.3 — capability schemas are local per this doc
 - [architecture-alignment-review.md](architecture-alignment-review.md) — live TD resolution matrix
 
 External (v1-spec, read via `.agents/local-paths.json → specs_root.v1-spec`):

@@ -22,7 +22,7 @@
 //! `call_json_rpc` method is preserved for backward compatibility — it
 //! delegates to the internal `IpcClient`.
 //!
-//! Design: `.agents/knowledge/orchestration-engine.md` §6.1, §6.5.
+//! Design: `.agents/knowledge/specs/orchestration-engine.md` §6.1, §6.5.
 
 use crate::worker::ipc::IpcClient;
 use crate::worker::transport::StdioTransport;

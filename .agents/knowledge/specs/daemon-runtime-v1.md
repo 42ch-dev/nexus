@@ -1,0 +1,116 @@
+# Nexus Daemon Runtime Architecture v1
+
+## 0. Document position
+
+| Attribute | Value |
+| --- | --- |
+| **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
+| **ADR** | `nexus-platform` `v1-spec/adr/` — ADR-026, ADR-027 ([cross-repo links](./README.md)) |
+| **Related** | [cli-spec-v1.md](./cli-spec-v1.md), [local-runtime-boundary-v1.md](./local-runtime-boundary-v1.md), [agent-host-v1.md](./agent-host-v1.md) |
+
+---
+
+## 1. Objective
+
+Converge on **one user-facing binary** (`nexus42`) with **daemon runtime** as an internal process mode — not a separate product binary (`nexus42d`).
+
+Pre-release posture (**ADR-023**): no compatibility migration layer required; local state may be wiped.
+
+---
+
+## 2. Normative layering
+
+```text
+nexus42 (CLI — entry, routing, UX)
+  └─ nexus-daemon-runtime (library — lifecycle, subsystems, local API)
+       ├─ local DB / workspace handles
+       ├─ sync client (push/pull; wire: shared/sync-contract-v1)
+       ├─ schedule / worker supervision
+       ├─ loopback Local API (/v1/local/*)
+       └─ AgentHostSubsystem → nexus-agent-host (see agent-host-v1)
+```
+
+**Rules**:
+
+1. Only **`nexus42`** is a user-facing executable artifact.
+2. **Daemon** is started via CLI (`nexus42 daemon start`, foreground or background); background mode may use a hidden internal entry (implementation detail in knowledge SSOT).
+3. **Local API** remains loopback HTTP and/or Unix socket; clients must not assume a separate daemon product binary.
+
+---
+
+## 3. Subsystem responsibilities
+
+| Subsystem | Owns | Does not own |
+| --- | --- | --- |
+| CLI | Parsing, one-shot commands, spawning daemon mode, user errors | Long-lived agent protocol details |
+| Daemon runtime | SQLite handles, sync scheduler, Local API listener, graceful shutdown | Human confirmation UX for destructive ops |
+| Agent host | Managed agent sessions (see agent-host-v1) | Platform HTTP |
+
+---
+
+## 4. Process model
+
+### 4.1 Foreground
+
+`nexus42 daemon start --foreground` runs the runtime in the current process until shutdown.
+
+### 4.2 Background
+
+Default `nexus42 daemon start`: preflight → spawn internal daemon-run mode → parent exits after startup gate. **Semantics** are normative; exact argv names are implementation SSOT.
+
+### 4.3 Control plane
+
+`status`, `stop`, `restart` coordinate via runtime health and process supervision (parity with prior daemon product behavior).
+
+---
+
+## 5. ACP role invariant
+
+Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Server and must **not** be advertised via ACP Registry as an agent. ACP Client role stays on the Nexus control plane path ([local-runtime-boundary-v1](./local-runtime-boundary-v1.md) §1).
+
+---
+
+## 6. Observability & errors
+
+- User-facing logs refer to **Nexus daemon runtime**, not legacy `nexus42d` product naming.
+- Errors are owned by layer: CLI (misuse) → runtime (orchestration) → API handlers (request validation).
+
+---
+
+## 7. Acceptance criteria (architecture level)
+
+1. Specs and docs do not **require** a standalone `nexus42d` product binary.
+2. Health endpoint reachable after foreground and background start.
+3. Stop/restart leaves no orphan runtime without documented force path.
+4. Agent-host subsystem can start under Managed-only rules ([agent-host-v1](./agent-host-v1.md)).
+
+---
+
+## 8. Verification matrix
+
+1. `nexus42 daemon start --foreground` boots and serves health endpoint
+2. Default background start returns and runtime stays alive
+3. `status` sees running runtime
+4. `stop` terminates runtime cleanly
+5. `restart` replaces process and health returns
+6. ACP-related runtime paths continue to function
+7. Schedule supervisor boot and shutdown hooks remain valid
+
+## 9. Implementation batches
+
+### Batch 1: Runtime extraction
+
+- Create `nexus-daemon-runtime`; migrate modules from legacy `nexus42d` layout
+
+### Batch 2: Single-binary wiring
+
+- Wire `nexus42 daemon` to runtime / internal-run mode
+
+### Batch 3: Remove old daemon crate
+
+- Remove `nexus42d` workspace member and references
+
+### Batch 4: Naming and hardening
+
+- Unify user-facing wording and logs; finalize reliability edge cases
+

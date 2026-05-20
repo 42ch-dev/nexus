@@ -1,41 +1,43 @@
-# Knowledge — Implementation SSOT
+# Knowledge — AGENTS.md
 
-Implementation-detail specs and reusable technical design artifacts for the Nexus OSS repo.
+Harness knowledge directory for the Nexus OSS repo.
 
-**Not here:** iteration compasses (`*-delivery-compass-*`, legacy `v1.*` program docs) → [`.agents/iterations/`](../iterations/README.md). **Not here:** end-user docs → `docs/`. Harness boundaries: [`.agents/AGENTS.md`](../AGENTS.md).
+## Two subtrees
 
-**Index:** active documents in [README.md](README.md); archived documents in [`.agents/archived/knowledge/README.md`](archived/knowledge/README.md).
+| Subtree | Path | Use for |
+| --- | --- | --- |
+| **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon, ACP, orchestration, sync feature contracts, frozen `v1` local module (flat under `specs/`) |
+| **Knowledge (root)** | This directory (files directly under `knowledge/`, not under `specs/`) | **Rules and reference**: dependency conventions, schema↔platform boundary, cross-version trackers, maintenance indexes |
 
-## File naming
+**Not here:** iteration compasses → [`.agents/iterations/`](../iterations/README.md). End-user docs → `docs/`.
 
-Use **`<topic>-<qualifier>.md`** (kebab-case, no version suffix in the filename).
+**Index:** specs in [`specs/README.md`](specs/README.md); knowledge-root docs in [`README.md`](README.md). Archived: [`.agents/archived/knowledge/`](../archived/knowledge/README.md).
 
-Examples: `daemon-api-workspace-write-architecture.md`, `novel-writing-sync-contract.md`, `crate-selection-best-practices.md`.
+## Where to add new documents
 
-Put revision or status in the document header (frontmatter or a short metadata block), for example `Status`, `Supersedes`, or `Revision`. Do not encode version numbers in the path; rename the file only when the topic or qualifier itself changes.
+| Document kind | Location | Naming |
+| --- | --- | --- |
+| CLI / daemon / ACP / local DB **normative** v1 | `specs/` | `*-v1.md` (frozen module convention) |
+| Feature or subsystem **architecture / contract** | `specs/` | `<topic>-<qualifier>.md` (kebab-case) |
+| Workspace dependency / codegen boundary / trackers | `knowledge/` (root) | same kebab-case pattern |
 
-Legacy files may still carry a `-v1` suffix; treat that as historical naming, not a pattern for new documents.
-
-## Adding a document
-
-1. Pick a descriptive `<topic>-<qualifier>.md` name.
-2. Follow reachability rules in [`.agents/AGENTS.md`](../AGENTS.md) (*Documentation & Plans*) — no references to paths outside this repository.
-3. Add a row to the **Index (active)** in [README.md](README.md) (source plan, description, status).
-4. If the document is a plan output, record the path in `status.json` under that plan's `metadata` (e.g. `wave_0_spec`, `spec_refs`).
+Put `Status`, `Supersedes`, or `Revision` in the document header — not in the directory name.
 
 ## Reading during implementation
 
-Before writing implementation code for a plan:
-
-1. Read `status.json` for `metadata.wave_0_spec` or `metadata.spec_refs` (may point to `knowledge/` or `iterations/`).
-2. Read every referenced document in scope.
-3. Do not silently diverge from in-scope knowledge/iteration specs; escalate conflicts via plan residual or spec update.
+1. Read `status.json` `metadata.wave_0_spec` / `metadata.spec_refs` (paths may point to `knowledge/specs/` or `iterations/`).
+2. For OSS runtime behavior, start with **`specs/*-v1.md`** when a frozen v1 doc exists; then related **`specs/*.md`**.
+3. Use **knowledge-root** docs for schema boundary and crate policy only.
+4. Do not silently diverge; escalate via plan residual or spec update.
 
 ## Archiving
 
-When a document is fully consumed by implementation or merged into a newer SSOT:
+When a spec is superseded:
 
-1. `git mv` the file to `.agents/archived/knowledge/` (do not delete).
-2. Remove its row from [README.md](README.md) **Index (active)**; add a row to [`.agents/archived/knowledge/README.md`](archived/knowledge/README.md).
-3. Update all in-repo paths (plan `.md`, archived plan JSON, cross-links in other specs).
-4. Keep `archived/plans/`, `archived/residuals/`, and `archived/knowledge/` as separate subtrees.
+1. `git mv` to `.agents/archived/knowledge/`.
+2. Update [`specs/README.md`](specs/README.md) or [`README.md`](README.md) indexes.
+3. Fix in-repo links in plans and other specs.
+
+## OSS local normative SSOT (2026-05-20)
+
+Former `nexus-platform` `.agents/designs/v1-spec/local/*.md` live **flat** under **`specs/`**. Edit OSS local normative text **here** only. Platform removed that tree per **ADR-029**; platform `v1-spec/README.md` §2 links back to this directory.

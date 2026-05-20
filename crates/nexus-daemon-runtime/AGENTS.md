@@ -11,7 +11,7 @@ and local API transport. It is a **library crate only** — no standalone binary
 
 ## Architecture Reference
 
-See `.agents/knowledge/nexus42-single-binary-daemon-runtime-architecture.md` — Sections 2.2, 3.1, 3.3
+See `.agents/knowledge/specs/daemon-runtime-v1.md` — Sections 2.2, 3.1, 3.3
 for the layering, crate structure, and workspace cleanup governing this crate.
 
 ## sqlx Compile-Time Macros (Mandatory)
