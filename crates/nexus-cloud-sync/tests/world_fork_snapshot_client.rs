@@ -1,7 +1,7 @@
 //! Integration tests: platform world fork / snapshot clients (wiremock).
 
-use nexus_contracts::{WorldForkRequest, WorldSnapshotRequest};
 use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_contracts::{WorldForkRequest, WorldSnapshotRequest};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

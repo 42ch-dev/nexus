@@ -355,12 +355,11 @@ fn build_platform_client(
         .and_then(|v| v.as_str())
         .unwrap_or("daemon");
 
-    nexus_cloud_sync::platform_client::PlatformClient::new(platform_url, auth_token, device_id).map_err(
-        |e| NexusApiError::Internal {
+    nexus_cloud_sync::platform_client::PlatformClient::new(platform_url, auth_token, device_id)
+        .map_err(|e| NexusApiError::Internal {
             code: "PLATFORM_CLIENT_ERROR".into(),
             message: e.to_string(),
-        },
-    )
+        })
 }
 
 /// Persist pending registration data to disk for the verify step.

@@ -1,7 +1,7 @@
 //! Integration tests: platform pull client (wiremock).
 
-use nexus_contracts::generated::SyncPullRequest;
 use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_contracts::generated::SyncPullRequest;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -1,7 +1,7 @@
 //! Integration tests: platform Publish story/history clients (wiremock).
 
-use nexus_contracts::{PublishHistoryRequest, PublishStoryRequest};
 use nexus_cloud_sync::sync_client::SyncClient;
+use nexus_contracts::{PublishHistoryRequest, PublishStoryRequest};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
