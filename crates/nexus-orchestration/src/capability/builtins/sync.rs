@@ -1,6 +1,6 @@
 //! `sync.pull` and `sync.push` capabilities.
 //!
-//! Owner crate: `nexus-sync` (placeholder stubs until integration is wired).
+//! Owner crate: `nexus-cloud-sync` (placeholder stubs until integration is wired).
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -14,7 +14,7 @@ use serde_json::Value;
 
 /// Pull remote deltas for a workspace.
 ///
-/// **Stub**: returns zero deltas until `nexus-sync` integration is wired.
+/// **Stub**: returns zero deltas until `nexus-cloud-sync` integration is wired.
 /// Marked with `#[ignore]` for network-dependent testing.
 pub struct SyncPull;
 
@@ -51,7 +51,7 @@ impl Capability for SyncPull {
 
 /// Push local outbox to remote.
 ///
-/// **Stub**: returns zero entries until `nexus-sync` integration is wired.
+/// **Stub**: returns zero entries until `nexus-cloud-sync` integration is wired.
 pub struct SyncPush;
 
 #[async_trait]

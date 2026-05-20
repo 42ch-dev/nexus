@@ -1,7 +1,7 @@
 //! Integration tests: platform world fork / snapshot clients (wiremock).
 
 use nexus_contracts::{WorldForkRequest, WorldSnapshotRequest};
-use nexus_sync::sync_client::SyncClient;
+use nexus_cloud_sync::sync_client::SyncClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -75,7 +75,7 @@ async fn fork_world_maps_400_to_platform_error() {
 
     let err = client.fork_world(&req).await.expect_err("expect 400");
     match err {
-        nexus_sync::SyncError::PlatformError { status, .. } => assert_eq!(status, 400),
+        nexus_cloud_sync::SyncError::PlatformError { status, .. } => assert_eq!(status, 400),
         other => panic!("unexpected error: {other:?}"),
     }
 }

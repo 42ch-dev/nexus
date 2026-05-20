@@ -332,17 +332,17 @@ impl From<nexus_local_db::LocalDbError> for CliError {
     }
 }
 
-impl From<nexus_sync::errors::SyncError> for CliError {
-    fn from(err: nexus_sync::errors::SyncError) -> Self {
+impl From<nexus_cloud_sync::errors::SyncError> for CliError {
+    fn from(err: nexus_cloud_sync::errors::SyncError) -> Self {
         match err {
-            nexus_sync::errors::SyncError::PlatformError { status, body } => {
+            nexus_cloud_sync::errors::SyncError::PlatformError { status, body } => {
                 Self::CreatorRegistrationFailed {
                     status,
                     message: body,
                 }
             }
-            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => Self::Config(msg),
-            nexus_sync::errors::SyncError::HttpError(e) => Self::Network(e),
+            nexus_cloud_sync::errors::SyncError::SyncNotConfigured(msg) => Self::Config(msg),
+            nexus_cloud_sync::errors::SyncError::HttpError(e) => Self::Network(e),
             other => Self::Other(format!("sync error: {other}")),
         }
     }
@@ -355,16 +355,16 @@ impl CliError {
     /// the verification step (as opposed to registration), so callers can
     /// distinguish registration failures from verification failures.
     #[must_use]
-    pub fn verify_creator_error(err: nexus_sync::errors::SyncError) -> Self {
+    pub fn verify_creator_error(err: nexus_cloud_sync::errors::SyncError) -> Self {
         match err {
-            nexus_sync::errors::SyncError::PlatformError { status, body } => {
+            nexus_cloud_sync::errors::SyncError::PlatformError { status, body } => {
                 Self::CreatorVerificationFailed {
                     status: status.to_string(),
                     message: body,
                 }
             }
-            nexus_sync::errors::SyncError::SyncNotConfigured(msg) => Self::Config(msg),
-            nexus_sync::errors::SyncError::HttpError(e) => Self::Network(e),
+            nexus_cloud_sync::errors::SyncError::SyncNotConfigured(msg) => Self::Config(msg),
+            nexus_cloud_sync::errors::SyncError::HttpError(e) => Self::Network(e),
             other => Self::Other(format!("sync error: {other}")),
         }
     }
@@ -511,7 +511,7 @@ mod tests {
 
     #[test]
     fn verify_creator_error_maps_platform_error_to_verification_failed() {
-        let sync_err = nexus_sync::errors::SyncError::PlatformError {
+        let sync_err = nexus_cloud_sync::errors::SyncError::PlatformError {
             status: 403,
             body: "verification token invalid".to_string(),
         };
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn verify_creator_error_maps_not_configured_to_config() {
-        let sync_err = nexus_sync::errors::SyncError::SyncNotConfigured(
+        let sync_err = nexus_cloud_sync::errors::SyncError::SyncNotConfigured(
             "platform_base_url is required".to_string(),
         );
         let cli_err = CliError::verify_creator_error(sync_err);

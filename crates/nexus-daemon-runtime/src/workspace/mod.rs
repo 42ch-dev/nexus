@@ -17,7 +17,7 @@ use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
     WorkerManager,
 };
-use nexus_sync::outbox::Outbox;
+use nexus_cloud_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -173,7 +173,7 @@ impl WorkspaceState {
         crate::db::schema::Schema::init(&db_path).await?;
         let db = DbPool::new(&db_path, PoolConfig::from_env()).await?;
 
-        // Initialize nexus-sync outbox at {nexus_home}/sync/outbox.db
+        // Initialize nexus-cloud-sync outbox at {nexus_home}/sync/outbox.db
         let sync_dir = nexus_home.join("sync");
         std::fs::create_dir_all(&sync_dir)?;
         let outbox_path = sync_dir.join("outbox.db");
@@ -309,7 +309,7 @@ impl WorkspaceState {
         self.db.pool()
     }
 
-    /// Get the nexus-sync Outbox for sync operations.
+    /// Get the nexus-cloud-sync Outbox for sync operations.
     ///
     /// Returns `None` if the outbox was not initialized (e.g., in test contexts
     /// using `new_for_testing`).

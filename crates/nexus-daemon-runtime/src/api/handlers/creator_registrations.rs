@@ -344,7 +344,7 @@ fn read_platform_auth_token() -> Result<String, NexusApiError> {
 fn build_platform_client(
     nexus_home: &std::path::Path,
     auth_token: &str,
-) -> Result<nexus_sync::platform_client::PlatformClient, NexusApiError> {
+) -> Result<nexus_cloud_sync::platform_client::PlatformClient, NexusApiError> {
     let cli_config = read_cli_config(nexus_home)?;
     let platform_url = cli_config
         .get("platform_url")
@@ -355,7 +355,7 @@ fn build_platform_client(
         .and_then(|v| v.as_str())
         .unwrap_or("daemon");
 
-    nexus_sync::platform_client::PlatformClient::new(platform_url, auth_token, device_id).map_err(
+    nexus_cloud_sync::platform_client::PlatformClient::new(platform_url, auth_token, device_id).map_err(
         |e| NexusApiError::Internal {
             code: "PLATFORM_CLIENT_ERROR".into(),
             message: e.to_string(),
@@ -567,7 +567,7 @@ pub async fn verify_registration(
         })?;
 
     match verify_response.status {
-        nexus_sync::platform_client::VerifyStatus::Verified => {
+        nexus_cloud_sync::platform_client::VerifyStatus::Verified => {
             finalize_verified_registration(
                 &state,
                 &pending,
@@ -582,7 +582,7 @@ pub async fn verify_registration(
                 message: "Creator registered and set as active".to_string(),
             }))
         }
-        nexus_sync::platform_client::VerifyStatus::WrongAnswer => {
+        nexus_cloud_sync::platform_client::VerifyStatus::WrongAnswer => {
             Ok(Json(VerifyRegistrationResponse {
                 creator_id,
                 verified: false,
@@ -592,14 +592,14 @@ pub async fn verify_registration(
                 ),
             }))
         }
-        nexus_sync::platform_client::VerifyStatus::Expired => {
+        nexus_cloud_sync::platform_client::VerifyStatus::Expired => {
             let _ = std::fs::remove_file(&pending_path);
             Err(NexusApiError::InvalidInput {
                 field: "answer".to_string(),
                 reason: "Challenge has expired. Start a new registration.".to_string(),
             })
         }
-        nexus_sync::platform_client::VerifyStatus::Locked => {
+        nexus_cloud_sync::platform_client::VerifyStatus::Locked => {
             let _ = std::fs::remove_file(&pending_path);
             Err(NexusApiError::Forbidden {
                 resource: "creator_registration".to_string(),

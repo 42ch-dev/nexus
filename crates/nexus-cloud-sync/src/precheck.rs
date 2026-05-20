@@ -351,7 +351,7 @@ fn check_canonical_hash(bundle: &Bundle, report: &mut PrecheckReport) {
     if bundle.canonical_hash.is_empty() {
         report.add_issue(PrecheckIssue::error_with_hint(
             "canonical_hash is empty (required for bundles that include deltas)",
-            "Compute with nexus_sync::canonical_hash::canonical_hash_for_deltas and set on the bundle",
+            "Compute with nexus_cloud_sync::canonical_hash::canonical_hash_for_deltas and set on the bundle",
         ));
         return;
     }

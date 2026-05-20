@@ -1,7 +1,7 @@
 //! Integration tests: HTTP body size limits (chunked read path).
 
-use nexus_sync::errors::SyncError;
-use nexus_sync::sync_client::SyncClient;
+use nexus_cloud_sync::errors::SyncError;
+use nexus_cloud_sync::sync_client::SyncClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

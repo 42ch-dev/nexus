@@ -26,7 +26,7 @@ schemas/*.json → codegen → Rust (crates/nexus-contracts) + TypeScript (packa
 - `nexus-contracts`: Generated wire types (library crate)
 - `nexus42`: CLI executable (includes daemon runtime mode)
 - `nexus-daemon-runtime`: Local supervisor / Local API (linked from `nexus42`, not a separate product binary)
-- `nexus-sync`: Bundle/outbox state machine
+- `nexus-cloud-sync`: Bundle/outbox state machine (cloud sync transport)
 
 **Design Principles:**
 

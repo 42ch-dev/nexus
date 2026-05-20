@@ -1,6 +1,6 @@
 //! `outbox.flush` and `outbox.compact` capabilities.
 //!
-//! Owner crate: `nexus-sync` (flush), `nexus-local-db` (compact).
+//! Owner crate: `nexus-cloud-sync` (flush), `nexus-local-db` (compact).
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -14,7 +14,7 @@ use serde_json::Value;
 
 /// Flush pending outbox entries.
 ///
-/// **Stub**: returns zero flushed until `nexus-sync` integration is wired.
+/// **Stub**: returns zero flushed until `nexus-cloud-sync` integration is wired.
 pub struct OutboxFlush;
 
 #[async_trait]

@@ -1,6 +1,6 @@
 //! Mutex lock patterns have scoped drops.
 #![allow(clippy::significant_drop_tightening)]
-//! Sync subsystem — wraps nexus-sync outbox reader.
+//! Sync subsystem — wraps nexus-cloud-sync outbox reader.
 //!
 //! Real implementation that manages the sync queue.
 
@@ -23,7 +23,7 @@ enum SyncState {
 
 /// Sync subsystem implementation.
 ///
-/// Manages the `nexus-sync::OutboxPool` for outbound sync operations.
+/// Manages the `nexus-cloud-sync::OutboxPool` for outbound sync operations.
 #[derive(Debug)]
 pub struct SyncSubsystem {
     /// Current state (behind Mutex for async access).
@@ -33,7 +33,7 @@ pub struct SyncSubsystem {
 impl SyncSubsystem {
     /// Create a new Sync subsystem.
     ///
-    /// The actual outbox initialization happens via `nexus-sync::OutboxPool`.
+    /// The actual outbox initialization happens via `nexus-cloud-sync::OutboxPool`.
     #[must_use]
     pub fn new() -> Self {
         Self {

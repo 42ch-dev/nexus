@@ -1,7 +1,7 @@
 //! Integration tests: platform pull client (wiremock).
 
 use nexus_contracts::generated::SyncPullRequest;
-use nexus_sync::sync_client::SyncClient;
+use nexus_cloud_sync::sync_client::SyncClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -61,7 +61,7 @@ async fn pull_bundles_maps_404_to_platform_error() {
 
     let err = client.pull_bundles(&req).await.expect_err("expect 404");
     match err {
-        nexus_sync::SyncError::PlatformError { status, .. } => assert_eq!(status, 404),
+        nexus_cloud_sync::SyncError::PlatformError { status, .. } => assert_eq!(status, 404),
         other => panic!("unexpected error: {other:?}"),
     }
 }
