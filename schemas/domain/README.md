@@ -34,8 +34,9 @@ Platform manifest for story chapters/arcs with summary and manuscript storage in
 ### SyncCommand (`sync-command.schema.json`)
 Business action command with audit attribution and origin tracking. §5.10
 
-### OutboxEntry (`outbox-entry.schema.json`)
-Local outbox queue item with delivery state and retry logic. §5.13
+### OutboxEntry (local Rust only)
+
+Outbox queue rows are **not** in `schemas/`; type `OutboxEntry` lives in `crates/nexus-contracts/src/local/domain/outbox_entry.rs` (platform does not observe outbox shape on wire). See [schemas-wire-platform-sync-boundary.md](../../.agents/knowledge/schemas-wire-platform-sync-boundary.md).
 
 ## Common Types
 

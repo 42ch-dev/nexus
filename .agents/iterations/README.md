@@ -13,26 +13,26 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 
 ### Delivery compasses
 
-| Document | Version |
-| --- | --- |
-| [v1.2-delivery-compass-v1.md](v1.2-delivery-compass-v1.md) | V1.2 |
-| [v1.3-delivery-compass-v1.md](v1.3-delivery-compass-v1.md) | V1.3 |
-| [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) | V1.4 |
-| [v1.5-nexus-delivery-compass-v1.md](v1.5-nexus-delivery-compass-v1.md) | V1.5 |
-| [v1.6-delivery-compass-v1.md](v1.6-delivery-compass-v1.md) | V1.6 |
-| [v1.7-delivery-compass-v1.md](v1.7-delivery-compass-v1.md) | V1.7 |
-| [v1.8-delivery-compass-v1.md](v1.8-delivery-compass-v1.md) | V1.8 |
-| [v1.9-delivery-compass-v1.md](v1.9-delivery-compass-v1.md) | V1.9 |
-| [v1.10-delivery-compass-v1.md](v1.10-delivery-compass-v1.md) | V1.10 |
-| [v1.11-delivery-compass-v1.md](v1.11-delivery-compass-v1.md) | V1.11 |
-| [v1.12-delivery-compass-v1.md](v1.12-delivery-compass-v1.md) | V1.12 |
-| [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md) | V1.13 |
-| [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md) | V1.14 |
-| [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md) | V1.15 |
-| [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md) | V1.16 |
-| [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md) | V1.18 |
-| [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md) | V1.19 |
-| [v1.20-delivery-compass-v1.md](v1.20-delivery-compass-v1.md) | V1.20 |
+| Document | Version | Status |
+| --- | --- | --- |
+| [v1.2-delivery-compass-v1.md](v1.2-delivery-compass-v1.md) | V1.2 | Historical |
+| [v1.3-delivery-compass-v1.md](v1.3-delivery-compass-v1.md) | V1.3 | Historical |
+| [v1.4-delivery-compass-v1.md](v1.4-delivery-compass-v1.md) | V1.4 | Historical |
+| [v1.5-nexus-delivery-compass-v1.md](v1.5-nexus-delivery-compass-v1.md) | V1.5 | Historical |
+| [v1.6-delivery-compass-v1.md](v1.6-delivery-compass-v1.md) | V1.6 | Historical |
+| [v1.7-delivery-compass-v1.md](v1.7-delivery-compass-v1.md) | V1.7 | Historical |
+| [v1.8-delivery-compass-v1.md](v1.8-delivery-compass-v1.md) | V1.8 | Historical |
+| [v1.9-delivery-compass-v1.md](v1.9-delivery-compass-v1.md) | V1.9 | Historical |
+| [v1.10-delivery-compass-v1.md](v1.10-delivery-compass-v1.md) | V1.10 | Historical |
+| [v1.11-delivery-compass-v1.md](v1.11-delivery-compass-v1.md) | V1.11 | Historical |
+| [v1.12-delivery-compass-v1.md](v1.12-delivery-compass-v1.md) | V1.12 | Historical |
+| [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md) | V1.13 | Historical |
+| [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md) | V1.14 | Historical |
+| [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md) | V1.15 | Historical |
+| [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md) | V1.16 | Historical |
+| [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md) | V1.18 | Shipped |
+| [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md) | V1.19 | Shipped |
+| [v1.20-delivery-compass-v1.md](v1.20-delivery-compass-v1.md) | V1.20 | **Shipped** (2026-05-19) |
 
 ### Legacy `v1.*` iteration artifacts
 
