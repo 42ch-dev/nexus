@@ -9,6 +9,7 @@ members = [
     "crates/nexus-home-layout",
     "crates/nexus-kb",
     "crates/nexus-knowledge",
+    "crates/nexus-narrative",
     "crates/nexus-orchestration",
     "crates/nexus42",
     "crates/nexus-cloud-sync",
