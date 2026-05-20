@@ -1,7 +1,13 @@
-//! Nexus Sync Library
+//! Nexus Cloud Sync Library
 //!
 //! Provides the sync mechanism for CLI ↔ Platform synchronization using
 //! Command, `DeltaBundle`, and Outbox patterns.
+//!
+//! # Feature Flags
+//!
+//! - **`legacy-sync`** (default off): Enables the legacy cloud sync pipeline —
+//!   outbox, push/pull HTTP client, platform HTTP client, and partial apply.
+//!   Daemon consumers should NOT enable this; CLI/cloud-line consumers should.
 //!
 //! # Architecture
 //!
@@ -17,13 +23,20 @@
 //!
 //! - [`command`]: Sync command types built on generated `SyncCommand`
 //! - [`delta_bundle`]: Bundle builder with metadata fields
-//! - [`outbox`]: SQLite-backed outbox for local operation queue
-//! - [`sync_client`]: HTTP client for platform sync API
 //! - [`conflict`]: Conflict resolution strategies
-//! - [`partial_apply`]: Partial apply semantics (Phase A/B)
 //! - [`precheck`]: Local precheck validation stage
 //! - [`errors`]: Sync error types
+//!
+//! ## Legacy sync modules (require `legacy-sync` feature)
+//!
+//! - [`outbox`]: SQLite-backed outbox for local operation queue
+//! - [`sync_client`]: HTTP client for platform sync API
+//! - [`platform_client`]: HTTP client for platform registration/verification
+//! - [`pull_apply`]: Apply platform pull responses to local outbox
+//! - [`pool`]: SQLite connection pool for outbox
+//! - [`partial_apply`]: Partial apply semantics (Phase A/B)
 
+// ── Always-available modules ──────────────────────────────────────────
 pub mod canonical_hash;
 pub mod command;
 pub mod conflict;
@@ -31,12 +44,20 @@ pub mod delta_bundle;
 pub mod device_flow_client;
 pub mod device_id;
 pub mod errors;
-pub mod outbox;
-pub mod partial_apply;
-pub mod platform_client;
-pub mod pool;
 pub mod precheck;
+
+// ── Legacy sync modules (gated behind feature flag) ──────────────────
+#[cfg(feature = "legacy-sync")]
+pub mod outbox;
+#[cfg(feature = "legacy-sync")]
+pub mod partial_apply;
+#[cfg(feature = "legacy-sync")]
+pub mod platform_client;
+#[cfg(feature = "legacy-sync")]
+pub mod pool;
+#[cfg(feature = "legacy-sync")]
 pub mod pull_apply;
+#[cfg(feature = "legacy-sync")]
 pub mod sync_client;
 
 // Re-export common types from nexus-contracts
@@ -46,7 +67,11 @@ pub use nexus_contracts::{
     BundleType, CreatorId, ManuscriptPhase, WorldId,
 };
 
-// Re-export sync error types
+// Re-export sync error types (always available)
 pub use errors::{SyncError, SyncResult};
+
+// Re-export legacy sync types (gated)
+#[cfg(feature = "legacy-sync")]
 pub use platform_client::{classify_platform_error, StagedPlatformError};
+#[cfg(feature = "legacy-sync")]
 pub use pull_apply::{apply_pull_response_to_outbox, PullApplySummary};

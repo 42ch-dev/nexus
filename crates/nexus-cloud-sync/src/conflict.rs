@@ -260,6 +260,7 @@ impl ConflictResponse {
     /// Returns `RetryAfterPolicy::AfterSeconds` if `retry_after` is set, or
     /// `RetryAfterPolicy::None` otherwise. The caller is responsible for storing
     /// this in the outbox entry (SYNC-R11).
+    #[cfg(feature = "legacy-sync")]
     #[must_use]
     pub const fn retry_after_policy(&self) -> crate::outbox::RetryAfterPolicy {
         match self.retry_after {
@@ -615,6 +616,7 @@ mod tests {
         assert!(response.retry_after.is_none());
     }
 
+    #[cfg(feature = "legacy-sync")]
     #[test]
     fn conflict_response_retry_after_policy() {
         let response = ConflictResponse {
@@ -633,6 +635,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "legacy-sync")]
     #[test]
     fn conflict_response_retry_after_policy_none() {
         let response = ConflictResponse {
@@ -648,6 +651,7 @@ mod tests {
         assert!(matches!(policy, crate::outbox::RetryAfterPolicy::None));
     }
 
+    #[cfg(feature = "legacy-sync")]
     #[test]
     fn conflict_response_retry_after_zero_is_none() {
         let response = ConflictResponse {
