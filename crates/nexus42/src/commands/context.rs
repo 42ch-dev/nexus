@@ -5,13 +5,15 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
-use nexus_domain::{
-    context_assembly::AssembleResponse, DegradationGuard, DomainRuntimeMode, Stage0Assembly,
-    TwoStageAssembly,
-};
+use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
+use nexus_moment_context_assembly::{Stage0Assembly, TwoStageAssembly};
+
+use nexus_domain::{DegradationGuard, DomainRuntimeMode};
 
 #[cfg(test)]
 use nexus_domain::DegradationPolicy;
+#[cfg(test)]
+use nexus_moment_context_assembly::cloud_stage::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
 
 /// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
 ///
@@ -372,7 +374,7 @@ fn build_two_stage_from_local(
         user_prompt: local.user_prompt.clone(),
         system_prefix: local.system_prefix.clone(),
         max_tokens: local.max_tokens,
-        runtime_mode: mode,
+        runtime_mode: AssemblyRuntimeMode::new(*mode.inner()),
     }
 }
 
@@ -527,8 +529,6 @@ mod tests {
 
     /// Helper: create a platform `AssembleResponse` for routing tests.
     fn make_platform_response() -> AssembleResponse {
-        use nexus_domain::context_assembly::{AssembleMetadata, MemoryItemRef, TimelineEventRef};
-
         AssembleResponse {
             memory_items: vec![MemoryItemRef {
                 memory_id: "mem_platform_1".to_string(),
