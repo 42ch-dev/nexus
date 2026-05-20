@@ -1,6 +1,8 @@
 # Archived Knowledge
 
-Superseded or cold-storage implementation knowledge documents. Active SSOT lives in [`.agents/knowledge/`](../../knowledge/README.md).
+Superseded or cold-storage implementation knowledge documents. **Active SSOT lives in [`.agents/knowledge/`](../../knowledge/README.md)** — do not treat this directory as current authority.
+
+Frozen `v1-spec/local/` **normative** contracts remain in `nexus-platform` `.agents/designs/v1-spec/local/`; only **superseded implementation snapshots** belong here.
 
 Paths in archived plan JSON / metadata may still point here for historical reference.
 

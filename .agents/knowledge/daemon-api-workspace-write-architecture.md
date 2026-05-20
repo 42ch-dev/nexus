@@ -1,13 +1,14 @@
 # V1.15 Daemon Local API & Workspace 写入架构设计
 
-**Status**: Active (workspace-write principles); **§1 API route inventory superseded**
-**Supersedes (API inventory only)**: [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) §3–§7 (shipped 2026-05-19) — authoritative for `/v1/local/*` routes, auth (`X-API-Key`), agent-host namespace, removed world/explore daemon proxies
+**Status**: Active (workspace-write principles D1–D7 only)
+**Route inventory SSOT**: [daemon-local-api-routes.md](./daemon-local-api-routes.md) (from `api/mod.rs`; includes V1.21 sync removal)
+**Supersedes (API inventory only)**: [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) §3–§7 — historical narrative; do not use §1 tables below
 **Created**: 2026-05-10
 **Author**: fullstack-dev (research + design task)
 **Plan ref**: `.agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md`
 **Compass ref**: `.agents/iterations/v1.15-delivery-compass-v1.md`
 
-> **Route inventory warning**: §1 tables describe the **pre-V1.20** daemon surface (`/acp/*`, `/world/*`, `/explore/*`). After V1.20, use the compass §3 inventory and `crates/nexus-daemon-runtime/src/api/mod.rs`. D1–D7 (agent-mediated workspace writes) remain valid.
+> **§1 is archived narrative only.** For current routes see [daemon-local-api-routes.md](./daemon-local-api-routes.md). Sync HTTP routes listed in §1.1 were **removed** in V1.21+; see [cloud-sync-and-local-sync-status.md](./cloud-sync-and-local-sync-status.md). D1–D7 (agent-mediated workspace writes) remain valid.
 
 ---
 
