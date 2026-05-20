@@ -3,8 +3,8 @@
 //! Integration tests for TwoStageAssembly with mocked platform responses.
 
 #![allow(clippy::manual_string_new, clippy::doc_markdown)]
-use nexus_creator_memory::LongTermMemory;
 use nexus_contracts::local::domain::RuntimeMode;
+use nexus_creator_memory::LongTermMemory;
 use nexus_moment_context_assembly::cloud_stage::{
     AssembleMetadata, AssembleResponse, AssemblyRuntimeMode, KbEntry, MemoryItemRef,
     TwoStageAssembly,
