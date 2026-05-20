@@ -2,7 +2,7 @@
 //!
 //! This crate owns `ReferenceSource` (local-only research/reference registration)
 //! and future general knowledge base entries. Indexed per creator/workspace but
-//! NOT narrative KeyBlocks (those live in `nexus-kb`).
+//! NOT narrative `KeyBlocks` (those live in `nexus-kb`).
 
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::must_use_candidate)]

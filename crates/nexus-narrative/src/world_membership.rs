@@ -42,7 +42,7 @@ impl MembershipStatus {
 }
 
 /// World membership permissions.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct MembershipPermissions {
     pub can_sync_kb: bool,
@@ -96,7 +96,7 @@ impl MembershipPermissions {
 }
 
 /// `WorldMembership` aggregate — Creator-World relationship.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorldMembership {
     pub schema_version: u32,
     pub membership_id: String,

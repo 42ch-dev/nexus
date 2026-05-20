@@ -1,14 +1,13 @@
 //! Nexus Narrative — World, timeline, fork, story, manuscript, consistency.
 //!
-//! This crate owns the narrative graph aggregates: World, TimelineEvent,
-//! ForkBranch, StoryManifest, ManuscriptState, WorldMembership, and
-//! cross-aggregate consistency rules. Uses `nexus-kb` for KeyBlock types.
+//! This crate owns the narrative graph aggregates: World, `TimelineEvent`,
+//! `ForkBranch`, `StoryManifest`, `ManuscriptState`, `WorldMembership`, and
+//! cross-aggregate consistency rules. Uses `nexus-kb` for `KeyBlock` types.
 
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::uninlined_format_args)]
 #![allow(clippy::redundant_closure_for_method_calls)]
-#![allow(clippy::uninlined_format_args)]
 
 pub mod consistency;
 pub mod errors;

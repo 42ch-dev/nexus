@@ -53,14 +53,14 @@ impl TimelineEventStatus {
 }
 
 /// A simplified membership check for promote gates.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipPermissionCheck {
     pub can_confirm_canon: bool,
     pub can_sync_kb: bool,
 }
 
 /// `TimelineEvent` aggregate — a canonical event on the world timeline.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimelineEvent {
     pub schema_version: u32,
     pub timeline_event_id: String,
@@ -119,7 +119,7 @@ impl TimelineEvent {
         &mut self,
         membership: &MembershipPermissionCheck,
         current_head: &str,
-        branch_events: &[TimelineEvent],
+        branch_events: &[Self],
     ) -> Result<(), NarrativeError> {
         // Must be provisional to promote
         if self.status != TimelineEventStatus::Provisional.as_str() {

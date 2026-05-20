@@ -49,7 +49,7 @@ impl VerificationStatus {
 }
 
 /// `ForkBranch` aggregate — describes a world branch forked from a parent.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkBranch {
     pub schema_version: u32,
     pub fork_branch_id: String,
@@ -336,7 +336,10 @@ mod tests {
             "ctr_creator1",
         );
         fb.archive().unwrap();
-        assert!(matches!(fb.archive(), Err(NarrativeError::AlreadyInState(_))));
+        assert!(matches!(
+            fb.archive(),
+            Err(NarrativeError::AlreadyInState(_))
+        ));
     }
 
     #[test]

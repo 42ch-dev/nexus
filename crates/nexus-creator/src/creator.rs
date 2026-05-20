@@ -59,7 +59,7 @@ impl RegistrationSource {
 }
 
 /// Creator style profile.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StyleProfile {
     /// Tone preferences.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,7 +73,7 @@ pub struct StyleProfile {
 }
 
 /// Creator aggregate — a first-class creative agent.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Creator {
     /// Schema version.
     pub schema_version: u32,
@@ -271,8 +271,9 @@ impl std::convert::TryFrom<Creator> for nexus_contracts::Creator {
             creator_id: d.creator_id,
             user_id: d.user_id,
             display_name: d.display_name,
-            status: nexus_contracts::CreatorStatus::from_str(&d.status)
-                .map_err(|_| CreatorError::ValidationError(format!("invalid status: {}", d.status)))?,
+            status: nexus_contracts::CreatorStatus::from_str(&d.status).map_err(|_| {
+                CreatorError::ValidationError(format!("invalid status: {}", d.status))
+            })?,
             is_platform_owned: d.is_platform_owned,
             api_key_ref: d.api_key_ref,
             registration_source: nexus_contracts::RegistrationSource::from_str(
