@@ -296,6 +296,12 @@ impl From<nexus_domain::errors::DomainError> for CliError {
     }
 }
 
+impl From<nexus_creator_memory::errors::MemoryError> for CliError {
+    fn from(err: nexus_creator_memory::errors::MemoryError) -> Self {
+        Self::Other(format!("Memory error: {err}"))
+    }
+}
+
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
         Self::Network(err)

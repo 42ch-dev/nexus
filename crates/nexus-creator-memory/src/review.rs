@@ -14,9 +14,9 @@ use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::review_quality::is_high_signal;
 use crate::errors::MemoryError;
 use crate::long_term_memory::LongTermMemory;
+use crate::review_quality::is_high_signal;
 
 use serde::{Deserialize, Serialize};
 

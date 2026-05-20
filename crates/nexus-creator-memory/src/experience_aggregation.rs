@@ -8,9 +8,9 @@
 //! (sort by recency + concat excerpts).
 
 use crate::errors::MemoryError;
-use crate::memory_io;
 #[cfg(test)]
 use crate::long_term_memory::LongTermMemory;
+use crate::memory_io;
 use std::path::Path;
 
 /// Memory kinds that contribute to the Experience section.

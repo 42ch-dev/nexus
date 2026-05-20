@@ -5,7 +5,7 @@
 use thiserror::Error;
 
 /// Error type for Creator aggregate and local identity operations.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum CreatorError {
     /// Entity is already in the target state.
     #[error("entity is already in state: {0}")]

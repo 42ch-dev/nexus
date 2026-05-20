@@ -4,6 +4,7 @@ members = [
     "crates/nexus-agent-host",
     "crates/nexus-contracts",
     "crates/nexus-creator",
+    "crates/nexus-creator-memory",
     "crates/nexus-daemon-runtime",
     "crates/nexus-domain",
     "crates/nexus-home-layout",

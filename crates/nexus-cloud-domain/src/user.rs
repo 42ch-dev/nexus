@@ -49,7 +49,7 @@ impl SubscriptionTier {
 }
 
 /// User aggregate — platform identity for auth and sync attribution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
     pub schema_version: u32,
     pub user_id: String,
@@ -114,7 +114,10 @@ impl User {
     /// # Errors
     /// Returns `Err(CloudDomainError::...)` if validation fails.
     /// Change subscription tier (blocked when deleted).
-    pub fn set_subscription_tier(&mut self, tier: SubscriptionTier) -> Result<(), CloudDomainError> {
+    pub fn set_subscription_tier(
+        &mut self,
+        tier: SubscriptionTier,
+    ) -> Result<(), CloudDomainError> {
         if self.account_status == AccountStatus::Deleted.as_str() {
             return Err(CloudDomainError::InvalidState {
                 expected: "active or suspended".to_string(),

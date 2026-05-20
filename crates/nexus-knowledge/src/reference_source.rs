@@ -53,7 +53,7 @@ impl ScanStatus {
 }
 
 /// `ReferenceSource` aggregate — local-only research/reference registration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReferenceSource {
     pub schema_version: u32,
     pub reference_source_id: String,
@@ -101,7 +101,7 @@ impl ReferenceSource {
     pub fn mark_scanned(&mut self, content_hash: Option<&str>) {
         self.scan_status = ScanStatus::Scanned.as_str().to_string();
         self.content_hash = content_hash
-            .map(|h| h.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| self.content_hash.clone());
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
@@ -143,10 +143,9 @@ impl ReferenceSource {
                     reason: "file/pdf URI must start with file:// or /".to_string(),
                 });
             }
-            "note" => {
-                // Notes don't require URI format validation
+            _ => {
+                // Notes and other types don't require URI format validation
             }
-            _ => {}
         }
 
         Ok(())

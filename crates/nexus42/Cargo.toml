@@ -22,6 +22,7 @@ path = "src/main.rs"
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-domain = { path = "../nexus-domain" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-cloud-sync = { path = "../nexus-cloud-sync", features = ["legacy-sync"] }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }

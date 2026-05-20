@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 /// Error type for User and Pairing domain operations.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum CloudDomainError {
     /// Entity is already in the target state.
     #[error("entity is already in state: {0}")]

@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 /// Error type for Knowledge operations.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum KnowledgeError {
     /// Validation error.
     #[error("validation error: {0}")]

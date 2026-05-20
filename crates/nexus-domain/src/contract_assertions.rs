@@ -44,8 +44,10 @@ fn _assert_keyblock_conversion() {
 
 /// Compile-time assertion: Creator domain ↔ contract conversion exists.
 fn _assert_creator_conversion() {
-    fn domain_to_contract(domain: Creator) -> nexus_contracts::Creator {
-        nexus_contracts::Creator::from(domain)
+    fn domain_to_contract(
+        domain: Creator,
+    ) -> Result<nexus_contracts::Creator, nexus_creator::errors::CreatorError> {
+        domain.try_into()
     }
     fn contract_to_domain(contract: nexus_contracts::Creator) -> Creator {
         Creator::from(contract)
@@ -219,7 +221,7 @@ fn test_keyblock_domain_contract_roundtrip() {
 #[test]
 fn test_creator_domain_contract_roundtrip() {
     let domain_creator = Creator::register("ctr_test", "Test", RegistrationSource::Cli, false);
-    let contract_creator: nexus_contracts::Creator = nexus_contracts::Creator::from(domain_creator);
+    let contract_creator: nexus_contracts::Creator = domain_creator.try_into().unwrap();
     assert_eq!(
         contract_creator.registration_source,
         nexus_contracts::RegistrationSource::Cli

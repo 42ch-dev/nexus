@@ -2220,6 +2220,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-cloud-domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "nexus-cloud-sync"
 version = "0.1.0"
 dependencies = [
@@ -2249,6 +2260,40 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "nexus-creator"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "nexus-home-layout",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-creator-memory"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "nexus-creator",
+ "nexus-home-layout",
+ "pulldown-cmark 0.12.2",
+ "pulldown-cmark-frontmatter",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "strum 0.26.3",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2301,8 +2346,14 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "jsonschema",
+ "nexus-cloud-domain",
  "nexus-contracts",
+ "nexus-creator",
+ "nexus-creator-memory",
  "nexus-home-layout",
+ "nexus-kb",
+ "nexus-knowledge",
+ "nexus-narrative",
  "pulldown-cmark 0.12.2",
  "pulldown-cmark-frontmatter",
  "serde",
@@ -2320,6 +2371,30 @@ name = "nexus-home-layout"
 version = "0.1.0"
 
 [[package]]
+name = "nexus-kb"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-knowledge"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-local-db"
 version = "0.1.0"
 dependencies = [
@@ -2329,6 +2404,20 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-narrative"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "nexus-kb",
+ "serde",
+ "serde_json",
+ "strum 0.26.3",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
@@ -2378,6 +2467,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-cloud-sync",
  "nexus-contracts",
+ "nexus-creator-memory",
  "nexus-daemon-runtime",
  "nexus-domain",
  "nexus-home-layout",

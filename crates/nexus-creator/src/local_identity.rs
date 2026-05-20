@@ -53,7 +53,7 @@ impl std::str::FromStr for LocalIdentityType {
 /// Represents a creator identity that exists entirely locally, without
 /// platform dependency. Can optionally be linked to a platform Creator
 /// via the Pairing flow.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalIdentity {
     /// Schema version.
     pub schema_version: u32,
@@ -103,7 +103,7 @@ impl LocalIdentity {
             schema_version: 1,
             creator_id: id,
             identity_type: LocalIdentityType::Persistent,
-            display_name: display_name.map(|s| s.to_string()),
+            display_name: display_name.map(std::string::ToString::to_string),
             created_at: chrono::Utc::now().to_rfc3339(),
             platform_linked: false,
             platform_creator_id: None,

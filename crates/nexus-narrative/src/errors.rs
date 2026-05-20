@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 /// Error type for Narrative aggregate operations.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum NarrativeError {
     /// Permission denied.
     #[error("permission denied: {0}")]

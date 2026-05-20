@@ -132,7 +132,7 @@ impl SoulDocument {
     /// Parse markdown content into a `SoulDocument`.
     /// Extracts frontmatter (YAML) and H2 sections by exact heading text.
     pub fn parse(content: &str) -> Result<Self, MemoryError> {
-        let mut doc = SoulDocument::new();
+        let mut doc = Self::new();
 
         // Extract frontmatter
         let fm_content = extract_frontmatter(content);

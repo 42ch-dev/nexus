@@ -1,4 +1,4 @@
-//! Nexus KB — Narrative KeyBlock + SourceAnchor types and logic.
+//! Nexus KB — Narrative `KeyBlock` + `SourceAnchor` types and logic.
 //!
 //! This crate owns the `KeyBlock` aggregate (structured knowledge units in
 //! world timelines) and the `SourceAnchor` value object. Types are from

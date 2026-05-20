@@ -31,7 +31,7 @@ impl WorldStatus {
 }
 
 /// World aggregate — a narrative universe.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct World {
     pub schema_version: u32,
     pub world_id: String,
@@ -107,7 +107,7 @@ impl World {
         &self,
         creator_id: &str,
         forked_from_event_id: &str,
-    ) -> Result<(World, ForkBranch), NarrativeError> {
+    ) -> Result<(Self, ForkBranch), NarrativeError> {
         if self.status != WorldStatus::Active.as_str() {
             return Err(NarrativeError::InvalidState {
                 expected: "active".to_string(),
@@ -126,7 +126,7 @@ impl World {
             creator_id,
         );
 
-        let mut child_world = World::new(
+        let mut child_world = Self::new(
             &child_world_id,
             creator_id,
             &format!("{} (fork)", self.title),

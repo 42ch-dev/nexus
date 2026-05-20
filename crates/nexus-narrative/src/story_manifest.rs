@@ -71,7 +71,7 @@ impl ManuscriptStorage {
 }
 
 /// `StoryManifest` aggregate — platform-side chapter/arc manifest and summary.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoryManifest {
     pub schema_version: u32,
     pub story_manifest_id: String,

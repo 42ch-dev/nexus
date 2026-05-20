@@ -28,5 +28,6 @@ pub use local_identity::is_valid_creator_id;
 
 // Re-export common types from nexus-contracts
 pub use nexus_contracts::{
-    CreatorId, RegistrationSource as ContractRegistrationSource, CreatorStatus as ContractCreatorStatus,
+    CreatorId, CreatorStatus as ContractCreatorStatus,
+    RegistrationSource as ContractRegistrationSource,
 };

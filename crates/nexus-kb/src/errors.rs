@@ -2,8 +2,8 @@
 
 use thiserror::Error;
 
-/// Error type for KeyBlock and SourceAnchor operations.
-#[derive(Debug, Error, PartialEq)]
+/// Error type for `KeyBlock` and `SourceAnchor` operations.
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum KbError {
     /// Permission denied.
     #[error("permission denied: {0}")]

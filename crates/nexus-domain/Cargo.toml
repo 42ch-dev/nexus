@@ -12,6 +12,12 @@ workspace = true
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
+nexus-creator = { path = "../nexus-creator" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-kb = { path = "../nexus-kb" }
+nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-narrative = { path = "../nexus-narrative" }
+nexus-cloud-domain = { path = "../nexus-cloud-domain" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

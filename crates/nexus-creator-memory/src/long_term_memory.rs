@@ -6,8 +6,8 @@
 //!
 //! See `creator-memory-soul-lifecycle-v1.md` §3, §5.
 
-use crate::memory_item::MemoryKind;
 use crate::errors::MemoryError;
+use crate::memory_item::MemoryKind;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::str::FromStr;

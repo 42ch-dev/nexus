@@ -9,7 +9,7 @@ use nexus_contracts::ManuscriptPhase;
 use serde::{Deserialize, Serialize};
 
 /// Helper to convert `ManuscriptPhase` to string.
-fn phase_to_str(phase: &ManuscriptPhase) -> &str {
+const fn phase_to_str(phase: &ManuscriptPhase) -> &str {
     match phase {
         ManuscriptPhase::Brainstorm => "brainstorm",
         ManuscriptPhase::Draft => "draft",
@@ -32,7 +32,7 @@ fn str_to_phase(s: &str) -> ManuscriptPhase {
 }
 
 /// `ManuscriptState` aggregate — local manuscript phase machine.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManuscriptState {
     pub schema_version: u32,
     pub manuscript_state_id: String,

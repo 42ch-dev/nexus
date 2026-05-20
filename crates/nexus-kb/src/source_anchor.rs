@@ -7,7 +7,7 @@ use crate::errors::KbError;
 use serde::{Deserialize, Serialize};
 
 /// Domain `SourceAnchor` — references platform Story summary entities.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceAnchor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub story_summary_refs: Option<Vec<SourceSummaryRef>>,
@@ -18,7 +18,7 @@ pub struct SourceAnchor {
 }
 
 /// Reference to a platform Story summary entity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceSummaryRef {
     pub story_manifest_id: String,
     pub summary_unit_id: String,
@@ -37,7 +37,7 @@ impl SourceAnchor {
             story_summary_refs: Some(vec![SourceSummaryRef {
                 story_manifest_id: story_manifest_id.to_string(),
                 summary_unit_id: summary_unit_id.to_string(),
-                unit_kind: unit_kind.map(|s| s.to_string()),
+                unit_kind: unit_kind.map(std::string::ToString::to_string),
             }]),
             excerpt: None,
             summary: None,
@@ -65,7 +65,7 @@ impl SourceAnchor {
         refs.push(SourceSummaryRef {
             story_manifest_id: story_manifest_id.to_string(),
             summary_unit_id: summary_unit_id.to_string(),
-            unit_kind: unit_kind.map(|s| s.to_string()),
+            unit_kind: unit_kind.map(std::string::ToString::to_string),
         });
     }
 

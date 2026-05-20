@@ -35,7 +35,7 @@ impl KeyBlockStatus {
 }
 
 /// `KeyBlock` body content.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyBlockBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -46,7 +46,7 @@ pub struct KeyBlockBody {
 }
 
 /// Result of a conflict check for confirm gates.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictCheckResult {
     pub has_hard_conflicts: bool,
     pub conflict_description: Option<String>,
@@ -71,14 +71,14 @@ impl ConflictCheckResult {
 
 /// A simplified world membership reference for permission checks.
 /// Full `WorldMembership` is in `world_membership` module.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipPermissionCheck {
     pub can_confirm_canon: bool,
     pub can_sync_kb: bool,
 }
 
 /// `KeyBlock` aggregate — a structured knowledge unit in a world timeline.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyBlock {
     pub schema_version: u32,
     pub key_block_id: String,
@@ -507,10 +507,7 @@ mod tests {
         let visible_manifests: &[&str] = &["stm_visible1"];
         let result = kb.confirm(&owner_membership(), 0, &no_conflicts(), visible_manifests);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            KbError::ValidationError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), KbError::ValidationError(_)));
     }
 
     /// C-1: confirm() succeeds when source_anchor references visible manifests.

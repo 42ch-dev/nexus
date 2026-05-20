@@ -216,14 +216,11 @@ pub fn validate_memory_scope(
 #[must_use]
 /// Check if a provisional record has exceeded its TTL.
 pub fn is_provisional_expired(created_at: &str) -> bool {
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(created_at) {
+    chrono::DateTime::parse_from_rfc3339(created_at).is_ok_and(|dt| {
         let now = chrono::Utc::now();
         let age = now.signed_duration_since(dt.with_timezone(&chrono::Utc));
         age.num_days() > PROVISIONAL_TTL_DAYS
-    } else {
-        // If we can't parse the date, don't consider it expired
-        false
-    }
+    })
 }
 
 #[cfg(test)]

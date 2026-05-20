@@ -29,7 +29,7 @@ impl PairingSource {
 }
 
 /// Pairing aggregate — Creator-User association.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Pairing {
     pub schema_version: u32,
     pub pairing_id: String,
