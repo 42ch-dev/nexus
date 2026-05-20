@@ -38,7 +38,9 @@ impl Capability for OutboxFlush {
     }
 
     async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
-        Err(CapabilityError::PermanentExternal(CLOUD_LINE_DISABLED.to_string()))
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
     }
 }
 
@@ -80,7 +82,10 @@ mod tests {
     #[tokio::test]
     async fn outbox_flush_returns_cloud_disabled_error() {
         let cap = OutboxFlush;
-        let err = cap.run(serde_json::json!({"limit": 100})).await.unwrap_err();
+        let err = cap
+            .run(serde_json::json!({"limit": 100}))
+            .await
+            .unwrap_err();
         match err {
             CapabilityError::PermanentExternal(msg) => {
                 assert!(msg.contains("cloud line disabled"));

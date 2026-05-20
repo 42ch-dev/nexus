@@ -39,7 +39,9 @@ impl Capability for SyncPull {
     }
 
     async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
-        Err(CapabilityError::PermanentExternal(CLOUD_LINE_DISABLED.to_string()))
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
     }
 }
 
@@ -68,7 +70,9 @@ impl Capability for SyncPush {
     }
 
     async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
-        Err(CapabilityError::PermanentExternal(CLOUD_LINE_DISABLED.to_string()))
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
     }
 }
 
@@ -79,7 +83,10 @@ mod tests {
     #[tokio::test]
     async fn sync_pull_returns_cloud_disabled_error() {
         let cap = SyncPull;
-        let err = cap.run(serde_json::json!({"force": false})).await.unwrap_err();
+        let err = cap
+            .run(serde_json::json!({"force": false}))
+            .await
+            .unwrap_err();
         match err {
             CapabilityError::PermanentExternal(msg) => {
                 assert!(msg.contains("cloud line disabled"));
@@ -91,7 +98,10 @@ mod tests {
     #[tokio::test]
     async fn sync_push_returns_cloud_disabled_error() {
         let cap = SyncPush;
-        let err = cap.run(serde_json::json!({"force": false})).await.unwrap_err();
+        let err = cap
+            .run(serde_json::json!({"force": false}))
+            .await
+            .unwrap_err();
         match err {
             CapabilityError::PermanentExternal(msg) => {
                 assert!(msg.contains("cloud line disabled"));
