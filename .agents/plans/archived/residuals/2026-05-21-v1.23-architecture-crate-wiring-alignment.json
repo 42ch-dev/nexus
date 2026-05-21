@@ -1,0 +1,45 @@
+{
+  "2026-05-21-v1.23-architecture-crate-wiring-alignment": [
+    {
+      "id": "R1",
+      "title": "Doc comments missing on public trait definitions",
+      "severity": "low",
+      "source": "qc1-suggestion",
+      "scope": "nexus-knowledge, nexus-kb, nexus-narrative",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog"
+    },
+    {
+      "id": "R2",
+      "title": "InMemory implementations need production SQLite backing",
+      "severity": "low",
+      "source": "qc1-suggestion",
+      "scope": "nexus-knowledge, nexus-kb, nexus-narrative",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog"
+    },
+    {
+      "id": "R3",
+      "title": "Misaligned doc comments in key_block.rs before deprecate/merge_into/delete",
+      "severity": "low",
+      "source": "qc2-warning-w001",
+      "scope": "nexus-kb",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog"
+    },
+    {
+      "id": "R4",
+      "title": "Non-Send futures in assemble_moment",
+      "severity": "low",
+      "source": "qc3-warning-f001",
+      "scope": "nexus-moment-context-assembly",
+      "decision": "risk-accepted",
+      "owner": "@fullstack-dev",
+      "target_date": "v1.24",
+      "note": "Acceptable for current in-memory context; must resolve before multi-threaded daemon path."
+    }
+  ]
+}
