@@ -1,6 +1,6 @@
 # Nexus Architecture
 
-High-level map of the **nexus** open-source monorepo: wire contracts, Rust workspace crates, and how they connect at build time. Normative rules and API class boundaries live in [`.agents/knowledge/specs/local-cloud-crate-architecture.md`](../.agents/knowledge/specs/local-cloud-crate-architecture.md); this document tracks **what is linked today** (`cargo tree`).
+High-level map of the **nexus** open-source monorepo: wire contracts, Rust workspace crates, entity-scope ownership, and how crates connect at build time. Normative scope and naming rules live in [`.agents/knowledge/specs/entity-scope-model.md`](../.agents/knowledge/specs/entity-scope-model.md); long-term local/cloud crate rules live in [`.agents/knowledge/specs/local-cloud-crate-architecture.md`](../.agents/knowledge/specs/local-cloud-crate-architecture.md). This document distinguishes **current Cargo wiring** from the **V1.23 target** so contributors do not mistake planned edges for existing runtime reachability.
 
 ## Monorepo layout
 
@@ -37,10 +37,35 @@ Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written un
 
 | Line | Purpose | Primary crates | User entry |
 | --- | --- | --- | --- |
-| **Local** | Daemon supervisor, orchestration, agent-host, creator workspace, schedules | `nexus-daemon-runtime`, `nexus-orchestration`, `nexus-agent-host`, `nexus-acp-host`, `nexus-creator`, `nexus-creator-memory`, `nexus-local-db` | `nexus42 daemon …` → `/v1/local/*` |
-| **Cloud** | Platform HTTP, registration, bundle sync (CLI-only) | `nexus-cloud-sync` (+ optional `legacy-sync` feature) | `nexus42 sync …`, `nexus42 platform …` |
+| **Local** | Daemon supervisor, orchestration, agent-host, Creator workspace, Creator memory, World KB / narrative state, User knowledge, Moment context assembly | Current daemon-local core: `nexus-daemon-runtime`, `nexus-orchestration`, `nexus-agent-host`, `nexus-acp-host`, `nexus-creator`, `nexus-local-db`; current CLI also reaches `nexus-creator-memory` and `nexus-moment-context-assembly` for non-daemon flows. V1.23 target wires `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge`, `nexus-moment-context-assembly` into the daemon/local product graph where product paths require them | `nexus42 daemon …` → `/v1/local/*` |
+| **Cloud** | Platform HTTP, registration, bundle sync (CLI-only), optional context Stage-1 | `nexus-cloud-sync` (+ optional `legacy-sync` feature); V1.23 target routes User/Pairing invariants through `nexus-cloud-domain` | `nexus42 sync …`, `nexus42 platform …` |
 
 **Hard isolation (enforced in `Cargo.toml`):** `nexus-daemon-runtime` does **not** depend on `nexus-cloud-sync` or `nexus-cloud-domain`. Platform sync and creator registration must not be exposed on the daemon Local API.
+
+## Entity scope hierarchy
+
+V1.23 uses the scope model in [`entity-scope-model.md`](../.agents/knowledge/specs/entity-scope-model.md) as the normative ownership map:
+
+```text
+Global
+└── User
+    ├── Creator
+    │   └── World
+    │       ├── Timeline
+    │       │   └── Event
+    │       │       └── Moment
+    │       └── KB graph / narrative knowledge assets
+    └── User knowledge index
+```
+
+Key contributor rules:
+
+- Every scoped entity has exactly one canonical owning scope.
+- `User` / `Pairing` invariants belong to `nexus-cloud-domain`; cloud transport belongs to `nexus-cloud-sync`.
+- `Creator` aggregate and local operational identity belong to `nexus-creator`; Creator memory belongs to `nexus-creator-memory`.
+- **World KB** / **narrative KB** assets belong under `World` and are owned by `nexus-kb` with `nexus-narrative` coordinating narrative context.
+- **User knowledge** / **global knowledge index** belongs to `nexus-knowledge`; it is not Creator-scoped and does not own World KeyBlocks.
+- **CLI local work KB index** means today’s `nexus42 creator kb --scope work` file/index workflow under the active `creator_id` + `workspace_slug`; it is not equivalent to `nexus-kb` or `nexus-knowledge`.
 
 ## Rust workspace members (16)
 
@@ -49,7 +74,7 @@ Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written un
 | Crate | Responsibility |
 | --- | --- |
 | `nexus-contracts` | Generated wire types + `src/local/` + enum conversions; no I/O |
-| `nexus-home-layout` | Frozen `~/.nexus42/` path helpers |
+| `nexus-home-layout` | Frozen `~/.nexus42/` path helpers; no entity invariants |
 
 ### Local runtime stack (wired into `nexus42`)
 
@@ -57,31 +82,31 @@ Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written un
 | --- | --- | --- |
 | `nexus-acp-host` | ACP client SDK adapter | `nexus-contracts` |
 | `nexus-agent-host` | Managed agent sessions (ACP client) | `nexus-acp-host`, `nexus-contracts`, `nexus-home-layout` |
-| `nexus-creator` | Creator aggregate logic (types from contracts) | `nexus-contracts`, `nexus-home-layout` |
-| `nexus-creator-memory` | SOUL, LTM, review, personality I/O | `nexus-creator`, `nexus-contracts`, `nexus-home-layout` |
-| `nexus-local-db` | Shared SQLite access for CLI + daemon | `nexus-contracts` |
-| `nexus-orchestration` | Presets, graph-flow engine, schedules, capability registry | `nexus-contracts`, `nexus-home-layout`, `nexus-local-db` |
+| `nexus-creator` | Creator aggregate logic, credential/cache hooks, active Creator local state | `nexus-contracts`, `nexus-home-layout` |
+| `nexus-creator-memory` | Creator-scoped SOUL, long-term memory, review, personality / experience I/O | `nexus-creator`, `nexus-contracts`, `nexus-home-layout` |
+| `nexus-local-db` | Shared SQLite mechanics for Creator/workspace working copies; does not own narrative or User semantics | `nexus-contracts` |
+| `nexus-orchestration` | Presets, graph-flow engine, schedules, capability registry; carries scope IDs as execution context | `nexus-contracts`, `nexus-home-layout`, `nexus-local-db` |
 | `nexus-daemon-runtime` | Lifecycle, Local API, hosts orchestration + agent-host | `nexus-agent-host`, `nexus-creator`, `nexus-local-db`, `nexus-orchestration`, `nexus-contracts`, `nexus-home-layout` |
-| `nexus-moment-context-assembly` | Per-moment context (Stage-0 local; optional cloud Stage-1) | `nexus-creator-memory`, `nexus-contracts`; optional `nexus-cloud-sync` via `cloud-stage` |
+| `nexus-moment-context-assembly` | Moment / session-start context aggregation (current Stage-0 local; optional cloud Stage-1) | Current: `nexus-creator-memory`, `nexus-contracts`; optional `nexus-cloud-sync` via `cloud-stage` |
 
 ### Cloud line (CLI; not daemon)
 
 | Crate | Responsibility | Direct deps (nexus crates) |
 | --- | --- | --- |
 | `nexus-cloud-sync` | Platform HTTP, delta/outbox (`legacy-sync` feature) | `nexus-contracts`, `nexus-home-layout`, `nexus-local-db` |
-| `nexus-cloud-domain` | User / Pairing **domain logic** (no HTTP) | `nexus-contracts` |
+| `nexus-cloud-domain` | User / Pairing **domain logic** and invariants (no HTTP) | `nexus-contracts` |
 
-### Domain libraries (present in workspace; not yet linked from `nexus42`)
+### Domain libraries (current compile-only islands; V1.23 target product domains)
 
-These crates were introduced in the V1.21 local/cloud split. They compile and have tests, but **no path from `nexus42` or `nexus-daemon-runtime` depends on them yet** (verified via `cargo tree`):
+These crates were introduced in the V1.21 local/cloud split. They compile and have tests, but most are **not yet reachable from `nexus42` or `nexus-daemon-runtime` product paths** (verified via `cargo tree`). In the V1.23 target, they become the owning local product domains instead of remaining compile-only islands:
 
-| Crate | Intended role | Current wiring |
+| Crate | Scope / intended role | Current wiring |
 | --- | --- | --- |
-| `nexus-kb` | Narrative `KeyBlock` + `SourceAnchor` logic | Only used by `nexus-narrative` |
-| `nexus-narrative` | Worlds, forks, timelines, manuscripts | Depends on `nexus-kb`; not linked from CLI/daemon |
-| `nexus-knowledge` | Global reference KB (not narrative KeyBlocks) | Standalone; not linked from CLI/daemon |
+| `nexus-kb` | **World KB** graph: KeyBlocks, SourceAnchors, graph insertion/query | Only used by `nexus-narrative`; not product-reachable from CLI/daemon |
+| `nexus-narrative` | `World`, `Timeline`, `Event`: worlds, forks, timelines, story/manuscript projections | Depends on `nexus-kb`; not linked from CLI/daemon |
+| `nexus-knowledge` | **User knowledge** / global knowledge index | Standalone; not linked from CLI/daemon |
 
-CLI `nexus42 creator kb` today implements **work-scope file index** storage under the workspace tree — it does **not** call `nexus-kb` or `nexus-knowledge` yet. See audit notes in PM reports / `.agents/knowledge/specs/local-cloud-crate-architecture.md` §3.5.
+CLI `nexus42 creator kb` today implements **CLI local work KB index** storage under the active Creator/workspace tree — it does **not** call `nexus-kb` or `nexus-knowledge` yet. Future `--scope world` behavior must route to `nexus-kb` + `nexus-narrative`; future User/global knowledge behavior must route to `nexus-knowledge`. See [`entity-scope-model.md` §5](../.agents/knowledge/specs/entity-scope-model.md#5-naming-clarifications) and [`local-cloud-crate-architecture.md` §3.5](../.agents/knowledge/specs/local-cloud-crate-architecture.md#35-nexus-kb-vs-nexus-knowledge).
 
 ### Executable surface
 
@@ -93,7 +118,9 @@ CLI `nexus42 creator kb` today implements **work-scope file index** storage unde
 
 `nexus42` enables `nexus-moment-context-assembly/cloud-stage` and `nexus-cloud-sync/legacy-sync` for CLI cloud workflows. Daemon builds use `nexus-daemon-runtime` without those cloud features on the runtime crate itself.
 
-## Dependency graph (build-time, actual)
+## Dependency graph — current Cargo wiring (verified 2026-05-21)
+
+This graph describes current `Cargo.toml` / `cargo tree` reality. It is intentionally separate from the V1.23 target graph below.
 
 ```text
                          schemas/
@@ -133,7 +160,42 @@ CLI `nexus42 creator kb` today implements **work-scope file index** storage unde
 
 **Forbidden edge (normative):** `nexus-daemon-runtime` → `nexus-cloud-sync` | `nexus-cloud-domain` — satisfied.
 
-**Spec vs code gap:** [local-cloud-crate-architecture.md](../.agents/knowledge/specs/local-cloud-crate-architecture.md) §4 shows `cloud-sync → cloud-domain` and daemon hosting `kb` / `narrative` / `knowledge` / `moment-context-assembly` with full local deps. The graph above reflects **current** `Cargo.toml` edges; wiring the split crates into CLI/daemon is follow-up work (see deferred tracker DF-29–DF-41 and V1.21 compass).
+**Current V1.23 alignment gaps:** `nexus-cloud-sync` does not yet depend on `nexus-cloud-domain`; `nexus-moment-context-assembly` Stage-0 does not yet depend on `nexus-narrative`, `nexus-kb`, or `nexus-knowledge`; `nexus-daemon-runtime` does not yet depend on `nexus-creator-memory`, `nexus-moment-context-assembly`, `nexus-narrative`, `nexus-kb`, or `nexus-knowledge`. These are target gaps, not contradictions in the current graph. See [`local-cloud-crate-architecture.md` §4–§5](../.agents/knowledge/specs/local-cloud-crate-architecture.md#4-currently-wired-cargo-graph-verified-2026-05-21).
+
+## Dependency graph — V1.23 target wiring
+
+The following graph is the V1.23 target from the locked plan and [`local-cloud-crate-architecture.md` §5](../.agents/knowledge/specs/local-cloud-crate-architecture.md#5-v123-target-wiring). It does **not** claim these edges exist today unless they also appear in the current graph above.
+
+```text
+nexus42
+  ├── nexus-daemon-runtime
+  │   ├── nexus-orchestration
+  │   ├── nexus-agent-host
+  │   ├── nexus-creator
+  │   ├── nexus-creator-memory
+  │   ├── nexus-narrative
+  │   ├── nexus-kb
+  │   ├── nexus-knowledge
+  │   ├── nexus-moment-context-assembly (default features only)
+  │   └── nexus-local-db
+  ├── nexus-cloud-sync
+  │   └── nexus-cloud-domain
+  └── nexus-moment-context-assembly (cloud-stage only for CLI/platform flows)
+
+nexus-moment-context-assembly (default Stage-0 target)
+  ├── nexus-creator-memory
+  ├── nexus-narrative
+  ├── nexus-kb
+  ├── nexus-knowledge
+  └── nexus-contracts
+```
+
+Target constraints:
+
+- Daemon wiring must use `nexus-moment-context-assembly` default features only.
+- Daemon wiring must still have no `nexus-cloud-sync`, no `nexus-cloud-domain`, and no platform HTTP path.
+- Cloud transport must use `nexus-cloud-domain` for User/Pairing invariants instead of reimplementing them in `nexus-cloud-sync`.
+- Moment assembly is a read-only pre-session aggregation point; it can include Creator memory, narrative state, World KB assets, and User knowledge without moving ownership between scopes.
 
 ## CLI command groups (frozen surface)
 
@@ -143,9 +205,9 @@ Six top-level groups ([`cli-spec.md`](../.agents/knowledge/specs/cli-spec.md) §
 | --- | --- |
 | `daemon` | Runtime lifecycle, schedules, orchestration control |
 | `acp` | Registry, agents, skills, probe/doctor |
-| `creator` | Identity, workspace, soul, memory, **work-scope kb index** |
+| `creator` | Identity, workspace, soul, memory, **CLI local work KB index** (`creator kb --scope work`) |
 | `sync` | Structured platform sync (`nexus-cloud-sync`) |
-| `platform` | Auth, explore, context assemble, publish |
+| `platform` | Auth, explore, context assemble, publish; future User knowledge entry points route to `nexus-knowledge` |
 | `system` | version, doctor, config, completion, debug |
 
 Hidden entries: `acp-worker`, `daemon-run` (internal process modes).
@@ -166,7 +228,7 @@ Route tables change per release. Authoritative lists:
 - [`.agents/knowledge/specs/local-runtime-boundary.md`](../.agents/knowledge/specs/local-runtime-boundary.md)
 - Active iteration compass under `.agents/iterations/`
 
-**Classes allowed on daemon:** runtime health, workspace, local creator listing, orchestration, agent-host, preset management, knowledge **index** endpoints as implemented.
+**Classes allowed on daemon:** runtime health, workspace, local Creator listing, orchestration, agent-host, preset management, CLI local work KB index endpoints as implemented today; V1.23 target local endpoints may also reach User knowledge, World KB / narrative state, and default-feature Moment context assembly through their owning crates.
 
 **Classes forbidden on daemon:** `/sync/*`, platform registration proxies, public `/acp/*` as a server (ACP stays client/worker path).
 
@@ -187,6 +249,7 @@ Route tables change per release. Authoritative lists:
 
 | Topic | Document |
 | --- | --- |
+| Entity scopes, crate ownership, KB / knowledge naming | [entity-scope-model.md](../.agents/knowledge/specs/entity-scope-model.md) |
 | Crate responsibilities & forbidden deps | [local-cloud-crate-architecture.md](../.agents/knowledge/specs/local-cloud-crate-architecture.md) |
 | Daemon layering | [daemon-runtime.md](../.agents/knowledge/specs/daemon-runtime.md) |
 | Orchestration | [orchestration-engine.md](../.agents/knowledge/specs/orchestration-engine.md) |
