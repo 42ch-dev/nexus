@@ -6,21 +6,21 @@
       "id": "2026-05-21-v1.22-cli-deprecation-cleanup",
       "title": "V1.22 CLI Deprecation Cleanup — remove all deprecated commands, dead code, stale redirects",
       "file": ".agents/plans/2026-05-21-v1.22-cli-deprecation-cleanup.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev", "@qa-engineer", "@qc-specialist"],
-      "progress": 95,
+      "progress": 100,
       "tags": ["v1.22", "cleanup", "cli", "deprecation"],
       "created_at": "2026-05-21",
       "updated_at": "2026-05-21",
-      "done_at": null,
-      "notes": "Batches A–E complete. Architect audit passed. QC tri-review in progress.",
+      "done_at": "2026-05-21",
+      "notes": "Batches A–E complete. QC tri-review 3× Approve. QA Pass (700/700). PR #30 merged.",
       "metadata": {
         "working_branch": "feature/v1.22-cli-deprecation-cleanup",
         "spec_integration_branch": "feature/v1.22-cli-deprecation-cleanup",
         "merge_target": "main",
         "branch_policy": "single integration branch — all batches merge to feature branch then PR to main",
-        "phase": "InReview",
+        "phase": "done",
         "priority": "medium",
         "description": "Remove ~18 deprecated CLI top-level commands, their implementations, deprecated runtime redirects, obsolete tests, and dead imports accumulated across V1.2–V1.18.",
         "iteration_compass": ".agents/iterations/v1.22-cli-deprecation-cleanup-delivery-compass-v1.md",
@@ -32,12 +32,12 @@
            { "index": 5, "name": "E — Architect audit fixes", "covers": ["E1", "E2", "E3", "E4"], "status": "done", "owner": "@fullstack-dev", "notes": "Clippy 39→0, stale CLI paths updated, deprecated removed, legacy scaffolding cleaned. Commit: 2528f10" }
         ],
         "gates": {
-          "qc": "in_progress",
-          "qa": "pending",
+          "qc": "pass",
+          "qa": "pass",
           "tests": "pass",
           "lint": "pass"
         },
-        "next_action": "QC tri-review in progress. 3 parallel reviewers examining the diff."
+        "next_action": "Done. V1.22 shipped via PR #30."
       }
     }
   ],
@@ -46,8 +46,8 @@
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
-    "latest_shipped_iteration": "v1.21",
-    "latest_shipped_at": "2026-05-21T01:28:59Z",
+    "latest_shipped_iteration": "v1.22",
+    "latest_shipped_at": "2026-05-21T12:00:00Z",
     "tech_debt_summary": {
       "updated_at": "2026-05-21T12:00:00Z",
       "total_open": 0,
