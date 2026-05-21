@@ -100,7 +100,7 @@ async fn list_identities() -> Result<()> {
 
     if identities.is_empty() {
         println!("No local identities found.");
-        println!("Create one with: nexus42 identity create [--anonymous | --persistent] [--name \"name\"]");
+        println!("Create one with: nexus42 system identity create [--anonymous | --persistent] [--name \"name\"]");
         return Ok(());
     }
 
@@ -193,7 +193,7 @@ async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<
         println!("  Stored in ~/.nexus42/state.db");
     } else {
         println!("  Ephemeral — data will be lost when this session ends");
-        println!("  (run `nexus42 identity create --persistent` for a saved identity)");
+        println!("  (run `nexus42 system identity create --persistent` for a saved identity)");
     }
 
     // Auto-set as active
@@ -215,7 +215,7 @@ async fn use_identity(creator_id: String) -> Result<()> {
     let pool = open_global_db().await?;
     let _identity = get_local_identity(&pool, &creator_id).await?.ok_or_else(|| {
         CliError::Other(format!(
-            "Local identity '{creator_id}' not found. Run `nexus42 identity list` to see available identities."
+            "Local identity '{creator_id}' not found. Run `nexus42 system identity list` to see available identities."
         ))
     })?;
 
@@ -365,7 +365,7 @@ impl ResolvedIdentity {
     #[must_use]
     pub const fn ephemeral_warning(&self) -> Option<&'static str> {
         if self.is_anonymous {
-            Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 identity create --persistent` for a saved identity.")
+            Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 system identity create --persistent` for a saved identity.")
         } else {
             None
         }

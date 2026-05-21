@@ -1,6 +1,6 @@
 //! Permission management commands (V1.6).
 //!
-//! Implements `nexus42 permission list/grant/deny/ask/revoke/reset` for
+//! Implements `nexus42 acp permission list/grant/deny/ask/revoke/reset` for
 //! managing per-agent permission rules in `.nexus42/permissions.toml`.
 //! Uses `toml_edit` to preserve unknown fields and comments.
 
@@ -77,7 +77,9 @@ pub enum PermissionCommand {
 /// - Invalid capability format
 pub fn run(command: PermissionCommand) -> Result<()> {
     let workspace_root = find_workspace_root().ok_or_else(|| {
-        anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
+        anyhow::anyhow!(
+            "Not in a Nexus workspace. Run 'nexus42 creator workspace init workspace' first."
+        )
     })?;
 
     match command {
@@ -168,7 +170,7 @@ fn print_list_text(policy: &PermissionPolicy, agent_filter: Option<&str>) {
             println!("No rules found for agent '{filter}'.");
         } else if global_granted.is_empty() && global_denied.is_empty() {
             println!("No permission rules configured.");
-            println!("Use 'nexus42 permission grant <agent> <capability>' to add rules.");
+            println!("Use 'nexus42 acp permission grant <agent> <capability>' to add rules.");
         }
         return;
     }

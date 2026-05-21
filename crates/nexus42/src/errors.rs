@@ -148,9 +148,9 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // Use default #[error] messages for simple variants
-            Self::WorkspaceNotInitialized => write!(f, "Workspace not initialized.\n\n  Suggestion: Run `nexus42 init` first."),
+            Self::WorkspaceNotInitialized => write!(f, "Workspace not initialized.\n\n  Suggestion: Run `nexus42 creator workspace init workspace` first."),
             Self::DaemonNotRunning => write!(f, "Daemon not running.\n\n  Suggestion: Start it with `nexus42 daemon start`."),
-            Self::AuthenticationRequired => write!(f, "Authentication required.\n\n  Suggestion: Run `nexus42 auth login` first."),
+            Self::AuthenticationRequired => write!(f, "Authentication required.\n\n  Suggestion: Run `nexus42 platform auth login` first."),
             Self::CreatorNotSelected => write!(f, "Creator not selected.\n\n  Suggestion: Run `nexus42 creator use <creator-ref>` first."),
 
             // Enhanced error variants with suggestions
@@ -166,7 +166,7 @@ impl fmt::Display for CliError {
                 write!(
                     f,
                     "Creator registration failed (HTTP {status}): {message}\n\n  Suggestion: \
-                     Check your authentication with `nexus42 auth status` and try again."
+                     Check your authentication with `nexus42 platform auth status` and try again."
                 )
             }
             Self::CreatorVerificationFailed { status, message } => {
@@ -218,7 +218,7 @@ impl fmt::Display for CliError {
                     f,
                     "Operation '{operation}' is not available in {mode} mode.\n\n  Suggestion: \
                      This operation requires platform connectivity. Switch to \
-                     `local_first` or `cloud_enhanced` mode with `nexus42 config set runtime_mode <mode>`."
+                     `local_first` or `cloud_enhanced` mode with `nexus42 system config set runtime_mode <mode>`."
                 )
             }
             Self::Other(msg) => write!(f, "{msg}"),
@@ -244,7 +244,7 @@ impl CliError {
         Self::AgentNotFound {
             agent_id: agent_id.clone(),
             message: format!("Agent '{agent_id}' not found."),
-            suggestion: "List available agents with `nexus42 agent list`.".to_string(),
+            suggestion: "List available agents with `nexus42 acp agent list`.".to_string(),
         }
     }
 
@@ -255,7 +255,8 @@ impl CliError {
         Self::SessionExpired {
             session_id: session_id.clone(),
             message: format!("Session '{session_id}' has expired."),
-            suggestion: "Create a new session with `nexus42 agent connect <agent>`.".to_string(),
+            suggestion: "Create a new session with `nexus42 acp agent connect <agent>`."
+                .to_string(),
         }
     }
 
@@ -268,7 +269,7 @@ impl CliError {
             tool: tool.clone(),
             reason,
             message: format!("Permission denied for tool: {tool}"),
-            suggestion: "Check your permissions with `nexus42 auth status`.".to_string(),
+            suggestion: "Check your permissions with `nexus42 platform auth status`.".to_string(),
         }
     }
 }
@@ -431,7 +432,7 @@ mod tests {
 
         assert!(display.contains("Agent 'agent-123' not found"));
         assert!(display.contains("Suggestion:"));
-        assert!(display.contains("nexus42 agent list"));
+        assert!(display.contains("nexus42 acp agent list"));
     }
 
     #[test]
@@ -441,7 +442,7 @@ mod tests {
 
         assert!(display.contains("Session 'sess-abc' has expired"));
         assert!(display.contains("Suggestion:"));
-        assert!(display.contains("nexus42 agent connect"));
+        assert!(display.contains("nexus42 acp agent connect"));
     }
 
     #[test]
@@ -451,7 +452,7 @@ mod tests {
 
         assert!(display.contains("Permission denied for tool: file_write"));
         assert!(display.contains("Suggestion:"));
-        assert!(display.contains("nexus42 auth status"));
+        assert!(display.contains("nexus42 platform auth status"));
     }
 
     #[test]
@@ -461,7 +462,7 @@ mod tests {
 
         assert!(display.contains("Workspace not initialized"));
         assert!(display.contains("Suggestion:"));
-        assert!(display.contains("nexus42 init"));
+        assert!(display.contains("nexus42 creator workspace init"));
     }
 
     #[test]

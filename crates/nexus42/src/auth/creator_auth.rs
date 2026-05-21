@@ -75,7 +75,7 @@ pub fn creator_auth_headers(_config: &CliConfig, creator_id: &str) -> Result<Cre
 
     // Path 3: No credentials
     Err(CliError::Other(
-        "Authentication required. Run `nexus42 auth login` or `nexus42 creator register`."
+        "Authentication required. Run `nexus42 platform auth login` or `nexus42 creator register`."
             .to_string(),
     ))
 }
@@ -243,7 +243,7 @@ mod tests {
 
         // Path 3: No credentials
         Err(CliError::Other(
-            "Authentication required. Run `nexus42 auth login` or `nexus42 creator register`."
+            "Authentication required. Run `nexus42 platform auth login` or `nexus42 creator register`."
                 .to_string(),
         ))
     }

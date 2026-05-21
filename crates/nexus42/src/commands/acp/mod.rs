@@ -26,6 +26,10 @@
 //!     ├─► Skills(Export)    ──► List client capabilities
 //!     └─► Skills(Verify)    ──► Verify client capabilities
 //! ```
+//!
+pub mod permission;
+pub mod policy;
+pub mod session;
 
 use std::path::PathBuf;
 
@@ -155,19 +159,19 @@ pub enum AcpCommand {
     /// ACP session persistence management
     Session {
         #[command(subcommand)]
-        command: super::session::SessionCommand,
+        command: session::SessionCommand,
     },
 
     /// Global permission policy management
     Policy {
         #[command(subcommand)]
-        command: super::policy::PolicyCommand,
+        command: policy::PolicyCommand,
     },
 
     /// Agent-scoped permission rules
     Permission {
         #[command(subcommand)]
-        command: super::permission::PermissionCommand,
+        command: permission::PermissionCommand,
     },
 
     /// Run an ACP agent interactively or with a single message
@@ -219,9 +223,9 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
                 Ok(())
             }
         },
-        AcpCommand::Session { command } => super::session::run(command, config),
-        AcpCommand::Policy { command } => super::policy::run(command),
-        AcpCommand::Permission { command } => super::permission::run(command),
+        AcpCommand::Session { command } => session::run(command, config),
+        AcpCommand::Policy { command } => policy::run(command),
+        AcpCommand::Permission { command } => permission::run(command),
         AcpCommand::Run {
             agent_ref,
             message,

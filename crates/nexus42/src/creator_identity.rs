@@ -396,13 +396,11 @@ mod tests {
             "base entry should survive concurrent writes"
         );
         // At least one thread entry should be present
-        let thread_entries: Vec<_> = final_cache
-            .creators
-            .keys()
-            .filter(|k| k.starts_with("ctr_thread_"))
-            .collect();
         assert!(
-            !thread_entries.is_empty(),
+            final_cache
+                .creators
+                .keys()
+                .any(|k| k.starts_with("ctr_thread_")),
             "at least one thread entry should be present"
         );
     }

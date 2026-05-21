@@ -11,7 +11,8 @@
 //! - **Pull**: fetches bundles via `SyncClient::pull_bundles`
 //! - **Status/Resolve**: reads/writes the local outbox (`Outbox` backed by `state.db`)
 
-use crate::commands::world::WorldCommand;
+pub mod world;
+
 use crate::config::CliConfig;
 use crate::domain::runtime_guard;
 use crate::errors::Result;
@@ -95,7 +96,7 @@ pub enum SyncCommand {
     /// World fork and snapshot (migrated from `nexus42 world`)
     World {
         #[command(subcommand)]
-        command: WorldCommand,
+        command: world::WorldCommand,
     },
 
     /// Retry a failed sync operation (coming soon)
@@ -318,7 +319,7 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             }
         }
         SyncCommand::World { command } => {
-            super::world::run(command).await?;
+            world::run(command).await?;
         }
         SyncCommand::Retry { bundle_id } => match bundle_id {
             Some(id) => {

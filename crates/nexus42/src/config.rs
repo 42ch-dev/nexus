@@ -1228,7 +1228,7 @@ pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     let user_home = user_home_dir()?;
     let cid = config.active_creator_id.as_deref().ok_or_else(|| {
         anyhow::anyhow!(
-            "No active creator configured. Run `nexus42 init workspace` or `nexus42 creator use <id>`."
+            "No active creator configured. Run `nexus42 creator workspace init workspace` or `nexus42 creator use <id>`."
         )
     })?;
     let slug = config.workspace_slug_for_creator(cid);
