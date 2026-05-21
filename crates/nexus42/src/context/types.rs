@@ -1,8 +1,12 @@
-//! Context Assembly — request/response types for POST /v1/local/context/assemble.
+//! Context Assembly — request/response types for the platform context assembly contract.
 //!
 //! Types are generated from `schemas/platform/context-assembly-v1.schema.json`
 //! via `pnpm run codegen` into `nexus-contracts`. This module re-exports them
 //! for use by CLI crates.
+//!
+//! Note (KCA-002 B2): These are wire types for the platform API contract.
+//! The daemon `POST /v1/local/context/assemble` route is retired; context
+//! assembly runs CLI in-process via `nexus-moment-context-assembly`.
 
 // Re-export generated types from nexus-contracts
 pub use nexus_contracts::generated::ContextAssembleRequestV1;
