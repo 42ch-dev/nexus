@@ -31,7 +31,7 @@ const EXPERIENCE_HEADING: &str = "## Experience";
 ///
 /// Collects all local context sources and assembles them in the
 /// spec-defined order (§9.2).
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Stage0Assembly {
     /// Personality section content (verbatim from SOUL.md `## Personality`).
     pub personality: String,

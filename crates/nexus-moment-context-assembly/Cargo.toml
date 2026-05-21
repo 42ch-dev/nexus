@@ -13,8 +13,12 @@ workspace = true
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-narrative = { path = "../nexus-narrative" }
+nexus-kb = { path = "../nexus-kb" }
+nexus-knowledge = { path = "../nexus-knowledge" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
 
 # Cloud-stage optional dependency
 nexus-cloud-sync = { path = "../nexus-cloud-sync", optional = true }
