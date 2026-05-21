@@ -20,3 +20,8 @@ pub mod test_utils;
 /// Gated behind `#[cfg(test)]` because it uses dev-dependencies.
 #[cfg(test)]
 pub mod test_support;
+
+/// Architecture dependency assertions — compile-time and runtime checks
+/// for the intended dependency graph of this crate.
+#[cfg(test)]
+mod architecture_assertions;
