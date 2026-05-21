@@ -34,6 +34,13 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md) | V1.19 | Shipped |
 | [v1.20-delivery-compass-v1.md](v1.20-delivery-compass-v1.md) | V1.20 | **Shipped** (2026-05-19) |
 | [v1.21-local-platform-isolation-delivery-compass-v1.md](v1.21-local-platform-isolation-delivery-compass-v1.md) | V1.21 | **InProgress** — plan [`2026-05-20-v1.21-local-platform-isolation`](../plans/2026-05-20-v1.21-local-platform-isolation.md) |
+| [v1.22-cli-deprecation-cleanup-delivery-compass-v1.md](v1.22-cli-deprecation-cleanup-delivery-compass-v1.md) | V1.22 | **Shipped** (2026-05-21) |
+
+### Reference compasses
+
+| Document | Version | Status |
+| --- | --- | --- |
+| [v1.23-architecture-crate-wiring-reference-compass-v1.md](v1.23-architecture-crate-wiring-reference-compass-v1.md) | V1.23 reference | Reference — non-binding, future iteration guidance |
 
 ### Legacy `v1.*` iteration artifacts
 

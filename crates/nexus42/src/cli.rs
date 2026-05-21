@@ -68,7 +68,7 @@ pub enum Commands {
         command: SyncCommand,
     },
 
-    /// Manage Creator entities (register, pair, credentials, workspace, soul, memory)
+    /// Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
     Creator {
         #[command(subcommand)]
         command: CreatorCommand,

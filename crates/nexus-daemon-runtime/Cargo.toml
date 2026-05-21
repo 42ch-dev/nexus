@@ -17,6 +17,11 @@ nexus-creator = { path = "../nexus-creator" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-agent-host = { path = "../nexus-agent-host" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-narrative = { path = "../nexus-narrative" }
+nexus-kb = { path = "../nexus-kb" }
+nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
