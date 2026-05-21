@@ -1,10 +1,12 @@
 //! Daemon Command — Manage the nexus daemon runtime
 
+pub mod schedule;
+
 use crate::api::DaemonClient;
-use crate::commands::schedule::ScheduleCommand;
 use crate::config::{CliConfig, DAEMON_PORT};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
+use schedule::ScheduleCommand;
 
 #[cfg(unix)]
 use nix::sys::signal::Signal;
@@ -137,7 +139,7 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
         DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
         DaemonCommand::Doctor { port } => daemon_doctor(port).await,
         DaemonCommand::Orchestrate { command } => run_orchestrate(command),
-        DaemonCommand::Schedule { command } => super::schedule::run(*command, config).await,
+        DaemonCommand::Schedule { command } => schedule::run(*command, config).await,
     }
 }
 
