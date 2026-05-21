@@ -2134,6 +2134,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "hex",
+ "nexus-cloud-domain",
  "nexus-contracts",
  "nexus-home-layout",
  "nexus-local-db",
@@ -2289,8 +2290,12 @@ dependencies = [
  "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator-memory",
+ "nexus-kb",
+ "nexus-knowledge",
+ "nexus-narrative",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
