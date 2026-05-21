@@ -232,7 +232,7 @@ pub fn status(_config: &CliConfig) -> Result<()> {
         }
     } else {
         println!("User Authentication: \u{2717} Not logged in");
-        println!("  Run `nexus42 auth login` to authenticate.");
+        println!("  Run `nexus42 platform auth login` to authenticate.");
     }
 
     Ok(())
@@ -312,13 +312,13 @@ pub async fn refresh_access_token(config: &CliConfig) -> Result<()> {
                 let mut store = AuthStore::load()?;
                 store.clear_user_token()?;
                 return Err(CliError::Other(
-                    "Refresh token expired. Please run `nexus42 auth login` again.".into(),
+                    "Refresh token expired. Please run `nexus42 platform auth login` again.".into(),
                 ));
             }
         }
         // Sanitize: don't leak upstream error details for non-invalid_grant 400s.
         return Err(CliError::Other(
-            "Token refresh failed (400 Bad Request). Please try `nexus42 auth login` again.".into(),
+            "Token refresh failed (400 Bad Request). Please try `nexus42 platform auth login` again.".into(),
         ));
     }
 
@@ -374,7 +374,7 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
     let store = AuthStore::load()?;
 
     let token = store.user_token.as_ref().ok_or_else(|| {
-        CliError::Other("Not authenticated. Run `nexus42 auth login` first.".into())
+        CliError::Other("Not authenticated. Run `nexus42 platform auth login` first.".into())
     })?;
 
     // Check if access token is still valid (with 60s buffer)
@@ -406,7 +406,7 @@ pub async fn ensure_valid_token(config: &CliConfig) -> Result<String> {
     if expires_at <= now {
         return Err(CliError::Other(
             "Access token expired and no refresh token available. \
-             Run `nexus42 auth login` again."
+             Run `nexus42 platform auth login` again."
                 .into(),
         ));
     }
@@ -477,9 +477,10 @@ mod tests {
 
     #[tokio::test]
     async fn login_polling_exits_on_success() {
-        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _home = crate::testutil::isolated_home();
 
         let mock_server = MockServer::start().await;
 
@@ -530,9 +531,10 @@ mod tests {
 
     #[tokio::test]
     async fn login_polling_handles_expired_token() {
-        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _home = crate::testutil::isolated_home();
 
         let mock_server = MockServer::start().await;
 
@@ -584,9 +586,10 @@ mod tests {
 
     #[tokio::test]
     async fn login_polling_handles_access_denied() {
-        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _home = crate::testutil::isolated_home();
 
         let mock_server = MockServer::start().await;
 
@@ -639,9 +642,10 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_access_token_success() {
-        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _home = crate::testutil::isolated_home();
 
         let mock_server = MockServer::start().await;
 
@@ -688,9 +692,10 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_access_token_invalid_grant_clears_tokens() {
-        let _home = crate::testutil::isolated_home();
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _home = crate::testutil::isolated_home();
 
         let mock_server = MockServer::start().await;
 

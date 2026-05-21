@@ -301,10 +301,10 @@ async fn init_workspace(
 fn print_next_steps() {
     println!();
     println!("Next steps:");
-    println!("  nexus42 preset list           — see available workflow presets");
-    println!("  nexus42 schedule add --preset <id> --creator <id>");
+    println!("  nexus42 system preset list    — see available workflow presets");
+    println!("  nexus42 daemon schedule add --preset <id> --creator <id>");
     println!("                                 — start a preset-driven workflow");
-    println!("  nexus42 auth login            — authenticate with the platform");
+    println!("  nexus42 platform auth login   — authenticate with the platform");
     println!("  nexus42 creator register      — create a Creator entity");
     println!();
     println!("Workspace artifacts (stories, research reports) are created");

@@ -313,6 +313,8 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
         // Write TRACE_FILE_SIZE_LIMIT + 1 bytes of padding
+        // SAFE: constant is 10 MiB, always fits in usize
+        #[allow(clippy::cast_possible_truncation)]
         let oversize_content = "X".repeat((TRACE_FILE_SIZE_LIMIT + 1) as usize);
         std::fs::write(&trace_path, oversize_content.as_bytes()).unwrap();
         assert!(

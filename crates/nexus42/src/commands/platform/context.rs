@@ -1,4 +1,4 @@
-//! Context Command — `nexus42 context assemble` and `nexus42 context assemble-local`
+//! Context Command — `nexus42 platform context assemble` and `nexus42 platform context assemble-local`
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
@@ -281,7 +281,7 @@ async fn build_stage0_from_local(
 ) -> Result<Stage0Assembly> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(
-            "No active creator set. Run `nexus42 identity use <id>` first.".to_string(),
+            "No active creator set. Run `nexus42 system identity use <id>` first.".to_string(),
         )
     })?;
 
