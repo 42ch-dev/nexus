@@ -3,6 +3,14 @@
 //! Provides the sync mechanism for CLI ↔ Platform synchronization using
 //! Command, `DeltaBundle`, and Outbox patterns.
 //!
+//! # Domain integration
+//!
+//! This crate uses [`nexus_cloud_domain`] for User and Pairing domain
+//! invariants (account lifecycle, pairing state transitions, domain ↔ contract
+//! conversions). Transport-layer code MUST NOT reimplement those rules; route
+//! all User/Pairing validation through `nexus_cloud_domain::user` and
+//! `nexus_cloud_domain::pairing`.
+//!
 //! # Feature Flags
 //!
 //! - **`legacy-sync`** (default off): Enables the legacy cloud sync pipeline —
@@ -66,6 +74,11 @@ pub use nexus_contracts::{
     local::domain::OutboxEntry,
     BundleType, CreatorId, ManuscriptPhase, WorldId,
 };
+
+// Re-export cloud-domain types for User/Pairing invariants.
+// All User/Pairing domain validation MUST route through these types
+// rather than being reimplemented in transport code.
+pub use nexus_cloud_domain as cloud_domain;
 
 // Re-export sync error types (always available)
 pub use errors::{SyncError, SyncResult};
