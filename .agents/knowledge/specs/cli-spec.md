@@ -301,7 +301,7 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 | Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KeyBlocks or User knowledge rows. |
 | Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-kb` | Route to World-scoped narrative KB graph. Must preserve KeyBlock / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
 | Manage User/global reference knowledge | Recommended future `nexus42 platform knowledge ...` (name may be finalized by implementation plan C4) | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
-| Assemble context for an agent session | `nexus42 platform context assemble` / ACP context capability | Moment request context; selected Creator/World/User inputs | `nexus-moment-context-assembly` reading `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge` | Produces a read-only Moment snapshot. Does not move ownership between scopes. |
+| Assemble context for an agent session | `nexus42 platform context assemble` / ACP context capability | Moment request context; selected Creator/World/User inputs | `nexus-moment-context-assembly` reading `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge` | Produces a read-only Moment snapshot. Runs **CLI in-process** (not via daemon Local API). Does not move ownership between scopes. |
 
 Implementation task C4 should therefore treat `creator kb` as a routing/name-alignment task, not as permission for `nexus42` to own KB/domain storage long-term.
 
@@ -348,7 +348,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 说明：
 
-- `context assemble` 读取 confirmed World KB / User knowledge / timeline / memory slices，输出只读快照。
+- `context assemble` 读取 confirmed World KB / User knowledge / timeline / memory slices，输出只读快照。Context assembly runs **CLI in-process** via `nexus-moment-context-assembly` (`Stage0Assembly` / `TwoStageAssembly`), not via daemon Local API. The daemon `POST /v1/local/context/assemble` route is **Retired** (KCA-002 B2).
 - `publish.*` 表示内容跨平台边界动作，不与 `sync push` 混用。
 - `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
 
@@ -359,7 +359,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | Structured state sync | `nexus42 sync ...` | `sync.*` + bundle/delta contracts |
 | Runtime orchestration control | `nexus42 daemon orchestrate ...` | daemon local API + orchestration engine |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
-| Context assembly snapshot | `nexus42 platform context assemble` | read-only context snapshot for local agents |
+| Context assembly snapshot | `nexus42 platform context assemble` | read-only context snapshot for local agents (CLI in-process via `nexus-moment-context-assembly`; daemon `POST /v1/local/context/assemble` is **Retired** — KCA-002 B2) |
 | Manuscript read/write | 无顶层独立命令组 | `manuscript.*` ACP capabilities + preset roots |
 | Research / references | 无顶层独立命令组 | preset orchestration + `research.*` ACP tools |
 | Content publication | `nexus42 platform publish ...`（或 preset 显式动作） | `publish.*` + confirmation policy |
