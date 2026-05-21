@@ -38,66 +38,16 @@ async fn main() {
     // Execute command
     let output_format = cli.output_format().to_string();
     let result = match cli.into_command() {
-        Some(Commands::Init { command }) => nexus42::commands::init::run(command).await,
-        Some(Commands::Auth { command }) => nexus42::commands::auth::run(command, &config).await,
         Some(Commands::Daemon { command }) => {
             nexus42::commands::daemon::run(command, &config).await
         }
-        Some(Commands::Db { command }) => nexus42::commands::db::run(command, &config).await,
-        Some(Commands::Debug { command }) => nexus42::commands::debug::run(command, &config).await,
-        Some(Commands::Doctor { command }) => {
-            eprintln!("Note: `nexus42 doctor` is deprecated. Use `nexus42 system doctor` instead.");
-            nexus42::commands::doctor::run(command, &config).await
-        }
         Some(Commands::Sync { command }) => nexus42::commands::sync::run(command, &config).await,
-        Some(Commands::World { command }) => nexus42::commands::world::run(command).await,
-        Some(Commands::Clone { args }) => nexus42::commands::clone::run(args, &config).await,
-        Some(Commands::Config { command }) => nexus42::commands::config::run(command, &config),
-        Some(Commands::Explore { command }) => {
-            eprintln!(
-                "Note: `nexus42 explore` is deprecated. Use `nexus42 platform explore` instead."
-            );
-            nexus42::commands::explore::run(command).await
-        }
         Some(Commands::Creator { command }) => {
             nexus42::commands::creator::run(command, &config).await
-        }
-        Some(Commands::Context { command }) => {
-            nexus42::commands::context::run(command, &config).await
         }
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
         Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
-        Some(Commands::Session { command }) => {
-            eprintln!("Note: `nexus42 session` is deprecated. Use `nexus42 acp session` instead.");
-            nexus42::commands::session::run(command, &config)
-        }
-        Some(Commands::Policy { command }) => {
-            eprintln!("Note: `nexus42 policy` is deprecated. Use `nexus42 acp policy` instead.");
-            nexus42::commands::policy::run(command)
-        }
-        Some(Commands::Permission { command }) => {
-            eprintln!(
-                "Note: `nexus42 permission` is deprecated. Use `nexus42 acp permission` instead."
-            );
-            nexus42::commands::permission::run(command)
-        }
-        Some(Commands::Preset { command }) => {
-            nexus42::commands::preset::run(command, &config).await
-        }
-        Some(Commands::Identity { command }) => {
-            nexus42::commands::identity::run(command, &config).await
-        }
-        Some(Commands::RuntimeMode { command }) => {
-            nexus42::commands::runtime_mode::run(command, &config)
-        }
-        Some(Commands::Soul { command }) => nexus42::commands::soul::run(command, &config).await,
-        Some(Commands::Memory { command }) => {
-            nexus42::commands::memory::run(command, &config).await
-        }
-        Some(Commands::Schedule { command }) => {
-            nexus42::commands::schedule::run(command, &config).await
-        }
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await
         }

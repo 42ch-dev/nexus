@@ -45,7 +45,7 @@ const MAX_VERIFY_ATTEMPTS: u32 = 2;
 
 // ── Inlined types from init.rs (V1.22 deprecation cleanup) ──────────
 
-/// Init subcommands (formerly in commands::init).
+/// Init subcommands (formerly in `commands::init`).
 #[derive(Debug, Subcommand)]
 pub enum InitCommand {
     /// Initialize creative workspace + operational registration under ~/.nexus42/creators/...
@@ -77,7 +77,7 @@ struct WorkspaceMeta {
     created_at: String,
 }
 
-/// Default creative root path: ~/Documents/nexus/<creator_id>/<workspace_slug>.
+/// Default creative root path: ~/Documents/nexus/<`creator_id`>/<`workspace_slug`>.
 fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<PathBuf> {
     let docs = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Documents")))
@@ -313,7 +313,7 @@ fn print_next_steps() {
 
 // ── Inlined types from clone.rs (V1.22 deprecation cleanup) ──────────
 
-/// Clone command arguments (formerly in commands::clone).
+/// Clone command arguments (formerly in `commands::clone`).
 #[derive(Debug, Args)]
 pub struct CloneArgs {
     /// World reference to clone (`world_id`, e.g. `wld_abc123`)
@@ -329,7 +329,7 @@ pub struct CloneArgs {
     pub yes: bool,
 }
 
-/// Clone source options (formerly in commands::clone).
+/// Clone source options (formerly in `commands::clone`).
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum CloneSourceArg {
     /// Clone from the platform (via daemon proxy)
@@ -338,7 +338,7 @@ pub enum CloneSourceArg {
     Local,
 }
 
-/// Response from the daemon clone endpoint (formerly in commands::clone).
+/// Response from the daemon clone endpoint (formerly in `commands::clone`).
 #[derive(Debug, Deserialize)]
 struct WorldCloneResponse {
     success: bool,
@@ -395,7 +395,7 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
         })
 }
 
-/// Run the clone command (formerly in commands::clone).
+/// Run the clone command (formerly in `commands::clone`).
 async fn run_clone(args: CloneArgs, config: &CliConfig) -> Result<()> {
     let world_ref = validate_world_ref(&args.world_ref).map_err(CliError::Other)?;
 

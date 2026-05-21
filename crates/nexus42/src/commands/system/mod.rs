@@ -1,7 +1,7 @@
 //! `nexus42 system` — System management command group.
 //!
 //! Implements the `nexus42 system` top-level command with subcommands:
-//! - `preset` — Show registered system presets (existing)
+//! - `preset` — Show registered system presets
 //! - `version` — Print CLI version info
 //! - `doctor` — Diagnostic health checks
 //! - `completion` — Shell completion generation
@@ -10,13 +10,14 @@
 //! - `db` — Database status and management
 //! - `identity` — Local identity management
 //! - `runtime-mode` — Runtime mode management
-//!
-//! # Architecture
-//!
-//! Thin delegation layer — each variant delegates to the existing command
-//! module's `run()` function. No business logic lives here.
 
 #![allow(clippy::print_literal)]
+
+pub mod config;
+pub mod db;
+pub mod debug;
+pub mod identity;
+pub mod runtime_mode;
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -48,31 +49,31 @@ pub enum SystemCommand {
     /// Configuration file management
     Config {
         #[command(subcommand)]
-        command: super::config::ConfigCommand,
+        command: config::ConfigCommand,
     },
 
     /// Internal debugging utilities
     Debug {
         #[command(subcommand)]
-        command: super::debug::DebugCommand,
+        command: debug::DebugCommand,
     },
 
     /// Database status and management
     Db {
         #[command(subcommand)]
-        command: super::db::DbCommand,
+        command: db::DbCommand,
     },
 
     /// Local identity management
     Identity {
         #[command(subcommand)]
-        command: super::identity::IdentityCommand,
+        command: identity::IdentityCommand,
     },
 
     /// Runtime mode management
     RuntimeMode {
         #[command(subcommand)]
-        command: super::runtime_mode::RuntimeModeCommand,
+        command: runtime_mode::RuntimeModeCommand,
     },
 }
 
@@ -117,11 +118,11 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
         }
         SystemCommand::Doctor => run_combined_doctor(config).await,
         SystemCommand::Completion { shell } => print_completion(&shell),
-        SystemCommand::Config { command } => super::config::run(command, config),
-        SystemCommand::Debug { command } => super::debug::run(command, config).await,
-        SystemCommand::Db { command } => super::db::run(command, config).await,
-        SystemCommand::Identity { command } => super::identity::run(command, config).await,
-        SystemCommand::RuntimeMode { command } => super::runtime_mode::run(command, config),
+        SystemCommand::Config { command } => config::run(command, config),
+        SystemCommand::Debug { command } => debug::run(command, config).await,
+        SystemCommand::Db { command } => db::run(command, config).await,
+        SystemCommand::Identity { command } => identity::run(command, config).await,
+        SystemCommand::RuntimeMode { command } => runtime_mode::run(command, config),
     }
 }
 
