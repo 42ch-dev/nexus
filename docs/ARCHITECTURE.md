@@ -238,6 +238,42 @@ Route tables change per release. Authoritative lists:
 - CLI / crate: SemVer per crate; breaking wire → coordinated bump of schemas, Rust crate, and npm major
 - Pre-release (&lt;1.0): breaking CLI, paths, and on-disk layout allowed without migration
 
+## Pre-release local storage and breaking changes
+
+Nexus is pre-release (version &lt; 1.0). Per [`AGENTS.md`](../AGENTS.md), breaking changes are expected and allowed — API shapes, CLI flags, on-disk paths, config file layout, and behavior may change without a deprecation period. **Local persistence may be wiped rather than migrated.**
+
+### What is stored locally
+
+| Path | Content | Owner crate |
+| --- | --- | --- |
+| `~/.nexus42/config.toml` | CLI preferences (active creator, workspace slug, URLs, runtime mode) | `nexus42` (CLI surface) |
+| `~/.nexus42/agents.toml` | Multi-agent strategy/role overrides | `nexus42` (CLI surface) |
+| `~/.nexus42/auth.json` | Platform JWT tokens, creator auth state, API keys | `nexus42` (CLI surface; planned daemon migration) |
+| `~/.nexus42/creator-identities.json` | Creator display name/handle cache | `nexus42` (CLI surface; planned SQLite migration) |
+| `~/.nexus42/state.db` | Global identity database | `nexus-local-db` via `nexus42` |
+| `~/.nexus42/creators/<cid>/workspaces/<slug>/state.db` | Per-creator/workspace working copy (creators, reference_sources, outbox, etc.) | `nexus-local-db` |
+| `~/.nexus42/creators/<cid>/workspaces/<slug>/kb/index.json` + `entries/*.md` | CLI local work KB index (distinct from World KB and User knowledge) | `nexus42` (CLI surface; future routing to `nexus-kb` / `nexus-knowledge`) |
+| `<workspace_root>/.nexus42/workspace.json` | Workspace display config | `nexus42` (CLI surface) |
+
+### What users should expect before 1.0
+
+- **On-disk paths may change** between versions. After an upgrade, existing `~/.nexus42/` data may not be readable by the new version.
+- **No automatic migration.** If a breaking schema or layout change occurs, the recommended action is to delete `~/.nexus42/` (or the affected workspace's data) and re-initialize.
+- **CLI config may reset.** `config.toml` fields may be added, removed, or renamed. If the file cannot be parsed, it is backed up and defaults are used.
+- **Auth tokens may be invalidated.** `auth.json` tokens have expiry times and may not survive across CLI version changes if the platform token format changes.
+- **KB work index may be reset.** The CLI local work KB index (`creator kb --scope work`) uses a simple JSON + Markdown file layout. This is a temporary implementation — future versions will route to the proper domain crates (`nexus-kb`, `nexus-knowledge`), and the existing file-based index may not be migrated.
+- **SQLite schemas may change.** `state.db` uses a versioned migration system (`db_schema_version`), but pre-release migrations may be destructive (drop-and-recreate rather than in-place alter).
+
+### Storage ownership summary
+
+The CLI crate `nexus42` is a **command/router layer**. It does not own domain storage semantics:
+
+- All SQLite mechanics are delegated to `nexus-local-db`.
+- Creator memory operations are delegated to `nexus-creator-memory`.
+- Cloud sync operations are delegated to `nexus-cloud-sync`.
+- Path layout is delegated to `nexus-home-layout`.
+- File-based caches in `nexus42` (auth, identities, KB work index) are pre-release conveniences acknowledged for future migration to proper domain crates or SQLite.
+
 ## Architecture constraints
 
 - Daemon runtime is a **local supervisor**, not an ACP Agent/Server
