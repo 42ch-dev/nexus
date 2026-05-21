@@ -6,37 +6,38 @@
       "id": "2026-05-21-v1.22-cli-deprecation-cleanup",
       "title": "V1.22 CLI Deprecation Cleanup — remove all deprecated commands, dead code, stale redirects",
       "file": ".agents/plans/2026-05-21-v1.22-cli-deprecation-cleanup.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev", "@qa-engineer", "@qc-specialist"],
-      "progress": 5,
+      "progress": 95,
       "tags": ["v1.22", "cleanup", "cli", "deprecation"],
       "created_at": "2026-05-21",
       "updated_at": "2026-05-21",
       "done_at": null,
-      "notes": "Draft — compass and plan created. Awaiting user go-ahead.",
+      "notes": "Batches A–E complete. Architect audit passed. QC tri-review in progress.",
       "metadata": {
         "working_branch": "feature/v1.22-cli-deprecation-cleanup",
         "spec_integration_branch": "feature/v1.22-cli-deprecation-cleanup",
         "merge_target": "main",
         "branch_policy": "single integration branch — all batches merge to feature branch then PR to main",
-        "phase": "implement",
+        "phase": "InReview",
         "priority": "medium",
         "description": "Remove ~18 deprecated CLI top-level commands, their implementations, deprecated runtime redirects, obsolete tests, and dead imports accumulated across V1.2–V1.18.",
         "iteration_compass": ".agents/iterations/v1.22-cli-deprecation-cleanup-delivery-compass-v1.md",
         "batches": [
-          { "index": 1, "name": "A — Extract shared utilities", "covers": ["A1", "A2", "A3"], "status": "pending", "owner": "@fullstack-dev", "notes": "Move init utils to creator.rs, schedule runner to daemon.rs" },
-          { "index": 2, "name": "B — Delete deprecated modules", "covers": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14", "B15", "B16", "B17", "B18", "B19"], "status": "pending", "owner": "@fullstack-dev", "notes": "~5,300 lines of deprecated code removed" },
-          { "index": 3, "name": "C — Clean up imports and references", "covers": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"], "status": "pending", "owner": "@fullstack-dev", "notes": "Fix compile errors from deletions" },
-          { "index": 4, "name": "D — Test cleanup and verification", "covers": ["D1", "D2", "D3", "D4", "D5"], "status": "pending", "owner": "@qa-engineer", "notes": "Full CI verification" }
+           { "index": 1, "name": "A — Extract shared utilities", "covers": ["A1", "A2", "A3"], "status": "done", "owner": "@fullstack-dev", "notes": "Move init utils to creator.rs, schedule runner to daemon.rs. Commit: 9397641" },
+           { "index": 2, "name": "B — Delete deprecated modules", "covers": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14", "B15", "B16", "B17", "B18", "B19"], "status": "done", "owner": "@fullstack-dev", "notes": "~5,300 lines removed + 6 modules restructured to dir modules. Commit: 84d6f4a" },
+           { "index": 3, "name": "C — Clean up imports and references", "covers": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"], "status": "done", "owner": "@fullstack-dev", "notes": "cli.rs 18→8 commands, main.rs cleaned, tests updated. Commit: aa35218" },
+           { "index": 4, "name": "D — Test cleanup and verification", "covers": ["D1", "D2", "D3", "D4", "D5"], "status": "done", "owner": "@fullstack-dev", "notes": "700+ tests pass, clippy clean, fmt clean. Commit: aa35218" },
+           { "index": 5, "name": "E — Architect audit fixes", "covers": ["E1", "E2", "E3", "E4"], "status": "done", "owner": "@fullstack-dev", "notes": "Clippy 39→0, stale CLI paths updated, deprecated removed, legacy scaffolding cleaned. Commit: 2528f10" }
         ],
         "gates": {
-          "qc": "pending",
+          "qc": "in_progress",
           "qa": "pending",
-          "tests": "pending",
-          "lint": "pending"
+          "tests": "pass",
+          "lint": "pass"
         },
-        "next_action": "Execute Batch A (extract shared utilities from init.rs/schedule.rs)."
+        "next_action": "QC tri-review in progress. 3 parallel reviewers examining the diff."
       }
     }
   ],
