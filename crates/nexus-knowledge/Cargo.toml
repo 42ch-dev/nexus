@@ -11,10 +11,13 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+async-trait.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-chrono = { version = "0.4", features = ["serde"] }
+tokio.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
