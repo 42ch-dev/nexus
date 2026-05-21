@@ -83,10 +83,10 @@ pub enum SystemPresetSubcommand {
     List,
 }
 
-/// Legacy `SystemPresetCommand` kept for backward compatibility.
-/// New code should use `SystemCommand::Preset` directly.
+#[cfg(test)]
+/// Legacy `SystemPresetCommand` used in tests for CLI parsing verification.
 #[derive(Debug, Subcommand)]
-pub enum SystemPresetCommand {
+enum SystemPresetCommand {
     /// Show registered system presets
     Preset {
         #[command(subcommand)]
@@ -94,6 +94,7 @@ pub enum SystemPresetCommand {
     },
 }
 
+#[cfg(test)]
 /// Wrapper for parsing `SystemPresetCommand` in tests.
 #[derive(Debug, clap::Parser)]
 #[command(subcommand_required = true, name = "system")]
@@ -123,22 +124,6 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
         SystemCommand::Db { command } => db::run(command, config).await,
         SystemCommand::Identity { command } => identity::run(command, config).await,
         SystemCommand::RuntimeMode { command } => runtime_mode::run(command, config),
-    }
-}
-
-/// Run the legacy system-preset command (backward compat).
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Daemon API calls fail
-/// - Invalid preset parameters
-#[allow(dead_code)]
-pub async fn run_legacy(cmd: SystemPresetCommand, config: &CliConfig) -> Result<()> {
-    match cmd {
-        SystemPresetCommand::Preset { command } => match command {
-            SystemPresetSubcommand::List => list_system_presets(config).await,
-        },
     }
 }
 

@@ -183,25 +183,6 @@ impl SummaryGenerator {
         }
     }
 
-    /// Set maximum file size limit (in bytes).
-    ///
-    /// This is a convenience builder method that modifies the config.
-    /// Deprecated: prefer using `with_config()` instead.
-    #[deprecated(note = "Use with_config() instead")]
-    #[must_use]
-    pub fn with_max_file_size(self, max_file_size: Option<u64>) -> Self {
-        Self {
-            config: SummaryConfig {
-                max_file_size: usize::try_from(
-                    max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE as u64),
-                )
-                .unwrap_or(usize::MAX),
-                ..self.config
-            },
-            ..self
-        }
-    }
-
     /// Scan the manuscript directory for recognized file types.
     ///
     /// Walks `Stories/<world_ref>/` for files matching configured extensions.

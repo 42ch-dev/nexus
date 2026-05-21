@@ -24,7 +24,7 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 ///
 /// # Panics
 ///
-/// Panics if a temporary directory cannot be created or the HOME_LOCK mutex is poisoned.
+/// Panics if a temporary directory cannot be created or the `HOME_LOCK` mutex is poisoned.
 ///
 /// # Example
 ///
@@ -37,7 +37,7 @@ pub fn isolated_home() -> IsolatedHome {
     // all subsequent tests that use isolated_home().
     let lock = HOME_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::TempDir::new().expect("tempdir for test");
     let original_home = std::env::var("HOME").ok();
     std::env::set_var("HOME", tmp.path());

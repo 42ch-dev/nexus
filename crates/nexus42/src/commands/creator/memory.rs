@@ -65,7 +65,7 @@ pub enum MemoryCommand {
 pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(
-            "No active creator set. Run `nexus42 identity use <id>` first.".to_string(),
+            "No active creator set. Run `nexus42 system identity use <id>` first.".to_string(),
         )
     })?;
 
