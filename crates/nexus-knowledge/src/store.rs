@@ -30,7 +30,11 @@ pub trait KnowledgeStore: Send + Sync {
     /// Retrieve a single knowledge entry by ID, scoped to `user_id`.
     ///
     /// Returns `None` if the entry does not exist or belongs to a different user.
-    async fn get(&self, user_id: &str, entry_id: &str) -> Result<Option<KnowledgeEntry>, KnowledgeError>;
+    async fn get(
+        &self,
+        user_id: &str,
+        entry_id: &str,
+    ) -> Result<Option<KnowledgeEntry>, KnowledgeError>;
 
     /// List knowledge entries for a user, with optional tag filtering and pagination.
     ///
@@ -146,12 +150,7 @@ impl KnowledgeStore for InMemoryKnowledgeStore {
                         .as_ref()
                         .is_none_or(|required| e.has_all_tags(required))
                 })
-                .filter(|e| {
-                    query
-                        .text
-                        .as_ref()
-                        .is_none_or(|t| e.content_contains(t))
-                })
+                .filter(|e| query.text.as_ref().is_none_or(|t| e.content_contains(t)))
                 .cloned()
                 .collect()
         };
@@ -250,11 +249,7 @@ mod tests {
     #[tokio::test]
     async fn store_and_get() {
         let store = InMemoryKnowledgeStore::new();
-        let entry = KnowledgeEntry::new(
-            "user_1",
-            vec![KnowledgeTag::new("test")],
-            "Test content",
-        );
+        let entry = KnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
         let id = entry.id.clone();
         let stored = store.store(entry).await.unwrap();
         assert_eq!(stored.id, id);
@@ -294,10 +289,7 @@ mod tests {
     async fn list_filter_by_tags() {
         let store = seeded_store().await;
         let result = store
-            .list(
-                &KnowledgeQuery::for_user("user_1")
-                    .with_tags(vec![KnowledgeTag::new("rust")]),
-            )
+            .list(&KnowledgeQuery::for_user("user_1").with_tags(vec![KnowledgeTag::new("rust")]))
             .await
             .unwrap();
         assert_eq!(result.total_count, 2);
@@ -323,7 +315,10 @@ mod tests {
     #[tokio::test]
     async fn search_by_text() {
         let store = seeded_store().await;
-        let result = store.search("user_1", "ownership", None, 50, 0).await.unwrap();
+        let result = store
+            .search("user_1", "ownership", None, 50, 0)
+            .await
+            .unwrap();
         assert_eq!(result.total_count, 1);
         assert!(result.entries[0].content.contains("ownership"));
     }

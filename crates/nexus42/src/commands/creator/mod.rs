@@ -745,7 +745,9 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
 
 /// Deferred message for `world` scope commands.
 fn world_scope_deferred() {
-    println!("World scope requires a platform connection (nexus-kb + nexus-narrative; coming soon).");
+    println!(
+        "World scope requires a platform connection (nexus-kb + nexus-narrative; coming soon)."
+    );
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.

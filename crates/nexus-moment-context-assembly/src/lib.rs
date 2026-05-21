@@ -35,5 +35,5 @@ pub mod cloud_stage;
 // Re-export primary types
 #[cfg(feature = "cloud-stage")]
 pub use cloud_stage::TwoStageAssembly;
-pub use moment::{MomentContext, MomentRequest, assemble_moment};
+pub use moment::{assemble_moment, MomentContext, MomentRequest};
 pub use stage0::Stage0Assembly;

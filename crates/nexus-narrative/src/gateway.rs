@@ -10,9 +10,7 @@
 
 use crate::errors::NarrativeError;
 use crate::fork_branch::ForkBranch;
-use crate::narrative_context::{
-    EventSnapshot, NarrativeContext, TimelinePosition, WorldState,
-};
+use crate::narrative_context::{EventSnapshot, NarrativeContext, TimelinePosition, WorldState};
 use crate::narrative_query::NarrativeQuery;
 use crate::timeline_event::TimelineEvent;
 use crate::world::World;
@@ -129,8 +127,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
     /// Read lock on forks.
     fn read_forks(
         &self,
-    ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, ForkBranch>>, NarrativeError>
-    {
+    ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, ForkBranch>>, NarrativeError> {
         self.forks
             .read()
             .map_err(|e| NarrativeError::ValidationError(format!("lock error: {e}")))
@@ -207,11 +204,9 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
     async fn get_world_state(&self, world_id: &str) -> Result<WorldState, NarrativeError> {
         let state = {
             let worlds = self.read_worlds()?;
-            let world = worlds
-                .get(world_id)
-                .ok_or_else(|| {
-                    NarrativeError::ValidationError(format!("world not found: {world_id}"))
-                })?;
+            let world = worlds.get(world_id).ok_or_else(|| {
+                NarrativeError::ValidationError(format!("world not found: {world_id}"))
+            })?;
             self.project_world_state(world, true)
         };
         Ok(state)
@@ -250,9 +245,7 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         events
             .get(event_id)
             .cloned()
-            .ok_or_else(|| {
-                NarrativeError::ValidationError(format!("event not found: {event_id}"))
-            })
+            .ok_or_else(|| NarrativeError::ValidationError(format!("event not found: {event_id}")))
     }
 
     async fn get_narrative_context(
@@ -262,14 +255,9 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         // Phase 1: resolve world state (drop lock before continuing)
         let (world_state, timeline_head_id) = {
             let worlds = self.read_worlds()?;
-            let world = worlds
-                .get(&query.world_id)
-                .ok_or_else(|| {
-                    NarrativeError::ValidationError(format!(
-                        "world not found: {}",
-                        query.world_id
-                    ))
-                })?;
+            let world = worlds.get(&query.world_id).ok_or_else(|| {
+                NarrativeError::ValidationError(format!("world not found: {}", query.world_id))
+            })?;
             let head = world.current_timeline_head_id.clone();
             let state = self.project_world_state(world, query.include_fork_info);
             (state, head)
@@ -287,7 +275,11 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
                 if branch_events.is_empty() {
                     (None, None, false)
                 } else {
-                    let max = branch_events.iter().map(|e| e.sequence_no).max().unwrap_or(0);
+                    let max = branch_events
+                        .iter()
+                        .map(|e| e.sequence_no)
+                        .max()
+                        .unwrap_or(0);
                     let cur = branch_events
                         .iter()
                         .find(|e| e.sequence_no == max)
@@ -378,12 +370,7 @@ mod tests {
 
     /// Helper: create a test event on a branch.
     fn make_event(world_id: &str, branch_id: &str, seq: u64) -> TimelineEvent {
-        TimelineEvent::new(
-            world_id,
-            branch_id,
-            TimelineEventType::StoryAdvance,
-            seq,
-        )
+        TimelineEvent::new(world_id, branch_id, TimelineEventType::StoryAdvance, seq)
     }
 
     // T1: get_world_state returns projected world state
@@ -596,10 +583,7 @@ mod tests {
 
         let fetched = gw.get_event(&id).await.unwrap();
         assert_eq!(fetched.title.as_deref(), Some("The Battle"));
-        assert_eq!(
-            fetched.summary.as_deref(),
-            Some("A great battle occurred")
-        );
+        assert_eq!(fetched.summary.as_deref(), Some("A great battle occurred"));
         assert_eq!(fetched.sequence_no, 7);
     }
 }
