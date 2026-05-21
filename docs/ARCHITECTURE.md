@@ -162,7 +162,7 @@ nexus-cloud-sync ──► nexus-cloud-domain
 
 **Narrative ↔ KB:** `nexus-narrative` → `nexus-kb` only (narrative coordinates World-scoped KB graph).
 
-Normative spec §4 in [`local-cloud-crate-architecture.md`](../.agents/knowledge/specs/local-cloud-crate-architecture.md) is **stale** relative to this graph until Theme A refresh in [v1.24 audit compass](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md).
+Normative spec §4 in [`local-cloud-crate-architecture.md`](../.agents/knowledge/specs/local-cloud-crate-architecture.md) is refreshed to match this graph; remaining discrepancies are tracked as product-integration gaps in [v1.24 audit compass](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md).
 
 ## Product integration gaps (runtime behavior, 2026-05-22)
 
@@ -203,7 +203,7 @@ No second handwritten DTO set in platform — types must come from this repo’s
 
 ## Local API authority
 
-**Authoritative route list:** `crates/nexus-daemon-runtime/src/api/mod.rs` (registered routes). [`.agents/knowledge/specs/local-runtime-boundary.md`](../.agents/knowledge/specs/local-runtime-boundary.md) §3.2.1 is **pending refresh** — several rows marked Active there are **not** registered (audit **KCA-002**, **KCA-006**).
+**Authoritative route list:** `crates/nexus-daemon-runtime/src/api/mod.rs` (registered routes). [`.agents/knowledge/specs/local-runtime-boundary.md`](../.agents/knowledge/specs/local-runtime-boundary.md) §3.2.1 is refreshed to mark unregistered context/research/agent-session rows as retired or not implemented (audit **KCA-002**, **KCA-006**).
 
 ### Registered route families (2026-05-22)
 
