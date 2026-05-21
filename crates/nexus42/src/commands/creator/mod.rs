@@ -542,7 +542,7 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
-    /// Knowledge base management (local work scope; world scope coming soon)
+    /// Local work-scope knowledge assets (file index; --scope world coming soon)
     Kb {
         #[command(subcommand)]
         command: KbCommand,
@@ -552,62 +552,65 @@ pub enum CreatorCommand {
     Logout,
 }
 
-/// KB scope: `work` (local workspace, default) or `world` (platform, future).
+/// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb, future).
+///
+/// Per entity-scope-model §5.3, `creator kb --scope work` is the CLI local work KB index —
+/// NOT the same as `nexus-kb` (World-scoped) or `nexus-knowledge` (User-scoped).
 #[derive(Debug, Clone, clap::ValueEnum, Default, PartialEq, Eq)]
 pub enum KbScope {
-    /// Local workspace knowledge (default)
+    /// Local workspace file index (default)
     #[default]
     Work,
-    /// Platform/world-scoped knowledge (future)
+    /// World-scoped narrative KB (nexus-kb + nexus-narrative, future)
     World,
 }
 
-/// Knowledge base subcommands.
+/// Knowledge base subcommands (local work-scope file index).
 #[derive(Debug, Subcommand)]
 pub enum KbCommand {
-    /// List knowledge base entries
+    /// List local work-scope knowledge entries
     List {
-        /// KB scope: `work` (local) or `world` (platform, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
 
-    /// Search knowledge base entries by title/content
+    /// Search local work-scope entries by title/content
     Search {
         /// Search query string
         query: String,
-        /// KB scope: `work` (local) or `world` (platform, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
 
-    /// Show a single knowledge base entry
+    /// Show a single local work-scope entry
     Show {
         /// Entry ID to display (e.g. `kb_a1b2c3d4`)
         entry_id: String,
-        /// KB scope: `work` (local) or `world` (platform, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
 
-    /// Add a knowledge base entry from a file
+    /// Add a local work-scope entry from a file
     Add {
-        /// Path to the source file to add as a KB entry
+        /// Path to the source file to add as a work-scope entry
         #[arg(long)]
         file: PathBuf,
         /// Optional title (defaults to filename stem)
         #[arg(long)]
         title: Option<String>,
-        /// KB scope: `work` (local) or `world` (platform, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
 
-    /// Remove a knowledge base entry
+    /// Remove a local work-scope entry
     Remove {
         /// Entry ID to remove (e.g. `kb_a1b2c3d4`)
         entry_id: String,
-        /// KB scope: `work` (local) or `world` (platform, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
@@ -722,7 +725,7 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
     validate_slug("workspace_slug", slug)
 }
 
-/// Handle knowledge base commands.
+/// Handle local work-scope KB commands (CLI local work index).
 async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     // F002: Validate active_creator_id before constructing any paths.
     // This prevents path traversal if config is corrupted or malicious.
@@ -742,7 +745,7 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
 
 /// Deferred message for `world` scope commands.
 fn world_scope_deferred() {
-    println!("KB world scope requires platform connection (coming soon).");
+    println!("World scope requires a platform connection (nexus-kb + nexus-narrative; coming soon).");
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
@@ -757,7 +760,7 @@ fn resolve_kb_paths(config: &CliConfig) -> Result<(String, String, PathBuf)> {
     Ok((creator_id, slug, home))
 }
 
-/// KB index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
+/// Local work index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct KbIndex {
     #[serde(default)]
@@ -771,7 +774,7 @@ struct KbIndexEntry {
     created_at: String,
 }
 
-/// Read the KB index from disk. Returns default (empty) if file is missing.
+/// Read the local work index from disk. Returns default (empty) if file is missing.
 /// Logs a warning if the file exists but contains invalid JSON.
 fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     if !index_path.exists() {
@@ -787,7 +790,7 @@ fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
         Ok(index) => index,
         Err(e) => {
             tracing::warn!(
-                "Corrupt KB index file {}: {e}. \
+                "Corrupt local work index file {}: {e}. \
                  The file will be treated as empty. \
                  Consider deleting it or re-adding entries to rebuild the index.",
                 index_path.display()
@@ -797,7 +800,7 @@ fn read_kb_index(index_path: &std::path::Path) -> KbIndex {
     }
 }
 
-/// Write the KB index to disk atomically.
+/// Write the local work index to disk atomically.
 ///
 /// Writes to a temporary file first, then renames to the final path.
 /// `std::fs::rename` is atomic on the same filesystem (POSIX), which
@@ -814,7 +817,7 @@ fn write_kb_index(index_path: &std::path::Path, index: &KbIndex) -> Result<()> {
     Ok(())
 }
 
-/// Generate a KB entry ID: `kb_` + 8 hex chars from timestamp + 4 hex chars
+/// Generate a local work entry ID: `kb_` + 8 hex chars from timestamp + 4 hex chars
 /// from a simple hash to reduce collision risk under rapid successive calls.
 #[allow(clippy::cast_possible_truncation)]
 fn generate_entry_id() -> String {
@@ -859,9 +862,9 @@ async fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
         match client.list_kb_entries(&creator_id, Some(&slug), None).await {
             Ok(resp) => {
                 if resp.items.is_empty() {
-                    println!("No KB entries in workspace {slug}.");
+                    println!("No local work entries in workspace {slug}.");
                 } else {
-                    println!("KB entries in workspace {slug}:");
+                    println!("Local work entries in workspace {slug}:");
                     println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
                     for entry in &resp.items {
                         println!(
@@ -873,7 +876,7 @@ async fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("nexus42: daemon KB list failed, falling back: {e}");
+                eprintln!("nexus42: daemon work-index list failed, falling back: {e}");
             }
         }
     }
@@ -883,17 +886,17 @@ async fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
     let index_path = kb_dir.join("index.json");
 
     if !index_path.exists() {
-        println!("No KB entries in workspace {slug}.");
+        println!("No local work entries in workspace {slug}.");
         return Ok(());
     }
 
     let index = read_kb_index(&index_path);
     if index.entries.is_empty() {
-        println!("No KB entries in workspace {slug}.");
+        println!("No local work entries in workspace {slug}.");
         return Ok(());
     }
 
-    println!("KB entries in workspace {slug}:");
+    println!("Local work entries in workspace {slug}:");
     println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
     for entry in &index.entries {
         println!(
@@ -921,9 +924,9 @@ async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<(
         {
             Ok(resp) => {
                 if resp.items.is_empty() {
-                    println!("No KB entries matching \"{query}\" in workspace {slug}.");
+                    println!("No local work entries matching \"{query}\" in workspace {slug}.");
                 } else {
-                    println!("KB entries matching \"{query}\" in workspace {slug}:");
+                    println!("Local work entries matching \"{query}\" in workspace {slug}:");
                     println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
                     for entry in &resp.items {
                         println!(
@@ -935,7 +938,7 @@ async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<(
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("nexus42: daemon KB search failed, falling back: {e}");
+                eprintln!("nexus42: daemon work-index search failed, falling back: {e}");
             }
         }
     }
@@ -945,7 +948,7 @@ async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<(
     let index_path = kb_dir.join("index.json");
 
     if !index_path.exists() {
-        println!("No KB entries in workspace {slug} to search.");
+        println!("No local work entries in workspace {slug} to search.");
         return Ok(());
     }
 
@@ -958,11 +961,11 @@ async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<(
         .collect();
 
     if matches.is_empty() {
-        println!("No KB entries matching \"{query}\" in workspace {slug}.");
+        println!("No local work entries matching \"{query}\" in workspace {slug}.");
         return Ok(());
     }
 
-    println!("KB entries matching \"{query}\" in workspace {slug}:");
+    println!("Local work entries matching \"{query}\" in workspace {slug}:");
     println!("{:<20} {:<40} CREATED_AT", "ENTRY_ID", "TITLE");
     for entry in matches {
         println!(
@@ -991,7 +994,7 @@ async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("nexus42: daemon KB show failed, falling back: {e}");
+                eprintln!("nexus42: daemon work-index show failed, falling back: {e}");
             }
         }
     }
@@ -1003,7 +1006,7 @@ async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<
 
     if !entry_path.exists() {
         return Err(CliError::Other(format!(
-            "KB entry {entry_id} not found in workspace {slug}."
+            "Work-scope entry {entry_id} not found in workspace {slug}."
         )));
     }
 
@@ -1012,7 +1015,7 @@ async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<
     Ok(())
 }
 
-/// `kb add` implementation — copy file into KB, update index.
+/// `kb add` implementation — copy file into local work index, update index.
 ///
 /// Writes the index update to a temp file first, then copies the entry file,
 /// then atomically renames the index. This prevents orphan entry files on
@@ -1049,11 +1052,11 @@ async fn kb_add(
         };
         match client.add_kb_entry(&req).await {
             Ok(resp) => {
-                println!("✓ KB entry added: {}", resp.entry_id);
+                println!("✓ Local work entry added: {}", resp.entry_id);
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("nexus42: daemon KB add failed, falling back: {e}");
+                eprintln!("nexus42: daemon work-index add failed, falling back: {e}");
             }
         }
     }
@@ -1099,11 +1102,11 @@ async fn kb_add(
     // Step 3: Atomically rename temp index to final (W2 — only committed after file is safe)
     std::fs::rename(&tmp_index_path, &index_path)?;
 
-    println!("✓ KB entry added: {entry_id}");
+    println!("✓ Local work entry added: {entry_id}");
     Ok(())
 }
 
-/// `kb remove` implementation — delete a KB entry.
+/// `kb remove` implementation — delete a local work-scope entry.
 ///
 /// Tries the daemon API first; falls back to direct FS removal
 /// (delete entry file + update index atomically).
@@ -1120,11 +1123,11 @@ async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Resul
     if client.health_check().await? {
         match client.delete_kb_entry(entry_id).await {
             Ok(_resp) => {
-                println!("✓ KB entry removed: {entry_id}");
+                println!("✓ Local work entry removed: {entry_id}");
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("nexus42: daemon KB remove failed, falling back: {e}");
+                eprintln!("nexus42: daemon work-index remove failed, falling back: {e}");
             }
         }
     }
@@ -1136,7 +1139,7 @@ async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Resul
 
     if !entry_path.exists() {
         return Err(CliError::Other(format!(
-            "KB entry {entry_id} not found in workspace {slug}."
+            "Work-scope entry {entry_id} not found in workspace {slug}."
         )));
     }
 
@@ -1151,7 +1154,7 @@ async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Resul
     index.entries.retain(|e| e.entry_id != entry_id);
     if index.entries.len() == original_len {
         // Entry was not in index but file existed — still report success
-        tracing::warn!("KB entry {entry_id} file existed but was not in index");
+        tracing::warn!("Work-scope entry {entry_id} file existed but was not in index");
     } else if !index.entries.is_empty() {
         // Write updated index
         write_kb_index(&index_path, &index)?;
@@ -1160,7 +1163,7 @@ async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Resul
         let _ = std::fs::remove_file(&index_path);
     }
 
-    println!("✓ KB entry removed: {entry_id}");
+    println!("✓ Local work entry removed: {entry_id}");
     Ok(())
 }
 
