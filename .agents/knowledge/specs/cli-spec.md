@@ -268,12 +268,12 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 - `nexus42 creator soul ...`：维护 `SOUL.md`（`Personality` / `Experience`）
 - `nexus42 creator memory ...`：长期记忆与回顾沉淀管理
-- `nexus42 creator kb ...`：本地工作资料索引（默认 `--scope work`）；未来可显式转向 World-scoped narrative KB（`--scope world`）
+- `nexus42 creator kb ...`：本地工作资料索引（默认 `--scope work`；`--scope work` 表示 **CLI local work KB index**，即 `~/.nexus42/.../kb/` 下的文件/索引）。当前仅实现 `--scope work`，**不**涉及 `nexus-kb`（World KB graph）或 `nexus-knowledge`（User knowledge index）。未来 `--scope world` 将路由至 World-scoped narrative KB（`nexus-kb` + `nexus-narrative`）。
 
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
-- **`--scope work`（默认，V1.23 必须保留）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，不是 `nexus-kb` 的 World graph，也不是 `nexus-knowledge` 的 User/global knowledge index。
-- **`--scope world`（未来目标）**：必须要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径创建 / 查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
+- **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
+- **`--scope world`（未来目标；V1.24 中为 deferred，CLI 打印 "coming soon" 消息）**：必须要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径创建 / 查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。Full KB route redesign is deferred beyond V1.24。
 - **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。
 
 命名与行为建议：
