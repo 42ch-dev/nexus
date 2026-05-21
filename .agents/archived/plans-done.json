@@ -1,7 +1,19 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-19T03:00:00Z",
+  "updated_at": "2026-05-21T12:00:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-20-v1.21-local-platform-isolation",
+      "title": "V1.21 Local Platform Isolation — crate split, daemon API cleanup, cloud-sync extraction",
+      "done_at": "2026-05-21T01:28:59Z",
+      "plan_file": ".agents/plans/2026-05-20-v1.21-local-platform-isolation.md",
+      "archived_record": ".agents/archived/plans/2026-05-20-v1.21-local-platform-isolation.json",
+      "total_batches": 7,
+      "batches_completed": 7,
+      "pr": "#28",
+      "qc": "3× Approve (0 critical, 2 low accepted)",
+      "qa": "7/7 Pass"
+    },
     {
       "plan_id": "2026-05-18-v1.20-daemon-local-api-redesign",
       "title": "V1.20 Daemon Local API Redesign — auth, route cleanup, agent-host completion, CLI-to-daemon migration",
