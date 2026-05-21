@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-05-20-v1.21-local-platform-isolation",
+  "title": "V1.21 Local Platform Isolation — crate split, daemon API cleanup, cloud-sync extraction",
+  "file": ".agents/plans/2026-05-20-v1.21-local-platform-isolation.md",
+  "status": "Done",
+  "done_at": "2026-05-21T01:28:59Z",
+  "pr": "#28",
+  "agents": ["@fullstack-dev", "@qa-engineer", "@qc-specialist"],
+  "batches": [
+    { "index": 1, "name": "G — schemas layout & READMEs", "status": "done" },
+    { "index": 2, "name": "A — nexus-cloud-sync rename", "status": "done" },
+    { "index": 3, "name": "B — domain crate split", "status": "done" },
+    { "index": 4, "name": "C — moment-context-assembly", "status": "done" },
+    { "index": 5, "name": "D — daemon isolation", "status": "done" },
+    { "index": 6, "name": "E — CLI cloud-line wiring", "status": "done" },
+    { "index": 7, "name": "F — stubs, tests, docs", "status": "done" }
+  ],
+  "gates": { "qc": "3× Approve", "qa": "7/7 Pass", "tests": "pass", "lint": "pass" }
+}

@@ -1,6 +1,6 @@
 //! Policy management commands for ACP permissions.
 //!
-//! Implements `nexus42 policy grant/deny/list` commands for managing
+//! Implements `nexus42 acp policy grant/deny/list` commands for managing
 //! permission policies (ACP-R7).
 
 use crate::config::find_workspace_root;
@@ -50,7 +50,9 @@ pub enum PolicyCommand {
 /// - Permission policy file cannot be loaded or saved
 pub fn run(command: PolicyCommand) -> Result<()> {
     let workspace_root = find_workspace_root().ok_or_else(|| {
-        anyhow::anyhow!("Not in a Nexus workspace. Run 'nexus42 init workspace' first.")
+        anyhow::anyhow!(
+            "Not in a Nexus workspace. Run 'nexus42 creator workspace init workspace' first."
+        )
     })?;
 
     let mut policy = PermissionPolicy::load(&workspace_root)?;
@@ -140,7 +142,7 @@ pub fn run(command: PolicyCommand) -> Result<()> {
             } else {
                 println!("No policy file found. Using default configuration:");
                 println!("default = \"{:?}\"\n", policy.default);
-                println!("Run 'nexus42 policy grant <permission>' or 'nexus42 policy deny <permission>' to configure.");
+                println!("Run 'nexus42 acp policy grant <permission>' or 'nexus42 acp policy deny <permission>' to configure.");
             }
         }
     }

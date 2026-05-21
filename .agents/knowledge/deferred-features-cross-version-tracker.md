@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.18 **Done**; V1.17 **Done**; V1.16 **Done**; V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
-**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.18), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
+**Status**: Active (V1.21 **Done**; V1.18 **Done**; V1.17 **Done**; V1.16 **Done**; V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
+**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.21), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
-**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.18) and the v1.2 reclassification matrix.
+**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-15
+**Last updated**: 2026-05-21
 
 ---
 
@@ -49,6 +49,19 @@
 | DF-26 | Cross-platform command probe (replace Unix-only `which`) | V1.18 QC R3 | V1.19 (Batch 1) | S | V1.18 status.json R3 | `path_scan.rs` uses Unix-only `which` command. Breaks on Windows. |
 | DF-27 | API handler input validation on session ID path params | V1.18 QC R4 | V1.19 (Batch 2) | S | V1.18 status.json R4 | Malformed/non-UUID session IDs in `/v1/local/agent-host/sessions/{id}/*` routes. |
 | DF-28 | Config path traversal protection | V1.18 QC R5 | V1.19 (Batch 2) | S | V1.18 status.json R5 | `config_path` and `workspace_root` not validated against directory traversal. |
+| DF-29 | Skill registry capability (synthetic output, no network) | V1.21 audit | Any future | M | `orchestration/capability/builtins/registry.rs` — returns hardcoded output; no real registry call. WS3 stub. |
+| DF-30 | Creator capability (synthetic output, `stub-fragment-id`) | V1.21 audit | Any future | M | `orchestration/capability/builtins/creator.rs` — returns hardcoded fragments; domain integration not wired. WS3 stub. |
+| DF-31 | Workspace capability (synthetic path/revision, `stub-revision`) | V1.21 audit | Any future | M | `orchestration/capability/builtins/workspace.rs` — depends on `nexus-home-layout` wiring. WS3 stub. |
+| DF-32 | Judge rule evaluator (only `always_true`/`always_false`) | V1.21 audit | Any future | S | `orchestration/capability/builtins/judge_rule.rs` — simple condition evaluator only. WS3 stub. |
+| DF-33 | Judge LLM evaluator (simplified logic) | V1.21 audit | Any future | S | `orchestration/capability/builtins/judge_llm.rs` — simplified judge logic. WS3 stub. |
+| DF-34 | Context summarize capability (`[SUMMARIZE_STUB]` marker) | V1.21 audit | Any future | M | `orchestration/capability/builtins/context_summarize.rs` — returns canned response on marker. WS3 stub. |
+| DF-35 | ACP prompt capability (stores prompt, no real execution) | V1.21 audit | Any future | M | `orchestration/capability/builtins/acp_prompt.rs` — stores prompt text; `[acp.prompt stub: ...]`. WS3 stub. |
+| DF-36 | ACP session load capability (stub success) | V1.21 audit | Any future | S | `orchestration/capability/builtins/acp_session_load.rs` — returns stub success. WS3 stub. |
+| DF-37 | InnerGraphNodeTask / AcpPromptTask stub mode fallback | V1.21 audit | Any future | S | `orchestration/tasks/mod.rs` — no worker handle → placeholder output. Intentional safe fallback, but real IPC needed. |
+| DF-38 | OrchestrationEngine instantiation stub in daemon | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — `OrchestrationEngine` instantiation is stub. Subsystem not wired. |
+| DF-39 | Worker Manager subsystem stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — Worker Manager start is stub. Subsystem not wired. |
+| DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
+| DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
 
 ### 3.2 Backlog (no committed target version)
 
@@ -223,6 +236,19 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | New tracker items | 11 | DF-18 through DF-28 (deferred from V1.18 §9 + QC residuals → V1.19 hardening backlog) |
 | Post-implementation audit | §9 of compass updated with R-003/R-005/R-006/R-007 audit notes, 3 new risk rows |
 
+### V1.21 delivery snapshot (Done)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
+| Machine state | `status.json` `plans[]` **empty** (archived); all gates passed (QC tri-review: 3× Approve, QA: 7/7 Pass) |
+| Plan | `2026-05-20-v1.21-local-platform-isolation` — **Done** (archived to `archived/plans/`) |
+| PR | [#28](https://github.com/42ch-dev/nexus/pull/28) merged to `main` |
+| QC | Triple review: QC1 Approve, QC2 Approve (2 low warnings accepted), QC3 Approve (2 suggestions) |
+| QA | 7/7 acceptance criteria verified |
+| Scope | Renamed `nexus-sync` → `nexus-cloud-sync` with `legacy-sync` feature; split `nexus-domain` into 6 focused crates; isolated daemon from cloud deps; wired CLI to cloud-sync directly; stubbed orchestration sync capabilities |
+| New tracker items | 13 | DF-29 through DF-41 (orchestration capability stubs, daemon lifecycle stubs, agent slot stub — see §3.1) |
+
 ### V1.16+ horizon
 
 | Category | Position |
@@ -311,6 +337,8 @@ Internal (this repo):
 - V1.17 delivery compass: [v1.17-delivery-compass-v1.md](../iterations/v1.17-delivery-compass-v1.md)
 - V1.18 delivery compass: [v1.18-delivery-compass-v1.md](../iterations/v1.18-delivery-compass-v1.md)
 - V1.19 delivery compass: [v1.19-delivery-compass-v1.md](../iterations/v1.19-delivery-compass-v1.md)
+- V1.20 delivery compass: [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md)
+- V1.21 delivery compass: [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
 - Orchestration engine design: [../knowledge/specs/orchestration-engine.md](../knowledge/specs/orchestration-engine.md)
 - ACP client tech spec v2: [../archived/../archived/knowledge/acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md)
@@ -325,4 +353,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-15**. Status: Active. V1.18 Done (agent-host-core, 11 deferred → V1.19); V1.19 Draft (hardening, 11 items, 2 batches); V1.17 Done (prompt-skills, BL-09 gate met); V1.16 Done; V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）+ V1.18 code-quality residuals (R1-R7, closing via V1.19). V1.19 hardening backlog: DF-18–DF-28 (11 items, 2 batches).*
+*Created: 2026-04-21. Last updated: **2026-05-21**. Status: Active. V1.21 Done (local-platform-isolation, 13 new deferred → §3.1 DF-29–DF-41); V1.18 Done (agent-host-core, 11 deferred → V1.19); V1.19 Draft (hardening, 11 items, 2 batches); V1.17 Done (prompt-skills, BL-09 gate met); V1.16 Done; V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）+ V1.18 code-quality residuals (R1-R7, closing via V1.19). V1.19 hardening backlog: DF-18–DF-28 (11 items, 2 batches). V1.21 orchestration stubs: DF-29–DF-41 (13 items).*
