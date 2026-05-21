@@ -7,32 +7,9 @@
 use crate::errors::KbError;
 use crate::source_anchor::SourceAnchor;
 use nexus_contracts::BlockType;
+use nexus_contracts::KeyBlockStatus;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-
-/// `KeyBlock` status enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum KeyBlockStatus {
-    Provisional,
-    Confirmed,
-    Deprecated,
-    Merged,
-    Deleted,
-}
-
-impl KeyBlockStatus {
-    #[must_use]
-    pub const fn as_str(&self) -> &str {
-        match self {
-            Self::Provisional => "provisional",
-            Self::Confirmed => "confirmed",
-            Self::Deprecated => "deprecated",
-            Self::Merged => "merged",
-            Self::Deleted => "deleted",
-        }
-    }
-}
 
 /// `KeyBlock` body content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -315,7 +292,7 @@ impl From<KeyBlock> for nexus_contracts::KeyBlock {
             world_id: d.world_id,
             block_type: d.block_type,
             canonical_name: d.canonical_name,
-            status: nexus_contracts::KeyBlockStatus::from_str(&d.status).unwrap(),
+            status: KeyBlockStatus::from_str(&d.status).unwrap(),
             revision: d.revision,
             body: d.body.map(|b| serde_json::to_value(b).unwrap_or_default()),
             source_anchor: d.source_anchor.map(nexus_contracts::SourceAnchor::from),

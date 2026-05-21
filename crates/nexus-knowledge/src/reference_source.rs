@@ -5,59 +5,20 @@
 //! See data-model-v1.md §5.9A.
 
 use crate::errors::KnowledgeError;
+use nexus_contracts::{ReferenceSourceType, ScanStatus};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// Reference source type enum.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReferenceSourceType {
-    File,
-    Pdf,
-    Url,
-    Note,
-}
-
-impl ReferenceSourceType {
-    #[must_use]
-    pub const fn as_str(&self) -> &str {
-        match self {
-            Self::File => "file",
-            Self::Pdf => "pdf",
-            Self::Url => "url",
-            Self::Note => "note",
-        }
-    }
-}
-
-/// Scan status enum.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ScanStatus {
-    Pending,
-    Scanned,
-    Failed,
-    Ignored,
-}
-
-impl ScanStatus {
-    #[must_use]
-    pub const fn as_str(&self) -> &str {
-        match self {
-            Self::Pending => "pending",
-            Self::Scanned => "scanned",
-            Self::Failed => "failed",
-            Self::Ignored => "ignored",
-        }
-    }
-}
-
-/// `ReferenceSource` aggregate — local-only research/reference registration.
+/// Domain aggregate for local-only reference source registration.
+///
+/// Uses `String` for `source_type` / `scan_status` to allow unknown variants
+/// in the domain layer. Converts to/from contract enum types via `From` impls.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReferenceSource {
     pub schema_version: u32,
     pub reference_source_id: String,
     pub workspace_id: String,
+    /// Stringified [`ReferenceSourceType`] — use contract enum for construction.
     pub source_type: String,
     pub uri: String,
     pub title: String,
@@ -65,6 +26,7 @@ pub struct ReferenceSource {
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    /// Stringified [`ScanStatus`] — use contract enum for construction.
     pub scan_status: String,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,18 +141,12 @@ impl From<ReferenceSource> for nexus_contracts::local::domain::ReferenceSource {
             schema_version: d.schema_version,
             reference_source_id: d.reference_source_id,
             workspace_id: d.workspace_id,
-            source_type: nexus_contracts::generated::common_types::ReferenceSourceType::from_str(
-                &d.source_type,
-            )
-            .unwrap(),
+            source_type: ReferenceSourceType::from_str(&d.source_type).unwrap(),
             uri: d.uri,
             title: d.title,
             tags: d.tags,
             content_hash: d.content_hash,
-            scan_status: nexus_contracts::generated::common_types::ScanStatus::from_str(
-                &d.scan_status,
-            )
-            .unwrap(),
+            scan_status: ScanStatus::from_str(&d.scan_status).unwrap(),
             created_at: d.created_at,
             updated_at: d.updated_at,
         }
