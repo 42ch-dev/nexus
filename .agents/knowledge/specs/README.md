@@ -27,11 +27,12 @@ When specs overlap, use this order (higher wins on conflict):
 
 1. **`AGENTS.md`** (repo root) — naming, contracts, release discipline.
 2. **[local-cloud-crate-architecture.md](local-cloud-crate-architecture.md)** — local vs cloud product lines, crate graph, contracts-first, forbidden daemon deps/API classes.
-3. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — what belongs in `schemas/` vs `nexus-contracts/src/local/`.
-4. **[schemas-directory-layout.md](schemas-directory-layout.md)** — `schemas/` folder tree (`cloud-sync/`, `platform/`, …) and removed paths.
-5. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
-6. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
-7. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
+3. **[entity-scope-model.md](entity-scope-model.md)** — Global/User/Creator/World/Timeline/Event/Moment hierarchy, uniqueness, and scope-to-crate ownership.
+4. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — what belongs in `schemas/` vs `nexus-contracts/src/local/`.
+5. **[schemas-directory-layout.md](schemas-directory-layout.md)** — `schemas/` folder tree (`cloud-sync/`, `platform/`, …) and removed paths.
+6. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
+7. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
+8. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → renamed **2026-05-20** to `local-cloud-crate-architecture.md`.
 
@@ -44,6 +45,7 @@ When specs overlap, use this order (higher wins on conflict):
 | [agent-host.md](agent-host.md) | Hybrid Managed-only `nexus-agent-host` |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | CLI / daemon / Local API / ACP topology |
 | [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Long-term SSOT: local/cloud split, crate graph, contracts-first; delivery → [v1.21 compass](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
+| [entity-scope-model.md](entity-scope-model.md) | Entity scope hierarchy, uniqueness constraints, and scope-to-crate ownership |
 | [acp-client-tech-spec.md](acp-client-tech-spec.md) | ACP Client technical spec |
 | [acp-capability-set.md](acp-capability-set.md) | Logical `nexus.*` capability surface |
 | [registry-integration.md](registry-integration.md) | ACP Registry integration |
