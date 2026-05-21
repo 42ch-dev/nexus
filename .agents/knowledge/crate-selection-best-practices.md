@@ -19,7 +19,7 @@ This document does **not** override:
 
 - `AGENTS.md` — release discipline, codegen rules, reachability rules.
 - `v1-spec/` (ADRs / codegen strategy / wire schemas) — wire and protocol decisions (e.g. `agent-client-protocol` SDK pin) remain owned there.
-- Architecture SSOTs — `orchestration-engine.md`, `daemon-lifecycle-api.md`, `creator-schedule-and-core-context.md`, `acp-client-tech-spec.md`, `schemas-boundary.md`, `local-db-refactor.md`, `architecture-alignment-review.md`.
+- Architecture SSOTs — **`specs/local-cloud-crate-architecture.md`** (crate graph & local/cloud lines), `orchestration-engine.md`, `daemon-runtime.md`, `creator-schedule-and-core-context.md`, `acp-client-tech-spec.md`, [`schemas-wire-platform-sync-boundary.md`](schemas-wire-platform-sync-boundary.md); archived: `schemas-boundary.md`, `daemon-lifecycle-api.md`, `local-db-refactor.md`, `architecture-alignment-review.md`.
 
 **Conflict order**: `AGENTS.md` > `v1-spec` / ADR > architecture SSOTs > this document > other knowledge.
 
@@ -161,7 +161,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 **What changes**:
 
 - `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` (and typed `&mut sqlx::SqliteConnection` helpers) instead of `rusqlite::Connection` / `deadpool::Object`.
-- All 34 files (~193 references) in `nexus42` / `nexus42d` / `nexus-sync` / `nexus-local-db` that currently import `rusqlite` or `deadpool_sqlite` become async sqlx callers.
+- All 34 files (~193 references) in `nexus42` / `nexus42d` / `nexus-cloud-sync` (today often `nexus-sync`) / `nexus-local-db` that currently import `rusqlite` or `deadpool_sqlite` become async sqlx callers.
 - The four existing migrations (v2 `local_identities`, v3 `soul_meta`, v4 `memory_pending_review` + `memory_fragments`) are ported to timestamped `.sql` files under `crates/nexus-local-db/migrations/`.
 - The `db_schema_version` key in `workspace_meta` is **preserved** across the port (rebaselined to sqlx's migration version tracking).
 
@@ -316,7 +316,7 @@ Before editing any of the above in a way that changes crate selection, update **
 
 - Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
 - V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](../iterations/v1.4-delivery-compass-v1.md)
-- Orchestration engine SSOT: [`orchestration-engine.md`](../knowledge/orchestration-engine.md)
+- Orchestration engine SSOT: [`orchestration-engine.md`](../knowledge/specs/orchestration-engine.md)
 - Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md)
 - Local DB ownership: [`local-db-refactor.md`](archived/knowledge/local-db-refactor.md)
 - Device flow deferral: [`device-flow-oauth-scope-v1.md`](device-flow-oauth-scope-v1.md)

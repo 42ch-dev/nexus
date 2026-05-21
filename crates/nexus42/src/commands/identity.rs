@@ -7,10 +7,10 @@
 //! Persistent identities (`ctr_local*`) are stored in `SQLite`.
 
 use crate::config::{self, CliConfig};
+use crate::domain::DomainError;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_domain::local_identity::{LocalIdentity, LocalIdentityType};
-use nexus_domain::{is_valid_creator_id, DomainError};
+use nexus_creator::local_identity::{is_valid_creator_id, LocalIdentity, LocalIdentityType};
 use nexus_local_db::{
     create_local_identity, get_local_identity, link_to_platform, list_local_identities,
     unlink_from_platform,

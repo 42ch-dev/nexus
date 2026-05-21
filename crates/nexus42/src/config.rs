@@ -1,7 +1,6 @@
 //! Nexus CLI Configuration
 
-use nexus_domain::runtime_mode::DomainRuntimeMode;
-use nexus_domain::DegradationSnapshot;
+use crate::domain::{DegradationSnapshot, DomainRuntimeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -385,8 +384,8 @@ mod tests {
 
     #[test]
     fn degradation_snapshot_roundtrips_via_toml() {
-        use nexus_domain::degradation::DegradationState;
-        use nexus_domain::HealthCheckSnapshot;
+        use crate::domain::degradation::DegradationState;
+        use crate::domain::HealthCheckSnapshot;
 
         let c = CliConfig {
             degradation_snapshot: Some(DegradationSnapshot {

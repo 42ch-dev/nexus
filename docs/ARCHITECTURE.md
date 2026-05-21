@@ -24,9 +24,9 @@ schemas/*.json → codegen → Rust (crates/nexus-contracts) + TypeScript (packa
 **Members:**
 
 - `nexus-contracts`: Generated wire types (library crate)
-- `nexus42` (future): CLI executable
-- `nexus42d` (future): Daemon/supervisor
-- `nexus-sync` (future): Bundle/outbox state machine
+- `nexus42`: CLI executable (includes daemon runtime mode)
+- `nexus-daemon-runtime`: Local supervisor / Local API (linked from `nexus42`, not a separate product binary)
+- `nexus-cloud-sync`: Bundle/outbox state machine (cloud sync transport)
 
 **Design Principles:**
 
@@ -54,7 +54,7 @@ schemas/*.json → codegen → Rust (crates/nexus-contracts) + TypeScript (packa
 
 ## Constraints
 
-- **Do not** treat `nexus42d` as ACP Agent/Server - it's client-only
+- **Do not** treat the daemon runtime as ACP Agent/Server — client-only
 - **Do not** sync full manuscript text by default - only deltas/bundles
 - **World history is immutable** - changes via Fork only
 - **Wire contracts must match schemas** - no drift

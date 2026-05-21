@@ -1,5 +1,5 @@
 //! nexus-orchestration — engine adapter, capability registry, worker manager.
-//! Authoritative design: `.agents/knowledge/orchestration-engine.md`.
+//! Authoritative design: `.agents/knowledge/specs/orchestration-engine.md`.
 
 pub mod capability;
 pub mod embedded_skills;

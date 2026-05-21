@@ -21,7 +21,7 @@ async fn main() {
     // (i.e., the user has already run `init workspace` or equivalent).
     if let Ok(nexus_home) = nexus42::config::nexus_home() {
         if nexus_home.exists() {
-            match nexus_sync::device_id::get_or_create_device_id(&nexus_home) {
+            match nexus_cloud_sync::device_id::get_or_create_device_id(&nexus_home) {
                 Ok(device_id) => config.device_id = device_id,
                 Err(e) => {
                     // Device ID failure is non-fatal: platform falls back to

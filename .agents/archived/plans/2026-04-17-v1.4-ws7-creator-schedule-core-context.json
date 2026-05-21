@@ -21,10 +21,10 @@
     "working_branch": "feature/v1.4-ws7-schedule",
     "merge_target": "feature/v1.4",
     "description": "Multi-Schedule per creator (concurrency declared per-add; serial default), CRUD over prompts by ID, immutable versioned core_context (Seed + UserEdit + PresetHook + PresetSeedExpansion; LlmSummarize reserved for V1.5 zero-migration). 13 CLI subcommands under nexus42 schedule + 8 HTTP endpoints under /v1/local/orchestration/schedules/*. Answers OQ-1..OQ-6 from orchestration-engine-v1 §11.",
-    "wave_0_spec": ".agents/knowledge/creator-schedule-and-core-context.md",
+    "wave_0_spec": ".agents/knowledge/specs/creator-schedule-and-core-context.md",
     "spec_refs": [
-      ".agents/knowledge/creator-schedule-and-core-context.md",
-      ".agents/knowledge/orchestration-engine.md",
+      ".agents/knowledge/specs/creator-schedule-and-core-context.md",
+      ".agents/knowledge/specs/orchestration-engine.md",
       ".agents/archived/knowledge/schemas-boundary.md",
       ".agents/iterations/v1.4-delivery-compass-v1.md"
     ],

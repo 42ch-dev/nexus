@@ -27,10 +27,10 @@ const SKIP_STRUCT_GENERATION = new Set([
 
 /**
  * Schema paths (relative to schemas/, POSIX slashes) that must not emit TS/Rust structs.
- * Used when a JSON Schema refines another file with the same basename (e.g. cli-sync/bundle
+ * Used when a JSON Schema refines another file with the same basename (e.g. cloud-sync/bundle
  * allOf domain/bundle): codegen only produces types from the canonical envelope schema.
  */
-const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['cli-sync/bundle.schema.json']);
+const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['cloud-sync/bundle.schema.json']);
 
 /**
  * Map of definition names from common.schema.json to their base types.
@@ -125,7 +125,7 @@ export function loadAllSchemas(): LoadedSchema[] {
 
 /**
  * Fail fast if two emitting schema files map to the same PascalCase type name (basename collision).
- * Skipped schemas (e.g. cli-sync refinements of a domain envelope) may share a basename with the canonical file.
+ * Skipped schemas (e.g. cloud-sync refinements of a domain envelope) may share a basename with the canonical file.
  */
 function assertUniqueTypeNames(schemas: LoadedSchema[]): void {
   const byType = new Map<string, string>();

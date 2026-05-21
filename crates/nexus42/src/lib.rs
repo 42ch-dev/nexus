@@ -12,6 +12,7 @@ pub mod config;
 pub mod context;
 pub mod creator_identity;
 pub mod db;
+pub mod domain;
 pub mod errors;
 pub mod paths;
 pub mod session_capture;

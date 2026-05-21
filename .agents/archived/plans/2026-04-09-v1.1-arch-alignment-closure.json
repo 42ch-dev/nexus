@@ -10,7 +10,7 @@
   "created_at": "2026-04-09",
   "updated_at": "2026-04-09",
   "done_at": "2026-04-09",
-  "notes": "Closed ALIGN-HASH-01 + ARCH-SYNC-D1; .agents/knowledge/canonical-hash.md + golden test; daemon eager push env gate; archived residuals appended.",
+  "notes": "Closed ALIGN-HASH-01 + ARCH-SYNC-D1; .agents/knowledge/specs/canonical-hash.md + golden test; daemon eager push env gate; archived residuals appended.",
   "metadata": {
     "priority": "high",
     "scope": "canonical_hash cross-stack preimage + golden vectors; optional daemon eager SyncClient::push_bundle when configured",

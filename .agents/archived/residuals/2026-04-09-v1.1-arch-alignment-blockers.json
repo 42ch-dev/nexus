@@ -66,8 +66,8 @@
       "severity": "medium",
       "lifecycle": "resolved",
       "closed_at": "2026-04-09",
-      "closure_note": "Preimage documented in .agents/knowledge/canonical-hash.md; golden vector in nexus-sync canonical_hash tests; bundle.schema.json description updated",
-      "closure_evidence": ".agents/knowledge/canonical-hash.md; crates/nexus-sync/src/canonical_hash.rs; schemas/domain/bundle.schema.json"
+      "closure_note": "Preimage documented in .agents/knowledge/specs/canonical-hash.md; golden vector in nexus-sync canonical_hash tests; bundle.schema.json description updated",
+      "closure_evidence": ".agents/knowledge/specs/canonical-hash.md; crates/nexus-sync/src/canonical_hash.rs; schemas/domain/bundle.schema.json"
     },
     {
       "id": "ARCH-SYNC-D1",

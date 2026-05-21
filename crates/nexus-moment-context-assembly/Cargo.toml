@@ -1,0 +1,27 @@
+[package]
+name = "nexus-moment-context-assembly"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Per-moment context assembly for ACP sessions (Stage-0 local, optional cloud-stage)"
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Cloud-stage optional dependency
+nexus-cloud-sync = { path = "../nexus-cloud-sync", optional = true }
+
+[features]
+default = []
+cloud-stage = ["dep:nexus-cloud-sync"]
+
+[dev-dependencies]
+chrono = { workspace = true }

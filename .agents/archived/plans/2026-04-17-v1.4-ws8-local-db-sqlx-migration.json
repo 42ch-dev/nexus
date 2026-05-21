@@ -26,7 +26,7 @@
     "spec_refs": [
       ".agents/knowledge/crate-selection-best-practices.md",
       ".agents/knowledge/local-db-refactor.md",
-      ".agents/knowledge/orchestration-engine.md",
+      ".agents/knowledge/specs/orchestration-engine.md",
       ".agents/iterations/v1.4-delivery-compass-v1.md",
       ".agents/plans/reports/2026-04-17-crate-selection-research/research-log.md"
     ],

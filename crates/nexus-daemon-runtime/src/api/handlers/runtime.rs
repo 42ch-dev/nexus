@@ -92,11 +92,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
     let subsystems = SubsystemHealth {
         http: Some(make_entry(HealthStatus::Up)),
         db: Some(make_entry(db_status)),
-        sync: Some(make_entry(if state.outbox().is_some() {
-            HealthStatus::Up
-        } else {
-            HealthStatus::Down
-        })),
+        sync: Some(make_entry(HealthStatus::Down)),
         engine: Some(SubsystemHealthEntry {
             status: if state.engine().is_some() {
                 HealthStatus::Up

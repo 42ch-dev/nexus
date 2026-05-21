@@ -45,7 +45,7 @@
 //!
 //! If finer-grained public error codes are needed in the future, `error_code()` should be
 //! updated to return the specific code rather than a generic one. See also:
-//! `crates/nexus-sync/src/errors.rs` for the `SyncError` pattern which returns variant-specific codes.
+//! `crates/nexus-cloud-sync/src/errors.rs` for the `SyncError` pattern which returns variant-specific codes.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

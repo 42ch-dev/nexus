@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/cloud-sync/conflict-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Sync Conflict Response",
+  "description": "Platform conflict response for bundle push operations. HTTP 200 with success:false indicates a conflict requiring resolution. See hard-vs-soft-validation-v1.md §7.",
+  "type": "object",
+  "required": [
+    "success",
+    "conflict_type",
+    "conflicts",
+    "server_world_revision"
+  ],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "const": false,
+      "description": "Always false for conflict responses."
+    },
+    "conflict_type": {
+      "type": "string",
+      "enum": ["version_mismatch", "sequence_conflict", "hard_validation_failure", "soft_validation_warning"],
+      "description": "Category of conflict."
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable conflict code (e.g., 'revision_outdated', 'delta_sequence_gap')."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable conflict description."
+          },
+          "delta_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into the conflicting deltas[] array, if applicable."
+          },
+          "expected": {
+            "description": "Expected value that caused the conflict."
+          },
+          "actual": {
+            "description": "Actual value received."
+          },
+          "resolution_hint": {
+            "type": "string",
+            "enum": ["auto_accept", "auto_reject", "manual_review"],
+            "description": "Suggested resolution strategy."
+          }
+        }
+      },
+      "minItems": 1,
+      "description": "Array of individual conflict details."
+    },
+    "server_world_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current world revision on the server."
+    },
+    "server_delta_sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current confirmed delta sequence on the server."
+    },
+    "retry_after": {
+      "type": ["integer", "null"],
+      "description": "Suggested retry delay in seconds, if applicable."
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,7 +6,7 @@
 **Scope**: SDK selection, crate boundary, registry integration, CLI command design, capability IDs, schema definitions, **worker-delegated orchestration hosting (new)**.
 **Coordinates with**:
 
-- [orchestration-engine.md](../../knowledge/orchestration-engine.md) — sibling spec for orchestration engine (this doc's §11 describes the crate it extracts; §4 describes the Local API it exposes for engine control)
+- [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) — sibling spec for orchestration engine (this doc's §11 describes the crate it extracts; §4 describes the Local API it exposes for engine control)
 - [daemon-lifecycle-api.md](daemon-lifecycle-api.md) — worker graceful shutdown timing sourced from lifecycle `Stopping.entry`
 
 ---
@@ -30,7 +30,7 @@ If v1 and v2 disagree on the same topic, **v2 wins** (supersession).
 | §2.2 Module layout            | amended  | ACP modules extracted out of `crates/nexus42` into new `crates/nexus-acp-host` (§11)                      |
 | §2.3 Process model            | **revised** | V1.0 rule "CLI spawns agents directly, daemon not involved" still holds for **interactive** `agent run`; orchestration-driven sessions add the **worker-delegated** path |
 | §2.4 Connection management    | amended  | `AcpSession` now also exists inside a worker; daemon tracks worker PID + session id for observability      |
-| §2.5 Dependency on daemon      | **revised** | V1.0 "no daemon involvement" narrowed: **still none for interactive**; orchestration path has explicit daemon ↔ worker IPC (spec in [orchestration-engine.md](../../knowledge/orchestration-engine.md) §6) |
+| §2.5 Dependency on daemon      | **revised** | V1.0 "no daemon involvement" narrowed: **still none for interactive**; orchestration path has explicit daemon ↔ worker IPC (spec in [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §6) |
 | §3 Registry                    | unchanged | Registry fetch + cache live in `nexus-acp-host`; still called from CLI + worker                           |
 | §4 Local API                   | amended  | Adds `/v1/local/orchestration/...` endpoints for engine control; `/v1/local/acp/...` remain deferred except where orchestration needs them |
 | §5 Skills / Capabilities       | amended  | V1.0 frozen capability IDs unchanged; V1.4 **adds** `session.persistence` and `session.modes` as newly declared in worker-delegated sessions (previously ACP-R6/R11 deferred) |
@@ -38,7 +38,7 @@ If v1 and v2 disagree on the same topic, **v2 wins** (supersession).
 | §7 Schemas                     | unchanged | `schemas/acp-runtime/registry-manifest.schema.json` moves crate home but stays wire-level                 |
 | §8 ACP-R1/R2                   | unchanged | Both resolved in v1                                                                                       |
 | §9 Test strategy               | amended  | Adds IPC-layer integration tests (daemon ↔ worker) to §9.2                                                |
-| §10 Task breakdown             | superseded| See [orchestration-engine.md](../../knowledge/orchestration-engine.md) §10 (Phase 1–4 is the new work plan)          |
+| §10 Task breakdown             | superseded| See [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §10 (Phase 1–4 is the new work plan)          |
 | §11 `nexus-acp-host` crate     | **new**  | Crate extraction plan: files, re-exports, linkage matrix, compatibility bridge                           |
 | Appendix B Residuals           | amended  | ACP-R6 (session persistence), ACP-R7 (permission policy), ACP-R8 (daemon-mediated tool access), ACP-R11 (session.modes) statuses updated |
 
@@ -61,7 +61,7 @@ Two code paths now consume `nexus-acp-host`, running in two different processes 
    - Long-lived CLI subprocess, one per active creator
    - Also holds its own `tokio::task::LocalSet` (LocalSet contagion **does not cross process boundaries**, so daemon's axum multi-thread runtime is unaffected)
    - Talks to agent directly over stdin/stdout JSON-RPC (same ACP flow as interactive)
-   - Receives prompts / cancellations from daemon via a **separate** stdin/stdout JSON-RPC channel (parent pipes to daemon — see [orchestration-engine.md](../../knowledge/orchestration-engine.md) §6.3)
+   - Receives prompts / cancellations from daemon via a **separate** stdin/stdout JSON-RPC channel (parent pipes to daemon — see [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §6.3)
    - Hosts exactly one ACP agent subprocess at a time in MVP; agent switch requires worker restart (§6.2)
 
 ### 2.3b Updated architecture diagram (supersedes v1 §2.1)
@@ -136,7 +136,7 @@ Interactive CLI still uses direct stdio; no Local API additions for that path.
 
 ### 4.3 (new in v2) — Orchestration control endpoints
 
-The following endpoints are **added** by the V1.4 orchestration track ([orchestration-engine.md](../../knowledge/orchestration-engine.md) §10.3) and by WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §9). They live on `nexus42d` alongside existing `/v1/local/workspace`, `/v1/local/daemon/status`, `/v1/local/runtime/*`.
+The following endpoints are **added** by the V1.4 orchestration track ([orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §10.3) and by WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §9). They live on `nexus42d` alongside existing `/v1/local/workspace`, `/v1/local/daemon/status`, `/v1/local/runtime/*`.
 
 **Engine session endpoints (WS2):**
 
@@ -230,7 +230,7 @@ nexus42 schedule status <session-id>             # should resume from last task
 
 ## §10 (superseded) — Task breakdown
 
-v1 §10 tasks 1–6 are **either delivered** (most V1.0 scope is done per `plans-done.json`) or **superseded** by the Phase 1–4 breakdown in [orchestration-engine.md](../../knowledge/orchestration-engine.md) §10. This document defers to that doc for sequencing and acceptance criteria; the only ACP-specific Phase-1 task is the **crate extraction** described in §11 below.
+v1 §10 tasks 1–6 are **either delivered** (most V1.0 scope is done per `plans-done.json`) or **superseded** by the Phase 1–4 breakdown in [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §10. This document defers to that doc for sequencing and acceptance criteria; the only ACP-specific Phase-1 task is the **crate extraction** described in §11 below.
 
 ---
 
@@ -278,7 +278,7 @@ crates/nexus-acp-host/
 
 ### 11.4 Migration steps
 
-Ordered for Phase 1 (see [orchestration-engine.md](../../knowledge/orchestration-engine.md) §10.2):
+Ordered for Phase 1 (see [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §10.2):
 
 1. `mkdir crates/nexus-acp-host`, initialise `Cargo.toml` (workspace member, dependencies copied from `nexus42` subset relevant to ACP).
 2. `git mv crates/nexus42/src/acp/{client,transport,skills,registry,error}.rs crates/nexus-acp-host/src/`.
@@ -328,7 +328,7 @@ so that any in-repo doc or external consumer still using `crate::acp::…` keeps
 
 Internal:
 
-- [orchestration-engine.md](../../knowledge/orchestration-engine.md) — companion spec; primary consumer of this doc's §11 crate and §4.3 endpoints
+- [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) — companion spec; primary consumer of this doc's §11 crate and §4.3 endpoints
 - [daemon-lifecycle-api.md](daemon-lifecycle-api.md) — worker graceful shutdown timing; lifecycle states that expose ACP-related subsystems in degraded/status reports
 - [acp-client-tech-spec-legacy.md](archived/knowledge/acp-client-tech-spec-legacy.md) — archived; do **not** cite directly — cite this v2 instead
 - [architecture-alignment-review.md](architecture-alignment-review.md) — TD list; ACP-R8 status change tracked here after Phase 2 lands

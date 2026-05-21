@@ -4,7 +4,7 @@
 
 **Goal:** Align nexus OSS CLI/daemon with v1-spec **ADR-014** (`{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}`) and synchronized cli-spec / local-db-schema / data-model prose: operational state under `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/`, creative roots without DB, **immutable** `(creator_id, workspace_slug)` registration, **active context** via **`creator use` + `creator workspace use`** (default slug **`default`**).
 
-**Architecture:** Introduce a small **path resolver** that maps `(creator_id, workspace_slug)` → DB path; persist **active `creator_id`** and **per-creator active `workspace_slug`** (fallback **`default`**); implement **`nexus42 creator workspace`** subcommands per `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2C; keep **nexus-local-db** as SQLite owner. (No legacy flat `state.db` or migration command — product pre-release.)
+**Architecture:** Introduce a small **path resolver** that maps `(creator_id, workspace_slug)` → DB path; persist **active `creator_id`** and **per-creator active `workspace_slug`** (fallback **`default`**); implement **`nexus42 creator workspace`** subcommands per `.agents/knowledge/specs/cli-spec.md` §6.2C; keep **nexus-local-db** as SQLite owner. (No legacy flat `state.db` or migration command — product pre-release.)
 
 **Tech Stack:** Rust (`nexus42`, `nexus42d`, `nexus-local-db`), SQLite, existing integration tests under `crates/nexus42` / `crates/nexus42d`.
 
@@ -16,12 +16,12 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 
 | Variable | Resolves to (relative) |
 |----------|-------------------------|
-| `{v1-spec/cli-sync/cli-spec-v1.md}` | CLI + directory layout SSOT |
-| `{v1-spec/cli-sync/local-db-schema-v1.md}` | Local SQLite filename + module boundaries |
+| `.agents/knowledge/specs/cli-spec.md` | CLI + directory layout SSOT |
+| `.agents/knowledge/specs/local-db-schema.md` | Local SQLite filename + module boundaries |
 | `{v1-spec/domain/data-model-v1.md}` | `WorkspaceBinding` and domain prose |
 | `{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}` | **Normative ADR** — local FS layout, binding, commands |
 
-**OSS companion (reachable without platform checkout):** `.agents/knowledge/local-fs-layout-creator-workspace.md` (non-normative recap + pointer)
+**OSS companion (reachable without platform checkout):** `.agents/archived/knowledge/local-fs-layout-creator-workspace.md` (non-normative recap + pointer)
 
 ---
 
@@ -29,10 +29,10 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 
 | Area | Responsibility |
 |------|------------------|
-| `.agents/knowledge/local-fs-layout-creator-workspace.md` | OSS companion — pointer to ADR-014 |
+| `.agents/archived/knowledge/local-fs-layout-creator-workspace.md` | OSS companion — pointer to ADR-014 |
 | `{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}` | Normative ADR |
-| `{v1-spec/cli-sync/cli-spec-v1.md}` | User-facing command SSOT (`creator use` + `creator workspace *`) |
-| `{v1-spec/cli-sync/local-db-schema-v1.md}` | Canonical **on-disk** path for `state.db` |
+| `.agents/knowledge/specs/cli-spec.md` | User-facing command SSOT (`creator use` + `creator workspace *`) |
+| `.agents/knowledge/specs/local-db-schema.md` | Canonical **on-disk** path for `state.db` |
 | `{v1-spec/domain/data-model-v1.md}` | §5.14 immutability + narrative |
 | `crates/nexus42/src/config.rs` | `nexus_home`, **active workspace** pointer, DB path builder |
 | `crates/nexus42d/src/workspace/mod.rs` | Daemon DB path + workspace discovery |
@@ -46,9 +46,9 @@ In this plan, **`{v1-spec/…}`** denotes a path **relative to** `specs_root.v1-
 **Files:**
 
 - Read: `{v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md}` (normative)
-- Read: `.agents/knowledge/local-fs-layout-creator-workspace.md` (OSS companion)
-- Read: `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2B–§6.3, §13.2
-- Read: `{v1-spec/cli-sync/local-db-schema-v1.md}` §0
+- Read: `.agents/archived/knowledge/local-fs-layout-creator-workspace.md` (OSS companion)
+- Read: `.agents/knowledge/specs/cli-spec.md` §6.2B–§6.3, §13.2
+- Read: `.agents/knowledge/specs/local-db-schema.md` §0
 - Read: `{v1-spec/domain/data-model-v1.md}` §5.14
 
 - [ ] **Step 1:** Open `.agents/local-paths.json` (or create from `.agents/local-paths.json.example`) and confirm `specs_root.v1-spec` resolves.
@@ -113,7 +113,7 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 - Modify: `crates/nexus42/src/commands/init.rs`
 - Modify: `crates/nexus42/tests/integration.rs`
 
-- [x] **Step 1:** Change `init` so **creative root** default matches configurable template **documented in ADR** (e.g. `Documents/nexus/<creator_slug>/<workspace_slug>/`), still creating `Stories/` and `References/` per `{v1-spec/cli-sync/cli-spec-v1.md}` §13.1.
+- [x] **Step 1:** Change `init` so **creative root** default matches configurable template **documented in ADR** (e.g. `Documents/nexus/<creator_slug>/<workspace_slug>/`), still creating `Stories/` and `References/` per `.agents/knowledge/specs/cli-spec.md` §13.1.
 - [x] **Step 2:** Write **workspace meta** under `creators/<creator_id>/workspaces/<workspace_slug>/meta.json` (or TOML) with **immutable** `creator_id`, **`workspace_slug`**, `local_root`, optional wire **`workspace_id`**, `created_at`.
 - [x] **Step 3:** Create empty `state.db` via `nexus-local-db` at `.../workspaces/<workspace_slug>/state.db` (not under `<workspace>/`).
 - [x] **Step 4:** Update integration test that currently expects `.nexus42` **inside** project dir — align with ADR (operational under home; creative root may still contain a marker file **without** DB if needed for cwd discovery).
@@ -148,7 +148,7 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 **Files:**
 
 - Modify: command router under `crates/nexus42/src/`
-- Cross-check: `{v1-spec/cli-sync/cli-spec-v1.md}` §6.2B–§6.2C
+- Cross-check: `.agents/knowledge/specs/cli-spec.md` §6.2B–§6.2C
 
 - [x] **Step 1:** Implement **`creator workspace` {list, create, use}** per spec; ensure **`creator use`** updates active Creator and resets slug per §6.2B table note.
 - [x] **Step 2:** `cargo clippy --all -- -D warnings` — pass.
@@ -173,7 +173,7 @@ fn operational_dir_follows_creator_then_workspace_slug() {
 
 1. **Spec coverage:** ADR-014 D1–D6 map to v1-spec §13.2, §6.2C, §6.3 C2, `local-db-schema-v1` §0 path, `data-model` §5.14 immutability — **Task 1** verifies.
 2. **Placeholder scan:** No `TBD` steps; tests name concrete files.
-3. **Type consistency:** **`workspace_slug`** (path segment) vs Wire **`workspace_id`** (optional in `meta`) vs `creator_id` match cli-spec / contracts; `state.db` path matches `{v1-spec/cli-sync/local-db-schema-v1.md}`.
+3. **Type consistency:** **`workspace_slug`** (path segment) vs Wire **`workspace_id`** (optional in `meta`) vs `creator_id` match cli-spec / contracts; `state.db` path matches `.agents/knowledge/specs/local-db-schema.md`.
 
 **Gaps (explicit):** `nexus42` ↔ `nexus42d` **active workspace handshake** (env var, config file, or IPC) is left to Task 5–7 implementation detail — if absent today, add **Task 5b** for “daemon reads same active pointer file as CLI” before merge.
 
