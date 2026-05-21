@@ -1,23 +1,18 @@
-//! Mutex lock patterns have scoped drops.
-#![allow(clippy::significant_drop_tightening)]
 //! Subsystem bootstrap implementations.
 //!
 //! Per spec §5, each subsystem implements `SubsystemBootstrap` for
-//! lifecycle-controlled startup/shutdown. Real implementations where possible,
-//! mock stubs for WS2 components (Engine, `WorkerMgr`) not yet available.
+//! lifecycle-controlled startup/shutdown.
 
 mod agent_host;
 mod db;
 mod http;
 mod mock_all;
-mod sync;
 mod worker_mgr;
 
 pub use agent_host::AgentHostSubsystem;
 pub use db::DbSubsystem;
 pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
-pub use sync::SyncSubsystem;
 pub use worker_mgr::WorkerMgrSubsystem;
 
 use async_trait::async_trait;

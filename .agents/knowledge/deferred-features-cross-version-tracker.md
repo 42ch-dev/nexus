@@ -312,7 +312,7 @@ Internal (this repo):
 - V1.18 delivery compass: [v1.18-delivery-compass-v1.md](../iterations/v1.18-delivery-compass-v1.md)
 - V1.19 delivery compass: [v1.19-delivery-compass-v1.md](../iterations/v1.19-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
-- Orchestration engine design: [../knowledge/orchestration-engine.md](../knowledge/orchestration-engine.md)
+- Orchestration engine design: [../knowledge/specs/orchestration-engine.md](../knowledge/specs/orchestration-engine.md)
 - ACP client tech spec v2: [../archived/../archived/knowledge/acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Crate selection best practices: [crate-selection-best-practices.md](crate-selection-best-practices.md)

@@ -89,8 +89,9 @@ impl SubsystemBootstrap for AgentHostSubsystem {
             .await
             .map_err(|e| anyhow::anyhow!("agent host start failed: {e}"))?;
 
-        let mut state = self.state.lock().await;
-        *state = AgentHostState::Running;
+        {
+            *self.state.lock().await = AgentHostState::Running;
+        }
         tracing::info!("Agent Host subsystem started");
         Ok(())
     }
@@ -101,8 +102,9 @@ impl SubsystemBootstrap for AgentHostSubsystem {
             .await
             .map_err(|e| anyhow::anyhow!("agent host shutdown failed: {e}"))?;
 
-        let mut state = self.state.lock().await;
-        *state = AgentHostState::Shutdown;
+        {
+            *self.state.lock().await = AgentHostState::Shutdown;
+        }
         tracing::info!("Agent Host subsystem shutdown complete");
         Ok(())
     }

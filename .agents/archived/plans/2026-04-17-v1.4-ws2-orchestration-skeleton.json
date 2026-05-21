@@ -19,9 +19,9 @@
     "phase": "V1.4-M2",
     "working_branch": "feature/v1.4-ws2-orch-skeleton",
     "description": "New crate crates/nexus-orchestration. OrchestrationEngine trait + GraphFlowEngine adapter over graph-flow=0.2.3, SqliteSessionStorage (sqlx, sharing nexus-local-db's pool — WS8 prereq for Task 3), Capability trait + non-ACP built-ins (sync/outbox/workspace/registry/creator.{read,write,inject}/judge.rule), WorkerManager + stdin/stdout JSON-RPC IPC (jsonrpsee-core + RpcTransport trait + NDJSON via tokio_util::codec::LinesCodec — selection closed per crate-selection-best-practices-v1 §3.1), _system.maintenance hardcoded graph, /v1/local/orchestration/* HTTP. ACP-touching capabilities + preset file loader deferred to WS3.",
-    "wave_0_spec": ".agents/knowledge/orchestration-engine.md",
+    "wave_0_spec": ".agents/knowledge/specs/orchestration-engine.md",
     "spec_refs": [
-      ".agents/knowledge/orchestration-engine.md",
+      ".agents/knowledge/specs/orchestration-engine.md",
       ".agents/archived/knowledge/acp-client-tech-spec.md",
       ".agents/archived/knowledge/schemas-boundary.md",
       ".agents/knowledge/crate-selection-best-practices.md",

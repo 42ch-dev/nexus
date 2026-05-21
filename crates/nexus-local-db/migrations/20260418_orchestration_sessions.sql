@@ -1,5 +1,5 @@
 -- Orchestration Sessions Table
--- Design: `.agents/knowledge/orchestration-engine.md` §4.3
+-- Design: `.agents/knowledge/specs/orchestration-engine.md` §4.3
 
 CREATE TABLE IF NOT EXISTS orchestration_sessions (
   session_id    TEXT PRIMARY KEY,

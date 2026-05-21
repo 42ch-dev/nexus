@@ -17,7 +17,6 @@ use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
     WorkerManager,
 };
-use nexus_sync::outbox::Outbox;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -26,10 +25,6 @@ use tokio::sync::Notify;
 #[derive(Clone)]
 pub struct WorkspaceState {
     db: DbPool,
-    /// Nexus-sync Outbox for bundle-level sync operations.
-    /// Uses a separate `SQLite` database at `{nexus_home}/sync/outbox.db`
-    /// with its own connection pool for async operations.
-    outbox: Arc<Option<Outbox>>,
     nexus_home: PathBuf,
     db_path: PathBuf,
     started_at: std::time::Instant,
@@ -65,7 +60,6 @@ impl WorkspaceState {
     /// Not intended for production use.
     ///
     /// Creates a connection pool with a single connection for test isolation.
-    /// Does NOT initialize the Outbox (sync operations will return `NotConfigured`).
     ///
     /// # Panics
     ///
@@ -80,7 +74,6 @@ impl WorkspaceState {
             .expect("Failed to create test database pool");
         Self {
             db,
-            outbox: Arc::new(None),
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
@@ -97,52 +90,7 @@ impl WorkspaceState {
         }
     }
 
-    /// Create a `WorkspaceState` for testing with an outbox.
-    ///
-    /// Initializes a temporary outbox database for testing sync operations.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the database pool, sync directory, or outbox cannot be created.
-    #[cfg(test)]
-    pub async fn new_for_testing_with_outbox(
-        nexus_home: PathBuf,
-        db_path: PathBuf,
-        workspace_path: Option<String>,
-    ) -> Self {
-        let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
-            .await
-            .expect("Failed to create test database pool");
-
-        // Create outbox at the standard sync directory
-        let sync_dir = nexus_home.join("sync");
-        std::fs::create_dir_all(&sync_dir).expect("Failed to create sync directory");
-        let outbox_path = sync_dir.join("outbox.db");
-        let outbox = Outbox::new(&outbox_path)
-            .await
-            .expect("Failed to create test outbox");
-
-        Self {
-            db,
-            outbox: Arc::new(Some(outbox)),
-            nexus_home,
-            db_path,
-            started_at: std::time::Instant::now(),
-            started_at_wall: chrono::Utc::now(),
-            workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
-            runtime_mode: RuntimeMode::LocalOnly,
-            lifecycle: Arc::new(None),
-            engine: Arc::new(None),
-            worker_manager: Arc::new(None),
-            capability_registry: Arc::new(None),
-            schedule_supervisor: Arc::new(None),
-            agent_host: Arc::new(None),
-            shutdown_notify: Arc::new(Notify::new()),
-        }
-    }
-
-    /// Initialize workspace state — create nexus home, `SQLite` database,
-    /// and sync outbox.
+    /// Initialize workspace state — create nexus home and `SQLite` database.
     ///
     /// # Errors
     ///
@@ -151,7 +99,6 @@ impl WorkspaceState {
     /// - Directory creation fails
     /// - CLI config cannot be read
     /// - Database schema initialization fails
-    /// - Outbox initialization fails
     pub async fn initialize() -> anyhow::Result<Self> {
         let user_home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
@@ -173,17 +120,10 @@ impl WorkspaceState {
         crate::db::schema::Schema::init(&db_path).await?;
         let db = DbPool::new(&db_path, PoolConfig::from_env()).await?;
 
-        // Initialize nexus-sync outbox at {nexus_home}/sync/outbox.db
-        let sync_dir = nexus_home.join("sync");
-        std::fs::create_dir_all(&sync_dir)?;
-        let outbox_path = sync_dir.join("outbox.db");
-        let outbox = Outbox::new(&outbox_path).await?;
-        tracing::info!("Sync outbox initialized at {:?}", outbox_path);
         tracing::info!("Workspace state.db at {:?}", db_path);
 
         Ok(Self {
             db,
-            outbox: Arc::new(Some(outbox)),
             nexus_home,
             db_path,
             started_at: std::time::Instant::now(),
@@ -307,15 +247,6 @@ impl WorkspaceState {
     #[must_use]
     pub const fn pool(&self) -> &sqlx::SqlitePool {
         self.db.pool()
-    }
-
-    /// Get the nexus-sync Outbox for sync operations.
-    ///
-    /// Returns `None` if the outbox was not initialized (e.g., in test contexts
-    /// using `new_for_testing`).
-    #[must_use]
-    pub fn outbox(&self) -> Option<&Outbox> {
-        self.outbox.as_ref().as_ref()
     }
 
     /// Check if workspace is initialized.

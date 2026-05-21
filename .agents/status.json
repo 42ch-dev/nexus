@@ -1,13 +1,63 @@
 {
   "version": 1,
-  "updated_at": "2026-05-20T00:00:00Z",
-  "plans": [],
+  "updated_at": "2026-05-20T18:00:00Z",
+  "plans": [
+    {
+      "id": "2026-05-20-v1.21-local-platform-isolation",
+      "title": "V1.21 Local Platform Isolation — crate split, daemon API cleanup, cloud-sync extraction",
+      "file": ".agents/plans/2026-05-20-v1.21-local-platform-isolation.md",
+      "status": "InProgress",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev", "@qa-engineer", "@qc-specialist"],
+      "progress": 86,
+      "tags": ["v1.21", "architecture", "local-cloud-isolation"],
+      "created_at": "2026-05-20",
+      "updated_at": "2026-05-21",
+      "done_at": null,
+      "notes": "Batches A–E ✅. CLI wired to cloud-sync directly. Pre-existing clippy error in daemon-runtime (from D batch) needs fix. Batch F remaining.",
+      "metadata": {
+        "working_branch": "feature/local-daemon-platform-isolation",
+        "spec_integration_branch": "feature/local-daemon-platform-isolation",
+        "merge_target": "main",
+        "branch_policy": "single integration branch — all batches merge to feature/local-daemon-platform-isolation then PR to main",
+        "phase": "implement",
+        "priority": "high",
+        "description": "Hard local/cloud split: rename nexus-cloud-sync, split nexus-domain, remove daemon sync/registration routes, CLI cloud-line wiring.",
+        "primary_spec": ".agents/knowledge/specs/local-cloud-crate-architecture.md",
+        "iteration_compass": ".agents/iterations/v1.21-local-platform-isolation-delivery-compass-v1.md",
+        "spec_refs": [
+          ".agents/knowledge/specs/local-cloud-crate-architecture.md",
+          ".agents/knowledge/schemas-wire-platform-sync-boundary.md",
+          ".agents/knowledge/specs/schemas-directory-layout.md",
+          ".agents/knowledge/specs/daemon-runtime.md",
+          ".agents/knowledge/specs/creator-challenge-solver.md",
+          ".agents/knowledge/specs/orchestration-engine.md"
+        ],
+        "batches": [
+          { "index": 1, "name": "A — nexus-cloud-sync rename", "covers": ["A1", "A2", "A3", "A4", "A5"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-20: 5 commits (1838ee5..11bf194); legacy-sync feature gates 6 modules; all tests + clippy green" },
+          { "index": 2, "name": "B — domain crate split", "covers": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"], "status": "done", "owner": "@fullstack-dev", "notes": "B1–B7 ✅ (012b742..3654b67). B8 finish via C batch (405d908): nexus-domain fully removed; degradation/runtime_guard/runtime_mode → nexus42/domain + nexus-creator. B9 → final QC." },
+          { "index": 3, "name": "C — moment-context-assembly", "covers": ["C1", "C2", "C3"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-21: 3 commits (4787e66..e63611a). nexus-moment-context-assembly scaffolded with cloud-stage feature; context_assembly extracted from nexus-domain + daemon." },
+          { "index": 4, "name": "D — daemon isolation", "covers": ["D1", "D2", "D3", "D4", "D5", "D6"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-21: 4 commits (b19bba2..a33d7e7). Daemon has zero cloud deps. Sync routes, registration proxy, SyncSubsystem, outbox removed. All 38 remaining routes verified against allowed families." },
+          { "index": 5, "name": "E — CLI cloud-line wiring", "covers": ["E1", "E2", "E3", "E4"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-21: 3 commits (5e5f3d4..50f444f). CLI sync/register/verify wired to nexus-cloud-sync directly. Zero stale daemon sync callers. legacy-sync feature enabled on CLI binary." },
+          { "index": 6, "name": "F — stubs, tests, docs", "covers": ["F1", "F2", "F3", "F4", "F5"], "status": "planned", "owner": "@qa-engineer" },
+          { "index": 7, "name": "G — schemas layout & READMEs", "covers": ["G1", "G2", "G3", "G4"], "status": "done", "owner": "@fullstack-dev", "notes": "2026-05-20: cloud-sync/ rename, meta/ removed; specs/plan/compass/tooling docs synced; layout §7 inventory" }
+        ],
+        "gates": {
+          "qc": "pending",
+          "qa": "pending",
+          "tests": "pending",
+          "lint": "pending"
+        },
+        "next_action": "Fix clippy error in nexus-daemon-runtime, then execute Batch F (stubs, tests, docs)."
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
-    "spec_integration_branch": "feature/v1.20",
+    "spec_integration_branch": "feature/local-daemon-platform-isolation",
     "latest_shipped_iteration": "v1.20",
     "latest_shipped_at": "2026-05-19T03:00:00Z",
     "tech_debt_summary": {
@@ -23,7 +73,8 @@
       "by_target": {},
       "by_plan": {},
       "in_flight": {
-        "v1.20": 0
+        "v1.20": 0,
+        "v1.21": 1
       },
       "cross_cutting": [
         {

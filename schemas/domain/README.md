@@ -1,6 +1,14 @@
-# Domain Schemas
+# Domain Wire Schemas
 
-Core domain entity schemas for Nexus. All aligned with `data-model-v1.md`.
+**Wire** domain entity JSON Schemas (platform-observed via HTTP bodies and sync bundles). Aligned with platform `data-model-v1.md`.
+
+**Not** the Rust `nexus-domain` crate (retired). Logic crates import generated types from `nexus-contracts`:
+
+- Creator → `nexus-creator`
+- User / Pairing → `nexus-cloud-domain`
+- Narrative / KB on wire → `nexus-narrative`, `nexus-kb`, etc.
+
+**Layout:** [schemas-directory-layout.md](../../.agents/knowledge/specs/schemas-directory-layout.md) §3.3.
 
 ## Schemas
 
@@ -30,6 +38,9 @@ Structured memory item (canon/working/experience) with embedding and source refs
 
 ### StoryManifest (`story-manifest.schema.json`)
 Platform manifest for story chapters/arcs with summary and manuscript storage info. §5.9
+
+### ForkBranch (`fork-branch.schema.json`)
+World branch fork metadata (`parent_branch_id`, `forked_from_event_id`). §5.7 — referenced by `platform/world-fork-response`.
 
 ### SyncCommand (`sync-command.schema.json`)
 Business action command with audit attribution and origin tracking. §5.10

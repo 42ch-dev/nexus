@@ -15,8 +15,8 @@ use crate::creator_identity::{self, CreatorIdentityEntry};
 use crate::errors::{CliError, Result};
 use crate::paths;
 use clap::Subcommand;
+use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
-use nexus_sync::platform_client::{PlatformClient, VerifyStatus};
 use std::path::PathBuf;
 
 /// Default registration source for the CLI.
@@ -1132,7 +1132,7 @@ async fn submit_with_retry(
     verification_code: &str,
     answer: &str,
     max_attempts: u32,
-) -> Result<nexus_sync::platform_client::VerifyResponse> {
+) -> Result<nexus_cloud_sync::platform_client::VerifyResponse> {
     let mut last_response = None;
 
     for attempt in 1..=max_attempts {
@@ -1509,7 +1509,9 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
 mod tests {
     use super::*;
     use crate::auth::{AuthStore, CreatorAuthState};
-    use nexus_sync::platform_client::{classify_platform_error, StagedPlatformError, VerifyStatus};
+    use nexus_cloud_sync::platform_client::{
+        classify_platform_error, StagedPlatformError, VerifyStatus,
+    };
 
     /// Helper: create an `AuthStore` with a known access token.
     fn store_with_token(creator_id: &str, token: &str) -> AuthStore {
@@ -1656,7 +1658,7 @@ mod tests {
 
     #[test]
     fn sync_platform_error_maps_to_creator_registration_failed() {
-        let sync_err = nexus_sync::errors::SyncError::PlatformError {
+        let sync_err = nexus_cloud_sync::errors::SyncError::PlatformError {
             status: 409,
             body: "creator already exists".to_string(),
         };
@@ -1672,7 +1674,7 @@ mod tests {
 
     #[test]
     fn sync_not_configured_maps_to_cli_config_error() {
-        let sync_err = nexus_sync::errors::SyncError::SyncNotConfigured(
+        let sync_err = nexus_cloud_sync::errors::SyncError::SyncNotConfigured(
             "platform_base_url is required".to_string(),
         );
         let cli_err: CliError = sync_err.into();
@@ -1686,7 +1688,7 @@ mod tests {
         // doesn't require a real connection. However, since we can't easily
         // construct a reqwest::Error, we instead verify the mapping logic
         // by checking the SyncError variant directly.
-        let sync_err = nexus_sync::errors::SyncError::PlatformError {
+        let sync_err = nexus_cloud_sync::errors::SyncError::PlatformError {
             status: 502,
             body: "bad gateway".to_string(),
         };
@@ -2078,11 +2080,16 @@ mod tests {
     #[derive(Debug)]
     struct StagedE2eResult {
         /// Gate-B1 outcome: platform register call result.
-        register:
-            std::result::Result<nexus_sync::platform_client::RegisterResponse, StagedPlatformError>,
+        register: std::result::Result<
+            nexus_cloud_sync::platform_client::RegisterResponse,
+            StagedPlatformError,
+        >,
         /// Gate-B2 outcome: platform verify call result (None if register failed).
         verify: Option<
-            std::result::Result<nexus_sync::platform_client::VerifyResponse, StagedPlatformError>,
+            std::result::Result<
+                nexus_cloud_sync::platform_client::VerifyResponse,
+                StagedPlatformError,
+            >,
         >,
     }
 

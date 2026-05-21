@@ -1,0 +1,20 @@
+[package]
+name = "nexus-knowledge"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]

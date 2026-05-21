@@ -22,9 +22,9 @@
     "working_branch": "create feature/v1.4-ws3-preset-loader from feature/v1.4",
     "merge_target": "feature/v1.4",
     "description": "YAML -> graph-flow::Graph loader + validation, ACP-touching capabilities (acp.prompt/acp.session_load/judge.llm), full AcpPromptTask + InnerGraphTask impls, embedded novel-writing preset (4 states + 2 inner graphs), mocked-agent E2E test across all states + daemon-restart durability. Minimal nexus42 schedule start/status/advance CLI (WS7 grows this).",
-    "wave_0_spec": ".agents/knowledge/orchestration-engine.md",
+    "wave_0_spec": ".agents/knowledge/specs/orchestration-engine.md",
     "spec_refs": [
-      ".agents/knowledge/orchestration-engine.md",
+      ".agents/knowledge/specs/orchestration-engine.md",
       ".agents/archived/knowledge/acp-client-tech-spec.md",
       ".agents/iterations/v1.4-delivery-compass-v1.md"
     ],

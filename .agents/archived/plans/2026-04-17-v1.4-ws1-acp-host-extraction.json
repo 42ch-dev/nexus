@@ -17,7 +17,7 @@
     "wave_0_spec": ".agents/archived/knowledge/acp-client-tech-spec.md",
     "spec_refs": [
       ".agents/archived/knowledge/acp-client-tech-spec.md",
-      ".agents/knowledge/orchestration-engine.md",
+      ".agents/knowledge/specs/orchestration-engine.md",
       ".agents/iterations/v1.4-delivery-compass-v1.md"
     ],
     "effort_agent_oriented": "M (1-2 agent sessions)",

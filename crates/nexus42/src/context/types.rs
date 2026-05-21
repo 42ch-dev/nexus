@@ -10,7 +10,7 @@ pub use nexus_contracts::generated::ContextAssembleResponseV1;
 
 // Re-export MemoryKind from domain for CLI use
 #[cfg(test)]
-pub use nexus_domain::memory_item::MemoryKind;
+pub use nexus_creator_memory::memory_item::MemoryKind;
 
 /// Backward-compatible type alias.
 #[allow(dead_code)]

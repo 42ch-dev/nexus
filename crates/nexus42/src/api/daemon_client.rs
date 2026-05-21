@@ -11,7 +11,7 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use nexus_domain::AssembleResponse;
+use nexus_moment_context_assembly::cloud_stage::AssembleResponse;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Write;
 use std::time::Duration;

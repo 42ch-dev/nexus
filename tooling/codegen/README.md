@@ -33,7 +33,9 @@ cd tooling/codegen && npm run build
 
 - **Common types** (`common.schema.json`, `source-anchor.schema.json`): Extracted into `CommonTypes.ts` / `common_types.rs` — no standalone struct generated
 - **Domain schemas** (`domain/*.schema.json`): Each generates a TypeScript interface and Rust struct
-- **Meta schema** (`meta.schema.json`): Generates Meta type with proper `$` field handling
+- **Platform** (`platform/*.schema.json`) and **cloud sync** (`cloud-sync/*.schema.json`): Same — one struct per schema file
+- **Cloud-sync bundle refinement** (`cloud-sync/bundle.schema.json`): Skipped for struct generation (canonical `Bundle` from `domain/bundle.schema.json`; see `schema-loader.ts`)
+- **Meta schema**: Not in `schemas/` — hand-written `crates/nexus-contracts/src/local/meta.rs` only
 
 ## Type Mapping
 

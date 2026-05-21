@@ -5,7 +5,7 @@
 **Supersedes**: [daemon-lifecycle-api-legacy.md](archived/knowledge/daemon-lifecycle-api-legacy.md) — archived 2026-04-17 (v1 captured the gap and the "running-probe" minimal slice; it does not reflect the final full-FSM design).
 **Coordinates with**:
 
-- [orchestration-engine.md](../../knowledge/orchestration-engine.md) — Phase 4 lands the HSM; engine is started/stopped by lifecycle state transitions (§3.2 / §10.5)
+- [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) — Phase 4 lands the HSM; engine is started/stopped by lifecycle state transitions (§3.2 / §10.5)
 - [acp-client-tech-spec.md](acp-client-tech-spec.md) — Worker Manager graceful shutdown is keyed off `Stopping.entry`
 - [architecture-alignment-review.md](architecture-alignment-review.md) — TD-9 resolution row updates to "Resolved (v2)" after Phase 4 merges
 
@@ -44,7 +44,7 @@ The canonical behavioural requirement is `v1-spec/cli-sync/cli-spec-v1.md` §10.
 
 **Out of scope**:
 
-- Orchestration engine internals (see [orchestration-engine.md](../../knowledge/orchestration-engine.md))
+- Orchestration engine internals (see [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md))
 - ACP worker process model (see [acp-client-tech-spec.md](acp-client-tech-spec.md) §2.3)
 - Platform-side signalling / control plane beyond what `GET /v1/local/daemon/status` exposes
 
@@ -165,7 +165,7 @@ Each subsystem bootstrap is its own tokio task; all emit events into the HSM's c
 
 ### 5.2 `Running.entry`
 
-- Start `_system.maintenance` Session on the orchestration engine (per [orchestration-engine.md](../../knowledge/orchestration-engine.md) §9.1)
+- Start `_system.maintenance` Session on the orchestration engine (per [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §9.1)
 - Resume any `orchestration_sessions` rows whose status was `paused` with reason `daemon_restart` (up to a configurable cap, default 16 concurrent)
 - Emit `tracing` event `daemon_lifecycle.running`
 - Set `lifecycle_state` string for HTTP endpoint to `"running"`
@@ -327,11 +327,11 @@ Adopt `statig` (crates.io `statig = "0.3"`; pin to the latest 0.3.x at Phase 4 i
 - `async` handlers — our entry actions involve tokio bootstrap, awaited subsystem readiness.
 - Introspection hooks (`before_dispatch`, `after_transition`) map 1:1 to our `tracing` needs.
 - Zero-allocation execution path — good fit for shutdown-reliability-critical code.
-- Compile-time structure — daemon's state graph is **not user-configurable** (unlike presets, per [orchestration-engine.md](../../knowledge/orchestration-engine.md) §1.2), so compile-time is a strength.
+- Compile-time structure — daemon's state graph is **not user-configurable** (unlike presets, per [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §1.2), so compile-time is a strength.
 
 ### 9.3 What we explicitly do **not** use statig for
 
-- Preset execution — that's `graph-flow` territory and requires runtime-constructed graphs (see [orchestration-engine.md](../../knowledge/orchestration-engine.md) §4.1).
+- Preset execution — that's `graph-flow` territory and requires runtime-constructed graphs (see [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §4.1).
 - Per-creator Schedule state — also runtime-configurable, handled in orchestration engine, not lifecycle HSM.
 
 ### 9.4 Adapter trait (minor insurance)
@@ -351,7 +351,7 @@ Only impl is `StatigLifecycle` backed by `statig::awaitable::StateMachine`. Keep
 
 ## 10. Implementation Plan
 
-### 10.1 Phase 4 scope (see [orchestration-engine.md](../../knowledge/orchestration-engine.md) §10.5)
+### 10.1 Phase 4 scope (see [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §10.5)
 
 - Add `statig = "0.3"` to `crates/nexus42d/Cargo.toml`
 - New module `crates/nexus42d/src/lifecycle/` with `state.rs` (HSM impl), `events.rs` (event enum), `actions.rs` (entry/exit handlers), `mod.rs` (`Lifecycle` trait + `StatigLifecycle`)
@@ -371,7 +371,7 @@ Only impl is `StatigLifecycle` backed by `statig::awaitable::StateMachine`. Keep
 
 ### 10.2 Parallelism with Phase 2
 
-Phase 4 **can** start the moment `crates/nexus-orchestration` has its first shippable commit (so `OrchestrationEngine` trait exists for `Running.entry` to call). Running it in parallel shortens overall wall-clock; see [orchestration-engine.md](../../knowledge/orchestration-engine.md) §10.1.
+Phase 4 **can** start the moment `crates/nexus-orchestration` has its first shippable commit (so `OrchestrationEngine` trait exists for `Running.entry` to call). Running it in parallel shortens overall wall-clock; see [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §10.1.
 
 ### 10.3 Backward-compat note
 
@@ -395,7 +395,7 @@ Because the v2 response is a superset of v1, no clients need to upgrade in locks
 
 Internal:
 
-- [orchestration-engine.md](../../knowledge/orchestration-engine.md) — sibling spec; lifecycle starts/stops the engine
+- [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) — sibling spec; lifecycle starts/stops the engine
 - [acp-client-tech-spec.md](acp-client-tech-spec.md) — worker graceful shutdown keyed off `Stopping.entry`
 - [architecture-alignment-review.md](architecture-alignment-review.md) — TD-9 row moves to "Resolved (v2)"
 - [daemon-lifecycle-api-legacy.md](archived/knowledge/daemon-lifecycle-api-legacy.md) — archived; do not rely on directly

@@ -1,12 +1,18 @@
-//! `sync.pull` and `sync.push` capabilities.
+//! `sync.pull` and `sync.push` capability stubs.
 //!
-//! Owner crate: `nexus-sync` (placeholder stubs until integration is wired).
+//! These capabilities require the cloud line (`nexus-cloud-sync`).
+//! In the default (local-only) build they return a permanent error
+//! indicating that cloud sync is disabled. The actual implementation
+//! lives in `nexus-cloud-sync` and is wired when the CLI enables the
+//! `legacy-sync` feature.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_contracts::local::orchestration::{SyncPullInput, SyncPullOutput};
-use nexus_contracts::local::orchestration::{SyncPushInput, SyncPushOutput};
 use serde_json::Value;
+
+/// Cloud-sync-disabled error message shared by all three cloud stubs.
+const CLOUD_LINE_DISABLED: &str =
+    "cloud line disabled: sync requires nexus-cloud-sync (enable legacy-sync feature)";
 
 // ---------------------------------------------------------------------------
 // sync.pull
@@ -14,8 +20,8 @@ use serde_json::Value;
 
 /// Pull remote deltas for a workspace.
 ///
-/// **Stub**: returns zero deltas until `nexus-sync` integration is wired.
-/// Marked with `#[ignore]` for network-dependent testing.
+/// **Stub**: returns `PermanentExternal` error in local-only builds.
+/// The real implementation lives in `nexus-cloud-sync`.
 pub struct SyncPull;
 
 #[async_trait]
@@ -32,16 +38,10 @@ impl Capability for SyncPull {
         r#"{"type":"object","properties":{"deltasPulled":{"type":"integer","minimum":0},"conflicts":{"type":"boolean"}},"required":["deltasPulled","conflicts"],"additionalProperties":false}"#
     }
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: SyncPullInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("sync.pull input: {e}")))?;
-        // Stub: no actual sync performed.
-        let output = SyncPullOutput {
-            deltas_pulled: 0,
-            conflicts: false,
-        };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
     }
 }
 
@@ -51,7 +51,8 @@ impl Capability for SyncPull {
 
 /// Push local outbox to remote.
 ///
-/// **Stub**: returns zero entries until `nexus-sync` integration is wired.
+/// **Stub**: returns `PermanentExternal` error in local-only builds.
+/// The real implementation lives in `nexus-cloud-sync`.
 pub struct SyncPush;
 
 #[async_trait]
@@ -68,12 +69,10 @@ impl Capability for SyncPush {
         r#"{"type":"object","properties":{"entriesPushed":{"type":"integer","minimum":0}},"required":["entriesPushed"],"additionalProperties":false}"#
     }
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let _input: SyncPushInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("sync.push input: {e}")))?;
-        let output = SyncPushOutput { entries_pushed: 0 };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
     }
 }
 
@@ -82,24 +81,32 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn sync_pull_smoke() {
+    async fn sync_pull_returns_cloud_disabled_error() {
         let cap = SyncPull;
-        let out = cap.run(serde_json::json!({"force": false})).await.unwrap();
-        assert_eq!(out["deltasPulled"], 0);
-        assert_eq!(out["conflicts"], false);
+        let err = cap
+            .run(serde_json::json!({"force": false}))
+            .await
+            .unwrap_err();
+        match err {
+            CapabilityError::PermanentExternal(msg) => {
+                assert!(msg.contains("cloud line disabled"));
+            }
+            other => panic!("expected PermanentExternal, got {other:?}"),
+        }
     }
 
     #[tokio::test]
-    async fn sync_push_smoke() {
+    async fn sync_push_returns_cloud_disabled_error() {
         let cap = SyncPush;
-        let out = cap.run(serde_json::json!({"force": false})).await.unwrap();
-        assert_eq!(out["entriesPushed"], 0);
-    }
-
-    #[tokio::test]
-    async fn sync_pull_invalid_input() {
-        let cap = SyncPull;
-        let result = cap.run(serde_json::json!({"force": "not-a-bool"})).await;
-        assert!(result.is_err());
+        let err = cap
+            .run(serde_json::json!({"force": false}))
+            .await
+            .unwrap_err();
+        match err {
+            CapabilityError::PermanentExternal(msg) => {
+                assert!(msg.contains("cloud line disabled"));
+            }
+            other => panic!("expected PermanentExternal, got {other:?}"),
+        }
     }
 }

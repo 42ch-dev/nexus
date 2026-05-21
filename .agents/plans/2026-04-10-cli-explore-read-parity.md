@@ -42,7 +42,7 @@
 
 ## Task group A — Command surface
 
-- [ ] **A1:** Choose subcommand group (`nexus42 explore …` or per `cli-spec-v1` once synced).
+- [ ] **A1:** Choose subcommand group (`nexus42 explore …` or per `cli-spec` once synced).
 - [ ] **A2:** Define query parameters and map to request types.
 
 ## Task group B — Client implementation

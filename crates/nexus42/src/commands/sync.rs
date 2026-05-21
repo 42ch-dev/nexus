@@ -4,27 +4,24 @@
 //! The `resolve` subcommand includes a safety confirmation prompt for
 //! auto-reject resolution (SYNC-R13), which can be bypassed with `--force`.
 //!
-//! # Wiring (TD-1)
+//! # Wiring (V1.21 — Batch E)
 //!
-//! CLI sync commands call daemon HTTP endpoints backed by `nexus-sync` (**Outbox**,
-//! **`BundleBuilder`**, **precheck**). Push builds a bundle (including `canonical_hash`),
-//! runs precheck, then **`Outbox::stage`** (`ready`). HTTP upload to the platform via
-//! **`SyncClient`** is offline-first (queued locally; optional daemon follow-up).
-//! Pull calls **`POST /v1/local/sync/pull`**, which uses **`SyncClient::pull_bundles`**
-//! against the platform and stages returned bundles (idempotent by `bundle_id`).
+//! CLI sync commands use `nexus-cloud-sync` directly (no daemon proxy):
+//! - **Push**: builds a bundle via `delta_bundle`, uploads via `SyncClient::push_bundle`
+//! - **Pull**: fetches bundles via `SyncClient::pull_bundles`
+//! - **Status/Resolve**: reads/writes the local outbox (`Outbox` backed by `state.db`)
 
-use crate::api::DaemonClient;
 use crate::commands::world::WorldCommand;
 use crate::config::CliConfig;
+use crate::domain::runtime_guard;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_contracts::SyncPullRequest;
-use nexus_domain::runtime_guard;
-use serde::{Deserialize, Serialize};
+use nexus_cloud_sync::delta_bundle::BundleBuilder;
+use nexus_cloud_sync::sync_client::SyncClient;
 
 /// Supported conflict resolution strategies.
 ///
-/// Mirrors `nexus_sync::conflict::ConflictResolution` for CLI use,
+/// Mirrors `nexus_cloud_sync::conflict::ConflictResolution` for CLI use,
 /// avoiding a direct dependency on the sync crate in the CLI layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ResolutionStrategy {
@@ -108,95 +105,17 @@ pub enum SyncCommand {
     },
 }
 
-// ── Request/Response models for daemon communication ──────────────
+// ── Local models (used for outbox status display) ──────────────────
 
-/// Sync status response from the daemon
-#[derive(Debug, Deserialize)]
-pub struct SyncStatusResponse {
-    pub staged_count: u64,
-    pub ready_count: u64,
-    pub sent_count: u64,
-    pub acked_count: u64,
-    pub failed_count: u64,
-    pub conflicted_count: u64,
-    pub last_sync_at: Option<String>,
-}
-
-/// Sync push request to the daemon
-#[derive(Debug, Serialize)]
-pub struct SyncPushRequest {
-    pub workspace_id: String,
-    pub world_id: String,
-    pub creator_id: String,
-    pub force: bool,
-}
-
-/// Sync push response from the daemon
-#[derive(Debug, Deserialize)]
-pub struct SyncPushResponse {
-    pub success: bool,
-    pub outbox_entry_id: Option<String>,
-    pub bundle_id: Option<String>,
-    pub precheck_result: Option<PrecheckSummaryResponse>,
-    pub error: Option<String>,
-}
-
-/// Precheck summary from the daemon
-#[derive(Debug, Deserialize)]
-pub struct PrecheckSummaryResponse {
-    pub valid: bool,
-    pub error_count: usize,
-    pub warning_count: usize,
-    pub summary: String,
-}
-
-/// Sync resolve request to the daemon
-#[derive(Debug, Serialize)]
-pub struct SyncResolveRequest {
-    pub outbox_entry_id: String,
-    pub resolution: String,
-    pub force: bool,
-}
-
-/// Sync pull response from the daemon (after platform `/v1/sync/pull` + local staging).
-#[derive(Debug, Deserialize)]
-pub struct SyncPullLocalResponse {
-    pub success: bool,
-    pub world_revision: u64,
-    pub confirmed_delta_sequence: u64,
-    pub bundles_received: usize,
-    pub entries_staged: Vec<String>,
-    pub skipped_known_bundles: usize,
-    pub is_up_to_date: Option<bool>,
-    pub error: Option<String>,
-}
-
-/// Sync resolve response from the daemon
-#[derive(Debug, Deserialize)]
-pub struct SyncResolveResponse {
-    pub success: bool,
-    pub delivery_state: Option<String>,
-    pub error: Option<String>,
-}
-
-/// Sync replay response from the daemon
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct SyncReplayResponse {
-    pub replayable_count: usize,
-    pub entries: Vec<OutboxEntrySummaryResponse>,
-}
-
-/// Outbox entry summary from the daemon
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct OutboxEntrySummaryResponse {
-    pub outbox_entry_id: String,
-    pub bundle_id: String,
-    pub delivery_state: String,
-    pub retry_count: i64,
-    pub last_error: Option<String>,
-    pub created_at: String,
+/// Sync status from the local outbox.
+#[derive(Debug)]
+pub struct SyncStatusInfo {
+    pub staged_count: usize,
+    pub ready_count: usize,
+    pub sent_count: usize,
+    pub acked_count: usize,
+    pub failed_count: usize,
+    pub conflicted_count: usize,
 }
 
 // ── Confirmation prompt ───────────────────────────────────────────
@@ -234,96 +153,62 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 ///
 /// Returns an error if:
 /// - Platform connectivity is required but unavailable
-/// - Daemon is not running
+/// - Authentication is missing or expired
 /// - Sync API calls fail
 /// - Invalid `world_id` or `creator_id` parameters
 ///
-/// Note: This function is 229 lines; splitting would break the coherent sync flow.
+/// Note: This function is long; splitting would break the coherent sync flow.
 #[allow(clippy::too_many_lines)]
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
-
     match cmd {
         SyncCommand::Push {
             workspace_id,
             world_id,
             creator_id,
-            force,
+            force: _,
         } => {
             runtime_guard::require_platform(&config.runtime_mode(), "sync push")?;
-            if !client.health_check().await? {
-                return Err(crate::errors::CliError::DaemonNotRunning);
-            }
 
-            let mut default_id_fields: Vec<&'static str> = Vec::new();
+            let Some(creator_id) = creator_id.or_else(|| config.active_creator_id.clone()) else {
+                return Err(crate::errors::CliError::Other(
+                    "Creator ID required for sync push. Use --creator-id or set active creator."
+                        .to_string(),
+                ));
+            };
 
             let workspace_id = workspace_id.unwrap_or_else(|| {
-                default_id_fields.push("workspace_id");
+                eprintln!("Warning: sync push using placeholder workspace_id \"local\".");
                 "local".to_string()
             });
-
             let world_id = world_id.unwrap_or_else(|| {
-                default_id_fields.push("world_id");
+                eprintln!("Warning: sync push using placeholder world_id \"unknown\".");
                 "unknown".to_string()
             });
 
-            let creator_id = creator_id.unwrap_or_else(|| {
-                config.active_creator_id.as_deref().map_or_else(
-                    || {
-                        default_id_fields.push("creator_id");
-                        "unknown".to_string()
-                    },
-                    ToString::to_string,
-                )
-            });
+            // Obtain auth token
+            let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
-            if !default_id_fields.is_empty() {
-                eprintln!(
-                    "Warning: sync push using placeholder IDs (missing {}). \
-Real platform sync requires --workspace-id, --world-id, and --creator-id (or active_creator_id in config).",
-                    default_id_fields.join(", ")
-                );
-            }
+            // Build a minimal bundle
+            let bundle = BundleBuilder::new(&workspace_id, &world_id, &creator_id).build()?;
 
-            let request = SyncPushRequest {
-                workspace_id,
-                world_id,
-                creator_id,
-                force,
-            };
-
-            match client
-                .post::<SyncPushResponse, SyncPushRequest>("/v1/local/sync/push", &request)
-                .await
-            {
+            // Push directly to platform via cloud-sync
+            let sync_client = SyncClient::new(&config.platform_url, &auth_token)?;
+            match sync_client.push_bundle(&bundle).await {
                 Ok(response) => {
-                    println!("Sync push staged successfully.");
-                    if let Some(entry_id) = &response.outbox_entry_id {
-                        println!("  Entry ID:  {entry_id}");
+                    println!("Sync push completed.");
+                    if let Some(rev) = response.world_revision {
+                        println!("  World revision: {rev}");
                     }
-                    if let Some(bundle_id) = &response.bundle_id {
-                        println!("  Bundle ID: {bundle_id}");
-                    }
-                    if let Some(precheck) = &response.precheck_result {
-                        if precheck.valid {
-                            println!("  Precheck:  PASSED");
-                        } else {
-                            println!(
-                                "  Precheck:  FAILED ({} errors, {} warnings)",
-                                precheck.error_count, precheck.warning_count
-                            );
-                            println!("  {}", precheck.summary);
-                        }
+                    if let Some(seq) = response.confirmed_delta_sequence {
+                        println!("  Confirmed delta sequence: {seq}");
                     }
                     if !response.success {
-                        if let Some(error) = &response.error {
-                            eprintln!("Error: {error}");
-                        }
+                        eprintln!("  Push reported non-success from platform.");
                     }
                 }
                 Err(e) => {
                     eprintln!("Sync push failed: {e}");
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         }
@@ -332,83 +217,53 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
             after_sequence,
         } => {
             runtime_guard::require_platform(&config.runtime_mode(), "sync pull")?;
-            if !client.health_check().await? {
-                return Err(crate::errors::CliError::DaemonNotRunning);
-            }
 
             let world_id = world_id.unwrap_or_else(|| {
-                eprintln!(
-                    "Warning: sync pull without --world-id uses placeholder \"unknown\". \
-            Set --world-id for real platform sync (and ensure it matches workspace sync binding if set)."
-                );
+                eprintln!("Warning: sync pull without --world-id uses placeholder \"unknown\".");
                 "unknown".to_string()
             });
 
-            let request = SyncPullRequest {
+            // Obtain auth token
+            let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
+
+            let request = nexus_contracts::SyncPullRequest {
                 schema_version: 1,
                 world_id,
                 after_confirmed_delta_sequence: after_sequence,
             };
 
-            match client
-                .post::<SyncPullLocalResponse, SyncPullRequest>("/v1/local/sync/pull", &request)
-                .await
-            {
+            // Pull directly from platform via cloud-sync
+            let sync_client = SyncClient::new(&config.platform_url, &auth_token)?;
+            match sync_client.pull_bundles(&request).await {
                 Ok(resp) => {
-                    if resp.success {
-                        println!("Sync pull completed.");
-                        println!("  World revision:           {}", resp.world_revision);
-                        println!(
-                            "  Confirmed delta sequence: {}",
-                            resp.confirmed_delta_sequence
-                        );
-                        println!("  Bundles received:         {}", resp.bundles_received);
-                        println!("  New outbox entries:       {}", resp.entries_staged.len());
-                        if resp.skipped_known_bundles > 0 {
-                            println!("  Skipped (already local): {}", resp.skipped_known_bundles);
-                        }
-                        if let Some(up) = resp.is_up_to_date {
-                            println!("  Server up-to-date flag:   {up}");
-                        }
-                        for id in &resp.entries_staged {
-                            println!("    - {id}");
-                        }
-                    } else if let Some(err) = &resp.error {
-                        eprintln!("Sync pull failed: {err}");
+                    println!("Sync pull completed.");
+                    println!("  World revision:           {}", resp.world_revision);
+                    println!(
+                        "  Confirmed delta sequence: {}",
+                        resp.confirmed_delta_sequence
+                    );
+                    println!("  Bundle count:             {}", resp.bundles.len());
+                    if let Some(up) = resp.is_up_to_date {
+                        println!("  Up to date:               {up}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Sync pull request failed: {e}");
-                    return Err(e);
+                    eprintln!("Sync pull failed: {e}");
+                    return Err(e.into());
                 }
             }
         }
         SyncCommand::Status => {
-            if !client.health_check().await? {
-                println!("Sync Status:");
-                println!("  Daemon: not running");
-                println!();
-                println!("Start the daemon with: nexus42 daemon start");
-                return Ok(());
-            }
-
-            match client
-                .get::<SyncStatusResponse>("/v1/local/sync/status")
-                .await
-            {
+            // Query local outbox for status
+            match get_local_outbox_status(config).await {
                 Ok(status) => {
-                    println!("Sync Status:");
+                    println!("Sync Status (local outbox):");
                     println!("  Staged:    {}", status.staged_count);
-                    println!("  Ready:    {}", status.ready_count);
+                    println!("  Ready:     {}", status.ready_count);
                     println!("  Sent:      {}", status.sent_count);
                     println!("  Acked:     {}", status.acked_count);
                     println!("  Conflicts: {}", status.conflicted_count);
                     println!("  Failed:    {}", status.failed_count);
-
-                    match &status.last_sync_at {
-                        Some(ts) => println!("  Last sync: {ts}"),
-                        None => println!("  Last sync: never"),
-                    }
 
                     let total_pending = status.staged_count + status.ready_count;
                     if total_pending > 0 {
@@ -434,6 +289,7 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 Err(e) => {
                     println!("Sync Status:");
                     println!("  Error: {e}");
+                    println!("  Hint: Ensure the CLI state database is initialized.");
                 }
             }
         }
@@ -443,9 +299,6 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
             force,
         } => {
             runtime_guard::require_platform(&config.runtime_mode(), "sync resolve")?;
-            if !client.health_check().await? {
-                return Err(crate::errors::CliError::DaemonNotRunning);
-            }
 
             // Safety prompt for auto-reject (SYNC-R13)
             if resolution == ResolutionStrategy::AutoReject && !confirm_auto_reject(force) {
@@ -453,31 +306,13 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
                 return Ok(());
             }
 
-            let request = SyncResolveRequest {
-                outbox_entry_id: outbox_entry_id.clone(),
-                resolution: resolution.to_string(),
-                force,
-            };
-
-            match client
-                .post::<SyncResolveResponse, SyncResolveRequest>("/v1/local/sync/resolve", &request)
-                .await
-            {
-                Ok(response) => {
-                    if response.success {
-                        println!("Resolved entry {outbox_entry_id} with strategy: {resolution}");
-                        if let Some(state) = &response.delivery_state {
-                            println!("  New state: {state}");
-                        }
-                    } else if let Some(error) = &response.error {
-                        eprintln!("Resolution failed: {error}");
-                        if let Some(state) = &response.delivery_state {
-                            eprintln!("  Current state: {state}");
-                        }
-                    }
+            // Resolve via local outbox
+            match resolve_outbox_entry(config, &outbox_entry_id, &resolution).await {
+                Ok(()) => {
+                    println!("Resolved entry {outbox_entry_id} with strategy: {resolution}");
                 }
                 Err(e) => {
-                    eprintln!("Resolve request failed for entry {outbox_entry_id}: {e}");
+                    eprintln!("Resolve failed for entry {outbox_entry_id}: {e}");
                     return Err(e);
                 }
             }
@@ -498,47 +333,63 @@ Real platform sync requires --workspace-id, --world-id, and --creator-id (or act
     Ok(())
 }
 
+// ── Local outbox helpers ─────────────────────────────────────────
+
+/// Get local outbox status by opening the CLI's state.db.
+async fn get_local_outbox_status(config: &CliConfig) -> Result<SyncStatusInfo> {
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let outbox = nexus_cloud_sync::outbox::Outbox::new(&db_path).await?;
+
+    let staged_count = outbox.count_by_state("staged").await.unwrap_or(0);
+    let ready_count = outbox.count_by_state("ready").await.unwrap_or(0);
+    let sent_count = outbox.count_by_state("sent").await.unwrap_or(0);
+    let acked_count = outbox.count_by_state("acked").await.unwrap_or(0);
+    let failed_count = outbox.count_by_state("failed").await.unwrap_or(0);
+    let conflicted_count = outbox.count_by_state("conflicted").await.unwrap_or(0);
+
+    Ok(SyncStatusInfo {
+        staged_count,
+        ready_count,
+        sent_count,
+        acked_count,
+        failed_count,
+        conflicted_count,
+    })
+}
+
+/// Resolve an outbox entry by updating its state in the local outbox.
+async fn resolve_outbox_entry(
+    config: &CliConfig,
+    outbox_entry_id: &str,
+    resolution: &ResolutionStrategy,
+) -> Result<()> {
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let outbox = nexus_cloud_sync::outbox::Outbox::new(&db_path).await?;
+
+    match resolution {
+        ResolutionStrategy::AutoAccept => {
+            // Mark as acked — accept server state
+            outbox.mark_acked(outbox_entry_id).await?;
+        }
+        ResolutionStrategy::AutoReject => {
+            // Mark as failed — keep local state (destructive for server changes)
+            outbox
+                .mark_failed(outbox_entry_id, "auto_reject: discarded server changes")
+                .await?;
+        }
+        ResolutionStrategy::ManualReview => {
+            // No state change — just log for user awareness
+            println!("  Entry {outbox_entry_id} left in conflicted state for manual review.");
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_sync_status_response_deserialization() {
-        let json = r#"{
-            "staged_count": 2,
-            "ready_count": 1,
-            "sent_count": 0,
-            "acked_count": 5,
-            "failed_count": 1,
-            "conflicted_count": 3,
-            "last_sync_at": "2026-04-07T00:00:00Z"
-        }"#;
-        let resp: SyncStatusResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.staged_count, 2);
-        assert_eq!(resp.ready_count, 1);
-        assert_eq!(resp.acked_count, 5);
-        assert_eq!(resp.conflicted_count, 3);
-        assert_eq!(resp.failed_count, 1);
-        assert_eq!(resp.last_sync_at, Some("2026-04-07T00:00:00Z".to_string()));
-    }
-
-    #[test]
-    fn test_sync_status_response_no_last_sync() {
-        let json = r#"{
-            "staged_count": 0,
-            "ready_count": 0,
-            "sent_count": 0,
-            "acked_count": 0,
-            "failed_count": 0,
-            "conflicted_count": 0,
-            "last_sync_at": null
-        }"#;
-        let resp: SyncStatusResponse = serde_json::from_str(json).unwrap();
-        assert!(resp.last_sync_at.is_none());
-    }
-
-    // ── Resolution strategy tests (SYNC-R13) ─────────────────────
 
     #[test]
     fn test_resolution_strategy_display() {
@@ -577,60 +428,5 @@ mod tests {
         let manual: ResolutionStrategy =
             clap::ValueEnum::from_str("manual-review", true).expect("parse manual-review");
         assert_eq!(manual, ResolutionStrategy::ManualReview);
-    }
-
-    #[test]
-    fn test_sync_push_response_deserialization() {
-        let json = r#"{
-            "success": true,
-            "outbox_entry_id": "obe_abc123",
-            "bundle_id": "bdl_xyz789",
-            "precheck_result": {
-                "valid": true,
-                "error_count": 0,
-                "warning_count": 1,
-                "summary": "All checks passed."
-            },
-            "error": null
-        }"#;
-        let resp: SyncPushResponse = serde_json::from_str(json).unwrap();
-        assert!(resp.success);
-        assert_eq!(resp.outbox_entry_id, Some("obe_abc123".to_string()));
-        assert_eq!(resp.bundle_id, Some("bdl_xyz789".to_string()));
-        assert!(resp.precheck_result.is_some());
-        let precheck = resp.precheck_result.unwrap();
-        assert!(precheck.valid);
-        assert_eq!(precheck.error_count, 0);
-    }
-
-    #[test]
-    fn test_sync_pull_local_response_deserialization() {
-        let json = r#"{
-            "success": true,
-            "world_revision": 3,
-            "confirmed_delta_sequence": 9,
-            "bundles_received": 1,
-            "entries_staged": ["obe_1"],
-            "skipped_known_bundles": 0,
-            "is_up_to_date": true,
-            "error": null
-        }"#;
-        let resp: SyncPullLocalResponse = serde_json::from_str(json).unwrap();
-        assert!(resp.success);
-        assert_eq!(resp.world_revision, 3);
-        assert_eq!(resp.entries_staged.len(), 1);
-        assert_eq!(resp.skipped_known_bundles, 0);
-    }
-
-    #[test]
-    fn test_sync_resolve_response_deserialization() {
-        let json = r#"{
-            "success": true,
-            "delivery_state": "acked",
-            "error": null
-        }"#;
-        let resp: SyncResolveResponse = serde_json::from_str(json).unwrap();
-        assert!(resp.success);
-        assert_eq!(resp.delivery_state, Some("acked".to_string()));
     }
 }
