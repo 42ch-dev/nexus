@@ -2134,6 +2134,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "hex",
+ "nexus-cloud-domain",
  "nexus-contracts",
  "nexus-home-layout",
  "nexus-local-db",
@@ -2213,8 +2214,13 @@ dependencies = [
  "nexus-agent-host",
  "nexus-contracts",
  "nexus-creator",
+ "nexus-creator-memory",
  "nexus-home-layout",
+ "nexus-kb",
+ "nexus-knowledge",
  "nexus-local-db",
+ "nexus-moment-context-assembly",
+ "nexus-narrative",
  "nexus-orchestration",
  "regex",
  "serde",
@@ -2250,6 +2256,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "uuid",
 ]
 
@@ -2257,11 +2264,13 @@ dependencies = [
 name = "nexus-knowledge"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "nexus-contracts",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "uuid",
 ]
 
@@ -2286,8 +2295,12 @@ dependencies = [
  "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator-memory",
+ "nexus-kb",
+ "nexus-knowledge",
+ "nexus-narrative",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2301,6 +2314,7 @@ dependencies = [
  "serde_json",
  "strum 0.26.3",
  "thiserror 1.0.69",
+ "tokio",
  "uuid",
 ]
 

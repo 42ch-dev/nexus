@@ -16,6 +16,7 @@ default = []
 legacy-sync = []
 
 [dependencies]
+nexus-cloud-domain = { path = "../nexus-cloud-domain" }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }

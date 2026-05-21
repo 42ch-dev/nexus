@@ -1,43 +1,55 @@
 {
   "version": 1,
-  "updated_at": "2026-05-21T12:00:00Z",
+  "updated_at": "2026-05-21T21:20:00+08:00",
   "plans": [
     {
-      "id": "2026-05-21-v1.22-cli-deprecation-cleanup",
-      "title": "V1.22 CLI Deprecation Cleanup — remove all deprecated commands, dead code, stale redirects",
-      "file": ".agents/plans/2026-05-21-v1.22-cli-deprecation-cleanup.md",
+      "id": "2026-05-21-v1.23-architecture-crate-wiring-alignment",
+      "title": "V1.23 Architecture & Crate Wiring Alignment — align knowledge specs, entity scopes, and actual crate graph",
+      "file": ".agents/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@qa-engineer", "@qc-specialist"],
+      "agents": ["@product-manager", "@architect", "@fullstack-dev", "@qa-engineer", "@qc-specialist", "@qc-specialist-2", "@qc-specialist-3"],
       "progress": 100,
-      "tags": ["v1.22", "cleanup", "cli", "deprecation"],
+      "tags": ["v1.23", "architecture", "crate-wiring", "knowledge", "scope-model"],
       "created_at": "2026-05-21",
       "updated_at": "2026-05-21",
       "done_at": "2026-05-21",
-      "notes": "Batches A–E complete. QC tri-review 3× Approve. QA Pass (700/700). PR #30 merged.",
+      "notes": "Batches A–E complete. QC tri-review 3× Approve. QA Pass (702/702). Ready for PR to main.",
       "metadata": {
-        "working_branch": "feature/v1.22-cli-deprecation-cleanup",
-        "spec_integration_branch": "feature/v1.22-cli-deprecation-cleanup",
-        "merge_target": "main",
-        "branch_policy": "single integration branch — all batches merge to feature branch then PR to main",
         "phase": "done",
-        "priority": "medium",
-        "description": "Remove ~18 deprecated CLI top-level commands, their implementations, deprecated runtime redirects, obsolete tests, and dead imports accumulated across V1.2–V1.18.",
-        "iteration_compass": ".agents/iterations/v1.22-cli-deprecation-cleanup-delivery-compass-v1.md",
-        "batches": [
-           { "index": 1, "name": "A — Extract shared utilities", "covers": ["A1", "A2", "A3"], "status": "done", "owner": "@fullstack-dev", "notes": "Move init utils to creator.rs, schedule runner to daemon.rs. Commit: 9397641" },
-           { "index": 2, "name": "B — Delete deprecated modules", "covers": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14", "B15", "B16", "B17", "B18", "B19"], "status": "done", "owner": "@fullstack-dev", "notes": "~5,300 lines removed + 6 modules restructured to dir modules. Commit: 84d6f4a" },
-           { "index": 3, "name": "C — Clean up imports and references", "covers": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"], "status": "done", "owner": "@fullstack-dev", "notes": "cli.rs 18→8 commands, main.rs cleaned, tests updated. Commit: aa35218" },
-           { "index": 4, "name": "D — Test cleanup and verification", "covers": ["D1", "D2", "D3", "D4", "D5"], "status": "done", "owner": "@fullstack-dev", "notes": "700+ tests pass, clippy clean, fmt clean. Commit: aa35218" },
-           { "index": 5, "name": "E — Architect audit fixes", "covers": ["E1", "E2", "E3", "E4"], "status": "done", "owner": "@fullstack-dev", "notes": "Clippy 39→0, stale CLI paths updated, deprecated removed, legacy scaffolding cleaned. Commit: 2528f10" }
+        "priority": "high",
+        "description": "Reconcile OSS knowledge specs with actual crates, define entity scope ownership, wire previously split domain crates into product paths, and add drift guards.",
+        "working_branch": "feature/v1.23-architecture-crate-wiring-alignment",
+        "recommended_branch": "feature/v1.23-architecture-crate-wiring-alignment",
+        "merge_target": "main",
+        "branch_policy": "single integration branch created from main; PR to main",
+        "primary_spec": ".agents/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
+        "spec_refs": [
+          ".agents/knowledge/specs/entity-scope-model.md",
+          ".agents/knowledge/specs/local-cloud-crate-architecture.md",
+          ".agents/knowledge/specs/cli-spec.md",
+          ".agents/knowledge/specs/daemon-runtime.md",
+          ".agents/knowledge/specs/orchestration-engine.md",
+          ".agents/knowledge/specs/local-db-schema.md",
+          ".agents/knowledge/deferred-features-cross-version-tracker.md",
+          "docs/ARCHITECTURE.md"
         ],
         "gates": {
+          "specify": "pass",
+          "clarify": "pass",
+          "plan": "pass",
+          "branch_policy": "pass",
           "qc": "pass",
-          "qa": "pass",
-          "tests": "pass",
-          "lint": "pass"
+          "qa": "pass"
         },
-        "next_action": "Done. V1.22 shipped via PR #30."
+        "next_action": "Done. Create PR to main.",
+        "batches": [
+          { "index": 1, "name": "A — Spec clarification (Prepare)", "covers": ["T1","T2","T3","T4"], "status": "done", "owner": "@architect", "notes": "Entity scope model created; crate architecture and CLI terminology reconciled; ARCHITECTURE.md updated. Commits: 0113773, 41df982, 74708b8" },
+          { "index": 2, "name": "B — Minimal domain interfaces", "covers": ["T5","T6","T7","T8"], "status": "done", "owner": "@fullstack-dev", "notes": "KnowledgeStore, KbStore, NarrativeGateway traits defined; contract enums deduplicated. Commits: 4828dcb, dda3bc0, 5fe5511, ac57d83" },
+          { "index": 3, "name": "C — Runtime wiring", "covers": ["T9","T10","T11","T12"], "status": "done", "owner": "@fullstack-dev", "notes": "cloud-sync→cloud-domain wired; moment-assembly→narrative/kb/knowledge wired; daemon 5 missing deps fixed; creator kb terminology clarified. Commits: 220608c, 4a6f646, 44c0fc2, ebb2e1b" },
+          { "index": 4, "name": "D — Persistence and migration cleanup", "covers": ["T13"], "status": "done", "owner": "@fullstack-dev", "notes": "16 storage ops audited, all correctly owned. Migration/wipe docs added. Commit: c73c7f2" },
+          { "index": 5, "name": "E — Tests, graph guards, docs", "covers": ["T14","T15","T16"], "status": "done", "owner": "@fullstack-dev, @qa-engineer, @qc-specialist*", "notes": "18 new tests (drift guards + integration + cloud-domain). QA 702/702 pass. QC 3× Approve. Commits: 9f6f38e, 46f862c, 60fe91c, 2b0a7c4, fdce2fc" }
+        ]
       }
     }
   ],
@@ -46,23 +58,21 @@
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
-    "latest_shipped_iteration": "v1.22",
-    "latest_shipped_at": "2026-05-21T12:00:00Z",
+    "latest_shipped_iteration": "v1.23",
+    "latest_shipped_at": "2026-05-21T21:20:00Z",
     "tech_debt_summary": {
-      "updated_at": "2026-05-21T12:00:00Z",
+      "updated_at": "2026-05-21T21:20:00Z",
       "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 0,
-        "nit": 0
+        "low": 4,
+        "nit": 11
       },
       "by_target": {},
       "by_plan": {},
-      "in_flight": {
-        "v1.22": 0
-      },
+      "in_flight": {},
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
@@ -75,5 +85,49 @@
       ]
     }
   },
-  "residual_findings": {}
+  "residual_findings": {
+    "2026-05-21-v1.23-architecture-crate-wiring-alignment": [
+      {
+        "id": "R1",
+        "title": "Doc comments missing on public trait definitions",
+        "severity": "low",
+        "source": "qc1-suggestion",
+        "scope": "nexus-knowledge, nexus-kb, nexus-narrative",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R2",
+        "title": "InMemory implementations need production SQLite backing",
+        "severity": "low",
+        "source": "qc1-suggestion",
+        "scope": "nexus-knowledge, nexus-kb, nexus-narrative",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R3",
+        "title": "Misaligned doc comments in key_block.rs before deprecate/merge_into/delete",
+        "severity": "low",
+        "source": "qc2-warning-w001",
+        "scope": "nexus-kb",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R4",
+        "title": "Non-Send futures in assemble_moment",
+        "severity": "low",
+        "source": "qc3-warning-f001",
+        "scope": "nexus-moment-context-assembly",
+        "decision": "risk-accepted",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.24",
+        "note": "Acceptable for current in-memory context; must resolve before multi-threaded daemon path."
+      }
+    ]
+  }
 }

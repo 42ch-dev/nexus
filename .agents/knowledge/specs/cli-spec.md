@@ -42,7 +42,7 @@
 - **定位**：Nexus CLI 是 **ACP-first 控制面** + **Creator 本地知识面**，不是执行逻辑聚合层。
 - **执行边界**：推理、工具调用、文件输出等执行能力统一经 ACP capability invocation。
 - **运行边界**：daemon runtime 负责编排运行态，CLI 负责控制、声明与可观测。
-- **知识边界**：`SOUL` / `memory` / `kb` 归属 Creator，平台提供增强结构化与跨 scope 扩展。
+- **知识边界**：`SOUL` / `memory` 归属 Creator；CLI `creator kb --scope work` 仅表示活跃 Creator + workspace 下的**本地工作资料索引**；World/narrative KB 归属 `nexus-kb` + `nexus-narrative`，User/global knowledge 归属 `nexus-knowledge`。
 
 ---
 
@@ -198,8 +198,8 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 设计约束：
 
 - `daemon` 与 `acp` 分离：前者负责运行控制，后者负责能力执行协议面。
-- `creator` 统一承载本地知识资产：`soul` / `memory` / `kb` 作为 Creator 子命令，不再分散为平级心智入口。
-- `creator kb` 采用 multi-scope 语义：本地默认 `work`，平台可扩展到 `world` 与其他 scope（以平台合同为准）。
+- `creator` 统一承载 Creator 本地知识资产：`soul` / `memory` / `kb --scope work` 作为 Creator 子命令，不再分散为平级心智入口。
+- `creator kb` 采用显式 scope 语义：本地默认 `work`；未来 `world` 必须路由到 World-scoped narrative KB（`nexus-kb` + `nexus-narrative`）；User/global knowledge 不属于 `creator kb`，应走 `nexus-knowledge` 对应的 CLI 入口。
 
 ### 6.1 `nexus42 system`（系统命令组）
 
@@ -268,12 +268,42 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 - `nexus42 creator soul ...`：维护 `SOUL.md`（`Personality` / `Experience`）
 - `nexus42 creator memory ...`：长期记忆与回顾沉淀管理
-- `nexus42 creator kb ...`：结构化 KB（multi-scope）
+- `nexus42 creator kb ...`：本地工作资料索引（默认 `--scope work`）；未来可显式转向 World-scoped narrative KB（`--scope world`）
 
-`creator kb` scope 约束：
+`creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
-- 本地默认 `work`（CLI 基线路径）
-- 可映射/扩展到 `world` 与其他 scope（平台增值路径）
+- **`--scope work`（默认，V1.23 必须保留）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，不是 `nexus-kb` 的 World graph，也不是 `nexus-knowledge` 的 User/global knowledge index。
+- **`--scope world`（未来目标）**：必须要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径创建 / 查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
+- **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。
+
+命名与行为建议：
+
+- **V1.23 最小落地**：保持 `nexus42 creator kb` 作为现有命令组；所有无 `--scope` 调用按 `--scope work` 解释，并在 help/文案中写明“local work index”。
+- **推荐别名 / 迁移方向**：由于 `creator kb` 与 crate `nexus-kb` 的语义碰撞风险为高，建议在 V1.23 或下一 pre-release 引入更直观的别名，例如 `nexus42 creator assets ...` 或 `nexus42 creator work-index ...`，作为 `creator kb --scope work` 的首选用户文案；`creator kb --scope work` 可暂留为兼容别名，避免打断现有脚本。
+- **不推荐硬改为泛化 KB**：不要把 `creator kb` 解释成“所有知识入口”。World KB、User knowledge、Creator memory 三者的 owning crate 与 entity scope 不同，CLI 只能做路由，不能在 `nexus42` 内实现第二套领域模型。
+
+### 6.2E KB / knowledge 术语禁用简写
+
+在本规格及后续架构 / 实现文档中，`KB` 一词必须按 [`entity-scope-model.md`](./entity-scope-model.md) §5.4 限定语义后使用：
+
+- **World KB** / **narrative KB**：指 `nexus-kb` 所有的 World-scoped narrative KB graph（KeyBlocks、SourceAnchors、graph insertion/query），由 `nexus-narrative` 协调 World/Timeline/Event 语境。
+- **User knowledge** / **global knowledge index**：指 `nexus-knowledge` 所有的 User-scoped global knowledge/reference material。
+- **CLI local work KB index** / **local work index**：指 `nexus42 creator kb --scope work` 当前的活跃 Creator + workspace 本地文件索引。
+
+禁止在存在歧义的上下文中单独写“KB”来同时指代以上三者；CLI help、错误提示、spec、ADR、计划任务均应使用限定词。
+
+### 6.2F V1.23 KB / knowledge target CLI model
+
+V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
+
+| User intent | CLI command model | Required scope inputs | Owning crates / modules | Behavior |
+| --- | --- | --- | --- | --- |
+| Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KeyBlocks or User knowledge rows. |
+| Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-kb` | Route to World-scoped narrative KB graph. Must preserve KeyBlock / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
+| Manage User/global reference knowledge | Recommended future `nexus42 platform knowledge ...` (name may be finalized by implementation plan C4) | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
+| Assemble context for an agent session | `nexus42 platform context assemble` / ACP context capability | Moment request context; selected Creator/World/User inputs | `nexus-moment-context-assembly` reading `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge` | Produces a read-only Moment snapshot. Does not move ownership between scopes. |
+
+Implementation task C4 should therefore treat `creator kb` as a routing/name-alignment task, not as permission for `nexus42` to own KB/domain storage long-term.
 
 ### 6.3 `nexus42 daemon`（运行态控制命令组）
 
@@ -318,7 +348,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 说明：
 
-- `context assemble` 读取 confirmed KB / timeline / memory slices，输出只读快照。
+- `context assemble` 读取 confirmed World KB / User knowledge / timeline / memory slices，输出只读快照。
 - `publish.*` 表示内容跨平台边界动作，不与 `sync push` 混用。
 - `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
 
@@ -690,7 +720,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 ```
 
 - 差异仅在**物理位置**：本地路径位于用户设备；平台路径位于服务端沙箱。
-- 关闭 `output_manuscript` 时，可不创建 `Stories/<StoryRef>/` 正文文件，但仍要允许 `StoryManifest.summary_text`、KB、Timeline 正常生成。
+- 关闭 `output_manuscript` 时，可不创建 `Stories/<StoryRef>/` 正文文件，但仍要允许 `StoryManifest.summary_text`、World KB、Timeline 正常生成。
 
 ### 13.2 系统目录（`$HOME/.nexus42/`）
 
