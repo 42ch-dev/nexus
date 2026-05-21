@@ -181,7 +181,12 @@ pub struct KnowledgeResult {
 impl KnowledgeResult {
     /// Create a result from matched entries and total count.
     #[must_use]
-    pub const fn new(entries: Vec<KnowledgeEntry>, total_count: u32, limit: u32, offset: u32) -> Self {
+    pub const fn new(
+        entries: Vec<KnowledgeEntry>,
+        total_count: u32,
+        limit: u32,
+        offset: u32,
+    ) -> Self {
         Self {
             entries,
             total_count,
@@ -291,11 +296,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip() {
-        let entry = KnowledgeEntry::new(
-            "user_1",
-            vec![KnowledgeTag::new("rust")],
-            "Some content",
-        );
+        let entry = KnowledgeEntry::new("user_1", vec![KnowledgeTag::new("rust")], "Some content");
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: KnowledgeEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry, deserialized);

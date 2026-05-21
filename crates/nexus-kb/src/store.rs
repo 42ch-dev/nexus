@@ -230,45 +230,43 @@ impl KbStore for InMemoryKbStore {
         let (matches, total_count, has_more) = {
             let blocks = self.read_blocks()?;
 
-            let mut matches: Vec<KeyBlock> = blocks
-                .values()
-                .filter(|kb| {
-                    if kb.world_id != query.world_id || !Self::is_active(kb) {
-                        return false;
-                    }
-                    if let Some(bt) = query.block_type {
-                        if kb.block_type != bt {
+            let mut matches: Vec<KeyBlock> =
+                blocks
+                    .values()
+                    .filter(|kb| {
+                        if kb.world_id != query.world_id || !Self::is_active(kb) {
                             return false;
                         }
-                    }
-                    if let Some(ref name) = query.canonical_name {
-                        if kb.canonical_name != *name {
-                            return false;
+                        if let Some(bt) = query.block_type {
+                            if kb.block_type != bt {
+                                return false;
+                            }
                         }
-                    }
-                    if let Some(ref text) = query.text_search {
-                        let lower = text.to_lowercase();
-                        let hit_name = kb.canonical_name.to_lowercase().contains(&lower);
-                        let hit_summary = kb
-                            .body
-                            .as_ref()
-                            .and_then(|b| b.summary.as_ref())
-                            .is_some_and(|s| s.to_lowercase().contains(&lower));
-                        let hit_tags = kb
-                            .body
-                            .as_ref()
-                            .and_then(|b| b.tags.as_ref())
-                            .is_some_and(|tags| {
-                                tags.iter().any(|t| t.to_lowercase().contains(&lower))
-                            });
-                        if !hit_name && !hit_summary && !hit_tags {
-                            return false;
+                        if let Some(ref name) = query.canonical_name {
+                            if kb.canonical_name != *name {
+                                return false;
+                            }
                         }
-                    }
-                    true
-                })
-                .cloned()
-                .collect();
+                        if let Some(ref text) = query.text_search {
+                            let lower = text.to_lowercase();
+                            let hit_name = kb.canonical_name.to_lowercase().contains(&lower);
+                            let hit_summary = kb
+                                .body
+                                .as_ref()
+                                .and_then(|b| b.summary.as_ref())
+                                .is_some_and(|s| s.to_lowercase().contains(&lower));
+                            let hit_tags =
+                                kb.body.as_ref().and_then(|b| b.tags.as_ref()).is_some_and(
+                                    |tags| tags.iter().any(|t| t.to_lowercase().contains(&lower)),
+                                );
+                            if !hit_name && !hit_summary && !hit_tags {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .cloned()
+                    .collect();
 
             let total_count = matches.len();
             let offset = query.offset.unwrap_or(0);
@@ -333,8 +331,7 @@ impl KbStore for InMemoryKbStore {
                 .ok_or_else(|| KbStoreError::NotFound(kb.key_block_id.clone()))?;
 
             // Re-check uniqueness if name or type changed
-            if existing.canonical_name != kb.canonical_name
-                || existing.block_type != kb.block_type
+            if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type
             {
                 Self::check_uniqueness(
                     &blocks,

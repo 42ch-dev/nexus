@@ -247,9 +247,7 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
 ) -> Result<(Option<String>, Option<String>), nexus_narrative::NarrativeError> {
     let world_state_result = gateway.get_world_state(world_id).await;
 
-    let world_state_text = world_state_result
-        .ok()
-        .map(|ws| format_world_state(&ws));
+    let world_state_text = world_state_result.ok().map(|ws| format_world_state(&ws));
 
     let timeline_text = match gateway.get_timeline(world_id, branch_id).await {
         Ok(events) if !events.is_empty() => Some(format_timeline(&events)),
@@ -277,7 +275,10 @@ async fn fetch_world_kb<K: KbStore>(
                 .as_ref()
                 .and_then(|b| b.summary.as_ref())
                 .map_or("(no summary)", std::string::String::as_str);
-            format!("- **{}** [{:?}]: {summary}", kb.canonical_name, kb.block_type)
+            format!(
+                "- **{}** [{:?}]: {summary}",
+                kb.canonical_name, kb.block_type
+            )
         })
         .collect();
     Ok(Some(lines.join("\n")))
@@ -334,14 +335,8 @@ fn format_world_state(ws: &nexus_narrative::WorldState) -> String {
 fn format_timeline(events: &[nexus_narrative::timeline_event::TimelineEvent]) -> String {
     let mut lines = Vec::new();
     for event in events {
-        let title = event
-            .title
-            .as_deref()
-            .unwrap_or("(untitled)");
-        let summary = event
-            .summary
-            .as_deref()
-            .unwrap_or("");
+        let title = event.title.as_deref().unwrap_or("(untitled)");
+        let summary = event.summary.as_deref().unwrap_or("");
         let line = if summary.is_empty() {
             format!("- [{}] {} ({})", event.sequence_no, title, event.event_type)
         } else {
@@ -394,8 +389,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0());
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
 
         assert!(!ctx.stage0_context.contains("World State"));
         assert!(ctx.world_state.is_none());
@@ -419,8 +413,7 @@ mod tests {
 
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
 
         assert!(ctx.world_state.is_some());
         let ws = ctx.world_state.unwrap();
@@ -451,8 +444,7 @@ mod tests {
 
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
 
         assert!(ctx.timeline.is_some());
         let tl = ctx.timeline.unwrap();
@@ -464,8 +456,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_ghost");
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
 
         assert!(ctx.world_state.is_none());
         assert!(ctx.timeline.is_none());
@@ -516,11 +507,13 @@ mod tests {
             .with_world("wld_1")
             .with_user("user_1");
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
 
         let full = ctx.to_full_context();
-        assert!(full.contains(WORLD_STATE_HEADING), "should have world state");
+        assert!(
+            full.contains(WORLD_STATE_HEADING),
+            "should have world state"
+        );
         assert!(full.contains(TIMELINE_HEADING), "should have timeline");
         assert!(full.contains(WORLD_KB_HEADING), "should have world KB");
         assert!(
@@ -538,8 +531,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0());
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let full = ctx.to_full_context();
 
         assert!(!full.contains(WORLD_STATE_HEADING));
@@ -553,8 +545,7 @@ mod tests {
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0());
 
-        let ctx =
-            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
 
         assert!(ctx.stage0_context.contains("A creative writer."));
         assert!(ctx.stage0_context.contains("Write chapter 3."));
