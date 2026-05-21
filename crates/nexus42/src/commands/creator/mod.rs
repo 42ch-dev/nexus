@@ -542,7 +542,12 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
-    /// Local work-scope knowledge assets (file index; --scope world coming soon)
+    /// Local work-scope knowledge assets (file index; default --scope work).
+    ///
+    /// **This is the CLI local work KB index**, NOT `nexus-kb` (World KB) or
+    /// `nexus-knowledge` (User knowledge). See entity-scope-model §5.3.
+    ///
+    /// `--scope world` (narrative KB via nexus-kb + nexus-narrative) is coming soon.
     Kb {
         #[command(subcommand)]
         command: KbCommand,
@@ -554,8 +559,13 @@ pub enum CreatorCommand {
 
 /// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb, future).
 ///
-/// Per entity-scope-model §5.3, `creator kb --scope work` is the CLI local work KB index —
-/// NOT the same as `nexus-kb` (World-scoped) or `nexus-knowledge` (User-scoped).
+/// Per entity-scope-model §5.3, `creator kb --scope work` is the **CLI local work KB index** —
+/// a per-creator, per-workspace file-based index stored under
+/// `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`. It is NOT `nexus-kb` (World-scoped
+/// narrative KB graph) or `nexus-knowledge` (User-scoped global knowledge).
+///
+/// Future `--scope world` will route to `nexus-kb` + `nexus-narrative` and require
+/// a resolvable `world_id`. User/global knowledge will NOT be a `creator kb` scope.
 #[derive(Debug, Clone, clap::ValueEnum, Default, PartialEq, Eq)]
 pub enum KbScope {
     /// Local workspace file index (default)
@@ -725,7 +735,12 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
     validate_slug("workspace_slug", slug)
 }
 
-/// Handle local work-scope KB commands (CLI local work index).
+/// Handle local work-scope KB commands (CLI local work file index).
+///
+/// All commands default to `scope=work`. When `scope=world` is requested,
+/// a deferred message is printed (World KB not yet implemented).
+/// The work-scope implementation is a local file index only — it does not
+/// interact with `nexus-kb` or `nexus-knowledge` crates.
 async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     // F002: Validate active_creator_id before constructing any paths.
     // This prevents path traversal if config is corrupted or malicious.
@@ -744,9 +759,15 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
 }
 
 /// Deferred message for `world` scope commands.
+///
+/// World scope requires routing to `nexus-kb` (World-scoped narrative KB graph)
+/// and `nexus-narrative`, with a resolvable `world_id`. This path is not yet
+/// implemented; full KB route redesign is deferred to a future iteration.
 fn world_scope_deferred() {
     println!(
-        "World scope requires a platform connection (nexus-kb + nexus-narrative; coming soon)."
+        "World scope requires a platform connection and a resolvable world_id \
+         (nexus-kb + nexus-narrative; coming soon). \
+         See: entity-scope-model §5.3."
     );
 }
 
