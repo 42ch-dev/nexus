@@ -21,6 +21,7 @@ fn r1_anonymous_identity_e2e() {
     // Create anonymous identity
     let output = Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -39,6 +40,7 @@ fn r1_anonymous_identity_e2e() {
     // Verify runtime mode is local_only (default)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("show")
         .env("HOME", home)
@@ -66,6 +68,7 @@ fn r1_anonymous_identity_active_session() {
     // Create anonymous identity
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -80,6 +83,7 @@ fn r1_anonymous_identity_active_session() {
     // (ephemeral means it won't persist to list in a new session)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("show")
         .env("HOME", home)
@@ -101,6 +105,7 @@ fn r2_persistent_identity_e2e() {
     // Create persistent local identity
     let output = Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -117,6 +122,7 @@ fn r2_persistent_identity_e2e() {
     // Verify identity can be used in second session (same HOME, new process)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("list")
         .env("HOME", home)
@@ -127,6 +133,7 @@ fn r2_persistent_identity_e2e() {
     // Verify runtime mode is local_only
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("show")
         .env("HOME", home)
@@ -144,6 +151,7 @@ fn r2_persistent_identity_config_persists() {
     // Create persistent identity
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -164,6 +172,7 @@ fn r2_persistent_identity_config_persists() {
     // List identities to verify persistence
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("list")
         .env("HOME", home)
@@ -187,6 +196,7 @@ fn r3_local_truth_chain() {
     // Create a persistent identity first (SOUL requires active creator)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -200,6 +210,8 @@ fn r3_local_truth_chain() {
     // Init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
+        .arg("workspace")
         .arg("init")
         .arg("workspace")
         .arg("--creative-root")
@@ -212,6 +224,7 @@ fn r3_local_truth_chain() {
     // Init SOUL
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("soul")
         .arg("init")
         .env("HOME", home)
@@ -222,6 +235,7 @@ fn r3_local_truth_chain() {
     // Verify SOUL was initialized
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("soul")
         .arg("show")
         .env("HOME", home)
@@ -232,6 +246,7 @@ fn r3_local_truth_chain() {
     // Create memory
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("memory")
         .arg("create")
         .arg("world_building")
@@ -245,6 +260,7 @@ fn r3_local_truth_chain() {
     // List memories to verify it was created
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("memory")
         .arg("list")
         .env("HOME", home)
@@ -270,6 +286,7 @@ fn r3_context_assemble_local_executes_without_placeholder_skip() {
     // Create a persistent identity (required for workspace operations)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -283,6 +300,8 @@ fn r3_context_assemble_local_executes_without_placeholder_skip() {
     // Init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
+        .arg("workspace")
         .arg("init")
         .arg("workspace")
         .arg("--creative-root")
@@ -295,6 +314,7 @@ fn r3_context_assemble_local_executes_without_placeholder_skip() {
     // Init SOUL (required by assemble-local)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("soul")
         .arg("init")
         .env("HOME", home)
@@ -305,7 +325,13 @@ fn r3_context_assemble_local_executes_without_placeholder_skip() {
     // Run context assemble-local — must not panic (clap -h fix) and succeed
     Command::cargo_bin("nexus42")
         .unwrap()
-        .args(["context", "assemble-local", "--max-tokens", "1200"])
+        .args([
+            "platform",
+            "context",
+            "assemble-local",
+            "--max-tokens",
+            "1200",
+        ])
         .env("HOME", home)
         .current_dir(&workspace)
         .assert()
@@ -323,6 +349,7 @@ fn r3_soul_validation() {
     // Create identity and init workspace
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("identity")
         .arg("create")
         .arg("--kind")
@@ -335,6 +362,8 @@ fn r3_soul_validation() {
 
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
+        .arg("workspace")
         .arg("init")
         .arg("workspace")
         .arg("--creative-root")
@@ -347,6 +376,7 @@ fn r3_soul_validation() {
     // Init SOUL
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("soul")
         .arg("init")
         .env("HOME", home)
@@ -357,6 +387,7 @@ fn r3_soul_validation() {
     // Validate SOUL structure
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("creator")
         .arg("soul")
         .arg("validate")
         .env("HOME", home)
@@ -379,6 +410,7 @@ fn r5_platform_guard_blocks_sync_push() {
     // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("set")
         .arg("local_only")
@@ -406,6 +438,7 @@ fn r5_platform_guard_explore_help() {
     // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("set")
         .arg("local_only")
@@ -416,6 +449,7 @@ fn r5_platform_guard_explore_help() {
     // Explore help should still work
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("platform")
         .arg("explore")
         .arg("--help")
         .env("HOME", home)
@@ -432,6 +466,7 @@ fn r5_platform_guard_sync_status_works() {
     // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("set")
         .arg("local_only")
@@ -460,6 +495,7 @@ fn r5_local_only_mode_persists() {
     // Set runtime mode to local_only
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("set")
         .arg("local_only")
@@ -470,6 +506,7 @@ fn r5_local_only_mode_persists() {
     // Verify mode persisted (new process, same HOME)
     Command::cargo_bin("nexus42")
         .unwrap()
+        .arg("system")
         .arg("runtime-mode")
         .arg("show")
         .env("HOME", home)
