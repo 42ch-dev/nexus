@@ -1,11 +1,11 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.21 **Done**; V1.18 **Done**; V1.17 **Done**; V1.16 **Done**; V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
+**Status**: Active (V1.24 **In progress**; V1.21 **Done**; V1.18 **Done**; V1.17 **Done**; V1.16 **Done**; V1.15 **Done**; V1.14 **Done**; residual SSOT = 2 **accepted** backlog items)
 **Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.21), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-21
+**Last updated**: 2026-05-22
 
 ---
 
@@ -62,6 +62,8 @@
 | DF-39 | Worker Manager subsystem stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — Worker Manager start is stub. Subsystem not wired. |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
+| DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
+| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | Any future | M | V1.24 audit compass; `nexus-knowledge` currently uses in-memory store. Full persistence deferred beyond V1.24. |
 
 ### 3.2 Backlog (no committed target version)
 
@@ -249,12 +251,31 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Scope | Renamed `nexus-sync` → `nexus-cloud-sync` with `legacy-sync` feature; split `nexus-domain` into 6 focused crates; isolated daemon from cloud deps; wired CLI to cloud-sync directly; stubbed orchestration sync capabilities |
 | New tracker items | 13 | DF-29 through DF-41 (orchestration capability stubs, daemon lifecycle stubs, agent slot stub — see §3.1) |
 
-### V1.16+ horizon
+### V1.21 delivery snapshot (Done)
 
 | Category | Position |
 |----------|----------|
-| Program | **Compass registered** — delivery SSOT：[v1.16-delivery-compass-v1.md](../iterations/v1.16-delivery-compass-v1.md). `status.json` `plans[]` **empty**. |
-| Next version (gated) | ~~V1.17 prompt-skills planning package tracked as **BL-09** in §3.4~~ → V1.17 **Done**; BL-09 gate met and executed. |
+| Delivery SSOT | [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
+| Machine state | `status.json` `plans[]` **empty** (archived); all gates passed (QC tri-review: 3× Approve, QA: 7/7 Pass) |
+| Plan | `2026-05-20-v1.21-local-platform-isolation` — **Done** (archived to `archived/plans/`) |
+| PR | [#28](https://github.com/42ch-dev/nexus/pull/28) merged to `main` |
+| QC | Triple review: QC1 Approve, QC2 Approve (2 low warnings accepted), QC3 Approve (2 suggestions) |
+| QA | 7/7 acceptance criteria verified |
+| Scope | Renamed `nexus-sync` → `nexus-cloud-sync` with `legacy-sync` feature; split `nexus-domain` into 6 focused crates; isolated daemon from cloud deps; wired CLI to cloud-sync directly; stubbed orchestration sync capabilities |
+| New tracker items | 13 | DF-29 through DF-41 (orchestration capability stubs, daemon lifecycle stubs, agent slot stub — see §3.1) |
+
+### V1.24 delivery snapshot (In progress)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) |
+| Plan | `2026-05-22-v1.24-knowledge-crates-alignment` — In progress |
+| Branch | `feature/v1.24-knowledge-crates-alignment` (from `main`) |
+| Scope | Normative spec refresh (Batch A); retire context/assemble daemon route (Batch B, KCA-002 B2); work-scope KB isolation (Batch C, KCA-003 C2); tracker hygiene (Batch D) |
+| Locked decisions | KCA-002=B2 (no daemon context/assemble), KCA-003=C2 (scope=work only) |
+| New tracker items | 2 | DF-42 (full KB route redesign), DF-43 (knowledge persistence) |
+
+### V1.16+ horizon (program)
 
 ### Items targeting V1.19
 
