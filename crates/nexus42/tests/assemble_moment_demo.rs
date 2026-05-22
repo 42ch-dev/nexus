@@ -79,13 +79,7 @@ async fn assemble_moment_demo_produces_four_domain_context() {
 /// Custom world ID and user ID should seed matching fixtures.
 #[tokio::test]
 async fn assemble_moment_demo_with_custom_ids() {
-    let ctx = run_assemble_moment_demo(
-        Some("wld_custom"),
-        Some("user_custom"),
-        None,
-        None,
-    )
-    .await;
+    let ctx = run_assemble_moment_demo(Some("wld_custom"), Some("user_custom"), None, None).await;
 
     let ws = ctx.world_state.as_ref().expect("world state");
     assert!(
@@ -109,8 +103,7 @@ async fn assemble_moment_demo_non_seeded_ids_yield_stage0_only() {
     // IDs through the function will always produce results. To test the
     // "missing world" path, we verify that the MomentContext default has
     // only stage0 when the four-domain data is empty.
-    let ctx =
-        nexus_moment_context_assembly::MomentContext::default();
+    let ctx = nexus_moment_context_assembly::MomentContext::default();
 
     assert!(ctx.stage0_context.is_empty());
     assert!(ctx.world_state.is_none());
@@ -126,7 +119,9 @@ async fn assemble_moment_demo_context_heading_order() {
     let full = ctx.to_full_context();
 
     // Verify section headings appear in spec order
-    let pos_stage0 = full.find("## Personality").or_else(|| full.find("demo creator"));
+    let pos_stage0 = full
+        .find("## Personality")
+        .or_else(|| full.find("demo creator"));
     let pos_world = full.find("## World State");
     let pos_timeline = full.find("## Timeline");
     let pos_kb = full.find("## World Knowledge Base");
@@ -137,7 +132,10 @@ async fn assemble_moment_demo_context_heading_order() {
     assert!(pos_world.is_some(), "World State heading must be present");
     assert!(pos_timeline.is_some(), "Timeline heading must be present");
     assert!(pos_kb.is_some(), "World KB heading must be present");
-    assert!(pos_knowledge.is_some(), "User Knowledge heading must be present");
+    assert!(
+        pos_knowledge.is_some(),
+        "User Knowledge heading must be present"
+    );
 
     // Verify ordering: Stage0 < World State < Timeline < World KB < User Knowledge
     let s0 = pos_stage0.expect("checked above");

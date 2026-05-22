@@ -203,15 +203,27 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             eprintln!("Stage-0: present");
             eprintln!(
                 "World state: {}",
-                if ctx.world_state.is_some() { "present" } else { "absent" }
+                if ctx.world_state.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                }
             );
             eprintln!(
                 "Timeline: {}",
-                if ctx.timeline.is_some() { "present" } else { "absent" }
+                if ctx.timeline.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                }
             );
             eprintln!(
                 "World KB: {}",
-                if ctx.world_kb.is_some() { "present" } else { "absent" }
+                if ctx.world_kb.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                }
             );
             eprintln!(
                 "User knowledge: {}",
@@ -564,10 +576,7 @@ fn seed_demo_world(narrative: &InMemoryNarrativeGateway<InMemoryKbStore>, world_
 }
 
 /// Seed a demo timeline event into the in-memory narrative gateway.
-fn seed_demo_timeline_event(
-    narrative: &InMemoryNarrativeGateway<InMemoryKbStore>,
-    world_id: &str,
-) {
+fn seed_demo_timeline_event(narrative: &InMemoryNarrativeGateway<InMemoryKbStore>, world_id: &str) {
     let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
         world_id,
         "fbk_root",
