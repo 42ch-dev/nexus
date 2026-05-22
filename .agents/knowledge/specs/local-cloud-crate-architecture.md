@@ -73,7 +73,7 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 | **`nexus-knowledge`** | `User` knowledge | User-scoped global knowledge/reference indexing and storage. It may feed Moment context assembly. It does not own narrative KeyBlocks and is not Creator-scoped. | No |
 | **`nexus-narrative`** | `World`, `Timeline`, `Event` | Creative-work narrative state: current work background, world state, forks, timelines, events, story/manuscript projections, and narrative consistency. | No — currently depends on **`nexus-kb`** |
 | **`nexus-cloud-domain`** | `User`, `Pairing` | Platform-bridge domain logic for User/Pairing invariants and mappings from contract types. No HTTP transport. | No HTTP; dependency of **`nexus-cloud-sync`** |
-| **`nexus-moment-context-assembly`** | `Moment` | Per-moment, pre-session context aggregation. Stage-0 aggregates Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context. | Only with `cloud-stage` |
+| **`nexus-moment-context-assembly`** | `Moment` | Per-moment, pre-session context aggregation. The full library `assemble_moment` path can aggregate Creator memory, narrative state, World KB assets, and User knowledge. The currently shipped CLI Stage-0/TwoStage path is narrower: Creator SOUL, Creator long-term memory, optional local fragment keywords, and a future direct platform Stage-1 response. Optional `cloud-stage` may merge platform context. | Only with `cloud-stage` |
 | **`nexus-cloud-sync`** | Cloud transport for User/Pairing and sync bundles | Platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants. | N/A |
 | **`nexus-daemon-runtime`** | Runtime host, not entity owner | Local API, lifecycle, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. | **Forbidden** |
 | **`nexus-orchestration`** | Execution sessions/schedules, not hierarchy owner | Presets, schedules, workers, and capability registry. Carries `creator_id`/workspace/world references as execution context; does not redefine entity ownership. | No cloud-sync (sync capabilities stubbed locally) |
@@ -108,9 +108,10 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 ### 3.6 `nexus-moment-context-assembly`
 
-- **Currently wired Stage-0 (verified 2026-05-22):** depends on `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge`, and `nexus-contracts`.
-- **Product integration status:** `assemble_moment` is available as library logic and used by CLI/platform-context flows, but the daemon intentionally does **not** expose `POST /v1/local/context/assemble` after the V1.24 KCA-002 B2 decision.
-- **Stage-1 (optional):** `cloud-stage` feature calls cloud-sync for platform context; not used on daemon default build.
+- **Library-ready four-domain Moment path (verified 2026-05-22):** `assemble_moment` depends on `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge`, and `nexus-contracts` and can assemble a full Moment snapshot when callers provide the required stores.
+- **Shipped CLI product path:** current `nexus42 platform context` code uses `Stage0Assembly` / `TwoStageAssembly` in-process over Creator SOUL, Creator long-term memory, optional local fragment keywords, and a future direct platform Stage-1 response. Current CLI/platform flows do **not** call full four-domain `assemble_moment`.
+- **Daemon product status:** the daemon intentionally does **not** expose context assembly after the V1.24 KCA-002 B2 decision; no daemon context-assemble proxy route should be reintroduced.
+- **Stage-1 (optional):** `cloud-stage` feature can call cloud-sync for platform context; not used on daemon default build.
 
 ```toml
 [features]
@@ -138,7 +139,7 @@ This section describes the current `Cargo.toml` and `cargo tree` reality. It is 
 | --- | --- | --- |
 | `nexus42` | `nexus-acp-host`, `nexus-cloud-sync` with `legacy-sync`, `nexus-contracts`, `nexus-creator`, `nexus-creator-memory`, `nexus-daemon-runtime`, `nexus-home-layout`, `nexus-local-db`, `nexus-moment-context-assembly` with `cloud-stage`, `nexus-orchestration` | CLI currently reaches cloud-sync and moment assembly. Because the CLI enables `cloud-stage`, `cargo tree -p nexus42` shows `nexus-moment-context-assembly -> nexus-cloud-sync`; this is CLI/cloud-line reachability, not daemon reachability. |
 | `nexus-daemon-runtime` | `nexus-agent-host`, `nexus-contracts`, `nexus-creator`, `nexus-creator-memory`, `nexus-home-layout`, `nexus-kb`, `nexus-knowledge`, `nexus-local-db`, `nexus-moment-context-assembly`, `nexus-narrative`, `nexus-orchestration` | Cargo-wired to the local domain graph with `nexus-moment-context-assembly` default features only. No daemon edge to `nexus-cloud-sync` or `nexus-cloud-domain`. Product wiring remains partial: daemon handlers do not expose moment assembly or narrative/user-knowledge domain HTTP yet. |
-| `nexus-moment-context-assembly` | `nexus-contracts`, `nexus-creator-memory`, `nexus-kb`, `nexus-knowledge`, `nexus-narrative`; optional `nexus-cloud-sync` behind `cloud-stage` | Stage-0 domain dependencies are wired. CLI can enable `cloud-stage`; daemon default build does not. |
+| `nexus-moment-context-assembly` | `nexus-contracts`, `nexus-creator-memory`, `nexus-kb`, `nexus-knowledge`, `nexus-narrative`; optional `nexus-cloud-sync` behind `cloud-stage` | Four-domain Moment library dependencies are wired. Current CLI Stage-0/TwoStage product flow remains narrower and does not call `assemble_moment`; CLI can enable `cloud-stage`, daemon default build does not. |
 | `nexus-narrative` | `nexus-contracts`, `nexus-kb` | World/Timeline/Event domain library wired to World KB. No dedicated daemon narrative routes yet. |
 | `nexus-kb` | `nexus-contracts` | World KB graph library; reachable from narrative, moment assembly, and daemon Cargo graph. Daemon `/v1/local/kb/*` remains the CLI local work KB file index, not `nexus-kb`. |
 | `nexus-knowledge` | `nexus-contracts` | User knowledge/reference-source library; reachable from moment assembly and daemon Cargo graph. `GET /v1/local/references` still uses `nexus-local-db`, not this crate. |
@@ -208,7 +209,7 @@ nexus42
   │   └── nexus-cloud-domain
   └── nexus-moment-context-assembly (cloud-stage only for CLI/platform flows)
 
-nexus-moment-context-assembly (default Stage-0 target)
+nexus-moment-context-assembly (default four-domain library target)
   ├── nexus-creator-memory
   ├── nexus-narrative
   ├── nexus-kb
@@ -223,9 +224,9 @@ nexus-moment-context-assembly (default Stage-0 target)
 | Crate pair / path | Cargo status (2026-05-22) | Product note |
 | --- | --- | --- |
 | `nexus-cloud-sync -> nexus-cloud-domain` | **Wired.** | Cloud transport must route User/Pairing invariants through `nexus-cloud-domain`. |
-| `nexus-moment-context-assembly -> nexus-narrative` | **Wired.** | Stage-0 may read narrative World/Timeline/Event context through `nexus-narrative`. |
-| `nexus-moment-context-assembly -> nexus-kb` | **Wired.** | Stage-0 may include World-scoped narrative KB slices. |
-| `nexus-moment-context-assembly -> nexus-knowledge` | **Wired.** | Stage-0 may include selected User-scoped knowledge slices. |
+| `nexus-moment-context-assembly -> nexus-narrative` | **Wired.** | Full `assemble_moment` may read narrative World/Timeline/Event context through `nexus-narrative`; current CLI Stage-0/TwoStage flow does not call this four-domain path. |
+| `nexus-moment-context-assembly -> nexus-kb` | **Wired.** | Full `assemble_moment` may include World-scoped narrative KB slices; current CLI Stage-0/TwoStage flow does not call this four-domain path. |
+| `nexus-moment-context-assembly -> nexus-knowledge` | **Wired.** | Full `assemble_moment` may include selected User-scoped knowledge slices; current CLI Stage-0/TwoStage flow does not call this four-domain path. |
 | `nexus-daemon-runtime -> nexus-moment-context-assembly` | **Wired with default features only.** | No daemon `cloud-stage`; KCA-002 B2 retires the daemon context-assemble route. |
 | `nexus-daemon-runtime -> nexus-narrative` | **Wired.** | No dedicated narrative HTTP routes yet. |
 | `nexus-daemon-runtime -> nexus-kb` | **Wired.** | `/v1/local/kb/*` is still work-scope file index, not World KB (`nexus-kb`) integration. |

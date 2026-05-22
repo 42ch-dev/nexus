@@ -13,46 +13,6 @@ use nix::sys::signal::Signal;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
-/// Orchestration control subcommands (V1.16+).
-#[derive(Debug, Subcommand)]
-pub enum OrchestrateCommand {
-    /// List active orchestration schedules
-    List,
-
-    /// Run an orchestration schedule
-    Run {
-        /// Schedule ID to run
-        schedule_id: String,
-        /// Run ID for trace correlation (auto-generated if omitted)
-        #[arg(long)]
-        run_id: Option<String>,
-    },
-
-    /// Pause a running orchestration
-    Pause {
-        /// Schedule ID to pause
-        schedule_id: String,
-    },
-
-    /// Resume a paused orchestration
-    Resume {
-        /// Schedule ID to resume
-        schedule_id: String,
-    },
-
-    /// Cancel an orchestration
-    Cancel {
-        /// Schedule ID to cancel
-        schedule_id: String,
-    },
-
-    /// Inspect an orchestration schedule in detail
-    Inspect {
-        /// Schedule ID to inspect
-        schedule_id: String,
-    },
-}
-
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Start the daemon runtime
@@ -109,12 +69,6 @@ pub enum DaemonCommand {
         port: u16,
     },
 
-    /// Orchestration control (schedules and workflows)
-    Orchestrate {
-        #[command(subcommand)]
-        command: OrchestrateCommand,
-    },
-
     /// Schedule preset-driven orchestration workflows (migrated from `nexus42 schedule`)
     Schedule {
         #[command(subcommand)]
@@ -138,7 +92,6 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
         DaemonCommand::Status { port } => daemon_status(port, config).await,
         DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
         DaemonCommand::Doctor { port } => daemon_doctor(port).await,
-        DaemonCommand::Orchestrate { command } => run_orchestrate(command),
         DaemonCommand::Schedule { command } => schedule::run(*command, config).await,
     }
 }
@@ -758,63 +711,6 @@ async fn daemon_doctor(port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Run orchestration subcommands.
-///
-/// Most orchestration commands are stubs — the full implementation will be
-/// wired in Plan 6.
-#[allow(clippy::unnecessary_wraps)]
-fn run_orchestrate(cmd: OrchestrateCommand) -> Result<()> {
-    match cmd {
-        OrchestrateCommand::List => {
-            println!("Coming soon: `daemon orchestrate list` — list orchestration schedules.");
-            println!("  This feature will be implemented in a follow-up plan.");
-        }
-        OrchestrateCommand::Run {
-            schedule_id,
-            run_id,
-        } => {
-            // Resolve or generate run ID
-            let resolved_run_id = match run_id {
-                Some(ref id) => {
-                    nexus_home_layout::validate_run_id_safe(id).map_err(CliError::Other)?;
-                    id.clone()
-                }
-                None => format!("run_{}", uuid::Uuid::new_v4().simple()),
-            };
-
-            println!("Coming soon: `daemon orchestrate run {schedule_id}` — run an orchestration.");
-            println!("  This feature will be implemented in a follow-up plan.");
-            println!("Run ID: {resolved_run_id}");
-            // TODO(V1.17): Pass `resolved_run_id` as `_run_id` into the orchestration context
-            // when the daemon API is implemented. The engine should store it in graph_flow::Context.
-            let _ = resolved_run_id;
-        }
-        OrchestrateCommand::Pause { schedule_id } => {
-            println!(
-                "Coming soon: `daemon orchestrate pause {schedule_id}` — pause an orchestration."
-            );
-            println!("  This feature will be implemented in a follow-up plan.");
-        }
-        OrchestrateCommand::Resume { schedule_id } => {
-            println!(
-                "Coming soon: `daemon orchestrate resume {schedule_id}` — resume an orchestration."
-            );
-            println!("  This feature will be implemented in a follow-up plan.");
-        }
-        OrchestrateCommand::Cancel { schedule_id } => {
-            println!(
-                "Coming soon: `daemon orchestrate cancel {schedule_id}` — cancel an orchestration."
-            );
-            println!("  This feature will be implemented in a follow-up plan.");
-        }
-        OrchestrateCommand::Inspect { schedule_id } => {
-            println!("Coming soon: `daemon orchestrate inspect {schedule_id}` — inspect an orchestration.");
-            println!("  This feature will be implemented in a follow-up plan.");
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -927,29 +823,5 @@ mod tests {
     async fn test_daemon_doctor() {
         let result = daemon_doctor(19999).await;
         assert!(result.is_ok(), "daemon_doctor should succeed");
-    }
-
-    #[test]
-    fn test_orchestrate_list_stub() {
-        let result = run_orchestrate(OrchestrateCommand::List);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_orchestrate_run_stub() {
-        let result = run_orchestrate(OrchestrateCommand::Run {
-            schedule_id: "test-schedule".to_string(),
-            run_id: None,
-        });
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_orchestrate_run_stub_with_run_id() {
-        let result = run_orchestrate(OrchestrateCommand::Run {
-            schedule_id: "test-schedule".to_string(),
-            run_id: Some("run_custom123".to_string()),
-        });
-        assert!(result.is_ok());
     }
 }

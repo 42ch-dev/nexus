@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-05-22-v1.24-knowledge-crates-alignment",
-      "title": "V1.24 Knowledge ↔ Crates Alignment — normative spec refresh and Local API / KB semantics",
+      "title": "V1.24 Knowledge \u2194 Crates Alignment \u2014 normative spec refresh and Local API / KB semantics",
       "file": ".agents/plans/2026-05-22-v1.24-knowledge-crates-alignment.md",
       "status": "Done",
       "owner": "@project-manager",
@@ -18,10 +18,17 @@
         "@qc-specialist-3"
       ],
       "progress": 100,
-      "tags": ["v1.24", "knowledge", "audit", "architecture", "local-api", "kb-semantics"],
+      "tags": [
+        "v1.24",
+        "knowledge",
+        "audit",
+        "architecture",
+        "local-api",
+        "kb-semantics"
+      ],
       "created_at": "2026-05-22",
       "updated_at": "2026-05-22",
-      "notes": "Done. Batches A–E complete. QC tri-review: 3× Approve (0 Critical, 0 Warning). QA: clippy clean, all tests pass. 352 lines dead code removed (daemon context/assemble proxy). Work-scope KB isolated and documented. R1/R2 (accept) archived; R3/R4 (defer) remain open.",
+      "notes": "Done. Batches A\u2013E complete. QC tri-review: 3\u00d7 Approve (0 Critical, 0 Warning). QA: clippy clean, all tests pass. 352 lines dead code removed (daemon context/assemble proxy). Work-scope KB isolated and documented. R1/R2 (accept) archived; R3/R4 (defer) remain open.",
       "metadata": {
         "phase": "done",
         "priority": "high",
@@ -50,53 +57,321 @@
         "batches": [
           {
             "index": 0,
-            "name": "A0 — Decision gate",
-            "covers": ["T0"],
+            "name": "A0 \u2014 Decision gate",
+            "covers": [
+              "T0"
+            ],
             "status": "done",
             "owner": "@project-manager",
             "notes": "Locked B2+C2 (2026-05-22)."
           },
           {
             "index": 1,
-            "name": "A — Normative doc refresh",
-            "covers": ["T1", "T2", "T3", "T4", "T5"],
+            "name": "A \u2014 Normative doc refresh",
+            "covers": [
+              "T1",
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ],
             "status": "done",
             "owner": "@architect",
-            "notes": "Commit 51852a5. §4 refreshed, boundary routes rebuilt, AGENTS.md aligned."
+            "notes": "Commit 51852a5. \u00a74 refreshed, boundary routes rebuilt, AGENTS.md aligned."
           },
           {
             "index": 2,
-            "name": "B — Context assemble B2",
-            "covers": ["T6", "T7"],
+            "name": "B \u2014 Context assemble B2",
+            "covers": [
+              "T6",
+              "T7"
+            ],
             "status": "done",
             "owner": "@fullstack-dev",
             "notes": "Commit ddc193a. 352 lines dead code removed. DaemonClient::call_assemble() retired."
           },
           {
             "index": 3,
-            "name": "C — Work KB semantics C2",
-            "covers": ["T8", "T9"],
+            "name": "C \u2014 Work KB semantics C2",
+            "covers": [
+              "T8",
+              "T9"
+            ],
             "status": "done",
             "owner": "@fullstack-dev",
             "notes": "Commit 7f63bc3. Work-scope docs/comments enforced. New test added."
           },
           {
             "index": 4,
-            "name": "D — Tracker hygiene",
-            "covers": ["T10"],
+            "name": "D \u2014 Tracker hygiene",
+            "covers": [
+              "T10"
+            ],
             "status": "done",
             "owner": "@project-manager",
             "notes": "Commit 75fdd8d. DF-42, DF-43 added to deferred tracker. V1.24 snapshot added."
           },
           {
             "index": 5,
-            "name": "E — QA + QC",
-            "covers": ["T11", "T12"],
+            "name": "E \u2014 QA + QC",
+            "covers": [
+              "T11",
+              "T12"
+            ],
             "status": "done",
             "owner": "@qa-engineer, @qc-specialist*",
-            "notes": "QC tri-review 3× Approve. 0 Critical, 0 Warning. 6 non-blocking suggestions registered as residuals."
+            "notes": "QC tri-review 3\u00d7 Approve. 0 Critical, 0 Warning. 6 non-blocking suggestions registered as residuals."
           }
         ]
+      }
+    },
+    {
+      "id": "2026-05-22-v1.25-knowledge-product-wiring",
+      "title": "V1.25 Knowledge \u2194 Crates Product Wiring \u2014 post-V1.24 hygiene (Theme A)",
+      "file": ".agents/plans/2026-05-22-v1.25-knowledge-product-wiring.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@project-manager",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.25",
+        "knowledge",
+        "audit",
+        "docs",
+        "hygiene"
+      ],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Done. Theme A only (doc/schema hygiene). QA: clippy clean, all tests pass. QC1: Approve (0 Critical, 0 Warning, 1 non-blocking Suggestion). Themes B/C/D deferred to future plans.",
+      "metadata": {
+        "phase": "done",
+        "priority": "medium",
+        "description": "Post-V1.24 hygiene: fix stale schema descriptions, clap help, deferred tracker, cli-spec orchestrate/schedule labels, and Stage-0 vs Moment wording.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/cli-spec.md",
+          ".agents/knowledge/specs/local-cloud-crate-architecture.md",
+          ".agents/knowledge/deferred-features-cross-version-tracker.md",
+          "schemas/platform/context-assembly-v1.schema.json"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pass",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Done. Merge to main or archive per Profile B.",
+        "batches": [
+          {
+            "index": 0,
+            "name": "A0 \u2014 Scope decision",
+            "covers": [
+              "T0"
+            ],
+            "status": "done",
+            "owner": "@project-manager",
+            "notes": "Confirmed Theme A only; B/C/D deferred. PM gate pass 2026-05-22."
+          },
+          {
+            "index": 1,
+            "name": "A \u2014 Post-V1.24 hygiene (doc/schema)",
+            "covers": [
+              "T1",
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ],
+            "status": "done",
+            "owner": "@architect",
+            "notes": "Commit ee04010. T1\u2013T5 complete. Schema descriptions, clap help, tracker, cli-spec, LCCA all aligned."
+          },
+          {
+            "index": 2,
+            "name": "QA \u2014 Verify + QC single-review",
+            "covers": [
+              "T6",
+              "T7"
+            ],
+            "status": "done",
+            "owner": "@qa-engineer, @qc-specialist",
+            "notes": "QA: clippy + fmt + tests all clean. QC1: Approve (0 Critical, 0 Warning, 1 Suggestion)."
+          }
+        ]
+      }
+    },
+    {
+      "id": "2026-05-22-v1.25-theme-d-orchestration-parity",
+      "title": "V1.25 Theme D \u2014 Remove daemon orchestrate stubs + cross-link docs",
+      "file": ".agents/plans/2026-05-22-v1.25-theme-d-orchestration-parity.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@project-manager",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.25",
+        "orchestration",
+        "cli",
+        "cleanup"
+      ],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Done. Removed OrchestrateCommand stubs (a6cb202). Added schedule/session cross-link docs. QA: fmt fixed (78078c1), clippy clean, all tests pass. QC1: Approve.",
+      "metadata": {
+        "phase": "done",
+        "priority": "low",
+        "description": "Remove legacy daemon orchestrate * CLI surface (Coming soon stubs) and add cross-link prose documenting daemon schedule as the sole orchestration control surface.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/cli-spec.md"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pass",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Done.",
+        "batches": [
+          {
+            "index": 0,
+            "name": "D1 \u2014 Remove orchestrate stubs",
+            "covers": [
+              "T1"
+            ],
+            "status": "done",
+            "owner": "@architect",
+            "notes": "Commit a6cb202. Removed OrchestrateCommand enum, match arm, run_orchestrate fn, tests. Updated cli-spec."
+          },
+          {
+            "index": 1,
+            "name": "D2 \u2014 Cross-link docs",
+            "covers": [
+              "T2"
+            ],
+            "status": "done",
+            "owner": "@architect",
+            "notes": "Commit a6cb202. cli-spec \u00a76.3 cross-link + api/mod.rs comment."
+          },
+          {
+            "index": 2,
+            "name": "QA \u2014 Verify + QC single-review",
+            "covers": [
+              "T3",
+              "T4"
+            ],
+            "status": "done",
+            "owner": "@qa-engineer, @qc-specialist",
+            "notes": "QA: fmt fixed (78078c1), clippy clean, all tests pass. QC1: Approve (0 Critical, 0 Warning)."
+          }
+        ]
+      }
+    },
+    {
+      "id": "2026-05-22-v1.25-theme-b-moment-four-domain",
+      "title": "V1.25 Theme B \u2014 Moment four-domain product path (assemble_moment CLI entry)",
+      "file": ".agents/plans/2026-05-22-v1.25-theme-b-moment-four-domain.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@project-manager",
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.25",
+        "context-assembly",
+        "moment",
+        "four-domain",
+        "cli"
+      ],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Done. B0 confirmed in-memory demo. B1.1: CLI entry (hidden experimental), B1.2: cli-spec updated, B3: 4 integration tests. QA: fmt fixed, clippy clean, all tests pass. QC1: Approve (0 Critical, 0 Warning, 1 Suggestion).",
+      "metadata": {
+        "phase": "done",
+        "priority": "medium",
+        "description": "Add platform context assemble-moment CLI command calling assemble_moment with InMemory stores; update cli-spec; add integration test.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/cli-spec.md"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pass",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Done."
+      }
+    },
+    {
+      "id": "2026-05-22-v1.25-theme-c-domain-crate-wiring",
+      "title": "V1.25 Theme C \u2014 Domain crate product wiring (narrative/kb/knowledge surfaces)",
+      "file": ".agents/plans/2026-05-22-v1.25-theme-c-domain-crate-wiring.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@project-manager",
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.25",
+        "narrative",
+        "kb",
+        "knowledge",
+        "daemon",
+        "domain-crates"
+      ],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Done. C0 gate confirmed. C1.1: narrative routes, C1.2: world-scope KB wiring, C2: reference_sources ADR. QA: all clean. QC1: Approve (2W+2S non-blocking).",
+      "metadata": {
+        "phase": "done",
+        "priority": "medium",
+        "description": "Add minimal narrative read surface via NarrativeGateway; wire creator kb --scope world to nexus-kb; write reference_sources persistence ADR.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/entity-scope-model.md",
+          ".agents/knowledge/specs/cli-spec.md",
+          ".agents/knowledge/deferred-features-cross-version-tracker.md"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pending",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Done."
       }
     }
   ],
@@ -105,10 +380,10 @@
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
-    "latest_shipped_iteration": "v1.23",
+    "latest_shipped_iteration": "v1.24",
     "latest_shipped_at": "2026-05-21T21:54:13Z",
     "tech_debt_summary": {
-  "updated_at": "2026-05-22T17:00:00Z",
+      "updated_at": "2026-05-22T17:00:00Z",
       "total_open": 0,
       "by_severity": {
         "critical": 0,
@@ -122,11 +397,11 @@
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
           "severity": "low",
           "target_date": "backlog",
           "decision": "accept",
-          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
+          "note": "Blocked by wiremock \u2192 http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ]
     }
@@ -135,7 +410,7 @@
     "2026-05-22-v1.24-knowledge-crates-alignment": [
       {
         "id": "R3",
-        "title": "Daemon KB request DTOs lack scope field — non-work values silently ignored",
+        "title": "Daemon KB request DTOs lack scope field \u2014 non-work values silently ignored",
         "severity": "suggestion",
         "source": "qc3 S-002",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/kb.rs",
