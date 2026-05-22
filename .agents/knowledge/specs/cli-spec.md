@@ -268,12 +268,12 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 
 - `nexus42 creator soul ...`：维护 `SOUL.md`（`Personality` / `Experience`）
 - `nexus42 creator memory ...`：长期记忆与回顾沉淀管理
-- `nexus42 creator kb ...`：本地工作资料索引（默认 `--scope work`）；未来可显式转向 World-scoped narrative KB（`--scope world`）
+- `nexus42 creator kb ...`：本地工作资料索引（默认 `--scope work`；`--scope work` 表示 **CLI local work KB index**，即 `~/.nexus42/.../kb/` 下的文件/索引）。当前仅实现 `--scope work`，**不**涉及 `nexus-kb`（World KB graph）或 `nexus-knowledge`（User knowledge index）。未来 `--scope world` 将路由至 World-scoped narrative KB（`nexus-kb` + `nexus-narrative`）。
 
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
-- **`--scope work`（默认，V1.23 必须保留）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，不是 `nexus-kb` 的 World graph，也不是 `nexus-knowledge` 的 User/global knowledge index。
-- **`--scope world`（未来目标）**：必须要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径创建 / 查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
+- **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
+- **`--scope world`（未来目标；V1.24 中为 deferred，CLI 打印 "coming soon" 消息）**：必须要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径创建 / 查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。Full KB route redesign is deferred beyond V1.24。
 - **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。
 
 命名与行为建议：
@@ -301,7 +301,7 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 | Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KeyBlocks or User knowledge rows. |
 | Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-kb` | Route to World-scoped narrative KB graph. Must preserve KeyBlock / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
 | Manage User/global reference knowledge | Recommended future `nexus42 platform knowledge ...` (name may be finalized by implementation plan C4) | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
-| Assemble context for an agent session | `nexus42 platform context assemble` / ACP context capability | Moment request context; selected Creator/World/User inputs | `nexus-moment-context-assembly` reading `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge` | Produces a read-only Moment snapshot. Does not move ownership between scopes. |
+| Assemble context for an agent session | `nexus42 platform context assemble` / ACP context capability | Moment request context; selected Creator/World/User inputs | `nexus-moment-context-assembly` reading `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge` | Produces a read-only Moment snapshot. Runs **CLI in-process** (not via daemon Local API). Does not move ownership between scopes. |
 
 Implementation task C4 should therefore treat `creator kb` as a routing/name-alignment task, not as permission for `nexus42` to own KB/domain storage long-term.
 
@@ -348,7 +348,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 说明：
 
-- `context assemble` 读取 confirmed World KB / User knowledge / timeline / memory slices，输出只读快照。
+- `context assemble` 读取 confirmed World KB / User knowledge / timeline / memory slices，输出只读快照。Context assembly runs **CLI in-process** via `nexus-moment-context-assembly` (`Stage0Assembly` / `TwoStageAssembly`), not via daemon Local API. The daemon `POST /v1/local/context/assemble` route is **Retired** (KCA-002 B2).
 - `publish.*` 表示内容跨平台边界动作，不与 `sync push` 混用。
 - `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
 
@@ -359,7 +359,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | Structured state sync | `nexus42 sync ...` | `sync.*` + bundle/delta contracts |
 | Runtime orchestration control | `nexus42 daemon orchestrate ...` | daemon local API + orchestration engine |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
-| Context assembly snapshot | `nexus42 platform context assemble` | read-only context snapshot for local agents |
+| Context assembly snapshot | `nexus42 platform context assemble` | read-only context snapshot for local agents (CLI in-process via `nexus-moment-context-assembly`; daemon `POST /v1/local/context/assemble` is **Retired** — KCA-002 B2) |
 | Manuscript read/write | 无顶层独立命令组 | `manuscript.*` ACP capabilities + preset roots |
 | Research / references | 无顶层独立命令组 | preset orchestration + `research.*` ACP tools |
 | Content publication | `nexus42 platform publish ...`（或 preset 显式动作） | `publish.*` + confirmation policy |

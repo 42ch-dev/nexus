@@ -1,6 +1,9 @@
 //! Context Command — `nexus42 platform context assemble` and `nexus42 platform context assemble-local`
+//!
+//! KCA-002 B2: Context assembly runs CLI in-process via `nexus-moment-context-assembly`.
+//! The daemon `POST /v1/local/context/assemble` route is retired. The `assemble-local`
+//! subcommand uses `Stage0Assembly` / `TwoStageAssembly` directly without daemon HTTP.
 
-use crate::api::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
@@ -249,7 +252,7 @@ pub async fn assemble_context(
         }
         RuntimeMode::LocalFirst | RuntimeMode::CloudEnhanced => {
             // Two-stage: try platform, fallback to Stage0
-            let platform_result = try_platform_assemble(config, hint).await;
+            let platform_result = try_platform_assemble(config, hint);
 
             if let Some(response) = platform_result {
                 guard.record_platform_result(true, None);
@@ -321,44 +324,22 @@ async fn build_stage0_from_local(
     })
 }
 
-/// Try to call platform assemble via daemon (best-effort).
+/// Try to obtain a platform assemble response (best-effort).
 ///
-/// Returns `Some(AssembleResponse)` if the platform call succeeds,
-/// or `None` if the daemon is unavailable or the call fails.
-/// This is used for two-stage assembly in `local_first`/`cloud_enhanced` modes.
-async fn try_platform_assemble(config: &CliConfig, hint: Option<&str>) -> Option<AssembleResponse> {
-    let client = DaemonClient::from_config(config);
-
-    // Use call_assemble which sends the request shape the daemon expects
-    // (W-1 fix: ContextClient::assemble sent ContextAssembleRequestV1 causing 422).
-    // V1.2 residual R4 (compatibility, nit): Dead call_assemble URL mismatch
-    // Dead code path; platform URL is correctly resolved at runtime
-    let creator_id = config.active_creator_id.as_deref().unwrap_or("ctr_unknown");
-    let runtime_mode_str = config.runtime_mode().to_string();
-
-    // Resolve the workspace slug from config (R2: was hardcoded "wrk_default").
-    let workspace_slug = config.workspace_slug_for_creator(creator_id);
-    if workspace_slug == crate::config::DEFAULT_WORKSPACE_SLUG {
-        tracing::debug!(
-            creator_id = creator_id,
-            "No workspace slug configured for creator, using default"
-        );
-    }
-
-    match client
-        .call_assemble(creator_id, workspace_slug, &runtime_mode_str, hint)
-        .await
-    {
-        Ok(Some(response)) => Some(response),
-        Ok(None) => {
-            tracing::debug!("Platform assemble returned None (unavailable)");
-            None
-        }
-        Err(e) => {
-            tracing::debug!(error = %e, "Failed to reach daemon for platform assemble");
-            None
-        }
-    }
+/// KCA-002 B2: The daemon `POST /v1/local/context/assemble` proxy route is retired.
+/// This function is a placeholder for future direct platform API integration.
+/// Currently always returns `None`, causing the caller to fall back to
+/// in-process `Stage0Assembly`.
+///
+/// When the direct platform context API becomes available, this function
+/// should be updated to call it directly (not via daemon proxy).
+fn try_platform_assemble(_config: &CliConfig, _hint: Option<&str>) -> Option<AssembleResponse> {
+    // KCA-002 B2: Daemon proxy route retired.
+    // Future: call platform context API directly when available.
+    tracing::debug!(
+        "Platform context API not yet wired for direct call; using in-process Stage0 assembly"
+    );
+    None
 }
 
 /// Build a `TwoStageAssembly` from local context data and a platform response.
