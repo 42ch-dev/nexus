@@ -7,6 +7,7 @@ pub mod host_tool_executor;
 pub mod kb;
 pub mod memory;
 pub mod monitoring;
+pub mod narrative;
 pub mod orchestration;
 pub mod permissions;
 pub mod preset_management;
