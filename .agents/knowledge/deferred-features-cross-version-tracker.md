@@ -61,7 +61,44 @@
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
 | DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
-| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | Any future | M | V1.24 audit compass; `nexus-knowledge` currently uses in-memory store. Full persistence deferred beyond V1.24. |
+| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | Any future | M | V1.24 audit compass → V1.25 Theme C decision recorded below. `nexus-knowledge` currently uses in-memory store. Production `reference_sources` persistence remains owned by `nexus-local-db`; crate-model integration/persistence adapter remains deferred. |
+
+#### DF-43 decision note — Reference sources persistence (V1.25 Theme C)
+
+**Status:** Decision accepted in V1.25 Theme C Batch C2; implementation remains **Open**.
+
+Nexus currently has two reference source models with different ownership boundaries:
+
+1. **`nexus-local-db` production persistence** — the shipped SQLite-backed `reference_sources` table in `state.db`, with columns such as `reference_source_id`, `workspace_id`, `source_type`, `uri`, `title`, `tags`, `content_hash`, and `scan_status`. This is the production path for local runtime reference data and daemon reference listing.
+2. **`nexus-knowledge::ReferenceSource` crate model** — an in-crate domain model for User-scoped knowledge/reference indexing. Today it is backed only by in-memory store wiring and is not the production persistence owner for `reference_sources`.
+
+**Decision:** Keep the current `nexus-local-db` `reference_sources` table as the production persistence owner for reference sources. `nexus-knowledge::ReferenceSource` remains an in-memory crate model for now. It may be aligned with, adapted to, or integrated into the production path in a later plan, but it is not the persistence owner today.
+
+**Options considered:**
+
+| Option | Summary | Result |
+| --- | --- | --- |
+| A — Keep `nexus-local-db` as production owner | Continue using the current SQLite table and daemon reference listing path. | **Accepted** — lowest risk and matches shipped behavior. |
+| B — Migrate production persistence to `nexus-knowledge` | Make `nexus-knowledge::ReferenceSource` the production model behind a persistent adapter. | Deferred — requires adapter, migration design, daemon/API integration, and regression testing. |
+| C — Hybrid adapter now | Keep the table but immediately add an adapter so `nexus-knowledge` reads/writes through it. | Deferred — still adds production behavior and ownership decisions outside V1.25 Theme C. |
+
+**Rationale:**
+
+- `nexus-local-db` is the current production storage boundary for local SQLite state and already owns the shared `reference_sources` table.
+- `nexus-knowledge` does not currently provide a SQLite- or file-backed persistent store implementation for `ReferenceSource`.
+- V1.25 Theme C confirmed an in-memory posture for new domain-crate wiring; migrating production ownership to `nexus-knowledge` requires a separate implementation plan covering adapter boundaries, data migration, daemon/API regression, and compatibility with existing `state.db` contents.
+
+**Risks and controls:**
+
+| Risk | Control |
+| --- | --- |
+| Readers assume `nexus-knowledge::ReferenceSource` is production-persisted. | This tracker explicitly states that `nexus-local-db` is the production persistence owner. |
+| Duplicate models drift further. | Keep DF-43 open for crate-model integration and persistence-adapter work. |
+| Future migration changes shipped local data behavior without review. | Require a follow-up plan before changing production ownership or `state.db` migration behavior. |
+
+**Future migration trigger:** Re-evaluate when `nexus-knowledge` has a proposed SQLite/file-backed persistence adapter for `ReferenceSource` and a concrete migration plan. Minimum trigger evidence: persistent store design with clear ownership boundaries; compatibility plan for existing `reference_sources` rows in `state.db`; daemon/API regression plan for local reference listing behavior; explicit update to DF-43 and related specs.
+
+**Consequences:** No immediate Rust source, database schema, daemon handler, test, codegen, or configuration changes are required by this decision. DF-43 is partially resolved: the production persistence owner is decided for now, while crate-model integration and any future migration remain open.
 
 ### 3.2 Backlog (no committed target version)
 
