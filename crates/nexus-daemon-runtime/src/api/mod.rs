@@ -189,6 +189,23 @@ fn workspace_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Narrative read surface routes — in-memory, read-only (V1.25 Theme C, C1.1).
+///
+/// Minimal read-only daemon routes backed by `NarrativeGateway` with
+/// in-memory stores. Distinct from the work-scope `/v1/local/kb/*`
+/// file-index routes. No persistence across daemon restarts.
+fn narrative_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/narrative/worlds",
+            get(handlers::narrative::list_worlds),
+        )
+        .route(
+            "/v1/local/narrative/worlds/{world_id}",
+            get(handlers::narrative::get_world),
+        )
+}
+
 /// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
 fn memory_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -241,6 +258,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(preset_routes())
         .merge(kb_routes())
         .merge(memory_routes())
+        .merge(narrative_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))
