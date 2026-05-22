@@ -58,8 +58,6 @@
 | DF-35 | ACP prompt capability (stores prompt, no real execution) | V1.21 audit | Any future | M | `orchestration/capability/builtins/acp_prompt.rs` — stores prompt text; `[acp.prompt stub: ...]`. WS3 stub. |
 | DF-36 | ACP session load capability (stub success) | V1.21 audit | Any future | S | `orchestration/capability/builtins/acp_session_load.rs` — returns stub success. WS3 stub. |
 | DF-37 | InnerGraphNodeTask / AcpPromptTask stub mode fallback | V1.21 audit | Any future | S | `orchestration/tasks/mod.rs` — no worker handle → placeholder output. Intentional safe fallback, but real IPC needed. |
-| DF-38 | OrchestrationEngine instantiation stub in daemon | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — `OrchestrationEngine` instantiation is stub. Subsystem not wired. |
-| DF-39 | Worker Manager subsystem stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — Worker Manager start is stub. Subsystem not wired. |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
 | DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
@@ -136,6 +134,8 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | ~~DF-17~~ | Third-party preset loading (`~/.nexus42/presets/`) + CLI init templates | V1.9 (WS-A) | Path corrected from `~/.nexus/strategies/` to `~/.nexus42/presets/`. |
 | ~~DF-11~~ | CoreContext Handlebars template engine binding | V1.13 | WS7 data path + template rendering integrated per V1.13 OSS-forward delivery. |
 | ~~DF-14~~ | CLI + Platform e2e integration | V1.13 | Staged cross-repo gates + harness per V1.13 OSS-forward delivery. |
+| ~~DF-38~~ | OrchestrationEngine instantiation in daemon | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` instantiates `GraphFlowEngine::new_with_storage(...)`, stores it as `Arc<dyn OrchestrationEngine>`, and calls `state.set_engine(...)`. The older `lifecycle/actions.rs` comment still says “Instantiate OrchestrationEngine (stub, subsystem task)”; that comment is stale evidence only, not current product state. |
+| ~~DF-39~~ | Worker Manager subsystem wiring in daemon lifecycle | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` creates `WorkerManager::new()` and calls `state.set_worker_manager(...)`; `lifecycle/subsystems/worker_mgr.rs` describes the real subsystem replacing the mock stub. The older `lifecycle/actions.rs` comment still says “Start Worker Manager (stub, subsystem task)”; that comment is stale evidence only and is distinct from remaining task-level worker-handle fallback tracked by DF-37. |
 
 ### Tech-debt residuals shipped
 
