@@ -159,6 +159,130 @@
           }
         ]
       }
+    },
+    {
+      "id": "2026-05-22-v1.25-theme-d-orchestration-parity",
+      "title": "V1.25 Theme D — Remove daemon orchestrate stubs + cross-link docs",
+      "file": ".agents/plans/2026-05-22-v1.25-theme-d-orchestration-parity.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@architect", "@project-manager", "@qc-specialist", "@qa-engineer"],
+      "progress": 100,
+      "tags": ["v1.25", "orchestration", "cli", "cleanup"],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Done. Removed OrchestrateCommand stubs (a6cb202). Added schedule/session cross-link docs. QA: fmt fixed (78078c1), clippy clean, all tests pass. QC1: Approve.",
+      "metadata": {
+        "phase": "done",
+        "priority": "low",
+        "description": "Remove legacy daemon orchestrate * CLI surface (Coming soon stubs) and add cross-link prose documenting daemon schedule as the sole orchestration control surface.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/cli-spec.md"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pass",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Done.",
+        "batches": [
+          {
+            "index": 0,
+            "name": "D1 — Remove orchestrate stubs",
+            "covers": ["T1"],
+            "status": "done",
+            "owner": "@architect",
+            "notes": "Commit a6cb202. Removed OrchestrateCommand enum, match arm, run_orchestrate fn, tests. Updated cli-spec."
+          },
+          {
+            "index": 1,
+            "name": "D2 — Cross-link docs",
+            "covers": ["T2"],
+            "status": "done",
+            "owner": "@architect",
+            "notes": "Commit a6cb202. cli-spec §6.3 cross-link + api/mod.rs comment."
+          },
+          {
+            "index": 2,
+            "name": "QA — Verify + QC single-review",
+            "covers": ["T3", "T4"],
+            "status": "done",
+            "owner": "@qa-engineer, @qc-specialist",
+            "notes": "QA: fmt fixed (78078c1), clippy clean, all tests pass. QC1: Approve (0 Critical, 0 Warning)."
+          }
+        ]
+      }
+    },
+    {
+      "id": "2026-05-22-v1.25-theme-b-moment-four-domain",
+      "title": "V1.25 Theme B — Moment four-domain product path (assemble_moment CLI entry)",
+      "file": ".agents/plans/2026-05-22-v1.25-theme-b-moment-four-domain.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@architect", "@project-manager", "@fullstack-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 0,
+      "tags": ["v1.25", "context-assembly", "moment", "four-domain", "cli"],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Plan created. In-memory demo approach for assemble_moment CLI entry. Not yet started.",
+      "metadata": {
+        "phase": "todo",
+        "priority": "medium",
+        "description": "Add platform context assemble-moment CLI command calling assemble_moment with InMemory stores; update cli-spec; add integration test.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/cli-spec.md"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pending",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Awaiting B0 decision gate (confirm in-memory demo approach)."
+      }
+    },
+    {
+      "id": "2026-05-22-v1.25-theme-c-domain-crate-wiring",
+      "title": "V1.25 Theme C — Domain crate product wiring (narrative/kb/knowledge surfaces)",
+      "file": ".agents/plans/2026-05-22-v1.25-theme-c-domain-crate-wiring.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@architect", "@project-manager", "@fullstack-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 0,
+      "tags": ["v1.25", "narrative", "kb", "knowledge", "daemon", "domain-crates"],
+      "created_at": "2026-05-22",
+      "updated_at": "2026-05-22",
+      "notes": "Plan created. Minimal narrative daemon surface + world-scope KB + persistence ADR. Not yet started.",
+      "metadata": {
+        "phase": "todo",
+        "priority": "medium",
+        "description": "Add minimal narrative read surface via NarrativeGateway; wire creator kb --scope world to nexus-kb; write reference_sources persistence ADR.",
+        "working_branch": "feature/v1.25-knowledge-product-wiring",
+        "merge_target": "main",
+        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "spec_refs": [
+          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".agents/knowledge/specs/entity-scope-model.md",
+          ".agents/knowledge/specs/cli-spec.md",
+          ".agents/knowledge/deferred-features-cross-version-tracker.md"
+        ],
+        "gates": {
+          "specify": "pass",
+          "clarify": "pending",
+          "plan": "pass",
+          "branch_policy": "feature"
+        },
+        "next_action": "Awaiting C0 decision gate (confirm in-memory approach + ADR direction)."
+      }
     }
   ],
   "metadata": {
