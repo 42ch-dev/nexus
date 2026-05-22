@@ -20,6 +20,7 @@ use clap::{Args, Subcommand};
 use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
+use nexus_kb::KbStore;
 use serde::Deserialize;
 use soul::SoulCommand;
 use std::path::PathBuf;
@@ -557,21 +558,21 @@ pub enum CreatorCommand {
     Logout,
 }
 
-/// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb, future).
+/// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb).
 ///
 /// Per entity-scope-model §5.3, `creator kb --scope work` is the **CLI local work KB index** —
 /// a per-creator, per-workspace file-based index stored under
 /// `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`. It is NOT `nexus-kb` (World-scoped
 /// narrative KB graph) or `nexus-knowledge` (User-scoped global knowledge).
 ///
-/// Future `--scope world` will route to `nexus-kb` + `nexus-narrative` and require
-/// a resolvable `world_id`. User/global knowledge will NOT be a `creator kb` scope.
+/// `--scope world` routes to `nexus-kb` + `nexus-narrative` and requires
+/// a `--world-id <id>`. User/global knowledge will NOT be a `creator kb` scope.
 #[derive(Debug, Clone, clap::ValueEnum, Default, PartialEq, Eq)]
 pub enum KbScope {
     /// Local workspace file index (default)
     #[default]
     Work,
-    /// World-scoped narrative KB (nexus-kb + nexus-narrative, future)
+    /// World-scoped narrative KB (nexus-kb + nexus-narrative)
     World,
 }
 
@@ -580,27 +581,36 @@ pub enum KbScope {
 pub enum KbCommand {
     /// List local work-scope knowledge entries
     List {
-        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
     },
 
     /// Search local work-scope entries by title/content
     Search {
         /// Search query string
         query: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
     },
 
     /// Show a single local work-scope entry
     Show {
-        /// Entry ID to display (e.g. `kb_a1b2c3d4`)
+        /// Entry ID to display (e.g. `kb_a1b2c3d4` or a key-block ID)
         entry_id: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
     },
 
     /// Add a local work-scope entry from a file
@@ -611,7 +621,7 @@ pub enum KbCommand {
         /// Optional title (defaults to filename stem)
         #[arg(long)]
         title: Option<String>,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
@@ -620,7 +630,7 @@ pub enum KbCommand {
     Remove {
         /// Entry ID to remove (e.g. `kb_a1b2c3d4`)
         entry_id: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB, future)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
     },
@@ -748,9 +758,13 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
         paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
     }
     match cmd {
-        KbCommand::List { scope } => kb_list(config, &scope).await,
-        KbCommand::Search { query, scope } => kb_search(config, &query, &scope).await,
-        KbCommand::Show { entry_id, scope } => kb_show(config, &entry_id, &scope).await,
+        KbCommand::List { scope, world_id } => kb_list(config, &scope, world_id.as_deref()).await,
+        KbCommand::Search { query, scope, world_id } => {
+            kb_search(config, &query, &scope, world_id.as_deref()).await
+        }
+        KbCommand::Show { entry_id, scope, world_id } => {
+            kb_show(config, &entry_id, &scope, world_id.as_deref()).await
+        }
         KbCommand::Add { file, title, scope } => {
             kb_add(config, &file, title.as_deref(), &scope).await
         }
@@ -758,17 +772,27 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Deferred message for `world` scope commands.
+/// Deferred message for `world` scope write commands (add/remove).
 ///
-/// World scope requires routing to `nexus-kb` (World-scoped narrative KB graph)
-/// and `nexus-narrative`, with a resolvable `world_id`. This path is not yet
-/// implemented; full KB route redesign is deferred to a future iteration.
-fn world_scope_deferred() {
+/// Write operations for world scope are out of scope for V1.25.
+fn world_scope_write_deferred() {
     println!(
-        "World scope requires a platform connection and a resolvable world_id \
-         (nexus-kb + nexus-narrative; coming soon). \
-         See: entity-scope-model §5.3."
+        "World scope write operations (add/remove) are not yet supported. \
+         Use --scope work for local file index operations."
     );
+}
+
+/// Require `--world-id` when `--scope world` is used. Returns the `world_id` or an error.
+fn require_world_id(world_id: Option<&str>) -> Result<String> {
+    world_id
+        .map(std::string::ToString::to_string)
+        .ok_or_else(|| {
+            CliError::Other(
+                "--world-id is required when using --scope world. \
+                 Usage: nexus42 creator kb <command> --scope world --world-id <id>"
+                    .into(),
+            )
+        })
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
@@ -872,9 +896,31 @@ fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
 }
 
 /// `kb list` implementation.
-async fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
+async fn kb_list(config: &CliConfig, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_deferred();
+        let wid = require_world_id(world_id)?;
+        let store = nexus_kb::InMemoryKbStore::new();
+        let blocks = store.list_by_world(&wid).await.map_err(|e| {
+            CliError::Other(format!("World KB list failed for {wid}: {e}"))
+        })?;
+        if blocks.is_empty() {
+            println!("No key blocks in world {wid}.");
+        } else {
+            println!("Key blocks in world {wid}:");
+            println!(
+                "{:<20} {:<15} {:<30} STATUS",
+                "BLOCK_ID", "TYPE", "NAME"
+            );
+            for block in &blocks {
+                println!(
+                    "{:<20} {:<15} {:<30} {}",
+                    block.key_block_id,
+                    format!("{:?}", block.block_type),
+                    block.canonical_name,
+                    block.status
+                );
+            }
+        }
         return Ok(());
     }
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
@@ -930,10 +976,33 @@ async fn kb_list(config: &CliConfig, scope: &KbScope) -> Result<()> {
     Ok(())
 }
 
-/// `kb search` implementation — case-insensitive substring match on title.
-async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<()> {
+/// `kb search` implementation — case-insensitive substring match on title/content.
+async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_deferred();
+        let wid = require_world_id(world_id)?;
+        let store = nexus_kb::InMemoryKbStore::new();
+        let kb_query = nexus_kb::KbQuery::new(&wid).with_text_search(query);
+        let result = store.query(&kb_query).await.map_err(|e| {
+            CliError::Other(format!("World KB search failed for {wid}: {e}"))
+        })?;
+        if result.items.is_empty() {
+            println!("No key blocks matching \"{query}\" in world {wid}.");
+        } else {
+            println!("Key blocks matching \"{query}\" in world {wid}:");
+            println!(
+                "{:<20} {:<15} {:<30} STATUS",
+                "BLOCK_ID", "TYPE", "NAME"
+            );
+            for block in &result.items {
+                println!(
+                    "{:<20} {:<15} {:<30} {}",
+                    block.key_block_id,
+                    format!("{:?}", block.block_type),
+                    block.canonical_name,
+                    block.status
+                );
+            }
+        }
         return Ok(());
     }
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
@@ -999,10 +1068,28 @@ async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope) -> Result<(
     Ok(())
 }
 
-/// `kb show` implementation — read and print a single entry file.
-async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+/// `kb show` implementation — read and print a single entry file / key block.
+async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_deferred();
+        let wid = require_world_id(world_id)?;
+        let store = nexus_kb::InMemoryKbStore::new();
+        let block = store.get_key_block(entry_id).await.map_err(|e| {
+            CliError::Other(format!("World KB show failed for {entry_id} in {wid}: {e}"))
+        })?;
+        println!("Key Block: {}", block.key_block_id);
+        println!("  World:      {}", block.world_id);
+        println!("  Name:       {}", block.canonical_name);
+        println!("  Type:       {:?}", block.block_type);
+        println!("  Status:     {}", block.status);
+        println!("  Created:    {}", block.created_at);
+        if let Some(ref body) = block.body {
+            if let Some(ref summary) = body.summary {
+                println!("  Summary:    {summary}");
+            }
+            if let Some(ref tags) = body.tags {
+                println!("  Tags:       {}", tags.join(", "));
+            }
+        }
         return Ok(());
     }
     // F001: Validate entry_id before constructing file path to prevent path traversal.
@@ -1050,7 +1137,7 @@ async fn kb_add(
     scope: &KbScope,
 ) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_deferred();
+        world_scope_write_deferred();
         return Ok(());
     }
     if !file.exists() {
@@ -1135,7 +1222,7 @@ async fn kb_add(
 /// (delete entry file + update index atomically).
 async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_deferred();
+        world_scope_write_deferred();
         return Ok(());
     }
     // F001: Validate entry_id before use.
