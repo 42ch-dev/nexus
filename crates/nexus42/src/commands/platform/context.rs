@@ -1,17 +1,28 @@
-//! Context Command — `nexus42 platform context assemble` and `nexus42 platform context assemble-local`
+//! Context Command — `nexus42 platform context assemble`, `assemble-local`, and `assemble-moment`.
 //!
 //! KCA-002 B2: Context assembly runs CLI in-process via `nexus-moment-context-assembly`.
 //! The daemon context-assemble proxy route is retired. The `assemble-local` subcommand
 //! uses `Stage0Assembly` / `TwoStageAssembly` directly without daemon HTTP.
+//!
+//! V1.25 Theme B: `assemble-moment` is an **experimental** four-domain Moment assembly
+//! path using in-memory stores only (no persistence).
 
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
-use nexus_moment_context_assembly::{Stage0Assembly, TwoStageAssembly};
+use nexus_moment_context_assembly::{
+    assemble_moment, MomentContext, MomentRequest, Stage0Assembly, TwoStageAssembly,
+};
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
+
+// Four-domain Moment demo (experimental, in-memory only)
+use nexus_contracts::{BlockType, TimePolicy, Visibility};
+use nexus_kb::{InMemoryKbStore, KbStore};
+use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore};
+use nexus_narrative::InMemoryNarrativeGateway;
 
 #[cfg(test)]
 use crate::domain::DegradationPolicy;
@@ -110,6 +121,26 @@ pub enum ContextCommand {
         #[arg(long)]
         hint: Option<String>,
     },
+
+    /// [Experimental] Assemble four-domain Moment context (in-memory demo)
+    #[command(hide = true)]
+    AssembleMoment {
+        /// World ID to include in Moment context
+        #[arg(long)]
+        world_id: Option<String>,
+
+        /// User ID for knowledge lookup
+        #[arg(long)]
+        user_id: Option<String>,
+
+        /// Branch ID within the world
+        #[arg(long)]
+        branch_id: Option<String>,
+
+        /// Event ID to focus context around
+        #[arg(long)]
+        event_id: Option<String>,
+    },
 }
 
 /// Run context command
@@ -149,6 +180,49 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
         } => {
             assemble_local_with_routing(config, max_tokens, include_fragments, hint.as_deref())
                 .await
+        }
+        ContextCommand::AssembleMoment {
+            world_id,
+            user_id,
+            branch_id,
+            event_id,
+        } => {
+            let ctx = run_assemble_moment_demo(
+                world_id.as_deref(),
+                user_id.as_deref(),
+                branch_id.as_deref(),
+                event_id.as_deref(),
+            )
+            .await;
+
+            // Print full context to stdout
+            println!("{}", ctx.to_full_context());
+
+            // Print summary to stderr
+            eprintln!("\n--- Moment Assembly (experimental, in-memory) ---");
+            eprintln!("Stage-0: present");
+            eprintln!(
+                "World state: {}",
+                if ctx.world_state.is_some() { "present" } else { "absent" }
+            );
+            eprintln!(
+                "Timeline: {}",
+                if ctx.timeline.is_some() { "present" } else { "absent" }
+            );
+            eprintln!(
+                "World KB: {}",
+                if ctx.world_kb.is_some() { "present" } else { "absent" }
+            );
+            eprintln!(
+                "User knowledge: {}",
+                if ctx.user_knowledge.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                }
+            );
+
+            Ok(())
         }
     }
 }
@@ -416,6 +490,113 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
     }
 
     keywords
+}
+
+// ── V1.25 Theme B: Four-domain Moment assembly (experimental, in-memory) ──────
+
+/// Run four-domain Moment assembly with seeded in-memory demo fixtures.
+///
+/// This is an **experimental demo** command that uses only in-memory stores.
+/// It does not read from or write to any persistent storage. All domain data
+/// is seeded with deterministic fixtures so the output is reproducible.
+///
+/// The four domains assembled are:
+/// 1. Creator Memory (Stage-0: SOUL sections, personality, experience)
+/// 2. Narrative (World state + timeline events)
+/// 3. World KB (key blocks for the world)
+/// 4. User Knowledge (entries for the user)
+///
+/// # Panics
+///
+/// Panics if in-memory store seeding fails (should never happen for in-memory stores).
+#[allow(clippy::future_not_send)]
+pub async fn run_assemble_moment_demo(
+    world_id: Option<&str>,
+    user_id: Option<&str>,
+    branch_id: Option<&str>,
+    _event_id: Option<&str>,
+) -> MomentContext {
+    let kb = InMemoryKbStore::new();
+    let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
+    let knowledge = InMemoryKnowledgeStore::new();
+
+    let wid = world_id.unwrap_or("wld_demo");
+    let uid = user_id.unwrap_or("user_demo");
+
+    // Seed demo fixtures into in-memory stores
+    seed_demo_world(&narrative, wid);
+    seed_demo_timeline_event(&narrative, wid);
+    seed_demo_kb_block(&kb, wid).await;
+    seed_demo_knowledge(&knowledge, uid).await;
+
+    // Build Stage0Assembly with demo content
+    let stage0 = Stage0Assembly {
+        personality: "I am a demo creator exploring four-domain Moment assembly.".to_string(),
+        experience: "Experimental four-domain context assembly demo.".to_string(),
+        long_term_memories: Vec::new(),
+        fragment_keywords: Vec::new(),
+        system_prefix: String::new(),
+        user_prompt: "Demo moment context assembly.".to_string(),
+        max_tokens: None,
+    };
+
+    // Build MomentRequest
+    let mut request = MomentRequest::new(stage0).with_world(wid).with_user(uid);
+    if let Some(bid) = branch_id {
+        request = request.with_branch(bid);
+    }
+
+    // Call assemble_moment
+    assemble_moment(&request, &narrative, &kb, &knowledge).await
+}
+
+/// Seed a demo world into the in-memory narrative gateway.
+fn seed_demo_world(narrative: &InMemoryNarrativeGateway<InMemoryKbStore>, world_id: &str) {
+    let world = nexus_narrative::world::World::new(
+        world_id,
+        "ctr_demo",
+        "Demo World",
+        "demo-world",
+        Visibility::Private,
+        TimePolicy::Manual,
+    );
+    narrative.insert_world(world);
+}
+
+/// Seed a demo timeline event into the in-memory narrative gateway.
+fn seed_demo_timeline_event(
+    narrative: &InMemoryNarrativeGateway<InMemoryKbStore>,
+    world_id: &str,
+) {
+    let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
+        world_id,
+        "fbk_root",
+        nexus_narrative::timeline_event::TimelineEventType::StoryAdvance,
+        1,
+    );
+    event.title = Some("Demo story event — the beginning".to_string());
+    narrative.insert_event(event);
+}
+
+/// Seed a demo KB block into the in-memory KB store.
+async fn seed_demo_kb_block(kb: &InMemoryKbStore, world_id: &str) {
+    let block = nexus_kb::key_block::KeyBlock::new(world_id, BlockType::Character, "Demo Hero");
+    kb.insert_key_block(block)
+        .await
+        .expect("in-memory KB seed should not fail");
+}
+
+/// Seed a demo knowledge entry into the in-memory knowledge store.
+async fn seed_demo_knowledge(knowledge: &InMemoryKnowledgeStore, user_id: &str) {
+    let entry = nexus_knowledge::KnowledgeEntry::new(
+        user_id,
+        vec![nexus_knowledge::KnowledgeTag::new("demo")],
+        "Demo user knowledge entry for Moment assembly.",
+    );
+    knowledge
+        .store(entry)
+        .await
+        .expect("in-memory knowledge seed should not fail");
 }
 
 #[cfg(test)]
