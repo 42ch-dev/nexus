@@ -21,7 +21,7 @@
       "tags": ["v1.24", "knowledge", "audit", "architecture", "local-api", "kb-semantics"],
       "created_at": "2026-05-22",
       "updated_at": "2026-05-22",
-      "notes": "Done. Batches A–E complete. QC tri-review: 3× Approve (0 Critical, 0 Warning). QA: clippy clean, all tests pass. 352 lines dead code removed (daemon context/assemble proxy). Work-scope KB isolated and documented.",
+      "notes": "Done. Batches A–E complete. QC tri-review: 3× Approve (0 Critical, 0 Warning). QA: clippy clean, all tests pass. 352 lines dead code removed (daemon context/assemble proxy). Work-scope KB isolated and documented. R1/R2 (accept) archived; R3/R4 (defer) remain open.",
       "metadata": {
         "phase": "done",
         "priority": "high",
@@ -108,7 +108,7 @@
     "latest_shipped_iteration": "v1.23",
     "latest_shipped_at": "2026-05-21T21:54:13Z",
     "tech_debt_summary": {
-      "updated_at": "2026-05-22T16:30:00Z",
+  "updated_at": "2026-05-22T17:00:00Z",
       "total_open": 0,
       "by_severity": {
         "critical": 0,
@@ -133,30 +133,6 @@
   },
   "residual_findings": {
     "2026-05-22-v1.24-knowledge-crates-alignment": [
-      {
-        "id": "R1",
-        "title": "try_platform_assemble unconditionally returns None — TwoStageAssembly path is dead code until future platform API",
-        "severity": "suggestion",
-        "source": "qc1 S-001",
-        "scope": "crates/nexus42/src/commands/platform/context.rs",
-        "decision": "accept",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "tracking_link": "DF-42 (full KB route redesign)",
-        "note": "Intentional per KCA-002 B2. Dead code is scaffolding for future cloud-stage integration."
-      },
-      {
-        "id": "R2",
-        "title": "Future platform API placeholder clarity in context assembly",
-        "severity": "suggestion",
-        "source": "qc2 S-001",
-        "scope": "crates/nexus42/src/commands/platform/context.rs",
-        "decision": "accept",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "tracking_link": null,
-        "note": "Consider upgrading debug! to warn! (once-per-process) so operators notice the cloud-stage gap."
-      },
       {
         "id": "R3",
         "title": "Daemon KB request DTOs lack scope field — non-work values silently ignored",
