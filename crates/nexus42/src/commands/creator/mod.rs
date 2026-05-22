@@ -759,12 +759,16 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     }
     match cmd {
         KbCommand::List { scope, world_id } => kb_list(config, &scope, world_id.as_deref()).await,
-        KbCommand::Search { query, scope, world_id } => {
-            kb_search(config, &query, &scope, world_id.as_deref()).await
-        }
-        KbCommand::Show { entry_id, scope, world_id } => {
-            kb_show(config, &entry_id, &scope, world_id.as_deref()).await
-        }
+        KbCommand::Search {
+            query,
+            scope,
+            world_id,
+        } => kb_search(config, &query, &scope, world_id.as_deref()).await,
+        KbCommand::Show {
+            entry_id,
+            scope,
+            world_id,
+        } => kb_show(config, &entry_id, &scope, world_id.as_deref()).await,
         KbCommand::Add { file, title, scope } => {
             kb_add(config, &file, title.as_deref(), &scope).await
         }
@@ -900,17 +904,15 @@ async fn kb_list(config: &CliConfig, scope: &KbScope, world_id: Option<&str>) ->
     if scope == &KbScope::World {
         let wid = require_world_id(world_id)?;
         let store = nexus_kb::InMemoryKbStore::new();
-        let blocks = store.list_by_world(&wid).await.map_err(|e| {
-            CliError::Other(format!("World KB list failed for {wid}: {e}"))
-        })?;
+        let blocks = store
+            .list_by_world(&wid)
+            .await
+            .map_err(|e| CliError::Other(format!("World KB list failed for {wid}: {e}")))?;
         if blocks.is_empty() {
             println!("No key blocks in world {wid}.");
         } else {
             println!("Key blocks in world {wid}:");
-            println!(
-                "{:<20} {:<15} {:<30} STATUS",
-                "BLOCK_ID", "TYPE", "NAME"
-            );
+            println!("{:<20} {:<15} {:<30} STATUS", "BLOCK_ID", "TYPE", "NAME");
             for block in &blocks {
                 println!(
                     "{:<20} {:<15} {:<30} {}",
@@ -977,22 +979,25 @@ async fn kb_list(config: &CliConfig, scope: &KbScope, world_id: Option<&str>) ->
 }
 
 /// `kb search` implementation — case-insensitive substring match on title/content.
-async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
+async fn kb_search(
+    config: &CliConfig,
+    query: &str,
+    scope: &KbScope,
+    world_id: Option<&str>,
+) -> Result<()> {
     if scope == &KbScope::World {
         let wid = require_world_id(world_id)?;
         let store = nexus_kb::InMemoryKbStore::new();
         let kb_query = nexus_kb::KbQuery::new(&wid).with_text_search(query);
-        let result = store.query(&kb_query).await.map_err(|e| {
-            CliError::Other(format!("World KB search failed for {wid}: {e}"))
-        })?;
+        let result = store
+            .query(&kb_query)
+            .await
+            .map_err(|e| CliError::Other(format!("World KB search failed for {wid}: {e}")))?;
         if result.items.is_empty() {
             println!("No key blocks matching \"{query}\" in world {wid}.");
         } else {
             println!("Key blocks matching \"{query}\" in world {wid}:");
-            println!(
-                "{:<20} {:<15} {:<30} STATUS",
-                "BLOCK_ID", "TYPE", "NAME"
-            );
+            println!("{:<20} {:<15} {:<30} STATUS", "BLOCK_ID", "TYPE", "NAME");
             for block in &result.items {
                 println!(
                     "{:<20} {:<15} {:<30} {}",
@@ -1069,7 +1074,12 @@ async fn kb_search(config: &CliConfig, query: &str, scope: &KbScope, world_id: O
 }
 
 /// `kb show` implementation — read and print a single entry file / key block.
-async fn kb_show(config: &CliConfig, entry_id: &str, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
+async fn kb_show(
+    config: &CliConfig,
+    entry_id: &str,
+    scope: &KbScope,
+    world_id: Option<&str>,
+) -> Result<()> {
     if scope == &KbScope::World {
         let wid = require_world_id(world_id)?;
         let store = nexus_kb::InMemoryKbStore::new();
