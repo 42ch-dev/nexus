@@ -325,13 +325,7 @@ fn v2_target_daemon_subcommands() {
     let help_text = String::from_utf8(output).unwrap();
 
     for subcmd in &[
-        "start",
-        "stop",
-        "restart",
-        "status",
-        "logs",
-        "doctor",
-        "schedule",
+        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
     ] {
         assert!(
             help_text.contains(subcmd),
