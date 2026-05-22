@@ -222,14 +222,14 @@
       "id": "2026-05-22-v1.25-theme-b-moment-four-domain",
       "title": "V1.25 Theme B — Moment four-domain product path (assemble_moment CLI entry)",
       "file": ".agents/plans/2026-05-22-v1.25-theme-b-moment-four-domain.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@architect", "@project-manager", "@fullstack-dev", "@qc-specialist", "@qa-engineer"],
-      "progress": 0,
+      "progress": 20,
       "tags": ["v1.25", "context-assembly", "moment", "four-domain", "cli"],
       "created_at": "2026-05-22",
       "updated_at": "2026-05-22",
-      "notes": "Plan created. In-memory demo approach for assemble_moment CLI entry. Not yet started.",
+      "notes": "B0 gate confirmed: in-memory demo approach. Dispatching Batch B1+B2 to @fullstack-dev.",
       "metadata": {
         "phase": "todo",
         "priority": "medium",
@@ -243,11 +243,11 @@
         ],
         "gates": {
           "specify": "pass",
-          "clarify": "pending",
+          "clarify": "pass",
           "plan": "pass",
           "branch_policy": "feature"
         },
-        "next_action": "Awaiting B0 decision gate (confirm in-memory demo approach)."
+        "next_action": "B0 gate confirmed. Batch B1+B2 dispatched to @fullstack-dev."
       }
     },
     {
