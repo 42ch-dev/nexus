@@ -1,0 +1,30 @@
+[
+  {
+    "id": "R1",
+    "title": "try_platform_assemble unconditionally returns None — TwoStageAssembly path is dead code until future platform API",
+    "severity": "suggestion",
+    "source": "qc1 S-001",
+    "scope": "crates/nexus42/src/commands/platform/context.rs",
+    "decision": "accept",
+    "closure_note": "Intentional per KCA-002 B2. Dead code is scaffolding for future cloud-stage integration. Accepted as permanent.",
+    "owner": "@fullstack-dev",
+    "target_date": "backlog",
+    "tracking_link": "DF-42 (full KB route redesign)",
+    "note": "Intentional per KCA-002 B2. Dead code is scaffolding for future cloud-stage integration.",
+    "closed_at": "2026-05-22"
+  },
+  {
+    "id": "R2",
+    "title": "Future platform API placeholder clarity in context assembly",
+    "severity": "suggestion",
+    "source": "qc2 S-001",
+    "scope": "crates/nexus42/src/commands/platform/context.rs",
+    "decision": "accept",
+    "closure_note": "Accepted as low-priority improvement. Upgrading debug! to warn! can be done when cloud-stage integration is prioritized.",
+    "owner": "@fullstack-dev",
+    "target_date": "backlog",
+    "tracking_link": null,
+    "note": "Consider upgrading debug! to warn! (once-per-process) so operators notice the cloud-stage gap.",
+    "closed_at": "2026-05-22"
+  }
+]
