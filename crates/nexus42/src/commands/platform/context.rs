@@ -1,8 +1,8 @@
 //! Context Command — `nexus42 platform context assemble` and `nexus42 platform context assemble-local`
 //!
 //! KCA-002 B2: Context assembly runs CLI in-process via `nexus-moment-context-assembly`.
-//! The daemon `POST /v1/local/context/assemble` route is retired. The `assemble-local`
-//! subcommand uses `Stage0Assembly` / `TwoStageAssembly` directly without daemon HTTP.
+//! The daemon context-assemble proxy route is retired. The `assemble-local` subcommand
+//! uses `Stage0Assembly` / `TwoStageAssembly` directly without daemon HTTP.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -53,7 +53,7 @@ pub fn validate_world_id(s: &str) -> std::result::Result<String, String> {
 
 #[derive(Debug, Subcommand)]
 pub enum ContextCommand {
-    /// Assemble context for a world via the Local API
+    /// Assemble context for a world via future direct platform context API
     Assemble {
         /// World ID (required for context assembly, format: wld_[a-zA-Z0-9]+)
         #[arg(long, value_parser = validate_world_id)]
@@ -326,7 +326,7 @@ async fn build_stage0_from_local(
 
 /// Try to obtain a platform assemble response (best-effort).
 ///
-/// KCA-002 B2: The daemon `POST /v1/local/context/assemble` proxy route is retired.
+/// KCA-002 B2: The daemon context-assemble proxy route is retired.
 /// This function is a placeholder for future direct platform API integration.
 /// Currently always returns `None`, causing the caller to fall back to
 /// in-process `Stage0Assembly`.
