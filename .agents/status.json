@@ -331,7 +331,7 @@
       "id": "2026-05-22-v1.25-theme-c-domain-crate-wiring",
       "title": "V1.25 Theme C \u2014 Domain crate product wiring (narrative/kb/knowledge surfaces)",
       "file": ".agents/plans/2026-05-22-v1.25-theme-c-domain-crate-wiring.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@architect",
@@ -340,7 +340,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.25",
         "narrative",
@@ -351,9 +351,9 @@
       ],
       "created_at": "2026-05-22",
       "updated_at": "2026-05-22",
-      "notes": "Plan created. Minimal narrative daemon surface + world-scope KB + persistence ADR. Not yet started.",
+      "notes": "Done. C0 gate confirmed. C1.1: narrative routes, C1.2: world-scope KB wiring, C2: reference_sources ADR. QA: all clean. QC1: Approve (2W+2S non-blocking).",
       "metadata": {
-        "phase": "todo",
+        "phase": "done",
         "priority": "medium",
         "description": "Add minimal narrative read surface via NarrativeGateway; wire creator kb --scope world to nexus-kb; write reference_sources persistence ADR.",
         "working_branch": "feature/v1.25-knowledge-product-wiring",
@@ -371,7 +371,7 @@
           "plan": "pass",
           "branch_policy": "feature"
         },
-        "next_action": "Awaiting C0 decision gate (confirm in-memory approach + ADR direction)."
+        "next_action": "Done."
       }
     }
   ],
