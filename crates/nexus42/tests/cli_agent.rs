@@ -289,25 +289,8 @@ fn daemon_shows_new_subcommands() {
         .stdout(predicate::str::contains("status"))
         .stdout(predicate::str::contains("logs"))
         .stdout(predicate::str::contains("doctor"))
-        .stdout(predicate::str::contains("orchestrate"));
-}
-
-/// Test `nexus42 daemon orchestrate --help` shows subcommands.
-#[test]
-fn daemon_orchestrate_shows_subcommands() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("daemon")
-        .arg("orchestrate")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("list"))
-        .stdout(predicate::str::contains("run"))
-        .stdout(predicate::str::contains("pause"))
-        .stdout(predicate::str::contains("resume"))
-        .stdout(predicate::str::contains("cancel"))
-        .stdout(predicate::str::contains("inspect"));
+        .stdout(predicate::str::contains("schedule"))
+        .stdout(predicate::str::contains("orchestrate").not());
 }
 
 /// Test `nexus42 --help` no longer shows agent/session/policy/permission as top-level.

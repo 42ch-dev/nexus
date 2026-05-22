@@ -58,6 +58,9 @@ fn agent_host_routes() -> Router<WorkspaceState> {
 }
 
 /// Orchestration engine and schedule routes.
+///
+/// The CLI exercises these session-control routes through `daemon schedule`;
+/// there is intentionally no separate direct daemon session-control CLI group.
 fn orchestration_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(

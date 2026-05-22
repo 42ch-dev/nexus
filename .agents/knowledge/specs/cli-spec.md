@@ -309,7 +309,6 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 ### 6.3 `nexus42 daemon`（运行态控制命令组）
 
 - `nexus42 daemon start|stop|restart|status|logs|doctor`
-- `nexus42 daemon orchestrate list|run|pause|resume|cancel|inspect`
 - `nexus42 daemon schedule add|edit|remove|list|inspect|context|context-history|start|pause|resume|cancel|advance|timeline`
 
 说明：
@@ -317,7 +316,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 - daemon runtime 是本地 supervisor，不是 ACP Agent/Server。
 - `daemon` 负责运行态控制，不承载 ACP 协议协商职责。
 - **Shipped:** `daemon schedule ...` is wired to the daemon orchestration schedules Local API (`/v1/local/orchestration/schedules/*`) via `commands/daemon/schedule.rs`.
-- **Deferred:** `daemon orchestrate list|run|pause|resume|cancel|inspect` are CLI placeholders today; `commands/daemon/mod.rs` prints “Coming soon” for each subcommand until thin wrappers over orchestration session-control APIs are implemented.
+- **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
 
 ### 6.4 `nexus42 acp`（能力协议命令组）
 
@@ -362,7 +361,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | User intent | CLI group | ACP / preset contract |
 | --- | --- | --- |
 | Structured state sync | `nexus42 sync ...` | `sync.*` + bundle/delta contracts |
-| Runtime orchestration control | `nexus42 daemon schedule ...` (**Shipped**) / `nexus42 daemon orchestrate ...` (**Deferred placeholders**) | schedule commands call daemon orchestration schedules Local API; orchestrate session-control wrappers are future work |
+| Runtime orchestration control | `nexus42 daemon schedule ...` (**Shipped**) | schedule commands call daemon orchestration schedules Local API and own session control via `current_session_id` + supervisor signal cascade |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
 | Context assembly snapshot | `nexus42 platform context assemble-local` / current `platform context` implementation path (**Shipped Stage-0/TwoStage**); future `platform context assemble` full Moment path (**Deferred**) | shipped path is CLI in-process via `Stage0Assembly` / `TwoStageAssembly` and creator-memory sources; full four-domain `assemble_moment` is not called from `nexus42`; daemon context-assemble Local API is **Retired** (KCA-002 B2) |
 | Manuscript read/write | 无顶层独立命令组 | `manuscript.*` ACP capabilities + preset roots |
