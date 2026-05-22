@@ -1,10 +1,23 @@
-//! Knowledge Base (KB) handlers (V1.20 Batch 5, T39).
+//! **Work-scope** local file index handlers (V1.20 Batch 5, T39; scope clarified KCA-003 C2).
 //!
-//! CRUD endpoints for local KB entries:
-//! - `GET /v1/local/kb/entries` — list/search KB entries
-//! - `POST /v1/local/kb/entries` — add KB entry
-//! - `GET /v1/local/kb/entries/{id}` — get single KB entry
-//! - `DELETE /v1/local/kb/entries/{id}` — delete KB entry
+//! These endpoints implement the **CLI local work KB index** — a per-creator, per-workspace
+//! file-based index stored under `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`.
+//!
+//! **This is NOT `nexus-kb` (World-scoped narrative KB graph) or `nexus-knowledge`
+//! (User-scoped global knowledge).** Only `scope=work` is implemented. See
+//! [entity-scope-model.md §5.3](../../../../../.agents/knowledge/specs/entity-scope-model.md#53-cli-creator-kb--local-work-scope-file-index)
+//! for the canonical scope definitions.
+//!
+//! # Endpoints
+//!
+//! - `GET /v1/local/kb/entries` — list/search work-scope entries
+//! - `POST /v1/local/kb/entries` — add work-scope entry
+//! - `GET /v1/local/kb/entries/{id}` — get single work-scope entry
+//! - `DELETE /v1/local/kb/entries/{id}` — delete work-scope entry
+//!
+//! Future World KB routes (`nexus-kb` + `nexus-narrative`) and User knowledge routes
+//! (`nexus-knowledge`) are **not** served here. Full KB route redesign is deferred
+//! (V1.24 non-goal).
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -80,7 +93,10 @@ pub struct DeleteKbEntryResponse {
     pub deleted: bool,
 }
 
-// ─── KB Index types ────────────────────────────────────────────────────────
+// ─── Work-scope KB Index types ─────────────────────────────────────────────
+//
+// These types represent the local work file index, NOT the World KB graph
+// (nexus-kb) or User knowledge (nexus-knowledge).
 
 /// KB index on disk: `{"entries": [{"entry_id": "...", "title": "...", "created_at": "..."}]}`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -181,7 +197,10 @@ fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
     format!("{base_id}_overflow")
 }
 
-// ─── KB Entry Index (QC3 W-005) ──────────────────────────────────────────
+// ─── Work-scope KB Entry Index (QC3 W-005) ─────────────────────────────────
+//
+// In-memory index over work-scope entry files for O(1) lookup by entry_id.
+// Only covers the local work file index — no World KB or User knowledge.
 
 /// Key for the KB entry index: [`String`] → (`creator_id`, `workspace_slug`).
 type EntryLocationMap = HashMap<String, (String, String)>;
@@ -289,7 +308,10 @@ fn remove_from_kb_entry_index(entry_id: &str) {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/kb/entries` — list/search KB entries (T39)
+/// `GET /v1/local/kb/entries` — list/search work-scope entries (T39).
+///
+/// Returns entries from the local work file index for the given creator/workspace.
+/// Only `scope=work` is supported; no World KB or User knowledge access.
 pub async fn list_entries(
     State(_state): State<WorkspaceState>,
     Query(query): Query<ListKbEntriesQuery>,
@@ -358,7 +380,9 @@ pub async fn list_entries(
     }))
 }
 
-/// `POST /v1/local/kb/entries` — add KB entry (T39)
+/// `POST /v1/local/kb/entries` — add work-scope entry (T39).
+///
+/// Adds an entry to the local work file index. Only `scope=work` is supported.
 pub async fn add_entry(
     State(_state): State<WorkspaceState>,
     Json(req): Json<AddKbEntryRequest>,
@@ -473,9 +497,10 @@ pub async fn add_entry(
     }))
 }
 
-/// `GET /v1/local/kb/entries/{id}` — get single KB entry (T39)
+/// `GET /v1/local/kb/entries/{id}` — get single work-scope entry (T39).
 ///
 /// Uses the KB entry index for O(1) lookup (QC3 W-005).
+/// Only `scope=work` is supported.
 pub async fn get_entry(
     State(_state): State<WorkspaceState>,
     Path(entry_id): Path<String>,
@@ -586,9 +611,10 @@ pub async fn get_entry(
     )))
 }
 
-/// `DELETE /v1/local/kb/entries/{id}` — delete KB entry (T39)
+/// `DELETE /v1/local/kb/entries/{id}` — delete work-scope entry (T39).
 ///
 /// Uses the KB entry index for O(1) lookup (QC3 W-005).
+/// Only `scope=work` is supported.
 pub async fn delete_entry(
     State(_state): State<WorkspaceState>,
     Path(entry_id): Path<String>,
@@ -739,5 +765,27 @@ mod tests {
         };
         let id = deduplicate_entry_id("kb_test", &index);
         assert_eq!(id, "kb_test_1");
+    }
+
+    /// Work-scope invariant: resolve_kb_paths always uses the local workspace file
+    /// index path under `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`.
+    /// This test verifies the path structure matches the work-scope file index layout,
+    /// NOT the World KB (`nexus-kb`) or User knowledge (`nexus-knowledge`) paths.
+    #[test]
+    fn resolve_kb_paths_uses_work_scope_layout() {
+        let home = std::path::Path::new("/home/test");
+        let (kb_dir, entries_dir) = resolve_kb_paths(home, "creator_1", Some("default"));
+        assert!(kb_dir.ends_with("kb"));
+        assert!(entries_dir.ends_with("entries"));
+        assert!(
+            kb_dir.starts_with("/home/test/.nexus42/creators/creator_1/workspaces/default"),
+            "work-scope KB dir must be under local workspace path, got: {}",
+            kb_dir.display()
+        );
+        assert!(
+            entries_dir.starts_with("/home/test/.nexus42/creators/creator_1/workspaces/default"),
+            "work-scope entries dir must be under local workspace path, got: {}",
+            entries_dir.display()
+        );
     }
 }

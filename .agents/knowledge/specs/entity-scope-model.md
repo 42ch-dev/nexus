@@ -117,7 +117,7 @@ explicitly declares uniqueness.
 | `nexus-home-layout` | Storage paths for `User`/`Creator` local material | Owns stable `~/.nexus42/` path helpers only. It does not own entity invariants. |
 | `nexus-local-db` | Storage mechanics across Creator/workspace working copies | Owns SQLite initialization, migration, versioning, and shared local persistence APIs. It does not own narrative or User semantics. |
 | `nexus-cloud-domain` | `User`, `Pairing` | Owns User/Pairing domain invariants and mappings from contract types. No HTTP transport. |
-| `nexus-cloud-sync` | Cloud transport for User/Pairing and sync bundles | Owns platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants instead of reimplementing or bypassing them. Current wiring that omits this dependency is a V1.23 alignment gap, not the target model. |
+| `nexus-cloud-sync` | Cloud transport for User/Pairing and sync bundles | Owns platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants instead of reimplementing or bypassing them; current Cargo wiring includes this dependency. |
 | `nexus-creator` | `Creator` | Owns Creator aggregate logic, credential/cache hooks, active Creator local state, and conversions over contract types. No platform HTTP. |
 | `nexus-creator-memory` | `Creator` memory subdomain | Owns SOUL, long-term memory, review, and personality/experience I/O under Creator scope. |
 | `nexus-knowledge` | `User` knowledge | Owns user-scoped global knowledge/reference indexing and storage. It is not Creator-scoped and does not own narrative KeyBlocks. It provides material that moment assembly may pull into a Moment. |

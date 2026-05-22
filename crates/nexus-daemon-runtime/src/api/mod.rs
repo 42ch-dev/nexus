@@ -149,7 +149,12 @@ fn preset_routes() -> Router<WorkspaceState> {
         )
 }
 
-/// KB routes (V1.20 Batch 5, T39).
+/// Work-scope KB routes — local work file index only (V1.20 Batch 5, T39; KCA-003 C2).
+///
+/// These routes serve the CLI local work KB index under
+/// `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`. They do **not**
+/// provide World KB (`nexus-kb`) or User knowledge (`nexus-knowledge`) access.
+/// Full KB route redesign is deferred to a future iteration.
 fn kb_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
