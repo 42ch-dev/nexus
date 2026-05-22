@@ -35,13 +35,14 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.20-delivery-compass-v1.md](v1.20-delivery-compass-v1.md) | V1.20 | **Shipped** (2026-05-19) |
 | [v1.21-local-platform-isolation-delivery-compass-v1.md](v1.21-local-platform-isolation-delivery-compass-v1.md) | V1.21 | **InProgress** — plan [`2026-05-20-v1.21-local-platform-isolation`](../plans/2026-05-20-v1.21-local-platform-isolation.md) |
 | [v1.22-cli-deprecation-cleanup-delivery-compass-v1.md](v1.22-cli-deprecation-cleanup-delivery-compass-v1.md) | V1.22 | **Shipped** (2026-05-21) |
-| [v1.24-knowledge-crates-alignment-audit-compass-v1.md](v1.24-knowledge-crates-alignment-audit-compass-v1.md) | V1.24 audit | **Active** — knowledge ↔ crates drift SSOT (2026-05-22) |
+| [v1.24-knowledge-crates-alignment-audit-compass-v1.md](v1.24-knowledge-crates-alignment-audit-compass-v1.md) | V1.24 audit | **Shipped** (2026-05-22) — doc refresh + KCA-002/003; plan Done |
+| [v1.25-knowledge-crates-product-wiring-audit-compass-v1.md](v1.25-knowledge-crates-product-wiring-audit-compass-v1.md) | V1.25 audit | **Active** — third-pass SSOT: product wiring, moment path, CLI parity (2026-05-22) |
 
 ### Reference compasses
 
 | Document | Version | Status |
 | --- | --- | --- |
-| [v1.23-architecture-crate-wiring-reference-compass-v1.md](v1.23-architecture-crate-wiring-reference-compass-v1.md) | V1.23 reference | Reference — non-binding; Cargo target largely met; see V1.24 audit for product gaps |
+| [v1.23-architecture-crate-wiring-reference-compass-v1.md](v1.23-architecture-crate-wiring-reference-compass-v1.md) | V1.23 reference | Reference — non-binding; Cargo target largely met; see V1.24/V1.25 audits for product gaps |
 
 ### Legacy `v1.*` iteration artifacts
 

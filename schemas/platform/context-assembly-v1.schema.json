@@ -3,18 +3,18 @@
   "$id": "https://nexus42.invalid/schemas/platform/context-assembly-v1.schema.json",
   "schema_version": 1,
   "title": "ContextAssemblyV1",
-  "description": "Context Assembly request/response schemas for POST /v1/local/context/assemble. CLI sends request to request a stable read-only context snapshot from the platform.",
+  "description": "Context Assembly request/response schemas for platform HTTP context assembly and CLI in-process context assembly flows. CLI uses these shapes to request a stable read-only context snapshot from the platform when direct platform integration is available.",
   "type": "object",
   "definitions": {
     "ContextAssembleRequestV1": {
-      "description": "Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform.",
+      "description": "Request shape for platform HTTP context assembly. CLI sends this to request a stable read-only context snapshot from the platform when direct platform integration is available.",
       "type": "object",
       "required": ["request_id", "workspace_id", "creator_id", "world_id"],
       "properties": {
         "request_id": {
           "type": "string",
           "minLength": 1,
-          "description": "Caller-generated traceable ID (Local API envelope)"
+          "description": "Caller-generated traceable ID for request/response correlation"
         },
         "workspace_id": {
           "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorkspaceId"
@@ -107,7 +107,7 @@
       "additionalProperties": false
     },
     "ContextAssembleResponseV1": {
-      "description": "Response shape for POST /v1/local/context/assemble. Platform returns a stable read-only context snapshot.",
+      "description": "Response shape for platform HTTP context assembly. Platform returns a stable read-only context snapshot.",
       "type": "object",
       "required": ["request_id", "success", "world_id", "assembled_at"],
       "properties": {

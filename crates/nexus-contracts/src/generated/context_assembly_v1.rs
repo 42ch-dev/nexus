@@ -1,13 +1,13 @@
 //! `ContextAssemblyV1`
 //!
-//! `Context` `Assembly` request/response schemas for `POST` /v1/local/context/assemble. `CLI` sends request to request a stable read-only context snapshot from the platform.
+//! `Context` `Assembly` request/response schemas for platform `HTTP` context assembly and `CLI` in-process context assembly flows. `CLI` uses these shapes to request a stable read-only context snapshot from the platform when direct platform integration is available.
 //!
 //! `@schema_version` 1
 //! `@source` context-assembly-v1.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// `Request` shape for `POST` /v1/local/context/assemble. `CLI` sends this to request a stable read-only context snapshot from the platform.
+/// `Request` shape for platform `HTTP` context assembly. `CLI` sends this to request a stable read-only context snapshot from the platform when direct platform integration is available.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleRequestV1 {
@@ -73,7 +73,7 @@ pub struct ContextAssembleResponseV1MemoryItem {
     pub memory_kind: String,
     pub content: String,
 }
-/// `Response` shape for `POST` /v1/local/context/assemble. `Platform` returns a stable read-only context snapshot.
+/// `Response` shape for platform `HTTP` context assembly. `Platform` returns a stable read-only context snapshot.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1 {

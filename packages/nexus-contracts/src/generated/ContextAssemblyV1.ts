@@ -2,7 +2,7 @@ import type { SchemaVersion } from './CommonTypes';
 /**
  * ContextAssemblyV1
  *
- * Context Assembly request/response schemas for POST /v1/local/context/assemble. CLI sends request to request a stable read-only context snapshot from the platform.
+ * Context Assembly request/response schemas for platform HTTP context assembly and CLI in-process context assembly flows. CLI uses these shapes to request a stable read-only context snapshot from the platform when direct platform integration is available.
  *
  * @schema_version 1
  * @source context-assembly-v1.schema.json
@@ -11,7 +11,7 @@ import type { SchemaVersion } from './CommonTypes';
 /** Inline enum type */
 export type ContextAssembleRequestV1MemoryKinds = 'story_summary' | 'research_material' | 'review_note' | 'character_note' | 'world_building' | 'plot_outline' | 'theme_analysis' | 'location_reference' | 'timeline_note' | 'dialogue_snippet' | 'symbol_motif' | 'custom';
 
-/** Request shape for POST /v1/local/context/assemble. CLI sends this to request a stable read-only context snapshot from the platform. */
+/** Request shape for platform HTTP context assembly. CLI sends this to request a stable read-only context snapshot from the platform when direct platform integration is available. */
 export interface ContextAssembleRequestV1 {
   request_id: string;
   workspace_id: string;
@@ -29,7 +29,7 @@ export interface ContextAssembleRequestV1 {
   max_story_summaries?: number | null;
   as_of?: string | null;
 }
-/** Response shape for POST /v1/local/context/assemble. Platform returns a stable read-only context snapshot. */
+/** Response shape for platform HTTP context assembly. Platform returns a stable read-only context snapshot. */
 export interface ContextAssembleResponseV1 {
   request_id: string;
   success: boolean;

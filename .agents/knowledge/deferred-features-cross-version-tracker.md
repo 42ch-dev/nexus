@@ -58,12 +58,47 @@
 | DF-35 | ACP prompt capability (stores prompt, no real execution) | V1.21 audit | Any future | M | `orchestration/capability/builtins/acp_prompt.rs` — stores prompt text; `[acp.prompt stub: ...]`. WS3 stub. |
 | DF-36 | ACP session load capability (stub success) | V1.21 audit | Any future | S | `orchestration/capability/builtins/acp_session_load.rs` — returns stub success. WS3 stub. |
 | DF-37 | InnerGraphNodeTask / AcpPromptTask stub mode fallback | V1.21 audit | Any future | S | `orchestration/tasks/mod.rs` — no worker handle → placeholder output. Intentional safe fallback, but real IPC needed. |
-| DF-38 | OrchestrationEngine instantiation stub in daemon | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — `OrchestrationEngine` instantiation is stub. Subsystem not wired. |
-| DF-39 | Worker Manager subsystem stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — Worker Manager start is stub. Subsystem not wired. |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
 | DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
-| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | Any future | M | V1.24 audit compass; `nexus-knowledge` currently uses in-memory store. Full persistence deferred beyond V1.24. |
+| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | Any future | M | V1.24 audit compass → V1.25 Theme C decision recorded below. `nexus-knowledge` currently uses in-memory store. Production `reference_sources` persistence remains owned by `nexus-local-db`; crate-model integration/persistence adapter remains deferred. |
+
+#### DF-43 decision note — Reference sources persistence (V1.25 Theme C)
+
+**Status:** Decision accepted in V1.25 Theme C Batch C2; implementation remains **Open**.
+
+Nexus currently has two reference source models with different ownership boundaries:
+
+1. **`nexus-local-db` production persistence** — the shipped SQLite-backed `reference_sources` table in `state.db`, with columns such as `reference_source_id`, `workspace_id`, `source_type`, `uri`, `title`, `tags`, `content_hash`, and `scan_status`. This is the production path for local runtime reference data and daemon reference listing.
+2. **`nexus-knowledge::ReferenceSource` crate model** — an in-crate domain model for User-scoped knowledge/reference indexing. Today it is backed only by in-memory store wiring and is not the production persistence owner for `reference_sources`.
+
+**Decision:** Keep the current `nexus-local-db` `reference_sources` table as the production persistence owner for reference sources. `nexus-knowledge::ReferenceSource` remains an in-memory crate model for now. It may be aligned with, adapted to, or integrated into the production path in a later plan, but it is not the persistence owner today.
+
+**Options considered:**
+
+| Option | Summary | Result |
+| --- | --- | --- |
+| A — Keep `nexus-local-db` as production owner | Continue using the current SQLite table and daemon reference listing path. | **Accepted** — lowest risk and matches shipped behavior. |
+| B — Migrate production persistence to `nexus-knowledge` | Make `nexus-knowledge::ReferenceSource` the production model behind a persistent adapter. | Deferred — requires adapter, migration design, daemon/API integration, and regression testing. |
+| C — Hybrid adapter now | Keep the table but immediately add an adapter so `nexus-knowledge` reads/writes through it. | Deferred — still adds production behavior and ownership decisions outside V1.25 Theme C. |
+
+**Rationale:**
+
+- `nexus-local-db` is the current production storage boundary for local SQLite state and already owns the shared `reference_sources` table.
+- `nexus-knowledge` does not currently provide a SQLite- or file-backed persistent store implementation for `ReferenceSource`.
+- V1.25 Theme C confirmed an in-memory posture for new domain-crate wiring; migrating production ownership to `nexus-knowledge` requires a separate implementation plan covering adapter boundaries, data migration, daemon/API regression, and compatibility with existing `state.db` contents.
+
+**Risks and controls:**
+
+| Risk | Control |
+| --- | --- |
+| Readers assume `nexus-knowledge::ReferenceSource` is production-persisted. | This tracker explicitly states that `nexus-local-db` is the production persistence owner. |
+| Duplicate models drift further. | Keep DF-43 open for crate-model integration and persistence-adapter work. |
+| Future migration changes shipped local data behavior without review. | Require a follow-up plan before changing production ownership or `state.db` migration behavior. |
+
+**Future migration trigger:** Re-evaluate when `nexus-knowledge` has a proposed SQLite/file-backed persistence adapter for `ReferenceSource` and a concrete migration plan. Minimum trigger evidence: persistent store design with clear ownership boundaries; compatibility plan for existing `reference_sources` rows in `state.db`; daemon/API regression plan for local reference listing behavior; explicit update to DF-43 and related specs.
+
+**Consequences:** No immediate Rust source, database schema, daemon handler, test, codegen, or configuration changes are required by this decision. DF-43 is partially resolved: the production persistence owner is decided for now, while crate-model integration and any future migration remain open.
 
 ### 3.2 Backlog (no committed target version)
 
@@ -136,6 +171,8 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | ~~DF-17~~ | Third-party preset loading (`~/.nexus42/presets/`) + CLI init templates | V1.9 (WS-A) | Path corrected from `~/.nexus/strategies/` to `~/.nexus42/presets/`. |
 | ~~DF-11~~ | CoreContext Handlebars template engine binding | V1.13 | WS7 data path + template rendering integrated per V1.13 OSS-forward delivery. |
 | ~~DF-14~~ | CLI + Platform e2e integration | V1.13 | Staged cross-repo gates + harness per V1.13 OSS-forward delivery. |
+| ~~DF-38~~ | OrchestrationEngine instantiation in daemon | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` instantiates `GraphFlowEngine::new_with_storage(...)`, stores it as `Arc<dyn OrchestrationEngine>`, and calls `state.set_engine(...)`. The older `lifecycle/actions.rs` comment still says “Instantiate OrchestrationEngine (stub, subsystem task)”; that comment is stale evidence only, not current product state. |
+| ~~DF-39~~ | Worker Manager subsystem wiring in daemon lifecycle | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` creates `WorkerManager::new()` and calls `state.set_worker_manager(...)`; `lifecycle/subsystems/worker_mgr.rs` describes the real subsystem replacing the mock stub. The older `lifecycle/actions.rs` comment still says “Start Worker Manager (stub, subsystem task)”; that comment is stale evidence only and is distinct from remaining task-level worker-handle fallback tracked by DF-37. |
 
 ### Tech-debt residuals shipped
 

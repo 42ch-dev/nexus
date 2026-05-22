@@ -123,15 +123,9 @@ fn current_state_daemon_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // V1.16+ daemon: start, stop, restart, status, logs, doctor, orchestrate
+    // Current daemon surface: lifecycle commands plus schedule orchestration.
     for subcmd in &[
-        "start",
-        "stop",
-        "restart",
-        "status",
-        "logs",
-        "doctor",
-        "orchestrate",
+        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
     ] {
         assert!(
             help_text.contains(subcmd),
@@ -331,13 +325,7 @@ fn v2_target_daemon_subcommands() {
     let help_text = String::from_utf8(output).unwrap();
 
     for subcmd in &[
-        "start",
-        "stop",
-        "restart",
-        "status",
-        "logs",
-        "doctor",
-        "orchestrate",
+        "start", "stop", "restart", "status", "logs", "doctor", "schedule",
     ] {
         assert!(
             help_text.contains(subcmd),
@@ -345,24 +333,10 @@ fn v2_target_daemon_subcommands() {
         );
     }
 
-    // Verify orchestrate sub-subcommands
-    let orch_output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["daemon", "orchestrate", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let orch_help = String::from_utf8(orch_output).unwrap();
-
-    for subcmd in &["list", "run", "pause", "resume", "cancel", "inspect"] {
-        assert!(
-            orch_help.contains(subcmd),
-            "V2 daemon orchestrate: expected subcommand '{subcmd}'"
-        );
-    }
+    assert!(
+        !help_text.contains("orchestrate"),
+        "daemon help must not list removed orchestrate subcommand"
+    );
 }
 
 /// V2 Target: `acp` top-level command group exists.
@@ -729,21 +703,12 @@ fn acp_run_shows_run_id_flag() {
     );
 }
 
-/// Verify `daemon orchestrate run --help` includes `--run-id` flag.
+/// Verify `daemon orchestrate run --help` is no longer a valid CLI surface.
 #[test]
-fn daemon_orchestrate_run_shows_run_id_flag() {
-    let output = Command::cargo_bin("nexus42")
+fn daemon_orchestrate_run_is_removed() {
+    Command::cargo_bin("nexus42")
         .unwrap()
         .args(["daemon", "orchestrate", "run", "--help"])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--run-id"),
-        "daemon orchestrate run --help must contain --run-id flag"
-    );
+        .failure();
 }
