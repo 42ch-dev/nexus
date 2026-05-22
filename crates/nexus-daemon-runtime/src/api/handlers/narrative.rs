@@ -17,8 +17,8 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
-use nexus_narrative::{InMemoryNarrativeGateway, NarrativeGateway, WorldState};
 use nexus_kb::InMemoryKbStore;
+use nexus_narrative::{InMemoryNarrativeGateway, NarrativeGateway, WorldState};
 use serde::Serialize;
 
 // ─── Response types ────────────────────────────────────────────────────────
@@ -68,9 +68,7 @@ pub async fn get_world(
         .get_world_state(&world_id)
         .await
         .map_err(|e| match e {
-            nexus_narrative::NarrativeError::ValidationError(msg)
-                if msg.contains("not found") =>
-            {
+            nexus_narrative::NarrativeError::ValidationError(msg) if msg.contains("not found") => {
                 NexusApiError::NotFound(format!("World {world_id} not found"))
             }
             _ => NexusApiError::Internal {
@@ -107,8 +105,14 @@ mod tests {
         use nexus_narrative::world::World;
 
         let gateway = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
-        let world =
-            World::new("wld_test", "ctr_test", "Test", "test", Visibility::Private, TimePolicy::Manual);
+        let world = World::new(
+            "wld_test",
+            "ctr_test",
+            "Test",
+            "test",
+            Visibility::Private,
+            TimePolicy::Manual,
+        );
         gateway.insert_world(world);
 
         let state = gateway.get_world_state("wld_test").await.unwrap();
