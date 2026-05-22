@@ -103,16 +103,16 @@
       "id": "2026-05-22-v1.25-knowledge-product-wiring",
       "title": "V1.25 Knowledge ↔ Crates Product Wiring — post-V1.24 hygiene (Theme A)",
       "file": ".agents/plans/2026-05-22-v1.25-knowledge-product-wiring.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@architect", "@project-manager", "@qc-specialist", "@qa-engineer"],
-      "progress": 0,
+      "progress": 100,
       "tags": ["v1.25", "knowledge", "audit", "docs", "hygiene"],
       "created_at": "2026-05-22",
       "updated_at": "2026-05-22",
-      "notes": "Theme A only (doc/schema hygiene). Themes B/C/D deferred to future plans. Based on V1.25 compass third-pass audit.",
+      "notes": "Done. Theme A only (doc/schema hygiene). QA: clippy clean, all tests pass. QC1: Approve (0 Critical, 0 Warning, 1 non-blocking Suggestion). Themes B/C/D deferred to future plans.",
       "metadata": {
-        "phase": "todo",
+        "phase": "done",
         "priority": "medium",
         "description": "Post-V1.24 hygiene: fix stale schema descriptions, clap help, deferred tracker, cli-spec orchestrate/schedule labels, and Stage-0 vs Moment wording.",
         "working_branch": "feature/v1.25-knowledge-product-wiring",
@@ -131,7 +131,7 @@
           "plan": "pass",
           "branch_policy": "feature"
         },
-        "next_action": "A0 confirmed (Theme A only). Dispatching @architect for Batch A.",
+        "next_action": "Done. Merge to main or archive per Profile B.",
         "batches": [
           {
             "index": 0,
@@ -145,17 +145,17 @@
             "index": 1,
             "name": "A — Post-V1.24 hygiene (doc/schema)",
             "covers": ["T1", "T2", "T3", "T4", "T5"],
-            "status": "todo",
+            "status": "done",
             "owner": "@architect",
-            "notes": "KCA-25-001 through KCA-25-008 doc fixes."
+            "notes": "Commit ee04010. T1–T5 complete. Schema descriptions, clap help, tracker, cli-spec, LCCA all aligned."
           },
           {
             "index": 2,
             "name": "QA — Verify + QC single-review",
             "covers": ["T6", "T7"],
-            "status": "todo",
+            "status": "done",
             "owner": "@qa-engineer, @qc-specialist",
-            "notes": "clippy + cargo test; single QC reviewer (doc-only)."
+            "notes": "QA: clippy + fmt + tests all clean. QC1: Approve (0 Critical, 0 Warning, 1 Suggestion)."
           }
         ]
       }
