@@ -1,7 +1,19 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-23T14:00:00Z",
+  "updated_at": "2026-05-23T16:00:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
+      "title": "V1.26 narrative + World KB SQLite",
+      "done_at": "2026-05-23T16:00:00Z",
+      "plan_file": ".agents/plans/2026-05-23-v1.26-narrative-kb-persistence.md",
+      "total_batches": 5,
+      "batches_completed": 5,
+      "qc": "3× review (QC1 Request Changes → fixed C-1/C-2/C-3 → Approve; QC2 Approve; QC3 Approve)",
+      "qa": "7/7 Pass",
+      "residual_count": 2,
+      "notes": "SqliteNarrativeGateway + SqliteKbStore moved to nexus-local-db. Schema v7 (narrative) + v8 (KB). R4 closed. Residuals R8-R9 deferred."
+    },
     {
       "plan_id": "2026-05-23-v1.26-reference-store-layout",
       "title": "V1.26 reference registry + MD body layout",
