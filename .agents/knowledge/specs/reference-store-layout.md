@@ -84,3 +84,48 @@ Generated files under `crates/nexus-contracts/src/generated/` currently contain 
 ## 7. Migration policy
 
 Pre-1.0 local persistence may be wiped rather than migrated. The V1.26 migration should add `content_path TEXT` and `source_mutability TEXT NOT NULL DEFAULT 'static'`; legacy inline `content` should be retained only for compatibility and set to `NULL` for new rows.
+
+## 8. CLI surface
+
+Reference sources are managed via `nexus42 creator reference` subcommands (V1.26 R4):
+
+### `nexus42 creator reference register`
+
+Registers a new reference source: creates the registry row in `state.db` and writes `body.md` to disk.
+
+```bash
+nexus42 creator reference register \
+  --source <uri-or-path> \
+  --title "My Reference" \
+  [--source-type note|file|url|pdf] \
+  [--mutability static|refreshable] \
+  [--tags "tag1,tag2"] \
+  (--file <body-file> | --body "inline text")
+```
+
+- `--source` (required): logical URI or path identifying the source material.
+- `--title` (required): human-readable title.
+- `--source-type` (default `note`): contract enum value.
+- `--mutability` (default `static`): mutability policy.
+- `--file`: path to a body text file (`-` for stdin). Mutually exclusive with `--body`.
+- `--body`: inline body text. Mutually exclusive with `--file`.
+
+### `nexus42 creator reference list`
+
+Lists all registered references (metadata only, no body loading).
+
+```bash
+nexus42 creator reference list
+```
+
+Output columns: ID, TYPE, MUTABILITY, TITLE, CREATED_AT.
+
+### `nexus42 creator reference show <reference_id>`
+
+Shows a single reference including all metadata and body path.
+
+```bash
+nexus42 creator reference show ref_abc123def456
+```
+
+Displays: ID, title, type, mutability, URI, workspace, scan status, timestamps, tags, content hash, and body path.
