@@ -504,20 +504,11 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
 
 // ── V1.26: Four-domain Moment assembly (persistent stores) ──────────
 
-/// Open a persistent `SqliteNarrativeGateway` backed by the workspace `state.db`.
-async fn open_narrative_gateway(
-    config: &CliConfig,
-) -> Result<nexus_local_db::narrative_gateway::SqliteNarrativeGateway> {
+/// Open a shared `SqlitePool` for persistent stores.
+async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool))
-}
-
-/// Open a persistent `SqliteKbStore` backed by the workspace `state.db`.
-async fn open_kb_store(config: &CliConfig) -> Result<nexus_local_db::kb_store::SqliteKbStore> {
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(nexus_local_db::kb_store::SqliteKbStore::new(pool))
+    Ok(pool)
 }
 
 /// Run four-domain Moment assembly using persistent narrative + KB stores.
@@ -537,8 +528,9 @@ pub async fn run_assemble_moment(
     branch_id: Option<&str>,
     _event_id: Option<&str>,
 ) -> Result<MomentContext> {
-    let narrative = open_narrative_gateway(config).await?;
-    let kb = open_kb_store(config).await?;
+    let pool = open_shared_pool(config).await?;
+    let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+    let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool);
     let knowledge = InMemoryKnowledgeStore::new();
 
     let wid = world_id.unwrap_or("wld_default");
@@ -547,18 +539,15 @@ pub async fn run_assemble_moment(
     // Build Stage0Assembly — load from creator memory if available
     let stage0 = build_stage0_from_local(config, None, None, false)
         .await
-        .map_or_else(
-            |_| Stage0Assembly {
-                personality: "Local Moment assembly.".to_string(),
-                experience: "Four-domain context from persistent stores.".to_string(),
-                long_term_memories: Vec::new(),
-                fragment_keywords: Vec::new(),
-                system_prefix: String::new(),
-                user_prompt: "Moment context assembly.".to_string(),
-                max_tokens: None,
-            },
-            std::convert::identity,
-        );
+        .unwrap_or_else(|_| Stage0Assembly {
+            personality: "Local Moment assembly.".to_string(),
+            experience: "Four-domain context from persistent stores.".to_string(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            system_prefix: String::new(),
+            user_prompt: "Moment context assembly.".to_string(),
+            max_tokens: None,
+        });
 
     // Build MomentRequest
     let mut request = MomentRequest::new(stage0).with_world(wid).with_user(uid);
@@ -692,7 +681,7 @@ mod tests {
     }
 
     /// C3.1: Test `run_assemble_moment` with persistent seed data.
-    /// Seeds a world and KB block into a fresh SQLite DB, then verifies
+    /// Seeds a world and KB block into a fresh `SQLite` DB, then verifies
     /// that `assemble_moment` returns world state and KB sections.
     #[tokio::test]
     async fn assemble_moment_with_persistent_seed() {
