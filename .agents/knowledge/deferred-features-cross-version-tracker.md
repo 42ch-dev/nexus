@@ -5,7 +5,7 @@
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-22
+**Last updated**: 2026-05-23
 
 ---
 
@@ -61,11 +61,12 @@
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
 | DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
-| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | Any future | M | V1.24 audit compass → V1.25 Theme C decision recorded below. `nexus-knowledge` currently uses in-memory store. Production `reference_sources` persistence remains owned by `nexus-local-db`; crate-model integration/persistence adapter remains deferred. |
+| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | **V1.26** | M | **Status: In Progress**; `implemented_in: v1.26` for narrative + World KB in [v1.26-narrative-kb-persistence](../plans/2026-05-23-v1.26-narrative-kb-persistence.md) and static reference registry + MD body split in [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md). KnowledgeEntry SQLite and crate-model alignment remain deferred. |
+| DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 reference-store layout | Post-V1.26 | M | **Status: Open**. V1.26 implements static reference registration with registry rows and MD body storage; auto-refreshing `body.md` from URL/PDF sources remains deferred. |
 
 #### DF-43 decision note — Reference sources persistence (V1.25 Theme C)
 
-**Status:** Decision accepted in V1.25 Theme C Batch C2; implementation remains **Open**.
+**Status:** Decision accepted in V1.25 Theme C Batch C2; **implementation in V1.26** via [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md) (reference registry + MD body). Crate-model alignment remains open after the V1.26 reference-store plan ships.
 
 Nexus currently has two reference source models with different ownership boundaries:
 

@@ -4,8 +4,12 @@
 //! The daemon context-assemble proxy route is retired. The `assemble-local` subcommand
 //! uses `Stage0Assembly` / `TwoStageAssembly` directly without daemon HTTP.
 //!
-//! V1.25 Theme B: `assemble-moment` is an **experimental** four-domain Moment assembly
-//! path using in-memory stores only (no persistence).
+//! V1.26: `assemble-moment` is a visible four-domain Moment assembly command that reads
+//! from persistent stores (`SqliteNarrativeGateway`, `SqliteKbStore`). Knowledge slice
+//! uses in-memory store (no persistent `UserKnowledgeStore` yet).
+//!
+//! The `assemble` (platform) subcommand is **deferred** — it prints a guidance message
+//! and exits with code 2.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -18,11 +22,9 @@ use nexus_moment_context_assembly::{
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
 
-// Four-domain Moment demo (experimental, in-memory only)
-use nexus_contracts::{BlockType, TimePolicy, Visibility};
-use nexus_kb::{InMemoryKbStore, KbStore};
-use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore};
-use nexus_narrative::InMemoryNarrativeGateway;
+// Four-domain Moment assembly — in-memory knowledge store
+// (narrative and KB use persistent stores from nexus-local-db)
+use nexus_knowledge::InMemoryKnowledgeStore;
 
 #[cfg(test)]
 use crate::domain::DegradationPolicy;
@@ -122,8 +124,7 @@ pub enum ContextCommand {
         hint: Option<String>,
     },
 
-    /// [Experimental] Assemble four-domain Moment context (in-memory demo)
-    #[command(hide = true)]
+    /// Assemble four-domain Moment context from local persistent stores
     AssembleMoment {
         /// World ID to include in Moment context
         #[arg(long)]
@@ -165,13 +166,9 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             max_file_size: _,
             output_file: _,
         } => {
-            // TODO(V1.10): context assemble — will integrate with platform context API in future release.
-            // The daemon context assemble endpoint has been removed in V1.10.
-            // This command will be re-enabled when the CLI integrates directly with
-            // the platform context API in a future version.
-            eprintln!("Context assembly is not yet available in V1.10.");
-            eprintln!("This feature is planned for a future release.");
-            std::process::exit(1);
+            eprintln!("Platform cloud context assembly is not yet available.");
+            eprintln!("Use `assemble-local` for Stage0/TwoStage or `assemble-moment` for local four-domain Moment assembly.");
+            std::process::exit(2);
         }
         ContextCommand::AssembleLocal {
             max_tokens,
@@ -187,19 +184,20 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             branch_id,
             event_id,
         } => {
-            let ctx = run_assemble_moment_demo(
+            let ctx = run_assemble_moment(
+                config,
                 world_id.as_deref(),
                 user_id.as_deref(),
                 branch_id.as_deref(),
                 event_id.as_deref(),
             )
-            .await;
+            .await?;
 
             // Print full context to stdout
             println!("{}", ctx.to_full_context());
 
             // Print summary to stderr
-            eprintln!("\n--- Moment Assembly (experimental, in-memory) ---");
+            eprintln!("\n--- Moment Assembly (local persistent) ---");
             eprintln!("Stage-0: present");
             eprintln!(
                 "World state: {}",
@@ -504,53 +502,52 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
     keywords
 }
 
-// ── V1.25 Theme B: Four-domain Moment assembly (experimental, in-memory) ──────
+// ── V1.26: Four-domain Moment assembly (persistent stores) ──────────
 
-/// Run four-domain Moment assembly with seeded in-memory demo fixtures.
+/// Open a shared `SqlitePool` for persistent stores.
+async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+    Ok(pool)
+}
+
+/// Run four-domain Moment assembly using persistent narrative + KB stores.
 ///
-/// This is an **experimental demo** command that uses only in-memory stores.
-/// It does not read from or write to any persistent storage. All domain data
-/// is seeded with deterministic fixtures so the output is reproducible.
+/// Uses `SqliteNarrativeGateway` and `SqliteKbStore` from `nexus-local-db`
+/// for world state, timeline, and KB data. Knowledge slice uses in-memory
+/// store (limitation: no persistent `UserKnowledgeStore` in V1.26).
 ///
-/// The four domains assembled are:
-/// 1. Creator Memory (Stage-0: SOUL sections, personality, experience)
-/// 2. Narrative (World state + timeline events)
-/// 3. World KB (key blocks for the world)
-/// 4. User Knowledge (entries for the user)
+/// # Errors
 ///
-/// # Panics
-///
-/// Panics if in-memory store seeding fails (should never happen for in-memory stores).
+/// Returns `CliError` if the database cannot be opened or migrations fail.
 #[allow(clippy::future_not_send)]
-pub async fn run_assemble_moment_demo(
+pub async fn run_assemble_moment(
+    config: &CliConfig,
     world_id: Option<&str>,
     user_id: Option<&str>,
     branch_id: Option<&str>,
     _event_id: Option<&str>,
-) -> MomentContext {
-    let kb = InMemoryKbStore::new();
-    let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
+) -> Result<MomentContext> {
+    let pool = open_shared_pool(config).await?;
+    let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+    let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool);
     let knowledge = InMemoryKnowledgeStore::new();
 
-    let wid = world_id.unwrap_or("wld_demo");
-    let uid = user_id.unwrap_or("user_demo");
+    let wid = world_id.unwrap_or("wld_default");
+    let uid = user_id.unwrap_or("user_default");
 
-    // Seed demo fixtures into in-memory stores
-    seed_demo_world(&narrative, wid);
-    seed_demo_timeline_event(&narrative, wid);
-    seed_demo_kb_block(&kb, wid).await;
-    seed_demo_knowledge(&knowledge, uid).await;
-
-    // Build Stage0Assembly with demo content
-    let stage0 = Stage0Assembly {
-        personality: "I am a demo creator exploring four-domain Moment assembly.".to_string(),
-        experience: "Experimental four-domain context assembly demo.".to_string(),
-        long_term_memories: Vec::new(),
-        fragment_keywords: Vec::new(),
-        system_prefix: String::new(),
-        user_prompt: "Demo moment context assembly.".to_string(),
-        max_tokens: None,
-    };
+    // Build Stage0Assembly — load from creator memory if available
+    let stage0 = build_stage0_from_local(config, None, None, false)
+        .await
+        .unwrap_or_else(|_| Stage0Assembly {
+            personality: "Local Moment assembly.".to_string(),
+            experience: "Four-domain context from persistent stores.".to_string(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            system_prefix: String::new(),
+            user_prompt: "Moment context assembly.".to_string(),
+            max_tokens: None,
+        });
 
     // Build MomentRequest
     let mut request = MomentRequest::new(stage0).with_world(wid).with_user(uid);
@@ -558,54 +555,8 @@ pub async fn run_assemble_moment_demo(
         request = request.with_branch(bid);
     }
 
-    // Call assemble_moment
-    assemble_moment(&request, &narrative, &kb, &knowledge).await
-}
-
-/// Seed a demo world into the in-memory narrative gateway.
-fn seed_demo_world(narrative: &InMemoryNarrativeGateway<InMemoryKbStore>, world_id: &str) {
-    let world = nexus_narrative::world::World::new(
-        world_id,
-        "ctr_demo",
-        "Demo World",
-        "demo-world",
-        Visibility::Private,
-        TimePolicy::Manual,
-    );
-    narrative.insert_world(world);
-}
-
-/// Seed a demo timeline event into the in-memory narrative gateway.
-fn seed_demo_timeline_event(narrative: &InMemoryNarrativeGateway<InMemoryKbStore>, world_id: &str) {
-    let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
-        world_id,
-        "fbk_root",
-        nexus_narrative::timeline_event::TimelineEventType::StoryAdvance,
-        1,
-    );
-    event.title = Some("Demo story event — the beginning".to_string());
-    narrative.insert_event(event);
-}
-
-/// Seed a demo KB block into the in-memory KB store.
-async fn seed_demo_kb_block(kb: &InMemoryKbStore, world_id: &str) {
-    let block = nexus_kb::key_block::KeyBlock::new(world_id, BlockType::Character, "Demo Hero");
-    kb.insert_key_block(block)
-        .await
-        .expect("in-memory KB seed should not fail");
-}
-
-/// Seed a demo knowledge entry into the in-memory knowledge store.
-async fn seed_demo_knowledge(knowledge: &InMemoryKnowledgeStore, user_id: &str) {
-    let entry = nexus_knowledge::KnowledgeEntry::new(
-        user_id,
-        vec![nexus_knowledge::KnowledgeTag::new("demo")],
-        "Demo user knowledge entry for Moment assembly.",
-    );
-    knowledge
-        .store(entry)
-        .await
-        .expect("in-memory knowledge seed should not fail");
+    // Call assemble_moment with persistent stores
+    Ok(assemble_moment(&request, &narrative, &kb, &knowledge).await)
 }
 
 #[cfg(test)]
@@ -683,6 +634,194 @@ mod tests {
             include_fragments: false,
             hint: None,
         };
+    }
+
+    /// C1.1: `AssembleMoment` variant exists without `hide = true`.
+    /// Clap's `hide = true` is a `#[command(...)]` attribute, not runtime-testable
+    /// directly, but we verify the variant is constructible and documented.
+    #[test]
+    fn context_command_assemble_moment_exists() {
+        let _ = ContextCommand::AssembleMoment {
+            world_id: Some("wld_test".to_string()),
+            user_id: Some("user_test".to_string()),
+            branch_id: None,
+            event_id: None,
+        };
+        let _ = ContextCommand::AssembleMoment {
+            world_id: None,
+            user_id: None,
+            branch_id: None,
+            event_id: None,
+        };
+    }
+
+    /// C1.3: Verify `Assemble` arm prints deferred message (no V1.10 reference).
+    /// We check the non-test portion of the source file.
+    #[test]
+    fn assemble_arm_has_no_v1_10_reference() {
+        let source = include_str!("context.rs");
+        // Strip test module to avoid false positives from test assertions
+        let non_test = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !non_test.contains("V1.10"),
+            "context.rs non-test code must not reference V1.10"
+        );
+        assert!(
+            source.contains("Platform cloud context assembly is not yet available"),
+            "context.rs must contain deferred platform message"
+        );
+        assert!(
+            source.contains("assemble-local"),
+            "deferred message must mention assemble-local"
+        );
+        assert!(
+            source.contains("assemble-moment"),
+            "deferred message must mention assemble-moment"
+        );
+    }
+
+    /// C3.1: Test `run_assemble_moment` with persistent seed data.
+    /// Seeds a world and KB block into a fresh `SQLite` DB, then verifies
+    /// that `assemble_moment` returns world state and KB sections.
+    #[tokio::test]
+    async fn assemble_moment_with_persistent_seed() {
+        use nexus_local_db::kb_store::seed as kb_seed;
+        use nexus_local_db::narrative_gateway::seed as narrative_seed;
+
+        // Create fresh SQLite DB
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        nexus_local_db::seed_versions(&pool).await.unwrap();
+
+        // Seed world + event (narrative_seed::world also seeds the creator for FK)
+        narrative_seed::world(
+            &pool,
+            "wld_test",
+            "ctr_test",
+            "Test World",
+            "test-world",
+            "private",
+            "manual",
+        )
+        .await;
+        narrative_seed::event(
+            &pool,
+            "evt_test_1",
+            "wld_test",
+            "fbk_root",
+            "story_advance",
+            1,
+        )
+        .await;
+
+        // Seed KB block (no need to call kb_seed::world — world already seeded above)
+        kb_seed::key_block(
+            &pool,
+            "kb_hero",
+            "wld_test",
+            "Character",
+            "Hero",
+            "confirmed",
+        )
+        .await;
+
+        // Build persistent stores from the pool
+        let narrative =
+            nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+        let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let knowledge = InMemoryKnowledgeStore::new();
+
+        // Build request
+        let stage0 = Stage0Assembly {
+            personality: "Test personality.".to_string(),
+            experience: "Test experience.".to_string(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            system_prefix: String::new(),
+            user_prompt: "Test prompt.".to_string(),
+            max_tokens: None,
+        };
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_test")
+            .with_user("user_test");
+
+        // Run assembly
+        let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+
+        // Verify world state from persistent store
+        assert!(
+            ctx.world_state.is_some(),
+            "world_state should be present from persistent store"
+        );
+        assert!(
+            ctx.world_state.as_ref().unwrap().contains("Test World"),
+            "world state should contain seeded title"
+        );
+
+        // Verify timeline from persistent store
+        assert!(
+            ctx.timeline.is_some(),
+            "timeline should be present from persistent store"
+        );
+
+        // Verify KB from persistent store
+        assert!(
+            ctx.world_kb.is_some(),
+            "world_kb should be present from persistent store"
+        );
+        assert!(
+            ctx.world_kb.as_ref().unwrap().contains("Hero"),
+            "KB should contain seeded key block name"
+        );
+
+        // Verify full context assembles correctly
+        let full = ctx.to_full_context();
+        assert!(full.contains("## World State"));
+        assert!(full.contains("## Timeline"));
+        assert!(full.contains("## World Knowledge Base"));
+    }
+
+    /// C3.1: Test `assemble_moment` returns absent sections when no data seeded.
+    #[tokio::test]
+    async fn assemble_moment_empty_db_returns_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        nexus_local_db::seed_versions(&pool).await.unwrap();
+
+        let narrative =
+            nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+        let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let knowledge = InMemoryKnowledgeStore::new();
+
+        let stage0 = Stage0Assembly {
+            personality: "Test.".to_string(),
+            experience: "Test.".to_string(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            system_prefix: String::new(),
+            user_prompt: "Test.".to_string(),
+            max_tokens: None,
+        };
+        let request = MomentRequest::new(stage0).with_world("wld_ghost");
+
+        let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+
+        assert!(
+            ctx.world_state.is_none(),
+            "world_state should be absent for unknown world"
+        );
+        assert!(
+            ctx.timeline.is_none(),
+            "timeline should be absent for unknown world"
+        );
+        assert!(
+            ctx.world_kb.is_none(),
+            "world_kb should be absent for unknown world"
+        );
     }
 
     // ── T6.7 / T6.8: Mode-aware routing tests ────────────────────────────

@@ -1,14 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-05-22T09:56:21.411961+00:00",
+  "updated_at": "2026-05-23T18:00:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
-    "latest_shipped_iteration": "v1.25",
-    "latest_shipped_at": "2026-05-22T09:26:37Z",
+    "latest_shipped_iteration": "v1.26",
+    "latest_shipped_at": "2026-05-23T18:00:00Z",
+    "latest_active_iteration": "v1.26",
+    "latest_active_compass": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+    "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-05-22T17:00:00Z",
       "total_open": 0,
@@ -16,7 +19,7 @@
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 4,
+        "low": 5,
         "nit": 11
       },
       "by_target": {},
@@ -34,6 +37,78 @@
     }
   },
   "residual_findings": {
+    "2026-05-23-v1.26-local-context-product": [
+      {
+        "id": "R10",
+        "title": "Knowledge slice uses InMemoryKnowledgeStore — no persistent UserKnowledgeStore in V1.26",
+        "severity": "low",
+        "source": "dev C1.2",
+        "scope": "crates/nexus42/src/commands/platform/context.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Replace with persistent knowledge store when available."
+      }
+    ],
+    "2026-05-23-v1.26-narrative-kb-persistence": [
+      {
+        "id": "R8",
+        "title": "db_err maps all sqlx::Error to ValidationError — no Storage variant",
+        "severity": "low",
+        "source": "qc1 W-001",
+        "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
+      },
+      {
+        "id": "R9",
+        "title": "KbQuery fetches all blocks into memory then filters in Rust — no DB-level pagination",
+        "severity": "nit",
+        "source": "qc1 W-002",
+        "scope": "crates/nexus-local-db/src/kb_store.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Add LIMIT to list_by_world when needed for scale."
+      }
+    ],
+    "2026-05-23-v1.26-reference-store-layout": [
+      {
+        "id": "R5",
+        "title": "body.md written before SQL INSERT — orphaned files on DB failure",
+        "severity": "low",
+        "source": "qc1 W-001, qc3 F-001",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
+      },
+      {
+        "id": "R6",
+        "title": "list_references returns all rows unbounded — no pagination",
+        "severity": "nit",
+        "source": "qc3 F-002",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
+      },
+      {
+        "id": "R7",
+        "title": "content_hash always NULL — integrity field unused",
+        "severity": "nit",
+        "source": "qc3 F-005",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Populate when refreshable scan pipeline lands (DF-44)."
+      }
+    ],
     "2026-05-22-v1.24-knowledge-crates-alignment": [
       {
         "id": "R3",
@@ -43,9 +118,9 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/kb.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "tracking_link": "DF-42 (full KB route redesign)",
-        "note": "Consider explicit scope rejection when full KB route redesign happens."
+        "target_date": "v1.26",
+        "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence (DF-42 follow-up)",
+        "note": "Address during V1.26 Theme K or explicit scope rejection in kb handler."
       },
       {
         "id": "R4",
@@ -53,11 +128,12 @@
         "severity": "suggestion",
         "source": "qc3 S-003",
         "scope": "crates/nexus42/src/commands/creator/mod.rs",
-        "decision": "defer",
+        "decision": "closed",
         "owner": "@qa-engineer",
-        "target_date": "backlog",
-        "tracking_link": null,
-        "note": "Cheap regression test to add when World scope is implemented."
+        "target_date": "v1.26",
+        "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence",
+        "note": "Closed: K1.3 SqliteKbStore tests land; CLI uses persistent store. QA verified 11 tests pass.",
+        "closed_at": "2026-05-23T16:00:00Z"
       }
     ]
   }

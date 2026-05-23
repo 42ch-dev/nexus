@@ -11,12 +11,16 @@
 //! See `.agents/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
 pub mod identity;
+pub mod kb_store;
 pub mod memory_fragment;
+pub mod narrative_gateway;
 pub mod pending_review;
+pub mod reference_source;
 pub mod soul_meta;
 pub mod world_stories;
 
 mod error;
+mod seed_shared;
 mod version;
 
 // Re-export version constants
@@ -55,6 +59,12 @@ pub use memory_fragment::{
 pub use world_stories::{
     create_world_story, delete_world_story, generate_id as generate_world_story_id, get_by_id,
     list_by_world, update_chapters, update_status, WorldStory,
+};
+
+// Re-export reference_source types
+pub use reference_source::{
+    get_by_id as get_reference_by_id, list as list_references, register as register_reference,
+    ReferenceSourceRow, RegisterParams, SourceMutability,
 };
 
 /// Runtime role for database initialization

@@ -29,14 +29,15 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.13-delivery-compass-v1.md](v1.13-delivery-compass-v1.md) | V1.13 | Historical |
 | [v1.14-delivery-compass-v1.md](v1.14-delivery-compass-v1.md) | V1.14 | Historical |
 | [v1.15-delivery-compass-v1.md](v1.15-delivery-compass-v1.md) | V1.15 | Historical |
-| [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md) | V1.16 | Historical |
+| [v1.16-delivery-compass-v1.md](v1.16-delivery-compass-v1.md) | V1.16 | Historical (Shipped) — command IA big-bang |
 | [v1.18-delivery-compass-v1.md](v1.18-delivery-compass-v1.md) | V1.18 | Shipped |
 | [v1.19-delivery-compass-v1.md](v1.19-delivery-compass-v1.md) | V1.19 | Shipped |
 | [v1.20-delivery-compass-v1.md](v1.20-delivery-compass-v1.md) | V1.20 | **Shipped** (2026-05-19) |
-| [v1.21-local-platform-isolation-delivery-compass-v1.md](v1.21-local-platform-isolation-delivery-compass-v1.md) | V1.21 | **InProgress** — plan [`2026-05-20-v1.21-local-platform-isolation`](../plans/2026-05-20-v1.21-local-platform-isolation.md) |
+| [v1.21-local-platform-isolation-delivery-compass-v1.md](v1.21-local-platform-isolation-delivery-compass-v1.md) | V1.21 | **Shipped** (2026-05-21) — plan archived |
 | [v1.22-cli-deprecation-cleanup-delivery-compass-v1.md](v1.22-cli-deprecation-cleanup-delivery-compass-v1.md) | V1.22 | **Shipped** (2026-05-21) |
-| [v1.24-knowledge-crates-alignment-audit-compass-v1.md](v1.24-knowledge-crates-alignment-audit-compass-v1.md) | V1.24 audit | **Shipped** (2026-05-22) — doc refresh + KCA-002/003; plan Done |
-| [v1.25-knowledge-crates-product-wiring-audit-compass-v1.md](v1.25-knowledge-crates-product-wiring-audit-compass-v1.md) | V1.25 audit | **Active** — third-pass SSOT: product wiring, moment path, CLI parity (2026-05-22) |
+| [v1.24-knowledge-crates-alignment-audit-compass-v1.md](v1.24-knowledge-crates-alignment-audit-compass-v1.md) | V1.24 audit | **Shipped** (2026-05-22) — doc refresh + KCA-002/003 |
+| [v1.25-knowledge-crates-product-wiring-audit-compass-v1.md](v1.25-knowledge-crates-product-wiring-audit-compass-v1.md) | V1.25 audit | **Shipped (partial)** (2026-05-22) — in-memory wiring; superseded by V1.26 |
+| [v1.26-local-persistence-delivery-compass-v1.md](v1.26-local-persistence-delivery-compass-v1.md) | V1.26 | **Active** — local SQLite persistence, reference MD layout, context productization |
 
 ### Reference compasses
 

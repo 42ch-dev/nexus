@@ -262,6 +262,10 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))
+        .route(
+            "/v1/local/references/:reference_id",
+            get(handlers::references::get),
+        )
         // ACP tool execution — internal route only (not public ACP routes)
         .route(
             "/v1/local/agent-host/internal/tool-executions",

@@ -23,6 +23,11 @@ pub enum LocalDbError {
     IdentityAlreadyLinked { creator_id: String },
     /// Local identity is not linked to any platform creator
     IdentityNotLinked { creator_id: String },
+    /// I/O error (file system operations)
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
     /// sqlx operation failed
     Sqlx(sqlx::Error),
     /// sqlx migration failed
@@ -68,6 +73,9 @@ impl fmt::Display for LocalDbError {
                     "local identity '{creator_id}' is not linked to any platform creator; nothing to unlink",
                 )
             }
+            Self::Io { path, source } => {
+                write!(f, "I/O error on '{path}': {source}")
+            }
             Self::Sqlx(err) => {
                 write!(f, "database operation failed: {err}")
             }
@@ -81,6 +89,7 @@ impl fmt::Display for LocalDbError {
 impl std::error::Error for LocalDbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Io { source, .. } => Some(source),
             Self::Sqlx(err) => Some(err),
             Self::Migrate(err) => Some(err),
             _ => None,
