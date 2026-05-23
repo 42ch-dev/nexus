@@ -4,6 +4,7 @@
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
 
 pub mod memory;
+pub mod reference;
 pub mod soul;
 
 use crate::api::DaemonClient;
@@ -543,6 +544,12 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
+    /// Reference source management (V1.26 reference store)
+    Reference {
+        #[command(subcommand)]
+        command: reference::ReferenceCommand,
+    },
+
     /// Local work-scope knowledge assets (file index; default --scope work).
     ///
     /// **This is the CLI local work KB index**, NOT `nexus-kb` (World KB) or
@@ -732,6 +739,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Workspace { command } => run_creator_workspace(config, command).await,
         CreatorCommand::Soul { command } => soul::run(command, config).await,
         CreatorCommand::Memory { command } => memory::run(command, config).await,
+        CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => run_kb(command, config).await,
         CreatorCommand::Logout => logout_creator(config).await,
     }
