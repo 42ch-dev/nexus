@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-23T12:00:00Z",
+  "updated_at": "2026-05-23T16:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-23-v1.26-iteration-hygiene",
@@ -12,23 +12,14 @@
       "next_action": "Hygiene complete; dispatch Theme R implement"
     },
     {
-      "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
-      "title": "V1.26 narrative + World KB SQLite",
-      "status": "InProgress",
-      "iteration": "v1.26",
-      "working_branch": "feature/v1.26-local-persistence",
-      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "depends_on": ["2026-05-23-v1.26-reference-store-layout"],
-      "next_action": "Dispatch N0 schema design"
-    },
-    {
       "plan_id": "2026-05-23-v1.26-local-context-product",
       "title": "V1.26 local context productization (no platform)",
       "status": "Todo",
       "iteration": "v1.26",
       "working_branch": "feature/v1.26-local-persistence",
       "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "depends_on": ["2026-05-23-v1.26-narrative-kb-persistence"]
+      "depends_on": ["2026-05-23-v1.26-narrative-kb-persistence"],
+      "next_action": "Ready to start — Theme N+K Done"
     }
   ],
   "metadata": {
@@ -66,6 +57,30 @@
     }
   },
   "residual_findings": {
+    "2026-05-23-v1.26-narrative-kb-persistence": [
+      {
+        "id": "R8",
+        "title": "db_err maps all sqlx::Error to ValidationError — no Storage variant",
+        "severity": "low",
+        "source": "qc1 W-001",
+        "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
+      },
+      {
+        "id": "R9",
+        "title": "KbQuery fetches all blocks into memory then filters in Rust — no DB-level pagination",
+        "severity": "nit",
+        "source": "qc1 W-002",
+        "scope": "crates/nexus-local-db/src/kb_store.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Add LIMIT to list_by_world when needed for scale."
+      }
+    ],
     "2026-05-23-v1.26-reference-store-layout": [
       {
         "id": "R5",
@@ -120,11 +135,12 @@
         "severity": "suggestion",
         "source": "qc3 S-003",
         "scope": "crates/nexus42/src/commands/creator/mod.rs",
-        "decision": "defer",
+        "decision": "closed",
         "owner": "@qa-engineer",
         "target_date": "v1.26",
         "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence",
-        "note": "Close when persistent world kb list test lands (Batch K1.3)."
+        "note": "Closed: K1.3 SqliteKbStore tests land; CLI uses persistent store. QA verified 11 tests pass.",
+        "closed_at": "2026-05-23T16:00:00Z"
       }
     ]
   }
