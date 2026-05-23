@@ -1,13 +1,13 @@
 //! `ContextAssemblyV1`
 //!
-//! `Context` `Assembly` request/response schemas for platform `HTTP` context assembly and `CLI` in-process context assembly flows. `CLI` uses these shapes to request a stable read-only context snapshot from the platform when direct platform integration is available.
+//! `Context` `Assembly` request/response schemas retained for deferred direct platform cloud context assembly and `CLI` local in-process context assembly flows. `In` `V1`.26, only local `CLI` assembly is shipped: assemble-local uses `Stage0`/`TwoStage` in-process assembly, and assemble-moment uses local four-domain `Moment` assembly. `There` is no active daemon context-assemble `Local` `API` endpoint.
 //!
 //! `@schema_version` 1
 //! `@source` context-assembly-v1.schema.json
 
 use serde::{Deserialize, Serialize};
 
-/// `Request` shape for platform `HTTP` context assembly. `CLI` sends this to request a stable read-only context snapshot from the platform when direct platform integration is available.
+/// `Request` shape for deferred direct platform cloud context assembly. `CLI` may use this shape when platform cloud assembly becomes available; `V1`.26 shipped context assembly is local-only and does not send this request to a daemon context-assemble `Local` `API` endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleRequestV1 {
@@ -73,7 +73,7 @@ pub struct ContextAssembleResponseV1MemoryItem {
     pub memory_kind: String,
     pub content: String,
 }
-/// `Response` shape for platform `HTTP` context assembly. `Platform` returns a stable read-only context snapshot.
+/// `Response` shape for deferred direct platform cloud context assembly. `Shipped` `V1`.26 local assembly paths run in-process and do not receive this response from a daemon context-assemble `Local` `API` endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1 {
