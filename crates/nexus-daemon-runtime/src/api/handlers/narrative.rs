@@ -112,7 +112,7 @@ mod tests {
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         // Seed a world directly into the DB
-        crate::db::narrative_gateway::seed::world(
+        nexus_local_db::narrative_gateway::seed::world(
             state.pool(),
             "wld_test",
             "ctr_test",
