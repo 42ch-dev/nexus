@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE kb_key_blocks SET\n                block_type = ?,\n                canonical_name = ?,\n                status = ?,\n                revision = ?,\n                body_json = ?,\n                source_anchor_json = ?,\n                updated_at = ?\n              WHERE key_block_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "e9583a65dfaa30a707975c63ad8ef6bf76595a844560e557571fe253606cfa54"
+}

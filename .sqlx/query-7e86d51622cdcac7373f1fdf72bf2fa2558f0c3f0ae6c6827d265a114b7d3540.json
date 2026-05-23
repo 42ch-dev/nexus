@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                key_block_id as \"key_block_id!\",\n                world_id as \"world_id!\",\n                block_type as \"block_type!\",\n                canonical_name as \"canonical_name!\",\n                status as \"status!\",\n                revision,\n                body_json,\n                source_anchor_json,\n                created_from_command_id,\n                created_at as \"created_at!\",\n                updated_at\n            FROM kb_key_blocks\n            WHERE world_id = ?\n              AND status NOT IN ('deleted', 'merged', 'deprecated')\n            ORDER BY created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "key_block_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "block_type!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "canonical_name!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "body_json",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_anchor_json",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_from_command_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "7e86d51622cdcac7373f1fdf72bf2fa2558f0c3f0ae6c6827d265a114b7d3540"
+}

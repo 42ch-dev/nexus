@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO narrative_timeline_events\n                (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, metadata_json)\n               VALUES (?, ?, ?, ?, 'provisional', ?, '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "3974259852c199912fb4741f0f06fe5997616d8138bbea54be826e5737b258aa"
+}

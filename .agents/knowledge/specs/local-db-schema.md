@@ -65,6 +65,144 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 | `workspace_meta` | 本地运行时元数据（版本、workspace路径、phase等） | Shared |
 | `creators` | Creator 本地缓存 | Shared |
 | `reference_sources` | 参考资料扫描索引与状态 | Shared |
+| `narrative_worlds` | Workspace-local World projections for narrative read paths | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
+| `narrative_timeline_events` | Workspace-local timeline event projections used by `NarrativeGateway` | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
+| `kb_key_blocks` | World-scoped narrative KB KeyBlocks persisted in workspace `state.db` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
+| `kb_source_anchors` | Multi-anchor rows attached to `kb_key_blocks` for `KbStore::attach_source_anchor` / `get_anchors` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
+
+#### 4.1.1 `reference_sources`
+
+`reference_sources` is the registry table for User-scoped local reference units. The canonical body text is externalized to `body.md` under the active Creator root; see [reference-store-layout.md](reference-store-layout.md).
+
+Required V1.26 columns:
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `reference_source_id` | `TEXT` | yes | Registry primary key and `references/units/<id>/` directory name. |
+| `workspace_id` | `TEXT` | yes | Workspace binding in `state.db`. |
+| `source_type` | `TEXT` | yes | Contract enum value such as `file`, `url`, `pdf`, or `note`. |
+| `source_mutability` | `TEXT` | yes | `NOT NULL DEFAULT 'static'`; allowed values: `static`, `refreshable`. |
+| `uri` | `TEXT` | yes | `nexus42://references/units/<id>` or original import URI. |
+| `title` | `TEXT` | yes | Human-readable title. |
+| `tags` | `TEXT` | no | Serialized tag list if present. |
+| `content_hash` | `TEXT` | no | Hash of canonical `body.md` when available. |
+| `content_path` | `TEXT` | no | Relative path from Creator root, e.g. `references/units/<id>/body.md`. |
+| `content` | `TEXT` | no | **Deprecated** inline body column; `NULL` for new rows. |
+| `scan_status` | `TEXT` | yes | Scan lifecycle status. |
+| `created_at` | `TEXT` | yes | Creation timestamp. |
+| `updated_at` | `TEXT` | no | Last registry update timestamp. |
+
+New code MUST write canonical body text to `content_path` on disk instead of `content`. Listing references MUST be satisfiable from registry metadata without reading full body text.
+
+#### 4.1.2 Narrative + World KB persistence (V1.26 draft)
+
+These tables live in the same workspace `state.db` as `reference_sources` and support the V1.26 persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
+
+`workspace_id` is retained on `narrative_worlds` as the logical workspace binding. The current local schema has no `workspaces` catalog table, so this draft does **not** add a physical workspace FK. If a workspace catalog is introduced later, `narrative_worlds.workspace_id` should become the FK target without changing child table ownership.
+
+```sql
+CREATE TABLE IF NOT EXISTS narrative_worlds (
+    world_id TEXT PRIMARY KEY CHECK (world_id LIKE 'wld_%'),
+    workspace_id TEXT NOT NULL,
+    owner_creator_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'archived', 'paused')),
+    visibility TEXT NOT NULL,
+    time_policy TEXT NOT NULL,
+    canon_revision INTEGER,
+    current_timeline_head_id TEXT,
+    current_time_pointer TEXT,
+    root_fork_branch_id TEXT,
+    world_rules_json TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    FOREIGN KEY (owner_creator_id) REFERENCES creators (creator_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_worlds_workspace_id
+    ON narrative_worlds (workspace_id);
+CREATE INDEX IF NOT EXISTS idx_narrative_worlds_owner_creator_id
+    ON narrative_worlds (owner_creator_id);
+CREATE INDEX IF NOT EXISTS idx_narrative_worlds_status
+    ON narrative_worlds (status);
+
+CREATE TABLE IF NOT EXISTS narrative_timeline_events (
+    timeline_event_id TEXT PRIMARY KEY CHECK (timeline_event_id LIKE 'evt_%'),
+    world_id TEXT NOT NULL,
+    branch_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'provisional'
+        CHECK (status IN ('canon', 'provisional', 'rejected')),
+    sequence_no INTEGER NOT NULL CHECK (sequence_no >= 0),
+    title TEXT,
+    summary TEXT,
+    caused_by_event_ids_json TEXT,
+    affected_key_block_ids_json TEXT,
+    source_command_id TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (world_id) REFERENCES narrative_worlds (world_id) ON DELETE CASCADE,
+    UNIQUE (world_id, branch_id, sequence_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_timeline_events_world_id
+    ON narrative_timeline_events (world_id);
+CREATE INDEX IF NOT EXISTS idx_narrative_timeline_events_world_branch_sequence
+    ON narrative_timeline_events (world_id, branch_id, sequence_no);
+CREATE INDEX IF NOT EXISTS idx_narrative_timeline_events_status
+    ON narrative_timeline_events (status);
+
+CREATE TABLE IF NOT EXISTS kb_key_blocks (
+    key_block_id TEXT PRIMARY KEY CHECK (key_block_id LIKE 'kb_%'),
+    world_id TEXT NOT NULL,
+    block_type TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'provisional'
+        CHECK (status IN ('provisional', 'confirmed', 'deprecated', 'merged', 'deleted')),
+    revision INTEGER,
+    body_json TEXT,
+    source_anchor_json TEXT,
+    created_from_command_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    FOREIGN KEY (world_id) REFERENCES narrative_worlds (world_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_key_blocks_world_id
+    ON kb_key_blocks (world_id);
+CREATE INDEX IF NOT EXISTS idx_kb_key_blocks_world_status
+    ON kb_key_blocks (world_id, status);
+CREATE INDEX IF NOT EXISTS idx_kb_key_blocks_world_type
+    ON kb_key_blocks (world_id, block_type);
+CREATE INDEX IF NOT EXISTS idx_kb_key_blocks_world_canonical_name
+    ON kb_key_blocks (world_id, canonical_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_key_blocks_active_unique
+    ON kb_key_blocks (world_id, block_type, canonical_name)
+    WHERE status NOT IN ('deleted', 'merged', 'deprecated');
+
+CREATE TABLE IF NOT EXISTS kb_source_anchors (
+    key_block_id TEXT NOT NULL,
+    anchor_ordinal INTEGER NOT NULL,
+    source_anchor_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (key_block_id, anchor_ordinal),
+    FOREIGN KEY (key_block_id) REFERENCES kb_key_blocks (key_block_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_source_anchors_key_block_id
+    ON kb_source_anchors (key_block_id);
+```
+
+Column notes:
+
+- `world_id`, `timeline_event_id`, and `key_block_id` preserve current domain ID prefixes (`wld_`, `evt_`, `kb_`).
+- `*_json` columns store serialized domain value objects or arrays where current traits only need full-object reconstruction (`world_rules`, event cause/affected ID arrays, KeyBlock body, and SourceAnchor values).
+- `narrative_timeline_events` is required by `NarrativeGateway::get_timeline`, `get_event`, and `get_narrative_context`.
+- `kb_source_anchors` is required because `KbStore::attach_source_anchor` permits multiple anchors per KeyBlock; `kb_key_blocks.source_anchor_json` remains the optional embedded `KeyBlock.source_anchor` value.
+- The partial unique index on `kb_key_blocks` implements the existing active uniqueness rule: one active `(world_id, canonical_name, block_type)` tuple, while `deleted`, `merged`, and `deprecated` rows no longer block replacement.
 
 ### 4.2 Daemon-only tables（由 daemon profile 管理）
 

@@ -142,6 +142,54 @@ pub fn creator_soul_md_path(home: &Path, creator_id: &str) -> PathBuf {
         .join("SOUL.md")
 }
 
+/// `$HOME/.nexus42/creators/<creator_id>/references/`
+///
+/// Root directory for reference source bodies belonging to a specific creator
+/// (V1.26 reference store layout).
+///
+/// # Defense-in-depth
+///
+/// If `creator_id` contains path traversal components, this function panics.
+/// See [`creator_soul_md_path`] for the same defense pattern.
+#[must_use]
+pub fn creator_references_root(home: &Path, creator_id: &str) -> PathBuf {
+    assert_creator_id_safe(creator_id);
+    nexus_root_from_home(home)
+        .join("creators")
+        .join(creator_id)
+        .join("references")
+}
+
+/// `$HOME/.nexus42/creators/<creator_id>/references/units/<reference_id>/`
+///
+/// Directory for a single reference source unit's body and metadata
+/// (V1.26 reference store layout).
+///
+/// # Defense-in-depth
+///
+/// Panics if `creator_id` or `reference_id` contains path traversal components.
+#[must_use]
+pub fn reference_unit_dir(home: &Path, creator_id: &str, reference_id: &str) -> PathBuf {
+    assert_creator_id_safe(creator_id);
+    assert_reference_id_safe(reference_id);
+    creator_references_root(home, creator_id)
+        .join("units")
+        .join(reference_id)
+}
+
+/// `$HOME/.nexus42/creators/<creator_id>/references/units/<reference_id>/body.md`
+///
+/// Canonical body file for a reference source (V1.26 reference store layout).
+///
+/// # Defense-in-depth
+///
+/// Panics if `creator_id` or `reference_id` contains path traversal components
+/// (assertions are applied in [`reference_unit_dir`]).
+#[must_use]
+pub fn reference_body_path(home: &Path, creator_id: &str, reference_id: &str) -> PathBuf {
+    reference_unit_dir(home, creator_id, reference_id).join("body.md")
+}
+
 /// Assert that `creator_id` does not contain path-traversal characters.
 ///
 /// This is a low-overhead sanity check; `nexus-domain::is_valid_creator_id()`
@@ -161,6 +209,28 @@ fn assert_creator_id_safe(id: &str) {
     assert!(
         !id.chars().any(char::is_control),
         "creator_id contains control characters: {id:?} — this would be a path-traversal vulnerability"
+    );
+}
+
+/// Assert that `reference_id` does not contain path-traversal characters.
+///
+/// Same safety checks as [`assert_creator_id_safe`] but also rejects empty strings,
+/// which are not valid reference source IDs.
+fn assert_reference_id_safe(id: &str) {
+    assert!(!id.is_empty(), "reference_id must not be empty");
+    for ch in id.chars() {
+        assert!(
+            ch != '/' && ch != '\\',
+            "reference_id contains path separator: {id:?} — this would be a path-traversal vulnerability"
+        );
+    }
+    assert!(
+        !id.contains(".."),
+        "reference_id contains '..': {id:?} — this would be a path-traversal vulnerability"
+    );
+    assert!(
+        !id.chars().any(char::is_control),
+        "reference_id contains control characters: {id:?} — this would be a path-traversal vulnerability"
     );
 }
 
@@ -271,6 +341,38 @@ pub fn validate_entry_id_safe(id: &str) -> std::result::Result<(), String> {
     if id.chars().any(char::is_control) {
         return Err(format!(
             "entry_id contains control characters: {id:?} — rejected for safety"
+        ));
+    }
+    Ok(())
+}
+
+/// Non-panicking path-traversal validation for `reference_id`.
+///
+/// Returns `Ok(())` if the ID is safe, or `Err` with a description.
+/// Same checks as [`assert_reference_id_safe`] but suitable for fallible call sites.
+///
+/// # Errors
+///
+/// Returns `Err` if the ID is empty or contains `/`, `\`, `..`, or control characters.
+pub fn validate_reference_id_safe(id: &str) -> std::result::Result<(), String> {
+    if id.is_empty() {
+        return Err("reference_id must not be empty".to_string());
+    }
+    for ch in id.chars() {
+        if ch == '/' || ch == '\\' {
+            return Err(format!(
+                "reference_id contains path separator: {id:?} — rejected for safety"
+            ));
+        }
+    }
+    if id.contains("..") {
+        return Err(format!(
+            "reference_id contains '..': {id:?} — rejected for safety"
+        ));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(format!(
+            "reference_id contains control characters: {id:?} — rejected for safety"
         ));
     }
     Ok(())
@@ -520,6 +622,118 @@ mod tests {
     #[test]
     fn validate_run_id_safe_rejects_control_chars() {
         let err = validate_run_id_safe("run_\x00null").unwrap_err();
+        assert!(err.contains("control characters"));
+    }
+
+    // ── Reference store path helpers ───────────────────────────────────────
+
+    #[test]
+    fn creator_references_root_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            creator_references_root(&home, "ctr_test"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/references")
+        );
+    }
+
+    #[test]
+    fn reference_unit_dir_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            reference_unit_dir(&home, "ctr_test", "ref_abc123"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/references/units/ref_abc123")
+        );
+    }
+
+    #[test]
+    fn reference_body_path_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            reference_body_path(&home, "ctr_test", "ref_abc123"),
+            PathBuf::from("/h/.nexus42/creators/ctr_test/references/units/ref_abc123/body.md")
+        );
+    }
+
+    // ── Reference path defense-in-depth (creator_id) ───────────────────────
+
+    #[test]
+    #[should_panic(expected = "path separator")]
+    fn reference_path_rejects_traversal_creator_id_slash() {
+        let home = PathBuf::from("/h");
+        let _ = creator_references_root(&home, "../../etc/passwd");
+    }
+
+    #[test]
+    #[should_panic(expected = "'..'")]
+    fn reference_path_rejects_traversal_creator_id_dotdot() {
+        let home = PathBuf::from("/h");
+        let _ = reference_unit_dir(&home, "ctr_.._bad", "ref_ok");
+    }
+
+    // ── Reference path defense-in-depth (reference_id) ─────────────────────
+
+    #[test]
+    #[should_panic(expected = "must not be empty")]
+    fn reference_path_rejects_empty_reference_id() {
+        let home = PathBuf::from("/h");
+        let _ = reference_unit_dir(&home, "ctr_ok", "");
+    }
+
+    #[test]
+    #[should_panic(expected = "path separator")]
+    fn reference_path_rejects_traversal_reference_id_slash() {
+        let home = PathBuf::from("/h");
+        let _ = reference_unit_dir(&home, "ctr_ok", "../../etc/passwd");
+    }
+
+    #[test]
+    #[should_panic(expected = "'..'")]
+    fn reference_path_rejects_traversal_reference_id_dotdot() {
+        let home = PathBuf::from("/h");
+        let _ = reference_body_path(&home, "ctr_ok", "ref_.._bad");
+    }
+
+    #[test]
+    #[should_panic(expected = "control characters")]
+    fn reference_path_rejects_control_char_reference_id() {
+        let home = PathBuf::from("/h");
+        let _ = reference_unit_dir(&home, "ctr_ok", "ref_\x00null");
+    }
+
+    // ── validate_reference_id_safe tests ───────────────────────────────────
+
+    #[test]
+    fn validate_reference_id_safe_accepts_valid() {
+        assert!(validate_reference_id_safe("ref_abc123").is_ok());
+    }
+
+    #[test]
+    fn validate_reference_id_safe_rejects_empty() {
+        let err = validate_reference_id_safe("").unwrap_err();
+        assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_reference_id_safe_rejects_forward_slash() {
+        let err = validate_reference_id_safe("ref_foo/bar").unwrap_err();
+        assert!(err.contains("path separator"));
+    }
+
+    #[test]
+    fn validate_reference_id_safe_rejects_backslash() {
+        let err = validate_reference_id_safe("ref_foo\\bar").unwrap_err();
+        assert!(err.contains("path separator"));
+    }
+
+    #[test]
+    fn validate_reference_id_safe_rejects_dotdot() {
+        let err = validate_reference_id_safe("ref_.._secret").unwrap_err();
+        assert!(err.contains("'..'"));
+    }
+
+    #[test]
+    fn validate_reference_id_safe_rejects_control_chars() {
+        let err = validate_reference_id_safe("ref_\x01ctrl").unwrap_err();
         assert!(err.contains("control characters"));
     }
 }
