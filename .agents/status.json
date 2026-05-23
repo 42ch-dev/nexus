@@ -14,12 +14,12 @@
     {
       "plan_id": "2026-05-23-v1.26-local-context-product",
       "title": "V1.26 local context productization (no platform)",
-      "status": "Todo",
+      "status": "InProgress",
       "iteration": "v1.26",
       "working_branch": "feature/v1.26-local-persistence",
       "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
       "depends_on": ["2026-05-23-v1.26-narrative-kb-persistence"],
-      "next_action": "Ready to start — Theme N+K Done"
+      "next_action": "Dispatch C1+C3 (code) + C2 (docs)"
     }
   ],
   "metadata": {
