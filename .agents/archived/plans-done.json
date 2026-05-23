@@ -1,7 +1,30 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-23T16:00:00Z",
+  "updated_at": "2026-05-23T18:00:00Z",
   "plans": [
+    {
+      "plan_id": "2026-05-23-v1.26-local-context-product",
+      "title": "V1.26 local context productization (assemble-moment promoted, deferred UX fix)",
+      "done_at": "2026-05-23T18:00:00Z",
+      "plan_file": ".agents/plans/2026-05-23-v1.26-local-context-product.md",
+      "total_batches": 4,
+      "batches_completed": 4,
+      "qc": "3× Approve (0 critical, 3 warnings fixed pre-merge: doc_markdown, double pool, map_or_else)",
+      "qa": "6/7 initial → 7/7 after fix (clippy clean)",
+      "residual_count": 1,
+      "notes": "assemble-moment promoted to visible, wired to persistent SqliteNarrativeGateway + SqliteKbStore. Assemble arm shows deferred message (exit 2). cli-spec + schema docs updated. Shared pool pattern replaces double open. R10 (InMemoryKnowledgeStore) deferred."
+    },
+    {
+      "plan_id": "2026-05-23-v1.26-iteration-hygiene",
+      "title": "V1.26 iteration hygiene — compass/plan status alignment",
+      "done_at": "2026-05-23T12:00:00Z",
+      "plan_file": ".agents/plans/2026-05-23-v1.26-iteration-hygiene.md",
+      "total_batches": 1,
+      "batches_completed": 1,
+      "qc": "N/A (admin)",
+      "qa": "N/A (admin)",
+      "notes": "Compass and plan status aligned. No code changes."
+    },
     {
       "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
       "title": "V1.26 narrative + World KB SQLite",

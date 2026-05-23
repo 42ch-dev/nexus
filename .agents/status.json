@@ -1,34 +1,14 @@
 {
   "version": 1,
-  "updated_at": "2026-05-23T16:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-05-23-v1.26-iteration-hygiene",
-      "title": "V1.26 iteration hygiene — compass/plan status alignment",
-      "status": "Done",
-      "iteration": "v1.26",
-      "working_branch": "feature/v1.26-local-persistence",
-      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "next_action": "Hygiene complete; dispatch Theme R implement"
-    },
-    {
-      "plan_id": "2026-05-23-v1.26-local-context-product",
-      "title": "V1.26 local context productization (no platform)",
-      "status": "InProgress",
-      "iteration": "v1.26",
-      "working_branch": "feature/v1.26-local-persistence",
-      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "depends_on": ["2026-05-23-v1.26-narrative-kb-persistence"],
-      "next_action": "Dispatch C1+C3 (code) + C2 (docs)"
-    }
-  ],
+  "updated_at": "2026-05-23T18:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
       "fix": "fix/{name}"
     },
-    "latest_shipped_iteration": "v1.25",
-    "latest_shipped_at": "2026-05-22T09:26:37Z",
+    "latest_shipped_iteration": "v1.26",
+    "latest_shipped_at": "2026-05-23T18:00:00Z",
     "latest_active_iteration": "v1.26",
     "latest_active_compass": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
@@ -39,7 +19,7 @@
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 4,
+        "low": 5,
         "nit": 11
       },
       "by_target": {},
@@ -57,6 +37,19 @@
     }
   },
   "residual_findings": {
+    "2026-05-23-v1.26-local-context-product": [
+      {
+        "id": "R10",
+        "title": "Knowledge slice uses InMemoryKnowledgeStore — no persistent UserKnowledgeStore in V1.26",
+        "severity": "low",
+        "source": "dev C1.2",
+        "scope": "crates/nexus42/src/commands/platform/context.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Replace with persistent knowledge store when available."
+      }
+    ],
     "2026-05-23-v1.26-narrative-kb-persistence": [
       {
         "id": "R8",
