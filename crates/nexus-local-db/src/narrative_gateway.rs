@@ -22,13 +22,13 @@ use std::sync::Arc;
 ///
 /// These functions are intended for tests and development fixtures only.
 /// They create the necessary FK parent rows (e.g. creators) if missing.
-#[cfg(test)]
 pub mod seed {
+    use super::super::seed_shared;
     use sqlx::SqlitePool;
 
     /// Seed a test world row into `narrative_worlds`.
     ///
-    /// Creates a minimal creator row for FK satisfaction if it does not exist.
+    /// Delegates to the shared `seed_shared::world` helper.
     pub async fn world(
         pool: &SqlitePool,
         world_id: &str,
@@ -38,19 +38,8 @@ pub mod seed {
         visibility: &str,
         time_policy: &str,
     ) {
-        sqlx::query!(
-            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', datetime('now'), '{}')",
-            owner_creator_id,
-            owner_creator_id,
-        )
-        .execute(pool)
-        .await
-        .unwrap();
-
-        sqlx::query!(
-            r#"INSERT INTO narrative_worlds
-                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
-               VALUES (?, 'wrk_test', ?, ?, ?, 'active', ?, ?, '{}')"#,
+        seed_shared::world(
+            pool,
             world_id,
             owner_creator_id,
             title,
@@ -58,12 +47,14 @@ pub mod seed {
             visibility,
             time_policy,
         )
-        .execute(pool)
-        .await
-        .unwrap();
+        .await;
     }
 
     /// Seed a test timeline event row into `narrative_timeline_events`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the database insert fails (e.g., FK violation).
     pub async fn event(
         pool: &SqlitePool,
         event_id: &str,
@@ -190,6 +181,8 @@ fn db_err(err: &sqlx::Error) -> NarrativeError {
     NarrativeError::ValidationError(format!("database error: {err}"))
 }
 
+// SAFETY: sqlx SQLite futures borrow the connection pool internally;
+// safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]
 impl NarrativeGateway for SqliteNarrativeGateway {
     async fn get_world_state(&self, world_id: &str) -> Result<WorldState, NarrativeError> {
@@ -416,7 +409,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_local_db::{open_pool, run_migrations};
+    use crate::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();

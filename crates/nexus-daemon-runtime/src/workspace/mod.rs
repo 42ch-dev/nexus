@@ -10,8 +10,8 @@
 
 pub mod manager;
 
-use crate::db::narrative_gateway::SqliteNarrativeGateway;
 use crate::db::pool::{DbPool, PoolConfig};
+use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_orchestration::{

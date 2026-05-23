@@ -11,13 +11,16 @@
 //! See `.agents/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
 pub mod identity;
+pub mod kb_store;
 pub mod memory_fragment;
+pub mod narrative_gateway;
 pub mod pending_review;
 pub mod reference_source;
 pub mod soul_meta;
 pub mod world_stories;
 
 mod error;
+mod seed_shared;
 mod version;
 
 // Re-export version constants

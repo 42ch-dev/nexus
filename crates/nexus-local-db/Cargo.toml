@@ -18,6 +18,8 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 uuid = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
+nexus-narrative = { path = "../nexus-narrative" }
+nexus-kb = { path = "../nexus-kb" }
 
 [dev-dependencies]
 tempfile = "3"

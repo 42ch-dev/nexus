@@ -1,9 +1,15 @@
 //! Database module — connection pooling, canonical schema, and gateway adapters
+//!
+//! The concrete gateway types (`SqliteKbStore`, `SqliteNarrativeGateway`)
+//! are defined in `nexus-local-db`. This module re-exports them and
+//! provides the daemon-specific pool and schema utilities.
 
-pub mod kb_store;
-pub mod narrative_gateway;
 pub mod pool;
 pub mod schema;
+
+// Re-export store types from nexus-local-db (canonical owner of SQLite concerns).
+pub use nexus_local_db::kb_store::SqliteKbStore;
+pub use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 
 #[cfg(test)]
 mod restart_tests {
@@ -32,7 +38,7 @@ mod restart_tests {
         let db_path = dir.path().join("test.db");
 
         // Seed a world via the narrative gateway seed helper.
-        super::narrative_gateway::seed::world(
+        nexus_local_db::narrative_gateway::seed::world(
             &pool,
             "wld_restart",
             "ctr_test",
@@ -44,7 +50,7 @@ mod restart_tests {
         .await;
 
         // Seed a key block for that world via the KB store seed helper.
-        super::kb_store::seed::key_block(
+        nexus_local_db::kb_store::seed::key_block(
             &pool,
             "kb_char_1",
             "wld_restart",
@@ -61,8 +67,8 @@ mod restart_tests {
         let pool2 = open_pool(&db_path).await.unwrap();
         run_migrations(&pool2).await.unwrap();
 
-        let gw = super::narrative_gateway::SqliteNarrativeGateway::new(pool2.clone());
-        let kb = super::kb_store::SqliteKbStore::new(pool2.clone());
+        let gw = super::SqliteNarrativeGateway::new(pool2.clone());
+        let kb = super::SqliteKbStore::new(pool2.clone());
 
         // ── Phase 3: verify persisted data ─────────────────────────
 

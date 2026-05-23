@@ -809,14 +809,14 @@ fn require_world_id(world_id: Option<&str>) -> Result<String> {
 
 /// Open a persistent KB store backed by the workspace `state.db`.
 ///
-/// Uses `nexus-daemon-runtime::db::kb_store::SqliteKbStore` which implements
+/// Uses `nexus_local_db::kb_store::SqliteKbStore` which implements
 /// `KbStore` via compile-time checked sqlx queries.
 async fn open_world_kb_store(
     config: &CliConfig,
-) -> Result<nexus_daemon_runtime::db::kb_store::SqliteKbStore> {
+) -> Result<nexus_local_db::kb_store::SqliteKbStore> {
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(nexus_daemon_runtime::db::kb_store::SqliteKbStore::new(pool))
+    Ok(nexus_local_db::kb_store::SqliteKbStore::new(pool))
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
