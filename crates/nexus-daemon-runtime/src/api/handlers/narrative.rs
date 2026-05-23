@@ -1,7 +1,7 @@
-//! Narrative read surface handlers (V1.25 Theme C, C1.1).
+//! Narrative read surface handlers (V1.25 Theme C, C1.1 → V1.26 persistence).
 //!
-//! Minimal read-only daemon routes backed by `NarrativeGateway` with
-//! in-memory stores. **No persistence across daemon restarts.**
+//! Read-only daemon routes backed by `NarrativeGateway` with
+//! `SQLite` persistence via `SqliteNarrativeGateway`.
 //!
 //! # Endpoints
 //!
@@ -17,8 +17,7 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
-use nexus_kb::InMemoryKbStore;
-use nexus_narrative::{InMemoryNarrativeGateway, NarrativeGateway, WorldState};
+use nexus_narrative::{NarrativeGateway, WorldState};
 use serde::Serialize;
 
 // ─── Response types ────────────────────────────────────────────────────────
@@ -37,14 +36,14 @@ pub struct GetWorldResponse {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/narrative/worlds` — list all worlds (in-memory, read-only).
+/// `GET /v1/local/narrative/worlds` — list all worlds.
 ///
-/// Returns an empty list when no worlds have been seeded into the gateway.
-/// The response shape is stable; persistence will be added in a future iteration.
+/// Returns worlds from the persistent `SQLite` gateway. Empty list when
+/// no worlds have been seeded into the database.
 pub async fn list_worlds(
-    State(_state): State<WorkspaceState>,
+    State(state): State<WorkspaceState>,
 ) -> Result<Json<ListWorldsResponse>, NexusApiError> {
-    let gateway = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
+    let gateway = state.narrative_gateway();
     let worlds = gateway
         .list_worlds()
         .await
@@ -58,12 +57,12 @@ pub async fn list_worlds(
 /// `GET /v1/local/narrative/worlds/{world_id}` — get a single world state.
 ///
 /// Returns 404 for an unknown world ID. Returns the projected world
-/// state (including fork info) for a known world.
+/// state for a known world from the persistent gateway.
 pub async fn get_world(
-    State(_state): State<WorkspaceState>,
+    State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
 ) -> Result<Json<GetWorldResponse>, NexusApiError> {
-    let gateway = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
+    let gateway = state.narrative_gateway();
     let world = gateway
         .get_world_state(&world_id)
         .await
@@ -87,36 +86,48 @@ mod tests {
 
     #[tokio::test]
     async fn list_worlds_returns_empty_for_fresh_gateway() {
-        let gateway = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let gateway = state.narrative_gateway();
         let worlds = gateway.list_worlds().await.unwrap();
         assert!(worlds.is_empty());
+        drop(state);
+        drop(tmp);
     }
 
     #[tokio::test]
     async fn get_world_state_returns_error_for_missing() {
-        let gateway = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let gateway = state.narrative_gateway();
         let result = gateway.get_world_state("nonexistent").await;
         assert!(result.is_err());
+        drop(state);
+        drop(tmp);
     }
 
     #[tokio::test]
     async fn get_world_state_returns_world_when_seeded() {
-        use nexus_contracts::{TimePolicy, Visibility};
-        use nexus_narrative::world::World;
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-        let gateway = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
-        let world = World::new(
+        // Seed a world directly into the DB
+        crate::db::narrative_gateway::seed::world(
+            state.pool(),
             "wld_test",
             "ctr_test",
             "Test",
             "test",
-            Visibility::Private,
-            TimePolicy::Manual,
-        );
-        gateway.insert_world(world);
+            "private",
+            "manual",
+        )
+        .await;
 
-        let state = gateway.get_world_state("wld_test").await.unwrap();
-        assert_eq!(state.world_id, "wld_test");
-        assert_eq!(state.title, "Test");
+        let gateway = state.narrative_gateway();
+        let s = gateway.get_world_state("wld_test").await.unwrap();
+        assert_eq!(s.world_id, "wld_test");
+        assert_eq!(s.title, "Test");
+        drop(state);
+        drop(tmp);
     }
 }

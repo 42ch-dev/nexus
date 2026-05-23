@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                world_id as \"world_id!\",\n                title as \"title!\",\n                slug as \"slug!\",\n                status as \"status!\",\n                canon_revision,\n                current_timeline_head_id,\n                current_time_pointer,\n                created_at as \"created_at!\",\n                root_fork_branch_id\n            FROM narrative_worlds\n            ORDER BY created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "world_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "slug!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "canon_revision",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "current_timeline_head_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_time_pointer",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "root_fork_branch_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "9c74eb59a76b4d94d0c50ee1c3a4718d4c9fc198034a2d8facba0ed22fc06fd5"
+}

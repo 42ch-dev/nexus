@@ -10,6 +10,7 @@
 
 pub mod manager;
 
+use crate::db::narrative_gateway::SqliteNarrativeGateway;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use nexus_contracts::local::domain::RuntimeMode;
@@ -50,6 +51,8 @@ pub struct WorkspaceState {
     schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
     agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
+    /// Narrative gateway — shared per workspace pool, constructed once at boot.
+    narrative_gateway: Arc<SqliteNarrativeGateway>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
@@ -72,6 +75,7 @@ impl WorkspaceState {
         let db = DbPool::new(&db_path, PoolConfig::default().with_max_connections(2))
             .await
             .expect("Failed to create test database pool");
+        let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
         Self {
             db,
             nexus_home,
@@ -86,6 +90,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
+            narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
         }
     }
@@ -120,6 +125,8 @@ impl WorkspaceState {
         crate::db::schema::Schema::init(&db_path).await?;
         let db = DbPool::new(&db_path, PoolConfig::from_env()).await?;
 
+        let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
+
         tracing::info!("Workspace state.db at {:?}", db_path);
 
         Ok(Self {
@@ -136,6 +143,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
+            narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
         })
     }
@@ -177,6 +185,12 @@ impl WorkspaceState {
     #[must_use]
     pub fn agent_host(&self) -> Option<Arc<dyn nexus_agent_host::HostFacade>> {
         self.agent_host.as_ref().clone()
+    }
+
+    /// Get the narrative gateway (shared per workspace pool).
+    #[must_use]
+    pub fn narrative_gateway(&self) -> Arc<SqliteNarrativeGateway> {
+        Arc::clone(&self.narrative_gateway)
     }
 
     /// Get the orchestration engine, if set.
