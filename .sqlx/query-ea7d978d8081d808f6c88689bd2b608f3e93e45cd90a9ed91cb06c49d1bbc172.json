@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n             reference_source_id as \"reference_source_id!\",\n             workspace_id as \"workspace_id!\",\n             source_type as \"source_type!\",\n             source_mutability as \"source_mutability!\",\n             uri as \"uri!\",\n             title as \"title!\",\n             tags,\n             content_hash,\n             content_path,\n             scan_status as \"scan_status!\",\n             created_at as \"created_at!\",\n             updated_at\n           FROM reference_sources ORDER BY created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference_source_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "workspace_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_type!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_mutability!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "uri!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "tags",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_hash",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_path",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "scan_status!",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 11,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ea7d978d8081d808f6c88689bd2b608f3e93e45cd90a9ed91cb06c49d1bbc172"
+}
