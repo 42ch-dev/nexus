@@ -2278,7 +2278,9 @@ dependencies = [
 name = "nexus-local-db"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "nexus-contracts",
+ "nexus-home-layout",
  "serde_json",
  "sqlx",
  "tempfile",
