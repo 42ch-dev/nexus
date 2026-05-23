@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-23T08:00:00Z",
+  "updated_at": "2026-05-23T12:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-23-v1.26-iteration-hygiene",
@@ -14,12 +14,12 @@
     {
       "plan_id": "2026-05-23-v1.26-reference-store-layout",
       "title": "V1.26 reference registry + MD body layout",
-      "status": "InProgress",
+      "status": "InReview",
       "iteration": "v1.26",
       "working_branch": "feature/v1.26-local-persistence",
       "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
       "depends_on": ["2026-05-23-v1.26-iteration-hygiene"],
-      "next_action": "Dispatch Batch R1 (design, @architect)"
+      "next_action": "All batches R1–R5 implemented; QC tri-review pending"
     },
     {
       "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
