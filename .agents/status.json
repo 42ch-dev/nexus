@@ -1,7 +1,44 @@
 {
   "version": 1,
-  "updated_at": "2026-05-22T09:56:21.411961+00:00",
-  "plans": [],
+  "updated_at": "2026-05-23T08:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-05-23-v1.26-iteration-hygiene",
+      "title": "V1.26 iteration hygiene — compass/plan status alignment",
+      "status": "Done",
+      "iteration": "v1.26",
+      "working_branch": "feature/v1.26-local-persistence",
+      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+      "next_action": "Hygiene complete; dispatch Theme R implement"
+    },
+    {
+      "plan_id": "2026-05-23-v1.26-reference-store-layout",
+      "title": "V1.26 reference registry + MD body layout",
+      "status": "Todo",
+      "iteration": "v1.26",
+      "working_branch": "feature/v1.26-local-persistence",
+      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+      "depends_on": ["2026-05-23-v1.26-iteration-hygiene"]
+    },
+    {
+      "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
+      "title": "V1.26 narrative + World KB SQLite",
+      "status": "Todo",
+      "iteration": "v1.26",
+      "working_branch": "feature/v1.26-local-persistence",
+      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+      "depends_on": ["2026-05-23-v1.26-reference-store-layout"]
+    },
+    {
+      "plan_id": "2026-05-23-v1.26-local-context-product",
+      "title": "V1.26 local context productization (no platform)",
+      "status": "Todo",
+      "iteration": "v1.26",
+      "working_branch": "feature/v1.26-local-persistence",
+      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+      "depends_on": ["2026-05-23-v1.26-narrative-kb-persistence"]
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,6 +46,9 @@
     },
     "latest_shipped_iteration": "v1.25",
     "latest_shipped_at": "2026-05-22T09:26:37Z",
+    "latest_active_iteration": "v1.26",
+    "latest_active_compass": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+    "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-05-22T17:00:00Z",
       "total_open": 0,
@@ -43,9 +83,9 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/kb.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "tracking_link": "DF-42 (full KB route redesign)",
-        "note": "Consider explicit scope rejection when full KB route redesign happens."
+        "target_date": "v1.26",
+        "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence (DF-42 follow-up)",
+        "note": "Address during V1.26 Theme K or explicit scope rejection in kb handler."
       },
       {
         "id": "R4",
@@ -55,9 +95,9 @@
         "scope": "crates/nexus42/src/commands/creator/mod.rs",
         "decision": "defer",
         "owner": "@qa-engineer",
-        "target_date": "backlog",
-        "tracking_link": null,
-        "note": "Cheap regression test to add when World scope is implemented."
+        "target_date": "v1.26",
+        "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence",
+        "note": "Close when persistent world kb list test lands (Batch K1.3)."
       }
     ]
   }

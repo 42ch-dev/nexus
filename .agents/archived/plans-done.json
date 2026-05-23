@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-22T09:56:21.411961+00:00",
+  "updated_at": "2026-05-23T08:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-20-v1.21-local-platform-isolation",
