@@ -31,8 +31,9 @@ When specs overlap, use this order (higher wins on conflict):
 4. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — what belongs in `schemas/` vs `nexus-contracts/src/local/`.
 5. **[schemas-directory-layout.md](schemas-directory-layout.md)** — `schemas/` folder tree (`cloud-sync/`, `platform/`, …) and removed paths.
 6. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
-7. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
-8. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
+7. **Local persistence / stores** — [local-db-schema.md](local-db-schema.md), [reference-store-layout.md](reference-store-layout.md).
+8. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
+9. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → renamed **2026-05-20** to `local-cloud-crate-architecture.md`.
 
@@ -51,6 +52,7 @@ When specs overlap, use this order (higher wins on conflict):
 | [registry-integration.md](registry-integration.md) | ACP Registry integration |
 | [skills-export-compatibility.md](skills-export-compatibility.md) | Skills export (CLI/local only) |
 | [local-db-schema.md](local-db-schema.md) | Local `state.db` |
+| [reference-store-layout.md](reference-store-layout.md) | Reference registry + `body.md` storage split |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Creator registration challenge solver |
 
 ## Index — OSS feature specs
