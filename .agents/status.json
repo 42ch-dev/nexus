@@ -14,11 +14,12 @@
     {
       "plan_id": "2026-05-23-v1.26-reference-store-layout",
       "title": "V1.26 reference registry + MD body layout",
-      "status": "Todo",
+      "status": "InProgress",
       "iteration": "v1.26",
       "working_branch": "feature/v1.26-local-persistence",
       "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "depends_on": ["2026-05-23-v1.26-iteration-hygiene"]
+      "depends_on": ["2026-05-23-v1.26-iteration-hygiene"],
+      "next_action": "Dispatch Batch R1 (design, @architect)"
     },
     {
       "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",

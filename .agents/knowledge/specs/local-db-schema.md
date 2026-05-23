@@ -66,6 +66,30 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 | `creators` | Creator 本地缓存 | Shared |
 | `reference_sources` | 参考资料扫描索引与状态 | Shared |
 
+#### 4.1.1 `reference_sources`
+
+`reference_sources` is the registry table for User-scoped local reference units. The canonical body text is externalized to `body.md` under the active Creator root; see [reference-store-layout.md](reference-store-layout.md).
+
+Required V1.26 columns:
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `reference_source_id` | `TEXT` | yes | Registry primary key and `references/units/<id>/` directory name. |
+| `workspace_id` | `TEXT` | yes | Workspace binding in `state.db`. |
+| `source_type` | `TEXT` | yes | Contract enum value such as `file`, `url`, `pdf`, or `note`. |
+| `source_mutability` | `TEXT` | yes | `NOT NULL DEFAULT 'static'`; allowed values: `static`, `refreshable`. |
+| `uri` | `TEXT` | yes | `nexus42://references/units/<id>` or original import URI. |
+| `title` | `TEXT` | yes | Human-readable title. |
+| `tags` | `TEXT` | no | Serialized tag list if present. |
+| `content_hash` | `TEXT` | no | Hash of canonical `body.md` when available. |
+| `content_path` | `TEXT` | no | Relative path from Creator root, e.g. `references/units/<id>/body.md`. |
+| `content` | `TEXT` | no | **Deprecated** inline body column; `NULL` for new rows. |
+| `scan_status` | `TEXT` | yes | Scan lifecycle status. |
+| `created_at` | `TEXT` | yes | Creation timestamp. |
+| `updated_at` | `TEXT` | no | Last registry update timestamp. |
+
+New code MUST write canonical body text to `content_path` on disk instead of `content`. Listing references MUST be satisfiable from registry metadata without reading full body text.
+
 ### 4.2 Daemon-only tables（由 daemon profile 管理）
 
 | Table | 作用 | Owner |
