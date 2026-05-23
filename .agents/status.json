@@ -75,6 +75,41 @@
     }
   },
   "residual_findings": {
+    "2026-05-23-v1.26-reference-store-layout": [
+      {
+        "id": "R5",
+        "title": "body.md written before SQL INSERT — orphaned files on DB failure",
+        "severity": "low",
+        "source": "qc1 W-001, qc3 F-001",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
+      },
+      {
+        "id": "R6",
+        "title": "list_references returns all rows unbounded — no pagination",
+        "severity": "nit",
+        "source": "qc3 F-002",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
+      },
+      {
+        "id": "R7",
+        "title": "content_hash always NULL — integrity field unused",
+        "severity": "nit",
+        "source": "qc3 F-005",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.26",
+        "note": "Populate when refreshable scan pipeline lands (DF-44)."
+      }
+    ],
     "2026-05-22-v1.24-knowledge-crates-alignment": [
       {
         "id": "R3",
