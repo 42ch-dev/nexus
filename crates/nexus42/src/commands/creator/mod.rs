@@ -801,10 +801,22 @@ fn require_world_id(world_id: Option<&str>) -> Result<String> {
         .ok_or_else(|| {
             CliError::Other(
                 "--world-id is required when using --scope world. \
-                 Usage: nexus42 creator kb <command> --scope world --world-id <id>"
+                  Usage: nexus42 creator kb <command> --scope world --world-id <id>"
                     .into(),
             )
         })
+}
+
+/// Open a persistent KB store backed by the workspace `state.db`.
+///
+/// Uses `nexus-daemon-runtime::db::kb_store::SqliteKbStore` which implements
+/// `KbStore` via compile-time checked sqlx queries.
+async fn open_world_kb_store(
+    config: &CliConfig,
+) -> Result<nexus_daemon_runtime::db::kb_store::SqliteKbStore> {
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+    Ok(nexus_daemon_runtime::db::kb_store::SqliteKbStore::new(pool))
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
@@ -911,7 +923,7 @@ fn deduplicate_entry_id(base_id: &str, index: &KbIndex) -> String {
 async fn kb_list(config: &CliConfig, scope: &KbScope, world_id: Option<&str>) -> Result<()> {
     if scope == &KbScope::World {
         let wid = require_world_id(world_id)?;
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = open_world_kb_store(config).await?;
         let blocks = store
             .list_by_world(&wid)
             .await
@@ -995,7 +1007,7 @@ async fn kb_search(
 ) -> Result<()> {
     if scope == &KbScope::World {
         let wid = require_world_id(world_id)?;
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = open_world_kb_store(config).await?;
         let kb_query = nexus_kb::KbQuery::new(&wid).with_text_search(query);
         let result = store
             .query(&kb_query)
@@ -1090,7 +1102,7 @@ async fn kb_show(
 ) -> Result<()> {
     if scope == &KbScope::World {
         let wid = require_world_id(world_id)?;
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = open_world_kb_store(config).await?;
         let block = store.get_key_block(entry_id).await.map_err(|e| {
             CliError::Other(format!("World KB show failed for {entry_id} in {wid}: {e}"))
         })?;

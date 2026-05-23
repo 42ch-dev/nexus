@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kb_key_blocks\n                (key_block_id, world_id, block_type, canonical_name, status, revision,\n                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at)\n               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "dbd27a032e3bf514b20f570339e047f7fb53536d71162ae8b56d94a317d9fe3e"
+}
