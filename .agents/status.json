@@ -12,23 +12,14 @@
       "next_action": "Hygiene complete; dispatch Theme R implement"
     },
     {
-      "plan_id": "2026-05-23-v1.26-reference-store-layout",
-      "title": "V1.26 reference registry + MD body layout",
-      "status": "InReview",
-      "iteration": "v1.26",
-      "working_branch": "feature/v1.26-local-persistence",
-      "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "depends_on": ["2026-05-23-v1.26-iteration-hygiene"],
-      "next_action": "All batches R1–R5 implemented; QC tri-review pending"
-    },
-    {
       "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
       "title": "V1.26 narrative + World KB SQLite",
       "status": "Todo",
       "iteration": "v1.26",
       "working_branch": "feature/v1.26-local-persistence",
       "primary_spec": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
-      "depends_on": ["2026-05-23-v1.26-reference-store-layout"]
+      "depends_on": ["2026-05-23-v1.26-reference-store-layout"],
+      "next_action": "Ready to start — Theme R Done"
     },
     {
       "plan_id": "2026-05-23-v1.26-local-context-product",
