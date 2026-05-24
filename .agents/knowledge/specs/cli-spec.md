@@ -248,7 +248,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 | `nexus42 creator workspace create <workspace_slug>` | 新建 workspace 登记与 operational 树 |
 | `nexus42 creator workspace use <workspace_slug>` | 切换活跃 workspace |
 | `nexus42 creator workspace init` | 在当前 `creator + workspace` 上下文登记创作根与 operational 元数据 |
-| `nexus42 creator workspace clone <world-ref>` | 从平台拉取世界骨架 |
+| `nexus42 creator workspace clone <world-ref>` | **Deprecated** — world cloning is platform-only; not available locally. Hidden from `--help` |
 | `nexus42 creator workspace link` | 绑定本地项目与平台 World |
 | `nexus42 creator workspace unlink` | 解绑本地项目与平台 World |
 | `nexus42 creator workspace status` | 当前 workspace 总览 |

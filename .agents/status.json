@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-05-24T14:00:00Z",
+  "updated_at": "2026-05-24T15:00:00Z",
   "plans": [
     {
       "id": "2026-05-24-v1.27-narrative-world-writes",
       "title": "V1.27 narrative world writes + World KB CLI writes",
-      "status": "Todo",
+      "status": "InProgress",
       "plan_file": ".agents/plans/2026-05-24-v1.27-narrative-world-writes.md",
       "working_branch": "feature/v1.27-narrative-world-writes",
       "merge_target": "feature/v1.27-local-authoring",
