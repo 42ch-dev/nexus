@@ -6,6 +6,7 @@
 pub mod memory;
 pub mod reference;
 pub mod soul;
+pub mod world;
 
 use crate::api::DaemonClient;
 use crate::auth;
@@ -554,11 +555,15 @@ pub enum CreatorCommand {
     ///
     /// **This is the CLI local work KB index**, NOT `nexus-kb` (World KB) or
     /// `nexus-knowledge` (User knowledge). See entity-scope-model §5.3.
-    ///
-    /// `--scope world` (narrative KB via nexus-kb + nexus-narrative) is coming soon.
     Kb {
         #[command(subcommand)]
         command: KbCommand,
+    },
+
+    /// Narrative world management (create worlds, add events, list)
+    World {
+        #[command(subcommand)]
+        command: world::WorldCommand,
     },
 
     /// Logout and clear creator credentials
@@ -631,6 +636,12 @@ pub enum KbCommand {
         /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
+        /// Block type for `--scope world` (e.g. Character, Scene, Item)
+        #[arg(long)]
+        block_type: Option<String>,
     },
 
     /// Remove a local work-scope entry
@@ -640,6 +651,9 @@ pub enum KbCommand {
         /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
     },
 }
 
@@ -741,6 +755,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Memory { command } => memory::run(command, config).await,
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => run_kb(command, config).await,
+        CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Logout => logout_creator(config).await,
     }
 }
@@ -777,21 +792,29 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
             scope,
             world_id,
         } => kb_show(config, &entry_id, &scope, world_id.as_deref()).await,
-        KbCommand::Add { file, title, scope } => {
-            kb_add(config, &file, title.as_deref(), &scope).await
+        KbCommand::Add {
+            file,
+            title,
+            scope,
+            world_id,
+            block_type,
+        } => {
+            kb_add(
+                config,
+                &file,
+                title.as_deref(),
+                &scope,
+                world_id.as_deref(),
+                block_type.as_deref(),
+            )
+            .await
         }
-        KbCommand::Remove { entry_id, scope } => kb_remove(config, &entry_id, &scope).await,
+        KbCommand::Remove {
+            entry_id,
+            scope,
+            world_id,
+        } => kb_remove(config, &entry_id, &scope, world_id.as_deref()).await,
     }
-}
-
-/// Deferred message for `world` scope write commands (add/remove).
-///
-/// Write operations for world scope are out of scope for V1.25.
-fn world_scope_write_deferred() {
-    println!(
-        "World scope write operations (add/remove) are not yet supported. \
-         Use --scope work for local file index operations."
-    );
 }
 
 /// Require `--world-id` when `--scope world` is used. Returns the `world_id` or an error.
@@ -817,6 +840,23 @@ async fn open_world_kb_store(
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
     Ok(nexus_local_db::kb_store::SqliteKbStore::new(pool))
+}
+
+/// Parse a block type string from CLI argument.
+fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
+    match s {
+        "Character" => Ok(nexus_contracts::BlockType::Character),
+        "Ability" => Ok(nexus_contracts::BlockType::Ability),
+        "Scene" => Ok(nexus_contracts::BlockType::Scene),
+        "Organization" => Ok(nexus_contracts::BlockType::Organization),
+        "Item" => Ok(nexus_contracts::BlockType::Item),
+        "Conflict" => Ok(nexus_contracts::BlockType::Conflict),
+        "InfoPoint" => Ok(nexus_contracts::BlockType::InfoPoint),
+        "Event" => Ok(nexus_contracts::BlockType::Event),
+        _ => Err(CliError::Other(format!(
+            "Unknown block_type '{s}'. Valid: Character, Ability, Scene, Organization, Item, Conflict, InfoPoint, Event"
+        ))),
+    }
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
@@ -1155,19 +1195,56 @@ async fn kb_show(
     Ok(())
 }
 
-/// `kb add` implementation — copy file into local work index, update index.
+/// `kb add` implementation — copy file into local work index, or add world KB block.
 ///
-/// Writes the index update to a temp file first, then copies the entry file,
+/// For work scope: writes the index update to a temp file first, then copies the entry file,
 /// then atomically renames the index. This prevents orphan entry files on
 /// partial failure (W2).
+///
+/// For world scope: creates a `KeyBlock` via `SqliteKbStore::insert_key_block`.
 async fn kb_add(
     config: &CliConfig,
     file: &std::path::Path,
     title: Option<&str>,
     scope: &KbScope,
+    world_id: Option<&str>,
+    block_type: Option<&str>,
 ) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_write_deferred();
+        let wid = require_world_id(world_id)?;
+        let bt_str = block_type.unwrap_or("InfoPoint");
+        let bt = parse_block_type_cli(bt_str)?;
+        let entry_title = title
+            .map(std::string::ToString::to_string)
+            .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "untitled".to_string());
+
+        let store = open_world_kb_store(config).await?;
+        let mut kb = nexus_kb::key_block::KeyBlock::new(&wid, bt, &entry_title);
+
+        // Read file content as summary if provided
+        if file.exists() {
+            let content = std::fs::read_to_string(file)?;
+            let summary = if content.len() > 500 {
+                format!("{}...", &content[..500])
+            } else {
+                content
+            };
+            kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+                summary: Some(summary),
+                attributes: None,
+                tags: None,
+            });
+        }
+
+        let result = store
+            .insert_key_block(kb)
+            .await
+            .map_err(|e| CliError::Other(format!("World KB add failed for {wid}: {e}")))?;
+        println!("✓ Key block added: {}", result.key_block_id);
+        println!("  World:  {wid}");
+        println!("  Type:   {bt_str}");
+        println!("  Name:   {entry_title}");
         return Ok(());
     }
     if !file.exists() {
@@ -1246,13 +1323,25 @@ async fn kb_add(
     Ok(())
 }
 
-/// `kb remove` implementation — delete a local work-scope entry.
+/// `kb remove` implementation — delete a local work-scope entry or world KB block.
 ///
 /// Tries the daemon API first; falls back to direct FS removal
 /// (delete entry file + update index atomically).
-async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+async fn kb_remove(
+    config: &CliConfig,
+    entry_id: &str,
+    scope: &KbScope,
+    world_id: Option<&str>,
+) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_write_deferred();
+        let wid = require_world_id(world_id)?;
+        let store = open_world_kb_store(config).await?;
+        store.delete_key_block(entry_id).await.map_err(|e| {
+            CliError::Other(format!(
+                "World KB remove failed for {entry_id} in {wid}: {e}"
+            ))
+        })?;
+        println!("✓ Key block removed: {entry_id}");
         return Ok(());
     }
     // F001: Validate entry_id before use.
