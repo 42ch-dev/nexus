@@ -5,7 +5,7 @@
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-05-23
+**Last updated**: 2026-05-24
 
 ---
 
@@ -61,8 +61,8 @@
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
 | DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
-| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | **V1.26** | M | **Status: In Progress**; `implemented_in: v1.26` for narrative + World KB in [v1.26-narrative-kb-persistence](../plans/2026-05-23-v1.26-narrative-kb-persistence.md) and static reference registry + MD body split in [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md). KnowledgeEntry SQLite and crate-model alignment remain deferred. |
-| DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 reference-store layout | Post-V1.26 | M | **Status: Open**. V1.26 implements static reference registration with registry rows and MD body storage; auto-refreshing `body.md` from URL/PDF sources remains deferred. |
+| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | **V1.27** (partial close) | M | **V1.26 shipped**: narrative + World KB read/write path (read only in V1.26) + reference registry in [v1.26-narrative-kb-persistence](../plans/2026-05-23-v1.26-narrative-kb-persistence.md) / [reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md). **V1.27 active**: KnowledgeEntry SQLite + CLI + assemble-moment in [v1.27-knowledge-persistence-context](../plans/2026-05-24-v1.27-knowledge-persistence-context.md); narrative/KB **writes** in [v1.27-narrative-world-writes](../plans/2026-05-24-v1.27-narrative-world-writes.md). Crate-model alignment (`nexus-knowledge::ReferenceSource` vs local-db) remains deferred. |
+| DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 reference-store layout | Post-V1.27 | M | **Status: Open**. V1.26 implements static reference registration with registry rows and MD body storage; optional static `content_hash` in V1.27 hygiene plan H4.1. Auto-refreshing `body.md` from URL/PDF sources remains deferred. |
 
 #### DF-43 decision note — Reference sources persistence (V1.25 Theme C)
 
@@ -302,16 +302,35 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Scope | Renamed `nexus-sync` → `nexus-cloud-sync` with `legacy-sync` feature; split `nexus-domain` into 6 focused crates; isolated daemon from cloud deps; wired CLI to cloud-sync directly; stubbed orchestration sync capabilities |
 | New tracker items | 13 | DF-29 through DF-41 (orchestration capability stubs, daemon lifecycle stubs, agent slot stub — see §3.1) |
 
-### V1.24 delivery snapshot (In progress)
+### V1.24 delivery snapshot (Shipped)
 
 | Category | Position |
 |----------|----------|
 | Delivery SSOT | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) |
-| Plan | `2026-05-22-v1.24-knowledge-crates-alignment` — In progress |
-| Branch | `feature/v1.24-knowledge-crates-alignment` (from `main`) |
-| Scope | Normative spec refresh (Batch A); retire context/assemble daemon route (Batch B, KCA-002 B2); work-scope KB isolation (Batch C, KCA-003 C2); tracker hygiene (Batch D) |
-| Locked decisions | KCA-002=B2 (no daemon context/assemble), KCA-003=C2 (scope=work only) |
-| New tracker items | 2 | DF-42 (full KB route redesign), DF-43 (knowledge persistence) |
+| Status | Shipped (2026-05-22) |
+| Scope | Normative spec refresh; KCA-002 B2; KCA-003 C2; tracker hygiene |
+| New tracker items | 2 | DF-42, DF-43 |
+
+### V1.26 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.26-local-persistence-delivery-compass-v1.md](../iterations/v1.26-local-persistence-delivery-compass-v1.md) |
+| Shipped at | 2026-05-23 |
+| Plans | iteration-hygiene, reference-store-layout, narrative-kb-persistence, local-context-product |
+| Platform | `metadata.platform_integration` = paused |
+| Open residuals into V1.27 | R10 (InMemory knowledge), R3 (KB scope), R5–R9 (nit/low) |
+
+### V1.27 delivery snapshot (Active)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.27-local-authoring-delivery-compass-v1.md](../iterations/v1.27-local-authoring-delivery-compass-v1.md) |
+| Machine state | `status.json` — 4 plans `Todo` on `feature/v1.27-local-authoring` |
+| Scope | CLI-first local writes (narrative, World KB, User knowledge); `creator demo seed`; assemble-moment four-domain closure; API/CLI hygiene; `acp agent use` |
+| Locked decisions | Platform paused; `user_id` = `user_default` until platform User alignment; no daemon POST for domain writes; world clone removed/deprecated |
+| Plans | `2026-05-24-v1.27-narrative-world-writes`, `knowledge-persistence-context`, `api-cli-hygiene`, `acp-agent-use` |
+| Explicit deferrals | DF-42 full redesign, DF-44 refresh pipeline, DF-29–37 orchestration stubs |
 
 ### V1.16+ horizon (program)
 
@@ -398,6 +417,8 @@ Internal (this repo):
 - V1.19 delivery compass: [v1.19-delivery-compass-v1.md](../iterations/v1.19-delivery-compass-v1.md)
 - V1.20 delivery compass: [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md)
 - V1.21 delivery compass: [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md)
+- V1.26 delivery compass: [v1.26-local-persistence-delivery-compass-v1.md](../iterations/v1.26-local-persistence-delivery-compass-v1.md)
+- V1.27 delivery compass: [v1.27-local-authoring-delivery-compass-v1.md](../iterations/v1.27-local-authoring-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
 - Orchestration engine design: [../knowledge/specs/orchestration-engine.md](../knowledge/specs/orchestration-engine.md)
 - ACP client tech spec v2: [../archived/../archived/knowledge/acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md)
@@ -412,4 +433,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-21**. Status: Active. V1.21 Done (local-platform-isolation, 13 new deferred → §3.1 DF-29–DF-41); V1.18 Done (agent-host-core, 11 deferred → V1.19); V1.19 Draft (hardening, 11 items, 2 batches); V1.17 Done (prompt-skills, BL-09 gate met); V1.16 Done; V1.15 Done (PR #23 merged); V1.14 Done; V1.13 DF-11/DF-14 shipped, DF-15 governance-closed. `residual_findings` 收敛为 **2** 条 accepted backlog（§3.3）+ V1.18 code-quality residuals (R1-R7, closing via V1.19). V1.19 hardening backlog: DF-18–DF-28 (11 items, 2 batches). V1.21 orchestration stubs: DF-29–DF-41 (13 items).*
+*Created: 2026-04-21. Last updated: **2026-05-24**. Status: Active. **V1.27 Active** (local authoring MVP, 4 plans registered). **V1.26 Shipped** (local persistence). V1.25 Shipped partial; V1.24 Shipped. Platform integration paused. Residuals R10/R3 targeted to V1.27 plans; see `status.json`.*
