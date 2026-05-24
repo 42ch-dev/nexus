@@ -663,6 +663,49 @@ const DEFAULT_AGENT_CONFIG_FILE: &str = "acp-default-agent.toml";
 /// Current schema version for the default agent config file.
 const DEFAULT_AGENT_CONFIG_SCHEMA_VERSION: u32 = 1;
 
+/// Validate that an agent reference contains only safe printable characters.
+///
+/// Agent refs should match patterns like `org/agent-name`, `simple-name`,
+/// or `@scope/package@version`. We reject control characters, whitespace
+/// (other than the leading/trailing trim already done), and path traversal.
+///
+/// # Errors
+///
+/// Returns `CliError::Other` if the agent ref contains control characters
+/// or characters outside the allowed printable set.
+fn validate_agent_ref(agent_ref: &str) -> Result<()> {
+    // Reject control characters (0x00-0x1F, 0x7F)
+    if agent_ref.chars().any(char::is_control) {
+        return Err(crate::errors::CliError::Other(
+            "Agent reference contains control characters. \
+             Only printable characters are allowed (alphanumeric, hyphens, underscores, dots, slashes, @)."
+                .to_string(),
+        ));
+    }
+
+    // Reject path traversal attempts
+    if agent_ref.contains("..") {
+        return Err(crate::errors::CliError::Other(
+            "Agent reference must not contain '..' (path traversal).".to_string(),
+        ));
+    }
+
+    // Allow only: alphanumeric, hyphen, underscore, dot, forward slash, @
+    let valid = agent_ref
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '@'));
+
+    if !valid {
+        return Err(crate::errors::CliError::Other(
+            "Agent reference contains invalid characters. \
+             Allowed: alphanumeric, hyphens (-), underscores (_), dots (.), forward slashes (/), @."
+                .to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Write the default agent ref to a TOML file under the active workspace directory.
 ///
 /// The file is stored at:
@@ -670,7 +713,8 @@ const DEFAULT_AGENT_CONFIG_SCHEMA_VERSION: u32 = 1;
 ///
 /// # Errors
 ///
-/// Returns `CliError::Other` if the agent ref is empty or the file cannot be written.
+/// Returns `CliError::Other` if the agent ref is empty, contains invalid characters,
+/// or the file cannot be written.
 /// Returns `CliError::CreatorNotSelected` if no creator is active.
 fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
     let trimmed = agent_ref.trim();
@@ -680,6 +724,8 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
                 .to_string(),
         ));
     }
+
+    validate_agent_ref(trimmed)?;
 
     let creator_id = config
         .active_creator_id
@@ -705,11 +751,15 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
     std::fs::create_dir_all(&ws_dir)?;
 
     let config_path = ws_dir.join(DEFAULT_AGENT_CONFIG_FILE);
+
+    // Manual TOML escaping is sufficient because `validate_agent_ref` above
+    // already rejected control characters and non-printable input.
+    // The only remaining special chars in TOML basic strings are `\` and `"`.
+    let escaped_ref = trimmed.replace('\\', "\\\\").replace('"', "\\\"");
     let content = format!(
         "# Nexus ACP default agent configuration\n\
          schema_version = {DEFAULT_AGENT_CONFIG_SCHEMA_VERSION}\n\
-         default_agent_ref = \"{escaped_ref}\"\n",
-        escaped_ref = trimmed.replace('\\', "\\\\").replace('"', "\\\"")
+         default_agent_ref = \"{escaped_ref}\"\n"
     );
 
     std::fs::write(&config_path, content)?;
@@ -1478,6 +1528,60 @@ mod tests {
             err.contains("must not be empty"),
             "Error should mention empty ref: {err}"
         );
+    }
+
+    #[test]
+    fn validate_agent_ref_accepts_valid_refs() {
+        assert!(validate_agent_ref("claude-acp").is_ok());
+        assert!(validate_agent_ref("org/agent-name").is_ok());
+        assert!(validate_agent_ref("@scope/pkg@1.0.0").is_ok());
+        assert!(validate_agent_ref("my_agent.v2").is_ok());
+        assert!(validate_agent_ref("a").is_ok());
+    }
+
+    #[test]
+    fn validate_agent_ref_rejects_control_chars() {
+        // newline
+        let result = validate_agent_ref("bad\nagent");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("control characters"),
+            "Should mention control characters: {err}"
+        );
+
+        // tab
+        assert!(validate_agent_ref("bad\tagent").is_err());
+        // null byte
+        assert!(validate_agent_ref("bad\0agent").is_err());
+        // DEL (0x7F)
+        assert!(validate_agent_ref("bad\u{7F}agent").is_err());
+    }
+
+    #[test]
+    fn validate_agent_ref_rejects_path_traversal() {
+        let result = validate_agent_ref("../etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("path traversal"),
+            "Should mention path traversal: {err}"
+        );
+
+        // Also reject embedded traversal
+        assert!(validate_agent_ref("agent/../other").is_err());
+    }
+
+    #[test]
+    fn validate_agent_ref_rejects_special_chars() {
+        // spaces
+        assert!(validate_agent_ref("bad agent").is_err());
+        // shell metacharacters
+        assert!(validate_agent_ref("bad;agent").is_err());
+        assert!(validate_agent_ref("bad$agent").is_err());
+        assert!(validate_agent_ref("bad`agent").is_err());
+        // unicode
+        assert!(validate_agent_ref("badαagent").is_err());
     }
 
     #[tokio::test]
