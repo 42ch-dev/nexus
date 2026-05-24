@@ -7,7 +7,6 @@ pub mod memory;
 pub mod reference;
 pub mod soul;
 
-use crate::api::DaemonClient;
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
 use crate::config::{
@@ -341,6 +340,8 @@ pub enum CloneSourceArg {
 }
 
 /// Response from the daemon clone endpoint (formerly in `commands::clone`).
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct WorldCloneResponse {
     success: bool,
@@ -351,6 +352,8 @@ struct WorldCloneResponse {
 }
 
 /// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 fn validate_world_id(s: &str) -> std::result::Result<String, String> {
     if !s.starts_with("wld_") {
         return Err(format!("WorldId must start with 'wld_' prefix (got '{s}')"));
@@ -368,6 +371,8 @@ fn validate_world_id(s: &str) -> std::result::Result<String, String> {
 }
 
 /// Validate world reference format (accepts wld_* and numeric).
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 fn validate_world_ref(s: &str) -> std::result::Result<String, String> {
     if s.starts_with("wld_") {
         return validate_world_id(s);
@@ -379,6 +384,8 @@ fn validate_world_ref(s: &str) -> std::result::Result<String, String> {
 }
 
 /// Confirm clone interactively (or skip with --yes).
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
     if yes {
         return true;
@@ -397,71 +404,20 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
         })
 }
 
-/// Run the clone command (formerly in `commands::clone`).
-async fn run_clone(args: CloneArgs, config: &CliConfig) -> Result<()> {
-    let world_ref = validate_world_ref(&args.world_ref).map_err(CliError::Other)?;
-
-    if matches!(args.source, CloneSourceArg::Platform) {
-        let mode = config.runtime_mode();
-        if mode.is_local_only() {
-            return Err(CliError::Other(format!(
-                "Clone from platform is not available in {mode} mode. \
-                 Use --source local for local clone, or switch runtime mode."
-            )));
-        }
-    }
-
-    let body = serde_json::json!({
-        "world_ref": world_ref,
-        "source": match args.source {
-            CloneSourceArg::Platform => "platform",
-            CloneSourceArg::Local => "local",
-        },
-        "schema_version": 1,
-    });
-
-    if args.dry_run {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&body).map_err(CliError::Json)?
-        );
-        return Ok(());
-    }
-
-    if !confirm_clone(args.yes, &world_ref, args.source) {
-        println!("Clone cancelled.");
-        return Ok(());
-    }
-
-    let client = DaemonClient::from_config(config);
-    if !client.health_check().await? {
-        return Err(CliError::DaemonNotRunning);
-    }
-
-    eprintln!(
-        "Warning: daemon endpoint /v1/local/world/clone not yet implemented. Clone will fail if attempted."
-    );
-
-    let resp = client
-        .post::<WorldCloneResponse, serde_json::Value>("/v1/local/world/clone", &body)
-        .await?;
-
-    if resp.success {
-        println!("World clone completed.");
-        if let Some(id) = resp.world_id {
-            println!("  world_id:        {id}");
-        }
-        if let Some(rev) = resp.world_revision {
-            println!("  world_revision:  {rev}");
-        }
-        if let Some(at) = &resp.cloned_at {
-            println!("  cloned_at:       {at}");
-        }
-    } else if let Some(err) = resp.error {
-        return Err(CliError::Other(format!("World clone failed: {err}")));
-    }
-
-    Ok(())
+/// Run the clone command — hard-deprecated stub (V1.27 H1).
+///
+/// World cloning is a platform-only operation that cannot be performed
+/// locally by the CLI. The `/v1/local/world/clone` endpoint never existed.
+/// Users should use the platform UI or a future `nexus42 sync` command
+/// to pull a world skeleton from the platform.
+fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
+    Err(CliError::Other(
+        "creator workspace clone is not available locally. \
+         World cloning is a platform-only operation. \
+         Use the platform UI or a future `nexus42 sync pull --world <id>` \
+         to pull a world skeleton."
+            .into(),
+    ))
 }
 
 // ── End inlined types ────────────────────────────────────────────────
@@ -555,7 +511,8 @@ pub enum CreatorCommand {
     /// **This is the CLI local work KB index**, NOT `nexus-kb` (World KB) or
     /// `nexus-knowledge` (User knowledge). See entity-scope-model §5.3.
     ///
-    /// `--scope world` (narrative KB via nexus-kb + nexus-narrative) is coming soon.
+    /// `--scope world` reads are implemented (narrative KB via nexus-kb + nexus-narrative).
+    /// World-scope writes (add/remove) are deferred to a future iteration.
     Kb {
         #[command(subcommand)]
         command: KbCommand,
@@ -668,7 +625,8 @@ pub enum CreatorWorkspaceCommand {
         #[command(subcommand)]
         command: InitCommand,
     },
-    /// Clone a world into the workspace (migrated from `nexus42 clone`)
+    /// Clone a world into the workspace (DEPRECATED — platform-only, not implemented locally)
+    #[command(hide = true)]
     Clone {
         /// World reference to clone (e.g. `wld_abc123`)
         world_ref: String,
@@ -756,7 +714,8 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
 /// Handle local work-scope KB commands (CLI local work file index).
 ///
 /// All commands default to `scope=work`. When `scope=world` is requested,
-/// a deferred message is printed (World KB not yet implemented).
+/// reads (list/search/show) are served via `nexus-kb` `SQLite` stores;
+/// writes (add/remove) print a deferred message.
 /// The work-scope implementation is a local file index only — it does not
 /// interact with `nexus-kb` or `nexus-knowledge` crates.
 async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
@@ -786,7 +745,8 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
 
 /// Deferred message for `world` scope write commands (add/remove).
 ///
-/// Write operations for world scope are out of scope for V1.25.
+/// Write operations for world scope are deferred. Reads (list/search/show)
+/// are implemented via `nexus-kb` + `nexus-narrative` `SQLite` stores.
 fn world_scope_write_deferred() {
     println!(
         "World scope write operations (add/remove) are not yet supported. \
@@ -1509,7 +1469,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 dry_run,
                 yes,
             };
-            run_clone(args, config).await
+            run_clone(args, config)
         }
         CreatorWorkspaceCommand::Link { workspace_slug } => {
             println!("Coming soon: `creator workspace link` — link workspace: {workspace_slug}");
