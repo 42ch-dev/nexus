@@ -326,7 +326,7 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Category | Position |
 |----------|----------|
 | Delivery SSOT | [v1.27-local-authoring-delivery-compass-v1.md](../iterations/v1.27-local-authoring-delivery-compass-v1.md) |
-| Machine state | `status.json` — 4 plans `Todo` on `feature/v1.27-local-authoring` |
+| Machine state | `status.json` — 4 plans `Todo`; topic branches per plan → merge into `feature/v1.27-local-authoring` → `main` |
 | Scope | CLI-first local writes (narrative, World KB, User knowledge); `creator demo seed`; assemble-moment four-domain closure; API/CLI hygiene; `acp agent use` |
 | Locked decisions | Platform paused; `user_id` = `user_default` until platform User alignment; no daemon POST for domain writes; world clone removed/deprecated |
 | Plans | `2026-05-24-v1.27-narrative-world-writes`, `knowledge-persistence-context`, `api-cli-hygiene`, `acp-agent-use` |
