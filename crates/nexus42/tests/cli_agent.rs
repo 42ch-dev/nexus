@@ -246,18 +246,116 @@ fn acp_skills_verify() {
         .stdout(predicate::str::contains("verified"));
 }
 
-/// Test `nexus42 acp agent use` shows coming soon message.
+/// Test `nexus42 acp agent use` with a valid agent ref succeeds.
 #[test]
-fn acp_agent_use_stub() {
+fn acp_agent_use_success() {
+    let tmp = TempDir::new().expect("Failed to create temp dir");
+
+    // Set up a creator and workspace in the config
+    let nexus_home = tmp.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).expect("create nexus home");
+
+    // Write a config.toml with active creator
+    let config_content = r#"active_creator_id = "ctr_test"
+[active_workspace_slug_by_creator]
+ctr_test = "default"
+"#;
+    std::fs::write(nexus_home.join("config.toml"), config_content).expect("write config");
+
+    // Create the workspace directory so the config path is valid
+    let ws_dir = nexus_home
+        .join("creators")
+        .join("ctr_test")
+        .join("workspaces")
+        .join("default");
+    std::fs::create_dir_all(&ws_dir).expect("create workspace dir");
+
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("acp")
         .arg("agent")
         .arg("use")
-        .arg("test-agent")
+        .arg("claude-acp")
+        .env("HOME", tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Coming soon"));
+        .stdout(predicate::str::contains("Default agent set to: claude-acp"));
+
+    // Verify the config file was written
+    let config_file = ws_dir.join("acp-default-agent.toml");
+    assert!(config_file.exists(), "Config file should exist");
+    let content = std::fs::read_to_string(&config_file).expect("read config");
+    assert!(content.contains("schema_version = 1"));
+    assert!(content.contains("default_agent_ref = \"claude-acp\""));
+}
+
+/// Test `nexus42 acp agent use` requires an agent ref argument.
+#[test]
+fn acp_agent_use_requires_arg() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("acp")
+        .arg("agent")
+        .arg("use")
+        .assert()
+        .failure();
+}
+
+/// Test `nexus42 acp agent use` persistence: set then read on new invocation.
+#[test]
+fn acp_agent_use_persistence() {
+    let tmp = TempDir::new().expect("Failed to create temp dir");
+
+    let nexus_home = tmp.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).expect("create nexus home");
+
+    let config_content = r#"active_creator_id = "ctr_persist"
+[active_workspace_slug_by_creator]
+ctr_persist = "default"
+"#;
+    std::fs::write(nexus_home.join("config.toml"), config_content).expect("write config");
+
+    let ws_dir = nexus_home
+        .join("creators")
+        .join("ctr_persist")
+        .join("workspaces")
+        .join("default");
+    std::fs::create_dir_all(&ws_dir).expect("create workspace dir");
+
+    // Set agent
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("acp")
+        .arg("agent")
+        .arg("use")
+        .arg("my-test-agent@1.0")
+        .env("HOME", tmp.path())
+        .assert()
+        .success();
+
+    // Verify file persists
+    let config_file = ws_dir.join("acp-default-agent.toml");
+    let content = std::fs::read_to_string(&config_file).expect("read config");
+    assert!(content.contains("my-test-agent@1.0"));
+
+    // Set a different agent (overwrite)
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("acp")
+        .arg("agent")
+        .arg("use")
+        .arg("other-agent")
+        .env("HOME", tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Default agent set to: other-agent",
+        ));
+
+    // Verify overwrite
+    let content_after = std::fs::read_to_string(&config_file).expect("read config after");
+    assert!(content_after.contains("other-agent"));
+    assert!(!content_after.contains("my-test-agent"));
 }
 
 /// Test `nexus42 acp doctor --help` shows usage.
