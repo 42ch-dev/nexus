@@ -37,7 +37,8 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.22-cli-deprecation-cleanup-delivery-compass-v1.md](v1.22-cli-deprecation-cleanup-delivery-compass-v1.md) | V1.22 | **Shipped** (2026-05-21) |
 | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](v1.24-knowledge-crates-alignment-audit-compass-v1.md) | V1.24 audit | **Shipped** (2026-05-22) — doc refresh + KCA-002/003 |
 | [v1.25-knowledge-crates-product-wiring-audit-compass-v1.md](v1.25-knowledge-crates-product-wiring-audit-compass-v1.md) | V1.25 audit | **Shipped (partial)** (2026-05-22) — in-memory wiring; superseded by V1.26 |
-| [v1.26-local-persistence-delivery-compass-v1.md](v1.26-local-persistence-delivery-compass-v1.md) | V1.26 | **Active** — local SQLite persistence, reference MD layout, context productization |
+| [v1.26-local-persistence-delivery-compass-v1.md](v1.26-local-persistence-delivery-compass-v1.md) | V1.26 | **Shipped** (2026-05-23) — local SQLite persistence, reference MD layout, context productization |
+| [v1.27-local-authoring-delivery-compass-v1.md](v1.27-local-authoring-delivery-compass-v1.md) | V1.27 | **Active** — CLI-first local authoring writes, User knowledge SQLite, context closure, API hygiene, `acp agent use` |
 
 ### Reference compasses
 

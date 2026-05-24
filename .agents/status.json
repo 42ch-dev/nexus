@@ -1,7 +1,45 @@
 {
   "version": 1,
-  "updated_at": "2026-05-23T18:00:00Z",
-  "plans": [],
+  "updated_at": "2026-05-24T12:00:00Z",
+  "plans": [
+    {
+      "id": "2026-05-24-v1.27-narrative-world-writes",
+      "title": "V1.27 narrative world writes + World KB CLI writes",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-24-v1.27-narrative-world-writes.md",
+      "working_branch": "feature/v1.27-local-authoring",
+      "task_category": "logic",
+      "themes": ["N", "K"]
+    },
+    {
+      "id": "2026-05-24-v1.27-knowledge-persistence-context",
+      "title": "V1.27 SqliteKnowledgeStore, knowledge CLI, assemble-moment, demo seed",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-24-v1.27-knowledge-persistence-context.md",
+      "working_branch": "feature/v1.27-local-authoring",
+      "task_category": "logic",
+      "depends_on": ["2026-05-24-v1.27-narrative-world-writes"],
+      "themes": ["U", "C"]
+    },
+    {
+      "id": "2026-05-24-v1.27-api-cli-hygiene",
+      "title": "V1.27 API and CLI honesty (clone, scope, docs)",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-24-v1.27-api-cli-hygiene.md",
+      "working_branch": "feature/v1.27-local-authoring",
+      "task_category": "logic",
+      "themes": ["H"]
+    },
+    {
+      "id": "2026-05-24-v1.27-acp-agent-use",
+      "title": "V1.27 implement acp agent use with persisted default agent",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-24-v1.27-acp-agent-use.md",
+      "working_branch": "feature/v1.27-local-authoring",
+      "task_category": "logic",
+      "themes": ["ACP"]
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,8 +47,8 @@
     },
     "latest_shipped_iteration": "v1.26",
     "latest_shipped_at": "2026-05-23T18:00:00Z",
-    "latest_active_iteration": "v1.26",
-    "latest_active_compass": ".agents/iterations/v1.26-local-persistence-delivery-compass-v1.md",
+    "latest_active_iteration": "v1.27",
+    "latest_active_compass": ".agents/iterations/v1.27-local-authoring-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-05-22T17:00:00Z",
@@ -46,8 +84,9 @@
         "scope": "crates/nexus42/src/commands/platform/context.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.26",
-        "note": "Replace with persistent knowledge store when available."
+        "target_date": "v1.27",
+        "tracking_link": "2026-05-24-v1.27-knowledge-persistence-context",
+        "note": "Close when SqliteKnowledgeStore wired in run_assemble_moment (Plan 2 C1.1)."
       }
     ],
     "2026-05-23-v1.26-narrative-kb-persistence": [
@@ -59,7 +98,7 @@
         "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.26",
+        "target_date": "post-v1.27",
         "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
       },
       {
@@ -70,7 +109,7 @@
         "scope": "crates/nexus-local-db/src/kb_store.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.26",
+        "target_date": "post-v1.27",
         "note": "Add LIMIT to list_by_world when needed for scale."
       }
     ],
@@ -83,7 +122,7 @@
         "scope": "crates/nexus-local-db/src/reference_source.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.26",
+        "target_date": "post-v1.27",
         "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
       },
       {
@@ -94,7 +133,7 @@
         "scope": "crates/nexus-local-db/src/reference_source.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.26",
+        "target_date": "post-v1.27",
         "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
       },
       {
@@ -105,8 +144,8 @@
         "scope": "crates/nexus-local-db/src/reference_source.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.26",
-        "note": "Populate when refreshable scan pipeline lands (DF-44)."
+        "target_date": "post-v1.27",
+        "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
       }
     ],
     "2026-05-22-v1.24-knowledge-crates-alignment": [
@@ -118,9 +157,9 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/kb.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "v1.26",
-        "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence (DF-42 follow-up)",
-        "note": "Address during V1.26 Theme K or explicit scope rejection in kb handler."
+        "target_date": "v1.27",
+        "tracking_link": "2026-05-24-v1.27-api-cli-hygiene",
+        "note": "Close when work-KB handler returns 400 for non-work scope (Plan 3 H3)."
       },
       {
         "id": "R4",
