@@ -12,6 +12,7 @@
 
 pub mod identity;
 pub mod kb_store;
+pub mod knowledge_store;
 pub mod memory_fragment;
 pub mod narrative_gateway;
 pub mod narrative_write;
@@ -66,6 +67,9 @@ pub use world_stories::{
 pub use narrative_write::{
     append_event, create_world, AppendEventResult, CreateWorldResult, NarrativeWriteError,
 };
+
+// Re-export knowledge_store types
+pub use knowledge_store::SqliteKnowledgeStore;
 
 // Re-export reference_source types
 pub use reference_source::{

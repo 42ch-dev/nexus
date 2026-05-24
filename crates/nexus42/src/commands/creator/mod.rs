@@ -3,6 +3,7 @@
 //! Creator is a V1.0 first-class citizen (roadmap §3.1.1, §3.1.2).
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
 
+pub mod knowledge;
 pub mod memory;
 pub mod reference;
 pub mod soul;
@@ -22,6 +23,7 @@ use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
 use nexus_kb::KbStore;
+use nexus_knowledge::KnowledgeStore;
 use serde::Deserialize;
 use soul::SoulCommand;
 use std::path::PathBuf;
@@ -524,6 +526,23 @@ pub enum CreatorCommand {
         command: world::WorldCommand,
     },
 
+    /// User-scoped knowledge management (add, list, search)
+    Knowledge {
+        #[command(subcommand)]
+        command: knowledge::KnowledgeCommand,
+    },
+
+    /// Seed demo data: creates a demo world, event, KB block, and knowledge entry.
+    ///
+    /// Idempotent by default — skips if demo world already exists.
+    /// Use --force to recreate (deletes existing demo data first).
+    #[command(name = "demo-seed")]
+    DemoSeed {
+        /// Force recreation of demo data (deletes existing demo world)
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Logout and clear creator credentials
     Logout,
 }
@@ -715,6 +734,8 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => run_kb(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
+        CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
+        CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config).await,
     }
 }
@@ -1353,6 +1374,121 @@ async fn kb_remove(
     }
 
     println!("✓ Local work entry removed: {entry_id}");
+    Ok(())
+}
+
+// ── Demo seed ───────────────────────────────────────────────────────
+
+/// Seed demo data for testing and development.
+///
+/// Creates a demo world, event, KB block, and knowledge entry using
+/// Plan 1 write APIs + knowledge store. Idempotent unless `--force`.
+async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(CliError::CreatorNotSelected)?
+        .to_string();
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+
+    let demo_title = "Demo World";
+    let demo_slug = "demo-world";
+
+    // Check if demo world already exists
+    // SAFETY: SELECT against known narrative_worlds table schema
+    let existing_id: Option<String> = sqlx::query_scalar(
+        "SELECT world_id FROM narrative_worlds WHERE slug = ? AND owner_creator_id = ? LIMIT 1",
+    )
+    .bind(demo_slug)
+    .bind(&creator_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to check existing demo: {e}")))?
+    .flatten();
+
+    if let Some(ref wid) = existing_id {
+        if !force {
+            println!("Demo world already exists: {wid}");
+            println!("Use --force to recreate demo data.");
+            return Ok(());
+        }
+        // Delete existing demo data (cascade handles events, KB blocks)
+        // SAFETY: DELETE against known tables
+        sqlx::query("DELETE FROM knowledge_entries WHERE user_id = 'user_default'")
+            .execute(&pool)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to clean demo knowledge: {e}")))?;
+        sqlx::query("DELETE FROM narrative_worlds WHERE world_id = ?")
+            .bind(wid)
+            .execute(&pool)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to clean demo world: {e}")))?;
+        println!("Deleted existing demo data.");
+    }
+
+    // 1. Create demo world
+    let world = nexus_local_db::create_world(
+        &pool,
+        &creator_id,
+        demo_title,
+        demo_slug,
+        "private",
+        "manual",
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to create demo world: {e}")))?;
+    println!("✓ Demo world: {}", world.world_id);
+
+    // 2. Append demo event
+    let event = nexus_local_db::append_event(
+        &pool,
+        &world.world_id,
+        &world.root_fork_branch_id,
+        "story_advance",
+        Some("The Journey Begins"),
+        Some("A hero embarks on their first adventure."),
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to create demo event: {e}")))?;
+    println!("✓ Demo event: {}", event.event_id);
+
+    // 3. Create demo KB block
+    let mut kb = nexus_kb::key_block::KeyBlock::new(
+        &world.world_id,
+        nexus_contracts::BlockType::Character,
+        "Hero",
+    );
+    kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+        summary: Some("The protagonist of the demo world.".to_string()),
+        attributes: None,
+        tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
+    });
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+    let kb_result = kb_store
+        .insert_key_block(kb)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to create demo KB block: {e}")))?;
+    println!("✓ Demo KB block: {}", kb_result.key_block_id);
+
+    // 4. Create demo knowledge entry
+    let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool);
+    let entry = nexus_knowledge::KnowledgeEntry::new(
+        "user_default",
+        vec![
+            nexus_knowledge::KnowledgeTag::new("demo"),
+            nexus_knowledge::KnowledgeTag::new("worldbuilding"),
+        ],
+        "Demo knowledge entry for Moment context assembly testing.",
+    );
+    let stored = knowledge_store
+        .store(entry)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to create demo knowledge: {e}")))?;
+    println!("✓ Demo knowledge: {}", stored.id);
+
+    println!();
+    println!("Demo seed complete. Run `nexus42 platform context assemble-moment` to verify.");
     Ok(())
 }
 
