@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "updated_at": "2026-05-24T12:00:00Z",
+  "updated_at": "2026-05-24T14:00:00Z",
   "plans": [
     {
       "id": "2026-05-24-v1.27-narrative-world-writes",
       "title": "V1.27 narrative world writes + World KB CLI writes",
       "status": "Todo",
       "plan_file": ".agents/plans/2026-05-24-v1.27-narrative-world-writes.md",
-      "working_branch": "feature/v1.27-local-authoring",
+      "working_branch": "feature/v1.27-narrative-world-writes",
+      "merge_target": "feature/v1.27-local-authoring",
       "task_category": "logic",
       "themes": ["N", "K"]
     },
@@ -16,7 +17,8 @@
       "title": "V1.27 SqliteKnowledgeStore, knowledge CLI, assemble-moment, demo seed",
       "status": "Todo",
       "plan_file": ".agents/plans/2026-05-24-v1.27-knowledge-persistence-context.md",
-      "working_branch": "feature/v1.27-local-authoring",
+      "working_branch": "feature/v1.27-knowledge-persistence-context",
+      "merge_target": "feature/v1.27-local-authoring",
       "task_category": "logic",
       "depends_on": ["2026-05-24-v1.27-narrative-world-writes"],
       "themes": ["U", "C"]
@@ -26,7 +28,8 @@
       "title": "V1.27 API and CLI honesty (clone, scope, docs)",
       "status": "Todo",
       "plan_file": ".agents/plans/2026-05-24-v1.27-api-cli-hygiene.md",
-      "working_branch": "feature/v1.27-local-authoring",
+      "working_branch": "feature/v1.27-api-cli-hygiene",
+      "merge_target": "feature/v1.27-local-authoring",
       "task_category": "logic",
       "themes": ["H"]
     },
@@ -35,7 +38,8 @@
       "title": "V1.27 implement acp agent use with persisted default agent",
       "status": "Todo",
       "plan_file": ".agents/plans/2026-05-24-v1.27-acp-agent-use.md",
-      "working_branch": "feature/v1.27-local-authoring",
+      "working_branch": "feature/v1.27-acp-agent-use",
+      "merge_target": "feature/v1.27-local-authoring",
       "task_category": "logic",
       "themes": ["ACP"]
     }
@@ -43,8 +47,13 @@
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
-      "fix": "fix/{name}"
+      "fix": "fix/{name}",
+      "plan_topic": "feature/{ver}-{plan-slug}",
+      "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
+    "integration_branch": "feature/v1.27-local-authoring",
+    "integration_merge_target": "main",
+    "integration_branch_role": "V1.27 iteration integration — merge all plan topic branches here before QC/QA; PR to main after sign-off",
     "latest_shipped_iteration": "v1.26",
     "latest_shipped_at": "2026-05-23T18:00:00Z",
     "latest_active_iteration": "v1.27",

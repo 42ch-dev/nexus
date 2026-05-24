@@ -37,6 +37,34 @@ Git-tracked docs and plans must be openable after a fresh `git clone`: no `.giti
 
 ## Project-Specific Deviations
 
+### Multi-plan iteration branches (harness convention)
+
+When an active delivery compass has **two or more** locked implement plans in the **same repo**, this project uses a **two-tier branch model** (aligned with Morning Star `mstar-branch-worktree` — plan integration branch + per-plan topic branches):
+
+| Tier | Field (`status.json`) | Purpose |
+| --- | --- | --- |
+| **Iteration integration** | `metadata.integration_branch` | Single line where all plan work lands before QC/QA; also the **`Working branch`** in QC/QA Assignments |
+| **Final landing** | `metadata.integration_merge_target` | Usually `main`; integration branch merges here via PR after iteration sign-off |
+| **Per plan** | `plans[].working_branch` | Topic branch for that plan’s commits only |
+| **Per plan** | `plans[].merge_target` | Must equal `metadata.integration_branch` for the same iteration |
+
+**Naming** (extends `metadata.branch_naming.feature`):
+
+- Integration: `feature/<ver>-<iteration-slug>` (e.g. `feature/v1.27-local-authoring`)
+- Topic: `feature/<ver>-<plan-slug>` where `<plan-slug>` is the plan title slug without date prefix (e.g. `feature/v1.27-narrative-world-writes`)
+
+**PM / implement rules:**
+
+1. Create the **integration branch** from `integration_merge_target` (typically `main`) before the first plan implement dispatch.
+2. Each plan Assignment uses **`Working branch: create <topic-branch> from <integration-branch>`** (or `from` integration `HEAD` after prior plans merged).
+3. On plan completion, merge topic branch into **`integration_branch`**; resolve conflicts on the integration branch, not on `main`.
+4. Do **not** point QC/QA at a topic branch unless only that plan is in scope for a partial review (exception must be written in Assignment).
+5. Same-repo **parallel** plans: one **git worktree** per topic branch; see `mstar-branch-worktree`.
+
+**Single-plan iterations** may use one branch for both roles: set `working_branch` and `integration_branch` to the same name, and omit separate topic branches.
+
+**SSOT:** active compass §Branch policy table + `status.json` for the iteration. If compass and `status.json` disagree, fix before dispatch.
+
 ### Plan compaction profile
 
 **Profile B** — Morning Star `mstar-plan-conventions` → `references/done-compaction.md` (Template B). `status.json.plans[]` keeps **non-`Done`** plans only; historical `Done` discovery uses `archived/plans-done.json` and `archived/plans/<plan-id>.json`.
