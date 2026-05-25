@@ -633,6 +633,82 @@ impl DaemonClient {
         let data: Vec<crate::api::models::FragmentRow> = resp.json().await?;
         Ok(data)
     }
+
+    // ─── Pending review methods ──────────────────────────────────────────
+
+    /// List pending reviews for a creator via daemon API.
+    ///
+    /// `GET /v1/local/memory/pending-review?creator_id=...`
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::DaemonNotReachable` if the daemon is not running.
+    pub async fn list_pending_reviews(
+        &self,
+        creator_id: &str,
+    ) -> Result<crate::api::models::ListPendingReviewsResponse> {
+        let path = "/v1/local/memory/pending-review";
+
+        let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
+        let resp = match self.send_authenticated(self.http.get(&url), path).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                if let CliError::Api { .. } = &e {
+                    return Err(e);
+                }
+                return Err(CliError::daemon_not_reachable(
+                    "Start the daemon with `nexus42 daemon start` and retry.",
+                ));
+            }
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: crate::api::models::ListPendingReviewsResponse = resp.json().await?;
+        Ok(data)
+    }
+
+    /// Dismiss (delete) a pending review via daemon API.
+    ///
+    /// `DELETE /v1/local/memory/pending-review/{id}?creator_id=...`
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::DaemonNotReachable` if the daemon is not running.
+    pub async fn dismiss_pending_review(
+        &self,
+        pending_id: &str,
+        creator_id: &str,
+    ) -> Result<crate::api::models::DeletePendingReviewResponse> {
+        let path = format!("/v1/local/memory/pending-review/{pending_id}");
+
+        let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
+        let resp = match self
+            .send_authenticated(self.http.delete(&url), &path)
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                if let CliError::Api { .. } = &e {
+                    return Err(e);
+                }
+                return Err(CliError::daemon_not_reachable(
+                    "Start the daemon with `nexus42 daemon start` and retry.",
+                ));
+            }
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: crate::api::models::DeletePendingReviewResponse = resp.json().await?;
+        Ok(data)
+    }
 }
 
 #[cfg(test)]

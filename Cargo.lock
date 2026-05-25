@@ -2338,6 +2338,7 @@ dependencies = [
  "include_dir",
  "jsonrpsee",
  "nexus-contracts",
+ "nexus-creator-memory",
  "nexus-home-layout",
  "nexus-local-db",
  "nix 0.29.0",

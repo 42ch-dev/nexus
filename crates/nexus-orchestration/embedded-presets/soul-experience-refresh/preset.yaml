@@ -1,0 +1,41 @@
+# Soul Experience Refresh — System Preset
+#
+# Scheduled preset that aggregates long-term memories into the SOUL ## Experience section.
+# Designed to run on a cron schedule (e.g. daily or weekly) via the daemon scheduler.
+#
+# This preset is deterministic — no LLM calls. It reads long-term memory files,
+# filters to experience-kind entries, and produces the aggregated Experience section.
+#
+# If LLM polish is desired, chain `context.summarize` in a subsequent step.
+#
+# Trigger: schedule via daemon cron, or manually with:
+#   nexus42 schedule add --preset soul-experience-refresh --var creator_id "<id>" --var home_dir "<path>"
+#
+# Or use the one-shot CLI command:
+#   nexus42 creator soul refresh-experience
+
+preset:
+  id: soul-experience-refresh
+  version: 1
+  kind: creator
+  description: "Aggregate long-term memories into the SOUL ## Experience section (deterministic, no LLM)"
+  requires_capabilities:
+    - soul.experience.aggregate
+  initial: aggregate
+  terminal: done
+
+states:
+  - id: aggregate
+    description: "Aggregate experience-kind memories into SOUL ## Experience section"
+    enter:
+      - kind: capability
+        name: soul.experience.aggregate
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          home_dir: "{{preset.input.home_dir}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true

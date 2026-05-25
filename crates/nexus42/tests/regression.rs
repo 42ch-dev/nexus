@@ -514,3 +514,64 @@ fn r5_local_only_mode_persists() {
         .success()
         .stdout(predicate::str::contains("local_only"));
 }
+
+// =============================================================================
+// V1.29 Memory Session Review Loop (Plan A1)
+// =============================================================================
+
+/// Verify `creator memory pending list --help` returns usage without error.
+#[test]
+fn v1_29_pending_list_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("memory")
+        .arg("pending-list")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pending-list"));
+}
+
+/// Verify `creator memory pending show --help` returns usage without error.
+#[test]
+fn v1_29_pending_show_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("memory")
+        .arg("pending-show")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PENDING_ID"));
+}
+
+/// Verify `creator memory pending dismiss --help` returns usage without error.
+#[test]
+fn v1_29_pending_dismiss_help() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("memory")
+        .arg("pending-dismiss")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PENDING_ID"));
+}
+
+/// Verify `creator memory --help` shows pending subcommands.
+#[test]
+fn v1_29_memory_help_shows_pending_commands() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("memory")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pending-list"))
+        .stdout(predicate::str::contains("pending-show"))
+        .stdout(predicate::str::contains("pending-dismiss"));
+}

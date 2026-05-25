@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-23T18:00:00Z",
+  "updated_at": "2026-05-26T16:30:00Z",
   "plans": [
     {
       "plan_id": "2026-05-23-v1.26-local-context-product",
@@ -1075,6 +1075,68 @@
         },
         "next_action": "Done."
       }
+    },
+    {
+      "plan_id": "2026-05-26-v1.29-memory-session-review-loop",
+      "title": "FL-A1 — session capture → pending-review → CLI review loop",
+      "done_at": "2026-05-26T16:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.29-memory-session-review-loop.md",
+      "category": "logic",
+      "working_branch": "feature/v1.29-memory-session-review-loop",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.29-stage0-structured-delimiters",
+      "title": "FL-A3 — Stage0 structured delimiters (R13)",
+      "done_at": "2026-05-26T16:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.29-stage0-structured-delimiters.md",
+      "category": "logic",
+      "working_branch": "feature/v1.29-stage0-structured-delimiters",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass",
+      "closed_residuals": ["R13"]
+    },
+    {
+      "plan_id": "2026-05-26-v1.29-soul-experience-preset",
+      "title": "FL-A2 — SOUL Experience preset + refresh-experience CLI",
+      "done_at": "2026-05-26T16:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.29-soul-experience-preset.md",
+      "category": "logic",
+      "working_branch": "feature/v1.29-soul-experience-preset",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.29-kb-extract-queue-preset",
+      "title": "FL-B — KB extract queue + kb.extract_work preset (agent-driven)",
+      "done_at": "2026-05-26T16:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.29-kb-extract-queue-preset.md",
+      "category": "logic",
+      "working_branch": "feature/v1.29-kb-extract-queue-preset",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.29-agent-host-batch2-hardening",
+      "title": "Agent Host Batch 2 — DF-21–23, 27–28",
+      "done_at": "2026-05-26T16:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.29-agent-host-batch2-hardening.md",
+      "category": "logic",
+      "working_branch": "feature/v1.29-agent-host-batch2-hardening",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass",
+      "closed_residuals": ["R11", "R12"]
+    },
+    {
+      "plan_id": "2026-05-26-v1.29-spec-tracker-hygiene",
+      "title": "V1.29 spec + tracker hygiene (V1.28 backfill + V1.29 normative)",
+      "done_at": "2026-05-26T16:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.29-spec-tracker-hygiene.md",
+      "category": "docs",
+      "working_branch": "feature/v1.29-spec-tracker-hygiene",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass"
     }
   ]
 }

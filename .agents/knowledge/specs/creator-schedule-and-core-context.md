@@ -250,6 +250,16 @@ Users can inspect the full derivation trace via CLI (§8) or HTTP (§9). The his
 
 The **content** of historical versions is returned on request (`schedule context-history <id> --show-content`) but by default only the meta-rows are shown to keep the output readable.
 
+### 6.6 SOUL Experience aggregation (V1.29)
+
+The `## Experience` section in SOUL.md is **derived from long-term memory files**, not hand-authored. Two paths update it:
+
+1. **CLI one-shot** — `nexus42 creator soul refresh-experience` runs deterministic aggregation (no LLM): reads all long-term memory files, filters to experience-kind entries (`story_summary`, `review_note`, `character_note`, `world_building`, `plot_outline`, `theme_analysis`), sorts by recency, and concatenates excerpts into the `## Experience` section. Hand-edits under `## Experience` are overwritten on each refresh.
+
+2. **Orchestration capability + preset** — the `soul.experience.aggregate` capability (registered in `CapabilityRegistry`) performs the same deterministic aggregation and can be invoked from the `soul-experience-refresh` embedded preset. Schedule a cron trigger via the daemon scheduler for periodic automated refresh. If LLM polish is desired, chain `context.summarize` in a subsequent step within the preset.
+
+Implementation: `nexus-creator-memory::experience_aggregation` (core logic), `nexus42 creator soul refresh-experience` (CLI entry), `nexus-orchestration::capability::builtins::soul_experience_aggregate` (orchestration capability).
+
 ## 7. Preset YAML Additions
 
 Extensions to the preset bundle format ([orchestration-engine.md](orchestration-engine.md) §7.2) that WS7 introduces. These are **additive** and optional — existing V1.4-era presets without these fields behave as if they had the defaults.
