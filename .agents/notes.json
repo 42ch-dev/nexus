@@ -177,6 +177,10 @@
     {
       "updated_at": "2026-04-21",
       "message": "V1.7 delivery compass drafted (iterations/v1.7-delivery-compass-v1.md) + deferred-features-cross-version-tracker.md committed. 6 workstreams: WS-A/B/C (close 8 residuals — DTO-C1/C2/W1, PERM-W1/W2/W3, R4, R7), WS-D (ACP SDK v0.11.0+ migration), WS-E (multi-agent worker — XL, OQ-7), WS-F (capability schema registry sharing — M). Branch: feature/v1.7. Draft — pending user confirmation."
+    },
+    {
+      "updated_at": "2026-05-26",
+      "message": "V1.29 COMPLETE: Author Intelligence & Agent Hardening. 6 plans Done (FL-A1 session review, FL-A2 SOUL Experience, FL-A3 Stage0 delimiters, FL-B KB extract queue, Agent Host Batch 2, spec hygiene). 23 commits, 58 files, +3368/-305 lines. QC tri-review Approve, QA Pass with residuals (R14–R20 deferred to V1.30). FL-A/FL-B shipped; DF-21–23/27–28 closed; DF-35/36 partial; R11/R12/R13 closed. Integration branch merged to main. AGENTS.md merge discipline rule added (PR-only)."
     }
   ]
 }
