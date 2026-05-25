@@ -832,6 +832,7 @@ Dedupe per `provider_id`, not per agent identity. Both can coexist with distinct
 | Version | Scope | Key additions |
 |---|---|---|
 | v1 | Consolidated from V1.18 + V1.19 | Initial SSOT: architecture, provider impl, discovery, policy, streaming, Multica/OpenDesign research, ACP protocol findings, design review decisions |
+| v2 | V1.29 Batch 2 hardening | DF-21 timeout enforcement (audit + close gaps in TimeoutConfig coverage); R11 persistent child Drop kill; R12 persistent mode cancel(); Batch 2 plan: `2026-05-26-v1.29-agent-host-batch2-hardening`. DF-22/23/27/28 already resolved in V1.28. |
 
 ---
 

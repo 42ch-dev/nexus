@@ -273,6 +273,15 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 - `nexus42 creator knowledge ...`：User knowledge / reference 管理入口（`nexus-knowledge`）
 - `nexus42 creator demo-seed ...`：演示数据填充（world + KB seed）
 
+**V1.29 additions** (compass: [v1.29](../../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md)):
+
+- `nexus42 creator memory pending-list` — list items in `memory_pending_review` awaiting review
+- `nexus42 creator memory pending-show <id>` — show detail of a single pending memory item
+- `nexus42 creator memory pending-dismiss <id>` — dismiss a pending memory item (no promotion)
+- `nexus42 creator soul refresh-experience` — deterministic one-shot SOUL `## Experience` aggregation via embedded preset; updates `SOUL.md` Experience section
+- `nexus42 creator kb queue-extract <work-entry-id> --world-id <id>` — enqueue a work entry for KB extraction into a World (idempotent)
+- `nexus42 creator kb extract-status [--job-id]` — check extraction job status (all jobs or specific)
+
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
 - **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
