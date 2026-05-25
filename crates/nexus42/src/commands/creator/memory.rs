@@ -297,8 +297,8 @@ async fn pending_list(config: &CliConfig, creator_id: &str) -> Result<()> {
 
     println!("Pending reviews for creator '{creator_id}':\n");
     println!(
-        "{:<30} {:<15} {:<15} {}",
-        "PENDING_ID", "TASK_KIND", "SESSION_ID", "CREATED_AT"
+        "{:<30} {:<15} {:<15} CREATED_AT",
+        "PENDING_ID", "TASK_KIND", "SESSION_ID"
     );
     println!("{}", "-".repeat(100));
 
