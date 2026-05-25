@@ -79,6 +79,8 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 **Git worktrees:** Place every additional `git worktree` checkout under this repository root at `.worktrees/<name>/` only (`.worktrees/` is gitignored).
 
+**Merge discipline:** All integration branches **must** be merged into `main` via a GitHub Pull Request — never by local `git merge` directly to `main`. This applies regardless of whether the change is agent-authored or human-authored. Rationale: this is a public open-source repo; PRs provide review trail, CI gate, and merge commit provenance that local merges cannot.
+
 ## Versioning Policy
 
 - Schema contracts use `schema_version` field aligned with bundle envelope
