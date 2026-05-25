@@ -1412,11 +1412,7 @@ async fn kb_remove(
 /// Creates a row in `kb_extract_jobs` with status `queued`.
 /// The actual extraction is performed by the `kb.extract_work` capability
 /// (triggered via preset or daemon orchestration). No LLM calls here.
-async fn kb_queue_extract(
-    config: &CliConfig,
-    work_entry_id: &str,
-    world_id: &str,
-) -> Result<()> {
+async fn kb_queue_extract(config: &CliConfig, work_entry_id: &str, world_id: &str) -> Result<()> {
     let creator_id = config
         .active_creator_id
         .as_deref()
@@ -1430,15 +1426,10 @@ async fn kb_queue_extract(
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
-    let job = nexus_local_db::enqueue_extract_job(
-        &pool,
-        &creator_id,
-        &slug,
-        work_entry_id,
-        world_id,
-    )
-    .await
-    .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
+    let job =
+        nexus_local_db::enqueue_extract_job(&pool, &creator_id, &slug, work_entry_id, world_id)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
 
     if job.status == "queued" {
         // Check if this was a new enqueue vs idempotent return

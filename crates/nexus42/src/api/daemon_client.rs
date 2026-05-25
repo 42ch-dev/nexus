@@ -686,10 +686,7 @@ impl DaemonClient {
         let path = format!("/v1/local/memory/pending-review/{pending_id}");
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
-        let resp = match self
-            .send_authenticated(self.http.delete(&url), &path)
-            .await
-        {
+        let resp = match self.send_authenticated(self.http.delete(&url), &path).await {
             Ok(resp) => resp,
             Err(e) => {
                 if let CliError::Api { .. } = &e {
