@@ -72,7 +72,7 @@ impl CapabilityRegistry {
     /// `workspace.open`, `workspace.commit`, `registry.refresh`,
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
     /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`,
-    /// `context.summarize`.
+    /// `context.summarize`, `kb.extract_work`.
     #[must_use]
     pub fn with_builtins() -> Self {
         let caps: Vec<Box<dyn Capability>> = vec![
@@ -91,6 +91,7 @@ impl CapabilityRegistry {
             Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm),
             Box::new(builtins::ContextSummarize),
+            Box::new(builtins::KbExtractWork),
         ];
         Self { capabilities: caps }
     }
@@ -135,9 +136,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_fifteen_builtins() {
+    fn registry_has_sixteen_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 15);
+        assert_eq!(reg.len(), 16);
     }
 
     #[test]
@@ -159,6 +160,7 @@ mod tests {
             "acp.session_load",
             "judge.llm",
             "context.summarize",
+            "kb.extract_work",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -177,11 +179,12 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 15);
+        assert_eq!(names.len(), 16);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
         assert!(names.contains(&"judge.llm"));
         assert!(names.contains(&"context.summarize"));
+        assert!(names.contains(&"kb.extract_work"));
     }
 }
