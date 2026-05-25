@@ -189,11 +189,11 @@ fn workspace_routes() -> Router<WorkspaceState> {
         )
 }
 
-/// Narrative read surface routes — in-memory, read-only (V1.25 Theme C, C1.1).
+/// Narrative read surface routes — SQLite-backed, read-only (V1.26+).
 ///
 /// Minimal read-only daemon routes backed by `NarrativeGateway` with
-/// in-memory stores. Distinct from the work-scope `/v1/local/kb/*`
-/// file-index routes. No persistence across daemon restarts.
+/// `SQLite` persistent stores (V1.26 local persistence). Distinct from
+/// the work-scope `/v1/local/kb/*` file-index routes.
 fn narrative_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(

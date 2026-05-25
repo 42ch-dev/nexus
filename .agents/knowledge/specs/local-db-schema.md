@@ -69,6 +69,7 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 | `narrative_timeline_events` | Workspace-local timeline event projections used by `NarrativeGateway` | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
 | `kb_key_blocks` | World-scoped narrative KB KeyBlocks persisted in workspace `state.db` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
 | `kb_source_anchors` | Multi-anchor rows attached to `kb_key_blocks` for `KbStore::attach_source_anchor` / `get_anchors` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
+| `knowledge_entries` | User-scoped knowledge entries for Moment context assembly (V1.27) | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
 
 #### 4.1.1 `reference_sources`
 
@@ -195,6 +196,39 @@ CREATE TABLE IF NOT EXISTS kb_source_anchors (
 CREATE INDEX IF NOT EXISTS idx_kb_source_anchors_key_block_id
     ON kb_source_anchors (key_block_id);
 ```
+
+#### 4.1.3 Knowledge entries persistence (V1.27)
+
+`knowledge_entries` stores user-scoped knowledge for the `User Knowledge` domain in Moment context assembly. Each entry belongs to a single user and carries a JSON tags array for filtering.
+
+```sql
+CREATE TABLE IF NOT EXISTS knowledge_entries (
+    entry_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    content TEXT NOT NULL,
+    reference_uri TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_entries_user_id
+    ON knowledge_entries (user_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_entries_tags
+    ON knowledge_entries (tags_json);
+CREATE INDEX IF NOT EXISTS idx_knowledge_entries_user_tags
+    ON knowledge_entries (user_id, tags_json);
+```
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `entry_id` | `TEXT` | yes | Primary key; generated UUID |
+| `user_id` | yes | Owner scope for user isolation |
+| `tags_json` | `TEXT` | yes | JSON array of tag strings, e.g. `["rust","tutorial"]` |
+| `content` | `TEXT` | yes | Knowledge content text |
+| `reference_uri` | `TEXT` | no | Optional URI for provenance |
+| `created_at` | `TEXT` | yes | Creation timestamp |
+| `updated_at` | `TEXT` | yes | Last update timestamp |
 
 Column notes:
 

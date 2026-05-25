@@ -12,8 +12,10 @@
 
 pub mod identity;
 pub mod kb_store;
+pub mod knowledge_store;
 pub mod memory_fragment;
 pub mod narrative_gateway;
+pub mod narrative_write;
 pub mod pending_review;
 pub mod reference_source;
 pub mod soul_meta;
@@ -60,6 +62,14 @@ pub use world_stories::{
     create_world_story, delete_world_story, generate_id as generate_world_story_id, get_by_id,
     list_by_world, update_chapters, update_status, WorldStory,
 };
+
+// Re-export narrative_write types
+pub use narrative_write::{
+    append_event, create_world, AppendEventResult, CreateWorldResult, NarrativeWriteError,
+};
+
+// Re-export knowledge_store types
+pub use knowledge_store::SqliteKnowledgeStore;
 
 // Re-export reference_source types
 pub use reference_source::{

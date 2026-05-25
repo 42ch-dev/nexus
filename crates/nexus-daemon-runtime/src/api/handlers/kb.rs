@@ -1,4 +1,4 @@
-//! **Work-scope** local file index handlers (V1.20 Batch 5, T39; scope clarified KCA-003 C2).
+//! **Work-scope** local file index handlers (V1.20 Batch 5, T39; scope clarified KCA-003 C2; V1.27 H3 scope honesty).
 //!
 //! These endpoints implement the **CLI local work KB index** — a per-creator, per-workspace
 //! file-based index stored under `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`.
@@ -7,6 +7,13 @@
 //! (User-scoped global knowledge).** Only `scope=work` is implemented. See
 //! [entity-scope-model.md §5.3](../../../../../.agents/knowledge/specs/entity-scope-model.md#53-cli-creator-kb--local-work-scope-file-index)
 //! for the canonical scope definitions.
+//!
+//! # Scope validation (V1.27 H3)
+//!
+//! Both `list_entries` and `add_entry` accept an optional `scope` parameter.
+//! If provided and not `"work"`, the handler returns **400** with a message citing
+//! entity-scope-model §5.3. This prevents clients from assuming these endpoints
+//! serve World KB or User knowledge.
 //!
 //! # Endpoints
 //!
@@ -38,6 +45,10 @@ use tracing::info;
 pub struct ListKbEntriesQuery {
     pub creator_id: Option<String>,
     pub workspace_slug: Option<String>,
+    /// KB scope — only `work` is supported. Non-`work` values return 400.
+    /// See entity-scope-model §5.3 for scope definitions.
+    #[serde(default)]
+    pub scope: Option<String>,
     pub q: Option<String>,
     pub limit: Option<usize>,
     pub cursor: Option<String>,
@@ -66,6 +77,10 @@ pub struct PaginationInfo {
 pub struct AddKbEntryRequest {
     pub creator_id: String,
     pub workspace_slug: Option<String>,
+    /// KB scope — only `work` is supported. Non-`work` values return 400.
+    /// See entity-scope-model §5.3 for scope definitions.
+    #[serde(default)]
+    pub scope: Option<String>,
     pub title: Option<String>,
     /// File content as UTF-8 string.
     pub content: Option<String>,
@@ -91,6 +106,26 @@ pub struct GetKbEntryResponse {
 pub struct DeleteKbEntryResponse {
     pub entry_id: String,
     pub deleted: bool,
+}
+
+// ─── Scope validation (H3: work-scope honesty) ────────────────────────────
+
+/// Validate KB scope — only `work` is supported by these endpoints.
+///
+/// Returns `Ok(())` if scope is `None` (defaults to work) or `"work"`.
+/// Returns a 400 error for any other value, citing entity-scope §5.3.
+fn validate_scope(scope: Option<&str>) -> Result<(), NexusApiError> {
+    match scope {
+        None | Some("work") => Ok(()),
+        Some(other) => Err(NexusApiError::InvalidInput {
+            field: "scope".to_string(),
+            reason: format!(
+                "scope '{other}' is not supported. These endpoints serve the \
+                 work-scope file index only (entity-scope-model §5.3). \
+                 World KB and User knowledge are served by separate routes."
+            ),
+        }),
+    }
 }
 
 // ─── Work-scope KB Index types ─────────────────────────────────────────────
@@ -316,6 +351,9 @@ pub async fn list_entries(
     State(_state): State<WorkspaceState>,
     Query(query): Query<ListKbEntriesQuery>,
 ) -> Result<Json<ListKbEntriesResponse>, NexusApiError> {
+    // H3: Reject non-work scope with 400
+    validate_scope(query.scope.as_deref())?;
+
     let creator_id = query
         .creator_id
         .as_deref()
@@ -387,6 +425,9 @@ pub async fn add_entry(
     State(_state): State<WorkspaceState>,
     Json(req): Json<AddKbEntryRequest>,
 ) -> Result<Json<AddKbEntryResponse>, NexusApiError> {
+    // H3: Reject non-work scope with 400
+    validate_scope(req.scope.as_deref())?;
+
     info!(creator_id = %req.creator_id, "Adding KB entry");
 
     nexus_home_layout::validate_creator_id_safe(&req.creator_id).map_err(|reason| {
@@ -787,5 +828,38 @@ mod tests {
             "work-scope entries dir must be under local workspace path, got: {}",
             entries_dir.display()
         );
+    }
+
+    // ── H3: Scope validation tests ──────────────────────────────────────
+
+    #[test]
+    fn validate_scope_accepts_none() {
+        assert!(validate_scope(None).is_ok());
+    }
+
+    #[test]
+    fn validate_scope_accepts_work() {
+        assert!(validate_scope(Some("work")).is_ok());
+    }
+
+    #[test]
+    fn validate_scope_rejects_world() {
+        let result = validate_scope(Some("world"));
+        assert!(result.is_err());
+        let msg = format!("{result:?}");
+        assert!(
+            msg.contains("entity-scope-model"),
+            "error should cite entity-scope-model §5.3, got: {msg}"
+        );
+        assert!(
+            msg.contains("work-scope file index only"),
+            "error should explain work-scope only, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_scope_rejects_unknown() {
+        let result = validate_scope(Some("user"));
+        assert!(result.is_err());
     }
 }

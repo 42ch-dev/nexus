@@ -1,49 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-24T14:00:00Z",
-  "plans": [
-    {
-      "id": "2026-05-24-v1.27-narrative-world-writes",
-      "title": "V1.27 narrative world writes + World KB CLI writes",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-24-v1.27-narrative-world-writes.md",
-      "working_branch": "feature/v1.27-narrative-world-writes",
-      "merge_target": "feature/v1.27-local-authoring",
-      "task_category": "logic",
-      "themes": ["N", "K"]
-    },
-    {
-      "id": "2026-05-24-v1.27-knowledge-persistence-context",
-      "title": "V1.27 SqliteKnowledgeStore, knowledge CLI, assemble-moment, demo seed",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-24-v1.27-knowledge-persistence-context.md",
-      "working_branch": "feature/v1.27-knowledge-persistence-context",
-      "merge_target": "feature/v1.27-local-authoring",
-      "task_category": "logic",
-      "depends_on": ["2026-05-24-v1.27-narrative-world-writes"],
-      "themes": ["U", "C"]
-    },
-    {
-      "id": "2026-05-24-v1.27-api-cli-hygiene",
-      "title": "V1.27 API and CLI honesty (clone, scope, docs)",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-24-v1.27-api-cli-hygiene.md",
-      "working_branch": "feature/v1.27-api-cli-hygiene",
-      "merge_target": "feature/v1.27-local-authoring",
-      "task_category": "logic",
-      "themes": ["H"]
-    },
-    {
-      "id": "2026-05-24-v1.27-acp-agent-use",
-      "title": "V1.27 implement acp agent use with persisted default agent",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-24-v1.27-acp-agent-use.md",
-      "working_branch": "feature/v1.27-acp-agent-use",
-      "merge_target": "feature/v1.27-local-authoring",
-      "task_category": "logic",
-      "themes": ["ACP"]
-    }
-  ],
+  "updated_at": "2026-05-24T17:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -54,8 +12,8 @@
     "integration_branch": "feature/v1.27-local-authoring",
     "integration_merge_target": "main",
     "integration_branch_role": "V1.27 iteration integration — merge all plan topic branches here before QC/QA; PR to main after sign-off",
-    "latest_shipped_iteration": "v1.26",
-    "latest_shipped_at": "2026-05-23T18:00:00Z",
+    "latest_shipped_iteration": "v1.27",
+    "latest_shipped_at": "2026-05-24T17:00:00Z",
     "latest_active_iteration": "v1.27",
     "latest_active_compass": ".agents/iterations/v1.27-local-authoring-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
@@ -91,11 +49,12 @@
         "severity": "low",
         "source": "dev C1.2",
         "scope": "crates/nexus42/src/commands/platform/context.rs",
-        "decision": "defer",
+        "decision": "closed",
         "owner": "@fullstack-dev",
         "target_date": "v1.27",
         "tracking_link": "2026-05-24-v1.27-knowledge-persistence-context",
-        "note": "Close when SqliteKnowledgeStore wired in run_assemble_moment (Plan 2 C1.1)."
+        "note": "Closed: SqliteKnowledgeStore wired in run_assemble_moment (Plan 2 C1.1).",
+        "closed_at": "2026-05-24T17:00:00Z"
       }
     ],
     "2026-05-23-v1.26-narrative-kb-persistence": [
@@ -164,11 +123,12 @@
         "severity": "suggestion",
         "source": "qc3 S-002",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/kb.rs",
-        "decision": "defer",
+        "decision": "closed",
         "owner": "@fullstack-dev",
         "target_date": "v1.27",
         "tracking_link": "2026-05-24-v1.27-api-cli-hygiene",
-        "note": "Close when work-KB handler returns 400 for non-work scope (Plan 3 H3)."
+        "note": "Closed: KB handler now has validate_scope() returning 400 for non-work scope (Plan 3 H3).",
+        "closed_at": "2026-05-24T16:30:00Z"
       },
       {
         "id": "R4",
