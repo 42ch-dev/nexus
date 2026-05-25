@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-25T18:00:00Z",
+  "updated_at": "2026-05-25T19:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-25-v1.28-context-assembly-convergence",
@@ -33,7 +33,7 @@
       "plan_id": "2026-05-25-v1.28-agent-host-native-multiturn",
       "title": "V1.28 DF-18 — persistent native CLI session for multi-turn execute",
       "file": ".agents/plans/2026-05-25-v1.28-agent-host-native-multiturn.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev", "@qc-specialist", "@qa-engineer"],
       "task_category": "logic",
@@ -46,7 +46,7 @@
       "plan_id": "2026-05-25-v1.28-local-ssot-refresh",
       "title": "V1.28 mandatory doc refresh — ARCHITECTURE, cli-spec, iterations index, deferred tracker",
       "file": ".agents/plans/2026-05-25-v1.28-local-ssot-refresh.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": ["@architect", "@writing-specialist", "@qc-specialist"],
       "task_category": "docs",
