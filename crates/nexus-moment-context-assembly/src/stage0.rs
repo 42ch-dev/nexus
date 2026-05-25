@@ -27,6 +27,16 @@ const PERSONALITY_HEADING: &str = "## Personality";
 /// Section heading for experience (matches SOUL.md).
 const EXPERIENCE_HEADING: &str = "## Experience";
 
+/// Structured delimiter marking the start of the Stage0 personality section.
+///
+/// Emitted by `Stage0Assembly::assemble()` / `assemble_with_truncation()`
+/// immediately after the `## Personality` heading and body.
+/// Used by `MomentContext::split_stage0_personality()` for reliable personality extraction.
+pub(crate) const STAGE0_PERSONALITY_START: &str = "---STAGE0:PERSONALITY:START---";
+
+/// Structured delimiter marking the end of the Stage0 personality section.
+pub(crate) const STAGE0_PERSONALITY_END: &str = "---STAGE0:PERSONALITY:END---";
+
 /// Stage-0 context assembly for `local_only` mode.
 ///
 /// Collects all local context sources and assembles them in the
@@ -62,9 +72,12 @@ impl Stage0Assembly {
             parts.push(self.system_prefix.clone());
         }
 
-        // 2. ## Personality
+        // 2. ## Personality (wrapped in structured delimiters)
         if !self.personality.is_empty() {
-            parts.push(format!("{PERSONALITY_HEADING}\n\n{}\n", self.personality));
+            parts.push(format!(
+                "{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n{}\n\n{STAGE0_PERSONALITY_END}",
+                self.personality
+            ));
         }
 
         // 3. Long-term memories (sorted by kind, then recency)
@@ -119,11 +132,13 @@ impl Stage0Assembly {
             sections.push((String::new(), self.system_prefix.clone(), true));
         }
 
-        // 2. Personality (non-truncatable — spec §9.3)
+        // 2. Personality (non-truncatable — spec §9.3, wrapped in delimiters)
         if !self.personality.is_empty() {
             sections.push((
-                format!("{PERSONALITY_HEADING}\n\n"),
-                self.personality.clone(),
+                format!(
+                    "{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n"
+                ),
+                format!("{}\n\n{STAGE0_PERSONALITY_END}", self.personality),
                 true,
             ));
         }
@@ -468,5 +483,92 @@ mod tests {
     #[test]
     fn truncate_to_char_count_zero() {
         assert_eq!(truncate_to_char_count("text", 0), "");
+    }
+
+    // --- A3.1: Delimiter emit tests ---
+
+    #[test]
+    fn assemble_emits_personality_delimiters() {
+        let asm = Stage0Assembly {
+            system_prefix: "System.".to_string(),
+            personality: "Bold and creative.".to_string(),
+            experience: String::new(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            user_prompt: "Write.".to_string(),
+            max_tokens: None,
+        };
+
+        let output = asm.assemble();
+        assert!(
+            output.contains(STAGE0_PERSONALITY_START),
+            "output must contain start delimiter"
+        );
+        assert!(
+            output.contains(STAGE0_PERSONALITY_END),
+            "output must contain end delimiter"
+        );
+        let start_pos = output.find(STAGE0_PERSONALITY_START).unwrap();
+        let end_pos = output.find(STAGE0_PERSONALITY_END).unwrap();
+        assert!(
+            start_pos < end_pos,
+            "start delimiter must come before end delimiter"
+        );
+        // Content between delimiters must include personality body and heading
+        let between = &output[start_pos + STAGE0_PERSONALITY_START.len()..end_pos];
+        assert!(
+            between.contains("Bold and creative."),
+            "personality body must be between delimiters"
+        );
+        assert!(
+            between.contains(PERSONALITY_HEADING),
+            "personality heading must be between delimiters"
+        );
+    }
+
+    #[test]
+    fn assemble_with_truncation_emits_personality_delimiters() {
+        let asm = Stage0Assembly {
+            system_prefix: String::new(),
+            personality: "Important personality.".to_string(),
+            experience: String::new(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            user_prompt: String::new(),
+            max_tokens: Some(50),
+        };
+
+        let output = asm.assemble_with_truncation();
+        assert!(
+            output.contains(STAGE0_PERSONALITY_START),
+            "truncated output must contain start delimiter"
+        );
+        assert!(
+            output.contains(STAGE0_PERSONALITY_END),
+            "truncated output must contain end delimiter"
+        );
+    }
+
+    #[test]
+    fn no_delimiters_when_personality_empty() {
+        let asm = Stage0Assembly {
+            system_prefix: "System.".to_string(),
+            personality: String::new(),
+            experience: "10 years.".to_string(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            user_prompt: "Task.".to_string(),
+            max_tokens: None,
+        };
+
+        let output = asm.assemble();
+        assert!(
+            !output.contains(STAGE0_PERSONALITY_START),
+            "no start delimiter when personality is empty"
+        );
+        assert!(
+            !output.contains(STAGE0_PERSONALITY_END),
+            "no end delimiter when personality is empty"
+        );
     }
 }
