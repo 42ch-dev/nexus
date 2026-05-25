@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kb_extract_jobs\n            (job_id, creator_id, workspace_id, work_entry_id, world_id, status)\n           VALUES (?, ?, ?, ?, ?, 'queued')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "c3eda401048b4e3b4fecfa7c4c113a4fff7a33e9df755e0983c7d04b24618acc"
+}
