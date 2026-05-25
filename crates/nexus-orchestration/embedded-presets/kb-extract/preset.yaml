@@ -1,0 +1,57 @@
+# KB Extract Preset — Work-to-World Knowledge Extraction
+#
+# This preset processes queued KB extract jobs:
+# 1. Loads the next queued job for the active creator
+# 2. Reads the work-scope KB file content
+# 3. Sends an extraction prompt via acp.prompt
+# 4. Parses the structured JSON response
+# 5. Inserts a KeyBlock into the target world
+#
+# Manual run command:
+#   nexus42 daemon orchestrate run --preset kb-extract --creator <id>
+
+preset:
+  id: kb-extract
+  version: 1
+  kind: creator
+  description: "Extract structured KeyBlocks from work-scope KB entries into world knowledge"
+  requires_capabilities:
+    - kb.extract_work
+    - acp.prompt
+  initial: loading
+  terminal: done
+
+states:
+  - id: loading
+    description: "Load work content from the queued extract job"
+    enter:
+      - kind: capability
+        name: kb.extract_work
+        args:
+          work_entry_id: "{{preset.input.work_entry_id}}"
+          world_id: "{{preset.input.world_id}}"
+          creator_id: "{{preset.input.creator_id}}"
+    exit_when:
+      kind: rule
+    next: extracting
+
+  - id: extracting
+    description: "Send extraction prompt to LLM via acp.prompt"
+    enter:
+      - kind: inner_graph
+        name: extraction_graph
+    exit_when:
+      kind: graph_complete
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  extraction_graph:
+    nodes:
+      - id: extract
+        kind: acp_prompt
+        template_file: prompts/extract.md
+        tool_policy: auto_grant_read_only
+    output_binding: extract.text
