@@ -472,4 +472,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-24**. Status: Active. **V1.27 Active** (local authoring MVP, 4 plans registered). **V1.26 Shipped** (local persistence). V1.25 Shipped partial; V1.24 Shipped. Platform integration paused. Residuals R10/R3 targeted to V1.27 plans; see `status.json`.*
+*Created: 2026-04-21. Last updated: **2026-05-25**. Status: Active. **V1.28 Active** (context assembly convergence + Agent Host Batch 1, 4 plans). **V1.27 Shipped** (2026-05-24, local authoring MVP). **V1.26 Shipped** (local persistence). V1.25 Shipped partial; V1.24 Shipped. Platform integration paused. Residuals R10/R3 closed in V1.27; see `status.json`.*
