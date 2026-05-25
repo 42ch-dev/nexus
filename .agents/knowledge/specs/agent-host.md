@@ -407,7 +407,7 @@ Each native adapter should follow the per-provider stream adapter pattern (borro
 Discovery is deterministic and ordered:
 
 1. **Static config** from `{NEXUS_HOME}/agent-host/config.toml`: explicit provider IDs, protocol kind, command template, args/env, allow/deny state, timeout/concurrency overrides.
-2. **PATH scan** for known native commands: Wave 1: `claude` only. Later waves: `codex`, `gemini`, `opencode`, `cursor`, `kimi`, etc. Use cross-platform probe (V1.19 D-009: replaced Unix-only `which` with `which::which()` crate or platform-conditional `Command::new`).
+2. **PATH scan** for known native commands: Wave 1: `claude` only. Later waves: `codex`, `gemini`, `opencode`, `cursor`, `kimi`, etc. Use cross-platform probe (DF-26: `which::which()` crate for PATH resolution, with manual fallback scan). **Windows note**: the `which` crate handles `PATHEXT` extensions (`.exe`, `.cmd`, etc.) automatically. Edge cases with custom shell integrations or non-standard PATH separators fall back to a manual directory scan.
 3. **ACP registry** via `nexus_acp_host::RegistryClient`: include registry entries with runnable distributions for current platform, annotate as `protocol_kind = acp`, preserve registry metadata and trust source.
 
 ### 5.2 Deduplication rules

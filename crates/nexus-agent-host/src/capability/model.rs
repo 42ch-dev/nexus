@@ -575,10 +575,7 @@ mod descriptor_audit_tests {
             !desc.set_model,
             "native_cli_limited must not claim set_model"
         );
-        assert!(
-            !desc.set_mode,
-            "native_cli_limited must not claim set_mode"
-        );
+        assert!(!desc.set_mode, "native_cli_limited must not claim set_mode");
     }
 
     /// `native_cli_limited` must not claim `structured_tool_calls` because

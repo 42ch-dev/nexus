@@ -986,8 +986,8 @@ mod tests {
     /// hang — it must return an outcome immediately.
     #[test]
     fn permission_handler_returns_immediately() {
-        use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
         use crate::config::PolicyConfig;
+        use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
 
         let config = PolicyConfig::default();
         let resolver = HostPermissionResolver::new_native_only(&config);
@@ -1017,8 +1017,8 @@ mod tests {
     /// defaults to Deny (safe default — no infinite wait, no hang).
     #[test]
     fn permission_handler_no_policy_defaults_deny() {
-        use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
         use crate::config::PolicyConfig;
+        use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
 
         let config = PolicyConfig::default();
         let resolver = HostPermissionResolver::new_native_only(&config);
