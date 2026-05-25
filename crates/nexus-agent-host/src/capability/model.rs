@@ -527,3 +527,103 @@ pub enum SessionState {
     /// Terminal error state.
     ErrorTerminal,
 }
+
+#[cfg(test)]
+mod descriptor_audit_tests {
+    use super::*;
+
+    // ── DF-20: Capability truthfulness audit (AH2.1 / AH2.2) ──────────
+    //
+    // These tests verify that `CapabilityDescriptor::acp_full()` claims
+    // match the `AcpProvider` implementation. The spec (agent-host.md §4.1.4
+    // D-003) requires the descriptor to never claim capabilities the adapter
+    // cannot deliver.
+
+    /// `set_model` must be `false` in the static descriptor because model
+    /// switching depends on dynamic discovery of agent-specific config
+    /// options. The `AcpProvider::handle_set_model()` method returns
+    /// `CapabilityUnsupported` when no model config option is found.
+    #[test]
+    fn acp_full_set_model_is_false_dynamic_discovery() {
+        let desc = CapabilityDescriptor::acp_full();
+        assert!(
+            !desc.set_model,
+            "acp_full() must claim set_model = false because model switching \
+             depends on dynamic config-option discovery, not a guaranteed SDK path"
+        );
+    }
+
+    /// `set_mode` must be `true` in the static descriptor because the ACP
+    /// protocol provides a stable `session/set_mode` RPC that the
+    /// `AcpProvider::handle_set_mode()` method calls directly.
+    #[test]
+    fn acp_full_set_mode_is_true_stable_rpc() {
+        let desc = CapabilityDescriptor::acp_full();
+        assert!(
+            desc.set_mode,
+            "acp_full() must claim set_mode = true because the ACP protocol \
+             provides a stable session/set_mode RPC"
+        );
+    }
+
+    /// `native_cli_limited` must not claim `set_model` or `set_mode` — native
+    /// CLI providers use subprocess invocation, not protocol-level control.
+    #[test]
+    fn native_cli_limited_no_model_or_mode() {
+        let desc = CapabilityDescriptor::native_cli_limited();
+        assert!(
+            !desc.set_model,
+            "native_cli_limited must not claim set_model"
+        );
+        assert!(
+            !desc.set_mode,
+            "native_cli_limited must not claim set_mode"
+        );
+    }
+
+    /// `native_cli_limited` must not claim `structured_tool_calls` because
+    /// native CLI output is unstructured (agent-host.md §4.2.2).
+    #[test]
+    fn native_cli_limited_no_structured_tool_calls() {
+        let desc = CapabilityDescriptor::native_cli_limited();
+        assert!(
+            !desc.structured_tool_calls,
+            "native_cli_limited must not claim structured_tool_calls"
+        );
+    }
+
+    /// `disabled` descriptor must have all capabilities off.
+    #[test]
+    fn disabled_all_off() {
+        let desc = CapabilityDescriptor::disabled();
+        assert!(!desc.text_prompt);
+        assert!(!desc.streaming);
+        assert!(!desc.cancellation);
+        assert!(!desc.session_restore);
+        assert!(!desc.structured_tool_calls);
+        assert!(!desc.mcp_http);
+        assert!(!desc.mcp_sse);
+        assert!(!desc.mcp_stdio);
+        assert!(!desc.images);
+        assert!(!desc.audio);
+        assert!(!desc.embedded_context);
+        assert!(!desc.set_model);
+        assert!(!desc.set_mode);
+        assert!(!desc.diagnostics);
+    }
+
+    /// `acp_full` must claim core capabilities that every ACP session
+    /// is expected to support (text prompt, streaming, cancellation).
+    #[test]
+    fn acp_full_core_capabilities_present() {
+        let desc = CapabilityDescriptor::acp_full();
+        assert!(desc.text_prompt, "ACP must support text_prompt");
+        assert!(desc.streaming, "ACP must support streaming");
+        assert!(desc.cancellation, "ACP must support cancellation");
+        assert!(desc.session_restore, "ACP must support session_restore");
+        assert!(
+            desc.structured_tool_calls,
+            "ACP must support structured_tool_calls"
+        );
+    }
+}
