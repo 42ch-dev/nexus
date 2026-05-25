@@ -10,9 +10,9 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_fifteen_builtins() {
+async fn registry_has_sixteen_builtins() {
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 15);
+    assert_eq!(reg.len(), 16);
 }
 
 #[tokio::test]
