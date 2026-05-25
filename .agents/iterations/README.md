@@ -40,7 +40,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.26-local-persistence-delivery-compass-v1.md](v1.26-local-persistence-delivery-compass-v1.md) | V1.26 | **Shipped** (2026-05-23) — local SQLite persistence, reference MD layout, context productization |
 | [v1.27-local-authoring-delivery-compass-v1.md](v1.27-local-authoring-delivery-compass-v1.md) | V1.27 | **Shipped** (2026-05-24) — CLI-first local authoring writes, User knowledge SQLite, context closure, API hygiene, `acp agent use` |
 | [v1.28-context-and-agent-host-delivery-compass-v1.md](v1.28-context-and-agent-host-delivery-compass-v1.md) | V1.28 | **Shipped** (2026-05-25) — `assemble-moment` SSOT, structured KB query, Agent Host Batch 1 |
-| [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md) | V1.29 | **Active** — Author Intelligence (FL-A/B), Agent Host Batch 2, spec/tracker hygiene |
+| [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md) | V1.29 | **Shipped** (2026-05-26) — Author Intelligence (FL-A/B), Agent Host Batch 2, spec/tracker hygiene |
 
 ### Reference compasses
 

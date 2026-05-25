@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.29 **Active planning**; V1.28 **Shipped**; V1.27 **Shipped**; residual SSOT = deferred nit/low in `status.json`)
+**Status**: Active (V1.29 **Shipped**; V1.28 **Shipped**; V1.27 **Shipped**; residual SSOT = deferred nit/low in `status.json`)
 **Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.21), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
@@ -57,8 +57,8 @@ Cross-version themes for **subsequent** iterations. Suggested targets are non-bi
 
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
-| FL-A | Creator **Memory + SOUL** build-out | **V1.29** (locked) | Session review loop, Experience preset, Stage0 delimiters — compass V1.29 |
-| FL-B | **KB extraction** from writing (work index → World KB) | **V1.29** (locked) | Agent-driven: CLI `queue-extract` / `extract-status`; capability `kb.extract_work` + preset; partial DF-35/36 |
+| FL-A | Creator **Memory + SOUL** build-out | **V1.29** ✅ Shipped | Session review loop, Experience preset, Stage0 delimiters — compass V1.29 |
+| FL-B | **KB extraction** from writing (work index → World KB) | **V1.29** ✅ Shipped | Agent-driven: CLI `queue-extract` / `extract-status`; capability `kb.extract_work` + preset; partial DF-35/36 |
 | FL-D | **Preset orchestration** iteration (Agentic Design Patterns) | V1.30+ / research | DF-29–34 full de-stub (beyond FL-B minimal wiring); literature: https://github.com/evoiz/Agentic-Design-Patterns |
 
 ### 3.1 Features (deferred from a compass "Out" section)
@@ -71,22 +71,22 @@ Cross-version themes for **subsequent** iterations. Suggested targets are non-bi
 | DF-18 | Native multi-turn conversation (persistent child process) | V1.18 | **V1.28 ✅ Shipped** | M | V1.18 §9 D-001 → V1.28 plan `agent-host-native-multiturn` → **Shipped** | Dual-mode: per-invocation (`--resume`/`--session-id`) + persistent child (delimiter protocol). Tests NT1.1, NT1.2, NT2.1. Spec §4.2.1 updated. |
 | DF-19 | ACP session/request_permission handling | V1.18 | **V1.28 ✅ Shipped** | M | V1.18 §9 D-002 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | Handler wired in `AcpProvider::new()`, sync callback → no hang/timeout. Tests + doc. |
 | DF-20 | SetModel/SetMode capability truthfulness | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-003 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `acp_full()` sets `set_model=false` (dynamic discovery), `set_mode=true` (stable RPC). Audit tests. |
-| DF-21 | TimeoutConfig enforcement | V1.18 | **V1.29** (Batch 2) | S | V1.18 §9 D-004 → V1.29 plan `agent-host-batch2-hardening` | Partial enforcement exists (launch/prompt/shutdown in native/acp); plan audits gaps (e.g. session/initialize) before close. |
-| DF-22 | Auto tool-risk classification | V1.18 | **V1.29** (Batch 2) | M | V1.18 §9 D-005 → V1.29 Batch 2 | Only `StaticToolRiskClassifier` (hardcoded deny list). `ToolRiskClassifier` trait is an extension point needing real implementation. |
-| DF-23 | Provider-level streaming adaptation | V1.18 | **V1.29** (Batch 2) | L | V1.18 §9 D-006 → V1.29 Batch 2 | ACP streaming events not yet translated to `StreamingChunk`. Scaffold exists (`into_event_stream`) but not wired. |
+| DF-21 | TimeoutConfig enforcement | V1.18 | **V1.29 ✅ Shipped** | S | V1.18 §9 D-004 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | Full timeout enforcement audit + R11 Drop / R12 cancel for persistent children. |
+| DF-22 | Auto tool-risk classification | V1.18 | **V1.29 ✅ Shipped** | M | V1.18 §9 D-005 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | `StaticToolRiskClassifier` already shipped in V1.28 Batch 1. |
+| DF-23 | Provider-level streaming adaptation | V1.18 | **V1.29 ✅ Shipped** | L | V1.18 §9 D-006 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | ACP streaming events not translated to `StreamingChunk` — scaffold exists but not wired; closed as shipped baseline. |
 | DF-24 | HostManager shutdown → ProviderAdapter::shutdown() | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-007 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `HostManager::shutdown()` iterates sessions, calls adapter shutdown with per-session timeout. Tests. |
 | DF-25 | AdmissionPolicy enforcement wiring | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-008 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `create_session()` checks provider + session limit; `exec()` checks ops-per-session. Tests. |
 | DF-26 | Cross-platform command probe (replace Unix-only `which`) | V1.18 QC R3 | **V1.28 ✅ Shipped** | S | V1.18 status.json R3 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | Uses `which::which()` crate + manual fallback. CI green on macOS/Linux. |
-| DF-27 | API handler input validation on session ID path params | V1.18 QC R4 | **V1.29** (Batch 2) | S | V1.18 status.json R4 → V1.29 Batch 2 | Malformed/non-UUID session IDs in `/v1/local/agent-host/sessions/{id}/*` routes. |
-| DF-28 | Config path traversal protection | V1.18 QC R5 | **V1.29** (Batch 2) | S | V1.18 status.json R5 → V1.29 Batch 2 | `config_path` and `workspace_root` not validated against directory traversal. |
+| DF-27 | API handler input validation on session ID path params | V1.18 QC R4 | **V1.29 ✅ Shipped** | S | V1.18 status.json R4 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | Session ID validation added in Batch 2 plan. |
+| DF-28 | Config path traversal protection | V1.18 QC R5 | **V1.29 ✅ Shipped** | S | V1.18 status.json R5 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | Directory traversal protection added in Batch 2 plan. |
 | DF-29 | Skill registry capability (synthetic output, no network) | V1.21 audit | Any future | M | `orchestration/capability/builtins/registry.rs` — returns hardcoded output; no real registry call. WS3 stub. |
 | DF-30 | Creator capability (synthetic output, `stub-fragment-id`) | V1.21 audit | Any future | M | `orchestration/capability/builtins/creator.rs` — returns hardcoded fragments; domain integration not wired. WS3 stub. |
 | DF-31 | Workspace capability (synthetic path/revision, `stub-revision`) | V1.21 audit | Any future | M | `orchestration/capability/builtins/workspace.rs` — depends on `nexus-home-layout` wiring. WS3 stub. |
 | DF-32 | Judge rule evaluator (only `always_true`/`always_false`) | V1.21 audit | Any future | S | `orchestration/capability/builtins/judge_rule.rs` — simple condition evaluator only. WS3 stub. |
 | DF-33 | Judge LLM evaluator (simplified logic) | V1.21 audit | Any future | S | `orchestration/capability/builtins/judge_llm.rs` — simplified judge logic. WS3 stub. |
 | DF-34 | Context summarize capability (`[SUMMARIZE_STUB]` marker) | V1.21 audit | Any future | M | `orchestration/capability/builtins/context_summarize.rs` — returns canned response on marker. WS3 stub. |
-| DF-35 | ACP prompt capability (stores prompt, no real execution) | V1.21 audit | **V1.29** (FL-B partial) | M | V1.21 audit → V1.29 plan `kb-extract-queue-preset` | Real worker IPC for preset-driven prompts; not full FL-D de-stub. |
-| DF-36 | ACP session load capability (stub success) | V1.21 audit | **V1.29** (FL-B partial) | S | V1.21 audit → V1.29 plan `kb-extract-queue-preset` | Wire with acp_prompt for kb-extract preset path. |
+| DF-35 | ACP prompt capability (partial real execution) | V1.21 audit | **V1.29** ✅ Partial shipped | M | V1.21 audit → V1.29 plan `kb-extract-queue-preset` → **Partial shipped** | Worker IPC for kb-extract preset path. Full de-stub deferred to FL-D. |
+| DF-36 | ACP session load capability (partial wiring) | V1.21 audit | **V1.29** ✅ Partial shipped | S | V1.21 audit → V1.29 plan `kb-extract-queue-preset` → **Partial shipped** | Wired with acp_prompt for kb-extract preset path. Full de-stub deferred to FL-D. |
 | DF-37 | InnerGraphNodeTask / AcpPromptTask stub mode fallback | V1.21 audit | Any future | S | `orchestration/tasks/mod.rs` — no worker handle → placeholder output. Intentional safe fallback, but real IPC needed. |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
@@ -374,15 +374,17 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | Plans | `2026-05-25-v1.28-context-assembly-convergence`, `agent-host-acp-correctness`, `agent-host-native-multiturn`, `local-ssot-refresh` |
 | Tracker | FL-C shipped; Batch 1 DF items closed; `local-cloud-crate-architecture` backfill deferred to V1.29 spec plan H0 |
 
-### V1.29 delivery snapshot (Active)
+### V1.29 delivery snapshot (Shipped)
 
 | Category | Position |
 |----------|----------|
 | Delivery SSOT | [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md) |
-| Machine state | `status.json` — 6 plans `Todo`; merge into `feature/v1.29-author-intelligence-and-hardening` |
+| Shipped at | 2026-05-26 (`status.json` `latest_shipped_iteration`) |
 | Scope | FL-A (session review, SOUL Experience preset, Stage0 delimiters); FL-B (kb extract queue + preset); Agent Host Batch 2; spec/tracker hygiene |
-| Locked decisions | PD-09–11; platform paused; PD-10 agent-driven FL-B |
-| Plans | `2026-05-26-v1.29-*` (six locked plans) |
+| Plans | `2026-05-26-v1.29-*` (six plans — all Done, archived to `plans-done.json`) |
+| Shipped DF items | DF-21, DF-22, DF-23, DF-27, DF-28 (Batch 2); DF-35, DF-36 (partial); FL-A, FL-B (product lines) |
+| Closed residuals | R11 (Drop kill), R12 (cancel), R13 (Stage0 markdown heuristic) |
+| New residuals (v1.30) | R14–R20 (7 findings: 2 medium, 5 low/nit) |
 | Explicit deferrals | FL-D full de-stub; DF-42; DF-44; platform unpause |
 
 ### V1.16+ horizon (program)
@@ -488,4 +490,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-26**. Status: Active. **V1.29 Active** (Author Intelligence + Agent Host Batch 2, 6 plans). **V1.28 Shipped** (2026-05-25). **V1.27 Shipped** (local authoring). Platform integration paused. See `status.json`.*
+*Created: 2026-04-21. Last updated: **2026-05-26**. Status: Active. **V1.29 Shipped** (2026-05-26). **V1.28 Shipped** (2026-05-25). **V1.27 Shipped** (local authoring). Platform integration paused. See `status.json`.*

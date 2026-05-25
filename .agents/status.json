@@ -9,9 +9,9 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": "feature/v1.29-author-intelligence-and-hardening",
+    "integration_branch": null,
     "integration_merge_target": "main",
-    "integration_branch_role": "V1.29 iteration integration — QC/QA Working branch",
+    "integration_branch_role": null,
     "latest_shipped_iteration": "v1.29",
     "latest_shipped_at": "2026-05-26T16:30:00Z",
     "latest_active_iteration": null,
