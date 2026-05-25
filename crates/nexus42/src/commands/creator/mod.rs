@@ -632,6 +632,29 @@ pub enum KbCommand {
         #[arg(long)]
         world_id: Option<String>,
     },
+
+    /// Queue a work-scope entry for KB extraction into a target world.
+    ///
+    /// Idempotent: if a non-failed job already exists for the same
+    /// work entry + world combination, returns the existing job.
+    #[command(name = "queue-extract")]
+    QueueExtract {
+        /// Work-scope entry ID to extract from (e.g. `kb_a1b2c3d4`)
+        work_entry_id: String,
+        /// Target world ID for the resulting `KeyBlock`
+        #[arg(long)]
+        world_id: String,
+    },
+
+    /// Show extract job status for the active creator.
+    ///
+    /// Without `--job-id`, lists all jobs for the active creator.
+    #[command(name = "extract-status")]
+    ExtractStatus {
+        /// Specific job ID to inspect
+        #[arg(long)]
+        job_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -795,6 +818,11 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
             scope,
             world_id,
         } => kb_remove(config, &entry_id, &scope, world_id.as_deref()).await,
+        KbCommand::QueueExtract {
+            work_entry_id,
+            world_id,
+        } => kb_queue_extract(config, &work_entry_id, &world_id).await,
+        KbCommand::ExtractStatus { job_id } => kb_extract_status(config, job_id.as_deref()).await,
     }
 }
 
@@ -1375,6 +1403,134 @@ async fn kb_remove(
 
     println!("✓ Local work entry removed: {entry_id}");
     Ok(())
+}
+
+// ── KB Extract Queue ─────────────────────────────────────────────────
+
+/// `kb queue-extract` — idempotent enqueue of a work entry for extraction.
+///
+/// Creates a row in `kb_extract_jobs` with status `queued`.
+/// The actual extraction is performed by the `kb.extract_work` capability
+/// (triggered via preset or daemon orchestration). No LLM calls here.
+async fn kb_queue_extract(
+    config: &CliConfig,
+    work_entry_id: &str,
+    world_id: &str,
+) -> Result<()> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(CliError::CreatorNotSelected)?
+        .to_string();
+    let slug = config.workspace_slug_for_creator(&creator_id).to_string();
+
+    // Validate entry_id format to prevent path traversal.
+    paths::validate_entry_id_safe(work_entry_id).map_err(CliError::Other)?;
+
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+
+    let job = nexus_local_db::enqueue_extract_job(
+        &pool,
+        &creator_id,
+        &slug,
+        work_entry_id,
+        world_id,
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
+
+    if job.status == "queued" {
+        // Check if this was a new enqueue vs idempotent return
+        println!("✓ Extract job queued: {}", job.job_id);
+    } else {
+        println!("ℹ Extract job already exists: {}", job.job_id);
+    }
+    println!("  Work entry:  {work_entry_id}");
+    println!("  Target world: {world_id}");
+    println!("  Status:       {}", job.status);
+    println!("  Created:      {}", job.created_at);
+    Ok(())
+}
+
+/// `kb extract-status` — show extract job(s) for the active creator.
+///
+/// With `--job-id`, shows a specific job. Without it, lists all jobs.
+async fn kb_extract_status(config: &CliConfig, job_id: Option<&str>) -> Result<()> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(CliError::CreatorNotSelected)?
+        .to_string();
+
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+
+    if let Some(jid) = job_id {
+        let job = nexus_local_db::get_extract_job(&pool, jid)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to get extract job: {e}")))?;
+
+        let Some(job) = job else {
+            return Err(CliError::Other(format!("Extract job '{jid}' not found.")));
+        };
+        print_job_detail(&job);
+    } else {
+        let jobs = nexus_local_db::list_extract_jobs(&pool, &creator_id)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to list extract jobs: {e}")))?;
+
+        if jobs.is_empty() {
+            println!("No extract jobs for creator {creator_id}.");
+            return Ok(());
+        }
+
+        println!("Extract jobs for creator {creator_id}:");
+        println!(
+            "{:<20} {:<15} {:<20} {:<20} STATUS",
+            "JOB_ID", "WORK_ENTRY", "WORLD", "CREATED"
+        );
+        for job in &jobs {
+            println!(
+                "{:<20} {:<15} {:<20} {:<20} {}",
+                job.job_id,
+                truncate_str(&job.work_entry_id, 15),
+                truncate_str(&job.world_id, 20),
+                job.created_at,
+                job.status,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Print a single job in detail.
+fn print_job_detail(job: &nexus_local_db::KbExtractJob) {
+    println!("Job:           {}", job.job_id);
+    println!("  Creator:     {}", job.creator_id);
+    println!("  Workspace:   {}", job.workspace_id);
+    println!("  Work entry:  {}", job.work_entry_id);
+    println!("  World:       {}", job.world_id);
+    println!("  Status:      {}", job.status);
+    println!("  Created:     {}", job.created_at);
+    if let Some(ref started) = job.started_at {
+        println!("  Started:     {started}");
+    }
+    if let Some(ref finished) = job.finished_at {
+        println!("  Finished:    {finished}");
+    }
+    if let Some(ref err) = job.error_text {
+        println!("  Error:       {err}");
+    }
+}
+
+/// Truncate a string for tabular display.
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len - 1])
+    }
 }
 
 // ── Demo seed ───────────────────────────────────────────────────────

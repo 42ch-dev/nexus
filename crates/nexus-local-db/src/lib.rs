@@ -11,6 +11,7 @@
 //! See `.agents/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
 pub mod identity;
+pub mod kb_extract_job;
 pub mod kb_store;
 pub mod knowledge_store;
 pub mod memory_fragment;
@@ -75,6 +76,14 @@ pub use knowledge_store::SqliteKnowledgeStore;
 pub use reference_source::{
     get_by_id as get_reference_by_id, list as list_references, register as register_reference,
     ReferenceSourceRow, RegisterParams, SourceMutability,
+};
+
+// Re-export kb_extract_job types
+pub use kb_extract_job::{
+    enqueue as enqueue_extract_job, get as get_extract_job, list_by_creator as list_extract_jobs,
+    mark_done as mark_extract_job_done, mark_failed as mark_extract_job_failed,
+    mark_running as mark_extract_job_running, next_queued as next_queued_extract_job,
+    KbExtractJob,
 };
 
 /// Runtime role for database initialization
