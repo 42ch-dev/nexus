@@ -2,7 +2,7 @@
 
 High-level map of the **nexus** open-source monorepo: wire contracts, Rust workspace crates, entity-scope ownership, and how crates connect at build time. Normative scope and naming rules live in [`.agents/knowledge/specs/entity-scope-model.md`](../.agents/knowledge/specs/entity-scope-model.md); long-term local/cloud crate rules live in [`.agents/knowledge/specs/local-cloud-crate-architecture.md`](../.agents/knowledge/specs/local-cloud-crate-architecture.md).
 
-This document separates **Cargo dependency wiring** (what compiles and links) from **product integration** (what CLI commands and daemon HTTP handlers actually call). A full knowledge↔crates drift audit lives in [`.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md`](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) (evidence date **2026-05-22**).
+This document separates **Cargo dependency wiring** (what compiles and links) from **product integration** (what CLI commands and daemon HTTP handlers actually call). A full knowledge↔crates drift audit lives in [`.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md`](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) (evidence date **2026-05-25**).
 
 ## Monorepo layout
 
@@ -39,7 +39,7 @@ Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written un
 
 | Line | Purpose | Primary crates | User entry |
 | --- | --- | --- | --- |
-| **Local** | Daemon supervisor, orchestration, agent-host, Creator workspace, Creator memory, World KB / narrative state, User knowledge, Moment context assembly | **Cargo:** `nexus-daemon-runtime` links orchestration, agent-host, creator, creator-memory, narrative, kb, knowledge, moment-context-assembly (default features), local-db. **Product:** memory + orchestration + agent-host + **work-scope KB file index** are wired on daemon HTTP; narrative/kb/knowledge/moment assembly are **library-linked** but mostly **not** exposed as domain HTTP yet (see § Product integration gaps) | `nexus42 daemon …` → `/v1/local/*` |
+| **Local** | Daemon supervisor, orchestration, agent-host, Creator workspace, Creator memory, World KB / narrative state, User knowledge, Moment context assembly | **Cargo:** `nexus-daemon-runtime` links orchestration, agent-host, creator, creator-memory, narrative, kb, knowledge, moment-context-assembly (default features), local-db. **Product:** memory + orchestration + agent-host + **work-scope KB file index** + **narrative read-only** (`GET /v1/local/narrative/*`) are wired on daemon HTTP; `assemble-moment` is the **single assembly SSOT** (no `assemble-local`); SQLite four-domain context assembly via `nexus-moment-context-assembly`. See § Product integration gaps. | `nexus42 daemon …` → `/v1/local/*` |
 | **Cloud** | Platform HTTP, registration, bundle sync (CLI-only), optional context Stage-1 | `nexus-cloud-sync` (`legacy-sync` on CLI) → `nexus-cloud-domain` for User/Pairing invariants | `nexus42 sync …`, `nexus42 platform …` |
 
 **Hard isolation (enforced in `Cargo.toml`):** `nexus-daemon-runtime` does **not** depend on `nexus-cloud-sync` or `nexus-cloud-domain`. Platform sync and creator registration must not be exposed on the daemon Local API.
@@ -100,15 +100,15 @@ Key contributor rules:
 
 ### Domain libraries (Cargo-linked; product integration partial)
 
-Introduced in the V1.21 split; **linked in `Cargo.toml` since V1.23 alignment** (verified 2026-05-22). Domain logic and tests live in-crate; most **daemon HTTP / CLI commands** still use legacy file/SQLite paths instead of these APIs.
+Introduced in the V1.21 split; **linked in `Cargo.toml` since V1.23 alignment** (verified 2026-05-25). Domain logic and tests live in-crate; most **daemon HTTP / CLI commands** still use legacy file/SQLite paths instead of these APIs.
 
-| Crate | Scope / role | Cargo reachability | Product integration (2026-05-22) |
+| Crate | Scope / role | Cargo reachability | Product integration (2026-05-25) |
 | --- | --- | --- | --- |
-| `nexus-kb` | **World KB** graph: KeyBlocks, SourceAnchors, `KbStore` | `nexus-narrative`, `nexus-moment-context-assembly`, `nexus-daemon-runtime` | Used by moment-assembly tests and narrative gateway; **not** used by `/v1/local/kb/*` (work file index) |
-| `nexus-narrative` | `World`, `Timeline`, `Event`: worlds, forks, timelines, manuscripts | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | `NarrativeGateway` + in-memory impl; **no** dedicated daemon narrative routes yet |
-| `nexus-knowledge` | **User knowledge** entries + reference-source types | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | `KnowledgeStore` in-memory; `GET /v1/local/references` still lists via **`nexus-local-db`**, not this crate |
+| `nexus-kb` | **World KB** graph: KeyBlocks, SourceAnchors, `KbStore` | `nexus-narrative`, `nexus-moment-context-assembly`, `nexus-daemon-runtime` | Used by moment-assembly and narrative read-only routes; `GET /v1/local/narrative/*` exposes World KB reads via `nexus-narrative` gateway. `/v1/local/kb/*` remains **work file index** (not `nexus-kb`) |
+| `nexus-narrative` | `World`, `Timeline`, `Event`: worlds, forks, timelines, manuscripts | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | `NarrativeGateway` powers `GET /v1/local/narrative/*` (read-only). **World fork is platform-only** (PD-01; see [`entity-scope-model.md`](../.agents/knowledge/specs/entity-scope-model.md)); no local fork CLI. |
+| `nexus-knowledge` | **User knowledge** entries + reference-source types | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | SQLite persistence shipped V1.27; `GET /v1/local/references` lists via **`nexus-local-db`** |
 
-CLI `nexus42 creator kb` and daemon `/v1/local/kb/entries` implement the **CLI local work KB index** (files under `~/.nexus42/.../kb/`) — **not** `nexus-kb`. `--scope world` is not implemented (`coming soon` in CLI). See [`entity-scope-model.md` §5](../.agents/knowledge/specs/entity-scope-model.md#5-naming-clarifications) and audit compass **KCA-003**.
+CLI `nexus42 creator kb` and daemon `/v1/local/kb/entries` implement the **CLI local work KB index** (files under `~/.nexus42/.../kb/`) — **not** `nexus-kb`. World KB scope (`--scope world`) routes to `nexus-narrative` + `nexus-kb` through the narrative read-only API. **World fork is platform-only** (PD-01; no local fork CLI — see [`entity-scope-model.md`](../.agents/knowledge/specs/entity-scope-model.md)). See [`entity-scope-model.md` §5](../.agents/knowledge/specs/entity-scope-model.md#5-naming-clarifications) and audit compass **KCA-003**.
 
 ### Executable surface
 
@@ -120,7 +120,7 @@ CLI `nexus42 creator kb` and daemon `/v1/local/kb/entries` implement the **CLI l
 
 `nexus42` enables `nexus-moment-context-assembly/cloud-stage` and `nexus-cloud-sync/legacy-sync` for CLI cloud workflows. Daemon builds use `nexus-daemon-runtime` without those cloud features on the runtime crate itself.
 
-## Dependency graph — Cargo wiring (verified 2026-05-22)
+## Dependency graph — Cargo wiring (verified 2026-05-25)
 
 Direct workspace dependencies from `Cargo.toml` / `cargo tree`. This is the **build-time** graph.
 
@@ -164,16 +164,16 @@ nexus-cloud-sync ──► nexus-cloud-domain
 
 Normative spec §4 in [`local-cloud-crate-architecture.md`](../.agents/knowledge/specs/local-cloud-crate-architecture.md) is refreshed to match this graph; remaining discrepancies are tracked as product-integration gaps in [v1.24 audit compass](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md).
 
-## Product integration gaps (runtime behavior, 2026-05-22)
+## Product integration gaps (runtime behavior, 2026-05-25)
 
 Cargo edges alone do not mean daemon HTTP or CLI commands call a crate. Known gaps:
 
 | Area | Wired in Cargo? | Product path today | Gap ID |
 | --- | --- | --- | --- |
-| Moment `assemble_moment` | Yes (daemon + CLI libs) | CLI `platform context` uses crate in-process; daemon has **no** `POST /v1/local/context/assemble` | KCA-002 |
-| World KB (`nexus-kb`) | Yes | `/v1/local/kb/*` = **work file index**, not `KbStore` | KCA-003 |
-| Narrative gateway | Yes | No `/v1/local/worlds/*` or narrative read API | — |
-| User knowledge store | Yes | In-memory only; references list uses **local-db** | KCA-004 |
+| Moment `assemble_moment` | Yes (daemon + CLI libs) | **Shipped:** `nexus42 platform context assemble-moment` calls `assemble_moment` in-process (four-domain SQLite assembly). `assemble-local` is **removed** in pre-release. Daemon has no `POST /v1/local/context/assemble` (KCA-002 B2 retired). | KCA-002 |
+| World KB (`nexus-kb`) | Yes | `/v1/local/kb/*` = **work file index**, not `KbStore`. World KB reads exposed via `GET /v1/local/narrative/*` | KCA-003 |
+| Narrative gateway | Yes | `GET /v1/local/narrative/*` (read-only) — shipped V1.27. No write/mutation routes (fork is platform-only per PD-01). | — |
+| User knowledge store | Yes | SQLite persistence shipped V1.27; `GET /v1/local/references` still lists via **local-db** | KCA-004 |
 | Orchestration engine in daemon lifecycle | Yes (orchestration crate) | Engine/worker stubs (DF-38–DF-40) | tracker |
 
 See [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) for remediation themes.
@@ -205,7 +205,7 @@ No second handwritten DTO set in platform — types must come from this repo’s
 
 **Authoritative route list:** `crates/nexus-daemon-runtime/src/api/mod.rs` (registered routes). [`.agents/knowledge/specs/local-runtime-boundary.md`](../.agents/knowledge/specs/local-runtime-boundary.md) §3.2.1 is refreshed to mark unregistered context/research/agent-session rows as retired or not implemented (audit **KCA-002**, **KCA-006**).
 
-### Registered route families (2026-05-22)
+### Registered route families (2026-05-25)
 
 | Family | Prefix / examples |
 | --- | --- |
@@ -214,13 +214,14 @@ No second handwritten DTO set in platform — types must come from this repo’s
 | Creator | `GET /v1/local/creators`, `GET|PUT …/creators/active`, `GET …/creators/{id}`, `POST …:logout` |
 | References | `GET /v1/local/references` (SQLite via local-db) |
 | Work KB index | `GET|POST /v1/local/kb/entries`, `GET|DELETE …/kb/entries/{id}` (**file index**, not `nexus-kb`) |
+| Narrative (read-only) | `GET /v1/local/narrative/*` — World KB reads via `NarrativeGateway` |
 | Memory review | `GET|POST|DELETE /v1/local/memory/pending-review…` |
 | Presets | `GET|POST /v1/local/presets`, `POST …/presets:validate`, `POST …/presets/{id}:reload` |
 | Orchestration | `GET|POST /v1/local/orchestration/sessions`, schedules, capabilities, presets |
 | Agent host | `/v1/local/agent-host/*` (sessions, operations, events SSE) |
 | Monitoring | `GET /v1/local/monitoring/pool` |
 
-**Not registered today (but referenced elsewhere):** `POST /v1/local/context/assemble`, `GET /v1/local/research/sources`, `POST /v1/local/research/scan`, `POST /v1/local/agent-sessions/restart`, legacy `/v1/local/sync/*` (correctly removed per V1.21).
+**Not registered today (but referenced elsewhere):** `POST /v1/local/context/assemble` (retired; `assemble-moment` replaces it), `GET /v1/local/research/sources`, `POST /v1/local/research/scan`, `POST /v1/local/agent-sessions/restart`, legacy `/v1/local/sync/*` (correctly removed per V1.21).
 
 **Classes allowed on daemon:** runtime health, workspace, local Creator listing, orchestration, agent-host, preset management, work-scope KB file index, memory pending-review, references list.
 
