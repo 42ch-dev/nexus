@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-26T16:30:00Z",
+  "updated_at": "2026-05-26T17:00:00Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -14,11 +14,11 @@
     "integration_branch_role": null,
     "latest_shipped_iteration": "v1.29",
     "latest_shipped_at": "2026-05-26T16:30:00Z",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.30",
+    "latest_active_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T16:30:00Z",
+      "updated_at": "2026-05-26T17:00:00Z",
       "total_open": 13,
       "by_severity": {
         "critical": 0,
@@ -32,7 +32,8 @@
         "v1.30": 7
       },
       "by_plan": {
-        "v1.29-iteration": 7
+        "v1.30-iteration": 7,
+        "post-v1.29-deferred": 6
       },
       "cross_cutting": [
         {
@@ -44,7 +45,7 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.29 shipped. 6 plans Done (archived). 7 V1.29 residuals (R14–R20) open for v1.30. R11/R12/R13 closed."
+      "note": "V1.30 Active. 7 V1.30 residuals (R14–R20) in scope. 6 post-v1.29 residuals (R5–R9) optional. V1.29 shipped."
     }
   },
   "residual_findings": {
