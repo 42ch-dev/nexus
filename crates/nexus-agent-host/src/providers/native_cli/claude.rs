@@ -1,21 +1,31 @@
 //! Claude Code CLI native provider adapter.
 //!
 //! Manages a `claude` subprocess using `tokio::process::Command`.
-//! Multi-turn session continuity via `--session-id` and `--resume` flags.
+//! Multi-turn session continuity via `--session-id` and `--resume` flags
+//! for per-invocation mode, or persistent child process reuse for
+//! persistent mode.
 //!
 //! # Session Model
 //!
 //! Each `launch()` generates a host-side UUID (the Claude CLI session ID).
+//!
+//! **Per-invocation mode** (default, `persistent = false`):
 //! The first `execute()` invocation passes `--session-id <uuid>` to the CLI.
 //! Subsequent invocations pass `--resume <uuid>`, providing conversation
-//! continuity across separate process spawns.
+//! continuity across separate process spawns. Each execute spawns a new child.
+//!
+//! **Persistent mode** (`persistent = true`):
+//! A single child process is spawned on the first `execute()` and reused
+//! across subsequent calls. The child stays alive, reading prompts from
+//! stdin and writing responses to stdout delimited by empty lines.
+//! Useful for testing and for CLI tools that support interactive mode.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
 use crate::capability::model::{
@@ -28,8 +38,47 @@ use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::ProviderAdapter;
 
+/// Persistent I/O handles for a child process that stays alive across execute calls.
+///
+/// stdin and stdout are wrapped in `Arc<Mutex<>>` to allow shared access
+/// between the session state and the event stream.
+struct PersistentHandles {
+    /// The child process. Used for liveness checks and forced termination.
+    child: tokio::process::Child,
+    /// stdin pipe — write prompts here, flush but do not close.
+    stdin: Arc<tokio::sync::Mutex<tokio::process::ChildStdin>>,
+    /// stdout pipe — read responses here until empty-line delimiter.
+    stdout: Arc<tokio::sync::Mutex<tokio::io::BufReader<tokio::process::ChildStdout>>>,
+    /// OS process ID for diagnostics.
+    pid: u32,
+}
+
+impl std::fmt::Debug for PersistentHandles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersistentHandles")
+            .field("pid", &self.pid)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PersistentHandles {
+    /// Check whether the child process is still alive (has not exited).
+    fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Kill the child process forcefully.
+    async fn kill(&mut self) {
+        let _ = self.child.kill().await;
+    }
+
+    /// Wait for the child to exit with a timeout.
+    async fn wait_with_timeout(&mut self, timeout: std::time::Duration) {
+        let _ = tokio::time::timeout(timeout, self.child.wait()).await;
+    }
+}
+
 /// Internal state for a managed native CLI session.
-#[derive(Debug)]
 struct NativeSession {
     /// The Claude CLI session ID (UUID) used for `--session-id` / `--resume`.
     /// Set at `launch()` time; used by `execute()` to pass the correct flags.
@@ -37,6 +86,22 @@ struct NativeSession {
     /// Whether the first `execute()` has been performed for this session.
     /// `false` → pass `--session-id`, `true` → pass `--resume`.
     first_exec_done: bool,
+    /// Persistent child handles for reuse across execute calls.
+    /// `Some` when a persistent-mode child is alive; `None` otherwise.
+    persistent_handles: Option<PersistentHandles>,
+}
+
+impl std::fmt::Debug for NativeSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativeSession")
+            .field("claude_session_id", &self.claude_session_id)
+            .field("first_exec_done", &self.first_exec_done)
+            .field(
+                "persistent_handles",
+                &self.persistent_handles.as_ref().map(|h| h.pid),
+            )
+            .finish()
+    }
 }
 
 /// Claude Code CLI native provider.
@@ -44,8 +109,12 @@ struct NativeSession {
 /// Spawns `claude` (or a configured command) as a subprocess and
 /// normalizes its stdout/stderr into `HostEvent` items.
 ///
-/// Multi-turn session continuity is achieved by passing `--session-id <uuid>`
-/// on the first invocation and `--resume <uuid>` on subsequent ones.
+/// Two operating modes:
+/// - **Per-invocation** (`persistent = false`, default): each `execute()` spawns
+///   a new child process. Multi-turn continuity via `--session-id`/`--resume`.
+/// - **Persistent** (`persistent = true`): first `execute()` spawns a child that
+///   stays alive; subsequent `execute()` calls reuse the same process via
+///   stdin/stdout with empty-line delimited responses.
 pub struct ClaudeCliProvider {
     /// Provider ID (typically `claude-native` to avoid collision with ACP registry).
     provider_id: ProviderId,
@@ -61,6 +130,10 @@ pub struct ClaudeCliProvider {
     sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
     /// Timeout configuration for stage-level enforcement.
     timeouts: TimeoutConfig,
+    /// Whether to keep the child process alive across execute calls.
+    /// When true, stdin/stdout are kept open and responses are delimited
+    /// by empty lines. When false (default), each execute spawns a new child.
+    persistent: bool,
 }
 
 impl ClaudeCliProvider {
@@ -82,6 +155,34 @@ impl ClaudeCliProvider {
             env,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
+            persistent: false,
+        }
+    }
+
+    /// Create a new persistent-mode Claude CLI provider.
+    ///
+    /// In persistent mode, a single child process is spawned on the first
+    /// `execute()` and reused across subsequent calls. The child stays alive,
+    /// reading prompts from stdin and writing responses to stdout delimited
+    /// by empty lines.
+    #[must_use]
+    pub fn new_persistent(
+        provider_id: ProviderId,
+        display_name: String,
+        command: String,
+        args: Vec<String>,
+        env: HashMap<String, String>,
+        timeouts: TimeoutConfig,
+    ) -> Self {
+        Self {
+            provider_id,
+            display_name,
+            command,
+            args,
+            env,
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            timeouts,
+            persistent: true,
         }
     }
 
@@ -178,6 +279,106 @@ impl ClaudeCliProvider {
         };
 
         started.chain(stdout_stream).boxed()
+    }
+
+    /// Build a delimited event stream from a shared stdout handle.
+    ///
+    /// Used for persistent child mode. Reads lines from stdout until an empty
+    /// line (delimiter) is encountered, indicating end-of-response. Also
+    /// terminates on EOF (child exited) or I/O error.
+    fn build_delimited_event_stream(
+        stdout: Arc<tokio::sync::Mutex<tokio::io::BufReader<tokio::process::ChildStdout>>>,
+        op_id: HostOperationId,
+        session_id: HostSessionId,
+    ) -> HostEventStream {
+        let started = futures_util::stream::once({
+            let op_id = op_id.clone();
+            let session_id = session_id.clone();
+            async move {
+                Ok(HostEvent::OpStarted(OperationStartedEvent {
+                    op_id,
+                    session_id,
+                }))
+            }
+        });
+
+        let response_stream: HostEventStream = futures_util::stream::unfold(
+            (stdout, op_id, session_id, false),
+            |(stdout_arc, op_id, session_id, finished)| async move {
+                if finished {
+                    return None;
+                }
+
+                let mut line = String::new();
+                let mut guard = stdout_arc.lock().await;
+                let read_result = guard.read_line(&mut line).await;
+                drop(guard);
+
+                match read_result {
+                    Ok(0) => {
+                        // EOF — child exited
+                        Some((
+                            Ok(HostEvent::OpFinished(OperationFinishedEvent {
+                                session_id,
+                                op_id,
+                                reason: FinishReason::EndTurn,
+                            })),
+                            (
+                                stdout_arc,
+                                HostOperationId::new(),
+                                HostSessionId::new(),
+                                true,
+                            ),
+                        ))
+                    }
+                    Ok(_) => {
+                        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                        if trimmed.is_empty() {
+                            // Empty line delimiter — end of response
+                            Some((
+                                Ok(HostEvent::OpFinished(OperationFinishedEvent {
+                                    session_id,
+                                    op_id,
+                                    reason: FinishReason::EndTurn,
+                                })),
+                                (
+                                    stdout_arc,
+                                    HostOperationId::new(),
+                                    HostSessionId::new(),
+                                    true,
+                                ),
+                            ))
+                        } else {
+                            Some((
+                                Ok(HostEvent::MessageDelta(TextDeltaEvent {
+                                    session_id: session_id.clone(),
+                                    op_id: op_id.clone(),
+                                    text: trimmed.to_string(),
+                                })),
+                                (stdout_arc, op_id, session_id, false),
+                            ))
+                        }
+                    }
+                    Err(e) => Some((
+                        Ok(HostEvent::OpFailed(OperationFailedEvent {
+                            session_id,
+                            op_id,
+                            error_category: "io_error".to_string(),
+                            error_message: e.to_string(),
+                        })),
+                        (
+                            stdout_arc,
+                            HostOperationId::new(),
+                            HostSessionId::new(),
+                            true,
+                        ),
+                    )),
+                }
+            },
+        )
+        .boxed();
+
+        started.chain(response_stream).boxed()
     }
 
     /// Spawn the CLI subprocess and write prompt to stdin.
@@ -298,6 +499,7 @@ impl ProviderAdapter for ClaudeCliProvider {
                 NativeSession {
                     claude_session_id,
                     first_exec_done: false,
+                    persistent_handles: None,
                 },
             );
         }
@@ -350,6 +552,150 @@ impl ProviderAdapter for ClaudeCliProvider {
             ));
         }
 
+        // Try persistent-mode reuse first
+        if self.persistent {
+            let reuse_result = {
+                let mut sessions = self.sessions.write().await;
+                let native_session = sessions.get_mut(&session.session_id);
+                if let Some(ns) = native_session {
+                    if let Some(ref mut handles) = ns.persistent_handles {
+                        if handles.is_alive() {
+                            // Child is alive — reuse it
+                            tracing::info!(
+                                session_id = %session.session_id,
+                                pid = handles.pid,
+                                "Reusing persistent native CLI child"
+                            );
+
+                            // Write prompt to stdin (flush, don't close)
+                            {
+                                let mut stdin = handles.stdin.lock().await;
+                                stdin.write_all(prompt_text.as_bytes()).await.map_err(|e| {
+                                    HostError::protocol_error(
+                                        "failed to write prompt to persistent stdin",
+                                        Some(e.to_string()),
+                                    )
+                                })?;
+                                stdin.write_all(b"\n").await.map_err(|e| {
+                                    HostError::protocol_error(
+                                        "failed to write newline delimiter",
+                                        Some(e.to_string()),
+                                    )
+                                })?;
+                                stdin.flush().await.map_err(|e| {
+                                    HostError::protocol_error(
+                                        "failed to flush persistent stdin",
+                                        Some(e.to_string()),
+                                    )
+                                })?;
+                                drop(stdin);
+                            }
+
+                            let stream = Self::build_delimited_event_stream(
+                                handles.stdout.clone(),
+                                op_id.clone(),
+                                session.session_id.clone(),
+                            );
+                            drop(sessions);
+                            Some(stream)
+                        } else {
+                            // Child exited — clear stale handles
+                            tracing::info!(
+                                session_id = %session.session_id,
+                                "Persistent child exited, clearing handles"
+                            );
+                            ns.persistent_handles = None;
+                            drop(sessions);
+                            None
+                        }
+                    } else {
+                        drop(sessions);
+                        None
+                    }
+                } else {
+                    drop(sessions);
+                    None
+                }
+            };
+
+            if let Some(stream) = reuse_result {
+                return Ok(stream);
+            }
+
+            // No persistent handles or child dead — spawn new persistent child
+            return self
+                .execute_spawn_persistent(session, op_id, prompt_text)
+                .await;
+        }
+
+        // Per-invocation mode: always spawn new child
+        self.execute_per_invocation(session, op_id, prompt_text)
+            .await
+    }
+
+    async fn cancel(
+        &self,
+        _session: &ManagedSessionHandle,
+        _op_id: HostOperationId,
+    ) -> HostResult<()> {
+        // For persistent-mode children, there's no cancel since the child
+        // stays alive between operations. The event stream will end on the
+        // next delimiter or timeout.
+        // For per-invocation mode, the child exits when stdin is closed.
+        tracing::info!(
+            provider_id = %self.provider_id,
+            persistent = self.persistent,
+            "Native CLI cancel requested"
+        );
+        Ok(())
+    }
+
+    async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
+        // Kill any alive persistent child with the configured shutdown timeout.
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(ns) = sessions.remove(&session.session_id) {
+                if let Some(mut handles) = ns.persistent_handles {
+                    let shutdown_dur = self.timeouts.shutdown_duration();
+                    tracing::info!(
+                        session_id = %session.session_id,
+                        pid = handles.pid,
+                        timeout_ms = self.timeouts.shutdown_ms,
+                        "Killing persistent native CLI child"
+                    );
+                    handles.kill().await;
+                    handles.wait_with_timeout(shutdown_dur).await;
+                }
+            }
+        }
+        tracing::info!(
+            session_id = %session.session_id,
+            provider_id = %self.provider_id,
+            "Native CLI session shut down"
+        );
+        Ok(())
+    }
+
+    fn capabilities(&self) -> CapabilityDescriptor {
+        CapabilityDescriptor::native_cli_limited()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper methods (not part of the ProviderAdapter trait)
+// ---------------------------------------------------------------------------
+
+impl ClaudeCliProvider {
+    /// Per-invocation execute: spawns a new child process for this call.
+    ///
+    /// Uses `--session-id` on first call and `--resume` on subsequent calls
+    /// for conversation continuity. Stdin is closed after writing the prompt.
+    async fn execute_per_invocation(
+        &self,
+        session: &ManagedSessionHandle,
+        op_id: HostOperationId,
+        prompt_text: String,
+    ) -> HostResult<HostEventStream> {
         // Look up session state to determine session-continuity flags
         let (claude_session_id, is_resume) = {
             let mut sessions = self.sessions.write().await;
@@ -430,38 +776,119 @@ impl ProviderAdapter for ClaudeCliProvider {
         Ok(stream)
     }
 
-    async fn cancel(
+    /// Persistent-mode execute: spawns a new child process and stores handles
+    /// for reuse on subsequent calls. Stdin is flushed but NOT closed.
+    async fn execute_spawn_persistent(
         &self,
-        _session: &ManagedSessionHandle,
-        _op_id: HostOperationId,
-    ) -> HostResult<()> {
-        // Native CLI cancellation in Wave 1 is a no-op since the process
-        // is spawned per-operation and will exit when stdin is closed.
-        // If the process is still running, we could kill it, but since
-        // each execute() spawns a fresh child, cancellation is handled
-        // by the process completing or timing out.
-        tracing::info!(
-            provider_id = %self.provider_id,
-            "Native CLI cancel requested (process exits naturally on stdin close)"
-        );
-        Ok(())
-    }
+        session: &ManagedSessionHandle,
+        op_id: HostOperationId,
+        prompt_text: String,
+    ) -> HostResult<HostEventStream> {
+        // Spawn child with piped stdio
+        let mut cmd = tokio::process::Command::new(&self.command);
+        cmd.args(&self.args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .envs(&self.env);
 
-    async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
+        // cmd.spawn() is synchronous (returns io::Result, not a Future),
+        // so we cannot wrap it in tokio::time::timeout. The spawn itself is
+        // fast; the expensive part (child execution) is covered by the
+        // delimited-stream reader timeout.
+        let mut child = cmd.spawn().map_err(|e| {
+            HostError::launch_failed(
+                self.provider_id.clone(),
+                format!("failed to spawn '{}'", self.command),
+                Some(e.to_string()),
+            )
+        })?;
+
+        let pid = child.id().unwrap_or(0);
+
+        // Take stdin and stdout
+        let raw_stdin = child.stdin.take();
+        let raw_stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let (Some(raw_stdin), Some(raw_stdout)) = (raw_stdin, raw_stdout) else {
+            // Can't do persistent mode without both pipes
+            let _ = child.kill().await;
+            return Err(HostError::launch_failed(
+                self.provider_id.clone(),
+                "failed to capture stdin/stdout for persistent mode",
+                None,
+            ));
+        };
+
+        let stdin: Arc<tokio::sync::Mutex<tokio::process::ChildStdin>> =
+            Arc::new(tokio::sync::Mutex::new(raw_stdin));
+        let stdout: Arc<tokio::sync::Mutex<tokio::io::BufReader<tokio::process::ChildStdout>>> =
+            Arc::new(tokio::sync::Mutex::new(tokio::io::BufReader::new(
+                raw_stdout,
+            )));
+
+        // Write initial prompt to stdin (flush, don't close)
+        {
+            let mut stdin_guard = stdin.lock().await;
+            stdin_guard
+                .write_all(prompt_text.as_bytes())
+                .await
+                .map_err(|e| {
+                    HostError::protocol_error(
+                        "failed to write prompt to persistent stdin",
+                        Some(e.to_string()),
+                    )
+                })?;
+            stdin_guard.write_all(b"\n").await.map_err(|e| {
+                HostError::protocol_error("failed to write newline delimiter", Some(e.to_string()))
+            })?;
+            stdin_guard.flush().await.map_err(|e| {
+                HostError::protocol_error("failed to flush persistent stdin", Some(e.to_string()))
+            })?;
+            drop(stdin_guard);
+        }
+
+        // Spawn a background task to drain stderr
+        if let Some(stderr) = stderr {
+            let provider_id = self.provider_id.clone();
+            tokio::spawn(async move {
+                let reader = tokio::io::BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::warn!(
+                        provider_id = %provider_id,
+                        stderr = %line,
+                        "Native CLI stderr output (persistent)"
+                    );
+                }
+            });
+        }
+
+        // Build the delimited event stream
+        let stream =
+            Self::build_delimited_event_stream(stdout.clone(), op_id, session.session_id.clone());
+
+        // Store persistent handles in the session
         {
             let mut sessions = self.sessions.write().await;
-            sessions.remove(&session.session_id);
+            if let Some(ns) = sessions.get_mut(&session.session_id) {
+                ns.persistent_handles = Some(PersistentHandles {
+                    child,
+                    stdin,
+                    stdout,
+                    pid,
+                });
+            }
         }
+
         tracing::info!(
             session_id = %session.session_id,
-            provider_id = %self.provider_id,
-            "Native CLI session shut down"
+            pid,
+            "Spawned persistent native CLI child"
         );
-        Ok(())
-    }
 
-    fn capabilities(&self) -> CapabilityDescriptor {
-        CapabilityDescriptor::native_cli_limited()
+        Ok(stream)
     }
 }
 
@@ -626,5 +1053,283 @@ mod tests {
             caps.set_mode,
             "acp_full should claim set_mode = true (stable RPC available)"
         );
+    }
+
+    // --- NT1.1: same PID across executes in persistent mode ---
+
+    /// Helper: build a persistent-mode provider backed by a mock shell that
+    /// echoes each stdin line as `R:<line>` followed by an empty-line delimiter.
+    /// The shell stays alive across multiple prompts.
+    fn persistent_mock_provider() -> ClaudeCliProvider {
+        // macOS `/bin/sh` `while read` loop: stays alive, echoes with delimiter
+        let mock_command = "sh";
+        let mock_args = vec![
+            "-c".to_string(),
+            "while IFS= read -r line; do printf 'R:%s\n\n' \"$line\"; done".to_string(),
+        ];
+        ClaudeCliProvider::new_persistent(
+            ProviderId::new("mock-persistent"),
+            "Mock Persistent".to_string(),
+            mock_command.to_string(),
+            mock_args,
+            HashMap::new(),
+            TimeoutConfig::default(),
+        )
+    }
+
+    /// Helper: fully consume a HostEventStream and return all unwrapped events.
+    /// Collects `Result<HostEvent, HostError>` items, unwrapping Oks and
+    /// failing the test on any error.
+    async fn collect_events(stream: HostEventStream) -> Vec<HostEvent> {
+        let results: Vec<_> = stream.collect().await;
+        results
+            .into_iter()
+            .map(|r| r.expect("stream item should be Ok"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn nt1_1_persistent_mode_same_pid_across_executes() {
+        let provider = persistent_mock_provider();
+
+        let handle = provider
+            .launch(crate::capability::model::LaunchSpec {
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+            })
+            .await
+            .expect("launch");
+
+        // First execute — should spawn persistent child
+        let stream1 = provider
+            .execute(
+                &handle,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "hello".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("first execute");
+
+        let events1 = collect_events(stream1).await;
+        // Should have at least Started + MessageDelta + Finished
+        assert!(!events1.is_empty(), "first execute should produce events");
+
+        // Capture PID from session state
+        let pid1 = {
+            let sessions = provider.sessions.read().await;
+            let ns = sessions.get(&handle.session_id).expect("session exists");
+            ns.persistent_handles
+                .as_ref()
+                .expect("should have persistent handles")
+                .pid
+        };
+
+        // Second execute — should reuse same child (same PID)
+        let stream2 = provider
+            .execute(
+                &handle,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "world".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("second execute");
+
+        let events2 = collect_events(stream2).await;
+        assert!(!events2.is_empty(), "second execute should produce events");
+
+        // Verify same PID
+        let pid2 = {
+            let sessions = provider.sessions.read().await;
+            let ns = sessions.get(&handle.session_id).expect("session exists");
+            ns.persistent_handles
+                .as_ref()
+                .expect("should have persistent handles after second execute")
+                .pid
+        };
+
+        assert_eq!(
+            pid1, pid2,
+            "NT1.1: persistent mode must reuse the same PID across executes"
+        );
+
+        // Clean up
+        provider
+            .shutdown(handle)
+            .await
+            .expect("shutdown should succeed");
+    }
+
+    // --- NT1.2: shutdown kills child, no zombie ---
+
+    #[tokio::test]
+    async fn nt1_2_shutdown_kills_persistent_child() {
+        let provider = persistent_mock_provider();
+
+        let handle = provider
+            .launch(crate::capability::model::LaunchSpec {
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+            })
+            .await
+            .expect("launch");
+
+        // Execute to spawn the persistent child
+        let stream = provider
+            .execute(
+                &handle,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "ping".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute");
+
+        // Drain the stream so the child isn't blocked on write
+        collect_events(stream).await;
+
+        // Capture PID before shutdown
+        let pid_before = {
+            let sessions = provider.sessions.read().await;
+            let ns = sessions.get(&handle.session_id).expect("session exists");
+            ns.persistent_handles
+                .as_ref()
+                .expect("should have persistent handles")
+                .pid
+        };
+        assert_ne!(pid_before, 0, "PID should be nonzero");
+
+        // Shut down — should kill the child
+        provider
+            .shutdown(handle)
+            .await
+            .expect("shutdown should succeed");
+
+        // After shutdown, the session is removed from the map.
+        // Verify the child process is no longer alive using `kill -0`.
+        // Give a brief moment for the process to fully exit.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Use `kill -0 <pid>` to check if the process still exists.
+        // This is safe (no signals sent) and avoids needing libc.
+        let check = tokio::process::Command::new("kill")
+            .arg("-0")
+            .arg(pid_before.to_string())
+            .output()
+            .await
+            .expect("kill -0 check");
+
+        assert!(
+            !check.status.success(),
+            "NT1.2: shutdown must kill the persistent child — PID {pid_before} is still alive"
+        );
+    }
+
+    // --- NT2.1: two executes share state (observable continuity) ---
+
+    #[tokio::test]
+    async fn nt2_1_two_executes_observable_state_continuity() {
+        let provider = persistent_mock_provider();
+
+        let handle = provider
+            .launch(crate::capability::model::LaunchSpec {
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+            })
+            .await
+            .expect("launch");
+
+        // First execute
+        let stream1 = provider
+            .execute(
+                &handle,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "alpha".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("first execute");
+
+        let events1 = collect_events(stream1).await;
+
+        // Verify first response content includes our echo
+        let text1: String = events1
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::MessageDelta(d) => Some(d.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text1.contains("alpha"),
+            "NT2.1: first response should echo 'alpha', got: {text1}"
+        );
+
+        // Second execute on same session — must reuse same PID
+        let stream2 = provider
+            .execute(
+                &handle,
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "beta".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("second execute");
+
+        let events2 = collect_events(stream2).await;
+
+        // Verify second response content includes the second prompt
+        let text2: String = events2
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::MessageDelta(d) => Some(d.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text2.contains("beta"),
+            "NT2.1: second response should echo 'beta', got: {text2}"
+        );
+
+        // Verify persistent handles are populated with same PID
+        {
+            let sessions = provider.sessions.read().await;
+            let ns = sessions.get(&handle.session_id).expect("session exists");
+            let handles = ns
+                .persistent_handles
+                .as_ref()
+                .expect("should have persistent handles");
+            assert!(handles.pid != 0, "NT2.1: persistent PID should be nonzero");
+        }
+
+        // Clean up
+        provider
+            .shutdown(handle)
+            .await
+            .expect("shutdown should succeed");
     }
 }

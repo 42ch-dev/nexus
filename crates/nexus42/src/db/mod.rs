@@ -25,6 +25,15 @@ impl Schema {
     ///
     /// Returns a `LocalDbError` if pool creation, migrations, or seeding fails.
     pub async fn init(db_path: &Path) -> Result<SqlitePool, nexus_local_db::LocalDbError> {
+        // Ensure parent directory exists before opening SQLite connection.
+        if let Some(parent) = db_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                nexus_local_db::LocalDbError::Io {
+                    path: parent.display().to_string(),
+                    source: e,
+                }
+            })?;
+        }
         let pool = local_db_open_pool(db_path).await?;
         run_migrations(&pool).await?;
         nexus_local_db::seed_versions(&pool).await?;

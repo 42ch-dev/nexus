@@ -264,16 +264,19 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
 - 同一活跃 Creator 下仅一个活跃 `workspace_slug`（默认 `default`）。
 - 支持多 world 并发，但每个 job/sync 请求必须显式携带 `world_id`。
 
-### 6.2D `nexus42 creator soul|memory|kb`（知识资产子命令）
+### 6.2D `nexus42 creator soul|memory|kb|world|knowledge`（知识资产子命令）
 
 - `nexus42 creator soul ...`：维护 `SOUL.md`（`Personality` / `Experience`）
 - `nexus42 creator memory ...`：长期记忆与回顾沉淀管理
-- `nexus42 creator kb ...`：本地工作资料索引（默认 `--scope work`；`--scope work` 表示 **CLI local work KB index**，即 `~/.nexus42/.../kb/` 下的文件/索引）。当前仅实现 `--scope work`，**不**涉及 `nexus-kb`（World KB graph）或 `nexus-knowledge`（User knowledge index）。未来 `--scope world` 将路由至 World-scoped narrative KB（`nexus-kb` + `nexus-narrative`）。
+- `nexus42 creator kb ...`：知识资产索引（默认 `--scope work`；`--scope world` 路由至 World-scoped narrative KB）
+- `nexus42 creator world ...`：World 浏览与 narrative 状态查询（read-only; platform fork 不在本地范围 — PD-01）
+- `nexus42 creator knowledge ...`：User knowledge / reference 管理入口（`nexus-knowledge`）
+- `nexus42 creator demo-seed ...`：演示数据填充（world + KB seed）
 
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
 - **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
-- **`--scope world`（未来目标；V1.24 中为 deferred，CLI 打印 "coming soon" 消息）**：必须要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径创建 / 查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。Full KB route redesign is deferred beyond V1.24。
+- **`--scope world`（V1.27+ shipped）**：要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
 - **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。
 
 命名与行为建议：
@@ -300,10 +303,11 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 | --- | --- | --- | --- | --- |
 | Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KeyBlocks or User knowledge rows. |
 | Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-kb` | Route to World-scoped narrative KB graph. Must preserve KeyBlock / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
-| Manage User/global reference knowledge | Recommended future `nexus42 platform knowledge ...` (name may be finalized by implementation plan C4) | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
-| Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-local` or `assemble-moment`. It must not call the retired daemon context-assemble Local API. |
-| Assemble shipped CLI context for an agent session | `nexus42 platform context assemble-local` | active `creator_id`; optional prompt/runtime hints | `nexus-moment-context-assembly` `Stage0Assembly` / `TwoStageAssembly` over Creator SOUL, Creator long-term memory, and optional local fragment keywords | **Shipped.** Stage-0/TwoStage path runs CLI in-process, does **not** call the daemon Local API, and does **not** read full four-domain Moment inputs from `nexus-narrative`, `nexus-kb`, or `nexus-knowledge`. |
-| Assemble local four-domain Moment snapshot | `nexus42 platform context assemble-moment` | optional `--world-id`, `--user-id`, `--branch-id`, `--event-id` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative, World KB, and User knowledge slices | **Shipped (local, V1.26).** Visible CLI command. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores, while User knowledge remains an in-memory slice until a persistent `UserKnowledgeStore` exists. No platform cloud assembly and no daemon context-assemble route. |
+| Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
+| Browse World narrative state | `nexus42 creator world ...` (read-only) | active `creator_id`, workspace_slug, explicit/resolved `world_id` | `nexus-narrative` | Query World state, timelines, manuscripts. Read-only — no local fork or write mutations (PD-01: fork is platform-only). |
+| Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
+| Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. It must not call the retired daemon context-assemble Local API. |
+| **Assemble local four-domain Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--user-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative, World KB, and User knowledge slices | **Shipped (local, V1.26+).** Single assembly SSOT — replaces the retired `assemble-local` path. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores, while User knowledge reads from SQLite (V1.27+). No platform cloud assembly and no daemon context-assemble route. |
 
 Implementation task C4 should therefore treat `creator kb` as a routing/name-alignment task, not as permission for `nexus42` to own KB/domain storage long-term.
 
@@ -349,14 +353,14 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 - `nexus42 platform auth login|logout|status|profiles`
 - `nexus42 platform context assemble` (**Deferred** — future direct platform cloud assembly)
-- `nexus42 platform context assemble-local` (**Shipped** — Stage-0/TwoStage CLI in-process assembly)
-- `nexus42 platform context assemble-moment` (**Shipped (local)** — four-domain Moment assembly with local persistent stores)
+- `nexus42 platform context assemble-moment` (**Shipped (local)** — single four-domain Moment assembly SSOT; frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`)
+
+> **Breaking change (pre-release):** `nexus42 platform context assemble-local` is **removed**. Use `assemble-moment` as the single local context assembly command. `assemble-local` (Stage-0/TwoStage only) was superseded by the full four-domain `assemble_moment` path.
 
 说明：
 
-- `platform context assemble` is **Deferred** in V1.26. Direct platform cloud assembly is not yet available; the command returns clear guidance to use a shipped local path instead. It must not call the retired daemon context-assemble Local API.
-- `platform context assemble-local` is the **Shipped** Stage-0/TwoStage CLI in-process path via `nexus-moment-context-assembly`: `Stage0Assembly` reads Creator SOUL, Creator long-term memory, and optional local fragment keywords; `TwoStageAssembly` can merge a future direct platform response when available. It does **not** call the daemon Local API and does **not** call full four-domain `assemble_moment`.
-- `platform context assemble-moment` is **Shipped (local)** in V1.26. It is a visible four-domain Moment assembly command that calls `assemble_moment` in-process. Narrative and World KB slices read from local persistent stores; User knowledge currently uses an in-memory slice until a persistent User knowledge store exists. It is distinct from both the deferred platform cloud `assemble` path and the narrower Stage-0/TwoStage `assemble-local` path.
+- `platform context assemble` is **Deferred** in V1.26. Direct platform cloud assembly is not yet available; the command returns clear guidance to use `assemble-moment` instead. It must not call the retired daemon context-assemble Local API.
+- `platform context assemble-moment` is the **single local assembly SSOT** (shipped V1.26, hardened V1.27+). It is a four-domain Moment assembly command that calls `assemble_moment` in-process. Narrative and World KB slices read from persistent local stores; User knowledge reads from SQLite (V1.27+). It is distinct from the deferred platform cloud `assemble` path.
 - `publish.*` 表示内容跨平台边界动作，不与 `sync push` 混用。
 - `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
 
@@ -367,7 +371,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | Structured state sync | `nexus42 sync ...` | `sync.*` + bundle/delta contracts |
 | Runtime orchestration control | `nexus42 daemon schedule ...` (**Shipped**) | schedule commands call daemon orchestration schedules Local API and own session control via `current_session_id` + supervisor signal cascade |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
-| Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-local` (**Shipped Stage-0/TwoStage**); `nexus42 platform context assemble-moment` (**Shipped local four-domain Moment**) | shipped paths are CLI in-process; `assemble-local` uses `Stage0Assembly` / `TwoStageAssembly` and creator-memory sources, while `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and an in-memory User knowledge slice. Daemon context-assemble Local API is **Retired** (KCA-002 B2). |
+| Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (**Shipped local four-domain Moment — single SSOT**) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and SQLite User knowledge. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`. Daemon context-assemble Local API is **Retired** (KCA-002 B2). `assemble-local` is **removed** in pre-release. |
 | Manuscript read/write | 无顶层独立命令组 | `manuscript.*` ACP capabilities + preset roots |
 | Research / references | 无顶层独立命令组 | preset orchestration + `research.*` ACP tools |
 | Content publication | `nexus42 platform publish ...`（或 preset 显式动作） | `publish.*` + confirmation policy |
@@ -708,7 +712,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 - **`SOUL.md`**（单文件 Markdown）：推荐路径 **`$HOME/.nexus42/creators/<creator_id>/SOUL.md`**，**必须**包含二级标题 **`## Personality`**（人格轨，人改、为锚）与 **`## Experience`**（经验轨，由长期记忆聚合生成）。  
 - **规范性警告**：在 **`## Experience`** 标题下至下一个同级 `##` 或 EOF 的范围内，**用户手改会在下一次经验聚合时被覆盖**；持久内容应写入 **`## Personality`** 或 **`creators/<creator_id>/memory/long-term/*.md`**（路径与 frontmatter 见该规格 §3–§5）。  
 - **CLI / daemon runtime**：负责 Session 收尾写入 **待回顾队列**、**定时回顾**、**经验段聚合**、以及 **发起新 ACP Session 前的 Context 终局合并**（与 `context-assembly` 平台响应组合）。  
-- **与 §6.6**：`nexus42 platform context assemble` 是 **Deferred** 的未来平台云上下文入口；当前已发货路径是本地 `assemble-local`（Stage-0/TwoStage）与 `assemble-moment`（local four-domain）。这些命令**不**替代 SOUL + 本地长期记忆的合并职责。
+- **与 §6.6**：`nexus42 platform context assemble` 是 **Deferred** 的未来平台云上下文入口；当前已发货路径是 `assemble-moment`（local four-domain，single SSOT）。这些命令**不**替代 SOUL + 本地长期记忆的合并职责。
 
 ### 13.1A 服务端沙箱（平台托管 Creator）
 

@@ -66,15 +66,15 @@ Cross-version themes for **subsequent** iterations. Suggested targets are non-bi
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture.md`. Single-writer rule follow-up. |
 | DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
-| DF-18 | Native multi-turn conversation (persistent child process) | V1.18 | **V1.28** | M | V1.18 §9 D-001 → **V1.28** plan `agent-host-native-multiturn` | `NativeSession` scaffolded but unused; `ClaudeCliProvider::execute()` spawns per-op. |
-| DF-19 | ACP session/request_permission handling | V1.18 | **V1.28** | M | V1.18 §9 D-002 → **V1.28** plan `agent-host-acp-correctness` | `AcpProvider::execute()` ignores `session/request_permission`; provider will hang/timeout. |
-| DF-20 | SetModel/SetMode capability truthfulness | V1.18 | **V1.28** | S | V1.18 §9 D-003 → **V1.28** plan `agent-host-acp-correctness` | `CapabilityDescriptor::acp_full()` claims vs `AcpProvider` implementation must align. |
+| DF-18 | Native multi-turn conversation (persistent child process) | V1.18 | **V1.28 ✅ Shipped** | M | V1.18 §9 D-001 → V1.28 plan `agent-host-native-multiturn` → **Shipped** | Dual-mode: per-invocation (`--resume`/`--session-id`) + persistent child (delimiter protocol). Tests NT1.1, NT1.2, NT2.1. Spec §4.2.1 updated. |
+| DF-19 | ACP session/request_permission handling | V1.18 | **V1.28 ✅ Shipped** | M | V1.18 §9 D-002 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | Handler wired in `AcpProvider::new()`, sync callback → no hang/timeout. Tests + doc. |
+| DF-20 | SetModel/SetMode capability truthfulness | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-003 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `acp_full()` sets `set_model=false` (dynamic discovery), `set_mode=true` (stable RPC). Audit tests. |
 | DF-21 | TimeoutConfig enforcement | V1.18 | V1.19 (Batch 2) | S | V1.18 §9 D-004 | `TimeoutConfig` values defined in `config.rs` but never enforced in any provider code path. |
 | DF-22 | Auto tool-risk classification | V1.18 | V1.19 (Batch 2) | M | V1.18 §9 D-005 | Only `StaticToolRiskClassifier` (hardcoded deny list). `ToolRiskClassifier` trait is an extension point needing real implementation. |
 | DF-23 | Provider-level streaming adaptation | V1.18 | V1.19 (Batch 2) | L | V1.18 §9 D-006 | ACP streaming events not yet translated to `StreamingChunk`. Scaffold exists (`into_event_stream`) but not wired. |
-| DF-24 | HostManager shutdown → ProviderAdapter::shutdown() | V1.18 | **V1.28** | S | V1.18 §9 D-007 → **V1.28** plan `agent-host-acp-correctness` | Orphan processes on daemon stop if not wired. |
-| DF-25 | AdmissionPolicy enforcement wiring | V1.18 | **V1.28** | S | V1.18 §9 D-008 → **V1.28** plan `agent-host-acp-correctness` | Policy methods not invoked from `create_session()` / `exec()`. |
-| DF-26 | Cross-platform command probe (replace Unix-only `which`) | V1.18 QC R3 | **V1.28** | S | V1.18 status.json R3 → **V1.28** plan `agent-host-acp-correctness` | `path_scan.rs` uses Unix-only `which`. |
+| DF-24 | HostManager shutdown → ProviderAdapter::shutdown() | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-007 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `HostManager::shutdown()` iterates sessions, calls adapter shutdown with per-session timeout. Tests. |
+| DF-25 | AdmissionPolicy enforcement wiring | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-008 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `create_session()` checks provider + session limit; `exec()` checks ops-per-session. Tests. |
+| DF-26 | Cross-platform command probe (replace Unix-only `which`) | V1.18 QC R3 | **V1.28 ✅ Shipped** | S | V1.18 status.json R3 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | Uses `which::which()` crate + manual fallback. CI green on macOS/Linux. |
 | DF-27 | API handler input validation on session ID path params | V1.18 QC R4 | V1.19 (Batch 2) | S | V1.18 status.json R4 | Malformed/non-UUID session IDs in `/v1/local/agent-host/sessions/{id}/*` routes. |
 | DF-28 | Config path traversal protection | V1.18 QC R5 | V1.19 (Batch 2) | S | V1.18 status.json R5 | `config_path` and `workspace_root` not validated against directory traversal. |
 | DF-29 | Skill registry capability (synthetic output, no network) | V1.21 audit | Any future | M | `orchestration/capability/builtins/registry.rs` — returns hardcoded output; no real registry call. WS3 stub. |
@@ -472,4 +472,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-24**. Status: Active. **V1.27 Active** (local authoring MVP, 4 plans registered). **V1.26 Shipped** (local persistence). V1.25 Shipped partial; V1.24 Shipped. Platform integration paused. Residuals R10/R3 targeted to V1.27 plans; see `status.json`.*
+*Created: 2026-04-21. Last updated: **2026-05-25**. Status: Active. **V1.28 Active** (context assembly convergence + Agent Host Batch 1, 4 plans). **V1.27 Shipped** (2026-05-24, local authoring MVP). **V1.26 Shipped** (local persistence). V1.25 Shipped partial; V1.24 Shipped. Platform integration paused. Residuals R10/R3 closed in V1.27; see `status.json`.*

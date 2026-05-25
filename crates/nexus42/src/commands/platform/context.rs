@@ -1,12 +1,7 @@
-//! Context Command — `nexus42 platform context assemble`, `assemble-local`, and `assemble-moment`.
+//! Context Command — `nexus42 platform context assemble` and `assemble-moment`.
 //!
-//! KCA-002 B2: Context assembly runs CLI in-process via `nexus-moment-context-assembly`.
-//! The daemon context-assemble proxy route is retired. The `assemble-local` subcommand
-//! uses `Stage0Assembly` / `TwoStageAssembly` directly without daemon HTTP.
-//!
-//! V1.26: `assemble-moment` is a visible four-domain Moment assembly command that reads
-//! from persistent stores (`SqliteNarrativeGateway`, `SqliteKbStore`). Knowledge slice
-//! uses in-memory store (no persistent `UserKnowledgeStore` yet).
+//! V1.28: `assemble-moment` is the single local assembly SSOT.
+//! Stage0 / degradation / optional two-stage behavior are flags on that command.
 //!
 //! The `assemble` (platform) subcommand is **deferred** — it prints a guidance message
 //! and exits with code 2.
@@ -109,22 +104,7 @@ pub enum ContextCommand {
         output_file: Option<String>,
     },
 
-    /// Run Stage-0 local context assembly and output result (local-only)
-    AssembleLocal {
-        /// Max tokens for context (optional budget)
-        #[arg(long)]
-        max_tokens: Option<usize>,
-
-        /// Include fragment keywords section
-        #[arg(long, default_value_t = true)]
-        include_fragments: bool,
-
-        /// Optional prompt hint for platform assemble (used in two-stage modes)
-        #[arg(long)]
-        hint: Option<String>,
-    },
-
-    /// Assemble four-domain Moment context from local persistent stores
+    /// Assemble four-domain Moment context from local persistent stores (SSOT)
     AssembleMoment {
         /// World ID to include in Moment context
         #[arg(long)]
@@ -141,6 +121,34 @@ pub enum ContextCommand {
         /// Event ID to focus context around
         #[arg(long)]
         event_id: Option<String>,
+
+        /// Cross-domain token budget (approximate chars/4 heuristic)
+        #[arg(long)]
+        max_tokens: Option<usize>,
+
+        /// Exclude fragment keywords section (default: include fragments)
+        #[arg(long)]
+        no_fragments: bool,
+
+        /// Optional prompt hint for Stage0 / two-stage assembly
+        #[arg(long)]
+        hint: Option<String>,
+
+        /// Maximum number of KB key blocks to return
+        #[arg(long)]
+        kb_limit: Option<usize>,
+
+        /// Text search filter for KB query (case-insensitive substring)
+        #[arg(long)]
+        kb_search: Option<String>,
+
+        /// Filter KB by block type (character, ability, scene, etc.)
+        #[arg(long)]
+        kb_type: Option<String>,
+
+        /// Maximum number of user knowledge entries to return (default: 20)
+        #[arg(long, default_value_t = 20)]
+        knowledge_limit: usize,
     },
 }
 
@@ -167,22 +175,21 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             output_file: _,
         } => {
             eprintln!("Platform cloud context assembly is not yet available.");
-            eprintln!("Use `assemble-local` for Stage0/TwoStage or `assemble-moment` for local four-domain Moment assembly.");
+            eprintln!("Use `assemble-moment` for local four-domain Moment assembly.");
             std::process::exit(2);
-        }
-        ContextCommand::AssembleLocal {
-            max_tokens,
-            include_fragments,
-            hint,
-        } => {
-            assemble_local_with_routing(config, max_tokens, include_fragments, hint.as_deref())
-                .await
         }
         ContextCommand::AssembleMoment {
             world_id,
             user_id,
             branch_id,
             event_id,
+            max_tokens,
+            no_fragments,
+            hint,
+            kb_limit,
+            kb_search,
+            kb_type,
+            knowledge_limit,
         } => {
             let ctx = run_assemble_moment(
                 config,
@@ -190,6 +197,13 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 user_id.as_deref(),
                 branch_id.as_deref(),
                 event_id.as_deref(),
+                max_tokens,
+                !no_fragments,
+                hint.as_deref(),
+                kb_limit,
+                kb_search.as_deref(),
+                kb_type.as_deref(),
+                Some(knowledge_limit),
             )
             .await?;
 
@@ -274,6 +288,11 @@ fn save_degradation_guard(config: &mut CliConfig, guard: &DegradationGuard) -> R
 /// - `local_first` / `cloud_enhanced` → `TwoStageAssembly` with fallback to Stage0
 ///
 /// Records platform results in `DegradationGuard` for degradation tracking.
+///
+/// This function is the internal routing core, shared between `assemble-moment`
+/// and future platform assembly paths. It is not wired directly to any single
+/// CLI subcommand — callers build the request and invoke it as needed.
+#[allow(dead_code)]
 async fn assemble_local_with_routing(
     config: &CliConfig,
     max_tokens: Option<usize>,
@@ -520,12 +539,21 @@ async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
 ///
 /// Returns `CliError` if the database cannot be opened or migrations fail.
 #[allow(clippy::future_not_send)]
+#[allow(clippy::fn_params_excessive_bools)]
+#[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
 pub async fn run_assemble_moment(
     config: &CliConfig,
     world_id: Option<&str>,
     user_id: Option<&str>,
     branch_id: Option<&str>,
     _event_id: Option<&str>,
+    max_tokens: Option<usize>,
+    include_fragments: bool,
+    hint: Option<&str>,
+    kb_limit: Option<usize>,
+    kb_search: Option<&str>,
+    kb_type: Option<&str>,
+    knowledge_limit: Option<usize>,
 ) -> Result<MomentContext> {
     let pool = open_shared_pool(config).await?;
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
@@ -536,7 +564,7 @@ pub async fn run_assemble_moment(
     let uid = user_id.unwrap_or("user_default");
 
     // Build Stage0Assembly — load from creator memory if available
-    let stage0 = build_stage0_from_local(config, None, None, false)
+    let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments)
         .await
         .unwrap_or_else(|_| Stage0Assembly {
             personality: "Local Moment assembly.".to_string(),
@@ -545,13 +573,33 @@ pub async fn run_assemble_moment(
             fragment_keywords: Vec::new(),
             system_prefix: String::new(),
             user_prompt: "Moment context assembly.".to_string(),
-            max_tokens: None,
+            max_tokens,
         });
 
-    // Build MomentRequest
+    // Build MomentRequest with KB query + budget fields
     let mut request = MomentRequest::new(stage0).with_world(wid).with_user(uid);
+
     if let Some(bid) = branch_id {
         request = request.with_branch(bid);
+    }
+    if let Some(mt) = max_tokens {
+        request = request.with_max_tokens(mt);
+    }
+    if let Some(limit) = kb_limit {
+        request = request.with_kb_limit(limit);
+    }
+    if let Some(search) = kb_search {
+        request = request.with_kb_text_search(search);
+    }
+    if let Some(bt_str) = kb_type {
+        if let Ok(bt) = serde_json::from_value::<nexus_contracts::BlockType>(
+            serde_json::Value::String(bt_str.to_string()),
+        ) {
+            request = request.with_kb_block_type(bt);
+        }
+    }
+    if let Some(limit) = knowledge_limit {
+        request = request.with_knowledge_limit(limit);
     }
 
     // Call assemble_moment with persistent stores
@@ -620,44 +668,56 @@ mod tests {
             .contains("alphanumeric characters"));
     }
 
-    /// Test that `AssembleLocal` variant exists with new hint field
+    /// L3.1: `AssembleLocal` variant no longer exists in `ContextCommand`.
     #[test]
-    fn context_command_assemble_local_exists() {
-        let _ = ContextCommand::AssembleLocal {
-            max_tokens: Some(1000),
-            include_fragments: true,
-            hint: Some("write chapter 3".to_string()),
-        };
-        let _ = ContextCommand::AssembleLocal {
-            max_tokens: None,
-            include_fragments: false,
-            hint: None,
-        };
+    fn context_command_no_assemble_local() {
+        let source = include_str!("context.rs");
+        // Strip test module to avoid false positives
+        let non_test = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !non_test.contains("AssembleLocal"),
+            "context.rs non-test code must not contain AssembleLocal"
+        );
+        assert!(
+            !non_test.contains("assemble-local"),
+            "context.rs non-test code must not reference assemble-local subcommand"
+        );
     }
 
-    /// C1.1: `AssembleMoment` variant exists without `hide = true`.
-    /// Clap's `hide = true` is a `#[command(...)]` attribute, not runtime-testable
-    /// directly, but we verify the variant is constructible and documented.
+    /// C1.1: `AssembleMoment` variant exists with all V1.28 flags.
     #[test]
-    fn context_command_assemble_moment_exists() {
+    fn context_command_assemble_moment_exists_with_flags() {
         let _ = ContextCommand::AssembleMoment {
             world_id: Some("wld_test".to_string()),
             user_id: Some("user_test".to_string()),
             branch_id: None,
             event_id: None,
+            max_tokens: Some(1000),
+            no_fragments: true,
+            hint: Some("write chapter 3".to_string()),
+            kb_limit: Some(5),
+            kb_search: Some("hero".to_string()),
+            kb_type: Some("character".to_string()),
+            knowledge_limit: 10,
         };
         let _ = ContextCommand::AssembleMoment {
             world_id: None,
             user_id: None,
             branch_id: None,
             event_id: None,
+            max_tokens: None,
+            no_fragments: false,
+            hint: None,
+            kb_limit: None,
+            kb_search: None,
+            kb_type: None,
+            knowledge_limit: 20,
         };
     }
 
-    /// C1.3: Verify `Assemble` arm prints deferred message (no V1.10 reference).
-    /// We check the non-test portion of the source file.
+    /// C1.3: Verify `Assemble` arm prints deferred message mentioning `assemble-moment` only.
     #[test]
-    fn assemble_arm_has_no_v1_10_reference() {
+    fn assemble_arm_deferred_message() {
         let source = include_str!("context.rs");
         // Strip test module to avoid false positives from test assertions
         let non_test = source.split("#[cfg(test)]").next().unwrap_or(source);
@@ -670,12 +730,13 @@ mod tests {
             "context.rs must contain deferred platform message"
         );
         assert!(
-            source.contains("assemble-local"),
-            "deferred message must mention assemble-local"
-        );
-        assert!(
             source.contains("assemble-moment"),
             "deferred message must mention assemble-moment"
+        );
+        // After L3.1, deferred message must NOT mention assemble-local
+        assert!(
+            !non_test.contains("assemble-local"),
+            "deferred message must not mention assemble-local"
         );
     }
 
