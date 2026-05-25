@@ -52,6 +52,21 @@ pub enum MemoryCommand {
 
     /// List memory fragments (requires daemon)
     Fragments,
+
+    /// List pending review entries for current creator (requires daemon)
+    PendingList,
+
+    /// Show details of a pending review entry (requires daemon)
+    PendingShow {
+        /// Pending review ID to show
+        pending_id: String,
+    },
+
+    /// Dismiss a pending review entry without promoting (requires daemon)
+    PendingDismiss {
+        /// Pending review ID to dismiss
+        pending_id: String,
+    },
 }
 
 /// Run memory command.
@@ -81,6 +96,13 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
         MemoryCommand::Review => review(config, creator_id).await,
         MemoryCommand::Fragments => fragments(config, creator_id).await,
+        MemoryCommand::PendingList => pending_list(config, creator_id).await,
+        MemoryCommand::PendingShow { pending_id } => {
+            pending_show(config, creator_id, &pending_id).await
+        }
+        MemoryCommand::PendingDismiss { pending_id } => {
+            pending_dismiss(config, creator_id, &pending_id).await
+        }
     }
 }
 
@@ -264,6 +286,84 @@ async fn fragments(config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
+async fn pending_list(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let result = client.list_pending_reviews(creator_id).await?;
+
+    if result.items.is_empty() {
+        println!("No pending reviews for creator '{creator_id}'.");
+        return Ok(());
+    }
+
+    println!("Pending reviews for creator '{creator_id}':\n");
+    println!(
+        "{:<30} {:<15} {:<15} {}",
+        "PENDING_ID", "TASK_KIND", "SESSION_ID", "CREATED_AT"
+    );
+    println!("{}", "-".repeat(100));
+
+    for r in &result.items {
+        // Truncate long IDs for display
+        let pending_short = if r.pending_id.len() > 28 {
+            format!("{}…", &r.pending_id[..25])
+        } else {
+            r.pending_id.clone()
+        };
+        let session_short = if r.session_id.len() > 13 {
+            format!("{}…", &r.session_id[..10])
+        } else {
+            r.session_id.clone()
+        };
+        println!(
+            "{:<30} {:<15} {:<15} {}",
+            pending_short, r.task_kind, session_short, r.created_at
+        );
+    }
+
+    println!("\n{} pending reviews", result.items.len());
+    Ok(())
+}
+
+async fn pending_show(config: &CliConfig, creator_id: &str, pending_id: &str) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let result = client.list_pending_reviews(creator_id).await?;
+
+    let entry = result
+        .items
+        .into_iter()
+        .find(|r| r.pending_id == pending_id)
+        .ok_or_else(|| {
+            crate::errors::CliError::Other(format!(
+                "Pending review '{pending_id}' not found for creator '{creator_id}'."
+            ))
+        })?;
+
+    println!("pending_id: {}", entry.pending_id);
+    println!("session_id: {}", entry.session_id);
+    println!("creator_id: {}", entry.creator_id);
+    if let Some(ref wid) = entry.world_id {
+        println!("world_id: {wid}");
+    }
+    println!("task_kind: {}", entry.task_kind);
+    println!("created_at: {}", entry.created_at);
+    println!();
+    println!("raw_digest:");
+    println!("{}", entry.raw_digest);
+    Ok(())
+}
+
+async fn pending_dismiss(config: &CliConfig, creator_id: &str, pending_id: &str) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let result = client.dismiss_pending_review(pending_id, creator_id).await?;
+
+    if result.success {
+        println!("Pending review '{pending_id}' dismissed.");
+    } else {
+        println!("Dismiss did not succeed for '{pending_id}'.");
+    }
+    Ok(())
+}
+
 /// Open a temporary file in the user's $EDITOR, return the edited content.
 ///
 /// Uses `tempfile::NamedTempFile` for automatic cleanup on drop (W-004),
@@ -333,5 +433,12 @@ mod tests {
         };
         let _ = MemoryCommand::Review;
         let _ = MemoryCommand::Fragments;
+        let _ = MemoryCommand::PendingList;
+        let _ = MemoryCommand::PendingShow {
+            pending_id: "pending_test".to_string(),
+        };
+        let _ = MemoryCommand::PendingDismiss {
+            pending_id: "pending_test".to_string(),
+        };
     }
 }
