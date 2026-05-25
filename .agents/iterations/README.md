@@ -38,7 +38,8 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](v1.24-knowledge-crates-alignment-audit-compass-v1.md) | V1.24 audit | **Shipped** (2026-05-22) — doc refresh + KCA-002/003 |
 | [v1.25-knowledge-crates-product-wiring-audit-compass-v1.md](v1.25-knowledge-crates-product-wiring-audit-compass-v1.md) | V1.25 audit | **Shipped (partial)** (2026-05-22) — in-memory wiring; superseded by V1.26 |
 | [v1.26-local-persistence-delivery-compass-v1.md](v1.26-local-persistence-delivery-compass-v1.md) | V1.26 | **Shipped** (2026-05-23) — local SQLite persistence, reference MD layout, context productization |
-| [v1.27-local-authoring-delivery-compass-v1.md](v1.27-local-authoring-delivery-compass-v1.md) | V1.27 | **Active** — CLI-first local authoring writes, User knowledge SQLite, context closure, API hygiene, `acp agent use` |
+| [v1.27-local-authoring-delivery-compass-v1.md](v1.27-local-authoring-delivery-compass-v1.md) | V1.27 | **Shipped** (2026-05-24) — CLI-first local authoring writes, User knowledge SQLite, context closure, API hygiene, `acp agent use` |
+| [v1.28-context-and-agent-host-delivery-compass-v1.md](v1.28-context-and-agent-host-delivery-compass-v1.md) | V1.28 | **Active** — `assemble-moment` SSOT, structured KB query, Agent Host Batch 1, mandatory SSOT doc refresh |
 
 ### Reference compasses
 
