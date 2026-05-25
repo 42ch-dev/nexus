@@ -272,12 +272,12 @@ fn r3_local_truth_chain() {
     // R3 verification: SOUL init + memory creation chain works
 }
 
-/// Regression R3: context assemble-local executes without panic or skip
+/// Regression R3: context assemble-moment executes without panic or skip
 ///
 /// Validates the clap -h flag collision fix (hint short alias removed)
-/// and that assemble-local runs successfully in a `local_only` workspace.
+/// and that assemble-moment runs successfully in a `local_only` workspace.
 #[test]
-fn r3_context_assemble_local_executes_without_placeholder_skip() {
+fn r3_context_assemble_moment_executes_without_placeholder_skip() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
     let workspace = tmp.path().join("workspace");
@@ -311,7 +311,7 @@ fn r3_context_assemble_local_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // Init SOUL (required by assemble-local)
+    // Init SOUL (required by assemble-moment Stage0)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -322,13 +322,13 @@ fn r3_context_assemble_local_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // Run context assemble-local — must not panic (clap -h fix) and succeed
+    // Run context assemble-moment — must not panic and succeed
     Command::cargo_bin("nexus42")
         .unwrap()
         .args([
             "platform",
             "context",
-            "assemble-local",
+            "assemble-moment",
             "--max-tokens",
             "1200",
         ])
