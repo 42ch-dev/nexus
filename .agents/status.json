@@ -1,61 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-25T19:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-05-25-v1.28-context-assembly-convergence",
-      "title": "V1.28 unify assemble-moment SSOT; KbQuery + token budget; remove assemble-local",
-      "file": ".agents/plans/2026-05-25-v1.28-context-assembly-convergence.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@architect", "@qc-specialist", "@qa-engineer"],
-      "task_category": "logic",
-      "secondary_task_category": "docs",
-      "working_branch": "feature/v1.28-context-assembly-convergence",
-      "merge_target": "feature/v1.28-context-and-agent-host",
-      "depends_on": [],
-      "primary_spec": ".agents/iterations/v1.28-context-and-agent-host-delivery-compass-v1.md"
-    },
-    {
-      "plan_id": "2026-05-25-v1.28-agent-host-acp-correctness",
-      "title": "V1.28 Agent Host Batch 1 — ACP permissions, capabilities, shutdown, admission, probe",
-      "file": ".agents/plans/2026-05-25-v1.28-agent-host-acp-correctness.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@qc-specialist", "@qa-engineer"],
-      "task_category": "logic",
-      "working_branch": "feature/v1.28-agent-host-acp-correctness",
-      "merge_target": "feature/v1.28-context-and-agent-host",
-      "depends_on": [],
-      "primary_spec": ".agents/iterations/v1.28-context-and-agent-host-delivery-compass-v1.md"
-    },
-    {
-      "plan_id": "2026-05-25-v1.28-agent-host-native-multiturn",
-      "title": "V1.28 DF-18 — persistent native CLI session for multi-turn execute",
-      "file": ".agents/plans/2026-05-25-v1.28-agent-host-native-multiturn.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@qc-specialist", "@qa-engineer"],
-      "task_category": "logic",
-      "working_branch": "feature/v1.28-agent-host-native-multiturn",
-      "merge_target": "feature/v1.28-context-and-agent-host",
-      "depends_on": ["2026-05-25-v1.28-agent-host-acp-correctness"],
-      "primary_spec": ".agents/iterations/v1.28-context-and-agent-host-delivery-compass-v1.md"
-    },
-    {
-      "plan_id": "2026-05-25-v1.28-local-ssot-refresh",
-      "title": "V1.28 mandatory doc refresh — ARCHITECTURE, cli-spec, iterations index, deferred tracker",
-      "file": ".agents/plans/2026-05-25-v1.28-local-ssot-refresh.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": ["@architect", "@writing-specialist", "@qc-specialist"],
-      "task_category": "docs",
-      "working_branch": "feature/v1.28-local-ssot-refresh",
-      "merge_target": "feature/v1.28-context-and-agent-host",
-      "depends_on": ["2026-05-25-v1.28-context-assembly-convergence"],
-      "primary_spec": ".agents/iterations/v1.28-context-and-agent-host-delivery-compass-v1.md"
-    }
-  ],
+  "updated_at": "2026-05-25T20:00:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -63,23 +9,23 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": "feature/v1.28-context-and-agent-host",
+    "integration_branch": null,
     "integration_merge_target": "main",
-    "integration_branch_role": "V1.28 — context assembly + agent host + SSOT; merge topic branches before QC/QA; PR to main after sign-off",
-    "latest_shipped_iteration": "v1.27",
-    "latest_shipped_at": "2026-05-24T17:00:00Z",
-    "latest_active_iteration": "v1.28",
-    "latest_active_compass": ".agents/iterations/v1.28-context-and-agent-host-delivery-compass-v1.md",
+    "integration_branch_role": null,
+    "latest_shipped_iteration": "v1.28",
+    "latest_shipped_at": "2026-05-25T20:00:00Z",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-25T12:00:00Z",
-      "total_open": 0,
+      "updated_at": "2026-05-25T20:00:00Z",
+      "total_open": 8,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 0,
         "low": 5,
-        "nit": 11
+        "nit": 6
       },
       "by_target": {},
       "by_plan": {},
@@ -96,21 +42,6 @@
     }
   },
   "residual_findings": {
-    "2026-05-23-v1.26-local-context-product": [
-      {
-        "id": "R10",
-        "title": "Knowledge slice uses InMemoryKnowledgeStore — no persistent UserKnowledgeStore in V1.26",
-        "severity": "low",
-        "source": "dev C1.2",
-        "scope": "crates/nexus42/src/commands/platform/context.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.27",
-        "tracking_link": "2026-05-24-v1.27-knowledge-persistence-context",
-        "note": "Closed: SqliteKnowledgeStore wired in run_assemble_moment (Plan 2 C1.1).",
-        "closed_at": "2026-05-24T17:00:00Z"
-      }
-    ],
     "2026-05-23-v1.26-narrative-kb-persistence": [
       {
         "id": "R8",
@@ -168,34 +99,6 @@
         "owner": "@fullstack-dev",
         "target_date": "post-v1.28",
         "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
-      }
-    ],
-    "2026-05-22-v1.24-knowledge-crates-alignment": [
-      {
-        "id": "R3",
-        "title": "Daemon KB request DTOs lack scope field — non-work values silently ignored",
-        "severity": "suggestion",
-        "source": "qc3 S-002",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/kb.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.27",
-        "tracking_link": "2026-05-24-v1.27-api-cli-hygiene",
-        "note": "Closed: KB handler now has validate_scope() returning 400 for non-work scope (Plan 3 H3).",
-        "closed_at": "2026-05-24T16:30:00Z"
-      },
-      {
-        "id": "R4",
-        "title": "No CLI-side test for KbScope::World short-circuit",
-        "severity": "suggestion",
-        "source": "qc3 S-003",
-        "scope": "crates/nexus42/src/commands/creator/mod.rs",
-        "decision": "closed",
-        "owner": "@qa-engineer",
-        "target_date": "v1.26",
-        "tracking_link": "2026-05-23-v1.26-narrative-kb-persistence",
-        "note": "Closed: K1.3 SqliteKbStore tests land; CLI uses persistent store. QA verified 11 tests pass.",
-        "closed_at": "2026-05-23T16:00:00Z"
       }
     ],
     "2026-05-25-v1.28-context-and-agent-host": [
