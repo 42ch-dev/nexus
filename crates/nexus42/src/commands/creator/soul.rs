@@ -24,6 +24,8 @@ pub enum SoulCommand {
     Validate,
     /// Push personality section to long-term memory
     PushPersonality,
+    /// Refresh the ## Experience section from long-term memories (deterministic, no LLM)
+    RefreshExperience,
 }
 
 /// Run soul command.
@@ -50,6 +52,7 @@ pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
         }
         SoulCommand::Validate => validate(config, creator_id),
         SoulCommand::PushPersonality => push_personality(config, creator_id),
+        SoulCommand::RefreshExperience => refresh_experience(config, creator_id).await,
     }
 }
 
@@ -179,6 +182,57 @@ fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Deterministic experience refresh — no LLM call.
+///
+/// Reads long-term memory files, filters to experience-kind entries, sorts by
+/// recency, and overwrites the `## Experience` section in SOUL.md.
+///
+/// **Warning:** hand-edits under `## Experience` are overwritten on each run.
+async fn refresh_experience(_config: &CliConfig, creator_id: &str) -> Result<()> {
+    let home = config::user_home_dir()?;
+
+    let result = nexus_creator_memory::experience_aggregation::aggregate_experience(
+        &home,
+        creator_id,
+        None, // No synthesizer — deterministic path only
+    )
+    .await?;
+
+    // Update metadata in DB (best-effort).
+    if let Some(pool) = open_global_db().await? {
+        let path = soul_io::soul_path(&home, creator_id);
+        let now = chrono::Utc::now().to_rfc3339();
+        let existing_created_at = db_get_soul_meta(&pool, creator_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.created_at);
+        let soul = soul_io::load(&home, creator_id)?;
+        let meta = SoulMeta {
+            creator_id: creator_id.to_string(),
+            file_path: path.display().to_string(),
+            schema_version: 1,
+            personality_hash: soul.personality.as_ref().map(|p| simple_hash(p)),
+            experience_hash: soul.experience.as_ref().map(|e| simple_hash(e)),
+            created_at: existing_created_at.unwrap_or_else(|| now.clone()),
+            updated_at: now,
+        };
+        if let Err(e) = db_upsert_soul_meta(&pool, &meta).await {
+            eprintln!("warning: failed to update soul metadata: {e}");
+        }
+    }
+
+    println!("Experience refreshed for creator '{creator_id}'.");
+    println!("  Memories processed: {}", result.memories_processed);
+    println!("  Method: deterministic (no LLM)");
+    if result.experience_markdown.is_empty() {
+        println!("  Note: no experience-kind memories found; Experience section cleared.");
+    } else {
+        println!("  Warning: hand-edits under ## Experience are overwritten on refresh.");
+    }
+    Ok(())
+}
+
 /// Open or create the global database, returning `Some(pool)` on success
 /// or `None` if the DB is not available (e.g., first run before `nexus42 creator workspace init`).
 ///
@@ -224,5 +278,7 @@ mod tests {
         let _ = SoulCommand::EditPersonality {
             content: Some("test".to_string()),
         };
+        let _ = SoulCommand::PushPersonality;
+        let _ = SoulCommand::RefreshExperience;
     }
 }
