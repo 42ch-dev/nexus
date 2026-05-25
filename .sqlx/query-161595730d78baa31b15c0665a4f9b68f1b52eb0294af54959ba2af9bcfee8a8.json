@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE kb_extract_jobs\n           SET status = 'failed', error_text = ?, finished_at = datetime('now')\n           WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "161595730d78baa31b15c0665a4f9b68f1b52eb0294af54959ba2af9bcfee8a8"
+}
