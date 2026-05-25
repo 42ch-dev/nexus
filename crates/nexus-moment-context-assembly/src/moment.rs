@@ -21,7 +21,7 @@
 //! Domain store queries are async. Callers must provide concrete implementations
 //! of the store traits. The crate provides no default runtime or storage backend.
 
-use crate::stage0::Stage0Assembly;
+use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use nexus_contracts::BlockType;
 use nexus_kb::{KbQuery, KbStore};
 use nexus_knowledge::KnowledgeStore;
@@ -251,13 +251,30 @@ impl MomentContext {
     }
 
     /// Split `stage0_context` into (`personality_section`, rest).
+    ///
+    /// Prefers structured delimiter split (`---STAGE0:PERSONALITY:START---` /
+    /// `---STAGE0:PERSONALITY:END---`). Falls back to the markdown-header
+    /// heuristic for legacy content without delimiters.
     fn split_stage0_personality(&self) -> (String, String) {
         let ctx = &self.stage0_context;
-        // Look for "## Personality" section
+
+        // Primary path: structured delimiters
+        if let (Some(start_pos), Some(end_pos)) = (
+            ctx.find(STAGE0_PERSONALITY_START),
+            ctx.find(STAGE0_PERSONALITY_END),
+        ) {
+            let content_start = start_pos + STAGE0_PERSONALITY_START.len();
+            if end_pos > content_start {
+                let personality_section = ctx[content_start..end_pos].to_string();
+                let rest = format!("{}{}", &ctx[..start_pos], &ctx[end_pos + STAGE0_PERSONALITY_END.len()..]);
+                return (personality_section, rest);
+            }
+        }
+
+        // Legacy fallback: markdown-header heuristic
         ctx.find("## Personality").map_or_else(
             || (String::new(), ctx.clone()),
             |pos| {
-                // Find the next ## section after personality
                 let after_personality_header = &ctx[pos..];
                 let end_of_personality = after_personality_header[14..] // skip "## Personality"
                     .find("\n## ")
@@ -853,6 +870,129 @@ mod tests {
         assert!(
             ctx_budget.stage0_context.contains("A creative writer."),
             "personality must survive truncation"
+        );
+    }
+
+    // --- A3.2: Delimiter-based personality split tests ---
+
+    #[test]
+    fn split_personality_uses_delimiter_path() {
+        // Stage0 assembly now emits delimiters, so split should use them
+        let asm = Stage0Assembly {
+            personality: "Bold and creative writer.".to_string(),
+            experience: "10 years.".to_string(),
+            user_prompt: "Write chapter 3.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let stage0_text = asm.assemble();
+
+        let ctx = MomentContext {
+            stage0_context: stage0_text,
+            world_state: Some("World state data.".to_string()),
+            timeline: None,
+            world_kb: None,
+            user_knowledge: None,
+        };
+
+        let (personality, rest) = ctx.split_stage0_personality();
+        assert!(
+            personality.contains("Bold and creative writer."),
+            "personality section must contain the personality body"
+        );
+        assert!(
+            personality.contains("## Personality"),
+            "personality section must contain the heading"
+        );
+        assert!(
+            !rest.contains("Bold and creative writer."),
+            "rest must not contain personality body"
+        );
+        assert!(
+            rest.contains("10 years."),
+            "rest must contain experience"
+        );
+    }
+
+    #[test]
+    fn split_personality_delimiter_round_trip() {
+        // Full round-trip: assemble → to_full_context → split_stage0_personality
+        let asm = Stage0Assembly {
+            system_prefix: "System prefix.".to_string(),
+            personality: "Creative soul.".to_string(),
+            experience: "5 years.".to_string(),
+            user_prompt: "Do task.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let stage0_text = asm.assemble();
+
+        let mut ctx = MomentContext {
+            stage0_context: stage0_text,
+            world_state: Some("Some world state.".to_string()),
+            timeline: Some("Timeline events.".to_string()),
+            world_kb: None,
+            user_knowledge: None,
+        };
+
+        // apply_cross_domain_truncation uses split_stage0_personality internally
+        ctx.apply_cross_domain_truncation(50);
+
+        // Personality must survive truncation
+        assert!(
+            ctx.stage0_context.contains("Creative soul."),
+            "personality must survive truncation round-trip"
+        );
+    }
+
+    #[test]
+    fn split_personality_r13_scenario_no_false_split() {
+        // R13: personality containing "## " sub-headers must not cause premature split.
+        // With delimiters, the split is structural, not heuristic.
+        let asm = Stage0Assembly {
+            personality: "A writer with goals.\n\n## Goals\n- Write daily\n- Be bold".to_string(),
+            experience: "10 years.".to_string(),
+            user_prompt: "Continue.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let stage0_text = asm.assemble();
+
+        let ctx = MomentContext {
+            stage0_context: stage0_text,
+            ..MomentContext::default()
+        };
+
+        let (personality, _rest) = ctx.split_stage0_personality();
+        assert!(
+            personality.contains("Write daily"),
+            "personality with embedded ## sub-headers must not be prematurely truncated"
+        );
+        assert!(
+            personality.contains("Be bold"),
+            "full personality content must be captured"
+        );
+    }
+
+    #[test]
+    fn split_personality_legacy_heuristic_fallback() {
+        // Content without delimiters should fall back to heuristic
+        let legacy_content = "System prefix.\n\n## Personality\n\nA creative soul.\n\n## Experience\n\n10 years.\n";
+
+        let ctx = MomentContext {
+            stage0_context: legacy_content.to_string(),
+            ..MomentContext::default()
+        };
+
+        let (personality, rest) = ctx.split_stage0_personality();
+        assert!(
+            personality.contains("A creative soul."),
+            "legacy heuristic must extract personality"
+        );
+        assert!(
+            !personality.contains("10 years"),
+            "legacy heuristic must not include experience"
+        );
+        assert!(
+            rest.contains("10 years"),
+            "rest must contain experience"
         );
     }
 }

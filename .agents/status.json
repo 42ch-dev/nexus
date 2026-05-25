@@ -1,89 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-26T12:00:00Z",
-  "plans": [
-    {
-      "id": "2026-05-26-v1.29-spec-tracker-hygiene",
-      "title": "V1.29 spec + tracker hygiene (V1.28 backfill + V1.29 normative)",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "category": "docs",
-      "working_branch": "feature/v1.29-spec-tracker-hygiene",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/local-cloud-crate-architecture.md",
-        "knowledge/deferred-features-cross-version-tracker.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-memory-session-review-loop",
-      "title": "FL-A1 — session capture → pending-review → CLI review loop",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-memory-session-review-loop",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/creator-schedule-and-core-context.md",
-        "knowledge/specs/local-runtime-boundary.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-stage0-structured-delimiters",
-      "title": "FL-A3 — Stage0 structured delimiters (R13)",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-stage0-structured-delimiters",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-soul-experience-preset",
-      "title": "FL-A2 — SOUL Experience preset + refresh-experience CLI",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-soul-experience-preset",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "depends_on": ["2026-05-26-v1.29-memory-session-review-loop"],
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/creator-schedule-and-core-context.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-kb-extract-queue-preset",
-      "title": "FL-B — KB extract queue + kb.extract_work preset (agent-driven)",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-kb-extract-queue-preset",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/entity-scope-model.md",
-        "knowledge/specs/orchestration-engine.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-agent-host-batch2-hardening",
-      "title": "Agent Host Batch 2 — DF-21–23, 27–28",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-agent-host-batch2-hardening",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/agent-host.md"
-      ]
-    }
-  ],
+  "updated_at": "2026-05-26T16:30:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -94,25 +12,28 @@
     "integration_branch": "feature/v1.29-author-intelligence-and-hardening",
     "integration_merge_target": "main",
     "integration_branch_role": "V1.29 iteration integration — QC/QA Working branch",
-    "latest_shipped_iteration": "v1.28",
-    "latest_shipped_at": "2026-05-25T20:00:00Z",
-    "latest_active_iteration": "v1.29",
-    "latest_active_compass": "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.29",
+    "latest_shipped_at": "2026-05-26T16:30:00Z",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T12:00:00Z",
-      "total_open": 8,
+      "updated_at": "2026-05-26T16:30:00Z",
+      "total_open": 13,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 5,
-        "nit": 6
+        "medium": 2,
+        "low": 8,
+        "nit": 3
       },
       "by_target": {
-        "post-v1.29": 8
+        "post-v1.29": 6,
+        "v1.30": 7
       },
-      "by_plan": {},
+      "by_plan": {
+        "v1.29-iteration": 7
+      },
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
@@ -123,7 +44,7 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.29 registered — 6 plans Todo. Residuals R8–R13 target post-v1.29 per plan acceptance."
+      "note": "V1.29 shipped. 6 plans Done (archived). 7 V1.29 residuals (R14–R20) open for v1.30. R11/R12/R13 closed."
     }
   },
   "residual_findings": {
@@ -186,39 +107,83 @@
         "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
       }
     ],
-    "2026-05-25-v1.28-context-and-agent-host": [
+    "v1.29-iteration": [
       {
-        "id": "R11",
-        "title": "Persistent child processes survive daemon crash — Drop does not kill",
+        "id": "R14",
+        "title": "SessionCapture created at agent-stop time produces near-zero session metrics",
+        "severity": "medium",
+        "source": "qc3 F-001",
+        "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Create SessionCapture at session start, record message/tool events, and close it on agent_stop."
+      },
+      {
+        "id": "R15",
+        "title": "KB extract job claim is not atomic across next_queued + mark_running",
+        "severity": "medium",
+        "source": "qc2 F-001",
+        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Wrap queue claim in a transaction/claim helper and add concurrent claim coverage."
+      },
+      {
+        "id": "R16",
+        "title": "kb.extract_work is registered but still placeholder-like for full extraction lifecycle",
         "severity": "low",
-        "source": "qc3 W-002",
+        "source": "qc1 W-002, qc2 F-004",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Complete job_id-driven mark_running/mark_done/mark_failed wiring and KeyBlock insertion."
+      },
+      {
+        "id": "R17",
+        "title": "Persistent child Drop cleanup is best-effort and Unix-only",
+        "severity": "low",
+        "source": "qc2 F-002, qc3 F-006",
         "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Add Drop impl with start_kill() for persistent child. Target: V1.29 Batch 2 plan."
+        "target_date": "v1.30",
+        "note": "R11 baseline fixed; follow-up to retain child handles or add cross-platform termination."
       },
       {
-        "id": "R12",
-        "title": "Persistent mode cancel() is a no-op — stuck operations require timeout",
-        "severity": "nit",
-        "source": "qc3 W-003",
-        "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Implement cancel() to kill child or drain stdin. Target: V1.29 Batch 2 plan."
-      },
-      {
-        "id": "R13",
-        "title": "split_stage0_personality uses markdown-header heuristic — brittle to future formatting changes",
+        "id": "R18",
+        "title": "KB extract job IDs use custom timestamp-derived generation",
         "severity": "low",
-        "source": "qc2 W-001",
-        "scope": "crates/nexus-moment-context-assembly/src/moment.rs",
+        "source": "qc2 F-003, qc3 F-003",
+        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Target: V1.29 stage0-structured-delimiters plan."
+        "target_date": "v1.30",
+        "note": "Replace with UUIDv4-style IDs while preserving the xj_ prefix."
+      },
+      {
+        "id": "R19",
+        "title": "creator command module is approaching maintainability threshold",
+        "severity": "low",
+        "source": "qc1 W-001",
+        "scope": "crates/nexus42/src/commands/creator/mod.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Extract KB command handlers to a dedicated creator/kb.rs module."
+      },
+      {
+        "id": "R20",
+        "title": "KB extract status list is unbounded",
+        "severity": "low",
+        "source": "qc3 F-002, qc2 S-003",
+        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Add LIMIT/pagination or a bounded default for extract-status."
       }
     ]
   }

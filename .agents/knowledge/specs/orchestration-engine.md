@@ -328,9 +328,13 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-creator`        | `nexus-domain`         |
 | `acp.prompt`                | Send a prompt to this creator's active ACP session             | `nexus-orchestration`  |
 | `acp.session_load`          | Resume a named ACP session id on the creator's worker          | `nexus-orchestration`  |
+| `kb.extract_work`           | Extract KB assets from a work entry into a World              | `nexus-orchestration` (preset-driven via `acp_prompt`) |
+| `soul.experience.aggregate` | Aggregate SOUL Experience section from session review items     | `nexus-orchestration` (preset-driven via `acp_prompt`) |
 | `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  |
 | `judge.rule`                | Evaluate a pure rule (AST over `Context`)                      | `nexus-orchestration`  |
 | `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  |
+
+> **V1.29 partial de-stub note:** `acp.prompt` and `acp.session_load` were partially de-stubbed in V1.29 (DF-35/36). Real worker IPC is wired for preset-driven prompts on the `kb.extract_work` and `soul.experience.aggregate` capability paths; full de-stub for all preset use-cases remains deferred (FL-D).
 
 ### 5.3 Capability input/output schemas
 

@@ -57,6 +57,34 @@ pub struct FragmentRow {
     pub summary: String,
 }
 
+// ─── Pending review models ──────────────────────────────────────────────────
+
+/// Response from `GET /v1/local/memory/pending-review`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListPendingReviewsResponse {
+    pub items: Vec<PendingReviewRow>,
+    pub pagination: PaginationInfo,
+}
+
+/// A single pending review row from the daemon API.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PendingReviewRow {
+    pub pending_id: String,
+    pub session_id: String,
+    pub creator_id: String,
+    pub world_id: Option<String>,
+    pub task_kind: String,
+    pub raw_digest: String,
+    pub created_at: String,
+}
+
+/// Response from `DELETE /v1/local/memory/pending-review/{id}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeletePendingReviewResponse {
+    pub success: bool,
+    pub pending_id: String,
+}
+
 // ─── Workspace management models (V1.20 Batch 4) ─────────────────────────
 
 /// Response from `GET /v1/local/workspaces`.

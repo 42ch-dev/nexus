@@ -33,3 +33,51 @@ Per-moment context assembly for ACP sessions. Three strategies:
 - `nexus-kb` (for `KbStore`, `KbQuery` — World-scoped key blocks with structured queries)
 - `nexus-knowledge` (for `KnowledgeStore` — User-scoped knowledge entries)
 - `nexus-cloud-sync` (optional, behind `cloud-stage` feature)
+
+## Stage0 Personality Delimiter Protocol
+
+Stage0 assembly wraps the personality section in structured delimiters so that
+`MomentContext::split_stage0_personality()` can extract it reliably — without
+depending on markdown-header heuristics that break when personality content
+contains `## ` sub-headers (R13).
+
+### Delimiter tokens
+
+| Token | Value |
+|-------|-------|
+| START | `---STAGE0:PERSONALITY:START---` |
+| END   | `---STAGE0:PERSONALITY:END---` |
+
+### Emitted format
+
+When `Stage0Assembly::personality` is non-empty, `assemble()` and
+`assemble_with_truncation()` emit:
+
+```
+---STAGE0:PERSONALITY:START---
+## Personality
+
+<personality body>
+
+---STAGE0:PERSONALITY:END---
+```
+
+When personality is empty, **no delimiters are emitted**.
+
+### Parsing rules
+
+`split_stage0_personality()` in `moment.rs` follows this priority:
+
+1. **Delimiter path** (preferred): find `START` token, then `END` token.
+   Everything strictly between them is the personality section.
+2. **Legacy heuristic fallback**: if no delimiters are found, fall back to
+   finding `## Personality` and scanning for the next `\n## ` boundary.
+   This handles content produced before the delimiter protocol was introduced.
+
+### Invariants
+
+- Delimiters are emitted by this crate only (Stage0 assembly).
+- Personality is **never truncated** regardless of token budget.
+- The delimiter tokens themselves are **frozen** — do not change them without
+  a migration plan for existing persisted Stage0 output.
+- Only one personality block per Stage0 context (first `START`/`END` pair wins).

@@ -3,10 +3,10 @@
 //! Collects session context when an ACP session ends and submits
 //! a `PendingReviewRecord` to the daemon API for later review/promotion.
 //!
+//! Wired into the ACP worker's `handle_agent_stop` — fires a background
+//! task that submits to the daemon Local API with local-file fallback.
+//!
 //! See creator-memory-soul-lifecycle-v1.md §6.2.
-
-// These functions are public API for future integration - not yet wired into session flow
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

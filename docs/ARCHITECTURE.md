@@ -175,6 +175,8 @@ Cargo edges alone do not mean daemon HTTP or CLI commands call a crate. Known ga
 | Narrative gateway | Yes | `GET /v1/local/narrative/*` (read-only) — shipped V1.27. No write/mutation routes (fork is platform-only per PD-01). | — |
 | User knowledge store | Yes | SQLite persistence shipped V1.27; `GET /v1/local/references` still lists via **local-db** | KCA-004 |
 | Orchestration engine in daemon lifecycle | Yes (orchestration crate) | Engine/worker stubs (DF-38–DF-40) | tracker |
+| Author Intelligence loop (V1.29) | Yes (`nexus-creator-memory`, `nexus-orchestration`) | CLI `creator memory pending-*` / `creator soul refresh-experience` shipped. Orchestration `kb.extract_work` / `soul.experience.aggregate` registered; `acp_prompt` partially de-stubbed for preset paths. Full de-stub deferred (FL-D). | tracker |
+| KB extract queue (V1.29) | Yes (`nexus-local-db`, `nexus-orchestration`) | CLI `creator kb queue-extract` / `extract-status` shipped. Extraction runs via preset + `acp_prompt` IPC. | tracker |
 
 See [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../.agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) for remediation themes.
 
