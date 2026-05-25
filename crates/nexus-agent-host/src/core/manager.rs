@@ -281,8 +281,26 @@ impl crate::HostFacade for HostManager {
             mcp_servers: request.mcp_servers,
         };
 
-        // Launch the session on the provider
-        let handle = adapter.launch(launch_spec).await?;
+        // Launch the session on the provider with session_ms timeout (D-004).
+        // This bounds the total time for provider session creation including
+        // any provider-side initialization that may occur during launch.
+        let session_timeout = self.config.read().await.as_ref().map_or_else(
+            || crate::config::TimeoutConfig::default().session_duration(),
+            |c| c.timeouts.session_duration(),
+        );
+        let provider_id_for_timeout = request.provider_id.clone();
+        let handle = tokio::time::timeout(session_timeout, adapter.launch(launch_spec))
+            .await
+            .map_err(|_| {
+                HostError::timeout(
+                    "launch",
+                    format!(
+                        "session creation timed out after {}ms",
+                        session_timeout.as_millis()
+                    ),
+                )
+                .with_provider(provider_id_for_timeout)
+            })??;
 
         // Register in our session registry
         let mut sessions = self.sessions.write().await;
@@ -1515,6 +1533,122 @@ mod tests {
             err.category(),
             "policy_denied",
             "expected policy_denied, got: {err}"
+        );
+    }
+
+    // ── DF-21: Timeout enforcement tests ──────────────────────────────────
+
+    /// A mock provider whose `launch()` takes longer than the configured timeout.
+    struct SlowLaunchProvider {
+        provider_id: ProviderId,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for SlowLaunchProvider {
+        fn descriptor(&self) -> crate::capability::model::ProviderDescriptor {
+            crate::capability::model::ProviderDescriptor {
+                provider_id: self.provider_id.clone(),
+                display_name: "SlowLaunch".to_string(),
+                protocol_kind: crate::capability::model::ProtocolKind::Acp,
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+            }
+        }
+
+        async fn probe(
+            &self,
+            _request: ProbeRequest,
+        ) -> HostResult<crate::capability::model::ProviderHealth> {
+            Ok(crate::capability::model::ProviderHealth {
+                provider_id: self.provider_id.clone(),
+                available: true,
+                latency_ms: None,
+                message: None,
+            })
+        }
+
+        async fn launch(&self, _spec: LaunchSpec) -> HostResult<ManagedSessionHandle> {
+            // Simulate a slow provider that takes 10 seconds to launch
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            Ok(ManagedSessionHandle {
+                provider_id: self.provider_id.clone(),
+                session_id: HostSessionId::new(),
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+            })
+        }
+
+        async fn execute(
+            &self,
+            _session: &ManagedSessionHandle,
+            _op: crate::capability::model::HostOperation,
+        ) -> HostResult<HostEventStream> {
+            Ok(futures_util::stream::empty().boxed())
+        }
+
+        async fn cancel(
+            &self,
+            _session: &ManagedSessionHandle,
+            _op_id: HostOperationId,
+        ) -> HostResult<()> {
+            Ok(())
+        }
+
+        async fn shutdown(&self, _session: ManagedSessionHandle) -> HostResult<()> {
+            Ok(())
+        }
+
+        fn capabilities(&self) -> crate::capability::model::CapabilityDescriptor {
+            crate::capability::model::CapabilityDescriptor::acp_full()
+        }
+    }
+
+    /// Verify that `create_session()` enforces the `session_ms` timeout (DF-21).
+    /// A provider with a slow launch should trigger an OperationTimeout error.
+    #[tokio::test]
+    async fn create_session_enforces_session_timeout() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_path = temp_dir.path().join("config.toml");
+        // Configure a very short session_ms (50ms) so the slow provider times out
+        std::fs::write(&config_path, "[timeouts]\nsession_ms = 50\n").expect("write config");
+
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(SlowLaunchProvider {
+                provider_id: ProviderId::new("slow-mock"),
+            }))
+            .await;
+
+        manager
+            .start(HostStartConfig {
+                config_path,
+                workspace_root: temp_dir.path().to_path_buf(),
+                max_sessions: 4,
+                max_ops_per_session: 1,
+                timeouts: crate::config::TimeoutConfig::default(),
+            })
+            .await
+            .expect("start");
+
+        let result = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("slow-mock"),
+                cwd: temp_dir.path().to_path_buf(),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+            })
+            .await;
+
+        assert!(result.is_err(), "slow provider should time out");
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.category(),
+            "operation_timeout",
+            "expected operation_timeout, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("session creation timed out"),
+            "expected session creation timeout message, got: {err}"
         );
     }
 }
