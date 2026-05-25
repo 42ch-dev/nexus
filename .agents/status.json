@@ -1,89 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-26T14:30:00Z",
-  "plans": [
-    {
-      "id": "2026-05-26-v1.29-spec-tracker-hygiene",
-      "title": "V1.29 spec + tracker hygiene (V1.28 backfill + V1.29 normative)",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "category": "docs",
-      "working_branch": "feature/v1.29-spec-tracker-hygiene",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/local-cloud-crate-architecture.md",
-        "knowledge/deferred-features-cross-version-tracker.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-memory-session-review-loop",
-      "title": "FL-A1 — session capture → pending-review → CLI review loop",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-memory-session-review-loop",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/creator-schedule-and-core-context.md",
-        "knowledge/specs/local-runtime-boundary.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-stage0-structured-delimiters",
-      "title": "FL-A3 — Stage0 structured delimiters (R13)",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-stage0-structured-delimiters",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-soul-experience-preset",
-      "title": "FL-A2 — SOUL Experience preset + refresh-experience CLI",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-soul-experience-preset",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "depends_on": ["2026-05-26-v1.29-memory-session-review-loop"],
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/creator-schedule-and-core-context.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-kb-extract-queue-preset",
-      "title": "FL-B — KB extract queue + kb.extract_work preset (agent-driven)",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-kb-extract-queue-preset",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/entity-scope-model.md",
-        "knowledge/specs/orchestration-engine.md"
-      ]
-    },
-    {
-      "id": "2026-05-26-v1.29-agent-host-batch2-hardening",
-      "title": "Agent Host Batch 2 — DF-21–23, 27–28",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "category": "logic",
-      "working_branch": "feature/v1.29-agent-host-batch2-hardening",
-      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
-      "spec_refs": [
-        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
-        "knowledge/specs/agent-host.md"
-      ]
-    }
-  ],
+  "updated_at": "2026-05-26T16:30:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -94,13 +12,13 @@
     "integration_branch": "feature/v1.29-author-intelligence-and-hardening",
     "integration_merge_target": "main",
     "integration_branch_role": "V1.29 iteration integration — QC/QA Working branch",
-    "latest_shipped_iteration": "v1.28",
-    "latest_shipped_at": "2026-05-25T20:00:00Z",
-    "latest_active_iteration": "v1.29",
-    "latest_active_compass": "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.29",
+    "latest_shipped_at": "2026-05-26T16:30:00Z",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T15:45:00Z",
+      "updated_at": "2026-05-26T16:30:00Z",
       "total_open": 13,
       "by_severity": {
         "critical": 0,
@@ -126,7 +44,7 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.29 all 6 plans InReview. QC tri-review completed with Approve / Approve / Approve; 7 non-blocking V1.29 residuals registered. R11/R12/R13 closed in V1.29."
+      "note": "V1.29 shipped. 6 plans Done (archived). 7 V1.29 residuals (R14–R20) open for v1.30. R11/R12/R13 closed."
     }
   },
   "residual_findings": {
@@ -199,7 +117,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
-        "note": "Create SessionCapture at session start, record message/tool events, and close it on agent_stop. Non-blocking for V1.29 because pending-review rows still capture digest/task metadata."
+        "note": "Create SessionCapture at session start, record message/tool events, and close it on agent_stop."
       },
       {
         "id": "R15",
@@ -210,7 +128,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
-        "note": "Wrap queue claim in a transaction/claim helper and add concurrent claim coverage before multi-worker extraction."
+        "note": "Wrap queue claim in a transaction/claim helper and add concurrent claim coverage."
       },
       {
         "id": "R16",
@@ -221,7 +139,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
-        "note": "Complete job_id-driven mark_running/mark_done/mark_failed wiring and KeyBlock insertion path before enabling default automated extraction."
+        "note": "Complete job_id-driven mark_running/mark_done/mark_failed wiring and KeyBlock insertion."
       },
       {
         "id": "R17",
@@ -232,7 +150,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
-        "note": "R11 baseline is fixed by best-effort Drop kill; follow-up should retain child handles or add cross-platform termination/reaping semantics."
+        "note": "R11 baseline fixed; follow-up to retain child handles or add cross-platform termination."
       },
       {
         "id": "R18",
@@ -243,7 +161,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
-        "note": "Replace with UUIDv4-style IDs while preserving the xj_ prefix and update tests/CHECK constraints."
+        "note": "Replace with UUIDv4-style IDs while preserving the xj_ prefix."
       },
       {
         "id": "R19",
@@ -254,7 +172,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
-        "note": "Extract KB command handlers to a dedicated creator/kb.rs module before adding more creator subcommands."
+        "note": "Extract KB command handlers to a dedicated creator/kb.rs module."
       },
       {
         "id": "R20",
