@@ -59,6 +59,24 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 **Clippy:** Workspace-level config in root `Cargo.toml` enables `pedantic` + `nursery` as `warn`, inherited by all crates. CI runs `cargo clippy --all -- -D warnings`. When fixing clippy errors, auto-fix first (`cargo clippy --fix --allow-dirty --allow-staged`), then handle residual manually. **Do not suppress** with `#[allow(...)]` without a brief justification comment. **Do not change runtime behavior** when fixing lint errors.
 
+**Rust `target/` disk hygiene:** `target/debug` is gitignored but grows without bound on macOS/Linux when the workspace is rebuilt often. Stale `.o` files under `target/debug/deps` and old `target/debug/incremental/*` hashes (e.g. after `pnpm run codegen`, crate renames, or repeated `cargo * --all`) are the usual cause — not a single bug. CI uses ephemeral runners + `rust-cache`; **local developers and agents must not mirror CI’s `--all` cadence during iteration.**
+
+| Phase | Command scope |
+|-------|----------------|
+| **Daily iteration** (default) | `cargo check -p <crate>`, `cargo test -p <crate>`, `cargo clippy -p <crate> -- -D warnings` for the crate you are editing |
+| **Pre-commit / gate** | `cargo clippy --all -- -D warnings`, `cargo test --all` (matches CI) |
+| **After codegen or large contract/workspace graph changes** | Prefer `cargo clean` once, then rebuild scoped or `--all` as needed — avoids piling orphan artifacts (including legacy `nexus42d` names) |
+
+**Cleanup (repo root):**
+
+- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected).
+- **Periodic maintenance (optional):** `cargo install cargo-sweep` then `cargo sweep -i 14` (remove artifacts unused for 14+ days) when a full clean is too disruptive.
+- **When to clean:** `target/debug` over ~50 GiB, filesystem slowness under `target/`, end of a large plan slice, or after deleting/renaming crates.
+
+**Anti-patterns:** Running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
+
+**Optional:** Set `CARGO_TARGET_DIR` (shell or `.cargo/config.toml` `build.target-dir`) to a large disk if the repo volume is space-constrained — this relocates growth, it does not prevent it; hygiene rules above still apply.
+
 **Git worktrees:** Place every additional `git worktree` checkout under this repository root at `.worktrees/<name>/` only (`.worktrees/` is gitignored).
 
 ## Versioning Policy
