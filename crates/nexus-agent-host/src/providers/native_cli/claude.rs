@@ -134,6 +134,10 @@ pub struct ClaudeCliProvider {
     /// When true, stdin/stdout are kept open and responses are delimited
     /// by empty lines. When false (default), each execute spawns a new child.
     persistent: bool,
+    /// PIDs of spawned persistent children, tracked for Drop-time cleanup (R-011).
+    /// Synchronized with `sessions` map: added on spawn, removed on shutdown kill.
+    /// Uses `std::sync::Mutex` (not tokio) so `Drop` can access it synchronously.
+    persistent_pids: std::sync::Mutex<Vec<u32>>,
 }
 
 impl ClaudeCliProvider {
@@ -156,6 +160,7 @@ impl ClaudeCliProvider {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
             persistent: false,
+            persistent_pids: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -183,6 +188,7 @@ impl ClaudeCliProvider {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
             persistent: true,
+            persistent_pids: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -635,13 +641,29 @@ impl ProviderAdapter for ClaudeCliProvider {
 
     async fn cancel(
         &self,
-        _session: &ManagedSessionHandle,
+        session: &ManagedSessionHandle,
         _op_id: HostOperationId,
     ) -> HostResult<()> {
-        // For persistent-mode children, there's no cancel since the child
-        // stays alive between operations. The event stream will end on the
-        // next delimiter or timeout.
-        // For per-invocation mode, the child exits when stdin is closed.
+        // R-012: For persistent mode, kill the persistent child to abort the
+        // in-progress operation. The next execute() will spawn a fresh child.
+        // For per-invocation mode, the child exits when stdin is closed —
+        // nothing to cancel.
+        if self.persistent {
+            let mut sessions = self.sessions.write().await;
+            if let Some(ns) = sessions.get_mut(&session.session_id) {
+                if let Some(mut handles) = ns.persistent_handles.take() {
+                    tracing::info!(
+                        session_id = %session.session_id,
+                        pid = handles.pid,
+                        "Cancel: killing persistent native CLI child"
+                    );
+                    handles.kill().await;
+                    // Remove from Drop-tracker (R-011).
+                    let mut pids = self.persistent_pids.lock().expect("persistent_pids lock");
+                    pids.retain(|&p| p != handles.pid);
+                }
+            }
+        }
         tracing::info!(
             provider_id = %self.provider_id,
             persistent = self.persistent,
@@ -665,6 +687,9 @@ impl ProviderAdapter for ClaudeCliProvider {
                     );
                     handles.kill().await;
                     handles.wait_with_timeout(shutdown_dur).await;
+                    // Remove from Drop-tracker since we've already killed it (R-011).
+                    let mut pids = self.persistent_pids.lock().expect("persistent_pids lock");
+                    pids.retain(|&p| p != handles.pid);
                 }
             }
         }
@@ -678,6 +703,45 @@ impl ProviderAdapter for ClaudeCliProvider {
 
     fn capabilities(&self) -> CapabilityDescriptor {
         CapabilityDescriptor::native_cli_limited()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R-011: Drop — kill lingering persistent children when provider is dropped
+// ---------------------------------------------------------------------------
+
+impl Drop for ClaudeCliProvider {
+    fn drop(&mut self) {
+        let pids = self.persistent_pids.lock().expect("persistent_pids lock");
+        if pids.is_empty() {
+            return;
+        }
+        tracing::warn!(
+            provider_id = %self.provider_id,
+            pids = ?*pids,
+            "ClaudeCliProvider dropped with {} alive persistent children — killing",
+            pids.len()
+        );
+        // Best-effort synchronous kill using the `kill` command.
+        // We don't have Child handles (those are behind tokio RwLock which
+        // can't be acquired synchronously), so we use OS process kill.
+        for &pid in pids.iter() {
+            #[cfg(unix)]
+            {
+                let pid_str = pid.to_string();
+                let _ = std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(&pid_str)
+                    .status();
+            }
+            #[cfg(not(unix))]
+            {
+                tracing::warn!(
+                    pid,
+                    "Persistent child cleanup during Drop is Unix-only; child may be orphaned"
+                );
+            }
+        }
     }
 }
 
@@ -869,7 +933,7 @@ impl ClaudeCliProvider {
         let stream =
             Self::build_delimited_event_stream(stdout.clone(), op_id, session.session_id.clone());
 
-        // Store persistent handles in the session
+        // Store persistent handles in the session and track PID for Drop cleanup (R-011).
         {
             let mut sessions = self.sessions.write().await;
             if let Some(ns) = sessions.get_mut(&session.session_id) {
@@ -880,6 +944,10 @@ impl ClaudeCliProvider {
                     pid,
                 });
             }
+        }
+        {
+            let mut pids = self.persistent_pids.lock().expect("persistent_pids lock");
+            pids.push(pid);
         }
 
         tracing::info!(
