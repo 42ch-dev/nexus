@@ -22,9 +22,9 @@ use nexus_moment_context_assembly::{
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
 
-// Four-domain Moment assembly — in-memory knowledge store
-// (narrative and KB use persistent stores from nexus-local-db)
-use nexus_knowledge::InMemoryKnowledgeStore;
+// Four-domain Moment assembly — persistent knowledge store
+// (narrative, KB, and knowledge all use persistent stores from nexus-local-db)
+use nexus_local_db::SqliteKnowledgeStore;
 
 #[cfg(test)]
 use crate::domain::DegradationPolicy;
@@ -511,11 +511,10 @@ async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
     Ok(pool)
 }
 
-/// Run four-domain Moment assembly using persistent narrative + KB stores.
+/// Run four-domain Moment assembly using persistent narrative + KB + knowledge stores.
 ///
-/// Uses `SqliteNarrativeGateway` and `SqliteKbStore` from `nexus-local-db`
-/// for world state, timeline, and KB data. Knowledge slice uses in-memory
-/// store (limitation: no persistent `UserKnowledgeStore` in V1.26).
+/// Uses `SqliteNarrativeGateway`, `SqliteKbStore`, and `SqliteKnowledgeStore`
+/// from `nexus-local-db` for all four domain slices.
 ///
 /// # Errors
 ///
@@ -530,8 +529,8 @@ pub async fn run_assemble_moment(
 ) -> Result<MomentContext> {
     let pool = open_shared_pool(config).await?;
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-    let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool);
-    let knowledge = InMemoryKnowledgeStore::new();
+    let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+    let knowledge = SqliteKnowledgeStore::new(pool);
 
     let wid = world_id.unwrap_or("wld_default");
     let uid = user_id.unwrap_or("user_default");
@@ -731,7 +730,7 @@ mod tests {
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = InMemoryKnowledgeStore::new();
+        let knowledge = SqliteKnowledgeStore::new(pool.clone());
 
         // Build request
         let stage0 = Stage0Assembly {
@@ -795,7 +794,7 @@ mod tests {
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let knowledge = InMemoryKnowledgeStore::new();
+        let knowledge = SqliteKnowledgeStore::new(pool.clone());
 
         let stage0 = Stage0Assembly {
             personality: "Test.".to_string(),
@@ -821,6 +820,167 @@ mod tests {
         assert!(
             ctx.world_kb.is_none(),
             "world_kb should be absent for unknown world"
+        );
+    }
+
+    /// C3.1: Persistent E2E — demo seed + assemble-moment, all four domains non-empty.
+    ///
+    /// Seeds a world, event, KB block, and knowledge entry into a fresh DB,
+    /// then runs `assemble_moment` and verifies all four domain sections
+    /// are present (world state, timeline, world KB, user knowledge).
+    #[tokio::test]
+    async fn assemble_moment_persistent_four_domains() {
+        use nexus_knowledge::{KnowledgeEntry, KnowledgeStore, KnowledgeTag};
+
+        // Create fresh SQLite DB
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        nexus_local_db::seed_versions(&pool).await.unwrap();
+
+        // Seed demo data: world + event + KB block (same as demo seed)
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_demo",
+            "ctr_test",
+            "Demo World",
+            "demo-world",
+            "private",
+            "manual",
+        )
+        .await;
+        nexus_local_db::narrative_gateway::seed::event(
+            &pool,
+            "evt_demo_1",
+            "wld_demo",
+            "fbk_root",
+            "story_advance",
+            0,
+        )
+        .await;
+        nexus_local_db::kb_store::seed::key_block(
+            &pool,
+            "kb_demo_hero",
+            "wld_demo",
+            "Character",
+            "Hero",
+            "confirmed",
+        )
+        .await;
+
+        // Seed knowledge entry (persistent)
+        let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool.clone());
+        let entry = KnowledgeEntry::new(
+            "user_default",
+            vec![
+                KnowledgeTag::new("demo"),
+                KnowledgeTag::new("worldbuilding"),
+            ],
+            "Demo knowledge entry for testing Moment context assembly.",
+        );
+        knowledge_store.store(entry).await.unwrap();
+
+        // Build persistent stores from the pool
+        let narrative =
+            nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+        let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let knowledge = nexus_local_db::SqliteKnowledgeStore::new(pool);
+
+        // Build request
+        let stage0 = Stage0Assembly {
+            personality: "Test personality.".to_string(),
+            experience: "Test experience.".to_string(),
+            long_term_memories: Vec::new(),
+            fragment_keywords: Vec::new(),
+            system_prefix: String::new(),
+            user_prompt: "Test prompt.".to_string(),
+            max_tokens: None,
+        };
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_demo")
+            .with_user("user_default");
+
+        // Run assembly
+        let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+
+        // Verify ALL four domains are present
+        assert!(
+            ctx.world_state.is_some(),
+            "world_state should be present from persistent store"
+        );
+        assert!(
+            ctx.world_state.as_ref().unwrap().contains("Demo World"),
+            "world state should contain demo title"
+        );
+
+        assert!(
+            ctx.timeline.is_some(),
+            "timeline should be present from persistent store"
+        );
+
+        assert!(
+            ctx.world_kb.is_some(),
+            "world_kb should be present from persistent store"
+        );
+        assert!(
+            ctx.world_kb.as_ref().unwrap().contains("Hero"),
+            "KB should contain demo key block name"
+        );
+
+        assert!(
+            ctx.user_knowledge.is_some(),
+            "user_knowledge should be present from persistent store"
+        );
+        assert!(
+            ctx.user_knowledge
+                .as_ref()
+                .unwrap()
+                .contains("Demo knowledge"),
+            "user knowledge should contain demo entry"
+        );
+
+        // Verify full context
+        let full = ctx.to_full_context();
+        assert!(full.contains("## World State"));
+        assert!(full.contains("## Timeline"));
+        assert!(full.contains("## World Knowledge Base"));
+        assert!(full.contains("## User Knowledge"));
+    }
+
+    /// C3.2: Restart test — second invocation sees same knowledge.
+    ///
+    /// Creates two separate store instances from the same DB file,
+    /// simulating a process restart. Verifies knowledge persists.
+    #[tokio::test]
+    async fn assemble_moment_restart_sees_same_knowledge() {
+        use nexus_knowledge::{KnowledgeEntry, KnowledgeStore, KnowledgeTag};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        nexus_local_db::seed_versions(&pool).await.unwrap();
+
+        // Process 1: seed knowledge
+        let store1 = nexus_local_db::SqliteKnowledgeStore::new(pool);
+        let entry = KnowledgeEntry::new(
+            "user_default",
+            vec![KnowledgeTag::new("restart-test")],
+            "Knowledge that survives restart.",
+        );
+        let id = entry.id.clone();
+        store1.store(entry).await.unwrap();
+        drop(store1);
+
+        // Process 2: read knowledge (simulating restart)
+        let pool2 = nexus_local_db::open_pool(&db_path).await.unwrap();
+        let store2 = nexus_local_db::SqliteKnowledgeStore::new(pool2);
+        let retrieved = store2.get("user_default", &id).await.unwrap();
+        assert!(retrieved.is_some());
+        assert_eq!(
+            retrieved.unwrap().content,
+            "Knowledge that survives restart."
         );
     }
 

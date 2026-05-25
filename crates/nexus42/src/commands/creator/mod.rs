@@ -3,11 +3,12 @@
 //! Creator is a V1.0 first-class citizen (roadmap §3.1.1, §3.1.2).
 //! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
 
+pub mod knowledge;
 pub mod memory;
 pub mod reference;
 pub mod soul;
+pub mod world;
 
-use crate::api::DaemonClient;
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
 use crate::config::{
@@ -22,6 +23,7 @@ use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
 use nexus_kb::KbStore;
+use nexus_knowledge::KnowledgeStore;
 use serde::Deserialize;
 use soul::SoulCommand;
 use std::path::PathBuf;
@@ -341,6 +343,8 @@ pub enum CloneSourceArg {
 }
 
 /// Response from the daemon clone endpoint (formerly in `commands::clone`).
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct WorldCloneResponse {
     success: bool,
@@ -351,6 +355,8 @@ struct WorldCloneResponse {
 }
 
 /// Validate `WorldId` format: must start with 'wld_' followed by alphanumeric characters.
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 fn validate_world_id(s: &str) -> std::result::Result<String, String> {
     if !s.starts_with("wld_") {
         return Err(format!("WorldId must start with 'wld_' prefix (got '{s}')"));
@@ -368,6 +374,8 @@ fn validate_world_id(s: &str) -> std::result::Result<String, String> {
 }
 
 /// Validate world reference format (accepts wld_* and numeric).
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 fn validate_world_ref(s: &str) -> std::result::Result<String, String> {
     if s.starts_with("wld_") {
         return validate_world_id(s);
@@ -379,6 +387,8 @@ fn validate_world_ref(s: &str) -> std::result::Result<String, String> {
 }
 
 /// Confirm clone interactively (or skip with --yes).
+// Kept for future platform clone support; unused since V1.27 hard-deprecation.
+#[allow(dead_code)]
 fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
     if yes {
         return true;
@@ -397,71 +407,20 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
         })
 }
 
-/// Run the clone command (formerly in `commands::clone`).
-async fn run_clone(args: CloneArgs, config: &CliConfig) -> Result<()> {
-    let world_ref = validate_world_ref(&args.world_ref).map_err(CliError::Other)?;
-
-    if matches!(args.source, CloneSourceArg::Platform) {
-        let mode = config.runtime_mode();
-        if mode.is_local_only() {
-            return Err(CliError::Other(format!(
-                "Clone from platform is not available in {mode} mode. \
-                 Use --source local for local clone, or switch runtime mode."
-            )));
-        }
-    }
-
-    let body = serde_json::json!({
-        "world_ref": world_ref,
-        "source": match args.source {
-            CloneSourceArg::Platform => "platform",
-            CloneSourceArg::Local => "local",
-        },
-        "schema_version": 1,
-    });
-
-    if args.dry_run {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&body).map_err(CliError::Json)?
-        );
-        return Ok(());
-    }
-
-    if !confirm_clone(args.yes, &world_ref, args.source) {
-        println!("Clone cancelled.");
-        return Ok(());
-    }
-
-    let client = DaemonClient::from_config(config);
-    if !client.health_check().await? {
-        return Err(CliError::DaemonNotRunning);
-    }
-
-    eprintln!(
-        "Warning: daemon endpoint /v1/local/world/clone not yet implemented. Clone will fail if attempted."
-    );
-
-    let resp = client
-        .post::<WorldCloneResponse, serde_json::Value>("/v1/local/world/clone", &body)
-        .await?;
-
-    if resp.success {
-        println!("World clone completed.");
-        if let Some(id) = resp.world_id {
-            println!("  world_id:        {id}");
-        }
-        if let Some(rev) = resp.world_revision {
-            println!("  world_revision:  {rev}");
-        }
-        if let Some(at) = &resp.cloned_at {
-            println!("  cloned_at:       {at}");
-        }
-    } else if let Some(err) = resp.error {
-        return Err(CliError::Other(format!("World clone failed: {err}")));
-    }
-
-    Ok(())
+/// Run the clone command — hard-deprecated stub (V1.27 H1).
+///
+/// World cloning is a platform-only operation that cannot be performed
+/// locally by the CLI. The `/v1/local/world/clone` endpoint never existed.
+/// Users should use the platform UI or a future `nexus42 sync` command
+/// to pull a world skeleton from the platform.
+fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
+    Err(CliError::Other(
+        "creator workspace clone is not available locally. \
+         World cloning is a platform-only operation. \
+         Use the platform UI or a future `nexus42 sync pull --world <id>` \
+         to pull a world skeleton."
+            .into(),
+    ))
 }
 
 // ── End inlined types ────────────────────────────────────────────────
@@ -555,10 +514,33 @@ pub enum CreatorCommand {
     /// **This is the CLI local work KB index**, NOT `nexus-kb` (World KB) or
     /// `nexus-knowledge` (User knowledge). See entity-scope-model §5.3.
     ///
-    /// `--scope world` (narrative KB via nexus-kb + nexus-narrative) is coming soon.
+    /// `--scope world` reads and writes are implemented (narrative KB via nexus-kb + nexus-narrative).
     Kb {
         #[command(subcommand)]
         command: KbCommand,
+    },
+
+    /// Narrative world management (create worlds, add events, list)
+    World {
+        #[command(subcommand)]
+        command: world::WorldCommand,
+    },
+
+    /// User-scoped knowledge management (add, list, search)
+    Knowledge {
+        #[command(subcommand)]
+        command: knowledge::KnowledgeCommand,
+    },
+
+    /// Seed demo data: creates a demo world, event, KB block, and knowledge entry.
+    ///
+    /// Idempotent by default — skips if demo world already exists.
+    /// Use --force to recreate (deletes existing demo data first).
+    #[command(name = "demo-seed")]
+    DemoSeed {
+        /// Force recreation of demo data (deletes existing demo world)
+        #[arg(long)]
+        force: bool,
     },
 
     /// Logout and clear creator credentials
@@ -631,6 +613,12 @@ pub enum KbCommand {
         /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
+        /// Block type for `--scope world` (e.g. Character, Scene, Item)
+        #[arg(long)]
+        block_type: Option<String>,
     },
 
     /// Remove a local work-scope entry
@@ -640,6 +628,9 @@ pub enum KbCommand {
         /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
+        /// World ID for `--scope world` (required when scope is `world`)
+        #[arg(long)]
+        world_id: Option<String>,
     },
 }
 
@@ -668,7 +659,8 @@ pub enum CreatorWorkspaceCommand {
         #[command(subcommand)]
         command: InitCommand,
     },
-    /// Clone a world into the workspace (migrated from `nexus42 clone`)
+    /// Clone a world into the workspace (DEPRECATED — platform-only, not implemented locally)
+    #[command(hide = true)]
     Clone {
         /// World reference to clone (e.g. `wld_abc123`)
         world_ref: String,
@@ -741,6 +733,9 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Memory { command } => memory::run(command, config).await,
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => run_kb(command, config).await,
+        CreatorCommand::World { command } => world::run(command, config).await,
+        CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
+        CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config).await,
     }
 }
@@ -756,7 +751,8 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
 /// Handle local work-scope KB commands (CLI local work file index).
 ///
 /// All commands default to `scope=work`. When `scope=world` is requested,
-/// a deferred message is printed (World KB not yet implemented).
+/// reads (list/search/show) are served via `nexus-kb` `SQLite` stores;
+/// writes (add/remove) print a deferred message.
 /// The work-scope implementation is a local file index only — it does not
 /// interact with `nexus-kb` or `nexus-knowledge` crates.
 async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
@@ -777,21 +773,29 @@ async fn run_kb(cmd: KbCommand, config: &CliConfig) -> Result<()> {
             scope,
             world_id,
         } => kb_show(config, &entry_id, &scope, world_id.as_deref()).await,
-        KbCommand::Add { file, title, scope } => {
-            kb_add(config, &file, title.as_deref(), &scope).await
+        KbCommand::Add {
+            file,
+            title,
+            scope,
+            world_id,
+            block_type,
+        } => {
+            kb_add(
+                config,
+                &file,
+                title.as_deref(),
+                &scope,
+                world_id.as_deref(),
+                block_type.as_deref(),
+            )
+            .await
         }
-        KbCommand::Remove { entry_id, scope } => kb_remove(config, &entry_id, &scope).await,
+        KbCommand::Remove {
+            entry_id,
+            scope,
+            world_id,
+        } => kb_remove(config, &entry_id, &scope, world_id.as_deref()).await,
     }
-}
-
-/// Deferred message for `world` scope write commands (add/remove).
-///
-/// Write operations for world scope are out of scope for V1.25.
-fn world_scope_write_deferred() {
-    println!(
-        "World scope write operations (add/remove) are not yet supported. \
-         Use --scope work for local file index operations."
-    );
 }
 
 /// Require `--world-id` when `--scope world` is used. Returns the `world_id` or an error.
@@ -817,6 +821,23 @@ async fn open_world_kb_store(
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
     Ok(nexus_local_db::kb_store::SqliteKbStore::new(pool))
+}
+
+/// Parse a block type string from CLI argument.
+fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
+    match s {
+        "Character" => Ok(nexus_contracts::BlockType::Character),
+        "Ability" => Ok(nexus_contracts::BlockType::Ability),
+        "Scene" => Ok(nexus_contracts::BlockType::Scene),
+        "Organization" => Ok(nexus_contracts::BlockType::Organization),
+        "Item" => Ok(nexus_contracts::BlockType::Item),
+        "Conflict" => Ok(nexus_contracts::BlockType::Conflict),
+        "InfoPoint" => Ok(nexus_contracts::BlockType::InfoPoint),
+        "Event" => Ok(nexus_contracts::BlockType::Event),
+        _ => Err(CliError::Other(format!(
+            "Unknown block_type '{s}'. Valid: Character, Ability, Scene, Organization, Item, Conflict, InfoPoint, Event"
+        ))),
+    }
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
@@ -1155,19 +1176,56 @@ async fn kb_show(
     Ok(())
 }
 
-/// `kb add` implementation — copy file into local work index, update index.
+/// `kb add` implementation — copy file into local work index, or add world KB block.
 ///
-/// Writes the index update to a temp file first, then copies the entry file,
+/// For work scope: writes the index update to a temp file first, then copies the entry file,
 /// then atomically renames the index. This prevents orphan entry files on
 /// partial failure (W2).
+///
+/// For world scope: creates a `KeyBlock` via `SqliteKbStore::insert_key_block`.
 async fn kb_add(
     config: &CliConfig,
     file: &std::path::Path,
     title: Option<&str>,
     scope: &KbScope,
+    world_id: Option<&str>,
+    block_type: Option<&str>,
 ) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_write_deferred();
+        let wid = require_world_id(world_id)?;
+        let bt_str = block_type.unwrap_or("InfoPoint");
+        let bt = parse_block_type_cli(bt_str)?;
+        let entry_title = title
+            .map(std::string::ToString::to_string)
+            .or_else(|| file.file_stem().map(|s| s.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "untitled".to_string());
+
+        let store = open_world_kb_store(config).await?;
+        let mut kb = nexus_kb::key_block::KeyBlock::new(&wid, bt, &entry_title);
+
+        // Read file content as summary if provided
+        if file.exists() {
+            let content = std::fs::read_to_string(file)?;
+            let summary = if content.len() > 500 {
+                format!("{}...", &content[..500])
+            } else {
+                content
+            };
+            kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+                summary: Some(summary),
+                attributes: None,
+                tags: None,
+            });
+        }
+
+        let result = store
+            .insert_key_block(kb)
+            .await
+            .map_err(|e| CliError::Other(format!("World KB add failed for {wid}: {e}")))?;
+        println!("✓ Key block added: {}", result.key_block_id);
+        println!("  World:  {wid}");
+        println!("  Type:   {bt_str}");
+        println!("  Name:   {entry_title}");
         return Ok(());
     }
     if !file.exists() {
@@ -1246,13 +1304,25 @@ async fn kb_add(
     Ok(())
 }
 
-/// `kb remove` implementation — delete a local work-scope entry.
+/// `kb remove` implementation — delete a local work-scope entry or world KB block.
 ///
 /// Tries the daemon API first; falls back to direct FS removal
 /// (delete entry file + update index atomically).
-async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Result<()> {
+async fn kb_remove(
+    config: &CliConfig,
+    entry_id: &str,
+    scope: &KbScope,
+    world_id: Option<&str>,
+) -> Result<()> {
     if scope == &KbScope::World {
-        world_scope_write_deferred();
+        let wid = require_world_id(world_id)?;
+        let store = open_world_kb_store(config).await?;
+        store.delete_key_block(entry_id).await.map_err(|e| {
+            CliError::Other(format!(
+                "World KB remove failed for {entry_id} in {wid}: {e}"
+            ))
+        })?;
+        println!("✓ Key block removed: {entry_id}");
         return Ok(());
     }
     // F001: Validate entry_id before use.
@@ -1304,6 +1374,121 @@ async fn kb_remove(config: &CliConfig, entry_id: &str, scope: &KbScope) -> Resul
     }
 
     println!("✓ Local work entry removed: {entry_id}");
+    Ok(())
+}
+
+// ── Demo seed ───────────────────────────────────────────────────────
+
+/// Seed demo data for testing and development.
+///
+/// Creates a demo world, event, KB block, and knowledge entry using
+/// Plan 1 write APIs + knowledge store. Idempotent unless `--force`.
+async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(CliError::CreatorNotSelected)?
+        .to_string();
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+
+    let demo_title = "Demo World";
+    let demo_slug = "demo-world";
+
+    // Check if demo world already exists
+    // SAFETY: SELECT against known narrative_worlds table schema
+    let existing_id: Option<String> = sqlx::query_scalar(
+        "SELECT world_id FROM narrative_worlds WHERE slug = ? AND owner_creator_id = ? LIMIT 1",
+    )
+    .bind(demo_slug)
+    .bind(&creator_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to check existing demo: {e}")))?
+    .flatten();
+
+    if let Some(ref wid) = existing_id {
+        if !force {
+            println!("Demo world already exists: {wid}");
+            println!("Use --force to recreate demo data.");
+            return Ok(());
+        }
+        // Delete existing demo data (cascade handles events, KB blocks)
+        // SAFETY: DELETE against known tables
+        sqlx::query("DELETE FROM knowledge_entries WHERE user_id = 'user_default'")
+            .execute(&pool)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to clean demo knowledge: {e}")))?;
+        sqlx::query("DELETE FROM narrative_worlds WHERE world_id = ?")
+            .bind(wid)
+            .execute(&pool)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to clean demo world: {e}")))?;
+        println!("Deleted existing demo data.");
+    }
+
+    // 1. Create demo world
+    let world = nexus_local_db::create_world(
+        &pool,
+        &creator_id,
+        demo_title,
+        demo_slug,
+        "private",
+        "manual",
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to create demo world: {e}")))?;
+    println!("✓ Demo world: {}", world.world_id);
+
+    // 2. Append demo event
+    let event = nexus_local_db::append_event(
+        &pool,
+        &world.world_id,
+        &world.root_fork_branch_id,
+        "story_advance",
+        Some("The Journey Begins"),
+        Some("A hero embarks on their first adventure."),
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to create demo event: {e}")))?;
+    println!("✓ Demo event: {}", event.event_id);
+
+    // 3. Create demo KB block
+    let mut kb = nexus_kb::key_block::KeyBlock::new(
+        &world.world_id,
+        nexus_contracts::BlockType::Character,
+        "Hero",
+    );
+    kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+        summary: Some("The protagonist of the demo world.".to_string()),
+        attributes: None,
+        tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
+    });
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+    let kb_result = kb_store
+        .insert_key_block(kb)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to create demo KB block: {e}")))?;
+    println!("✓ Demo KB block: {}", kb_result.key_block_id);
+
+    // 4. Create demo knowledge entry
+    let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool);
+    let entry = nexus_knowledge::KnowledgeEntry::new(
+        "user_default",
+        vec![
+            nexus_knowledge::KnowledgeTag::new("demo"),
+            nexus_knowledge::KnowledgeTag::new("worldbuilding"),
+        ],
+        "Demo knowledge entry for Moment context assembly testing.",
+    );
+    let stored = knowledge_store
+        .store(entry)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to create demo knowledge: {e}")))?;
+    println!("✓ Demo knowledge: {}", stored.id);
+
+    println!();
+    println!("Demo seed complete. Run `nexus42 platform context assemble-moment` to verify.");
     Ok(())
 }
 
@@ -1509,7 +1694,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 dry_run,
                 yes,
             };
-            run_clone(args, config).await
+            run_clone(args, config)
         }
         CreatorWorkspaceCommand::Link { workspace_slug } => {
             println!("Coming soon: `creator workspace link` — link workspace: {workspace_slug}");
