@@ -197,6 +197,41 @@
         "note": "Closed: K1.3 SqliteKbStore tests land; CLI uses persistent store. QA verified 11 tests pass.",
         "closed_at": "2026-05-23T16:00:00Z"
       }
+    ],
+    "2026-05-25-v1.28-context-and-agent-host": [
+      {
+        "id": "R11",
+        "title": "Persistent child processes survive daemon crash — Drop does not kill",
+        "severity": "low",
+        "source": "qc3 W-002",
+        "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.28",
+        "note": "Add Drop impl with start_kill() for persistent child. Low risk in pre-release local-only daemon."
+      },
+      {
+        "id": "R12",
+        "title": "Persistent mode cancel() is a no-op — stuck operations require timeout",
+        "severity": "nit",
+        "source": "qc3 W-003",
+        "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.28",
+        "note": "Implement cancel() to kill child or drain stdin. Acceptable in pre-release."
+      },
+      {
+        "id": "R13",
+        "title": "split_stage0_personality uses markdown-header heuristic — brittle to future formatting changes",
+        "severity": "low",
+        "source": "qc2 W-001",
+        "scope": "crates/nexus-moment-context-assembly/src/moment.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "post-v1.28",
+        "note": "Test-covered for current format. Consider structured delimiter if stage0 format evolves."
+      }
     ]
   }
 }
