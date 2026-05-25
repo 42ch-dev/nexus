@@ -963,4 +963,79 @@ mod tests {
             _ => panic!("expected PlanUpdate event"),
         }
     }
+
+    // ── DF-19 permission handling tests (AH1.1 / AH1.2) ──────────────
+    //
+    // The permission handler is wired in `AcpProvider::new()` and delegates
+    // to `HostPermissionResolver::resolve()`. The handler is synchronous
+    // (`Fn(&str) -> AcpPermissionOutcome`) so it CANNOT hang or timeout —
+    // it returns immediately with a structured allow/deny/default outcome.
+    //
+    // The SDK's `on_receive_request` handler calls this closure on the
+    // LocalSet bridge thread and sends the response back to the agent.
+    // No infinite wait is possible because:
+    // 1. The handler callback is `Fn(&str) -> AcpPermissionOutcome` (sync)
+    // 2. If no handler is registered, the SDK denies by default
+    // 3. The `stream_prompt` streaming path uses cumulative timeouts (D-004)
+    //
+    // Timeout/cancel path: If the agent does not process the permission
+    // response in time, the streaming timeout (prompt_ms) fires and emits
+    // OpFailed. The host then sends a best-effort cancel (QC3 F-002).
+
+    /// Verify that the permission handler closure is synchronous and cannot
+    /// hang — it must return an outcome immediately.
+    #[test]
+    fn permission_handler_returns_immediately() {
+        use crate::config::PolicyConfig;
+        use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
+
+        let config = PolicyConfig::default();
+        let resolver = HostPermissionResolver::new_native_only(&config);
+
+        // Build the same handler closure that AcpProvider::new() creates
+        let classifier = AutoToolRiskClassifier::new();
+        let provider_id = ProviderId::new("test-acp");
+        let handler: Box<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync> =
+            Box::new(move |tool_name: &str| {
+                let risk = classifier.classify_or_default(tool_name);
+                let outcome =
+                    resolver.resolve(ProtocolKind::Acp, &provider_id.0, tool_name, Some(risk));
+                match outcome {
+                    PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
+                    PermissionOutcome::Ask | PermissionOutcome::Deny => AcpPermissionOutcome::Deny,
+                }
+            });
+
+        // Verify the handler returns immediately for various tool names
+        // (no async, no blocking, no timeout possible)
+        assert_eq!(handler("file_read"), AcpPermissionOutcome::Deny); // no ACP policy → deny
+        assert_eq!(handler("file_delete"), AcpPermissionOutcome::Deny); // destructive → deny
+        assert_eq!(handler("unknown_tool"), AcpPermissionOutcome::Deny); // unknown → deny
+    }
+
+    /// Verify that the permission handler for ACP without a loaded policy
+    /// defaults to Deny (safe default — no infinite wait, no hang).
+    #[test]
+    fn permission_handler_no_policy_defaults_deny() {
+        use crate::config::PolicyConfig;
+        use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
+
+        let config = PolicyConfig::default();
+        let resolver = HostPermissionResolver::new_native_only(&config);
+        let _classifier = AutoToolRiskClassifier::new(); // present for structural parity but not used in this test
+        let provider_id = ProviderId::new("test-acp");
+
+        // Without ACP policy loaded, all ACP permission requests default to Deny
+        let outcome = resolver.resolve(
+            ProtocolKind::Acp,
+            &provider_id.0,
+            "terminal.create",
+            Some(crate::capability::risk::ToolRisk::Write),
+        );
+        assert_eq!(
+            outcome,
+            PermissionOutcome::Deny,
+            "ACP without policy must default to Deny (no hang)"
+        );
+    }
 }

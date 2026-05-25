@@ -372,15 +372,30 @@ When a provider does not support model/mode changes at the SDK level:
 
 #### 4.2.1 Multi-turn session support (D-001)
 
-`ClaudeCliProvider` must maintain a persistent child process across `execute()` calls within the same session:
+`ClaudeCliProvider` supports two operating modes for session continuity:
 
-1. `launch()` spawns the child process and stores it in a session-scoped `NativeSession { child, stdin, stdout }`.
-2. `stdin` pipe stays open across `execute()` calls.
-3. Each `execute()` writes a new prompt to `stdin` and reads the response from `stdout`.
-4. `shutdown()` closes stdin (EOF), waits for process exit with `shutdown_ms` timeout, then force-kills.
-5. Claude CLI `--print` mode is single-turn by design — multi-turn requires interactive/repl mode or `--resume`/`--session-id` flags.
+**Per-invocation mode** (`persistent = false`, default):
+- Each `execute()` spawns a new child process with `--print`.
+- Multi-turn continuity is best-effort via `--session-id` (first call) and `--resume` (subsequent calls).
+- Stdin is closed after writing the prompt; the child exits after responding.
+- Suitable for stateless single-turn use cases.
 
-**Open question**: Does Claude CLI `--print` support multi-turn via persistent stdin, or does it require `--resume`/`--session-id`? If not, scope reduces to "best-effort session continuity via resume flags" with a note that full multi-turn requires ACP provider.
+**Persistent mode** (`persistent = true`, via `new_persistent()`):
+- First `execute()` spawns a child process and stores `PersistentHandles { child, stdin, stdout, pid }` in `NativeSession`.
+- Stdin and stdout are wrapped in `Arc<Mutex<>>` for shared access between the session state and the event stream.
+- Subsequent `execute()` calls write the prompt to the existing stdin and read the response from stdout until an empty-line delimiter (`\n\n`).
+- `shutdown()` kills the child process with a `shutdown_ms` timeout, preventing zombies.
+- `cancel()` is a no-op in persistent mode (the child stays alive between operations).
+- Same PID is observable across executes within a session (tested: NT1.1).
+- Shutdown kills the child and the process is confirmed dead (tested: NT1.2).
+
+Lifecycle:
+1. `launch()` creates a `NativeSession` with `claude_session_id` (UUID) and empty `persistent_handles`.
+2. First `execute()` in persistent mode: spawns child, takes stdin/stdout, stores `PersistentHandles`, writes prompt to stdin, reads delimited response from stdout.
+3. Subsequent `execute()` in persistent mode: checks `is_alive()`, if alive reuses stdin/stdout; if dead, clears stale handles and spawns a new child.
+4. `shutdown()`: removes session, kills alive persistent child with timeout.
+
+**Resolved question**: Claude CLI `--print` mode is single-turn; persistent mode uses a delimiter protocol (empty line marks end-of-response) to enable multi-turn with a long-lived child process. Per-invocation mode uses `--resume`/`--session-id` for best-effort continuity when a persistent child is not available.
 
 #### 4.2.2 Streaming normalization
 
@@ -407,7 +422,7 @@ Each native adapter should follow the per-provider stream adapter pattern (borro
 Discovery is deterministic and ordered:
 
 1. **Static config** from `{NEXUS_HOME}/agent-host/config.toml`: explicit provider IDs, protocol kind, command template, args/env, allow/deny state, timeout/concurrency overrides.
-2. **PATH scan** for known native commands: Wave 1: `claude` only. Later waves: `codex`, `gemini`, `opencode`, `cursor`, `kimi`, etc. Use cross-platform probe (V1.19 D-009: replaced Unix-only `which` with `which::which()` crate or platform-conditional `Command::new`).
+2. **PATH scan** for known native commands: Wave 1: `claude` only. Later waves: `codex`, `gemini`, `opencode`, `cursor`, `kimi`, etc. Use cross-platform probe (DF-26: `which::which()` crate for PATH resolution, with manual fallback scan). **Windows note**: the `which` crate handles `PATHEXT` extensions (`.exe`, `.cmd`, etc.) automatically. Edge cases with custom shell integrations or non-standard PATH separators fall back to a manual directory scan.
 3. **ACP registry** via `nexus_acp_host::RegistryClient`: include registry entries with runnable distributions for current platform, annotate as `protocol_kind = acp`, preserve registry metadata and trust source.
 
 ### 5.2 Deduplication rules

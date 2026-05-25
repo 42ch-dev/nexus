@@ -22,7 +22,8 @@
 //! of the store traits. The crate provides no default runtime or storage backend.
 
 use crate::stage0::Stage0Assembly;
-use nexus_kb::KbStore;
+use nexus_contracts::BlockType;
+use nexus_kb::{KbQuery, KbStore};
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
 
@@ -54,6 +55,18 @@ pub struct MomentRequest {
     pub user_id: Option<String>,
     /// Stage-0 assembly inputs (SOUL, memories, fragments, prompt).
     pub stage0: Stage0Assembly,
+    /// Cross-domain token budget (approximate chars/4 heuristic).
+    /// When set, applies truncation to domain sections after Stage-0 personality.
+    /// Personality section inside Stage-0 is never truncated.
+    pub max_tokens: Option<usize>,
+    /// KB query: maximum number of key blocks to return.
+    pub kb_limit: Option<usize>,
+    /// KB query: text search filter (case-insensitive substring).
+    pub kb_text_search: Option<String>,
+    /// KB query: filter by block type.
+    pub kb_block_type: Option<BlockType>,
+    /// User knowledge query: maximum number of entries to return.
+    pub knowledge_limit: Option<usize>,
 }
 
 impl MomentRequest {
@@ -66,6 +79,11 @@ impl MomentRequest {
             event_id: None,
             user_id: None,
             stage0,
+            max_tokens: None,
+            kb_limit: None,
+            kb_text_search: None,
+            kb_block_type: None,
+            knowledge_limit: None,
         }
     }
 
@@ -94,6 +112,41 @@ impl MomentRequest {
     #[must_use]
     pub fn with_user(mut self, user_id: impl Into<String>) -> Self {
         self.user_id = Some(user_id.into());
+        self
+    }
+
+    /// Set cross-domain token budget.
+    #[must_use]
+    pub const fn with_max_tokens(mut self, max_tokens: usize) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set KB result limit.
+    #[must_use]
+    pub const fn with_kb_limit(mut self, limit: usize) -> Self {
+        self.kb_limit = Some(limit);
+        self
+    }
+
+    /// Set KB text search filter.
+    #[must_use]
+    pub fn with_kb_text_search(mut self, text: impl Into<String>) -> Self {
+        self.kb_text_search = Some(text.into());
+        self
+    }
+
+    /// Set KB block type filter.
+    #[must_use]
+    pub const fn with_kb_block_type(mut self, block_type: BlockType) -> Self {
+        self.kb_block_type = Some(block_type);
+        self
+    }
+
+    /// Set user knowledge result limit.
+    #[must_use]
+    pub const fn with_knowledge_limit(mut self, limit: usize) -> Self {
+        self.knowledge_limit = Some(limit);
         self
     }
 }
@@ -161,6 +214,88 @@ impl MomentContext {
 
         parts.join("\n")
     }
+
+    /// Apply cross-domain token budget truncation.
+    ///
+    /// Personality section inside Stage-0 is never truncated.
+    /// The remaining budget (after personality) is distributed across
+    /// `world_state`, `timeline`, `world_kb`, and `user_knowledge` in order.
+    ///
+    /// Token count uses chars/4 heuristic (spec §9.3).
+    pub fn apply_cross_domain_truncation(&mut self, max_tokens: usize) {
+        let max_chars = max_tokens.saturating_mul(4);
+
+        // Extract personality from stage0_context — personality section is never truncated.
+        let (personality_part, rest_stage0) = self.split_stage0_personality();
+
+        let personality_chars = personality_part.chars().count();
+        let mut remaining = max_chars.saturating_sub(personality_chars);
+
+        // Truncate domain sections in priority order
+        remaining = Self::truncate_section(&mut self.world_state, remaining);
+        remaining = Self::truncate_section(&mut self.timeline, remaining);
+        remaining = Self::truncate_section(&mut self.world_kb, remaining);
+        remaining = Self::truncate_section(&mut self.user_knowledge, remaining);
+
+        // Truncate remaining stage0 content (non-personality)
+        if rest_stage0.chars().count() > remaining {
+            self.stage0_context = if personality_part.is_empty() {
+                Self::truncate_text(&rest_stage0, remaining)
+            } else {
+                format!(
+                    "{personality_part}\n\n{}",
+                    Self::truncate_text(&rest_stage0, remaining)
+                )
+            };
+        }
+    }
+
+    /// Split `stage0_context` into (`personality_section`, rest).
+    fn split_stage0_personality(&self) -> (String, String) {
+        let ctx = &self.stage0_context;
+        // Look for "## Personality" section
+        ctx.find("## Personality").map_or_else(
+            || (String::new(), ctx.clone()),
+            |pos| {
+                // Find the next ## section after personality
+                let after_personality_header = &ctx[pos..];
+                let end_of_personality = after_personality_header[14..] // skip "## Personality"
+                    .find("\n## ")
+                    .map_or(after_personality_header.len(), |i| 14 + i);
+
+                let personality_section = ctx[pos..pos + end_of_personality].to_string();
+                let rest = format!("{}{}", &ctx[..pos], &ctx[pos + end_of_personality..]);
+                (personality_section, rest)
+            },
+        )
+    }
+
+    /// Truncate a section to fit within `max_chars`, returning remaining chars.
+    fn truncate_section(section: &mut Option<String>, max_chars: usize) -> usize {
+        section.as_mut().map_or(max_chars, |text| {
+            let len = text.chars().count();
+            if len > max_chars {
+                *text = Self::truncate_text(text, max_chars);
+                0
+            } else {
+                max_chars - len
+            }
+        })
+    }
+
+    /// Truncate text to at most `max_chars` characters, trying to break at line boundaries.
+    fn truncate_text(text: &str, max_chars: usize) -> String {
+        if text.chars().count() <= max_chars {
+            return text.to_string();
+        }
+        let truncated: String = text.chars().take(max_chars).collect();
+        // Try to break at last newline
+        if let Some(pos) = truncated.rfind('\n') {
+            truncated[..pos].to_string()
+        } else {
+            truncated
+        }
+    }
 }
 
 /// Assemble moment context from all domain sources.
@@ -210,7 +345,7 @@ where
 
     // 3. World KB (if world_id provided)
     let world_kb = if let Some(ref world_id) = request.world_id {
-        match fetch_world_kb(kb_store, world_id).await {
+        match fetch_world_kb(kb_store, world_id, request).await {
             Ok(Some(kb_text)) => Some(kb_text),
             _ => None,
         }
@@ -220,7 +355,7 @@ where
 
     // 4. User knowledge (if user_id provided)
     let user_knowledge = if let Some(ref user_id) = request.user_id {
-        match fetch_user_knowledge(knowledge, user_id).await {
+        match fetch_user_knowledge(knowledge, user_id, request.knowledge_limit).await {
             Ok(Some(uk_text)) => Some(uk_text),
             _ => None,
         }
@@ -228,13 +363,20 @@ where
         None
     };
 
-    MomentContext {
+    let mut ctx = MomentContext {
         stage0_context,
         world_state,
         timeline,
         world_kb,
         user_knowledge,
+    };
+
+    // 5. Cross-domain truncation if max_tokens set
+    if let Some(max_tokens) = request.max_tokens {
+        ctx.apply_cross_domain_truncation(max_tokens);
     }
+
+    ctx
 }
 
 /// Fetch narrative context (world state + timeline) from the gateway.
@@ -257,17 +399,29 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
     Ok((world_state_text, timeline_text))
 }
 
-/// Fetch World KB assets and format as context text.
+/// Fetch World KB assets using structured query and format as context text.
 #[allow(clippy::future_not_send)]
 async fn fetch_world_kb<K: KbStore>(
     kb_store: &K,
     world_id: &str,
+    request: &MomentRequest,
 ) -> Result<Option<String>, nexus_kb::KbStoreError> {
-    let blocks = kb_store.list_by_world(world_id).await?;
-    if blocks.is_empty() {
+    let mut query = KbQuery::new(world_id);
+    if let Some(limit) = request.kb_limit {
+        query = query.with_limit(limit);
+    }
+    if let Some(ref text) = request.kb_text_search {
+        query = query.with_text_search(text);
+    }
+    if let Some(block_type) = request.kb_block_type {
+        query = query.with_block_type(block_type);
+    }
+    let result = kb_store.query(&query).await?;
+    if result.items.is_empty() {
         return Ok(None);
     }
-    let lines: Vec<String> = blocks
+    let lines: Vec<String> = result
+        .items
         .iter()
         .map(|kb| {
             let summary = kb
@@ -288,8 +442,11 @@ async fn fetch_world_kb<K: KbStore>(
 async fn fetch_user_knowledge<S: KnowledgeStore>(
     knowledge: &S,
     user_id: &str,
+    knowledge_limit: Option<usize>,
 ) -> Result<Option<String>, nexus_knowledge::KnowledgeError> {
-    let query = nexus_knowledge::KnowledgeQuery::for_user(user_id).with_limit(20);
+    let limit = knowledge_limit.unwrap_or(20);
+    let query = nexus_knowledge::KnowledgeQuery::for_user(user_id)
+        .with_limit(u32::try_from(limit).unwrap_or(u32::MAX));
     let result = knowledge.list(&query).await?;
     if result.entries.is_empty() {
         return Ok(None);
@@ -549,5 +706,153 @@ mod tests {
 
         assert!(ctx.stage0_context.contains("A creative writer."));
         assert!(ctx.stage0_context.contains("Write chapter 3."));
+    }
+
+    /// C2.2: KB query respects `kb_limit` — seeded multi-block, limit 1 yields single line.
+    #[tokio::test]
+    async fn kb_query_respects_limit() {
+        let stores = TestStores::new();
+
+        // Seed two KB blocks
+        let kb1 = nexus_kb::key_block::KeyBlock::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "Hero",
+        );
+        let kb2 = nexus_kb::key_block::KeyBlock::new(
+            "wld_1",
+            nexus_contracts::BlockType::Scene,
+            "Castle",
+        );
+        stores.kb.insert_key_block(kb1).await.unwrap();
+        stores.kb.insert_key_block(kb2).await.unwrap();
+
+        // Without limit: both blocks
+        let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.unwrap();
+        assert!(kb_text.contains("Hero"), "unlimited KB should contain Hero");
+        assert!(
+            kb_text.contains("Castle"),
+            "unlimited KB should contain Castle"
+        );
+
+        // With limit 1: only one block
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_kb_limit(1);
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.unwrap();
+        // One of them, not both
+        let has_hero = kb_text.contains("Hero");
+        let has_castle = kb_text.contains("Castle");
+        assert!(
+            has_hero ^ has_castle,
+            "kb_limit=1 should return exactly one block, got: {kb_text}"
+        );
+    }
+
+    /// C2.2: KB query respects `kb_text_search` filter.
+    #[tokio::test]
+    async fn kb_query_respects_text_search() {
+        let stores = TestStores::new();
+
+        let kb1 = nexus_kb::key_block::KeyBlock::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "Hero",
+        );
+        let kb2 = nexus_kb::key_block::KeyBlock::new(
+            "wld_1",
+            nexus_contracts::BlockType::Scene,
+            "Castle",
+        );
+        stores.kb.insert_key_block(kb1).await.unwrap();
+        stores.kb.insert_key_block(kb2).await.unwrap();
+
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_kb_text_search("her");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.unwrap();
+        assert!(
+            kb_text.contains("Hero"),
+            "text_search='her' should match Hero"
+        );
+        assert!(
+            !kb_text.contains("Castle"),
+            "text_search='her' should not match Castle"
+        );
+    }
+
+    /// C2.3: Cross-domain truncation bounds total output.
+    #[tokio::test]
+    async fn cross_domain_truncation_respects_budget() {
+        let stores = TestStores::new();
+
+        // Set up world
+        let world = nexus_narrative::world::World::new(
+            "wld_1",
+            "ctr_test",
+            "A very long world title that should be truncated",
+            "test-world",
+            nexus_contracts::Visibility::Private,
+            nexus_contracts::TimePolicy::Manual,
+        );
+        stores.narrative.insert_world(world);
+
+        // Set up KB
+        let kb = nexus_kb::key_block::KeyBlock::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "Hero with a long description",
+        );
+        stores.kb.insert_key_block(kb).await.unwrap();
+
+        // Set up knowledge
+        let entry = nexus_knowledge::KnowledgeEntry::new(
+            "user_1",
+            vec![nexus_knowledge::KnowledgeTag::new("writing")],
+            "A long knowledge entry that should also be truncated when budget is tight.",
+        );
+        stores.knowledge.store(entry).await.unwrap();
+
+        // Without truncation: full content
+        let request_no_budget = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_user("user_1");
+        let ctx_full = assemble_moment(
+            &request_no_budget,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+        )
+        .await;
+        let full_len = ctx_full.to_full_context().chars().count();
+
+        // With small budget
+        let request_budget = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_user("user_1")
+            .with_max_tokens(50); // 200 chars budget
+        let ctx_budget = assemble_moment(
+            &request_budget,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+        )
+        .await;
+        let budget_len = ctx_budget.to_full_context().chars().count();
+
+        assert!(
+            budget_len <= full_len,
+            "truncated output ({budget_len}) should not exceed full output ({full_len})"
+        );
+
+        // Personality should still be present (never truncated)
+        assert!(
+            ctx_budget.stage0_context.contains("A creative writer."),
+            "personality must survive truncation"
+        );
     }
 }

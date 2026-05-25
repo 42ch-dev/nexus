@@ -206,6 +206,8 @@ Timeline/Event history is immutable for canonical narrative purposes. Correction
 alternate histories, or rewrites use Fork semantics through `nexus-narrative`; they do
 not mutate prior Event ownership in place.
 
+**World fork / community branching is platform scope.** The local `nexus42` CLI and daemon do not implement fork creation, fork listing, or fork merge commands. `World::fork` in `nexus-narrative` may carry the domain model for platform sync, but no local product surface exposes fork operations. See planning decision PD-01 in the deferred-features tracker.
+
 ### 6.7 Creator/User pairing
 
 Pairing links a Creator to a User for account and platform visibility. Pairing does not
