@@ -353,8 +353,7 @@ fn clone_requires_world_ref() {
         .stderr(predicate::str::contains("WORLD_REF"));
 }
 
-/// Test clone dry-run without daemon (prints JSON, no daemon needed).
-/// Uses --source local to avoid platform requirement in `local_only` mode (S-008).
+/// Test clone is hard-deprecated (V1.27 H1) — always returns error.
 #[test]
 fn clone_dry_run_no_daemon() {
     let tmp = TempDir::new().unwrap();
@@ -382,13 +381,11 @@ fn clone_dry_run_no_daemon() {
         .arg("--dry-run")
         .env("HOME", tmp.path())
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"world_ref\""))
-        .stdout(predicate::str::contains("\"source\""));
+        .failure()
+        .stderr(predicate::str::contains("not available locally"));
 }
 
-/// Test clone with --source platform in `local_only` mode returns error.
-/// S-008: Platform clone is blocked in `local_only` mode.
+/// Test clone with --source platform is hard-deprecated (V1.27 H1) — always returns error.
 #[test]
 fn clone_dry_run_source_platform_blocked_in_local_only() {
     let tmp = TempDir::new().unwrap();
@@ -417,10 +414,10 @@ fn clone_dry_run_source_platform_blocked_in_local_only() {
         .env("HOME", tmp.path())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("local_only mode"));
+        .stderr(predicate::str::contains("not available locally"));
 }
 
-/// Test clone with --source local
+/// Test clone with --source local is hard-deprecated (V1.27 H1) — always returns error.
 #[test]
 fn clone_dry_run_source_local() {
     let tmp = TempDir::new().unwrap();
@@ -448,8 +445,8 @@ fn clone_dry_run_source_local() {
         .arg("--dry-run")
         .env("HOME", tmp.path())
         .assert()
-        .success()
-        .stdout(predicate::str::contains("local"));
+        .failure()
+        .stderr(predicate::str::contains("not available locally"));
 }
 
 /// Test clone rejects invalid `world_ref` format
