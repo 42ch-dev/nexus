@@ -69,7 +69,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 **Cleanup (repo root):**
 
-- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected).
+- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected). If it errors on `target/debug/incremental` (“Directory not empty”), remove the heavy subtrees then retry: `rm -rf target/debug/{deps,incremental}` && `cargo clean`.
 - **Periodic maintenance (optional):** `cargo install cargo-sweep` then `cargo sweep -i 14` (remove artifacts unused for 14+ days) when a full clean is too disruptive.
 - **When to clean:** `target/debug` over ~50 GiB, filesystem slowness under `target/`, end of a large plan slice, or after deleting/renaming crates.
 
