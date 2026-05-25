@@ -13,6 +13,7 @@ mod judge_rule;
 mod kb_extract_work;
 mod outbox;
 pub mod registry;
+mod soul_experience_aggregate;
 mod sync;
 mod workspace;
 
@@ -25,5 +26,6 @@ pub use judge_rule::JudgeRule;
 pub use kb_extract_work::KbExtractWork;
 pub use outbox::{OutboxCompact, OutboxFlush};
 pub use registry::RegistryRefresh;
+pub use soul_experience_aggregate::SoulExperienceAggregate;
 pub use sync::{SyncPull, SyncPush};
 pub use workspace::{WorkspaceCommit, WorkspaceOpen};
