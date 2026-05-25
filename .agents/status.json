@@ -1,7 +1,89 @@
 {
   "version": 1,
-  "updated_at": "2026-05-25T20:00:00Z",
-  "plans": [],
+  "updated_at": "2026-05-26T12:00:00Z",
+  "plans": [
+    {
+      "id": "2026-05-26-v1.29-spec-tracker-hygiene",
+      "title": "V1.29 spec + tracker hygiene (V1.28 backfill + V1.29 normative)",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "category": "docs",
+      "working_branch": "feature/v1.29-spec-tracker-hygiene",
+      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
+      "spec_refs": [
+        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+        "knowledge/specs/local-cloud-crate-architecture.md",
+        "knowledge/deferred-features-cross-version-tracker.md"
+      ]
+    },
+    {
+      "id": "2026-05-26-v1.29-memory-session-review-loop",
+      "title": "FL-A1 — session capture → pending-review → CLI review loop",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "category": "logic",
+      "working_branch": "feature/v1.29-memory-session-review-loop",
+      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
+      "spec_refs": [
+        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+        "knowledge/specs/creator-schedule-and-core-context.md",
+        "knowledge/specs/local-runtime-boundary.md"
+      ]
+    },
+    {
+      "id": "2026-05-26-v1.29-stage0-structured-delimiters",
+      "title": "FL-A3 — Stage0 structured delimiters (R13)",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "category": "logic",
+      "working_branch": "feature/v1.29-stage0-structured-delimiters",
+      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
+      "spec_refs": [
+        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md"
+      ]
+    },
+    {
+      "id": "2026-05-26-v1.29-soul-experience-preset",
+      "title": "FL-A2 — SOUL Experience preset + refresh-experience CLI",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "category": "logic",
+      "working_branch": "feature/v1.29-soul-experience-preset",
+      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
+      "depends_on": ["2026-05-26-v1.29-memory-session-review-loop"],
+      "spec_refs": [
+        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+        "knowledge/specs/creator-schedule-and-core-context.md"
+      ]
+    },
+    {
+      "id": "2026-05-26-v1.29-kb-extract-queue-preset",
+      "title": "FL-B — KB extract queue + kb.extract_work preset (agent-driven)",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "category": "logic",
+      "working_branch": "feature/v1.29-kb-extract-queue-preset",
+      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
+      "spec_refs": [
+        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+        "knowledge/specs/entity-scope-model.md",
+        "knowledge/specs/orchestration-engine.md"
+      ]
+    },
+    {
+      "id": "2026-05-26-v1.29-agent-host-batch2-hardening",
+      "title": "Agent Host Batch 2 — DF-21–23, 27–28",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "category": "logic",
+      "working_branch": "feature/v1.29-agent-host-batch2-hardening",
+      "merge_target": "feature/v1.29-author-intelligence-and-hardening",
+      "spec_refs": [
+        "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
+        "knowledge/specs/agent-host.md"
+      ]
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,16 +91,16 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": null,
+    "integration_branch": "feature/v1.29-author-intelligence-and-hardening",
     "integration_merge_target": "main",
-    "integration_branch_role": null,
+    "integration_branch_role": "V1.29 iteration integration — QC/QA Working branch",
     "latest_shipped_iteration": "v1.28",
     "latest_shipped_at": "2026-05-25T20:00:00Z",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.29",
+    "latest_active_compass": "iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-25T20:00:00Z",
+      "updated_at": "2026-05-26T12:00:00Z",
       "total_open": 8,
       "by_severity": {
         "critical": 0,
@@ -27,7 +109,9 @@
         "low": 5,
         "nit": 6
       },
-      "by_target": {},
+      "by_target": {
+        "post-v1.29": 8
+      },
       "by_plan": {},
       "cross_cutting": [
         {
@@ -38,7 +122,8 @@
           "decision": "accept",
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
-      ]
+      ],
+      "note": "V1.29 registered — 6 plans Todo. Residuals R8–R13 target post-v1.29 per plan acceptance."
     }
   },
   "residual_findings": {
@@ -51,7 +136,7 @@
         "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
+        "target_date": "post-v1.29",
         "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
       },
       {
@@ -62,7 +147,7 @@
         "scope": "crates/nexus-local-db/src/kb_store.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
+        "target_date": "post-v1.29",
         "note": "Add LIMIT to list_by_world when needed for scale."
       }
     ],
@@ -75,7 +160,7 @@
         "scope": "crates/nexus-local-db/src/reference_source.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
+        "target_date": "post-v1.29",
         "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
       },
       {
@@ -86,7 +171,7 @@
         "scope": "crates/nexus-local-db/src/reference_source.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
+        "target_date": "post-v1.29",
         "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
       },
       {
@@ -97,7 +182,7 @@
         "scope": "crates/nexus-local-db/src/reference_source.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
+        "target_date": "post-v1.29",
         "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
       }
     ],
@@ -110,8 +195,8 @@
         "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
-        "note": "Add Drop impl with start_kill() for persistent child. Low risk in pre-release local-only daemon."
+        "target_date": "post-v1.29",
+        "note": "Add Drop impl with start_kill() for persistent child. Target: V1.29 Batch 2 plan."
       },
       {
         "id": "R12",
@@ -121,8 +206,8 @@
         "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
-        "note": "Implement cancel() to kill child or drain stdin. Acceptable in pre-release."
+        "target_date": "post-v1.29",
+        "note": "Implement cancel() to kill child or drain stdin. Target: V1.29 Batch 2 plan."
       },
       {
         "id": "R13",
@@ -132,8 +217,8 @@
         "scope": "crates/nexus-moment-context-assembly/src/moment.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "post-v1.28",
-        "note": "Test-covered for current format. Consider structured delimiter if stage0 format evolves."
+        "target_date": "post-v1.29",
+        "note": "Target: V1.29 stage0-structured-delimiters plan."
       }
     ]
   }
