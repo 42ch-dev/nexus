@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updated_at": "2026-05-25T12:00:00Z",
+  "updated_at": "2026-05-25T17:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-25-v1.28-context-assembly-convergence",
       "title": "V1.28 unify assemble-moment SSOT; KbQuery + token budget; remove assemble-local",
       "file": ".agents/plans/2026-05-25-v1.28-context-assembly-convergence.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev", "@architect", "@qc-specialist", "@qa-engineer"],
       "task_category": "logic",
@@ -20,7 +20,7 @@
       "plan_id": "2026-05-25-v1.28-agent-host-acp-correctness",
       "title": "V1.28 Agent Host Batch 1 — ACP permissions, capabilities, shutdown, admission, probe",
       "file": ".agents/plans/2026-05-25-v1.28-agent-host-acp-correctness.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev", "@qc-specialist", "@qa-engineer"],
       "task_category": "logic",
