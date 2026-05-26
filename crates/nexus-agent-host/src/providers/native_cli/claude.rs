@@ -741,9 +741,19 @@ impl Drop for ClaudeCliProvider {
         for &pid in pids.iter() {
             #[cfg(unix)]
             {
-                // Send SIGTERM via `kill -TERM <pid>`.
-                // Uses `std::process::Command` for best-effort synchronous kill
-                // since we cannot access the tokio Child handle from Drop.
+                // Check if process still exists before sending signal.
+                // PID reuse on Unix means a killed PID could be reassigned
+                // to an unrelated process; `kill -0` is a no-op that exits
+                // with success only if the process exists.
+                let exists = std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                if !exists {
+                    tracing::debug!(pid, "Process no longer exists, skipping SIGTERM");
+                    continue;
+                }
                 let _ = std::process::Command::new("kill")
                     .arg("-TERM")
                     .arg(pid.to_string())
@@ -769,6 +779,15 @@ impl Drop for ClaudeCliProvider {
         for &pid in pids.iter() {
             #[cfg(unix)]
             {
+                let exists = std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                if !exists {
+                    tracing::debug!(pid, "Process no longer exists, skipping SIGKILL");
+                    continue;
+                }
                 let _ = std::process::Command::new("kill")
                     .arg("-9")
                     .arg(pid.to_string())
