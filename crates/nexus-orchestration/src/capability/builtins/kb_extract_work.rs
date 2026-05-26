@@ -4,7 +4,7 @@
 //! 1. When `job_id` present: load job row; reject wrong status.
 //! 2. When `job_id` omitted: call `claim_job` for `creator_id`.
 //! 3. Mark running → load work content → build extraction prompt → parse
-//!    LLM response → insert `KeyBlock` via `SqliteKbStore` → mark done/failed.
+//!    LLM response → mark done → insert `KeyBlock` via `SqliteKbStore`.
 //!
 //! The capability is stateful: it holds an `Option<SqlitePool>` for job
 //! lifecycle management and `KeyBlock` insertion. Without a pool it returns
@@ -304,26 +304,27 @@ impl Capability for KbExtractWork {
             tags: None,
         });
 
-        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = match store.insert_key_block(kb).await {
-            Ok(result) => result,
-            Err(e) => {
-                let _ = nexus_local_db::mark_extract_job_failed(
-                    pool,
-                    &job_id,
-                    &format!("KeyBlock insert failed: {e}"),
-                )
-                .await;
-                return Err(CapabilityError::Internal(format!(
-                    "KeyBlock insert failed: {e}"
-                )));
-            }
-        };
-
-        // ── Phase 5: Mark job as done ───────────────────────────────
+        // ── Phase 4: Mark job as done BEFORE inserting KeyBlock ───────
+        // This ordering ensures: if mark_done fails, no KeyBlock was created
+        // and the job can be safely retried. A "done" job without a KeyBlock
+        // is recoverable; a "running" job with an orphaned KeyBlock is not.
         nexus_local_db::mark_extract_job_done(pool, &job_id)
             .await
             .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
+
+        // ── Phase 5: Insert KeyBlock ─────────────────────────────────
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
+        let insert_result = store.insert_key_block(kb).await.map_err(|e| {
+            // KeyBlock insert failed after job was marked done. The job is
+            // in terminal "done" state; the extraction content is lost but
+            // the job lifecycle is clean. A new extract job can re-process.
+            tracing::error!(
+                job_id = %job_id,
+                error = %e,
+                "KeyBlock insert failed after job marked done — extraction content lost"
+            );
+            CapabilityError::Internal(format!("KeyBlock insert failed: {e}"))
+        })?;
 
         Ok(json!({
             "job_id": job_id,
