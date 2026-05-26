@@ -1,7 +1,68 @@
 {
   "version": 1,
-  "updated_at": "2026-05-26T17:00:00Z",
-  "plans": [],
+  "updated_at": "2026-05-26T20:00:00Z",
+  "plans": [
+    {
+      "id": "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
+      "title": "KB extract atomic claim, UUID job IDs, bounded status, full e2e lifecycle",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-kb-extract-lifecycle-hardening.md",
+      "metadata": {
+        "working_branch": "feature/v1.30-kb-extract-lifecycle-hardening",
+        "merge_target": "feature/v1.30-residual-convergence",
+        "task_category": "logic",
+        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "blocked_by_plan_id": null,
+        "phase": "v1.30"
+      }
+    },
+    {
+      "id": "2026-05-26-v1.30-agent-session-quality",
+      "title": "SessionCapture from session start + persistent child Drop hardening",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-agent-session-quality.md",
+      "metadata": {
+        "working_branch": "feature/v1.30-agent-session-quality",
+        "merge_target": "feature/v1.30-residual-convergence",
+        "task_category": "logic",
+        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "blocked_by_plan_id": null,
+        "phase": "v1.30"
+      }
+    },
+    {
+      "id": "2026-05-26-v1.30-creator-module-refactor",
+      "title": "Extract KB command handlers to creator/kb.rs",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-creator-module-refactor.md",
+      "metadata": {
+        "working_branch": "feature/v1.30-creator-module-refactor",
+        "merge_target": "feature/v1.30-residual-convergence",
+        "task_category": "logic",
+        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "blocked_by_plan_id": "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
+        "phase": "v1.30"
+      }
+    },
+    {
+      "id": "2026-05-26-v1.30-local-db-hardening",
+      "title": "Reference store, narrative errors, and KB query hygiene (R5–R9)",
+      "status": "Todo",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-local-db-hardening.md",
+      "metadata": {
+        "working_branch": "feature/v1.30-local-db-hardening",
+        "merge_target": "feature/v1.30-residual-convergence",
+        "task_category": "logic",
+        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+        "blocked_by_plan_id": null,
+        "phase": "v1.30"
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,31 +70,32 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": null,
+    "integration_branch": "feature/v1.30-residual-convergence",
     "integration_merge_target": "main",
-    "integration_branch_role": null,
+    "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.29",
     "latest_shipped_at": "2026-05-26T16:30:00Z",
     "latest_active_iteration": "v1.30",
     "latest_active_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T17:00:00Z",
-      "total_open": 13,
+      "updated_at": "2026-05-26T20:00:00Z",
+      "total_open": 12,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 8,
+        "low": 7,
         "nit": 3
       },
       "by_target": {
-        "post-v1.29": 6,
-        "v1.30": 7
+        "v1.30": 12
       },
       "by_plan": {
-        "v1.30-iteration": 7,
-        "post-v1.29-deferred": 6
+        "2026-05-26-v1.30-kb-extract-lifecycle-hardening": 4,
+        "2026-05-26-v1.30-agent-session-quality": 2,
+        "2026-05-26-v1.30-creator-module-refactor": 1,
+        "2026-05-26-v1.30-local-db-hardening": 5
       },
       "cross_cutting": [
         {
@@ -45,81 +107,11 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.30 Active. 7 V1.30 residuals (R14–R20) in scope. 6 post-v1.29 residuals (R5–R9) optional. V1.29 shipped."
+      "note": "V1.30 harness registered: 4 plans Todo, integration_branch set, residuals R5–R20 re-keyed by plan-id. v1.29-iteration bucket removed."
     }
   },
   "residual_findings": {
-    "2026-05-23-v1.26-narrative-kb-persistence": [
-      {
-        "id": "R8",
-        "title": "db_err maps all sqlx::Error to ValidationError — no Storage variant",
-        "severity": "low",
-        "source": "qc1 W-001",
-        "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
-      },
-      {
-        "id": "R9",
-        "title": "KbQuery fetches all blocks into memory then filters in Rust — no DB-level pagination",
-        "severity": "nit",
-        "source": "qc1 W-002",
-        "scope": "crates/nexus-local-db/src/kb_store.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Add LIMIT to list_by_world when needed for scale."
-      }
-    ],
-    "2026-05-23-v1.26-reference-store-layout": [
-      {
-        "id": "R5",
-        "title": "body.md written before SQL INSERT — orphaned files on DB failure",
-        "severity": "low",
-        "source": "qc1 W-001, qc3 F-001",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
-      },
-      {
-        "id": "R6",
-        "title": "list_references returns all rows unbounded — no pagination",
-        "severity": "nit",
-        "source": "qc3 F-002",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
-      },
-      {
-        "id": "R7",
-        "title": "content_hash always NULL — integrity field unused",
-        "severity": "nit",
-        "source": "qc3 F-005",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "post-v1.29",
-        "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
-      }
-    ],
-    "v1.29-iteration": [
-      {
-        "id": "R14",
-        "title": "SessionCapture created at agent-stop time produces near-zero session metrics",
-        "severity": "medium",
-        "source": "qc3 F-001",
-        "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Create SessionCapture at session start, record message/tool events, and close it on agent_stop."
-      },
+    "2026-05-26-v1.30-kb-extract-lifecycle-hardening": [
       {
         "id": "R15",
         "title": "KB extract job claim is not atomic across next_queued + mark_running",
@@ -143,17 +135,6 @@
         "note": "Complete job_id-driven mark_running/mark_done/mark_failed wiring and KeyBlock insertion."
       },
       {
-        "id": "R17",
-        "title": "Persistent child Drop cleanup is best-effort and Unix-only",
-        "severity": "low",
-        "source": "qc2 F-002, qc3 F-006",
-        "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "R11 baseline fixed; follow-up to retain child handles or add cross-platform termination."
-      },
-      {
         "id": "R18",
         "title": "KB extract job IDs use custom timestamp-derived generation",
         "severity": "low",
@@ -165,17 +146,6 @@
         "note": "Replace with UUIDv4-style IDs while preserving the xj_ prefix."
       },
       {
-        "id": "R19",
-        "title": "creator command module is approaching maintainability threshold",
-        "severity": "low",
-        "source": "qc1 W-001",
-        "scope": "crates/nexus42/src/commands/creator/mod.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Extract KB command handlers to a dedicated creator/kb.rs module."
-      },
-      {
         "id": "R20",
         "title": "KB extract status list is unbounded",
         "severity": "low",
@@ -185,6 +155,100 @@
         "owner": "@fullstack-dev",
         "target_date": "v1.30",
         "note": "Add LIMIT/pagination or a bounded default for extract-status."
+      }
+    ],
+    "2026-05-26-v1.30-agent-session-quality": [
+      {
+        "id": "R14",
+        "title": "SessionCapture created at agent-stop time produces near-zero session metrics",
+        "severity": "medium",
+        "source": "qc3 F-001",
+        "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Create SessionCapture at session start, record message/tool events, and close it on agent_stop."
+      },
+      {
+        "id": "R17",
+        "title": "Persistent child Drop cleanup is best-effort and Unix-only",
+        "severity": "low",
+        "source": "qc2 F-002, qc3 F-006",
+        "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "R11 baseline fixed; follow-up to retain child handles or add cross-platform termination."
+      }
+    ],
+    "2026-05-26-v1.30-creator-module-refactor": [
+      {
+        "id": "R19",
+        "title": "creator command module is approaching maintainability threshold",
+        "severity": "low",
+        "source": "qc1 W-001",
+        "scope": "crates/nexus42/src/commands/creator/mod.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Extract KB command handlers to a dedicated creator/kb.rs module."
+      }
+    ],
+    "2026-05-26-v1.30-local-db-hardening": [
+      {
+        "id": "R5",
+        "title": "body.md written before SQL INSERT — orphaned files on DB failure",
+        "severity": "low",
+        "source": "qc1 W-001, qc3 F-001",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
+      },
+      {
+        "id": "R6",
+        "title": "list_references returns all rows unbounded — no pagination",
+        "severity": "nit",
+        "source": "qc3 F-002",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
+      },
+      {
+        "id": "R7",
+        "title": "content_hash always NULL — integrity field unused",
+        "severity": "nit",
+        "source": "qc3 F-005",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
+      },
+      {
+        "id": "R8",
+        "title": "db_err maps all sqlx::Error to ValidationError — no Storage variant",
+        "severity": "low",
+        "source": "qc1 W-001",
+        "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
+      },
+      {
+        "id": "R9",
+        "title": "KbQuery fetches all blocks into memory then filters in Rust — no DB-level pagination",
+        "severity": "nit",
+        "source": "qc1 W-002",
+        "scope": "crates/nexus-local-db/src/kb_store.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "v1.30",
+        "note": "Add LIMIT to list_by_world when needed for scale."
       }
     ]
   }
