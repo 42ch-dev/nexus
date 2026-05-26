@@ -309,7 +309,8 @@ pub async fn claim_job(
     };
 
     // Atomically mark as running within the same transaction.
-    sqlx::query!(
+    // Check rows_affected() to detect concurrent claims (QC2-C1).
+    let result = sqlx::query!(
         r#"UPDATE kb_extract_jobs
            SET status = 'running', started_at = datetime('now')
            WHERE job_id = ? AND status = 'queued'"#,
@@ -317,6 +318,12 @@ pub async fn claim_job(
     )
     .execute(&mut *tx)
     .await?;
+
+    if result.rows_affected() == 0 {
+        // Another worker claimed this job between our SELECT and UPDATE.
+        tx.rollback().await?;
+        return Ok(None);
+    }
 
     tx.commit().await?;
 
