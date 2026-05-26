@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO reference_sources (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at) VALUES (?, 'x', 'x', 'x', 'x', 'x', NULL, NULL, NULL, NULL, 'pending', 'x')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ddd4b9486c8d416e60b8cdecc5f879b58b6fed72db9c875166bbe02a2e1691ee"
+}
