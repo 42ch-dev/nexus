@@ -53,7 +53,7 @@ pub async fn list(
 ) -> Result<Json<ListReferencesResponse>, NexusApiError> {
     info!("Handling list references request");
 
-    let rows = nexus_local_db::list_references(state.pool())
+    let rows = nexus_local_db::list_references(state.pool(), None, None)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
