@@ -1137,6 +1137,46 @@
       "working_branch": "feature/v1.29-spec-tracker-hygiene",
       "qc_verdict": "Approve",
       "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
+      "title": "KB extract atomic claim, UUID job IDs, bounded status, full e2e lifecycle",
+      "done_at": "2026-05-26T21:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-kb-extract-lifecycle-hardening.md",
+      "category": "logic",
+      "working_branch": "feature/v1.30-kb-extract-lifecycle-hardening",
+      "qc_verdict": "Approve (after fix: rows_affected check)",
+      "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.30-agent-session-quality",
+      "title": "SessionCapture from session start + persistent child Drop hardening",
+      "done_at": "2026-05-26T21:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-agent-session-quality.md",
+      "category": "logic",
+      "working_branch": "feature/v1.30-agent-session-quality",
+      "qc_verdict": "Approve (after fix: PID existence check)",
+      "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.30-creator-module-refactor",
+      "title": "Extract KB command handlers to creator/kb.rs",
+      "done_at": "2026-05-26T21:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-creator-module-refactor.md",
+      "category": "logic",
+      "working_branch": "feature/v1.30-creator-module-refactor",
+      "qc_verdict": "Approve",
+      "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-26-v1.30-local-db-hardening",
+      "title": "Reference store, narrative errors, and KB query hygiene (R5–R9)",
+      "done_at": "2026-05-26T21:30:00Z",
+      "plan_file": ".agents/plans/2026-05-26-v1.30-local-db-hardening.md",
+      "category": "logic",
+      "working_branch": "feature/v1.30-local-db-hardening",
+      "qc_verdict": "Approve (after fix: limit/offset clamping)",
+      "qa_verdict": "Pass"
     }
   ]
 }
