@@ -648,7 +648,7 @@ pub enum KbCommand {
 
     /// Show extract job status for the active creator.
     ///
-    /// Without `--job-id`, lists all jobs for the active creator.
+    /// Without `--job-id`, lists up to 100 most recent jobs for the active creator.
     #[command(name = "extract-status")]
     ExtractStatus {
         /// Specific job ID to inspect
@@ -1412,11 +1412,7 @@ async fn kb_remove(
 /// Creates a row in `kb_extract_jobs` with status `queued`.
 /// The actual extraction is performed by the `kb.extract_work` capability
 /// (triggered via preset or daemon orchestration). No LLM calls here.
-async fn kb_queue_extract(
-    config: &CliConfig,
-    work_entry_id: &str,
-    world_id: &str,
-) -> Result<()> {
+async fn kb_queue_extract(config: &CliConfig, work_entry_id: &str, world_id: &str) -> Result<()> {
     let creator_id = config
         .active_creator_id
         .as_deref()
@@ -1430,15 +1426,10 @@ async fn kb_queue_extract(
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
-    let job = nexus_local_db::enqueue_extract_job(
-        &pool,
-        &creator_id,
-        &slug,
-        work_entry_id,
-        world_id,
-    )
-    .await
-    .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
+    let job =
+        nexus_local_db::enqueue_extract_job(&pool, &creator_id, &slug, work_entry_id, world_id)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
 
     if job.status == "queued" {
         // Check if this was a new enqueue vs idempotent return
@@ -1453,9 +1444,13 @@ async fn kb_queue_extract(
     Ok(())
 }
 
+/// Default maximum number of extract jobs shown when listing without `--job-id`.
+const DEFAULT_EXTRACT_STATUS_LIMIT: u32 = 100;
+
 /// `kb extract-status` — show extract job(s) for the active creator.
 ///
-/// With `--job-id`, shows a specific job. Without it, lists all jobs.
+/// With `--job-id`, shows a specific job. Without it, lists up to
+/// `DEFAULT_EXTRACT_STATUS_LIMIT` (100) most recent jobs.
 async fn kb_extract_status(config: &CliConfig, job_id: Option<&str>) -> Result<()> {
     let creator_id = config
         .active_creator_id
@@ -1476,16 +1471,19 @@ async fn kb_extract_status(config: &CliConfig, job_id: Option<&str>) -> Result<(
         };
         print_job_detail(&job);
     } else {
-        let jobs = nexus_local_db::list_extract_jobs(&pool, &creator_id)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to list extract jobs: {e}")))?;
+        let jobs =
+            nexus_local_db::list_extract_jobs(&pool, &creator_id, DEFAULT_EXTRACT_STATUS_LIMIT)
+                .await
+                .map_err(|e| CliError::Other(format!("Failed to list extract jobs: {e}")))?;
 
         if jobs.is_empty() {
             println!("No extract jobs for creator {creator_id}.");
             return Ok(());
         }
 
-        println!("Extract jobs for creator {creator_id}:");
+        println!(
+            "Extract jobs for creator {creator_id} (showing up to {DEFAULT_EXTRACT_STATUS_LIMIT}):"
+        );
         println!(
             "{:<20} {:<15} {:<20} {:<20} STATUS",
             "JOB_ID", "WORK_ENTRY", "WORLD", "CREATED"

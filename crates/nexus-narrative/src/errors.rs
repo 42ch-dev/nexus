@@ -88,6 +88,10 @@ pub enum NarrativeError {
         /// Maximum length.
         max: usize,
     },
+
+    /// Storage backend error (database, I/O, etc.).
+    #[error("storage error: {0}")]
+    Storage(String),
 }
 
 #[cfg(test)]

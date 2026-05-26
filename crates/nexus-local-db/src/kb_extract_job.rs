@@ -33,14 +33,71 @@ pub struct KbExtractJob {
     pub finished_at: Option<String>,
 }
 
-/// Generate a unique job ID: `xj_` + 12 hex chars.
-#[allow(clippy::cast_possible_truncation)]
+/// Generate a unique job ID: `xj_` + `UUIDv4` hex string.
+///
+/// Uses the `uuid` crate for proper `UUIDv4` generation with `xj_` prefix.
+/// Collision probability is negligible but handled by the caller via single retry.
 fn generate_job_id() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let millis = u64::from(now.subsec_nanos()) | (now.as_millis() as u64).wrapping_shl(20);
-    format!("xj_{:012x}", millis & 0xFFFF_FFFF_FFFF)
+    format!("xj_{}", uuid::Uuid::new_v4().simple())
+}
+
+/// Insert a new job row, retrying once on PRIMARY KEY collision (R18).
+///
+/// `UUIDv4` collision is astronomically unlikely; this guard is defensive only.
+async fn insert_with_retry(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_id: &str,
+    work_entry_id: &str,
+    world_id: &str,
+) -> Result<KbExtractJob, sqlx::Error> {
+    for _ in 0..2 {
+        let job_id = generate_job_id();
+        let result = sqlx::query!(
+            r#"INSERT INTO kb_extract_jobs
+                (job_id, creator_id, workspace_id, work_entry_id, world_id, status)
+               VALUES (?, ?, ?, ?, ?, 'queued')"#,
+            job_id,
+            creator_id,
+            workspace_id,
+            work_entry_id,
+            world_id,
+        )
+        .execute(pool)
+        .await;
+
+        match result {
+            Ok(_) => {
+                return sqlx::query_as!(
+                    KbExtractJob,
+                    r#"SELECT
+                        job_id as "job_id!",
+                        creator_id as "creator_id!",
+                        workspace_id as "workspace_id!",
+                        work_entry_id as "work_entry_id!",
+                        world_id as "world_id!",
+                        status as "status!",
+                        error_text,
+                        created_at as "created_at!",
+                        started_at,
+                        finished_at
+                    FROM kb_extract_jobs
+                    WHERE job_id = ?"#,
+                    job_id,
+                )
+                .fetch_one(pool)
+                .await;
+            }
+            Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("1555") => {
+                // SQLite UNIQUE constraint violation (code 1555) — retry with new UUID
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    // Should never reach here with UUIDv4
+    Err(sqlx::Error::Configuration(
+        "UNIQUE constraint violation after retry — impossible with UUIDv4".into(),
+    ))
 }
 
 /// Enqueue a new extract job. Idempotent: if a non-failed job already exists
@@ -86,41 +143,8 @@ pub async fn enqueue(
         return Ok(job);
     }
 
-    // Insert new job.
-    let job_id = generate_job_id();
-    sqlx::query!(
-        r#"INSERT INTO kb_extract_jobs
-            (job_id, creator_id, workspace_id, work_entry_id, world_id, status)
-           VALUES (?, ?, ?, ?, ?, 'queued')"#,
-        job_id,
-        creator_id,
-        workspace_id,
-        work_entry_id,
-        world_id,
-    )
-    .execute(pool)
-    .await?;
-
-    // Fetch back to return the full row.
-    sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE job_id = ?"#,
-        job_id,
-    )
-    .fetch_one(pool)
-    .await
+    // Insert new job with retry on PRIMARY KEY collision.
+    insert_with_retry(pool, creator_id, workspace_id, work_entry_id, world_id).await
 }
 
 /// Get a specific job by ID.
@@ -150,7 +174,10 @@ pub async fn get(pool: &SqlitePool, job_id: &str) -> Result<Option<KbExtractJob>
     .await
 }
 
-/// List all jobs for a given creator.
+/// List jobs for a given creator, bounded by `limit` (R20).
+///
+/// Returns at most `limit` jobs ordered by creation date (newest first).
+/// Use a reasonable default (e.g. 100) to avoid unbounded result sets.
 ///
 /// # Errors
 ///
@@ -158,6 +185,7 @@ pub async fn get(pool: &SqlitePool, job_id: &str) -> Result<Option<KbExtractJob>
 pub async fn list_by_creator(
     pool: &SqlitePool,
     creator_id: &str,
+    limit: u32,
 ) -> Result<Vec<KbExtractJob>, sqlx::Error> {
     sqlx::query_as!(
         KbExtractJob,
@@ -174,8 +202,10 @@ pub async fn list_by_creator(
             finished_at
         FROM kb_extract_jobs
         WHERE creator_id = ?
-        ORDER BY created_at DESC"#,
+        ORDER BY created_at DESC
+        LIMIT ?"#,
         creator_id,
+        limit,
     )
     .fetch_all(pool)
     .await
@@ -231,6 +261,87 @@ pub async fn mark_running(pool: &SqlitePool, job_id: &str) -> Result<(), sqlx::E
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Atomically claim the oldest queued job for a given creator (R15).
+///
+/// Performs SELECT + UPDATE in a single `SQLite` transaction to prevent
+/// concurrent workers from double-claiming the same job.
+///
+/// Returns `Some(job)` if a queued job was found and claimed, `None` otherwise.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn claim_job(
+    pool: &SqlitePool,
+    creator_id: &str,
+) -> Result<Option<KbExtractJob>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Select oldest queued job for this creator.
+    let job = sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at
+        FROM kb_extract_jobs
+        WHERE creator_id = ?
+          AND status = 'queued'
+        ORDER BY created_at ASC
+        LIMIT 1"#,
+        creator_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(job) = job else {
+        tx.rollback().await?;
+        return Ok(None);
+    };
+
+    // Atomically mark as running within the same transaction.
+    sqlx::query!(
+        r#"UPDATE kb_extract_jobs
+           SET status = 'running', started_at = datetime('now')
+           WHERE job_id = ? AND status = 'queued'"#,
+        job.job_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    // Re-fetch to get the updated started_at timestamp.
+    let claimed = sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at
+        FROM kb_extract_jobs
+        WHERE job_id = ?"#,
+        job.job_id,
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(Some(claimed))
 }
 
 /// Mark a job as done. Sets `finished_at` to now.
@@ -294,6 +405,10 @@ mod tests {
         assert!(job.job_id.starts_with("xj_"));
         assert_eq!(job.status, "queued");
         assert_eq!(job.creator_id, "ctr_1");
+        // UUID format: xj_ + 32 hex chars
+        let uuid_part = &job.job_id[3..];
+        assert_eq!(uuid_part.len(), 32);
+        assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));
 
         let fetched = get(&pool, &job.job_id).await.unwrap().unwrap();
         assert_eq!(fetched.work_entry_id, "kb_abc123");
@@ -375,11 +490,29 @@ mod tests {
             .await
             .unwrap();
 
-        let jobs = list_by_creator(&pool, "ctr_1").await.unwrap();
+        let jobs = list_by_creator(&pool, "ctr_1", 100).await.unwrap();
         assert_eq!(jobs.len(), 2);
 
-        let jobs = list_by_creator(&pool, "ctr_2").await.unwrap();
+        let jobs = list_by_creator(&pool, "ctr_2", 100).await.unwrap();
         assert_eq!(jobs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_list_by_creator_bounded() {
+        let (pool, _dir) = fresh_pool().await;
+        for i in 0..5 {
+            enqueue(&pool, "ctr_1", "wrk_1", &format!("kb_{i}"), "wld_1")
+                .await
+                .unwrap();
+        }
+
+        // Limit of 3 should return only 3
+        let jobs = list_by_creator(&pool, "ctr_1", 3).await.unwrap();
+        assert_eq!(jobs.len(), 3);
+
+        // Limit of 100 returns all
+        let jobs = list_by_creator(&pool, "ctr_1", 100).await.unwrap();
+        assert_eq!(jobs.len(), 5);
     }
 
     #[tokio::test]
@@ -401,5 +534,84 @@ mod tests {
         let next = next_queued(&pool, "ctr_1").await.unwrap().unwrap();
         assert!(next.job_id.starts_with("xj_"));
         assert_ne!(next.job_id, j1.job_id);
+    }
+
+    // ── K1: Atomic claim_job tests ──────────────────────────────────
+
+    #[tokio::test]
+    async fn test_claim_job_selects_oldest_queued() {
+        let (pool, _dir) = fresh_pool().await;
+        let j1 = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
+            .await
+            .unwrap();
+        let _j2 = enqueue(&pool, "ctr_1", "wrk_1", "kb_b", "wld_1")
+            .await
+            .unwrap();
+
+        let claimed = claim_job(&pool, "ctr_1").await.unwrap().unwrap();
+        assert_eq!(claimed.job_id, j1.job_id);
+        assert_eq!(claimed.status, "running");
+        assert!(claimed.started_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_claim_job_returns_none_when_empty() {
+        let (pool, _dir) = fresh_pool().await;
+        assert!(claim_job(&pool, "ctr_1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_claim_job_skips_non_queued() {
+        let (pool, _dir) = fresh_pool().await;
+        let j1 = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
+            .await
+            .unwrap();
+        mark_running(&pool, &j1.job_id).await.unwrap();
+
+        // Only running jobs — nothing to claim
+        assert!(claim_job(&pool, "ctr_1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_claim_job_concurrent_double_claim_prevented() {
+        let (pool, _dir) = fresh_pool().await;
+        // Enqueue a single job
+        let _j = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
+            .await
+            .unwrap();
+
+        // Two concurrent claimers — SQLite may return BUSY for one of them,
+        // which we treat as "did not claim".
+        let pool1 = pool.clone();
+        let pool2 = pool.clone();
+        let h1 = tokio::spawn(async move { claim_job(&pool1, "ctr_1").await });
+        let h2 = tokio::spawn(async move { claim_job(&pool2, "ctr_1").await });
+
+        let r1 = h1.await.unwrap().ok().flatten();
+        let r2 = h2.await.unwrap().ok().flatten();
+
+        // Exactly one should succeed (the other gets SQLITE_BUSY → Err, or
+        // finds no queued row → None).
+        let claimed_count = r1.is_some() as usize + r2.is_some() as usize;
+        assert!(
+            claimed_count == 1,
+            "expected exactly one claim to succeed, got {claimed_count}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_claim_job_then_full_lifecycle() {
+        let (pool, _dir) = fresh_pool().await;
+        let j = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
+            .await
+            .unwrap();
+
+        let claimed = claim_job(&pool, "ctr_1").await.unwrap().unwrap();
+        assert_eq!(claimed.job_id, j.job_id);
+        assert_eq!(claimed.status, "running");
+
+        mark_done(&pool, &claimed.job_id).await.unwrap();
+        let done = get(&pool, &claimed.job_id).await.unwrap().unwrap();
+        assert_eq!(done.status, "done");
     }
 }

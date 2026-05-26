@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE kb_extract_jobs\n           SET status = 'running', started_at = datetime('now')\n           WHERE job_id = ? AND status = 'queued'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1eaea40bcbc2e8d04936f4d89d72a7986ece24e52939c20771319a5c51405806"
+}
