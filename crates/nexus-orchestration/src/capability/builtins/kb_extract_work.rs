@@ -352,6 +352,8 @@ mod tests {
         let resp = parse_extraction_response(json).unwrap();
         assert_eq!(resp.block_type, "Character");
         assert_eq!(resp.canonical_name, "Elena");
+        assert_eq!(resp.body, "A brave warrior");
+        assert_eq!(resp.source_work_entry_id, "kb_abc");
     }
 
     #[test]
@@ -359,6 +361,7 @@ mod tests {
         let json = "```json\n{\"block_type\": \"Scene\", \"canonical_name\": \"Mountains\", \"body\": \"Cold peaks\", \"source_work_entry_id\": \"\"}\n```";
         let resp = parse_extraction_response(json).unwrap();
         assert_eq!(resp.block_type, "Scene");
+        assert_eq!(resp.body, "Cold peaks");
     }
 
     #[test]
