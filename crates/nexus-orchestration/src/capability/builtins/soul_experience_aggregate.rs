@@ -82,9 +82,7 @@ impl Capability for SoulExperienceAggregate {
         let home_dir = input
             .get("home_dir")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                CapabilityError::InputInvalid("missing 'home_dir' field".to_string())
-            })?;
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'home_dir' field".to_string()))?;
 
         let home = std::path::Path::new(home_dir);
 
@@ -92,14 +90,10 @@ impl Capability for SoulExperienceAggregate {
         // side-effect-free. The preset orchestrator or CLI is responsible for
         // writing the result to SOUL.md.
         let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
-            home,
-            creator_id,
-            None, // Deterministic path only — no LLM synthesizer
+            home, creator_id, None, // Deterministic path only — no LLM synthesizer
         )
         .await
-        .map_err(|e| {
-            CapabilityError::Internal(format!("experience aggregation failed: {e}"))
-        })?;
+        .map_err(|e| CapabilityError::Internal(format!("experience aggregation failed: {e}")))?;
 
         Ok(json!({
             "memories_processed": result.memories_processed,
@@ -119,8 +113,8 @@ mod tests {
 
     #[test]
     fn soul_experience_aggregate_input_schema_valid() {
-        let schema: Value =
-            serde_json::from_str(SoulExperienceAggregate.input_schema()).expect("valid JSON Schema");
+        let schema: Value = serde_json::from_str(SoulExperienceAggregate.input_schema())
+            .expect("valid JSON Schema");
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"
@@ -138,8 +132,8 @@ mod tests {
 
     #[test]
     fn soul_experience_aggregate_output_schema_valid() {
-        let schema: Value =
-            serde_json::from_str(SoulExperienceAggregate.output_schema()).expect("valid JSON Schema");
+        let schema: Value = serde_json::from_str(SoulExperienceAggregate.output_schema())
+            .expect("valid JSON Schema");
         assert_eq!(schema["type"], "object");
         let required = schema["required"].as_array().unwrap();
         assert!(required.contains(&json!("memories_processed")));
@@ -149,9 +143,7 @@ mod tests {
     #[tokio::test]
     async fn soul_experience_aggregate_missing_creator_id_errors() {
         let cap = SoulExperienceAggregate;
-        let result = cap
-            .run(json!({ "home_dir": "/tmp" }))
-            .await;
+        let result = cap.run(json!({ "home_dir": "/tmp" })).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("missing 'creator_id'"));
@@ -160,9 +152,7 @@ mod tests {
     #[tokio::test]
     async fn soul_experience_aggregate_missing_home_dir_errors() {
         let cap = SoulExperienceAggregate;
-        let result = cap
-            .run(json!({ "creator_id": "ctr_test" }))
-            .await;
+        let result = cap.run(json!({ "creator_id": "ctr_test" })).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("missing 'home_dir'"));

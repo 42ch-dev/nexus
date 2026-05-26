@@ -123,8 +123,7 @@ pub async fn run(args: AcpWorkerArgs) -> Result<()> {
         "acp-worker starting"
     );
 
-    let daemon_client =
-        crate::api::daemon_client::DaemonClient::new(&args.daemon_url);
+    let daemon_client = crate::api::daemon_client::DaemonClient::new(&args.daemon_url);
     let state = Arc::new(MultiplexedWorkerState::new(args.creator, daemon_client));
 
     // The ACP SDK requires LocalSet since its futures are !Send.
@@ -703,11 +702,7 @@ async fn handle_agent_stop(
             None, // world_id not available at worker level
         );
         let digest = capture.capture_session_end();
-        crate::session_capture::spawn_submit_capture(
-            state.daemon_client.clone(),
-            capture,
-            digest,
-        );
+        crate::session_capture::spawn_submit_capture(state.daemon_client.clone(), capture, digest);
     }
 
     let result = json!({ "ok": true });
@@ -910,7 +905,10 @@ mod tests {
 
     #[test]
     fn worker_state_defaults() {
-        let state = MultiplexedWorkerState::new("test-creator".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
         assert!(!state.shutdown_requested.load(Ordering::Relaxed));
         assert_eq!(state.creator_id, "test-creator");
         // No sessions initially.
@@ -989,7 +987,10 @@ mod tests {
 
     #[test]
     fn initialize_with_agent_ref_creates_default_session() {
-        let state = MultiplexedWorkerState::new("test-creator".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
         let params = json!({
             "agent_ref": "claude-sonnet-4-20250514"
         });
@@ -1021,7 +1022,10 @@ mod tests {
 
     #[test]
     fn initialize_with_agents_array_creates_multiple_sessions() {
-        let state = MultiplexedWorkerState::new("test-creator".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
         let params = json!({
             "agents": [
                 {
@@ -1106,7 +1110,10 @@ mod tests {
 
     #[test]
     fn agent_start_creates_slot_and_stops_removes() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Start an agent.
         {
@@ -1138,7 +1145,10 @@ mod tests {
 
     #[test]
     fn acp_prompt_routes_to_correct_session() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Create two sessions.
         {
@@ -1172,14 +1182,20 @@ mod tests {
 
     #[test]
     fn acp_prompt_errors_on_nonexistent_session() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
         let sessions = state.sessions.read().expect("lock ok");
         assert!(sessions.get("nonexistent").is_none());
     }
 
     #[test]
     fn acp_prompt_errors_on_non_ready_session() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Create a session in Error state.
         {
@@ -1199,7 +1215,10 @@ mod tests {
 
     #[test]
     fn agent_list_returns_all_sessions() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         {
             let mut sessions = state.sessions.write().expect("lock ok");
@@ -1220,7 +1239,10 @@ mod tests {
 
     #[test]
     fn health_returns_per_session_info() {
-        let state = MultiplexedWorkerState::new("test-creator".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         {
             let mut sessions = state.sessions.write().expect("lock ok");
@@ -1266,7 +1288,10 @@ mod tests {
 
     #[test]
     fn shutdown_requests_stop_on_all_sessions() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         {
             let mut sessions = state.sessions.write().expect("lock ok");
@@ -1298,7 +1323,10 @@ mod tests {
 
     #[test]
     fn initialize_with_no_params_creates_default_session() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
         let params = json!({});
 
         // Simulate initialize fallback path.
@@ -1328,7 +1356,10 @@ mod tests {
 
     #[test]
     fn agent_start_with_system_prompt_stores_correctly() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Simulate agent_start IPC with system_prompt.
         let params = json!({
@@ -1387,7 +1418,10 @@ mod tests {
 
     #[test]
     fn agent_start_without_system_prompt_works_gracefully() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Simulate agent_start IPC WITHOUT system_prompt.
         let params = json!({
@@ -1441,7 +1475,10 @@ mod tests {
 
     #[test]
     fn agent_start_rejects_duplicate_session_id() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Insert first session.
         {
@@ -1463,7 +1500,10 @@ mod tests {
 
     #[test]
     fn agent_stop_on_nonexistent_returns_none() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         let removed = {
             let mut sessions = state.sessions.write().expect("lock ok");
@@ -1481,7 +1521,10 @@ mod tests {
 
     #[test]
     fn initialize_idempotent_replaces_sessions() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // First init.
         {
@@ -1561,7 +1604,10 @@ mod tests {
 
     #[test]
     fn crash_isolation_one_slot_crash_does_not_affect_others() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Create two sessions.
         {
@@ -1595,7 +1641,10 @@ mod tests {
 
     #[test]
     fn crash_isolation_three_slots_one_crashes() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         // Create three sessions.
         {
@@ -1628,7 +1677,10 @@ mod tests {
 
     #[test]
     fn crashed_slot_remains_in_sessions_map() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         {
             let mut sessions = state.sessions.write().expect("lock ok");
@@ -1656,7 +1708,10 @@ mod tests {
 
     #[test]
     fn crash_reason_recorded_in_health() {
-        let state = MultiplexedWorkerState::new("test".to_string(), crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"));
+        let state = MultiplexedWorkerState::new(
+            "test".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
 
         {
             let mut sessions = state.sessions.write().expect("lock ok");

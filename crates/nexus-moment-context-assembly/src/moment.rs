@@ -266,7 +266,11 @@ impl MomentContext {
             let content_start = start_pos + STAGE0_PERSONALITY_START.len();
             if end_pos > content_start {
                 let personality_section = ctx[content_start..end_pos].to_string();
-                let rest = format!("{}{}", &ctx[..start_pos], &ctx[end_pos + STAGE0_PERSONALITY_END.len()..]);
+                let rest = format!(
+                    "{}{}",
+                    &ctx[..start_pos],
+                    &ctx[end_pos + STAGE0_PERSONALITY_END.len()..]
+                );
                 return (personality_section, rest);
             }
         }
@@ -907,10 +911,7 @@ mod tests {
             !rest.contains("Bold and creative writer."),
             "rest must not contain personality body"
         );
-        assert!(
-            rest.contains("10 years."),
-            "rest must contain experience"
-        );
+        assert!(rest.contains("10 years."), "rest must contain experience");
     }
 
     #[test]
@@ -974,7 +975,8 @@ mod tests {
     #[test]
     fn split_personality_legacy_heuristic_fallback() {
         // Content without delimiters should fall back to heuristic
-        let legacy_content = "System prefix.\n\n## Personality\n\nA creative soul.\n\n## Experience\n\n10 years.\n";
+        let legacy_content =
+            "System prefix.\n\n## Personality\n\nA creative soul.\n\n## Experience\n\n10 years.\n";
 
         let ctx = MomentContext {
             stage0_context: legacy_content.to_string(),
@@ -990,9 +992,6 @@ mod tests {
             !personality.contains("10 years"),
             "legacy heuristic must not include experience"
         );
-        assert!(
-            rest.contains("10 years"),
-            "rest must contain experience"
-        );
+        assert!(rest.contains("10 years"), "rest must contain experience");
     }
 }
