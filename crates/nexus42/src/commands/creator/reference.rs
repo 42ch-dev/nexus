@@ -178,7 +178,7 @@ async fn run_list(config: &CliConfig) -> Result<()> {
     let _creator_context = resolve_creator_context(config)?;
     let pool = open_workspace_pool(config).await?;
 
-    let rows = nexus_local_db::list_references(&pool).await?;
+    let rows = nexus_local_db::list_references(&pool, None, None).await?;
 
     if rows.is_empty() {
         println!("No registered references.");

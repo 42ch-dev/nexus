@@ -73,6 +73,9 @@ impl CapabilityRegistry {
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
     /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`,
     /// `context.summarize`, `kb.extract_work`, `soul.experience.aggregate`.
+    ///
+    /// `kb.extract_work` is created without a pool (placeholder mode).
+    /// Use [`with_builtins_and_pool`] for full e2e support.
     #[must_use]
     pub fn with_builtins() -> Self {
         let caps: Vec<Box<dyn Capability>> = vec![
@@ -91,7 +94,35 @@ impl CapabilityRegistry {
             Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm),
             Box::new(builtins::ContextSummarize),
-            Box::new(builtins::KbExtractWork),
+            Box::new(builtins::KbExtractWork::new()),
+            Box::new(builtins::SoulExperienceAggregate),
+        ];
+        Self { capabilities: caps }
+    }
+
+    /// Create a registry with built-in capabilities and a pool for `kb.extract_work`.
+    ///
+    /// Same as [`with_builtins`] but `kb.extract_work` receives the pool
+    /// for full e2e lifecycle (claim → extract → `KeyBlock` insert → finalize).
+    #[must_use]
+    pub fn with_builtins_and_pool(pool: sqlx::SqlitePool) -> Self {
+        let caps: Vec<Box<dyn Capability>> = vec![
+            Box::new(builtins::SyncPull),
+            Box::new(builtins::SyncPush),
+            Box::new(builtins::OutboxFlush),
+            Box::new(builtins::OutboxCompact),
+            Box::new(builtins::WorkspaceOpen),
+            Box::new(builtins::WorkspaceCommit),
+            Box::new(builtins::RegistryRefresh),
+            Box::new(builtins::CreatorReadMemory),
+            Box::new(builtins::CreatorWriteMemory),
+            Box::new(builtins::CreatorInjectPrompt),
+            Box::new(builtins::JudgeRule),
+            Box::new(builtins::AcpPrompt),
+            Box::new(builtins::AcpSessionLoad),
+            Box::new(builtins::JudgeLlm),
+            Box::new(builtins::ContextSummarize),
+            Box::new(builtins::KbExtractWork::with_pool(pool)),
             Box::new(builtins::SoulExperienceAggregate),
         ];
         Self { capabilities: caps }

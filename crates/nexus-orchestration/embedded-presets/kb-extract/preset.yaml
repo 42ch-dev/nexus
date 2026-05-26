@@ -1,18 +1,21 @@
 # KB Extract Preset — Work-to-World Knowledge Extraction
 #
 # This preset processes queued KB extract jobs:
-# 1. Loads the next queued job for the active creator
+# 1. Claims the next queued job for the active creator (or uses a specific job_id)
 # 2. Reads the work-scope KB file content
 # 3. Sends an extraction prompt via acp.prompt
 # 4. Parses the structured JSON response
 # 5. Inserts a KeyBlock into the target world
+#
+# The kb.extract_work capability handles the full lifecycle:
+# claim → mark_running → build prompt → parse LLM response → insert KeyBlock → mark done/failed
 #
 # Manual run command:
 #   nexus42 daemon orchestrate run --preset kb-extract --creator <id>
 
 preset:
   id: kb-extract
-  version: 1
+  version: 2
   kind: creator
   description: "Extract structured KeyBlocks from work-scope KB entries into world knowledge"
   requires_capabilities:
@@ -23,23 +26,28 @@ preset:
 
 states:
   - id: loading
-    description: "Load work content from the queued extract job"
+    description: "Load and claim the next queued extract job, then extract content"
     enter:
       - kind: capability
         name: kb.extract_work
         args:
-          work_entry_id: "{{preset.input.work_entry_id}}"
-          world_id: "{{preset.input.world_id}}"
           creator_id: "{{preset.input.creator_id}}"
+          job_id: "{{preset.input.job_id}}"
+          work_content: "{{preset.input.work_content}}"
     exit_when:
       kind: rule
     next: extracting
 
   - id: extracting
-    description: "Send extraction prompt to LLM via acp.prompt"
+    description: "Send extraction prompt to LLM via acp.prompt, then finalize"
     enter:
-      - kind: inner_graph
-        name: extraction_graph
+      - kind: capability
+        name: kb.extract_work
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          job_id: "{{loading.output.job_id}}"
+          work_content: "{{preset.input.work_content}}"
+          llm_response: "{{extraction_graph.output}}"
     exit_when:
       kind: graph_complete
     next: done

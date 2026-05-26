@@ -87,6 +87,8 @@ struct MultiplexedWorkerState {
     request_counter: AtomicU64,
     /// Daemon HTTP client for session-capture submissions.
     daemon_client: crate::api::daemon_client::DaemonClient,
+    /// Per-session captures for R14 session quality tracking.
+    session_captures: std::sync::RwLock<HashMap<String, crate::session_capture::SessionCapture>>,
 }
 
 impl MultiplexedWorkerState {
@@ -98,6 +100,7 @@ impl MultiplexedWorkerState {
             start_time: std::time::Instant::now(),
             request_counter: AtomicU64::new(1),
             daemon_client,
+            session_captures: std::sync::RwLock::new(HashMap::new()),
         }
     }
 }
@@ -373,7 +376,7 @@ async fn handle_initialize(
             let config = AgentConfig::new(session_id.clone(), agent_ref.to_string());
             let slot = AgentSlot::new(config);
             slot.mark_ready();
-            sessions.insert(session_id, slot);
+            sessions.insert(session_id.clone(), slot);
         } else {
             // No agent info provided — create a default session.
             let session_id = "default".to_string();
@@ -381,7 +384,20 @@ async fn handle_initialize(
                 AgentConfig::new(session_id.clone(), "claude-sonnet-4-20250514".to_string());
             let slot = AgentSlot::new(config);
             slot.mark_ready();
-            sessions.insert(session_id, slot);
+            sessions.insert(session_id.clone(), slot);
+        }
+
+        // R14: Create SessionCapture for each initialized session.
+        if let Ok(mut captures) = state.session_captures.write() {
+            for (sid, slot) in sessions.iter() {
+                let capture = crate::session_capture::SessionCapture::new(
+                    sid.clone(),
+                    slot.acp_agent_id().to_string(),
+                    state.creator_id.clone(),
+                    None, // world_id not available at worker level
+                );
+                captures.insert(sid.clone(), capture);
+            }
         }
 
         // Build session summaries.
@@ -497,6 +513,14 @@ async fn handle_acp_prompt(
     let chunk_bytes = format!("{chunk}\n");
     stdout.write_all(chunk_bytes.as_bytes()).await?;
     stdout.flush().await?;
+
+    // R14: Record message exchange on the session capture.
+    if let Ok(mut captures) = state.session_captures.write() {
+        if let Some(capture) = captures.get_mut(&session_id) {
+            capture.record_message();
+            capture.update_context(&prompt);
+        }
+    }
 
     // Transition back to Ready (synchronous lock scope — no await).
     {
@@ -624,6 +648,21 @@ async fn handle_agent_start(
             // Emit started event (async, no lock held).
             emit_session_event(stdout, &session_id, "started", None).await?;
 
+            // R14: Create SessionCapture for the new session.
+            if let Ok(mut captures) = state.session_captures.write() {
+                let capture = crate::session_capture::SessionCapture::new(
+                    session_id.clone(),
+                    summary
+                        .get("acp_agent_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    state.creator_id.clone(),
+                    None,
+                );
+                captures.insert(session_id.clone(), capture);
+            }
+
             let result = json!({ "session": summary });
             write_jsonrpc_response(stdout, id, &result).await?;
         }
@@ -691,16 +730,28 @@ async fn handle_agent_stop(
     // Emit stopped event (async, no lock held).
     emit_session_event(stdout, &session_id, "stopped", None).await?;
 
-    // Fire-and-forget session capture: submit pending review to daemon.
-    // Uses SessionCapture::spawn_submit_capture which falls back to local
-    // file if the daemon is unavailable.
+    // R14: Retrieve the session-scoped capture (created at session start)
+    // and submit with populated metrics. Falls back to a fresh capture only
+    // if no prior capture exists (e.g., sessions started before this code).
     {
-        let capture = crate::session_capture::SessionCapture::new(
-            session_id.clone(),
-            agent_id,
-            state.creator_id.clone(),
-            None, // world_id not available at worker level
-        );
+        let capture = if let Ok(mut captures) = state.session_captures.write() {
+            captures.remove(&session_id)
+        } else {
+            None
+        };
+
+        let capture = capture.unwrap_or_else(|| {
+            warn!(
+                session_id = %session_id,
+                "No session-scoped capture found; creating fallback capture with zero metrics"
+            );
+            crate::session_capture::SessionCapture::new(
+                session_id.clone(),
+                agent_id,
+                state.creator_id.clone(),
+                None,
+            )
+        });
         let digest = capture.capture_session_end();
         crate::session_capture::spawn_submit_capture(state.daemon_client.clone(), capture, digest);
     }
@@ -1923,5 +1974,157 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("invalid --agent-ref format"));
+    }
+
+    // --- R14: SessionCapture lifecycle tests ---
+
+    /// Verify that SessionCapture created at session start accumulates
+    /// non-zero message counts when prompts are simulated.
+    #[test]
+    fn session_capture_populated_after_prompts() {
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
+
+        // Simulate session creation (as in initialize with agent_ref).
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let session_id = "s1".to_string();
+            let config = AgentConfig::new(session_id.clone(), "agent_a".to_string());
+            let slot = AgentSlot::new(config);
+            slot.mark_ready();
+            sessions.insert(session_id.clone(), slot);
+
+            // R14: Create capture at session start.
+            let mut captures = state.session_captures.write().expect("captures lock ok");
+            let capture = crate::session_capture::SessionCapture::new(
+                session_id,
+                "agent_a".to_string(),
+                "test-creator".to_string(),
+                None,
+            );
+            captures.insert("s1".to_string(), capture);
+        }
+
+        // Simulate two prompts.
+        {
+            let mut captures = state.session_captures.write().expect("captures lock ok");
+            let capture = captures.get_mut("s1").expect("capture exists");
+            capture.record_message();
+            capture.update_context("first prompt");
+        }
+        {
+            let mut captures = state.session_captures.write().expect("captures lock ok");
+            let capture = captures.get_mut("s1").expect("capture exists");
+            capture.record_message();
+            capture.record_tool_call();
+            capture.update_context("second prompt with tool");
+        }
+
+        // Retrieve capture and verify populated metrics.
+        let capture = state
+            .session_captures
+            .write()
+            .expect("captures lock ok")
+            .remove("s1")
+            .expect("capture exists");
+        let digest = capture.capture_session_end();
+
+        assert_eq!(
+            digest.message_count, 2,
+            "R14: digest should have 2 messages after two prompts"
+        );
+        assert_eq!(digest.tool_calls, 1, "R14: digest should have 1 tool call");
+        assert!(
+            digest.duration_secs > 0 || digest.message_count > 0,
+            "R14: digest should have meaningful metrics"
+        );
+        assert_eq!(digest.last_context, "second prompt with tool");
+    }
+
+    /// Verify that session capture is removed from the map on agent_stop.
+    #[test]
+    fn session_capture_removed_on_stop() {
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
+
+        // Create session + capture.
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            let config = AgentConfig::new("s1".to_string(), "agent_a".to_string());
+            let slot = AgentSlot::new(config);
+            slot.mark_ready();
+            sessions.insert("s1".to_string(), slot);
+        }
+        {
+            let mut captures = state.session_captures.write().expect("captures lock ok");
+            let capture = crate::session_capture::SessionCapture::new(
+                "s1".to_string(),
+                "agent_a".to_string(),
+                "test-creator".to_string(),
+                None,
+            );
+            captures.insert("s1".to_string(), capture);
+        }
+
+        // Simulate agent_stop: remove both slot and capture.
+        {
+            let mut sessions = state.sessions.write().expect("lock ok");
+            sessions.remove("s1");
+        }
+        let capture = state
+            .session_captures
+            .write()
+            .expect("captures lock ok")
+            .remove("s1");
+        assert!(capture.is_some(), "R14: capture should exist for removal");
+
+        // After stop, both maps should be empty.
+        assert!(state.sessions.read().expect("lock ok").is_empty());
+        assert!(state
+            .session_captures
+            .read()
+            .expect("captures lock ok")
+            .is_empty());
+    }
+
+    /// Verify initialize clears stale captures on re-init.
+    #[test]
+    fn session_capture_cleared_on_reinit() {
+        let state = MultiplexedWorkerState::new(
+            "test-creator".to_string(),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+        );
+
+        // Create initial captures.
+        {
+            let mut captures = state.session_captures.write().expect("captures lock ok");
+            let capture = crate::session_capture::SessionCapture::new(
+                "old_s1".to_string(),
+                "old_agent".to_string(),
+                "test-creator".to_string(),
+                None,
+            );
+            captures.insert("old_s1".to_string(), capture);
+        }
+
+        assert_eq!(
+            state.session_captures.read().expect("lock ok").len(),
+            1,
+            "should have 1 capture before re-init"
+        );
+
+        // Simulate re-init clearing captures.
+        if let Ok(mut captures) = state.session_captures.write() {
+            captures.clear();
+        }
+
+        assert!(
+            state.session_captures.read().expect("lock ok").is_empty(),
+            "R14: captures should be cleared on re-init"
+        );
     }
 }

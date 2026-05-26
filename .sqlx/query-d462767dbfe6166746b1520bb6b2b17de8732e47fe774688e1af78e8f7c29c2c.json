@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n            job_id as \"job_id!\",\n            creator_id as \"creator_id!\",\n            workspace_id as \"workspace_id!\",\n            work_entry_id as \"work_entry_id!\",\n            world_id as \"world_id!\",\n            status as \"status!\",\n            error_text,\n            created_at as \"created_at!\",\n            started_at,\n            finished_at\n        FROM kb_extract_jobs\n        WHERE creator_id = ?\n        ORDER BY created_at DESC",
+  "query": "SELECT\n                        job_id as \"job_id!\",\n                        creator_id as \"creator_id!\",\n                        workspace_id as \"workspace_id!\",\n                        work_entry_id as \"work_entry_id!\",\n                        world_id as \"world_id!\",\n                        status as \"status!\",\n                        error_text,\n                        created_at as \"created_at!\",\n                        started_at,\n                        finished_at\n                    FROM kb_extract_jobs\n                    WHERE job_id = ?",
   "describe": {
     "columns": [
       {
@@ -70,5 +70,5 @@
       true
     ]
   },
-  "hash": "2d43d1a6f37e2eb8e7edeccf64ea383f1ce34f8065311251f35808c0a3fd665f"
+  "hash": "d462767dbfe6166746b1520bb6b2b17de8732e47fe774688e1af78e8f7c29c2c"
 }
