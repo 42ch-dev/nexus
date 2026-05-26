@@ -222,12 +222,11 @@ pub async fn list(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<ReferenceSourceRow>, LocalDbError> {
-    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT);
-    let offset = offset.unwrap_or(0);
+    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, 1000);
+    let offset = offset.unwrap_or(0).max(0);
 
-    // SAFETY: `limit` and `offset` are bounded `i64` values from `Option<i64>`;
-    // negative values are not possible since callers provide positive integers
-    // only. Dynamic SQL needed because `sqlx::query!` does not support
+    // SAFETY: `limit` is clamped to 1..=1000 and `offset` to >= 0.
+    // Dynamic SQL needed because `sqlx::query!` does not support
     // `LIMIT`/`OFFSET` as bind parameters in SQLite offline mode.
     let rows = sqlx::query(&format!(
         "SELECT
