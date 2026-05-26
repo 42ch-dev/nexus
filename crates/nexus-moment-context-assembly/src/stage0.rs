@@ -135,9 +135,7 @@ impl Stage0Assembly {
         // 2. Personality (non-truncatable — spec §9.3, wrapped in delimiters)
         if !self.personality.is_empty() {
             sections.push((
-                format!(
-                    "{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n"
-                ),
+                format!("{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n"),
                 format!("{}\n\n{STAGE0_PERSONALITY_END}", self.personality),
                 true,
             ));

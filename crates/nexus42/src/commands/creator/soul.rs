@@ -192,9 +192,7 @@ async fn refresh_experience(_config: &CliConfig, creator_id: &str) -> Result<()>
     let home = config::user_home_dir()?;
 
     let result = nexus_creator_memory::experience_aggregation::aggregate_experience(
-        &home,
-        creator_id,
-        None, // No synthesizer — deterministic path only
+        &home, creator_id, None, // No synthesizer — deterministic path only
     )
     .await?;
 
