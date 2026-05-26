@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.29 **Shipped**; V1.28 **Shipped**; V1.27 **Shipped**; residual SSOT = deferred nit/low in `status.json`)
+**Status**: Active (V1.30 **Shipped**; V1.29 **Shipped**; V1.28 **Shipped**; V1.27 **Shipped**; residual SSOT = deferred nit/low in `status.json`)
 **Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.21), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
 **Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
 **Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
@@ -165,16 +165,25 @@ Nexus currently has two reference source models with different ownership boundar
 
 ### 3.3 Open tech-debt residuals (tracked in `status.json`)
 
-Authoritative machine state: **`status.json` root `residual_findings`**（`updated_at` **2026-05-11**）。`metadata.tech_debt_summary.total_open` is **0** — remaining rows below are **`decision: accept`** with `target_date: backlog` (QA-owned follow-ups, not blocking releases).
+Authoritative machine state: **`status.json` root `residual_findings`**（`updated_at` **2026-05-26**）。`metadata.tech_debt_summary.total_open` is **11** — post-V1.30 QC tech debt (TD-V130-01..11: 8 low, 3 nit; all `decision: accept/defer`, `target_date: backlog`). Historical residuals R-V113-005/R-V113-007 remain accepted backlog.
 
 | ID | Title | Severity | Decision | `target_date` | Origin plan | Scope |
 |----|-------|----------|----------|----------------|-------------|-------|
 | R-V113-005 | UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s) | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/tests/creator_register_e2e.rs` |
 | R-V113-007 | Pre-existing flaky test `auth::tests::get_returns_none_for_unknown_creator` | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/src/auth/mod.rs` |
+| TD-V130-01 | SessionCapture RwLock uses write() for all accesses | low | accept | backlog | v1.30 QC3 W-002 | `crates/nexus42/src/commands/acp_worker/mod.rs` |
+| TD-V130-02 | cleanup_row fire-and-forget — DELETE failure silently lost | low | defer | backlog | v1.30 QC2 W-003 | `crates/nexus-local-db/src/reference_source.rs` |
+| TD-V130-03 | JobLifecycleGuard FSM — no RAII guard for mark_done/mark_failed | low | defer | backlog | v1.30 QC2 S-003 | `crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs` |
+| TD-V130-04 | Drop timeout 150ms may be insufficient — make configurable | low | defer | backlog | v1.30 QC3 S-001 | `crates/nexus-agent-host/src/providers/native_cli/claude.rs` |
+| TD-V130-05 | LIST_BY_WORLD_LIMIT=500 silently truncates | low | accept | backlog | v1.30 QC3 S-002 | `crates/nexus-local-db/src/kb_store.rs` |
+| TD-V130-06 | mark_running lacks WHERE status guard | low | defer | backlog | v1.30 QC3 S-004 | `crates/nexus-local-db/src/kb_extract_job.rs` |
+| TD-V130-07 | claim_job re-fetches row after commit for started_at | nit | accept | backlog | v1.30 QC3 S-005 | `crates/nexus-local-db/src/kb_extract_job.rs` |
+| TD-V130-08 | insert_with_retry returns generic error on collision | nit | accept | backlog | v1.30 QC2 S-005 | `crates/nexus-local-db/src/kb_extract_job.rs` |
+| TD-V130-09 | Dynamic SQL (format!) not parameterized | low | accept | backlog | v1.30 QC1 S-001, QC2 S-001 | `crates/nexus-local-db/src/reference_source.rs` |
+| TD-V130-10 | Extraction prompt format!() doubles memory for large entries | nit | accept | backlog | v1.30 QC3 S-003 | `crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs` |
+| TD-V130-11 | sqlx prepare CI enforcement | low | defer | backlog | v1.30 QC2 S-008 | CI pipeline |
 
-**Hygiene note (2026-05-11)**: Older tracker ids (R5, R11, R-WA-*, R-M1-W*, R-V110-*, …) are **not** present in root `residual_findings` today. Recover narrative detail from `archived/residuals/` / plan QC reports if you need historical provenance.
-
-> **Note**: `DEBT-RAND-073` (rand 0.7.3, blocked by wiremock) is **cancelled/accepted** — listed in §4 Closed.
+**Hygiene note (2026-05-26)**: Original V1.30 residuals R5–R20 are **all closed** (shipped in V1.30). See `archived/residuals/v1.30-residual-convergence.json` for closure details. Pre-V1.30 tracker ids (R5, R11, R-WA-*, R-M1-W*, R-V110-*, …) are not present in root `residual_findings` today. Recover narrative detail from `archived/residuals/` / plan QC reports if needed.
 
 ---
 
@@ -231,6 +240,23 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | ~~DF-O~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-05 — Full ACP permission policy engine UI (web-based). Not core product value. |
 | ~~DF-P~~ | **Superseded** | 2026-04-21 (V1.7 planning) | DF-06 — Preset hot-reload. Snapshot semantics correct; real need → DF-17. |
 | ~~DF-15~~ | **Cancelled** | V1.13 (governance closure) | OpenAPI export work. Nexus is not an OpenAPI-first product boundary for runtime value delivery; V1.13 resolves tracker ambiguity as governance-only closure with no implementation scope. |
+
+### Tech-debt residuals shipped (V1.30)
+
+| ID | Title | Shipped in | Notes |
+|----|-------|------------|-------|
+| ~~R5~~ | body.md written before SQL INSERT — orphaned files on DB failure | V1.30 | Write order reversed: SQL INSERT first, body.md second. |
+| ~~R6~~ | list_references returns all rows unbounded — no pagination | V1.30 | LIMIT/OFFSET pagination with DEFAULT_PAGE_LIMIT; clamped 1..=1000. |
+| ~~R7~~ | content_hash always NULL — integrity field unused | V1.30 | blake3 content_hash computed on registration. |
+| ~~R8~~ | db_err maps all sqlx::Error to ValidationError — no Storage variant | V1.30 | `NarrativeError::Storage` variant introduced. |
+| ~~R9~~ | KbQuery fetches all blocks into memory — no DB-level pagination | V1.30 | `LIST_BY_WORLD_LIMIT=500` added to `list_by_world`. |
+| ~~R14~~ | SessionCapture created at agent-stop time — near-zero metrics | V1.30 | SessionCapture at session start with `session_captures` map in `MultiplexedWorkerState`. |
+| ~~R15~~ | KB extract job claim not atomic across next_queued + mark_running | V1.30 | Atomic `claim_job()`: SELECT+UPDATE in single tx + `rows_affected()` check. |
+| ~~R16~~ | kb.extract_work placeholder — no full extraction lifecycle | V1.30 | Full e2e: claim → extract → parse → mark_done → KeyBlock insert. |
+| ~~R17~~ | Persistent child Drop cleanup is best-effort and Unix-only | V1.30 | SIGTERM→wait→SIGKILL + PID existence check (`kill -0`). |
+| ~~R18~~ | KB extract job IDs use custom timestamp-derived generation | V1.30 | UUIDv4 with `xj_` prefix + `insert_with_retry`. |
+| ~~R19~~ | creator command module approaching maintainability threshold | V1.30 | KB handlers extracted to `creator/kb.rs` (973 lines); `mod.rs` reduced ~30%. |
+| ~~R20~~ | KB extract status list is unbounded | V1.30 | Bounded listing with `limit=100` default. |
 
 ---
 
@@ -387,6 +413,21 @@ Authoritative machine state: **`status.json` root `residual_findings`**（`updat
 | New residuals (v1.30) | R14–R20 (7 findings: 2 medium, 5 low/nit) |
 | Explicit deferrals | FL-D full de-stub; DF-42; DF-44; platform unpause |
 
+### V1.30 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md) |
+| Shipped at | 2026-05-26 (`status.json` `latest_shipped_iteration`) |
+| PR | [#38](https://github.com/42ch-dev/nexus/pull/38) merged to `main` |
+| Scope | Residual convergence — close all open residuals R5–R20 from V1.26–V1.29 delivery compasses |
+| Plans | `2026-05-26-v1.30-*` (four plans — all Done, archived to `plans-done.json`) |
+| Closed residuals | R5–R20 (12 findings: 2 medium, 8 low, 3 nit — **all fixed**) |
+| QC | Tri-review: QC1 Approve; QC2 Request Changes → 4 Critical fixes landed → consolidated Approve; QC3 Request Changes → W-001 fix landed → consolidated Approve |
+| Post-QC tech debt | 11 items (TD-V130-01..11: 8 low, 3 nit) — all `accept/defer`, backlog |
+| Key changes | Atomic `claim_job()` + `rows_affected()`, UUID `xj_` job IDs, bounded listing (limit=100), full e2e `kb.extract_work` lifecycle, SessionCapture at session start, SIGTERM→SIGKILL + PID existence check, `creator/kb.rs` extraction (973 lines), write-after-INSERT + blake3 content_hash + pagination, `NarrativeError::Storage`, KB LIMIT 500 |
+| Verification | 687 tests pass (0 failures); clippy clean on all V1.30 crates |
+
 ### V1.16+ horizon (program)
 
 ### Items targeting V1.19 (superseded by V1.28 for Batch 1)
@@ -476,6 +517,7 @@ Internal (this repo):
 - V1.27 delivery compass: [v1.27-local-authoring-delivery-compass-v1.md](../iterations/v1.27-local-authoring-delivery-compass-v1.md)
 - V1.28 delivery compass: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md)
 - V1.29 delivery compass: [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md)
+- V1.30 delivery compass: [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md)
 - V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
 - Orchestration engine design: [../knowledge/specs/orchestration-engine.md](../knowledge/specs/orchestration-engine.md)
 - ACP client tech spec v2: [../archived/../archived/knowledge/acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md)
@@ -490,4 +532,4 @@ External (v1-spec, resolved via `.agents/local-paths.json`):
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-26**. Status: Active. **V1.29 Shipped** (2026-05-26). **V1.28 Shipped** (2026-05-25). **V1.27 Shipped** (local authoring). Platform integration paused. See `status.json`.*
+*Created: 2026-04-21. Last updated: **2026-05-26**. Status: Active. **V1.30 Shipped** (2026-05-26). **V1.29 Shipped** (2026-05-26). **V1.28 Shipped** (2026-05-25). Platform integration paused. See `status.json`.*
