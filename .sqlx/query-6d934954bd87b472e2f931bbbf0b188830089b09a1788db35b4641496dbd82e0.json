@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO reference_sources\n            (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 'pending', ?, NULL)\n           RETURNING\n             reference_source_id as \"reference_source_id!\",\n             workspace_id as \"workspace_id!\",\n             source_type as \"source_type!\",\n             source_mutability as \"source_mutability!\",\n             uri as \"uri!\",\n             title as \"title!\",\n             tags,\n             content_hash,\n             content_path,\n             scan_status as \"scan_status!\",\n             created_at as \"created_at!\",\n             updated_at",
+  "query": "INSERT INTO reference_sources\n            (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, NULL)\n           RETURNING\n             reference_source_id as \"reference_source_id!\",\n             workspace_id as \"workspace_id!\",\n             source_type as \"source_type!\",\n             source_mutability as \"source_mutability!\",\n             uri as \"uri!\",\n             title as \"title!\",\n             tags,\n             content_hash,\n             content_path,\n             scan_status as \"scan_status!\",\n             created_at as \"created_at!\",\n             updated_at",
   "describe": {
     "columns": [
       {
@@ -65,7 +65,7 @@
       }
     ],
     "parameters": {
-      "Right": 9
+      "Right": 10
     },
     "nullable": [
       true,
@@ -82,5 +82,5 @@
       true
     ]
   },
-  "hash": "f1e92f0395c52744b271a0d66733df048eed192fd9f5a9f65a07ba058eb9eaef"
+  "hash": "6d934954bd87b472e2f931bbbf0b188830089b09a1788db35b4641496dbd82e0"
 }

@@ -1,68 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-05-26T20:00:00Z",
-  "plans": [
-    {
-      "id": "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
-      "title": "KB extract atomic claim, UUID job IDs, bounded status, full e2e lifecycle",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-kb-extract-lifecycle-hardening.md",
-      "metadata": {
-        "working_branch": "feature/v1.30-kb-extract-lifecycle-hardening",
-        "merge_target": "feature/v1.30-residual-convergence",
-        "task_category": "logic",
-        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "blocked_by_plan_id": null,
-        "phase": "v1.30"
-      }
-    },
-    {
-      "id": "2026-05-26-v1.30-agent-session-quality",
-      "title": "SessionCapture from session start + persistent child Drop hardening",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-agent-session-quality.md",
-      "metadata": {
-        "working_branch": "feature/v1.30-agent-session-quality",
-        "merge_target": "feature/v1.30-residual-convergence",
-        "task_category": "logic",
-        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "blocked_by_plan_id": null,
-        "phase": "v1.30"
-      }
-    },
-    {
-      "id": "2026-05-26-v1.30-creator-module-refactor",
-      "title": "Extract KB command handlers to creator/kb.rs",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-creator-module-refactor.md",
-      "metadata": {
-        "working_branch": "feature/v1.30-creator-module-refactor",
-        "merge_target": "feature/v1.30-residual-convergence",
-        "task_category": "logic",
-        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "blocked_by_plan_id": "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
-        "phase": "v1.30"
-      }
-    },
-    {
-      "id": "2026-05-26-v1.30-local-db-hardening",
-      "title": "Reference store, narrative errors, and KB query hygiene (R5–R9)",
-      "status": "Todo",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-local-db-hardening.md",
-      "metadata": {
-        "working_branch": "feature/v1.30-local-db-hardening",
-        "merge_target": "feature/v1.30-residual-convergence",
-        "task_category": "logic",
-        "iteration_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "primary_spec": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
-        "blocked_by_plan_id": null,
-        "phase": "v1.30"
-      }
-    }
-  ],
+  "updated_at": "2026-05-26T21:30:00Z",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -73,30 +12,25 @@
     "integration_branch": "feature/v1.30-residual-convergence",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.29",
-    "latest_shipped_at": "2026-05-26T16:30:00Z",
-    "latest_active_iteration": "v1.30",
-    "latest_active_compass": ".agents/iterations/v1.30-residual-convergence-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.30",
+    "latest_shipped_at": "2026-05-26T21:30:00Z",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T20:00:00Z",
-      "total_open": 12,
+      "updated_at": "2026-05-26T21:30:00Z",
+      "total_open": 11,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 2,
-        "low": 7,
+        "medium": 0,
+        "low": 8,
         "nit": 3
       },
       "by_target": {
-        "v1.30": 12
+        "backlog": 11
       },
-      "by_plan": {
-        "2026-05-26-v1.30-kb-extract-lifecycle-hardening": 4,
-        "2026-05-26-v1.30-agent-session-quality": 2,
-        "2026-05-26-v1.30-creator-module-refactor": 1,
-        "2026-05-26-v1.30-local-db-hardening": 5
-      },
+      "by_plan": {},
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
@@ -107,148 +41,131 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.30 harness registered: 4 plans Todo, integration_branch set, residuals R5–R20 re-keyed by plan-id. v1.29-iteration bucket removed."
+      "note": "V1.30 shipped. Original residuals R5–R20 archived (all implemented + QC fixes landed). 11 post-QC tech-debt items registered from tri-review."
     }
   },
   "residual_findings": {
-    "2026-05-26-v1.30-kb-extract-lifecycle-hardening": [
+    "v1.30-post-qc-tech-debt": [
       {
-        "id": "R15",
-        "title": "KB extract job claim is not atomic across next_queued + mark_running",
-        "severity": "medium",
-        "source": "qc2 F-001",
-        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
-        "decision": "defer",
+        "id": "TD-V130-01",
+        "title": "SessionCapture RwLock uses write() for all accesses — cosmetic under single-threaded IPC",
+        "severity": "low",
+        "source": "qc3 W-002",
+        "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
+        "decision": "accept",
         "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Wrap queue claim in a transaction/claim helper and add concurrent claim coverage."
+        "target_date": "backlog",
+        "note": "Benign in current single-threaded IPC model. Revisit if worker becomes concurrent. Consider parking_lot::RwLock."
       },
       {
-        "id": "R16",
-        "title": "kb.extract_work is registered but still placeholder-like for full extraction lifecycle",
+        "id": "TD-V130-02",
+        "title": "cleanup_row fire-and-forget — DELETE failure silently lost, dangling registry rows possible",
         "severity": "low",
-        "source": "qc1 W-002, qc2 F-004",
+        "source": "qc2 W-003, qc3 W-003",
+        "scope": "crates/nexus-local-db/src/reference_source.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add tracing::error on DELETE failure at minimum. Consider awaiting inline with timeout."
+      },
+      {
+        "id": "TD-V130-03",
+        "title": "JobLifecycleGuard FSM — no RAII guard to ensure mark_done/mark_failed called exactly once",
+        "severity": "low",
+        "source": "qc2 S-003",
         "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Complete job_id-driven mark_running/mark_done/mark_failed wiring and KeyBlock insertion."
+        "target_date": "backlog",
+        "note": "Mark_done now runs before KeyBlock insert (W-001 fix), reducing risk. Full guard would eliminate the class."
       },
       {
-        "id": "R18",
-        "title": "KB extract job IDs use custom timestamp-derived generation",
+        "id": "TD-V130-04",
+        "title": "Drop timeout 150ms may be insufficient for heavy LLM children — make configurable",
         "severity": "low",
-        "source": "qc2 F-003, qc3 F-003",
-        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Replace with UUIDv4-style IDs while preserving the xj_ prefix."
-      },
-      {
-        "id": "R20",
-        "title": "KB extract status list is unbounded",
-        "severity": "low",
-        "source": "qc3 F-002, qc2 S-003",
-        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Add LIMIT/pagination or a bounded default for extract-status."
-      }
-    ],
-    "2026-05-26-v1.30-agent-session-quality": [
-      {
-        "id": "R14",
-        "title": "SessionCapture created at agent-stop time produces near-zero session metrics",
-        "severity": "medium",
-        "source": "qc3 F-001",
-        "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Create SessionCapture at session start, record message/tool events, and close it on agent_stop."
-      },
-      {
-        "id": "R17",
-        "title": "Persistent child Drop cleanup is best-effort and Unix-only",
-        "severity": "low",
-        "source": "qc2 F-002, qc3 F-006",
+        "source": "qc3 S-001",
         "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "R11 baseline fixed; follow-up to retain child handles or add cross-platform termination."
-      }
-    ],
-    "2026-05-26-v1.30-creator-module-refactor": [
+        "target_date": "backlog",
+        "note": "PID existence check added (C-4 fix). Configurable timeout via TimeoutConfig would improve safety."
+      },
       {
-        "id": "R19",
-        "title": "creator command module is approaching maintainability threshold",
+        "id": "TD-V130-05",
+        "title": "LIST_BY_WORLD_LIMIT=500 silently truncates — no truncation indicator to caller",
         "severity": "low",
-        "source": "qc1 W-001",
-        "scope": "crates/nexus42/src/commands/creator/mod.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Extract KB command handlers to a dedicated creator/kb.rs module."
-      }
-    ],
-    "2026-05-26-v1.30-local-db-hardening": [
-      {
-        "id": "R5",
-        "title": "body.md written before SQL INSERT — orphaned files on DB failure",
-        "severity": "low",
-        "source": "qc1 W-001, qc3 F-001",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Wrap in transaction or write body after SQL INSERT in post-1.0 hardening."
-      },
-      {
-        "id": "R6",
-        "title": "list_references returns all rows unbounded — no pagination",
-        "severity": "nit",
-        "source": "qc3 F-002",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Acceptable for pre-release volume. Add LIMIT/OFFSET when needed."
-      },
-      {
-        "id": "R7",
-        "title": "content_hash always NULL — integrity field unused",
-        "severity": "nit",
-        "source": "qc3 F-005",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Optional static hash in V1.27 hygiene plan H4.1; full refresh pipeline is DF-44."
-      },
-      {
-        "id": "R8",
-        "title": "db_err maps all sqlx::Error to ValidationError — no Storage variant",
-        "severity": "low",
-        "source": "qc1 W-001",
-        "scope": "crates/nexus-local-db/src/narrative_gateway.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Introduce NarrativeError::Storage or Database variant in post-1.0 hardening."
-      },
-      {
-        "id": "R9",
-        "title": "KbQuery fetches all blocks into memory then filters in Rust — no DB-level pagination",
-        "severity": "nit",
-        "source": "qc1 W-002",
+        "source": "qc3 S-002",
         "scope": "crates/nexus-local-db/src/kb_store.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Pre-release volumes well under 500. Add total_count or has_more field when scale requires it."
+      },
+      {
+        "id": "TD-V130-06",
+        "title": "mark_running lacks WHERE status guard — can revert done/failed jobs",
+        "severity": "low",
+        "source": "qc3 S-004",
+        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "v1.30",
-        "note": "Add LIMIT to list_by_world when needed for scale."
+        "target_date": "backlog",
+        "note": "Add WHERE status='queued' guard to mark_running, mirroring claim_job pattern."
+      },
+      {
+        "id": "TD-V130-07",
+        "title": "claim_job re-fetches row after commit solely for started_at timestamp",
+        "severity": "nit",
+        "source": "qc3 S-005",
+        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Extra DB round-trip for started_at. Could compute in Rust post-commit. Low priority optimization."
+      },
+      {
+        "id": "TD-V130-08",
+        "title": "insert_with_retry returns generic Configuration error on collision — should use dedicated type",
+        "severity": "nit",
+        "source": "qc2 S-005",
+        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "UUIDv4 makes collision near-impossible. Error type improvement for API clarity."
+      },
+      {
+        "id": "TD-V130-09",
+        "title": "Dynamic SQL (format!) in reference_source::list and kb_store::list_by_world — not parameterized",
+        "severity": "low",
+        "source": "qc1 S-001, qc2 S-001",
+        "scope": "crates/nexus-local-db/src/reference_source.rs, crates/nexus-local-db/src/kb_store.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Limit/offset now clamped (C-2 fix). format! needed because sqlx offline mode cannot bind LIMIT/OFFSET. Document exception."
+      },
+      {
+        "id": "TD-V130-10",
+        "title": "Extraction prompt format!() doubles memory for large work entries",
+        "severity": "nit",
+        "source": "qc3 S-003",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Typical work entries are small structured summaries. Streaming approach if large-file support added."
+      },
+      {
+        "id": "TD-V130-11",
+        "title": "sqlx prepare CI enforcement — ensure offline metadata stays green after query changes",
+        "severity": "low",
+        "source": "qc2 S-008",
+        "scope": "CI pipeline",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "backlog",
+        "note": ".sqlx/ metadata churn in diff expected after query changes. Add CI step to verify sqlx prepare is current."
       }
     ]
   }

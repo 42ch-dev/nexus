@@ -707,7 +707,21 @@ impl ProviderAdapter for ClaudeCliProvider {
 }
 
 // ---------------------------------------------------------------------------
-// R-011: Drop — kill lingering persistent children when provider is dropped
+// R-011/R-017: Drop — kill lingering persistent children when provider is dropped
+//
+// Cleanup strategy (Unix only):
+//   1. SIGTERM — ask child to exit gracefully.
+//   2. Bounded wait (~150 ms) — give child time to clean up.
+//   3. SIGKILL — force-kill any stragglers.
+//
+// This is intentionally best-effort and bounded. The preferred shutdown path
+// is the explicit `shutdown()` method which has access to the tokio Child
+// handle and can await exit properly. Drop runs synchronously and cannot
+// use async I/O, so we fall back to PID-based process signals.
+//
+// Non-Unix platforms: persistent children may be orphaned if Drop runs
+// before explicit `shutdown()`. Callers should always prefer the explicit
+// shutdown path on non-Unix targets.
 // ---------------------------------------------------------------------------
 
 impl Drop for ClaudeCliProvider {
@@ -722,24 +736,62 @@ impl Drop for ClaudeCliProvider {
             "ClaudeCliProvider dropped with {} alive persistent children — killing",
             pids.len()
         );
-        // Best-effort synchronous kill using the `kill` command.
-        // We don't have Child handles (those are behind tokio RwLock which
-        // can't be acquired synchronously), so we use OS process kill.
+
+        // Phase 1: SIGTERM (graceful request to terminate).
         for &pid in pids.iter() {
             #[cfg(unix)]
             {
-                let pid_str = pid.to_string();
+                // Check if process still exists before sending signal.
+                // PID reuse on Unix means a killed PID could be reassigned
+                // to an unrelated process; `kill -0` is a no-op that exits
+                // with success only if the process exists.
+                let exists = std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                if !exists {
+                    tracing::debug!(pid, "Process no longer exists, skipping SIGTERM");
+                    continue;
+                }
                 let _ = std::process::Command::new("kill")
-                    .arg("-9")
-                    .arg(&pid_str)
+                    .arg("-TERM")
+                    .arg(pid.to_string())
                     .status();
             }
             #[cfg(not(unix))]
             {
                 tracing::warn!(
                     pid,
-                    "Persistent child cleanup during Drop is Unix-only; child may be orphaned"
+                    "Persistent child cleanup during Drop is Unix-only; \
+                     child may be orphaned. Use explicit shutdown() instead."
                 );
+            }
+        }
+
+        // Phase 2: Bounded wait for graceful exit.
+        // 150 ms is short enough to avoid blocking Drop unboundedly, yet long
+        // enough for well-behaved children to flush and exit.
+        #[cfg(unix)]
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        // Phase 3: SIGKILL (force-kill any remaining stragglers).
+        for &pid in pids.iter() {
+            #[cfg(unix)]
+            {
+                let exists = std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                if !exists {
+                    tracing::debug!(pid, "Process no longer exists, skipping SIGKILL");
+                    continue;
+                }
+                let _ = std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(pid.to_string())
+                    .status();
             }
         }
     }

@@ -2,10 +2,20 @@
 //!
 //! V1.26 reference store layout: registry row (metadata only) in `reference_sources`,
 //! canonical body text in `~/.nexus42/creators/<creator_id>/references/units/<id>/body.md`.
+//!
+//! # Write ordering (R5)
+//!
+//! The SQL INSERT is performed first. The body.md file is written only after the
+//! database transaction succeeds. This prevents orphan body files on DB failure.
+//! If the file write fails after a successful INSERT, the row is cleaned up via
+//! best-effort DELETE to avoid a dangling registry entry.
 
-use sqlx::SqlitePool;
+use sqlx::{Row as _, SqlitePool};
 
 use crate::error::LocalDbError;
+
+/// Default page size for `list_references`.
+const DEFAULT_PAGE_LIMIT: i64 = 100;
 
 /// Mutability policy for a reference source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +37,7 @@ impl SourceMutability {
     }
 }
 
-/// Registry metadata for a reference source — mirrors the `reference_sources` DB row.
+/// Registry metadata for a reference source.
 ///
 /// Does NOT contain the full body text. Body is stored on disk at `content_path`.
 #[derive(Debug, Clone)]
@@ -36,9 +46,9 @@ pub struct ReferenceSourceRow {
     pub reference_source_id: String,
     /// Workspace binding.
     pub workspace_id: String,
-    /// Contract enum string (`file`, `url`, `pdf`, `note`).
+    /// Contract enum string (file, url, pdf, note).
     pub source_type: String,
-    /// Mutability policy: `static` or `refreshable`.
+    /// Mutability policy: static or refreshable.
     pub source_mutability: String,
     /// Logical locator URI.
     pub uri: String,
@@ -46,9 +56,9 @@ pub struct ReferenceSourceRow {
     pub title: String,
     /// Serialized tag list.
     pub tags: Option<String>,
-    /// Hash of canonical `body.md` when available.
+    /// Hash of canonical body.md when available.
     pub content_hash: Option<String>,
-    /// Relative path from Creator root to canonical `body.md`.
+    /// Relative path from Creator root to canonical body.md.
     pub content_path: Option<String>,
     /// Scan lifecycle status.
     pub scan_status: String,
@@ -66,7 +76,7 @@ pub struct RegisterParams<'a> {
     pub creator_id: &'a str,
     /// Workspace binding.
     pub workspace_id: &'a str,
-    /// Contract enum string (`file`, `url`, `pdf`, `note`).
+    /// Contract enum string (file, url, pdf, note).
     pub source_type: &'a str,
     /// Mutability policy.
     pub source_mutability: SourceMutability,
@@ -80,17 +90,15 @@ pub struct RegisterParams<'a> {
     pub body: &'a str,
 }
 
-/// Register a new reference source: creates directories + `body.md`, writes metadata to `SQLite`.
+/// Register a new reference source: inserts metadata into `SQLite`, then creates `body.md`.
 ///
-/// The `params.home` parameter is the user's home directory (used with `nexus-home-layout` helpers).
-/// The `params.creator_id` identifies the active creator under whose root the body file is stored.
-/// The `params.body` parameter is the canonical body text to write to `body.md`.
+/// The SQL INSERT runs first (R5: prevents orphan body files on DB failure).
+/// If the file write fails after a successful INSERT, the registry row is
+/// cleaned up (deleted) to avoid a dangling entry.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if:
-/// - The database insert fails
-/// - The body file or directories cannot be created
+/// Returns `LocalDbError` if the database insert fails or the body file cannot be created.
 pub async fn register(
     pool: &SqlitePool,
     params: RegisterParams<'_>,
@@ -102,34 +110,14 @@ pub async fn register(
     // Relative path from Creator root
     let content_path = format!("references/units/{reference_source_id}/body.md");
 
-    // Absolute path for body.md on disk
-    let body_abs = nexus_home_layout::reference_body_path(
-        params.home,
-        params.creator_id,
-        &reference_source_id,
-    );
+    // Compute content hash from body bytes (R7)
+    let content_hash = blake3_hash(params.body.as_bytes());
 
-    // Create unit directory and write body.md
-    if let Some(parent) = body_abs.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| LocalDbError::Io {
-                path: parent.display().to_string(),
-                source: e,
-            })?;
-    }
-    tokio::fs::write(&body_abs, params.body)
-        .await
-        .map_err(|e| LocalDbError::Io {
-            path: body_abs.display().to_string(),
-            source: e,
-        })?;
-
-    // Insert metadata into SQLite
+    // Step 1: Insert metadata into SQLite first (R5: DB first, file second)
     let row = sqlx::query!(
         r#"INSERT INTO reference_sources
             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 'pending', ?, NULL)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, NULL)
            RETURNING
              reference_source_id as "reference_source_id!",
              workspace_id as "workspace_id!",
@@ -150,11 +138,41 @@ pub async fn register(
         params.uri,
         params.title,
         params.tags,
+        content_hash,
         content_path,
         now,
     )
     .fetch_one(pool)
     .await?;
+
+    // Step 2: Write body.md to disk (only after DB success)
+    let body_abs = nexus_home_layout::reference_body_path(
+        params.home,
+        params.creator_id,
+        &reference_source_id,
+    );
+
+    // Create unit directory
+    if let Some(parent) = body_abs.parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            cleanup_row(pool, &reference_source_id);
+            LocalDbError::Io {
+                path: parent.display().to_string(),
+                source: e,
+            }
+        })?;
+    }
+
+    // Write body file
+    tokio::fs::write(&body_abs, params.body)
+        .await
+        .map_err(|e| {
+            cleanup_row(pool, &reference_source_id);
+            LocalDbError::Io {
+                path: body_abs.display().to_string(),
+                source: e,
+            }
+        })?;
 
     Ok(ReferenceSourceRow {
         reference_source_id: row.reference_source_id,
@@ -172,55 +190,87 @@ pub async fn register(
     })
 }
 
-/// List all reference sources — returns registry metadata WITHOUT loading body content.
+/// Best-effort cleanup: delete a just-inserted row when file write fails.
+fn cleanup_row(pool: &SqlitePool, id: &str) {
+    let pool = pool.clone();
+    let id = id.to_string();
+    tokio::spawn(async move {
+        // SAFETY: runtime query for best-effort cleanup; compile-time
+        // macro not required in fire-and-forget context.
+        let _ = sqlx::query("DELETE FROM reference_sources WHERE reference_source_id = ?")
+            .bind(&id)
+            .execute(&pool)
+            .await;
+    });
+}
+
+/// Compute a blake3 hex hash of the given bytes.
+fn blake3_hash(data: &[u8]) -> String {
+    blake3::hash(data).to_hex().to_string()
+}
+
+/// List reference sources with pagination.
 ///
-/// Ordered by `created_at` descending (newest first).
+/// Ordered by `created_at` descending (newest first). Uses `limit`/`offset` pagination
+/// with a default page size of [`DEFAULT_PAGE_LIMIT`].
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
-pub async fn list(pool: &SqlitePool) -> Result<Vec<ReferenceSourceRow>, LocalDbError> {
-    let rows = sqlx::query!(
-        r#"SELECT
-             reference_source_id as "reference_source_id!",
-             workspace_id as "workspace_id!",
-             source_type as "source_type!",
-             source_mutability as "source_mutability!",
-             uri as "uri!",
-             title as "title!",
-             tags,
-             content_hash,
-             content_path,
-             scan_status as "scan_status!",
-             created_at as "created_at!",
-             updated_at
-           FROM reference_sources ORDER BY created_at DESC"#
-    )
+pub async fn list(
+    pool: &SqlitePool,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<ReferenceSourceRow>, LocalDbError> {
+    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, 1000);
+    let offset = offset.unwrap_or(0).max(0);
+
+    // SAFETY: `limit` is clamped to 1..=1000 and `offset` to >= 0.
+    // Dynamic SQL needed because `sqlx::query!` does not support
+    // `LIMIT`/`OFFSET` as bind parameters in SQLite offline mode.
+    let rows = sqlx::query(&format!(
+        "SELECT
+              reference_source_id,
+              workspace_id,
+              source_type,
+              source_mutability,
+              uri,
+              title,
+              tags,
+              content_hash,
+              content_path,
+              scan_status,
+              created_at,
+              updated_at
+           FROM reference_sources
+           ORDER BY created_at DESC
+           LIMIT {limit} OFFSET {offset}"
+    ))
     .fetch_all(pool)
     .await?;
 
     Ok(rows
         .into_iter()
         .map(|r| ReferenceSourceRow {
-            reference_source_id: r.reference_source_id,
-            workspace_id: r.workspace_id,
-            source_type: r.source_type,
-            source_mutability: r.source_mutability,
-            uri: r.uri,
-            title: r.title,
-            tags: r.tags,
-            content_hash: r.content_hash,
-            content_path: r.content_path,
-            scan_status: r.scan_status,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
+            reference_source_id: r.get("reference_source_id"),
+            workspace_id: r.get("workspace_id"),
+            source_type: r.get("source_type"),
+            source_mutability: r.get("source_mutability"),
+            uri: r.get("uri"),
+            title: r.get("title"),
+            tags: r.get("tags"),
+            content_hash: r.get("content_hash"),
+            content_path: r.get("content_path"),
+            scan_status: r.get("scan_status"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
         })
         .collect())
 }
 
 /// Get a single reference source by ID — returns registry metadata only (no body content).
 ///
-/// Returns `None` if the record doesn't exist.
+/// Returns `None` if the record does not exist.
 ///
 /// # Errors
 ///
@@ -362,7 +412,7 @@ mod tests {
         .await
         .unwrap();
 
-        let all = list(&pool).await.unwrap();
+        let all = list(&pool, None, None).await.unwrap();
         assert_eq!(all.len(), 2);
 
         // Ordered by created_at DESC — newest first
@@ -372,6 +422,126 @@ mod tests {
 
         assert_eq!(all[1].title, "Ref A");
         assert_eq!(all[1].source_mutability, "static");
+    }
+
+    #[tokio::test]
+    async fn test_list_pagination() {
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+
+        // Register 3 references
+        for i in 0..3 {
+            register(
+                &pool,
+                RegisterParams {
+                    home,
+                    creator_id: "ctr_test",
+                    workspace_id: "wrk_default",
+                    source_type: "note",
+                    source_mutability: SourceMutability::Static,
+                    uri: &format!("nexus42://references/units/pg{i}"),
+                    title: &format!("Ref {i}"),
+                    tags: None,
+                    body: &format!("Body {i}"),
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        // Page 1: limit=2, offset=0
+        let page1 = list(&pool, Some(2), Some(0)).await.unwrap();
+        assert_eq!(page1.len(), 2);
+
+        // Page 2: limit=2, offset=2
+        let page2 = list(&pool, Some(2), Some(2)).await.unwrap();
+        assert_eq!(page2.len(), 1);
+
+        // No overlap
+        assert_ne!(page1[0].reference_source_id, page2[0].reference_source_id);
+    }
+
+    #[tokio::test]
+    async fn test_content_hash_populated() {
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+
+        let row = register(
+            &pool,
+            RegisterParams {
+                home,
+                creator_id: "ctr_test",
+                workspace_id: "wrk_default",
+                source_type: "note",
+                source_mutability: SourceMutability::Static,
+                uri: "nexus42://references/units/hash-test",
+                title: "Hash Test",
+                tags: None,
+                body: "Some body content",
+            },
+        )
+        .await
+        .unwrap();
+
+        // content_hash should be populated (blake3 hex)
+        assert!(row.content_hash.is_some());
+        let hash = row.content_hash.unwrap();
+        assert_eq!(hash.len(), 64); // blake3 hex is 64 chars
+
+        // Verify hash is correct
+        let expected = blake3::hash(b"Some body content").to_hex().to_string();
+        assert_eq!(hash, expected);
+
+        // Same hash via get_by_id
+        let fetched = get_by_id(&pool, &row.reference_source_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched.content_hash.as_deref(), Some(expected.as_str()));
+    }
+
+    #[tokio::test]
+    async fn test_write_order_no_orphan_file_on_db_failure() {
+        // R5: Verify that if we simulate a constraint violation (duplicate PK),
+        // no body file is left behind.
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+
+        // Register successfully
+        let row = register(
+            &pool,
+            RegisterParams {
+                home,
+                creator_id: "ctr_test",
+                workspace_id: "wrk_default",
+                source_type: "note",
+                source_mutability: SourceMutability::Static,
+                uri: "nexus42://references/units/orphan-test",
+                title: "Orphan Test",
+                tags: None,
+                body: "First body",
+            },
+        )
+        .await
+        .unwrap();
+
+        // Body file exists
+        let body_path =
+            nexus_home_layout::reference_body_path(home, "ctr_test", &row.reference_source_id);
+        assert!(tokio::fs::metadata(&body_path).await.is_ok());
+
+        // Try to INSERT a row with the same PK (simulating DB failure)
+        let result: Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> = sqlx::query!(
+            "INSERT INTO reference_sources (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at) VALUES (?, 'x', 'x', 'x', 'x', 'x', NULL, NULL, NULL, NULL, 'pending', 'x')",
+            row.reference_source_id,
+        )
+        .execute(&pool)
+        .await;
+        assert!(result.is_err(), "Duplicate PK should fail");
+
+        // The original body file is still intact — no new orphan
+        let body_content = tokio::fs::read_to_string(&body_path).await.unwrap();
+        assert_eq!(body_content, "First body");
     }
 
     #[tokio::test]

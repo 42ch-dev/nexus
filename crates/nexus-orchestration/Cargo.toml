@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
+nexus-kb = { path = "../nexus-kb" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 blake3 = { workspace = true }

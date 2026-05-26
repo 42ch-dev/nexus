@@ -79,6 +79,12 @@ pub mod seed {
     }
 }
 
+/// Maximum number of key blocks returned by `list_by_world` (safety cap, R9).
+///
+/// Prevents unbounded memory usage on large worlds. The `query()` method applies
+/// its own pagination on top of this.
+const LIST_BY_WORLD_LIMIT: i64 = 500;
+
 /// SQLite-backed KB store.
 ///
 /// Holds an `Arc<SqlitePool>` shared per active workspace. Construct once
@@ -252,26 +258,28 @@ impl KbStore for SqliteKbStore {
     }
 
     async fn list_by_world(&self, world_id: &str) -> Result<Vec<KeyBlock>, KbStoreError> {
-        let rows = sqlx::query_as!(
-            KeyBlockRow,
-            r#"SELECT
-                key_block_id as "key_block_id!",
-                world_id as "world_id!",
-                block_type as "block_type!",
-                canonical_name as "canonical_name!",
-                status as "status!",
+        // SAFETY: LIMIT is a compile-time constant; dynamic SQL needed because
+        // sqlx::query_as! does not support LIMIT as bind param in SQLite offline mode.
+        let rows = sqlx::query_as::<_, KeyBlockRow>(&format!(
+            r"SELECT
+                key_block_id,
+                world_id,
+                block_type,
+                canonical_name,
+                status,
                 revision,
                 body_json,
                 source_anchor_json,
                 created_from_command_id,
-                created_at as "created_at!",
+                created_at,
                 updated_at
             FROM kb_key_blocks
             WHERE world_id = ?
               AND status NOT IN ('deleted', 'merged', 'deprecated')
-            ORDER BY created_at ASC"#,
-            world_id
-        )
+            ORDER BY created_at ASC
+            LIMIT {LIST_BY_WORLD_LIMIT}"
+        ))
+        .bind(world_id)
         .fetch_all(&*self.pool)
         .await
         .map_err(|e| db_err(&e))?;
