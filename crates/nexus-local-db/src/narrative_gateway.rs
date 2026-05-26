@@ -178,7 +178,7 @@ impl TimelineEventRow {
 
 /// Convert a sqlx error into a `NarrativeError`.
 fn db_err(err: &sqlx::Error) -> NarrativeError {
-    NarrativeError::ValidationError(format!("database error: {err}"))
+    NarrativeError::Storage(format!("database error: {err}"))
 }
 
 // SAFETY: sqlx SQLite futures borrow the connection pool internally;
@@ -537,6 +537,17 @@ mod tests {
         let gw = SqliteNarrativeGateway::new(pool);
         let result = gw.get_event("evt_missing").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_db_err_maps_to_storage() {
+        // R8: db_err should return NarrativeError::Storage
+        let sqlx_err = sqlx::Error::Configuration("test config error".into());
+        let narrative_err = db_err(&sqlx_err);
+        assert!(
+            matches!(narrative_err, NarrativeError::Storage(ref msg) if msg.contains("database error")),
+            "db_err should return NarrativeError::Storage, got: {narrative_err:?}"
+        );
     }
 
     #[tokio::test]
