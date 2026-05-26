@@ -2279,6 +2279,7 @@ name = "nexus-local-db"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "blake3",
  "chrono",
  "nexus-contracts",
  "nexus-home-layout",

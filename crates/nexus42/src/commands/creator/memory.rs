@@ -354,7 +354,9 @@ async fn pending_show(config: &CliConfig, creator_id: &str, pending_id: &str) ->
 
 async fn pending_dismiss(config: &CliConfig, creator_id: &str, pending_id: &str) -> Result<()> {
     let client = DaemonClient::from_config(config);
-    let result = client.dismiss_pending_review(pending_id, creator_id).await?;
+    let result = client
+        .dismiss_pending_review(pending_id, creator_id)
+        .await?;
 
     if result.success {
         println!("Pending review '{pending_id}' dismissed.");
