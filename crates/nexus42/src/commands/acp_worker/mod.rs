@@ -87,6 +87,8 @@ struct MultiplexedWorkerState {
     request_counter: AtomicU64,
     /// Daemon HTTP client for session-capture submissions.
     daemon_client: crate::api::daemon_client::DaemonClient,
+    /// Per-session captures for R14 session quality tracking.
+    session_captures: std::sync::RwLock<HashMap<String, crate::session_capture::SessionCapture>>,
 }
 
 impl MultiplexedWorkerState {
@@ -98,6 +100,7 @@ impl MultiplexedWorkerState {
             start_time: std::time::Instant::now(),
             request_counter: AtomicU64::new(1),
             daemon_client,
+            session_captures: std::sync::RwLock::new(HashMap::new()),
         }
     }
 }
