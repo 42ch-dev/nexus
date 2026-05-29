@@ -1,25 +1,55 @@
 //! `judge.llm` capability — evaluate a go/nogo prompt using a judge agent.
 //!
-//! Design: `orchestration-engine.md` §5.2.
+//! Design: `orchestration-engine.md` §5.2, DF-33, plan J2.
 //!
-//! Implementation: delegates to `acp.prompt` with `tool_policy: deny_all`,
-//! then parses the response as a boolean.
+//! Two execution modes:
+//! 1. **With worker IPC**: when `WorkerHandleProvider` is injected through the
+//!    registry, builds a judge prompt, calls `worker/acp_prompt` with
+//!    `deny_all` tool policy, and parses the LLM response as GO/NOGO.
+//! 2. **Standalone (no provider)**: returns `WorkerUnavailable` — no heuristic
+//!    matching on input text.
 
-use crate::capability::{Capability, CapabilityError};
+use crate::capability::{Capability, CapabilityError, WorkerHandleProvider};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-
-/// The `judge.llm` capability.
-///
-/// Input schema: `{ prompt: string, creator_id?: string }`
-/// Output schema: `{ result: boolean, reason: string }`
-pub struct JudgeLlm;
+use std::sync::Arc;
 
 /// Judge response verdicts that count as "go".
 const GO_WORDS: &[&str] = &["go", "yes", "proceed", "pass", "approve", "ok"];
 
 /// Judge response verdicts that count as "no-go".
 const NOGO_WORDS: &[&str] = &["wait", "no", "stop", "reject", "deny", "fail"];
+
+/// The `judge.llm` capability.
+///
+/// Holds an optional [`WorkerHandleProvider`] for LLM calls. When present,
+/// sends the evaluation prompt via worker IPC. When absent, returns
+/// [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
+pub struct JudgeLlm {
+    workers: Option<Arc<dyn WorkerHandleProvider>>,
+}
+
+impl JudgeLlm {
+    /// Create in standalone/test mode (no worker IPC).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { workers: None }
+    }
+
+    /// Create with a worker handle provider for production IPC.
+    #[must_use]
+    pub fn with_worker_provider(provider: Arc<dyn WorkerHandleProvider>) -> Self {
+        Self {
+            workers: Some(provider),
+        }
+    }
+}
+
+impl Default for JudgeLlm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl Capability for JudgeLlm {
@@ -34,7 +64,8 @@ impl Capability for JudgeLlm {
             "required": ["prompt"],
             "properties": {
                 "prompt": { "type": "string", "description": "The evaluation prompt for the judge" },
-                "creator_id": { "type": "string", "description": "Optional creator ID for the judge agent" }
+                "creator_id": { "type": "string", "description": "Optional creator ID for the judge agent" },
+                "session_id": { "type": "string", "description": "Optional session ID" }
             }
         }"#
     }
@@ -52,15 +83,43 @@ impl Capability for JudgeLlm {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let prompt = input
+        let prompt_text = input
             .get("prompt")
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
 
-        // In the full implementation, this would call acp.prompt with deny_all
-        // tool policy and parse the response. For the capability layer stub,
-        // we do a simple heuristic parse on the prompt itself (for testing).
-        let (result, reason) = parse_judge_response(prompt);
+        let creator_id = input
+            .get("creator_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        let session_id = input
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        let workers = self
+            .workers
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
+
+        // Build judge prompt with GO/NOGO framing.
+        let judge_prompt = format!(
+            "You are a judge. Evaluate the following and respond with GO or NOGO.\n\
+             Respond with ONLY 'GO' or 'NOGO' followed by a brief reason.\n\n\
+             {prompt_text}"
+        );
+
+        let response = workers
+            .call_acp_prompt(creator_id, session_id, judge_prompt, "deny_all")
+            .await?;
+
+        let full_text = response
+            .get("full_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let (result, reason) = parse_judge_response(full_text);
 
         Ok(json!({
             "result": result,
@@ -69,29 +128,28 @@ impl Capability for JudgeLlm {
     }
 }
 
-/// Parse a judge response text into a boolean verdict.
+/// Parse a judge LLM response text into a boolean verdict.
 ///
-/// "go" / "yes" / "proceed" → true
-/// "wait" / "no" → false
-/// Ambiguous → error
-fn parse_judge_response(text: &str) -> (bool, String) {
+/// Returns `(result, reason)` where result is true for GO, false for NOGO
+/// or ambiguous.
+pub fn parse_judge_response(text: &str) -> (bool, String) {
     let lower = text.trim().to_lowercase();
 
     for word in GO_WORDS {
         if lower.contains(word) {
-            return (true, format!("judge.llm: go (matched '{word}')"));
+            return (true, format!("judge.llm: go (matched '{word}' in LLM response)"));
         }
     }
 
     for word in NOGO_WORDS {
         if lower.contains(word) {
-            return (false, format!("judge.llm: nogo (matched '{word}')"));
+            return (false, format!("judge.llm: nogo (matched '{word}' in LLM response)"));
         }
     }
 
     (
         false,
-        format!("judge.llm: ambiguous response — '{lower:.50}'"),
+        format!("judge.llm: ambiguous LLM response — '{}'", &lower[..lower.len().min(50)]),
     )
 }
 
@@ -101,7 +159,8 @@ mod tests {
 
     #[test]
     fn judge_llm_name() {
-        assert_eq!(JudgeLlm.name(), "judge.llm");
+        let cap = JudgeLlm::new();
+        assert_eq!(cap.name(), "judge.llm");
     }
 
     #[test]
@@ -124,25 +183,80 @@ mod tests {
         assert!(reason.contains("ambiguous"));
     }
 
+    // ── J2: Standalone mode returns WorkerUnavailable ─────────────────
+
     #[tokio::test]
-    async fn judge_llm_valid_go_input() {
-        let cap = JudgeLlm;
-        let input = json!({ "prompt": "Yes, go ahead with the next step" });
-        let result = cap.run(input).await.unwrap();
-        assert_eq!(result["result"], true);
+    async fn judge_llm_standalone_returns_unavailable() {
+        let cap = JudgeLlm::new();
+        let input = json!({ "prompt": "evaluate this" });
+        let result = cap.run(input).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("worker unavailable"),
+            "expected worker unavailable, got: {err}"
+        );
+    }
+
+    // ── J2: With mock provider — GO response ──────────────────────────
+
+    /// Mock provider that returns a canned GO response.
+    struct MockGoProvider;
+
+    #[async_trait]
+    impl WorkerHandleProvider for MockGoProvider {
+        async fn call_acp_prompt(
+            &self,
+            _creator_id: &str,
+            _session_id: &str,
+            _prompt: String,
+            _tool_policy: &str,
+        ) -> Result<Value, CapabilityError> {
+            Ok(json!({ "full_text": "GO — the evaluation passes." }))
+        }
     }
 
     #[tokio::test]
-    async fn judge_llm_valid_nogo_input() {
-        let cap = JudgeLlm;
-        let input = json!({ "prompt": "No, stop and wait" });
+    async fn judge_llm_with_mock_worker_go() {
+        let cap =
+            JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
+        let input = json!({ "prompt": "Is the task complete?" });
+        let result = cap.run(input).await.unwrap();
+        assert_eq!(result["result"], true);
+        assert!(result["reason"].as_str().unwrap().contains("go"));
+    }
+
+    // ── J2: With mock provider — NOGO response ────────────────────────
+
+    struct MockNogoProvider;
+
+    #[async_trait]
+    impl WorkerHandleProvider for MockNogoProvider {
+        async fn call_acp_prompt(
+            &self,
+            _creator_id: &str,
+            _session_id: &str,
+            _prompt: String,
+            _tool_policy: &str,
+        ) -> Result<Value, CapabilityError> {
+            Ok(json!({ "full_text": "NO — stop and review." }))
+        }
+    }
+
+    #[tokio::test]
+    async fn judge_llm_with_mock_worker_nogo() {
+        let cap =
+            JudgeLlm::with_worker_provider(Arc::new(MockNogoProvider));
+        let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], false);
+        assert!(result["reason"].as_str().unwrap().contains("nogo"));
     }
 
     #[tokio::test]
     async fn judge_llm_missing_prompt_errors() {
-        let cap = JudgeLlm;
+        let cap =
+            JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
