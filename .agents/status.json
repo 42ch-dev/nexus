@@ -1,7 +1,68 @@
 {
   "version": 1,
-  "updated_at": "2026-05-26T21:30:00Z",
-  "plans": [],
+  "updated_at": "2026-05-30T00:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-05-30-v1.31-creator-memory-capabilities",
+      "title": "V1.31 creator memory capabilities de-stub",
+      "status": "Todo",
+      "working_branch": "feature/v1.31-creator-memory-capabilities",
+      "merge_target": "feature/v1.31-agentic-design-patterns",
+      "metadata": {
+        "iteration": "v1.31",
+        "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "theme": "P1-creator-memory",
+        "tracker_ids": ["DF-30"]
+      }
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-judge-and-summarize-capabilities",
+      "title": "V1.31 judge rule/llm and context summarize de-stub",
+      "status": "Todo",
+      "working_branch": "feature/v1.31-judge-and-summarize-capabilities",
+      "merge_target": "feature/v1.31-agentic-design-patterns",
+      "metadata": {
+        "iteration": "v1.31",
+        "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "theme": "P2-judge-summarize",
+        "tracker_ids": ["DF-32", "DF-33", "DF-34", "DF-37"]
+      }
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
+      "title": "V1.31 Agentic Design Pattern demonstrator presets",
+      "status": "Todo",
+      "working_branch": "feature/v1.31-agentic-pattern-presets",
+      "merge_target": "feature/v1.31-agentic-design-patterns",
+      "depends_on": [
+        "2026-05-30-v1.31-creator-memory-capabilities",
+        "2026-05-30-v1.31-judge-and-summarize-capabilities"
+      ],
+      "metadata": {
+        "iteration": "v1.31",
+        "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "theme": "P3-agentic-presets",
+        "tracker_ids": ["FL-D"]
+      }
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
+      "title": "V1.31 spec and tracker hygiene",
+      "status": "Todo",
+      "working_branch": "feature/v1.31-spec-tracker-hygiene",
+      "merge_target": "feature/v1.31-agentic-design-patterns",
+      "metadata": {
+        "iteration": "v1.31",
+        "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+        "theme": "P4-spec-tracker",
+        "merge_order": "last"
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,13 +70,13 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": "feature/v1.30-residual-convergence",
+    "integration_branch": "feature/v1.31-agentic-design-patterns",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.30",
     "latest_shipped_at": "2026-05-26T21:30:00Z",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.31",
+    "latest_active_compass": ".agents/iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-05-26T21:30:00Z",
@@ -41,7 +102,7 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.30 shipped. Original residuals R5–R20 archived (all implemented + QC fixes landed). 11 post-QC tech-debt items registered from tri-review."
+      "note": "V1.30 shipped. V1.31 active (FL-D Agentic Design Patterns). 11 post-QC tech-debt items remain backlog."
     }
   },
   "residual_findings": {

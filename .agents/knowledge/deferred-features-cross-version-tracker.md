@@ -1,21 +1,24 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Status**: Active (V1.30 **Shipped**; V1.29 **Shipped**; V1.28 **Shipped**; V1.27 **Shipped**; residual SSOT = deferred nit/low in `status.json`)
-**Purpose**: Single source of truth for all features/tech-debt items that have been **deferred** from any delivery compass (V1.2–V1.21), with their lifecycle status across versions. This file enables version planning by showing what was promised, deferred, shipped, or cancelled — without reading every compass.
-**Scope**: `nexus` OSS repository only. Platform features are referenced only when they block or depend on nexus-side work.
-**Predecessor**: Consolidated from all delivery compasses (v1.2 through v1.21) and the v1.2 reclassification matrix.
-**Created**: 2026-04-21
-**Last updated**: 2026-05-26
+**Quick status**: **V1.31 Active** (FL-D Agentic Design Patterns) · **V1.30 Shipped** · Platform **paused** · Open DF rows targeting V1.31: **DF-30, DF-32–34, DF-37** · Residual SSOT: `status.json` (11 backlog items)
+
+**Status**: Active  
+**Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md).  
+**Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
+**Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
+**Created**: 2026-04-21  
+**Last updated**: 2026-05-30
 
 ---
 
 ## 1) How to use this file
 
-- **Product decisions (not deferrals)**: See §3.0 Program planning decisions (PD-*).
-- **Future product lines (cross-version themes)**: See §3.6 Future product lines (FL-*).
-- **Planning a new version**: Scan the "Open" table (§3.1) for items targeting that version or "Any future". Evaluate whether to scope them in.
-- **Closing an item**: Move its row from "Open" to "Closed" (§4) with the actual completion version, plan-id, and a brief note.
-- **Deferring again**: Update the `Target` column; keep the row in "Open". Add a note in `Deferral history`.
+- **Product decisions (not deferrals)**: See §3.1 Program planning decisions (PD-*).
+- **Future product lines (cross-version themes)**: See §3.2 Future product lines (FL-*).
+- **Planning a new version**: Scan §3.3 Open features for items targeting that version or "Any future".
+- **Closing an item**: Remove its row from §3.3; append to [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md) with completion version, plan-id, and note.
+- **Deferring again**: Update the `Target` column; keep the row in §3.3. Add a note in `Deferral history`.
+- **Shipped / cancelled history**: [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md) (§1 closed items, §2 per-version snapshots).
 - **Source of truth**: This file is the **tracker**; the **compass** of the active version is the **scope authority**. If this file and the active compass conflict, the compass wins.
 
 ---
@@ -25,511 +28,142 @@
 | Status | Meaning |
 |--------|---------|
 | **Open** | Item has not been implemented. May have a target version assigned, or be in backlog. |
-| **Shipped** | Implemented and merged in the indicated version. |
-| **Cancelled** | Explicitly removed from scope (no longer planned). Includes "accepted as tech debt" with no intent to fix. |
-| **Superseded** | Replaced by a different approach; the original item is no longer relevant. |
+| **Shipped** | Implemented and merged in the indicated version (record in archive). |
+| **Cancelled** | Explicitly removed from scope (no longer planned). |
+| **Superseded** | Replaced by a different approach; original item no longer relevant. |
 
 ---
 
 ## 3) Open items
 
-### 3.0 Program planning decisions (2026-05-25 grill-me)
+### 3.1 Program planning decisions
 
 Recorded product rulings for iteration planning. **Not** implementation tasks — the active delivery compass is scope authority.
 
 | ID | Decision | Notes |
 |----|----------|-------|
-| PD-01 | **World fork is platform-only** | Community/social feature; **no** local `nexus42` CLI or daemon fork implementation. See DF-45. |
-| PD-02 | V1.28 primary product = structured KB query + context assembly convergence | Compass: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md); plan: `2026-05-25-v1.28-context-assembly-convergence` |
+| PD-01 | **World fork is platform-only** | Community/social feature; **no** local `nexus42` CLI or daemon fork. See DF-45 (Cancelled) in archive. |
+| PD-02 | V1.28 primary product = structured KB query + context assembly convergence | Compass: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md) |
 | PD-03 | V1.28 mandatory = local SSOT doc refresh | Plan: `2026-05-25-v1.28-local-ssot-refresh` |
-| PD-04 | Agent Host (ACP + native CLI) = local product P0–P1 | V1.28 plans: `agent-host-acp-correctness`, `agent-host-native-multiturn`; Batch 2 (DF-21–23, 27–28) → V1.29+ |
-| PD-05 | Cloud sync is **not** a short-term iteration focus | CLI `sync push/pull` unchanged; orchestration `sync.pull`/`sync.push` stubs remain Open (DF-29 area) |
-| PD-06 | Memory + SOUL deep build | **In V1.29 scope** (FL-A); see compass V1.29 |
-| PD-07 | Writing-process KB extraction | **In V1.29 scope** (FL-B, agent-driven); see PD-10 |
-| PD-08 | Preset orchestration + Agentic Design Patterns deferred | See FL-D; research: https://github.com/evoiz/Agentic-Design-Patterns |
-| PD-09 | V1.29 primary = **Author Intelligence Loop** (FL-A + FL-B) | Compass: [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md); plans: memory-session-review, soul-experience-preset, stage0-delimiters, kb-extract-queue-preset |
-| PD-10 | FL-B **agent-driven**: CLI queue/status only; LLM via preset + capability | Plan: `2026-05-26-v1.29-kb-extract-queue-preset`; no CLI→LLM for extraction |
-| PD-11 | V1.29 secondary = **Agent Host Batch 2** (single plan) | Plan: `2026-05-26-v1.29-agent-host-batch2-hardening`; DF-21–23, 27–28 |
+| PD-04 | Agent Host (ACP + native CLI) = local product P0–P1 | V1.28 Batch 1 + V1.29 Batch 2 shipped |
+| PD-05 | Cloud sync is **not** a short-term iteration focus | CLI `sync push/pull` unchanged; orchestration `sync.pull`/`sync.push` stubs remain Open |
+| PD-06 | Memory + SOUL deep build | **Shipped V1.29** (FL-A) |
+| PD-07 | Writing-process KB extraction | **Shipped V1.29** (FL-B) |
+| PD-08 | Preset orchestration + Agentic Design Patterns | See FL-D; research: https://github.com/evoiz/Agentic-Design-Patterns |
+| PD-09 | V1.29 primary = **Author Intelligence Loop** (FL-A + FL-B) | Shipped V1.29 |
+| PD-10 | FL-B **agent-driven**: CLI queue/status only; LLM via preset + capability | Shipped V1.29 |
+| PD-11 | V1.29 secondary = **Agent Host Batch 2** | Shipped V1.29 |
+| PD-12 | **V1.31 primary = FL-D Agentic Design Patterns** | De-stub orchestration capabilities (DF-30, DF-32–34, DF-37); 2 demonstrator presets; **out**: DF-29, DF-31, conditional routing engine. Compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md) |
 
-### 3.6 Future product lines (planning backlog)
+### 3.2 Future product lines (planning backlog)
 
-Cross-version themes for **subsequent** iterations. Suggested targets are non-binding until locked in a compass.
+Cross-version themes. Suggested targets are non-binding until locked in a compass.
 
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
-| FL-A | Creator **Memory + SOUL** build-out | **V1.29** ✅ Shipped | Session review loop, Experience preset, Stage0 delimiters — compass V1.29 |
-| FL-B | **KB extraction** from writing (work index → World KB) | **V1.29** ✅ Shipped | Agent-driven: CLI `queue-extract` / `extract-status`; capability `kb.extract_work` + preset; partial DF-35/36 |
-| FL-D | **Preset orchestration** iteration (Agentic Design Patterns) | V1.30+ / research | DF-29–34 full de-stub (beyond FL-B minimal wiring); literature: https://github.com/evoiz/Agentic-Design-Patterns |
+| FL-A | Creator **Memory + SOUL** build-out | **V1.29** ✅ Shipped | Session review, Experience preset, Stage0 delimiters |
+| FL-B | **KB extraction** from writing (work index → World KB) | **V1.29** ✅ Shipped | CLI queue + `kb.extract_work` preset; partial DF-35/36 |
+| FL-D | **Preset orchestration** (Agentic Design Patterns) | **V1.31** 🔄 Active | Partial scope: judge/creator/summarize de-stub + 2 presets; DF-29/31 remain deferred post-V1.31 |
 
-### 3.1 Features (deferred from a compass "Out" section)
+### 3.3 Open features (deferred from compass "Out" or audit)
 
-| ID | Feature | First deferred | Target | Effort est. | Deferral history | Blocking reason / Notes |
-|----|---------|---------------|--------|-------------|-----------------|----------------------|
-| DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 (no fixed milestone) | Batch D waived. Knowledge: `dual-outbox-architecture.md`. Single-writer rule follow-up. |
-| DF-13 | Entitlements API consumption (`/me/entitlements`, `/official-creator/quota`) | V1.3 | V2.0+ | M | V1.3 (not in V1.3) | Platform API dependency. |
-| DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2 (V1.3/V1.4)→V1.3 (not in V1.3) | ADR-011/012/013. Platform dependency. |
-| DF-18 | Native multi-turn conversation (persistent child process) | V1.18 | **V1.28 ✅ Shipped** | M | V1.18 §9 D-001 → V1.28 plan `agent-host-native-multiturn` → **Shipped** | Dual-mode: per-invocation (`--resume`/`--session-id`) + persistent child (delimiter protocol). Tests NT1.1, NT1.2, NT2.1. Spec §4.2.1 updated. |
-| DF-19 | ACP session/request_permission handling | V1.18 | **V1.28 ✅ Shipped** | M | V1.18 §9 D-002 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | Handler wired in `AcpProvider::new()`, sync callback → no hang/timeout. Tests + doc. |
-| DF-20 | SetModel/SetMode capability truthfulness | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-003 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `acp_full()` sets `set_model=false` (dynamic discovery), `set_mode=true` (stable RPC). Audit tests. |
-| DF-21 | TimeoutConfig enforcement | V1.18 | **V1.29 ✅ Shipped** | S | V1.18 §9 D-004 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | Full timeout enforcement audit + R11 Drop / R12 cancel for persistent children. |
-| DF-22 | Auto tool-risk classification | V1.18 | **V1.29 ✅ Shipped** | M | V1.18 §9 D-005 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | `StaticToolRiskClassifier` already shipped in V1.28 Batch 1. |
-| DF-23 | Provider-level streaming adaptation | V1.18 | **V1.29 ✅ Shipped** | L | V1.18 §9 D-006 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | ACP streaming events not translated to `StreamingChunk` — scaffold exists but not wired; closed as shipped baseline. |
-| DF-24 | HostManager shutdown → ProviderAdapter::shutdown() | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-007 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `HostManager::shutdown()` iterates sessions, calls adapter shutdown with per-session timeout. Tests. |
-| DF-25 | AdmissionPolicy enforcement wiring | V1.18 | **V1.28 ✅ Shipped** | S | V1.18 §9 D-008 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | `create_session()` checks provider + session limit; `exec()` checks ops-per-session. Tests. |
-| DF-26 | Cross-platform command probe (replace Unix-only `which`) | V1.18 QC R3 | **V1.28 ✅ Shipped** | S | V1.18 status.json R3 → V1.28 plan `agent-host-acp-correctness` → **Shipped** | Uses `which::which()` crate + manual fallback. CI green on macOS/Linux. |
-| DF-27 | API handler input validation on session ID path params | V1.18 QC R4 | **V1.29 ✅ Shipped** | S | V1.18 status.json R4 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | Session ID validation added in Batch 2 plan. |
-| DF-28 | Config path traversal protection | V1.18 QC R5 | **V1.29 ✅ Shipped** | S | V1.18 status.json R5 → V1.29 plan `agent-host-batch2-hardening` → **Shipped** | Directory traversal protection added in Batch 2 plan. |
-| DF-29 | Skill registry capability (synthetic output, no network) | V1.21 audit | Any future | M | `orchestration/capability/builtins/registry.rs` — returns hardcoded output; no real registry call. WS3 stub. |
-| DF-30 | Creator capability (synthetic output, `stub-fragment-id`) | V1.21 audit | Any future | M | `orchestration/capability/builtins/creator.rs` — returns hardcoded fragments; domain integration not wired. WS3 stub. |
-| DF-31 | Workspace capability (synthetic path/revision, `stub-revision`) | V1.21 audit | Any future | M | `orchestration/capability/builtins/workspace.rs` — depends on `nexus-home-layout` wiring. WS3 stub. |
-| DF-32 | Judge rule evaluator (only `always_true`/`always_false`) | V1.21 audit | Any future | S | `orchestration/capability/builtins/judge_rule.rs` — simple condition evaluator only. WS3 stub. |
-| DF-33 | Judge LLM evaluator (simplified logic) | V1.21 audit | Any future | S | `orchestration/capability/builtins/judge_llm.rs` — simplified judge logic. WS3 stub. |
-| DF-34 | Context summarize capability (`[SUMMARIZE_STUB]` marker) | V1.21 audit | Any future | M | `orchestration/capability/builtins/context_summarize.rs` — returns canned response on marker. WS3 stub. |
-| DF-35 | ACP prompt capability (partial real execution) | V1.21 audit | **V1.29** ✅ Partial shipped | M | V1.21 audit → V1.29 plan `kb-extract-queue-preset` → **Partial shipped** | Worker IPC for kb-extract preset path. Full de-stub deferred to FL-D. |
-| DF-36 | ACP session load capability (partial wiring) | V1.21 audit | **V1.29** ✅ Partial shipped | S | V1.21 audit → V1.29 plan `kb-extract-queue-preset` → **Partial shipped** | Wired with acp_prompt for kb-extract preset path. Full de-stub deferred to FL-D. |
-| DF-37 | InnerGraphNodeTask / AcpPromptTask stub mode fallback | V1.21 audit | Any future | S | `orchestration/tasks/mod.rs` — no worker handle → placeholder output. Intentional safe fallback, but real IPC needed. |
-| DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | `daemon-runtime/lifecycle/actions.rs` — paused session resume is stub. |
-| DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | `nexus42/src/commands/acp_worker/agent_slot.rs` — actual ACP connection stubbed; T3 will wire. |
-| DF-42 | Full Local API redesign for World/User KB (`nexus-kb`, `nexus-knowledge`) | V1.24 (KCA-003) | Any future | L | V1.24 audit compass; `/v1/local/kb/*` redesigned to properly serve World KB, User KB, and Work KB with explicit scoping. V1.24 only stabilized `scope=work`; full redesign deferred. |
-| DF-43 | SQLite persistence for `nexus-knowledge` / `nexus-kb` | V1.24 audit | **V1.28** (partial close) | M | **V1.26–27 shipped** persistence + CLI writes. **V1.28** closes assembly/query portion via [context-assembly-convergence](../plans/2026-05-25-v1.28-context-assembly-convergence.md). Crate-model alignment (`nexus-knowledge::ReferenceSource` vs local-db) remains deferred. |
-| DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 reference-store layout | Post-V1.28 | M | Static reference registration shipped V1.26; auto-refresh pipeline still Open. |
-| DF-45 | Local CLI/daemon **world fork** | V1.27 compass (rejected) | **Cancelled** | — | **PD-01**: World fork is **platform-only** (community). Domain `World::fork` may exist in `nexus-narrative` for platform sync; no local product surface. |
+| ID | Feature | First deferred | Target | Effort | Deferral history | Notes |
+|----|---------|---------------|--------|--------|-----------------|-------|
+| DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 | Knowledge: `dual-outbox-architecture.md` (archived). Single-writer follow-up. |
+| DF-13 | Entitlements API consumption | V1.3 | V2.0+ | M | V1.3 | Platform API dependency. |
+| DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2→V1.3 | ADR-011/012/013. Platform dependency. |
+| DF-29 | `registry.refresh` (synthetic output) | V1.21 audit | Any future | M | V1.21 | **Out of V1.31** — needs network/CDN. `builtins/registry.rs`. |
+| DF-30 | `creator.read_memory` / `write_memory` / `inject_prompt` stubs | V1.21 audit | **V1.31** | M | V1.21 → V1.31 plan `creator-memory-capabilities` | Wire to `nexus-creator-memory`; prompt injection queue. |
+| DF-31 | `workspace.open` / `workspace.commit` stubs | V1.21 audit | Any future | M | V1.21 | **Out of V1.31** — `nexus-home-layout` wiring deferred. |
+| DF-32 | `judge.rule` (only `always_true`/`always_false`) | V1.21 audit | **V1.31** | S | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Real expression engine over `contextData`. |
+| DF-33 | `judge.llm` (heuristic on prompt text) | V1.21 audit | **V1.31** | S | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Real via `acp.prompt` deny_all + parse. |
+| DF-34 | `context.summarize` (`[SUMMARIZE_STUB]` marker) | V1.21 audit | **V1.31** | M | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Real LLM via `acp.prompt`. |
+| DF-37 | InnerGraphNodeTask / AcpPromptTask stub fallback | V1.21 audit | **V1.31** | S | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Worker-handle plumbing; fold with judge/summarize IPC. |
+| DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | V1.21 | `daemon-runtime/lifecycle/actions.rs`. |
+| DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
+| DF-42 | Full Local API redesign for World/User KB | V1.24 (KCA-003) | Any future | L | V1.24 | `/v1/local/kb/*` full scoping redesign. |
+| DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
+| DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 
-#### DF-43 decision note — Reference sources persistence (V1.25 Theme C)
+#### DF-43 decision note — Reference sources persistence
 
-**Status:** Decision accepted in V1.25 Theme C Batch C2; **implementation in V1.26** via [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md) (reference registry + MD body). Crate-model alignment remains open after the V1.26 reference-store plan ships.
+**Status:** Production persistence owner decided (V1.25 Theme C); crate-model alignment **remains open**.
 
-Nexus currently has two reference source models with different ownership boundaries:
+1. **`nexus-local-db`** owns production `reference_sources` in `state.db`.
+2. **`nexus-knowledge::ReferenceSource`** remains in-memory crate model until a follow-up adapter plan.
 
-1. **`nexus-local-db` production persistence** — the shipped SQLite-backed `reference_sources` table in `state.db`, with columns such as `reference_source_id`, `workspace_id`, `source_type`, `uri`, `title`, `tags`, `content_hash`, and `scan_status`. This is the production path for local runtime reference data and daemon reference listing.
-2. **`nexus-knowledge::ReferenceSource` crate model** — an in-crate domain model for User-scoped knowledge/reference indexing. Today it is backed only by in-memory store wiring and is not the production persistence owner for `reference_sources`.
+See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md). Re-evaluate when `nexus-knowledge` proposes a SQLite/file-backed adapter with migration plan.
 
-**Decision:** Keep the current `nexus-local-db` `reference_sources` table as the production persistence owner for reference sources. `nexus-knowledge::ReferenceSource` remains an in-memory crate model for now. It may be aligned with, adapted to, or integrated into the production path in a later plan, but it is not the persistence owner today.
+### 3.4 Backlog (no committed target version)
 
-**Options considered:**
-
-| Option | Summary | Result |
-| --- | --- | --- |
-| A — Keep `nexus-local-db` as production owner | Continue using the current SQLite table and daemon reference listing path. | **Accepted** — lowest risk and matches shipped behavior. |
-| B — Migrate production persistence to `nexus-knowledge` | Make `nexus-knowledge::ReferenceSource` the production model behind a persistent adapter. | Deferred — requires adapter, migration design, daemon/API integration, and regression testing. |
-| C — Hybrid adapter now | Keep the table but immediately add an adapter so `nexus-knowledge` reads/writes through it. | Deferred — still adds production behavior and ownership decisions outside V1.25 Theme C. |
-
-**Rationale:**
-
-- `nexus-local-db` is the current production storage boundary for local SQLite state and already owns the shared `reference_sources` table.
-- `nexus-knowledge` does not currently provide a SQLite- or file-backed persistent store implementation for `ReferenceSource`.
-- V1.25 Theme C confirmed an in-memory posture for new domain-crate wiring; migrating production ownership to `nexus-knowledge` requires a separate implementation plan covering adapter boundaries, data migration, daemon/API regression, and compatibility with existing `state.db` contents.
-
-**Risks and controls:**
-
-| Risk | Control |
-| --- | --- |
-| Readers assume `nexus-knowledge::ReferenceSource` is production-persisted. | This tracker explicitly states that `nexus-local-db` is the production persistence owner. |
-| Duplicate models drift further. | Keep DF-43 open for crate-model integration and persistence-adapter work. |
-| Future migration changes shipped local data behavior without review. | Require a follow-up plan before changing production ownership or `state.db` migration behavior. |
-
-**Future migration trigger:** Re-evaluate when `nexus-knowledge` has a proposed SQLite/file-backed persistence adapter for `ReferenceSource` and a concrete migration plan. Minimum trigger evidence: persistent store design with clear ownership boundaries; compatibility plan for existing `reference_sources` rows in `state.db`; daemon/API regression plan for local reference listing behavior; explicit update to DF-43 and related specs.
-
-**Consequences:** No immediate Rust source, database schema, daemon handler, test, codegen, or configuration changes are required by this decision. DF-43 is partially resolved: the production persistence owner is decided for now, while crate-model integration and any future migration remain open.
-
-### 3.2 Backlog (no committed target version)
-
-| ID | Feature | First deferred | Target | Effort est. | Notes |
-|----|---------|---------------|--------|-------------|-------|
-| DF-03 | Preset third-party registry / signing / publish | V1.4 | Backlog | XL | Requires trust model + distribution protocol. **Long-term backlog** — potentially an independent project, not a nexus version feature. |
-| BL-01 | World Merge complete execution / rollback product form | V1.2 | Backlog | XL | Spec anchor: `platform/world-merge-execution-backlog-v1.md`. |
+| ID | Feature | First deferred | Target | Effort | Notes |
+|----|---------|---------------|--------|--------|-------|
+| DF-03 | Preset third-party registry / signing / publish | V1.4 | Backlog | XL | Potentially independent project. |
+| BL-01 | World Merge complete execution / rollback | V1.2 | Backlog | XL | Spec: `platform/world-merge-execution-backlog-v1.md`. |
 | BL-02 | Local Shadow Read / staged change full chain | V1.2 | Backlog | L | Requires product spec. |
-| BL-03 | Advanced declarative Context Assembly API / DSL | V1.2 | Backlog | XL | Spec anchor: `platform/context-assembly-advanced-dsl-backlog-v1.md`. |
+| BL-03 | Advanced declarative Context Assembly API / DSL | V1.2 | Backlog | XL | Spec: `platform/context-assembly-advanced-dsl-backlog-v1.md`. |
 | BL-04 | Long-running task checkpoint (product-level) | V1.2 | Backlog | M | |
 | BL-05 | Commonware / multi-workspace advanced narrative | V1.2 | Backlog | XL | |
-| BL-06 | Independent search microservice | V1.2 | Backlog | L | Compatible with old "not mandatory" principle. |
-| BL-07 | Explore ranking / cold-start strategy + Publish compliance determination matrix | V1.2 | Backlog | M | Elevated by ADR-011 + product spec in V1.2 matrix (originally V1.4). |
+| BL-06 | Independent search microservice | V1.2 | Backlog | L | |
+| BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | ADR-011 elevated. |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | ADR-011/012/013. |
-| BL-09 | V1.17 Prompt + Skills Compass v1 (planning package) | V1.16 | V1.17 (GATED) | M | **Gate met** — V1.16 compass Done. Planning-only package activated for V1.17 execution scope. |
+| BL-09 | V1.17 Prompt + Skills Compass v1 | V1.16 | Done | M | **Shipped V1.17** — see archive §2. |
 
-### 3.4 Gated planning package details (not executable scope yet)
+### 3.5 Open tech-debt residuals (tracked in `status.json`)
 
-#### BL-09 — V1.17 Prompt + Skills Compass v1
+Authoritative machine state: **`status.json` root `residual_findings`** (`updated_at` **2026-05-26**). `metadata.tech_debt_summary.total_open` = **11** (TD-V130-01..11 + historical R-V113-005/007).
 
-- **Status**: Execution complete (V1.17 shipped)
-- **Gate**: ✅ Met — `v1.16-delivery-compass-v1.md` is Done.
-- **Outcome**: V1.17 prompt/skills work delivered. See V1.17 delivery snapshot in §5.
-- **Planned themes** (for reference):
-  - **S1 Embedded skills quality**: Trigger rules + evidence standards; skill versioning and change records.
-  - **S2 Preset prompt refinement**: `novel-writing` quality/consistency; `research` output structure + traceability.
-  - **S3 Output evaluation**: Golden outputs + regression comparison; optional evaluation harness requires a separate ADR if enabled.
-- **Entry criteria to activate execution planning**:
-  1. `v1.16-delivery-compass-v1.md` is marked Done.
-  2. Cross-repo contract updates are completed and traceable.
-  3. A new V1.17 row is added in `{PLAN_DIR}` and recorded in `status.json`.
+| ID | Title | Severity | Decision | `target_date` | Scope |
+|----|-------|----------|----------|----------------|-------|
+| R-V113-005 | UpstreamTimeout e2e test duration varies by OS/proxy | low | accept | backlog | `crates/nexus42/tests/creator_register_e2e.rs` |
+| R-V113-007 | Flaky test `auth::tests::get_returns_none_for_unknown_creator` | low | accept | backlog | `crates/nexus42/src/auth/mod.rs` |
+| TD-V130-01 | SessionCapture RwLock uses write() for all accesses | low | accept | backlog | `crates/nexus42/src/commands/acp_worker/mod.rs` |
+| TD-V130-02 | cleanup_row fire-and-forget — DELETE failure silently lost | low | defer | backlog | `crates/nexus-local-db/src/reference_source.rs` |
+| TD-V130-03 | JobLifecycleGuard FSM — no RAII guard | low | defer | backlog | `crates/nexus-orchestration/.../kb_extract_work.rs` |
+| TD-V130-04 | Drop timeout 150ms may be insufficient | low | defer | backlog | `crates/nexus-agent-host/.../claude.rs` |
+| TD-V130-05 | LIST_BY_WORLD_LIMIT=500 silently truncates | low | accept | backlog | `crates/nexus-local-db/src/kb_store.rs` |
+| TD-V130-06 | mark_running lacks WHERE status guard | low | defer | backlog | `crates/nexus-local-db/src/kb_extract_job.rs` |
+| TD-V130-07 | claim_job re-fetches row after commit | nit | accept | backlog | `crates/nexus-local-db/src/kb_extract_job.rs` |
+| TD-V130-08 | insert_with_retry generic error on collision | nit | accept | backlog | `crates/nexus-local-db/src/kb_extract_job.rs` |
+| TD-V130-09 | Dynamic SQL (format!) not parameterized | low | accept | backlog | `reference_source.rs`, `kb_store.rs` |
+| TD-V130-10 | Extraction prompt format!() doubles memory | nit | accept | backlog | `kb_extract_work.rs` |
+| TD-V130-11 | sqlx prepare CI enforcement | low | defer | backlog | CI pipeline |
 
-### 3.3 Open tech-debt residuals (tracked in `status.json`)
-
-Authoritative machine state: **`status.json` root `residual_findings`**（`updated_at` **2026-05-26**）。`metadata.tech_debt_summary.total_open` is **11** — post-V1.30 QC tech debt (TD-V130-01..11: 8 low, 3 nit; all `decision: accept/defer`, `target_date: backlog`). Historical residuals R-V113-005/R-V113-007 remain accepted backlog.
-
-| ID | Title | Severity | Decision | `target_date` | Origin plan | Scope |
-|----|-------|----------|----------|----------------|-------------|-------|
-| R-V113-005 | UpstreamTimeout e2e test duration varies by OS/proxy (up to ~30s) | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/tests/creator_register_e2e.rs` |
-| R-V113-007 | Pre-existing flaky test `auth::tests::get_returns_none_for_unknown_creator` | low | accept | backlog | `2026-05-06-v1.13-oss-forward-delivery` | `crates/nexus42/src/auth/mod.rs` |
-| TD-V130-01 | SessionCapture RwLock uses write() for all accesses | low | accept | backlog | v1.30 QC3 W-002 | `crates/nexus42/src/commands/acp_worker/mod.rs` |
-| TD-V130-02 | cleanup_row fire-and-forget — DELETE failure silently lost | low | defer | backlog | v1.30 QC2 W-003 | `crates/nexus-local-db/src/reference_source.rs` |
-| TD-V130-03 | JobLifecycleGuard FSM — no RAII guard for mark_done/mark_failed | low | defer | backlog | v1.30 QC2 S-003 | `crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs` |
-| TD-V130-04 | Drop timeout 150ms may be insufficient — make configurable | low | defer | backlog | v1.30 QC3 S-001 | `crates/nexus-agent-host/src/providers/native_cli/claude.rs` |
-| TD-V130-05 | LIST_BY_WORLD_LIMIT=500 silently truncates | low | accept | backlog | v1.30 QC3 S-002 | `crates/nexus-local-db/src/kb_store.rs` |
-| TD-V130-06 | mark_running lacks WHERE status guard | low | defer | backlog | v1.30 QC3 S-004 | `crates/nexus-local-db/src/kb_extract_job.rs` |
-| TD-V130-07 | claim_job re-fetches row after commit for started_at | nit | accept | backlog | v1.30 QC3 S-005 | `crates/nexus-local-db/src/kb_extract_job.rs` |
-| TD-V130-08 | insert_with_retry returns generic error on collision | nit | accept | backlog | v1.30 QC2 S-005 | `crates/nexus-local-db/src/kb_extract_job.rs` |
-| TD-V130-09 | Dynamic SQL (format!) not parameterized | low | accept | backlog | v1.30 QC1 S-001, QC2 S-001 | `crates/nexus-local-db/src/reference_source.rs` |
-| TD-V130-10 | Extraction prompt format!() doubles memory for large entries | nit | accept | backlog | v1.30 QC3 S-003 | `crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs` |
-| TD-V130-11 | sqlx prepare CI enforcement | low | defer | backlog | v1.30 QC2 S-008 | CI pipeline |
-
-**Hygiene note (2026-05-26)**: Original V1.30 residuals R5–R20 are **all closed** (shipped in V1.30). See `archived/residuals/v1.30-residual-convergence.json` for closure details. Pre-V1.30 tracker ids (R5, R11, R-WA-*, R-M1-W*, R-V110-*, …) are not present in root `residual_findings` today. Recover narrative detail from `archived/residuals/` / plan QC reports if needed.
+V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-convergence.json`.
 
 ---
 
-## 4) Closed items
+## 4) Change control
 
-### Features shipped
-
-| ID | Feature | Shipped in | Notes |
-|----|---------|------------|-------|
-| ~~DF-A~~ | `context.summarize` capability (LLM-driven core_context summarisation) | V1.5 (WS-C) | V1.4 reserved `DerivationKind::LlmSummarize`; V1.5 implemented. |
-| ~~DF-B~~ | Schedule cron / wall-clock triggers (`scheduled_at` column) | V1.5 (WS-D) | V1.4 reserved column; V1.5 added clock poller zero-migration. |
-| ~~DF-C~~ | System-managed multi-preset scheduler (`_system/` directory) | V1.6 (WS-D / Track D) | V1.4 backlog → V1.5 deferred → V1.6 implemented. |
-| ~~DF-D~~ | V1.5 residual R1 — cancel signal ignores `pause_schedule()` error | V1.6 (WS-A) | Medium severity. Fixed in `nexus42d/.../schedules.rs`. |
-| ~~DF-E~~ | V1.5 residual R2 — `resume_schedule()` TOCTOU race | V1.6 (WS-A) | Medium severity. Fixed in `nexus-orchestration/.../supervisor.rs`. |
-| ~~DF-F~~ | V1.5 residual R3 — `Scheduler::tick()` dead code | V1.6 (WS-A) | Low severity. Removed redundant DB query path. |
-| ~~DF-G~~ | V1.5 residual R6 — Recovered sessions lack FlowRunner | V1.6 (WS-A) | Low severity. Session recovery after daemon restart fixed. |
-| ~~DF-H~~ | ACP SDK DTO decoupling (Nexus-owned trait types) | V1.6 (WS-B) | Nexus-owned DTOs for `NexusAcpClient` trait. Preparation for DF-04. |
-| ~~DF-I~~ | ACP permission policy CLI surface (`nexus42 permission`) | V1.6 (WS-C) | CLI command group: list/grant/deny/ask/revoke/reset. |
-| ~~DF-J~~ | Full daemon lifecycle state machine (6-state FSM) | V1.4 (WS4) | `statig` HSM. Originally deferred from V1.2 matrix (TD-9-FU). |
-| ~~DF-K~~ | User registration / Creator binding full story | V1.3 | V1.2 deferred to V1.3. Creator register CLI delivered. |
-| ~~DF-01~~ | Multi-agent worker (single worker hosting >1 ACP agent) | V1.7 (WS-E) | Approach A (multiplex one worker). WorkerRegistry: `HashMap<CreatorId, WorkerHandle>`. |
-| ~~DF-04~~ | ACP SDK migration to sacp v1.0 | V1.7 (WS-D) | Adapter-trait policy. SDK types confined to `AcpSdkAdapter`. |
-| ~~DF-08~~ | Wire/local drift auto-detect tooling | V1.9 (WS-D) | Automated detection of schema classification drift. CLI command delivered. |
-| ~~DF-09~~ | Template_file path validation | V1.9 (WS-B) | Filesystem preset path traversal protection. |
-| ~~DF-10~~ | Starting lifecycle edge cases | V1.9 (WS-C) | HealthDegraded during Starting, Starting.exit in-flight cancel. |
-| ~~DF-17~~ | Third-party preset loading (`~/.nexus42/presets/`) + CLI init templates | V1.9 (WS-A) | Path corrected from `~/.nexus/strategies/` to `~/.nexus42/presets/`. |
-| ~~DF-11~~ | CoreContext Handlebars template engine binding | V1.13 | WS7 data path + template rendering integrated per V1.13 OSS-forward delivery. |
-| ~~DF-14~~ | CLI + Platform e2e integration | V1.13 | Staged cross-repo gates + harness per V1.13 OSS-forward delivery. |
-| ~~DF-38~~ | OrchestrationEngine instantiation in daemon | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` instantiates `GraphFlowEngine::new_with_storage(...)`, stores it as `Arc<dyn OrchestrationEngine>`, and calls `state.set_engine(...)`. The older `lifecycle/actions.rs` comment still says “Instantiate OrchestrationEngine (stub, subsystem task)”; that comment is stale evidence only, not current product state. |
-| ~~DF-39~~ | Worker Manager subsystem wiring in daemon lifecycle | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` creates `WorkerManager::new()` and calls `state.set_worker_manager(...)`; `lifecycle/subsystems/worker_mgr.rs` describes the real subsystem replacing the mock stub. The older `lifecycle/actions.rs` comment still says “Start Worker Manager (stub, subsystem task)”; that comment is stale evidence only and is distinct from remaining task-level worker-handle fallback tracked by DF-37. |
-| ~~FL-C~~ | Structured KB query + context assembly convergence | V1.28 | `assemble-moment` SSOT; KbQuery + cross-domain token budget; `assemble-local` removed. Plans: `2026-05-25-v1.28-context-assembly-convergence`, agent-host plans, `local-ssot-refresh`. |
-
-### Tech-debt residuals shipped
-
-| ID | Title | Shipped in | Notes |
-|----|-------|------------|-------|
-| ~~DTO-C1~~ | `sdk_new_session_request_from_nexus` silently drops `mcp_servers` field | V1.7 | Medium severity. Fixed in `nexus-acp-host`. |
-| ~~DTO-C2~~ | Protocol version `.parse::<u16>().unwrap_or(1)` silent degradation | V1.7 | Low severity. Fixed in `nexus-acp-host`. |
-| ~~DTO-W1~~ | `NexusContentBlock` missing `Eq` derive | V1.7 | Nit. Fixed in `nexus-contracts`. |
-| ~~PERM-W1~~ | `policy.rs` save re-serializes TOML losing comments/format | V1.7 | Low severity. Fixed in `nexus-acp-host`. |
-| ~~PERM-W2~~ | JSON permission list omits global rules when agent filter used | V1.7 | Low severity. Fixed in `nexus42`. |
-| ~~PERM-W3~~ | Unvalidated TOML keys in permission commands | V1.7 | Low severity. Fixed in `nexus42`. |
-| ~~R4~~ | `SystemClock` DST safety not implemented | V1.7 | Low severity. Fixed in `nexus-orchestration`. |
-| ~~R7~~ | `schedule_guards` HashMap grows unbounded | V1.7 | Nit. Fixed in `nexus-orchestration`. |
-| ~~TD-10~~ | Device flow OAuth — production auth deferred; stub `verify_device_code` only | V1.10 | Low severity. Replaced by real Device Flow Login (WS-A). |
-
-### Cancelled / Superseded
-
-| ID | Status | Cancelled in | Reason |
-|----|--------|--------------|--------|
-| ~~DF-L~~ | **Cancelled** | V1.6 (accepted) | rand 0.7.3 blocked by wiremock — accepted as permanent tech debt. |
-| ~~DF-M~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-07 — Capability schema registry sharing with platform. Over-designed. |
-| ~~DF-N~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-02 — User-authored capabilities (shell / WASM plugin ABI). Over-designed. |
-| ~~DF-O~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-05 — Full ACP permission policy engine UI (web-based). Not core product value. |
-| ~~DF-P~~ | **Superseded** | 2026-04-21 (V1.7 planning) | DF-06 — Preset hot-reload. Snapshot semantics correct; real need → DF-17. |
-| ~~DF-15~~ | **Cancelled** | V1.13 (governance closure) | OpenAPI export work. Nexus is not an OpenAPI-first product boundary for runtime value delivery; V1.13 resolves tracker ambiguity as governance-only closure with no implementation scope. |
-
-### Tech-debt residuals shipped (V1.30)
-
-| ID | Title | Shipped in | Notes |
-|----|-------|------------|-------|
-| ~~R5~~ | body.md written before SQL INSERT — orphaned files on DB failure | V1.30 | Write order reversed: SQL INSERT first, body.md second. |
-| ~~R6~~ | list_references returns all rows unbounded — no pagination | V1.30 | LIMIT/OFFSET pagination with DEFAULT_PAGE_LIMIT; clamped 1..=1000. |
-| ~~R7~~ | content_hash always NULL — integrity field unused | V1.30 | blake3 content_hash computed on registration. |
-| ~~R8~~ | db_err maps all sqlx::Error to ValidationError — no Storage variant | V1.30 | `NarrativeError::Storage` variant introduced. |
-| ~~R9~~ | KbQuery fetches all blocks into memory — no DB-level pagination | V1.30 | `LIST_BY_WORLD_LIMIT=500` added to `list_by_world`. |
-| ~~R14~~ | SessionCapture created at agent-stop time — near-zero metrics | V1.30 | SessionCapture at session start with `session_captures` map in `MultiplexedWorkerState`. |
-| ~~R15~~ | KB extract job claim not atomic across next_queued + mark_running | V1.30 | Atomic `claim_job()`: SELECT+UPDATE in single tx + `rows_affected()` check. |
-| ~~R16~~ | kb.extract_work placeholder — no full extraction lifecycle | V1.30 | Full e2e: claim → extract → parse → mark_done → KeyBlock insert. |
-| ~~R17~~ | Persistent child Drop cleanup is best-effort and Unix-only | V1.30 | SIGTERM→wait→SIGKILL + PID existence check (`kill -0`). |
-| ~~R18~~ | KB extract job IDs use custom timestamp-derived generation | V1.30 | UUIDv4 with `xj_` prefix + `insert_with_retry`. |
-| ~~R19~~ | creator command module approaching maintainability threshold | V1.30 | KB handlers extracted to `creator/kb.rs` (973 lines); `mod.rs` reduced ~30%. |
-| ~~R20~~ | KB extract status list is unbounded | V1.30 | Bounded listing with `limit=100` default. |
+- **Shipped rows**: Move from §3.3 to [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
+- **Compass authority**: Active compass controls scope even if this tracker lists a different target.
+- **Effort estimates**: XS/S/M/L/XL agent-session scale; guidance only. See `effort-estimation.md`.
+- **Residual detail**: `status.json` wins over this file for machine-state residuals.
 
 ---
 
-## 5) Per-version summary
+## 5) Related index
 
-### Shipped in V1.7
+**Active iteration**
 
-| Category | Count | IDs |
-|----------|-------|-----|
-| Features | 2 | DF-01 (multi-agent worker), DF-04 (ACP SDK migration) |
-| Tech-debt residuals | 8 | DTO-C1, DTO-C2, DTO-W1, PERM-W1, PERM-W2, PERM-W3, R4, R7 |
-| **Total** | **10** | |
+- V1.31 delivery compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
 
-### Shipped in V1.8
+**Recent shipped compasses** (detail in archive §2)
 
-| Category | Count | Notes |
-|----------|-------|-------|
-| Features from tracker | 0 | V1.8 was purely CLI spec alignment (`--handle`, `--name` flag, LLM fallback) |
-| New residuals introduced | 4 | R-WA-001, R-WA-002, R-WC-002, R-WC-003 |
-| **Total** | **4 new residuals** | No tracker items scoped into V1.8 |
+- V1.30: [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md)
+- V1.29: [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md)
+- V1.28: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md)
 
-### Shipped in V1.9
+**Knowledge & specs**
 
-| Category | Count | IDs |
-|----------|-------|-----|
-| Features | 4 | DF-08 (drift auto-detect), DF-09 (template_file validation), DF-10 (Starting lifecycle), DF-17 (third-party presets) |
-| New residuals introduced | 7 | R-M1-W02 through R-M1-W07, R-M1-W09 |
-| **Total** | **11** | 4 features shipped + 7 new residuals created |
-
-### Shipped in V1.10
-
-| Category | Count | IDs |
-|----------|-------|-----|
-| Tech-debt residuals | 1 | TD-10 (Device Flow Login — real auth replaced stub) |
-| New residuals introduced | 2 | R-V110-003, R-V110-004 |
-| **Total** | **3** | 1 residual closed + 2 new residuals created |
-
-### Shipped in V1.13
-
-| Category | Count | IDs |
-|----------|-------|-----|
-| Features | 2 | DF-11 (Handlebars binding), DF-14 (CLI+Platform e2e) |
-| Governance closure | 1 | DF-15 (Cancelled — OpenAPI export) |
-| Tech-debt residuals | 0 | — |
-
-### V1.14 delivery snapshot (registered)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.14-delivery-compass-v1.md](../iterations/v1.14-delivery-compass-v1.md)（§0 scope lock **合并于**本 compass） |
-| Machine state | `status.json` `plans[]` **空**；`residual_findings` 仅 **R-V113-005** / **R-V113-007**（accepted / backlog） |
-| Platform execution | **Done** — `nexus-platform` Plans **86–87**（rate-limit/JWKS + OpenAPI doc batch）；详见平台仓 `status.json` `metadata.tech_debt_summary.note` |
-| Cross-repo gates | Canonical: `nexus-platform/.agents/knowledge/v1.14-program-compass-v1.md` §5 |
-
-### V1.15 delivery snapshot (Done)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.15-delivery-compass-v1.md](../iterations/v1.15-delivery-compass-v1.md)（§0 scope lock, D1-D7 architecture decisions） |
-| Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` unchanged — **R-V113-005** / **R-V113-007**（accepted / backlog） |
-| Plan | `2026-05-10-v1.15-orchestration-first-pipeline` — **Done** (archived to `archived/plans/`) |
-| PR | [#23](https://github.com/42ch-dev/nexus/pull/23) merged to `main` |
-| QC | Triple review: QC1 Request Changes (pre-existing auth test drift), QC2 Approve, QC3 Approve (3 warnings accepted) |
-| Cross-repo gates | G1–G3 done, G4 done (tracker aligned), G5 done (QC triple complete) |
-| New tracker items | None — all V1.15 work was new features, no DF-* items from tracker were in scope |
-| New residuals | None formally filed — QC3 warnings (skill_sync I/O, skill_link TOCTOU, sync_module unbounded memory, embedded_skills linear search) accepted in-place |
-
-### V1.18 delivery snapshot (Done)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.18-delivery-compass-v1.md](../iterations/v1.18-delivery-compass-v1.md)（§0 scope lock, R-001–R-010 requirements, §9 deferred D-001–D-008） |
-| Machine state | `status.json` `plans[]` **empty** (archived); `residual_findings` includes V1.18 code-quality residuals + V1.19 deferred functional gaps |
-| Plan | `2026-05-15-v1.18-agent-host-core` — **Done** (archived to `archived/plans/`) |
-| New tracker items | 11 | DF-18 through DF-28 (deferred from V1.18 §9 + QC residuals → V1.19 hardening backlog) |
-| Post-implementation audit | §9 of compass updated with R-003/R-005/R-006/R-007 audit notes, 3 new risk rows |
-
-### V1.21 delivery snapshot (Done)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
-| Machine state | `status.json` `plans[]` **empty** (archived); all gates passed (QC tri-review: 3× Approve, QA: 7/7 Pass) |
-| Plan | `2026-05-20-v1.21-local-platform-isolation` — **Done** (archived to `archived/plans/`) |
-| PR | [#28](https://github.com/42ch-dev/nexus/pull/28) merged to `main` |
-| QC | Triple review: QC1 Approve, QC2 Approve (2 low warnings accepted), QC3 Approve (2 suggestions) |
-| QA | 7/7 acceptance criteria verified |
-| Scope | Renamed `nexus-sync` → `nexus-cloud-sync` with `legacy-sync` feature; split `nexus-domain` into 6 focused crates; isolated daemon from cloud deps; wired CLI to cloud-sync directly; stubbed orchestration sync capabilities |
-| New tracker items | 13 | DF-29 through DF-41 (orchestration capability stubs, daemon lifecycle stubs, agent slot stub — see §3.1) |
-
-### V1.21 delivery snapshot (Done)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
-| Machine state | `status.json` `plans[]` **empty** (archived); all gates passed (QC tri-review: 3× Approve, QA: 7/7 Pass) |
-| Plan | `2026-05-20-v1.21-local-platform-isolation` — **Done** (archived to `archived/plans/`) |
-| PR | [#28](https://github.com/42ch-dev/nexus/pull/28) merged to `main` |
-| QC | Triple review: QC1 Approve, QC2 Approve (2 low warnings accepted), QC3 Approve (2 suggestions) |
-| QA | 7/7 acceptance criteria verified |
-| Scope | Renamed `nexus-sync` → `nexus-cloud-sync` with `legacy-sync` feature; split `nexus-domain` into 6 focused crates; isolated daemon from cloud deps; wired CLI to cloud-sync directly; stubbed orchestration sync capabilities |
-| New tracker items | 13 | DF-29 through DF-41 (orchestration capability stubs, daemon lifecycle stubs, agent slot stub — see §3.1) |
-
-### V1.24 delivery snapshot (Shipped)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) |
-| Status | Shipped (2026-05-22) |
-| Scope | Normative spec refresh; KCA-002 B2; KCA-003 C2; tracker hygiene |
-| New tracker items | 2 | DF-42, DF-43 |
-
-### V1.26 delivery snapshot (Shipped)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.26-local-persistence-delivery-compass-v1.md](../iterations/v1.26-local-persistence-delivery-compass-v1.md) |
-| Shipped at | 2026-05-23 |
-| Plans | iteration-hygiene, reference-store-layout, narrative-kb-persistence, local-context-product |
-| Platform | `metadata.platform_integration` = paused |
-| Open residuals into V1.27 | R10 (InMemory knowledge), R3 (KB scope), R5–R9 (nit/low) |
-
-### V1.27 delivery snapshot (Shipped)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.27-local-authoring-delivery-compass-v1.md](../iterations/v1.27-local-authoring-delivery-compass-v1.md) |
-| Shipped at | 2026-05-24 (`status.json` `latest_shipped_iteration`) |
-| Scope | CLI-first local writes; `creator demo seed`; four-domain persistent `assemble-moment`; API/CLI hygiene; `acp agent use` |
-| Plans | `2026-05-24-v1.27-narrative-world-writes`, `knowledge-persistence-context`, `api-cli-hygiene`, `acp-agent-use` |
-| Note | Local world fork explicitly out (platform-only per PD-01 / V1.28) |
-
-### V1.28 delivery snapshot (Shipped)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md) |
-| Shipped at | 2026-05-25 (`status.json` `latest_shipped_iteration`) |
-| PR | [#36](https://github.com/42ch-dev/nexus/pull/36) merged to `main` |
-| Scope | `assemble-moment` SSOT (remove `assemble-local`); KbQuery + token budget; Agent Host Batch 1 (DF-18–20, 24–26); SSOT doc refresh |
-| Plans | `2026-05-25-v1.28-context-assembly-convergence`, `agent-host-acp-correctness`, `agent-host-native-multiturn`, `local-ssot-refresh` |
-| Tracker | FL-C shipped; Batch 1 DF items closed; `local-cloud-crate-architecture` backfill deferred to V1.29 spec plan H0 |
-
-### V1.29 delivery snapshot (Shipped)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md) |
-| Shipped at | 2026-05-26 (`status.json` `latest_shipped_iteration`) |
-| Scope | FL-A (session review, SOUL Experience preset, Stage0 delimiters); FL-B (kb extract queue + preset); Agent Host Batch 2; spec/tracker hygiene |
-| Plans | `2026-05-26-v1.29-*` (six plans — all Done, archived to `plans-done.json`) |
-| Shipped DF items | DF-21, DF-22, DF-23, DF-27, DF-28 (Batch 2); DF-35, DF-36 (partial); FL-A, FL-B (product lines) |
-| Closed residuals | R11 (Drop kill), R12 (cancel), R13 (Stage0 markdown heuristic) |
-| New residuals (v1.30) | R14–R20 (7 findings: 2 medium, 5 low/nit) |
-| Explicit deferrals | FL-D full de-stub; DF-42; DF-44; platform unpause |
-
-### V1.30 delivery snapshot (Shipped)
-
-| Category | Position |
-|----------|----------|
-| Delivery SSOT | [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md) |
-| Shipped at | 2026-05-26 (`status.json` `latest_shipped_iteration`) |
-| PR | [#38](https://github.com/42ch-dev/nexus/pull/38) merged to `main` |
-| Scope | Residual convergence — close all open residuals R5–R20 from V1.26–V1.29 delivery compasses |
-| Plans | `2026-05-26-v1.30-*` (four plans — all Done, archived to `plans-done.json`) |
-| Closed residuals | R5–R20 (12 findings: 2 medium, 8 low, 3 nit — **all fixed**) |
-| QC | Tri-review: QC1 Approve; QC2 Request Changes → 4 Critical fixes landed → consolidated Approve; QC3 Request Changes → W-001 fix landed → consolidated Approve |
-| Post-QC tech debt | 11 items (TD-V130-01..11: 8 low, 3 nit) — all `accept/defer`, backlog |
-| Key changes | Atomic `claim_job()` + `rows_affected()`, UUID `xj_` job IDs, bounded listing (limit=100), full e2e `kb.extract_work` lifecycle, SessionCapture at session start, SIGTERM→SIGKILL + PID existence check, `creator/kb.rs` extraction (973 lines), write-after-INSERT + blake3 content_hash + pagination, `NarrativeError::Storage`, KB LIMIT 500 |
-| Verification | 687 tests pass (0 failures); clippy clean on all V1.30 crates |
-
-### V1.16+ horizon (program)
-
-### Items targeting V1.19 (superseded by V1.28 for Batch 1)
-
-| Category | Count | IDs |
-|----------|-------|-----|
-| Features (Batch 1 — safety/correctness) | 6 | DF-18, DF-19, DF-20, DF-24, DF-25, DF-26 — **scheduled V1.28** (was V1.19) |
-| Features (Batch 2 — hardening) | 5 | DF-21, DF-22, DF-23, DF-27, DF-28 — **target V1.29** (locked in compass) |
-| **Total** | **11** | Original V1.18 §9 backlog; Batch 1 absorbed into V1.28 compass |
-
-### Items targeting V2.0+
-
-| Category | Count | IDs |
-|----------|-------|-----|
-| Features | 2 | DF-13 (Entitlements), DF-16 (Billing) |
-| Tech-debt residuals | 0 | No V2.0-targeted rows in root `residual_findings` (2026-05-11); historical R5/R11/M1-W07 remain **knowledge / compass** follow-ups until re-filed |
-| Backlog | 1 | BL-08 (Social/marketing) |
-| **Total** | **3** | |
-
-### Open backlog (no committed target)
-
-| Category | Count | IDs |
-|----------|-------|-----|
-| Features | 1 | DF-03 (Preset registry/publish) |
-| Backlog features | 8 | BL-01 through BL-08 |
-| Tech-debt (accepted backlog) | 2 | R-V113-005, R-V113-007（§3.3） |
-| **Total** | **11** | |
-
-### Cancelled / Superseded (V1.7 planning, 2026-04-21)
-
-| ID | Status | Reason |
-|----|--------|--------|
-| DF-02 | Cancelled | Over-designed; OSS contributions sufficient |
-| DF-05 | Cancelled | ACP permission not core product value |
-| DF-06 | Superseded | Snapshot semantics correct; real need → DF-17 |
-| DF-07 | Cancelled | Over-designed; built-in capabilities don't need platform registration |
-
-### Decision log (V1.7 planning, 2026-04-21)
-
-| ID | Decision | Rationale |
-|----|----------|-----------|
-| DF-02 | **Cancelled** | Over-designed; users can contribute capabilities via OSS code contributions |
-| DF-03 | **→ Backlog** (independent project) | Too large for a nexus version feature; potentially standalone |
-| DF-05 | **Cancelled** | ACP permission is not core value — ACP Session is an orchestration tool, not a product focus |
-| DF-06 | **Superseded** | Snapshot semantics are correct; real need is DF-17 (`~/.nexus42/presets/` loading + CLI init) |
-| DF-07 | **Cancelled** | Over-designed; built-in capabilities don't need platform registration |
-| DF-08 | Keep (worth doing) | Schema drift detection |
-| DF-09 | Keep (prioritize) | Must work with `~/.nexus42/presets/` (DF-17) |
-| DF-10 | Keep (worth doing) | Daemon lifecycle hardening |
-| DF-11 | Keep (worth doing) | Handlebars binding for CoreContext |
-
----
-
-## 6) Change control
-
-- **Updates**: When a version ships, move all delivered items to §4 Closed. When an item is re-deferred, update §3.
-- **Source compasses remain authoritative for scope decisions**: If the active compass says "Out" for an item but this tracker has it as "Open" with that version target, the compass controls whether it enters scope.
-- **Effort estimates are approximate** (XS/S/M/L/XL agent-session scale) and for planning guidance only — not contractual. See `effort-estimation.md` for methodology.
-- **Residual detail**: Machine-state residuals (§3.3) are authoritative in **`status.json` root `residual_findings`**. This file mirrors them for cross-version planning convenience; if there's a conflict, `status.json` wins.
-
----
-
-## 7) Related index
-
-Internal (this repo):
-
-- V1.2 delivery compass: [v1.2-delivery-compass-v1.md](../iterations/v1.2-delivery-compass-v1.md)
-- V1.2 reclassification matrix: [v1.2-reclassification-matrix-v1.md](../iterations/v1.2-reclassification-matrix-v1.md)
-- V1.3 delivery compass: [v1.3-delivery-compass-v1.md](../iterations/v1.3-delivery-compass-v1.md)
-- V1.4 delivery compass: [v1.4-delivery-compass-v1.md](../iterations/v1.4-delivery-compass-v1.md)
-- V1.5 delivery compass: [v1.5-nexus-delivery-compass-v1.md](../iterations/v1.5-nexus-delivery-compass-v1.md)
-- V1.6 delivery compass: [v1.6-delivery-compass-v1.md](../iterations/v1.6-delivery-compass-v1.md)
-- V1.7 delivery compass: [v1.7-delivery-compass-v1.md](../iterations/v1.7-delivery-compass-v1.md)
-- V1.8 delivery compass: [v1.8-delivery-compass-v1.md](../iterations/v1.8-delivery-compass-v1.md)
-- V1.9 delivery compass: [v1.9-delivery-compass-v1.md](../iterations/v1.9-delivery-compass-v1.md)
-- V1.10 delivery compass: [v1.10-delivery-compass-v1.md](../iterations/v1.10-delivery-compass-v1.md)
-- V1.13 delivery compass: [v1.13-delivery-compass-v1.md](../iterations/v1.13-delivery-compass-v1.md)
-- V1.14 delivery compass: [v1.14-delivery-compass-v1.md](../iterations/v1.14-delivery-compass-v1.md)
-- V1.15 delivery compass: [v1.15-delivery-compass-v1.md](../iterations/v1.15-delivery-compass-v1.md)
-- V1.16 delivery compass: [v1.16-delivery-compass-v1.md](../iterations/v1.16-delivery-compass-v1.md)
-- V1.17 delivery compass: [v1.17-delivery-compass-v1.md](../iterations/v1.17-delivery-compass-v1.md)
-- V1.18 delivery compass: [v1.18-delivery-compass-v1.md](../iterations/v1.18-delivery-compass-v1.md)
-- V1.19 delivery compass: [v1.19-delivery-compass-v1.md](../iterations/v1.19-delivery-compass-v1.md)
-- V1.20 delivery compass: [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md)
-- V1.21 delivery compass: [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md)
-- V1.26 delivery compass: [v1.26-local-persistence-delivery-compass-v1.md](../iterations/v1.26-local-persistence-delivery-compass-v1.md)
-- V1.27 delivery compass: [v1.27-local-authoring-delivery-compass-v1.md](../iterations/v1.27-local-authoring-delivery-compass-v1.md)
-- V1.28 delivery compass: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md)
-- V1.29 delivery compass: [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md)
-- V1.30 delivery compass: [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md)
-- V1.17 prompt-skills compass: merged into this tracker under `BL-09` (§3.4)
-- Orchestration engine design: [../knowledge/specs/orchestration-engine.md](../knowledge/specs/orchestration-engine.md)
-- ACP client tech spec v2: [../archived/../archived/knowledge/acp-client-tech-spec.md](../archived/../archived/knowledge/acp-client-tech-spec.md)
+- Shipped history archive: [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md)
+- Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
-- Crate selection best practices: [crate-selection-best-practices.md](crate-selection-best-practices.md)
-- `status.json` (machine-state residuals): [../status.json](../status.json)
+- Iteration index: [iterations/README.md](../iterations/README.md)
+- Machine state: [status.json](../status.json)
 
-External (v1-spec, resolved via `.agents/local-paths.json`):
-
-- `{v1-spec}/architecture/v1.md` — base architecture
-- `{platform-designs}/roadmap.md` — program roadmap
+External (via `.agents/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{platform-designs}/roadmap.md`
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-26**. Status: Active. **V1.30 Shipped** (2026-05-26). **V1.29 Shipped** (2026-05-26). **V1.28 Shipped** (2026-05-25). Platform integration paused. See `status.json`.*
+*Created: 2026-04-21. Last updated: **2026-05-30**. Status: Active. **V1.31 Active**. **V1.30 Shipped** (2026-05-26). Platform integration paused.*
