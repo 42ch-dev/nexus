@@ -17,7 +17,9 @@ pub mod tasks;
 pub mod user_preset_dir;
 pub mod worker;
 
-pub use capability::{Capability, CapabilityError, CapabilityRegistry};
+pub use capability::{
+    Capability, CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, WorkerHandleProvider,
+};
 pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use preset::resolve_preset;
 pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
