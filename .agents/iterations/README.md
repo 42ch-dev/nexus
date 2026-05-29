@@ -42,7 +42,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowl
 | [v1.28-context-and-agent-host-delivery-compass-v1.md](v1.28-context-and-agent-host-delivery-compass-v1.md) | V1.28 | **Shipped** (2026-05-25) — `assemble-moment` SSOT, structured KB query, Agent Host Batch 1 |
 | [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md) | V1.29 | **Shipped** (2026-05-26) — Author Intelligence (FL-A/B), Agent Host Batch 2, spec/tracker hygiene |
 | [v1.30-residual-convergence-delivery-compass-v1.md](v1.30-residual-convergence-delivery-compass-v1.md) | V1.30 | **Shipped** (2026-05-26) — residual convergence (R5–R20) |
-| [v1.31-agentic-design-patterns-delivery-compass-v1.md](v1.31-agentic-design-patterns-delivery-compass-v1.md) | V1.31 | **Active** — FL-D orchestration de-stub + 2 Agentic Design Pattern presets |
+| [v1.31-agentic-design-patterns-delivery-compass-v1.md](v1.31-agentic-design-patterns-delivery-compass-v1.md) | V1.31 | **Shipped** (2026-05-30) — FL-D partial close: orchestration de-stub + 2 Agentic Design Pattern presets |
 
 ### Reference compasses
 

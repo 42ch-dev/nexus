@@ -40,6 +40,11 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-38~~ | OrchestrationEngine instantiation in daemon | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` instantiates `GraphFlowEngine::new_with_storage(...)`, stores it as `Arc<dyn OrchestrationEngine>`, and calls `state.set_engine(...)`. The older `lifecycle/actions.rs` comment still says “Instantiate OrchestrationEngine (stub, subsystem task)”; that comment is stale evidence only, not current product state. |
 | ~~DF-39~~ | Worker Manager subsystem wiring in daemon lifecycle | V1.25 audit hygiene | Shipped before V1.25: `crates/nexus-daemon-runtime/src/boot.rs` creates `WorkerManager::new()` and calls `state.set_worker_manager(...)`; `lifecycle/subsystems/worker_mgr.rs` describes the real subsystem replacing the mock stub. The older `lifecycle/actions.rs` comment still says “Start Worker Manager (stub, subsystem task)”; that comment is stale evidence only and is distinct from remaining task-level worker-handle fallback tracked by DF-37. |
 | ~~FL-C~~ | Structured KB query + context assembly convergence | V1.28 | `assemble-moment` SSOT; KbQuery + cross-domain token budget; `assemble-local` removed. Plans: `2026-05-25-v1.28-context-assembly-convergence`, agent-host plans, `local-ssot-refresh`. |
+| ~~DF-30~~ | `creator.read_memory` / `write_memory` / `inject_prompt` de-stub | V1.31 | Plan `2026-05-30-v1.31-creator-memory-capabilities`: real SQLite read/write via `CreatorCapabilityStore`; `inject_prompt` persisted queue in `state.db`. |
+| ~~DF-32~~ | `judge.rule` expression engine | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: boolean literals, field equality/inequality, and numeric comparisons over `contextData`. |
+| ~~DF-33~~ | `judge.llm` worker-backed GO/NOGO judge | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: executes via `WorkerHandleProvider::call_acp_prompt` with `deny_all` and parses GO/NOGO. |
+| ~~DF-34~~ | `context.summarize` worker-backed summarization | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: executes via `WorkerHandleProvider` and returns `{ summary, prompt_hash }`. |
+| ~~DF-37~~ | Worker-handle plumbing for capability-layer LLM calls | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: `Arc<dyn WorkerHandleProvider>` injected through `CapabilityRegistry::with_runtime_deps()`; fallback limited to explicit standalone/test mode. |
 
 ### Tech-debt residuals shipped
 
@@ -252,6 +257,19 @@ When a version ships, append new closed rows here and remove them from the activ
 | Post-QC tech debt | 11 items (TD-V130-01..11: 8 low, 3 nit) — all `accept/defer`, backlog |
 | Key changes | Atomic `claim_job()` + `rows_affected()`, UUID `xj_` job IDs, bounded listing (limit=100), full e2e `kb.extract_work` lifecycle, SessionCapture at session start, SIGTERM→SIGKILL + PID existence check, `creator/kb.rs` extraction (973 lines), write-after-INSERT + blake3 content_hash + pagination, `NarrativeError::Storage`, KB LIMIT 500 |
 | Verification | 687 tests pass (0 failures); clippy clean on all V1.30 crates |
+
+### V1.31 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md) |
+| Shipped at | 2026-05-30 |
+| PR | Pending — P4 spec/tracker hygiene branch prepares integration close |
+| Scope | FL-D partial close: creator memory capabilities, rule/LLM judge, context summarization, worker-handle provider injection, and two embedded Agentic Design Pattern presets |
+| Plans | `2026-05-30-v1.31-creator-memory-capabilities`, `2026-05-30-v1.31-judge-and-summarize-capabilities`, `2026-05-30-v1.31-agentic-pattern-presets`, `2026-05-30-v1.31-spec-tracker-hygiene` |
+| Shipped DF items | DF-30, DF-32, DF-33, DF-34, DF-37 |
+| Embedded presets | `reflection-loop`, `memory-augmented` |
+| Explicit deferrals | DF-29 `registry.refresh`, DF-31 `workspace.*`, conditional routing engine, platform HTTP unpause |
 
 ### V1.16+ horizon (program)
 
