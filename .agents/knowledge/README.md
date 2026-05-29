@@ -24,4 +24,5 @@ All feature and local normative documents: **[`specs/README.md`](specs/README.md
 
 ## Archived
 
-[`.agents/archived/knowledge/`](../archived/knowledge/README.md)
+- Implementation knowledge supersession: [`.agents/archived/knowledge/`](../archived/knowledge/README.md)
+- Shipped / closed feature tracker: [`.agents/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md)
