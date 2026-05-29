@@ -6,6 +6,7 @@ pub mod builtins;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::sync::Arc;
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -86,9 +87,9 @@ impl CapabilityRegistry {
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh),
-            Box::new(builtins::CreatorReadMemory),
-            Box::new(builtins::CreatorWriteMemory),
-            Box::new(builtins::CreatorInjectPrompt),
+            Box::new(builtins::CreatorReadMemory::new()),
+            Box::new(builtins::CreatorWriteMemory::new()),
+            Box::new(builtins::CreatorInjectPrompt::new()),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt),
             Box::new(builtins::AcpSessionLoad),
@@ -100,12 +101,16 @@ impl CapabilityRegistry {
         Self { capabilities: caps }
     }
 
-    /// Create a registry with built-in capabilities and a pool for `kb.extract_work`.
+    /// Create a registry with built-in capabilities and a pool.
     ///
     /// Same as [`with_builtins`] but `kb.extract_work` receives the pool
-    /// for full e2e lifecycle (claim → extract → `KeyBlock` insert → finalize).
+    /// for full e2e lifecycle, and all creator capabilities receive a
+    /// [`builtins::CreatorCapabilityStore`] for real memory I/O
+    /// and prompt injection persistence.
     #[must_use]
     pub fn with_builtins_and_pool(pool: sqlx::SqlitePool) -> Self {
+        let creator_store =
+            Arc::new(builtins::CreatorCapabilityStore::new(pool.clone()));
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
@@ -114,9 +119,9 @@ impl CapabilityRegistry {
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh),
-            Box::new(builtins::CreatorReadMemory),
-            Box::new(builtins::CreatorWriteMemory),
-            Box::new(builtins::CreatorInjectPrompt),
+            Box::new(builtins::CreatorReadMemory::with_store(creator_store.clone())),
+            Box::new(builtins::CreatorWriteMemory::with_store(creator_store.clone())),
+            Box::new(builtins::CreatorInjectPrompt::with_store(creator_store)),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt),
             Box::new(builtins::AcpSessionLoad),

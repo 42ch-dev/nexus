@@ -18,6 +18,7 @@ pub mod memory_fragment;
 pub mod narrative_gateway;
 pub mod narrative_write;
 pub mod pending_review;
+pub mod prompt_injection;
 pub mod reference_source;
 pub mod soul_meta;
 pub mod world_stories;
@@ -54,8 +55,8 @@ pub use pending_review::{
 
 // Re-export memory_fragment types
 pub use memory_fragment::{
-    create_fragment, delete_fragment, get_all_keywords, list_fragments, list_fragments_by_session,
-    MemoryFragmentRecord,
+    count_fragments, create_fragment, delete_fragment, get_all_keywords, list_fragments,
+    list_fragments_by_session, list_fragments_filtered, MemoryFragmentRecord,
 };
 
 // Re-export world_stories types
@@ -83,6 +84,12 @@ pub use kb_extract_job::{
     enqueue as enqueue_extract_job, get as get_extract_job, list_by_creator as list_extract_jobs,
     mark_done as mark_extract_job_done, mark_failed as mark_extract_job_failed,
     mark_running as mark_extract_job_running, next_queued as next_queued_extract_job, KbExtractJob,
+};
+
+// Re-export prompt_injection types
+pub use prompt_injection::{
+    claim_prompt_injections, enqueue_prompt_injection, mark_prompt_injections_consumed,
+    NewPromptInjection, PromptInjectionRow,
 };
 
 /// Runtime role for database initialization
