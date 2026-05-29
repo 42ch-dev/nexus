@@ -106,6 +106,74 @@
     }
   },
   "residual_findings": {
+    "v1.31-post-qc-tech-debt": [
+      {
+        "id": "TD-V131-01",
+        "title": "Non-atomic queue claim race — claim_prompt_injections SELECT-then-UPDATE without transaction",
+        "severity": "low",
+        "source": "qc2 C-2-2, qc1 W-002",
+        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Single-process SQLite pre-1.0. Wrap in transaction when concurrent access possible."
+      },
+      {
+        "id": "TD-V131-02",
+        "title": "Keyword LIKE pattern doesn't escape special characters",
+        "severity": "low",
+        "source": "qc1 W-003",
+        "scope": "crates/nexus-local-db/src/memory_fragment.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add escape_sql_like helper for user-supplied keyword values."
+      },
+      {
+        "id": "TD-V131-03",
+        "title": "Unbounded IN clause in mark_prompt_injections_consumed",
+        "severity": "low",
+        "source": "qc3 W-002",
+        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add batch limit (e.g. 100) and chunk if needed."
+      },
+      {
+        "id": "TD-V131-04",
+        "title": "Unbounded prompt size in build_summary_prompt — memory/IPC risk",
+        "severity": "low",
+        "source": "qc3 W-003",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add configurable content size limit before prompt construction."
+      },
+      {
+        "id": "TD-V131-05",
+        "title": "Missing prompt injection queue cleanup — table growth",
+        "severity": "low",
+        "source": "qc3 W-001",
+        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add daemon maintenance cleanup for expired/consumed rows."
+      },
+      {
+        "id": "TD-V131-06",
+        "title": "JSON LIKE query performance on memory_fragments degrades with scale",
+        "severity": "nit",
+        "source": "qc3 W-004",
+        "scope": "crates/nexus-local-db/src/memory_fragment.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Pre-release volumes low. Consider FTS5 or keyword index at scale."
+      }
+    ],
     "v1.30-post-qc-tech-debt": [
       {
         "id": "TD-V130-01",
