@@ -2341,6 +2341,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-home-layout",
+ "nexus-kb",
  "nexus-local-db",
  "nix 0.29.0",
  "serde",
