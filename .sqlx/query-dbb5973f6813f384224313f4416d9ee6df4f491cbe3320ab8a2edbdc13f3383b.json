@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO creator_prompt_injections\n            (injection_id, creator_id, session_id, prompt, priority,\n             status, created_at, expires_at, source_schedule_id,\n             source_capability_call_id, metadata_json)\n         VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "dbb5973f6813f384224313f4416d9ee6df4f491cbe3320ab8a2edbdc13f3383b"
+}

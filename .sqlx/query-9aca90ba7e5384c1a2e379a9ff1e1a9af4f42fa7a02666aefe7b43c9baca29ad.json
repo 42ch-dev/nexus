@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT content FROM reference_sources WHERE reference_source_id = ?",
+  "query": "SELECT creator_id FROM orchestration_sessions WHERE session_id = ?",
   "describe": {
     "columns": [
       {
-        "name": "content",
+        "name": "creator_id",
         "ordinal": 0,
         "type_info": "Text"
       }
@@ -13,8 +13,8 @@
       "Right": 1
     },
     "nullable": [
-      true
+      false
     ]
   },
-  "hash": "23ab1ac2426ca651f726f44a76b4bff2001d055e6758786f6c1e9b753d89e0c4"
+  "hash": "9aca90ba7e5384c1a2e379a9ff1e1a9af4f42fa7a02666aefe7b43c9baca29ad"
 }
