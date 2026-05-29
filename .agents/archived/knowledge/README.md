@@ -4,11 +4,12 @@ Superseded or cold-storage implementation knowledge documents. Active SSOT lives
 
 Paths in archived plan JSON / metadata may still point here for historical reference.
 
+**Not in this directory:** cross-version **shipped feature tracker** history → [`.agents/archived/shipped-features-tracker.md`](../shipped-features-tracker.md).
+
 ## Index
 
 | Document | Source Plan | Description | Status |
 | --- | --- | --- | --- |
-| [shipped-features-tracker.md](shipped-features-tracker.md) | Tracker restructure (2026-05-30) | Closed DF-* rows, per-version delivery snapshots, V1.7 planning decision logs — split from active deferred tracker. | Archived — append-only history |
 | [dual-outbox-architecture.md](dual-outbox-architecture.md) | `v1-tech-debt-cleanup` | TD-8: dual-outbox model (nexus-local-db vs nexus-sync). Superseded by WS8 sqlx migration. | Archived — WS8 migration superseded |
 | [architecture-alignment-review.md](architecture-alignment-review.md) | 2026-04-08 / `2026-04-09-v1.1-arch-alignment-closure` | Architecture alignment baseline + TD resolution matrix. ACP paths stale; CLI commands now exist. | Archived — historical reference; ACP paths outdated |
 | [acp-client-tech-spec.md](acp-client-tech-spec.md) | V1.4 Orchestration brainstorm (2026-04-17) | V1.4 ACP client amendment: worker-delegated hosting, `nexus-acp-host` crate extraction, orchestration control endpoints. Schema moved to local types; `capabilities/` dir not created. | Archived — V1.4 shipped; schema locations stale |

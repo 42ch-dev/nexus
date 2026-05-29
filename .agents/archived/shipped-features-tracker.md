@@ -1,9 +1,10 @@
 # Shipped Features — Cross-Version Archive
 
 **Status**: Archived (append-only)  
-**Purpose**: Long-term record of **closed** deferred-feature tracker rows (shipped, cancelled, superseded) and per-version delivery snapshots. The **active** open/backlog tracker lives in [deferred-features-cross-version-tracker.md](../../knowledge/deferred-features-cross-version-tracker.md).  
+**Purpose**: Long-term **append-only** archive for closed deferred-feature tracker rows (shipped, cancelled, superseded) and per-version delivery snapshots. The **active** open/backlog tracker lives in [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md).  
 **Scope**: `nexus` OSS repository only.  
-**Split from**: [deferred-features-cross-version-tracker.md](../../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
+**Location**: Top-level harness archive (`.agents/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
+**Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
 **Last updated**: 2026-05-30
 

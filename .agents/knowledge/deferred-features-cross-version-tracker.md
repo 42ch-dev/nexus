@@ -3,7 +3,7 @@
 **Quick status**: **V1.31 Active** (FL-D Agentic Design Patterns) · **V1.30 Shipped** · Platform **paused** · Open DF rows targeting V1.31: **DF-30, DF-32–34, DF-37** · Residual SSOT: `status.json` (11 backlog items)
 
 **Status**: Active  
-**Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md).  
+**Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
@@ -16,9 +16,9 @@
 - **Product decisions (not deferrals)**: See §3.1 Program planning decisions (PD-*).
 - **Future product lines (cross-version themes)**: See §3.2 Future product lines (FL-*).
 - **Planning a new version**: Scan §3.3 Open features for items targeting that version or "Any future".
-- **Closing an item**: Remove its row from §3.3; append to [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md) with completion version, plan-id, and note.
+- **Closing an item**: Remove its row from §3.3; append to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) with completion version, plan-id, and note.
 - **Deferring again**: Update the `Target` column; keep the row in §3.3. Add a note in `Deferral history`.
-- **Shipped / cancelled history**: [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md) (§1 closed items, §2 per-version snapshots).
+- **Shipped / cancelled history**: [shipped-features-tracker.md](../archived/shipped-features-tracker.md) (§1 closed items, §2 per-version snapshots).
 - **Source of truth**: This file is the **tracker**; the **compass** of the active version is the **scope authority**. If this file and the active compass conflict, the compass wins.
 
 ---
@@ -135,7 +135,7 @@ V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-conve
 
 ## 4) Change control
 
-- **Shipped rows**: Move from §3.3 to [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
+- **Shipped rows**: Move from §3.3 to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
 - **Compass authority**: Active compass controls scope even if this tracker lists a different target.
 - **Effort estimates**: XS/S/M/L/XL agent-session scale; guidance only. See `effort-estimation.md`.
 - **Residual detail**: `status.json` wins over this file for machine-state residuals.
@@ -156,7 +156,7 @@ V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-conve
 
 **Knowledge & specs**
 
-- Shipped history archive: [shipped-features-tracker.md](../archived/knowledge/shipped-features-tracker.md)
+- Shipped history archive: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
 - Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Iteration index: [iterations/README.md](../iterations/README.md)
