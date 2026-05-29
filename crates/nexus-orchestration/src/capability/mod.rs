@@ -197,6 +197,25 @@ impl CapabilityRegistry {
             |provider| builtins::AcpPrompt::with_worker_provider(provider.clone()),
         );
 
+        let creator_store = deps.pool.as_ref().map(|pool| {
+            std::sync::Arc::new(builtins::CreatorCapabilityStore::from_arc(
+                std::sync::Arc::new(pool.clone()),
+            ))
+        });
+
+        let creator_read = creator_store.as_ref().map_or_else(
+            builtins::CreatorReadMemory::new,
+            |store| builtins::CreatorReadMemory::with_store(store.clone()),
+        );
+        let creator_write = creator_store.as_ref().map_or_else(
+            builtins::CreatorWriteMemory::new,
+            |store| builtins::CreatorWriteMemory::with_store(store.clone()),
+        );
+        let creator_inject = creator_store.as_ref().map_or_else(
+            builtins::CreatorInjectPrompt::new,
+            |store| builtins::CreatorInjectPrompt::with_store(store.clone()),
+        );
+
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
@@ -205,9 +224,9 @@ impl CapabilityRegistry {
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh),
-            Box::new(builtins::CreatorReadMemory::new()),
-            Box::new(builtins::CreatorWriteMemory::new()),
-            Box::new(builtins::CreatorInjectPrompt::new()),
+            Box::new(creator_read),
+            Box::new(creator_write),
+            Box::new(creator_inject),
             Box::new(builtins::JudgeRule),
             Box::new(acp_prompt),
             Box::new(builtins::AcpSessionLoad),
