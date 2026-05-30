@@ -3,7 +3,7 @@
 //! Manages lightweight keyword-indexed fragments from review decisions.
 //! See creator-memory-soul-lifecycle-v1.md §7.2.
 
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
@@ -172,6 +172,102 @@ pub async fn get_all_keywords(
     }
 
     Ok(all_keywords)
+}
+
+/// List fragments for a creator with optional keyword filter and limit.
+///
+/// When `keyword` is `Some`, only fragments whose `keywords` JSON array contains
+/// the given keyword (case-insensitive `LIKE` match) are returned.
+/// Results are ordered by `created_at` descending, limited to `limit` rows.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn list_fragments_filtered(
+    pool: &SqlitePool,
+    creator_id: &str,
+    keyword: Option<&str>,
+    limit: u32,
+) -> Result<Vec<MemoryFragmentRecord>, LocalDbError> {
+    // SAFETY: keyword and limit are used in a parameterized query (no injection risk).
+    // Dynamic SQL is used because the optional keyword filter changes the WHERE clause
+    // structure, which cannot be expressed with sqlx compile-time macros alone.
+    let rows = if let Some(kw) = keyword {
+        let pattern = format!("%\"{kw}\"%");
+        sqlx::query(
+            "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
+                    creator_id as \"creator_id!\", keywords as \"keywords!\",
+                    summary as \"summary!\", created_at as \"created_at!\", ttl
+             FROM memory_fragments
+             WHERE creator_id = ? AND keywords LIKE ?
+             ORDER BY created_at DESC
+             LIMIT ?",
+        )
+        .bind(creator_id)
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
+                    creator_id as \"creator_id!\", keywords as \"keywords!\",
+                    summary as \"summary!\", created_at as \"created_at!\", ttl
+             FROM memory_fragments
+             WHERE creator_id = ?
+             ORDER BY created_at DESC
+             LIMIT ?",
+        )
+        .bind(creator_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|row| MemoryFragmentRecord {
+            fragment_id: row.get("fragment_id"),
+            session_id: row.get("session_id"),
+            creator_id: row.get("creator_id"),
+            keywords: row.get("keywords"),
+            summary: row.get("summary"),
+            created_at: row.get("created_at"),
+            ttl: row.get("ttl"),
+        })
+        .collect())
+}
+
+/// Count fragments for a creator with optional keyword filter.
+///
+/// Returns the number of matching fragments without fetching full rows.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_fragments(
+    pool: &SqlitePool,
+    creator_id: &str,
+    keyword: Option<&str>,
+) -> Result<u32, LocalDbError> {
+    // SAFETY: same rationale as list_fragments_filtered — dynamic WHERE for optional keyword.
+    let count: i64 = if let Some(kw) = keyword {
+        let pattern = format!("%\"{kw}\"%");
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_fragments
+             WHERE creator_id = ? AND keywords LIKE ?",
+        )
+        .bind(creator_id)
+        .bind(&pattern)
+        .fetch_one(pool)
+        .await?
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_fragments WHERE creator_id = ?")
+            .bind(creator_id)
+            .fetch_one(pool)
+            .await?
+    };
+    Ok(u32::try_from(count).unwrap_or(0))
 }
 
 #[cfg(test)]

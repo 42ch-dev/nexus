@@ -508,4 +508,359 @@ states:
         assert_eq!(writer.recommended_skills.len(), 1);
         assert_eq!(writer.recommended_skills[0], "novel-writing-assistant");
     }
+
+    // ── P3: Agentic Pattern Preset tests ────────────────────────────────
+
+    #[test]
+    fn list_embedded_presets_includes_reflection_loop() {
+        let presets = list_embedded_presets();
+        assert!(
+            presets.iter().any(|p| p == "reflection-loop"),
+            "expected 'reflection-loop' in embedded presets: {presets:?}"
+        );
+    }
+
+    #[test]
+    fn list_embedded_presets_includes_memory_augmented() {
+        let presets = list_embedded_presets();
+        assert!(
+            presets.iter().any(|p| p == "memory-augmented"),
+            "expected 'memory-augmented' in embedded presets: {presets:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_reflection_loop_loads_and_validates() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
+
+        assert_eq!(loaded.id, "reflection-loop");
+        assert_eq!(loaded.version, 1);
+
+        // Linear state machine: draft → revise → summarize → done
+        assert!(loaded.outer_graph.get_task("draft").is_some());
+        assert!(loaded.outer_graph.get_task("revise").is_some());
+        assert!(loaded.outer_graph.get_task("summarize").is_some());
+        assert!(loaded.outer_graph.get_task("done").is_some());
+
+        // Two inner graphs: draft_graph, revise_graph
+        assert!(
+            loaded.inner_graphs.contains_key("draft_graph"),
+            "expected draft_graph inner graph"
+        );
+        assert!(
+            loaded.inner_graphs.contains_key("revise_graph"),
+            "expected revise_graph inner graph"
+        );
+
+        // Verify inner graph structure
+        let draft_graph = &loaded.inner_graphs["draft_graph"];
+        assert!(draft_graph.get_task("generate").is_some());
+
+        let revise_graph = &loaded.inner_graphs["revise_graph"];
+        assert!(revise_graph.get_task("apply_critique").is_some());
+
+        // Output bindings
+        assert_eq!(
+            loaded.output_bindings.get("draft_graph").unwrap(),
+            "generate.text"
+        );
+        assert_eq!(
+            loaded.output_bindings.get("revise_graph").unwrap(),
+            "apply_critique.text"
+        );
+
+        // Source hash is non-trivial
+        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash, [0u8; 32]);
+
+        // Single-agent preset — no roles
+        assert!(
+            loaded.roles.is_empty(),
+            "reflection-loop should not have roles"
+        );
+    }
+
+    #[test]
+    fn reflection_loop_has_llm_judge_exit_conditions() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
+
+        // draft state uses llm_judge
+        let draft = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "draft")
+            .unwrap();
+        match &draft.exit_when {
+            Some(manifest::ExitWhen::LlmJudge {
+                template_file,
+                judge_capability,
+                ..
+            }) => {
+                assert_eq!(
+                    template_file.as_deref(),
+                    Some("prompts/draft-quality-check.md")
+                );
+                assert_eq!(judge_capability.as_deref(), Some("judge.llm"));
+            }
+            other => panic!("expected llm_judge exit_when for draft, got: {other:?}"),
+        }
+
+        // revise state also uses llm_judge
+        let revise = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "revise")
+            .unwrap();
+        match &revise.exit_when {
+            Some(manifest::ExitWhen::LlmJudge {
+                template_file,
+                judge_capability,
+                ..
+            }) => {
+                assert_eq!(
+                    template_file.as_deref(),
+                    Some("prompts/revise-quality-check.md")
+                );
+                assert_eq!(judge_capability.as_deref(), Some("judge.llm"));
+            }
+            other => panic!("expected llm_judge exit_when for revise, got: {other:?}"),
+        }
+
+        // summarize state uses manual exit
+        let summarize = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "summarize")
+            .unwrap();
+        assert!(
+            matches!(summarize.exit_when, Some(manifest::ExitWhen::Manual)),
+            "expected manual exit_when for summarize"
+        );
+
+        // done is terminal
+        let done = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "done")
+            .unwrap();
+        assert!(done.terminal, "done state should be terminal");
+    }
+
+    #[test]
+    fn reflection_loop_has_correct_prompt_files() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
+
+        // Verify prompt files referenced in inner_graph nodes
+        let _draft_graph = &loaded.inner_graphs["draft_graph"];
+        let _revise_graph = &loaded.inner_graphs["revise_graph"];
+
+        // draft_graph.generate should reference prompts/generate-draft.md
+        // (verified via inner graph node template_file)
+        if let Some(ref igs) = loaded.manifest.inner_graphs {
+            let draft_nodes = &igs["draft_graph"].nodes;
+            assert_eq!(draft_nodes[0].id, "generate");
+            assert_eq!(
+                draft_nodes[0].template_file.as_deref(),
+                Some("prompts/generate-draft.md")
+            );
+
+            let revise_nodes = &igs["revise_graph"].nodes;
+            assert_eq!(revise_nodes[0].id, "apply_critique");
+            assert_eq!(
+                revise_nodes[0].template_file.as_deref(),
+                Some("prompts/apply-critique.md")
+            );
+        }
+
+        // Verify all 5 prompt files exist in the embedded directory
+        let prompts_dir = EMBEDDED_PRESETS
+            .get_dir("reflection-loop/prompts")
+            .expect("reflection-loop/prompts dir should exist");
+        assert_eq!(
+            prompts_dir.files().count(),
+            5,
+            "expected 5 embedded prompt files for reflection-loop"
+        );
+    }
+
+    #[test]
+    fn embedded_memory_augmented_loads_and_validates() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("memory-augmented", &caps).unwrap();
+
+        assert_eq!(loaded.id, "memory-augmented");
+        assert_eq!(loaded.version, 1);
+
+        // Linear state machine: recall → generate → persist → done
+        assert!(loaded.outer_graph.get_task("recall").is_some());
+        assert!(loaded.outer_graph.get_task("generate").is_some());
+        assert!(loaded.outer_graph.get_task("persist").is_some());
+        assert!(loaded.outer_graph.get_task("done").is_some());
+
+        // One inner graph: generate_graph
+        assert!(
+            loaded.inner_graphs.contains_key("generate_graph"),
+            "expected generate_graph inner graph"
+        );
+
+        // Verify inner graph structure
+        let generate_graph = &loaded.inner_graphs["generate_graph"];
+        assert!(generate_graph.get_task("generate_with_context").is_some());
+
+        // Output binding
+        assert_eq!(
+            loaded.output_bindings.get("generate_graph").unwrap(),
+            "generate_with_context.text"
+        );
+
+        // Source hash is non-trivial
+        assert!(!loaded.source_hash.is_empty());
+        assert_ne!(loaded.source_hash, [0u8; 32]);
+
+        // Single-agent preset — no roles
+        assert!(
+            loaded.roles.is_empty(),
+            "memory-augmented should not have roles"
+        );
+    }
+
+    #[test]
+    fn memory_augmented_uses_creator_capabilities() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("memory-augmented", &caps).unwrap();
+
+        // recall state uses creator.read_memory
+        let recall = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "recall")
+            .unwrap();
+        assert_eq!(recall.enter.len(), 1);
+        match &recall.enter[0] {
+            manifest::EnterAction::Capability { name, args } => {
+                assert_eq!(name, "creator.read_memory");
+                // Verify args contain keyword reference
+                assert!(args.is_some());
+                let args = args.as_ref().unwrap();
+                assert!(args.get("keyword").is_some());
+            }
+            other => panic!("expected capability enter for recall, got: {other:?}"),
+        }
+
+        // recall exit_when is rule
+        assert!(
+            matches!(recall.exit_when, Some(manifest::ExitWhen::Rule)),
+            "expected rule exit_when for recall"
+        );
+
+        // generate state uses inner_graph
+        let generate = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "generate")
+            .unwrap();
+        assert_eq!(generate.enter.len(), 1);
+        match &generate.enter[0] {
+            manifest::EnterAction::InnerGraph { name } => {
+                assert_eq!(name, "generate_graph");
+            }
+            other => panic!("expected inner_graph enter for generate, got: {other:?}"),
+        }
+
+        // persist state uses creator.write_memory
+        let persist = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "persist")
+            .unwrap();
+        assert_eq!(persist.enter.len(), 1);
+        match &persist.enter[0] {
+            manifest::EnterAction::Capability { name, args } => {
+                assert_eq!(name, "creator.write_memory");
+                assert!(args.is_some());
+                let args = args.as_ref().unwrap();
+                assert!(args.get("content").is_some());
+                assert!(args.get("keywords").is_some());
+            }
+            other => panic!("expected capability enter for persist, got: {other:?}"),
+        }
+
+        // done is terminal
+        let done = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "done")
+            .unwrap();
+        assert!(done.terminal, "done state should be terminal");
+    }
+
+    #[test]
+    fn memory_augmented_has_correct_prompt_files() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("memory-augmented", &caps).unwrap();
+
+        // Verify prompt file in generate_graph
+        if let Some(ref igs) = loaded.manifest.inner_graphs {
+            let gen_nodes = &igs["generate_graph"].nodes;
+            assert_eq!(gen_nodes[0].id, "generate_with_context");
+            assert_eq!(
+                gen_nodes[0].template_file.as_deref(),
+                Some("prompts/generate-with-memory.md")
+            );
+        }
+
+        // Verify all 3 prompt files exist in the embedded directory
+        let prompts_dir = EMBEDDED_PRESETS
+            .get_dir("memory-augmented/prompts")
+            .expect("memory-augmented/prompts dir should exist");
+        assert_eq!(
+            prompts_dir.files().count(),
+            3,
+            "expected 3 embedded prompt files for memory-augmented"
+        );
+    }
+
+    #[test]
+    fn two_new_presets_in_registry_iteration() {
+        let presets = list_embedded_presets();
+
+        // Must contain both new presets
+        assert!(
+            presets.iter().any(|p| p == "reflection-loop"),
+            "reflection-loop must be in embedded presets"
+        );
+        assert!(
+            presets.iter().any(|p| p == "memory-augmented"),
+            "memory-augmented must be in embedded presets"
+        );
+
+        // Existing presets still present
+        assert!(
+            presets.iter().any(|p| p == "novel-writing"),
+            "novel-writing must still be present"
+        );
+        assert!(
+            presets.iter().any(|p| p == "kb-extract"),
+            "kb-extract must still be present"
+        );
+
+        // Total count: at least novel-writing + kb-extract + research +
+        // soul-experience-refresh + reflection-loop + memory-augmented = 6
+        assert!(
+            presets.len() >= 6,
+            "expected at least 6 embedded presets, got {}: {presets:?}",
+            presets.len()
+        );
+    }
 }

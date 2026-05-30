@@ -1,0 +1,84 @@
+# Reflection Loop Preset — Agentic Design Pattern: Self-Reflection
+#
+# Demonstrates the self-reflection pattern (Compass §2.2):
+# 1. Generate an initial draft via ACP prompt
+# 2. LLM judge evaluates quality
+# 3. If quality is insufficient, revise with critique applied
+# 4. When quality passes, summarize the final output
+#
+# This is a linear state machine — no conditional routing.
+# The reflection loop runs draft → critique → revise once per invocation.
+# For iterative refinement, schedule multiple runs or extend with an inner_graph cycle.
+#
+# Input variables:
+#   topic:     The topic or task to draft about (required)
+#   content:   Optional seed content or context for the draft
+#
+# Manual run command:
+#   nexus42 schedule add --preset reflection-loop --var topic "..." --var content "..."
+
+preset:
+  id: reflection-loop
+  version: 1
+  kind: creator
+  description: "Self-reflection pattern: generate, critique, revise, and summarize"
+  requires_capabilities:
+    - acp.prompt
+    - judge.llm
+    - context.summarize
+  initial: draft
+  terminal: done
+
+states:
+  - id: draft
+    description: "Generate an initial draft on the given topic"
+    enter:
+      - kind: inner_graph
+        name: draft_graph
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/draft-quality-check.md
+      judge_capability: judge.llm
+    next: revise
+
+  - id: revise
+    description: "Apply critique feedback and refine the draft"
+    enter:
+      - kind: inner_graph
+        name: revise_graph
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/revise-quality-check.md
+      judge_capability: judge.llm
+    next: summarize
+
+  - id: summarize
+    description: "Produce a condensed summary of the refined output"
+    enter:
+      - kind: capability
+        name: context.summarize
+        args:
+          content: "{{preset.input.topic}}"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  draft_graph:
+    nodes:
+      - id: generate
+        kind: acp_prompt
+        template_file: prompts/generate-draft.md
+        tool_policy: auto_grant_read_only
+    output_binding: generate.text
+
+  revise_graph:
+    nodes:
+      - id: apply_critique
+        kind: acp_prompt
+        template_file: prompts/apply-critique.md
+        tool_policy: auto_grant_read_only
+    output_binding: apply_critique.text

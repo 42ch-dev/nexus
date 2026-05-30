@@ -314,27 +314,28 @@ pub struct CapabilityCtx<'a> {
 
 All capabilities below are registered at daemon runtime startup. Adding a new capability is a Rust code change (not user-config) for V1.4. User-authored capabilities are **out of scope** (residual for V1.5+).
 
-| Name                        | Purpose                                                        | Owner crate (target)   | Legacy owner (pre–V1.21) |
-| --------------------------- | -------------------------------------------------------------- | ---------------------- | ------------------------ |
-| `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-cloud-sync`     | `nexus-sync`             |
-| `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-cloud-sync`     | `nexus-sync`             |
-| `outbox.flush`              | Flush pending outbox entries                                   | `nexus-cloud-sync`     | `nexus-sync`             |
-| `outbox.compact`            | Compact outbox table                                           | `nexus-local-db`       | —                      |
-| `workspace.open`            | Ensure workspace dir is present and valid                      | `nexus-home-layout`    | —                      |
-| `workspace.commit`          | Commit manuscript diff into working copy                       | `nexus-home-layout`    | —                      |
-| `registry.refresh`          | Refresh ACP registry cache                                     | `nexus-acp-host`       | —                      |
-| `creator.read_memory`       | Read entries from creator memory store                         | `nexus-creator-memory` | `nexus-domain`         |
-| `creator.write_memory`      | Append/update creator memory                                   | `nexus-creator-memory` | `nexus-domain`         |
-| `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-creator`        | `nexus-domain`         |
-| `acp.prompt`                | Send a prompt to this creator's active ACP session             | `nexus-orchestration`  |
-| `acp.session_load`          | Resume a named ACP session id on the creator's worker          | `nexus-orchestration`  |
-| `kb.extract_work`           | Extract KB assets from a work entry into a World              | `nexus-orchestration` (preset-driven via `acp_prompt`) |
-| `soul.experience.aggregate` | Aggregate SOUL Experience section from session review items     | `nexus-orchestration` (preset-driven via `acp_prompt`) |
-| `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  |
-| `judge.rule`                | Evaluate a pure rule (AST over `Context`)                      | `nexus-orchestration`  |
-| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  |
+| Name                        | Purpose                                                        | Owner crate (target)   | Runtime status |
+| --------------------------- | -------------------------------------------------------------- | ---------------------- | -------------- |
+| `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-cloud-sync`     | Deferred wiring |
+| `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-cloud-sync`     | Deferred wiring |
+| `outbox.flush`              | Flush pending outbox entries                                   | `nexus-cloud-sync`     | Deferred wiring |
+| `outbox.compact`            | Compact outbox table                                           | `nexus-local-db`       | Deferred wiring |
+| `workspace.open`            | Ensure workspace dir is present and valid                      | `nexus-home-layout`    | Deferred wiring (DF-31) |
+| `workspace.commit`          | Commit manuscript diff into working copy                       | `nexus-home-layout`    | Deferred wiring (DF-31) |
+| `registry.refresh`          | Refresh ACP registry cache                                     | `nexus-acp-host`       | Deferred network/CDN wiring (DF-29) |
+| `creator.read_memory`       | Query persisted creator memory fragments                       | `nexus-creator-memory` | **Real** — SQLite-backed query through `CreatorCapabilityStore` (V1.31 DF-30) |
+| `creator.write_memory`      | Persist creator memory fragments and return real `fragment_id` | `nexus-creator-memory` | **Real** — SQLite-backed write through `CreatorCapabilityStore` (V1.31 DF-30) |
+| `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-orchestration`  | **Real** — persisted injection queue in `state.db` (V1.31 DF-30) |
+| `acp.prompt`                | Send a prompt to this creator's active ACP session             | `nexus-orchestration`  | Real for worker-backed preset execution |
+| `acp.session_load`          | Resume a named ACP session id on the creator's worker          | `nexus-orchestration`  | Real for worker-backed preset execution |
+| `kb.extract_work`           | Extract KB assets from a work entry into a World               | `nexus-orchestration` (preset-driven via `acp_prompt`) | Real |
+| `soul.experience.aggregate` | Aggregate SOUL Experience section from session review items    | `nexus-orchestration` (preset-driven via `acp_prompt`) | Real |
+| `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  | **Real** — worker-backed `acp.prompt` with `deny_all`, GO/NOGO parse (V1.31 DF-33/37) |
+| `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons (V1.31 DF-32) |
+| `context.summarize`         | Summarize context through a worker-backed ACP prompt           | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` (V1.31 DF-34/37) |
+| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration |
 
-> **V1.29 partial de-stub note:** `acp.prompt` and `acp.session_load` were partially de-stubbed in V1.29 (DF-35/36). Real worker IPC is wired for preset-driven prompts on the `kb.extract_work` and `soul.experience.aggregate` capability paths; full de-stub for all preset use-cases remains deferred (FL-D).
+> **V1.31 de-stub note:** `creator.*`, `judge.rule`, `judge.llm`, and `context.summarize` are real runtime capabilities as of V1.31. DF-37 reduces worker-backed fallback to explicit standalone/test construction paths; daemon/preset execution injects runtime dependencies through the registry factory.
 
 ### 5.3 Capability input/output schemas
 
@@ -345,6 +346,25 @@ Each capability ships its `input_schema` and `output_schema` as constants (JSON 
 ### 5.4 Capability errors
 
 `CapabilityError` variants: `InputInvalid`, `TransientExternal`, `PermanentExternal`, `WorkerUnavailable`, `AcpSessionLost`, `Cancelled`, `Internal`. Engine translates these into graph-flow `TaskResult` + Session context `_error` field so presets can fork on error kind.
+
+### 5.5 Runtime dependency injection (V1.31)
+
+Runtime-backed capabilities receive their external handles through `CapabilityRegistry::with_runtime_deps()` or the pool-aware `CapabilityRegistry::with_builtins_and_pool()` factory. The registry owns shared adapters rather than letting individual capabilities discover global state.
+
+- **Creator memory adapter**: `CreatorCapabilityStore` is injected for `creator.read_memory`, `creator.write_memory`, and `creator.inject_prompt`. It uses the orchestration-side SQLite pool and maps capability inputs/session context to creator memory operations.
+- **Worker handle provider**: worker-backed capabilities receive `Arc<dyn WorkerHandleProvider>`. `judge.llm` and `context.summarize` call `WorkerHandleProvider::call_acp_prompt(...)`; `judge.llm` uses `tool_policy = deny_all` and parses explicit GO/NOGO responses.
+- **Standalone/test mode**: constructors without runtime dependencies may still install deterministic fallbacks for isolated unit tests. Those fallbacks are not the daemon/preset runtime path.
+
+### 5.6 `creator.inject_prompt` queue semantics (V1.31)
+
+`creator.inject_prompt` persists prompt injections in `state.db` in the `creator_prompt_injections` table. Rows are scoped to the creator/session context and are consumed by the next `acp.prompt` on the same creator session.
+
+Operational semantics:
+
+1. `creator.inject_prompt` appends a queued prompt row and returns queue metadata.
+2. The next worker-backed `acp.prompt` drains pending injections for that creator session before sending the prompt to the worker.
+3. Consumed rows are marked/drained transactionally with the prompt dispatch path so a daemon restart does not lose unconsumed injections.
+4. The queue is for orchestration-to-worker prompt augmentation only; it does not bypass ACP tool policy or worker permission handling.
 
 ---
 
@@ -438,7 +458,7 @@ Locations searched (in order):
 
 1. `$XDG_CONFIG_HOME/nexus42/presets/<id>/` (user-installed)
 2. `$HOME/.nexus42/presets/<id>/`             (legacy / dev)
-3. Preset shipped in the binary (via `include_dir!`) under `nexus-orchestration/embedded-presets/<id>/` (currently `_system.maintenance`, `novel-writing`)
+3. Preset shipped in the binary (via `include_dir!`) under `nexus-orchestration/embedded-presets/<id>/` (currently `_system.maintenance`, `novel-writing`, `reflection-loop`, `memory-augmented`)
 
 ### 7.2 `preset.yaml` schema (v1)
 
@@ -610,6 +630,17 @@ Error format:
 }
 ```
 
+### 7.7 Embedded preset index (V1.31)
+
+The binary includes the following Agentic Design Pattern demonstrators under `crates/nexus-orchestration/embedded-presets/`:
+
+| Preset ID | Pattern | State flow | Primary capabilities exercised |
+| --- | --- | --- | --- |
+| `reflection-loop` | Reflection / iterative improvement | `draft` → `revise` → `summarize` → `done` | `acp.prompt`, `judge.llm`, `context.summarize` |
+| `memory-augmented` | Memory-augmented generation with persistence | `recall` → `generate` → `persist` → `done` | `creator.read_memory`, `acp.prompt`, `judge.rule`, `creator.write_memory` |
+
+Both presets intentionally use linear `next` transitions; the conditional routing engine remains deferred.
+
 ---
 
 ## 8. Preset Loader (YAML → graph-flow Graph)
@@ -771,7 +802,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 **Acceptance**
 
 - [ ] `nexus42 schedule start novel-writing --creator <id>` returns a session id; `nexus42 schedule status` shows state `gathering`
-- [ ] Daemon sends `creator.inject_prompt` output, which reaches the worker via IPC; mocked agent echoes; `judge.llm` (stubbed to always pass once) advances state → `brainstorming`
+- [ ] Daemon sends `creator.inject_prompt` output, which reaches the worker via IPC; mocked agent echoes; `judge.llm` advances state → `brainstorming`
 - [ ] Inner graph runs all 3 nodes; `output_binding` writes into outer context; state advances to `outlining`
 - [ ] `schedule advance` advances past `outlining` → `drafting` → `done`
 - [ ] Daemon restart mid-`brainstorming` resumes from the last completed inner-graph node

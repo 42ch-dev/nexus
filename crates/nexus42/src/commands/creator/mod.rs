@@ -23,6 +23,7 @@ use clap::{Args, Subcommand};
 use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
+use nexus_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use serde::Deserialize;
 use soul::SoulCommand;

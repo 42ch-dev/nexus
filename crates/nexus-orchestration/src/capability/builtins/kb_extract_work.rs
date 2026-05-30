@@ -209,7 +209,7 @@ impl Capability for KbExtractWork {
             job
         } else {
             // Claim next queued job for this creator
-            nexus_local_db::claim_extract_job(pool, creator_id)
+            nexus_local_db::next_queued_extract_job(pool, creator_id)
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("Failed to claim job: {e}")))?
                 .ok_or_else(|| {
