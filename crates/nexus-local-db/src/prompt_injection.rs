@@ -147,7 +147,10 @@ pub async fn claim_prompt_injections(
     .fetch_all(pool)
     .await?;
 
-    let ids: Vec<String> = rows.iter().map(|r| r.get::<String, _>("injection_id")).collect();
+    let ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.get::<String, _>("injection_id"))
+        .collect();
     if ids.is_empty() {
         return Ok(Vec::new());
     }

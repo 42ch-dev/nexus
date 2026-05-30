@@ -126,10 +126,7 @@ impl Capability for ContextSummarize {
             .unwrap_or("default");
 
         let trace = input.get("trace").and_then(|v| v.as_str()).unwrap_or("");
-        let template = input
-            .get("template")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let template = input.get("template").and_then(|v| v.as_str()).unwrap_or("");
 
         // Build summarization prompt.
         let prompt = build_summary_prompt(content, trace, template);
@@ -187,8 +184,7 @@ mod tests {
     #[test]
     fn context_summarize_input_schema_valid() {
         let cap = ContextSummarize::new();
-        let schema: Value =
-            serde_json::from_str(cap.input_schema()).expect("valid JSON Schema");
+        let schema: Value = serde_json::from_str(cap.input_schema()).expect("valid JSON Schema");
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"
@@ -203,8 +199,7 @@ mod tests {
     #[test]
     fn context_summarize_output_schema_valid() {
         let cap = ContextSummarize::new();
-        let schema: Value =
-            serde_json::from_str(cap.output_schema()).expect("valid JSON Schema");
+        let schema: Value = serde_json::from_str(cap.output_schema()).expect("valid JSON Schema");
         assert_eq!(schema["type"], "object");
         let required = schema["required"].as_array().unwrap();
         assert!(required.contains(&json!("summary")));

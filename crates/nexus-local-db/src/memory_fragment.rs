@@ -262,12 +262,10 @@ pub async fn count_fragments(
         .fetch_one(pool)
         .await?
     } else {
-        sqlx::query_scalar(
-            "SELECT COUNT(*) FROM memory_fragments WHERE creator_id = ?",
-        )
-        .bind(creator_id)
-        .fetch_one(pool)
-        .await?
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_fragments WHERE creator_id = ?")
+            .bind(creator_id)
+            .fetch_one(pool)
+            .await?
     };
     Ok(u32::try_from(count).unwrap_or(0))
 }

@@ -146,8 +146,7 @@ impl CapabilityRegistry {
     /// and prompt injection persistence.
     #[must_use]
     pub fn with_builtins_and_pool(pool: sqlx::SqlitePool) -> Self {
-        let creator_store =
-            Arc::new(builtins::CreatorCapabilityStore::new(pool.clone()));
+        let creator_store = Arc::new(builtins::CreatorCapabilityStore::new(pool.clone()));
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
@@ -156,8 +155,12 @@ impl CapabilityRegistry {
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh),
-            Box::new(builtins::CreatorReadMemory::with_store(creator_store.clone())),
-            Box::new(builtins::CreatorWriteMemory::with_store(creator_store.clone())),
+            Box::new(builtins::CreatorReadMemory::with_store(
+                creator_store.clone(),
+            )),
+            Box::new(builtins::CreatorWriteMemory::with_store(
+                creator_store.clone(),
+            )),
             Box::new(builtins::CreatorInjectPrompt::with_store(creator_store)),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt::new()),
@@ -177,25 +180,33 @@ impl CapabilityRegistry {
     /// are constructed in their default (standalone) form.
     #[must_use]
     pub fn with_runtime_deps(deps: &CapabilityRuntimeDeps) -> Self {
-        let kb = deps.pool.as_ref().map_or_else(
-            builtins::KbExtractWork::new,
-            |pool| builtins::KbExtractWork::with_pool(pool.clone()),
-        );
+        let kb = deps
+            .pool
+            .as_ref()
+            .map_or_else(builtins::KbExtractWork::new, |pool| {
+                builtins::KbExtractWork::with_pool(pool.clone())
+            });
 
-        let judge_llm = deps.worker_provider.as_ref().map_or_else(
-            builtins::JudgeLlm::new,
-            |provider| builtins::JudgeLlm::with_worker_provider(provider.clone()),
-        );
+        let judge_llm = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::JudgeLlm::new, |provider| {
+                builtins::JudgeLlm::with_worker_provider(provider.clone())
+            });
 
-        let context_summarize = deps.worker_provider.as_ref().map_or_else(
-            builtins::ContextSummarize::new,
-            |provider| builtins::ContextSummarize::with_worker_provider(provider.clone()),
-        );
+        let context_summarize = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::ContextSummarize::new, |provider| {
+                builtins::ContextSummarize::with_worker_provider(provider.clone())
+            });
 
-        let acp_prompt = deps.worker_provider.as_ref().map_or_else(
-            builtins::AcpPrompt::new,
-            |provider| builtins::AcpPrompt::with_worker_provider(provider.clone()),
-        );
+        let acp_prompt = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::AcpPrompt::new, |provider| {
+                builtins::AcpPrompt::with_worker_provider(provider.clone())
+            });
 
         let creator_store = deps.pool.as_ref().map(|pool| {
             std::sync::Arc::new(builtins::CreatorCapabilityStore::from_arc(
@@ -203,18 +214,21 @@ impl CapabilityRegistry {
             ))
         });
 
-        let creator_read = creator_store.as_ref().map_or_else(
-            builtins::CreatorReadMemory::new,
-            |store| builtins::CreatorReadMemory::with_store(store.clone()),
-        );
-        let creator_write = creator_store.as_ref().map_or_else(
-            builtins::CreatorWriteMemory::new,
-            |store| builtins::CreatorWriteMemory::with_store(store.clone()),
-        );
-        let creator_inject = creator_store.as_ref().map_or_else(
-            builtins::CreatorInjectPrompt::new,
-            |store| builtins::CreatorInjectPrompt::with_store(store.clone()),
-        );
+        let creator_read = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorReadMemory::new, |store| {
+                builtins::CreatorReadMemory::with_store(store.clone())
+            });
+        let creator_write = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorWriteMemory::new, |store| {
+                builtins::CreatorWriteMemory::with_store(store.clone())
+            });
+        let creator_inject = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorInjectPrompt::new, |store| {
+                builtins::CreatorInjectPrompt::with_store(store.clone())
+            });
 
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),

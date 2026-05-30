@@ -123,6 +123,11 @@ pub enum KbCommand {
 ///
 /// F002: Validates `active_creator_id` before constructing any paths.
 /// This prevents path traversal if config is corrupted or malicious.
+///
+/// # Errors
+///
+/// Returns an error if `active_creator_id` fails validation or the underlying
+/// KB operation fails.
 pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     if let Some(cid) = &config.active_creator_id {
         paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;

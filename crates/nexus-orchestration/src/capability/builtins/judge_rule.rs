@@ -90,16 +90,17 @@ fn evaluate_context_comparison(
             }
 
             let field_value = context_data.get(field).ok_or_else(|| {
-                CapabilityError::InputInvalid(format!(
-                    "field '{field}' not found in contextData"
-                ))
+                CapabilityError::InputInvalid(format!("field '{field}' not found in contextData"))
             })?;
 
             return match op {
                 "==" => return Ok(evaluate_equality(field, field_value, value_str)),
                 "!=" => {
                     let (eq_result, _) = evaluate_equality(field, field_value, value_str);
-                    Ok((!eq_result, format!("rule: context.{field} != {value_str} → {}", !eq_result)))
+                    Ok((
+                        !eq_result,
+                        format!("rule: context.{field} != {value_str} → {}", !eq_result),
+                    ))
                 }
                 ">=" | "<=" | ">" | "<" => evaluate_numeric(field, field_value, value_str, op),
                 _ => unreachable!("operator list is exhaustive"),
@@ -113,35 +114,29 @@ fn evaluate_context_comparison(
 }
 
 /// Evaluate string/boolean/number equality.
-fn evaluate_equality(
-    field: &str,
-    field_value: &Value,
-    expected: &str,
-) -> (bool, String) {
+fn evaluate_equality(field: &str, field_value: &Value, expected: &str) -> (bool, String) {
     // Try to parse expected as a quoted string
-    let expected_val = if let Some(unquoted) = expected
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-    {
-        serde_json::Value::String(unquoted.to_string())
-    } else if expected == "true" {
-        serde_json::Value::Bool(true)
-    } else if expected == "false" {
-        serde_json::Value::Bool(false)
-    } else if let Ok(n) = expected.parse::<i64>() {
-        serde_json::Value::Number(n.into())
-    } else if let Ok(n) = expected.parse::<f64>() {
-        // f64 is lossy but acceptable for rule evaluation
-        serde_json::to_value(n).unwrap_or_default()
-    } else {
-        // Treat as plain string comparison against field_value's string repr
-        let field_str = field_value.as_str().unwrap_or("");
-        let result = field_str == expected;
-        return (
-            result,
-            format!("rule: context.{field} == {expected} → {result}"),
-        );
-    };
+    let expected_val =
+        if let Some(unquoted) = expected.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+            serde_json::Value::String(unquoted.to_string())
+        } else if expected == "true" {
+            serde_json::Value::Bool(true)
+        } else if expected == "false" {
+            serde_json::Value::Bool(false)
+        } else if let Ok(n) = expected.parse::<i64>() {
+            serde_json::Value::Number(n.into())
+        } else if let Ok(n) = expected.parse::<f64>() {
+            // f64 is lossy but acceptable for rule evaluation
+            serde_json::to_value(n).unwrap_or_default()
+        } else {
+            // Treat as plain string comparison against field_value's string repr
+            let field_str = field_value.as_str().unwrap_or("");
+            let result = field_str == expected;
+            return (
+                result,
+                format!("rule: context.{field} == {expected} → {result}"),
+            );
+        };
 
     let result = *field_value == expected_val;
     (
@@ -158,15 +153,11 @@ fn evaluate_numeric(
     op: &str,
 ) -> Result<(bool, String), CapabilityError> {
     let lhs = value_to_f64(field_value).ok_or_else(|| {
-        CapabilityError::InputInvalid(format!(
-            "field '{field}' is not numeric: {field_value}"
-        ))
+        CapabilityError::InputInvalid(format!("field '{field}' is not numeric: {field_value}"))
     })?;
 
     let rhs: f64 = rhs_str.parse().map_err(|_| {
-        CapabilityError::InputInvalid(format!(
-            "right-hand side is not a number: '{rhs_str}'"
-        ))
+        CapabilityError::InputInvalid(format!("right-hand side is not a number: '{rhs_str}'"))
     })?;
 
     let result = match op {
@@ -410,10 +401,7 @@ mod tests {
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("not found in contextData"),
-            "error: {err}"
-        );
+        assert!(err.contains("not found in contextData"), "error: {err}");
     }
 
     #[tokio::test]

@@ -16,8 +16,11 @@ use std::sync::Arc;
 
 /// The `acp.prompt` capability.
 ///
-/// Input schema: `{ prompt: string, tool_policy: enum, session_id?: string,
-/// creator_id?: string }`
+/// Input schema: `{ prompt: string, tool_policy: enum }`
+///
+/// Identity fields (`_creator_id`, `_session_id`) are **context-injected** by
+/// the orchestration task execution layer — not accepted from raw user input,
+/// to prevent cross-creator IPC routing.
 /// Output schema: `{ full_text: string }`
 ///
 /// When `WorkerHandleProvider` is present, dispatches the prompt via worker
@@ -66,9 +69,9 @@ impl Capability for AcpPrompt {
                     "enum": ["auto_grant_all", "auto_grant_read_only", "deny_all", "request_policy"],
                     "default": "auto_grant_read_only",
                     "description": "Tool permission policy for this prompt"
-                },
-                "session_id": { "type": "string", "description": "Optional ACP session ID" },
-                "creator_id": { "type": "string", "description": "Optional creator ID" }
+                }
+                // "_creator_id" and "_session_id" are injected by orchestration context,
+                // NOT accepted from user input (security: prevents cross-creator IPC).
             }
         }"#
     }
@@ -95,13 +98,16 @@ impl Capability for AcpPrompt {
             .and_then(|v| v.as_str())
             .unwrap_or("auto_grant_read_only");
 
+        // Security: only accept context-injected identity fields (prefixed _).
+        // Raw `creator_id`/`session_id` from user/preset input are ignored
+        // to prevent cross-creator IPC routing (IDOR).
         let session_id = input
-            .get("session_id")
+            .get("_session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
         let creator_id = input
-            .get("creator_id")
+            .get("_creator_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
@@ -190,12 +196,12 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_with_worker_uses_ipc() {
-        let cap =
-            AcpPrompt::with_worker_provider(Arc::new(MockAcpProvider));
+        let cap = AcpPrompt::with_worker_provider(Arc::new(MockAcpProvider));
         let input = json!({
             "prompt": "Extract character info",
             "tool_policy": "auto_grant_read_only",
-            "session_id": "sess_123"
+            "_session_id": "sess_123",
+            "_creator_id": "creator_abc"
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["dispatched_via_ipc"], true);
@@ -208,15 +214,18 @@ mod tests {
 
     #[tokio::test]
     async fn acp_prompt_with_worker_returns_structured_output() {
-        let cap =
-            AcpPrompt::with_worker_provider(Arc::new(MockAcpProvider));
+        let cap = AcpPrompt::with_worker_provider(Arc::new(MockAcpProvider));
         let input = json!({
             "prompt": "test prompt",
             "tool_policy": "deny_all",
-            "session_id": "sess_456"
+            "_session_id": "sess_456",
+            "_creator_id": "creator_def"
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["dispatched_via_ipc"], true);
-        assert!(result["full_text"].as_str().unwrap().contains("test prompt"));
+        assert!(result["full_text"]
+            .as_str()
+            .unwrap()
+            .contains("test prompt"));
     }
 }

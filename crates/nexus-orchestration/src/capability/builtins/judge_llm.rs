@@ -137,19 +137,28 @@ pub fn parse_judge_response(text: &str) -> (bool, String) {
 
     for word in GO_WORDS {
         if lower.contains(word) {
-            return (true, format!("judge.llm: go (matched '{word}' in LLM response)"));
+            return (
+                true,
+                format!("judge.llm: go (matched '{word}' in LLM response)"),
+            );
         }
     }
 
     for word in NOGO_WORDS {
         if lower.contains(word) {
-            return (false, format!("judge.llm: nogo (matched '{word}' in LLM response)"));
+            return (
+                false,
+                format!("judge.llm: nogo (matched '{word}' in LLM response)"),
+            );
         }
     }
 
     (
         false,
-        format!("judge.llm: ambiguous LLM response — '{}'", &lower[..lower.len().min(50)]),
+        format!(
+            "judge.llm: ambiguous LLM response — '{}'",
+            &lower[..lower.len().min(50)]
+        ),
     )
 }
 
@@ -218,8 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_with_mock_worker_go() {
-        let cap =
-            JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
+        let cap = JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
@@ -245,8 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_with_mock_worker_nogo() {
-        let cap =
-            JudgeLlm::with_worker_provider(Arc::new(MockNogoProvider));
+        let cap = JudgeLlm::with_worker_provider(Arc::new(MockNogoProvider));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], false);
@@ -255,8 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_missing_prompt_errors() {
-        let cap =
-            JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
+        let cap = JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());

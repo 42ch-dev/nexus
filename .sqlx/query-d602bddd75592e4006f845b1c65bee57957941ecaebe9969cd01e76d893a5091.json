@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', '2026-01-01T00:00:00Z', '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d602bddd75592e4006f845b1c65bee57957941ecaebe9969cd01e76d893a5091"
+}

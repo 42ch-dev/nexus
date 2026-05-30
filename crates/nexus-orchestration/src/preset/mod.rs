@@ -658,8 +658,8 @@ states:
         let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
 
         // Verify prompt files referenced in inner_graph nodes
-        let draft_graph = &loaded.inner_graphs["draft_graph"];
-        let revise_graph = &loaded.inner_graphs["revise_graph"];
+        let _draft_graph = &loaded.inner_graphs["draft_graph"];
+        let _revise_graph = &loaded.inner_graphs["revise_graph"];
 
         // draft_graph.generate should reference prompts/generate-draft.md
         // (verified via inner graph node template_file)

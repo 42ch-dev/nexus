@@ -47,30 +47,30 @@ impl CreatorCapabilityStore {
 
     /// Resolve the creator identity from capability input.
     ///
-    /// Resolution order (per architect note C0):
-    /// 1. Input `creator_id`
-    /// 2. Input `_creator_id` (injected by task execution from schedule/session context)
-    /// 3. Input `schedule_id` → look up `creator_schedules.creator_id`
-    /// 4. Input `session_id` → look up `orchestration_sessions.creator_id`
-    /// 5. Error
+    /// Only accepts **context-injected** identity fields (prefixed with `_`)
+    /// to prevent cross-creator authorization bypass (IDOR). The orchestration
+    /// task execution layer is responsible for enriching capability input with
+    /// `_creator_id`, `_schedule_id`, and `_session_id` from the running
+    /// schedule/session context before invoking capabilities.
+    ///
+    /// Resolution order:
+    /// 1. Input `_creator_id` (injected by task execution from schedule/session context)
+    /// 2. Input `_schedule_id` → look up `creator_schedules.creator_id`
+    /// 3. Input `_session_id` → look up `orchestration_sessions.creator_id`
+    /// 4. Error
     ///
     /// # Errors
     ///
     /// Returns `CapabilityError::InputInvalid` if no creator identity can be resolved.
     /// Returns `CapabilityError::Internal` if a database lookup fails.
     pub async fn resolve_creator_id(&self, input: &Value) -> Result<String, CapabilityError> {
-        // Step 1: direct creator_id
-        if let Some(id) = input.get("creator_id").and_then(|v| v.as_str()) {
-            return Ok(id.to_string());
-        }
-
-        // Step 2: injected _creator_id
+        // Step 1: context-injected _creator_id
         if let Some(id) = input.get("_creator_id").and_then(|v| v.as_str()) {
             return Ok(id.to_string());
         }
 
-        // Step 3: schedule_id → creator_schedules.creator_id
-        if let Some(schedule_id) = input.get("schedule_id").and_then(|v| v.as_str()) {
+        // Step 2: context-injected _schedule_id → creator_schedules.creator_id
+        if let Some(schedule_id) = input.get("_schedule_id").and_then(|v| v.as_str()) {
             let row = sqlx::query_scalar!(
                 "SELECT creator_id FROM creator_schedules WHERE schedule_id = ?",
                 schedule_id
@@ -84,8 +84,8 @@ impl CreatorCapabilityStore {
             }
         }
 
-        // Step 4: session_id → orchestration_sessions.creator_id
-        if let Some(session_id) = input.get("session_id").and_then(|v| v.as_str()) {
+        // Step 3: context-injected _session_id → orchestration_sessions.creator_id
+        if let Some(session_id) = input.get("_session_id").and_then(|v| v.as_str()) {
             let row = sqlx::query_scalar!(
                 "SELECT creator_id FROM orchestration_sessions WHERE session_id = ?",
                 session_id
@@ -99,20 +99,18 @@ impl CreatorCapabilityStore {
             }
         }
 
-        // Step 5: unresolved
+        // Step 4: unresolved
         Err(CapabilityError::InputInvalid(
-            "missing creator identity: provide creator_id, _creator_id, schedule_id, or session_id"
+            "missing creator identity: orchestration context must inject _creator_id, _schedule_id, or _session_id"
                 .into(),
         ))
     }
 
     /// Resolve `session_id` from capability input.
     ///
-    /// Order: `session_id` → `_session_id` → `"default"` (standalone/test).
+    /// Only accepts context-injected `_session_id`. Falls back to `"default"`
+    /// only in standalone/test mode (no store injected).
     fn resolve_session_id(input: &Value) -> String {
-        if let Some(id) = input.get("session_id").and_then(|v| v.as_str()) {
-            return id.to_string();
-        }
         if let Some(id) = input.get("_session_id").and_then(|v| v.as_str()) {
             return id.to_string();
         }
@@ -165,9 +163,7 @@ impl CreatorCapabilityStore {
 
         let fragment = nexus_local_db::MemoryFragmentRecord {
             fragment_id: fragment_id.clone(),
-            session_id: source_session_id
-                .unwrap_or("standalone")
-                .to_string(),
+            session_id: source_session_id.unwrap_or("standalone").to_string(),
             creator_id: creator_id.to_string(),
             keywords: keywords_json,
             summary: content.to_string(),
@@ -235,9 +231,15 @@ impl CreatorCapabilityStore {
         limit: i64,
     ) -> Result<Vec<nexus_local_db::PromptInjectionRow>, CapabilityError> {
         let now = chrono::Utc::now().timestamp_millis();
-        nexus_local_db::claim_prompt_injections(self.pool.as_ref(), creator_id, session_id, limit, now)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("drain_prompt_queue: {e}")))
+        nexus_local_db::claim_prompt_injections(
+            self.pool.as_ref(),
+            creator_id,
+            session_id,
+            limit,
+            now,
+        )
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("drain_prompt_queue: {e}")))
     }
 }
 
@@ -278,9 +280,7 @@ impl CreatorReadMemory {
     // Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
-        Self {
-            store: Some(store),
-        }
+        Self { store: Some(store) }
     }
 }
 
@@ -305,9 +305,10 @@ impl Capability for CreatorReadMemory {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let parsed: CreatorReadMemoryInput = serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.read_memory input: {e}"))
-        })?;
+        let parsed: CreatorReadMemoryInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.read_memory input: {e}"))
+            })?;
 
         let Some(store) = &self.store else {
             // Standalone/test mode — return zero count
@@ -351,9 +352,7 @@ impl CreatorWriteMemory {
     // Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
-        Self {
-            store: Some(store),
-        }
+        Self { store: Some(store) }
     }
 }
 
@@ -378,9 +377,10 @@ impl Capability for CreatorWriteMemory {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let parsed: CreatorWriteMemoryInput = serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.write_memory input: {e}"))
-        })?;
+        let parsed: CreatorWriteMemoryInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.write_memory input: {e}"))
+            })?;
 
         let Some(store) = &self.store else {
             // Standalone/test mode — return stub
@@ -392,10 +392,7 @@ impl Capability for CreatorWriteMemory {
         };
 
         let creator_id = store.resolve_creator_id(&input).await?;
-        let source_session_id = input
-            .get("_session_id")
-            .and_then(|v| v.as_str())
-            .or_else(|| input.get("session_id").and_then(|v| v.as_str()));
+        let source_session_id = input.get("_session_id").and_then(|v| v.as_str());
 
         let fragment_id = store
             .write_memory(
@@ -436,9 +433,7 @@ impl CreatorInjectPrompt {
     // Arc::new is not const, so this cannot be const fn on stable.
     #[allow(clippy::missing_const_for_fn)]
     pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
-        Self {
-            store: Some(store),
-        }
+        Self { store: Some(store) }
     }
 }
 
@@ -463,9 +458,10 @@ impl Capability for CreatorInjectPrompt {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let parsed: CreatorInjectPromptInput = serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.inject_prompt input: {e}"))
-        })?;
+        let parsed: CreatorInjectPromptInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.inject_prompt input: {e}"))
+            })?;
 
         // Validate prompt is non-empty
         if parsed.prompt.trim().is_empty() {
@@ -483,10 +479,7 @@ impl Capability for CreatorInjectPrompt {
 
         let creator_id = store.resolve_creator_id(&input).await?;
         let session_id = CreatorCapabilityStore::resolve_session_id(&input);
-        let source_schedule_id = input
-            .get("_schedule_id")
-            .and_then(|v| v.as_str())
-            .or_else(|| input.get("schedule_id").and_then(|v| v.as_str()));
+        let source_schedule_id = input.get("_schedule_id").and_then(|v| v.as_str());
 
         store
             .enqueue_prompt(
@@ -753,15 +746,21 @@ mod tests {
         assert_eq!(drained[0].prompt, "high priority");
     }
 
+    /// Verifies that raw `creator_id` (without underscore) is REJECTED.
+    /// Only `_creator_id` (context-injected) is accepted for security.
     #[tokio::test]
-    async fn resolve_creator_id_from_creator_id_field() {
+    async fn resolve_creator_id_rejects_raw_creator_id() {
         let (pool, _dir) = fresh_pool().await;
         let store = CreatorCapabilityStore::new(pool);
-        let id = store
+        let result = store
             .resolve_creator_id(&serde_json::json!({"creator_id": "ctr_direct"}))
-            .await
-            .unwrap();
-        assert_eq!(id, "ctr_direct");
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("missing creator identity"),
+            "expected rejection, got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -785,7 +784,8 @@ mod tests {
                 (schedule_id, creator_id, preset_id, preset_version, status,
                  concurrency_kind, current_core_context_version, created_at, updated_at)
              VALUES ('sched_1', 'ctr_from_sched', 'test', 1, 'running', 'serial', 0, ?, ?)",
-            now, now
+            now,
+            now
         )
         .execute(&pool)
         .await
@@ -793,7 +793,7 @@ mod tests {
 
         let store = CreatorCapabilityStore::new(pool);
         let id = store
-            .resolve_creator_id(&serde_json::json!({"schedule_id": "sched_1"}))
+            .resolve_creator_id(&serde_json::json!({"_schedule_id": "sched_1"}))
             .await
             .unwrap();
         assert_eq!(id, "ctr_from_sched");
@@ -808,7 +808,8 @@ mod tests {
                 (session_id, creator_id, preset_id, preset_version, status,
                  context_json, created_at, updated_at)
              VALUES ('sess_1', 'ctr_from_sess', 'test', 1, 'running', '{}', ?, ?)",
-            now, now
+            now,
+            now
         )
         .execute(&pool)
         .await
@@ -816,7 +817,7 @@ mod tests {
 
         let store = CreatorCapabilityStore::new(pool);
         let id = store
-            .resolve_creator_id(&serde_json::json!({"session_id": "sess_1"}))
+            .resolve_creator_id(&serde_json::json!({"_session_id": "sess_1"}))
             .await
             .unwrap();
         assert_eq!(id, "ctr_from_sess");
@@ -830,6 +831,9 @@ mod tests {
             .resolve_creator_id(&serde_json::json!({"other_field": "value"}))
             .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing creator identity"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing creator identity"));
     }
 }
