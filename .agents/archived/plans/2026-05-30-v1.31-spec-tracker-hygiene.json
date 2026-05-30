@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
+  "title": "V1.31 spec and tracker hygiene",
+  "status": "Done",
+  "working_branch": "feature/v1.31-spec-tracker-hygiene",
+  "merge_target": "feature/v1.31-agentic-design-patterns",
+  "metadata": {
+    "iteration": "v1.31",
+    "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "theme": "P4-spec-tracker",
+    "merge_order": "last"
+  },
+  "archived_at": "2026-05-30T12:00:00Z"
+}
