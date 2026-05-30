@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
+  "title": "V1.31 Agentic Design Pattern demonstrator presets",
+  "status": "Done",
+  "working_branch": "feature/v1.31-agentic-pattern-presets",
+  "merge_target": "feature/v1.31-agentic-design-patterns",
+  "depends_on": [
+    "2026-05-30-v1.31-creator-memory-capabilities",
+    "2026-05-30-v1.31-judge-and-summarize-capabilities"
+  ],
+  "metadata": {
+    "iteration": "v1.31",
+    "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "theme": "P3-agentic-presets",
+    "tracker_ids": ["FL-D"]
+  },
+  "archived_at": "2026-05-30T12:00:00Z"
+}

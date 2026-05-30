@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.31 Shipped** (FL-D Agentic Design Patterns partial close) · **V1.30 Shipped** · Platform **paused** · Open FL-D DF rows: **DF-29, DF-31** · Residual SSOT: `status.json` (15 backlog items incl. 1 medium SEC-V131-01)
+**Quick status**: **V1.31 Shipped** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 20)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
@@ -19,6 +19,7 @@
 - **Closing an item**: Remove its row from §3.3; append to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) with completion version, plan-id, and note.
 - **Deferring again**: Update the `Target` column; keep the row in §3.3. Add a note in `Deferral history`.
 - **Shipped / cancelled history**: [shipped-features-tracker.md](../archived/shipped-features-tracker.md) (§1 closed items, §2 per-version snapshots).
+- **Tech-debt residuals**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (§3.5 pointer only).
 - **Source of truth**: This file is the **tracker**; the **compass** of the active version is the **scope authority**. If this file and the active compass conflict, the compass wins.
 
 ---
@@ -38,32 +39,21 @@
 
 ### 3.1 Program planning decisions
 
-Recorded product rulings for iteration planning. **Not** implementation tasks — the active delivery compass is scope authority.
+Recorded product rulings for iteration planning. **Not** implementation tasks — the active delivery compass is scope authority. Closed PD-02..12 → [shipped archive §2](../archived/shipped-features-tracker.md).
 
 | ID | Decision | Notes |
 |----|----------|-------|
 | PD-01 | **World fork is platform-only** | Community/social feature; **no** local `nexus42` CLI or daemon fork. See DF-45 (Cancelled) in archive. |
-| PD-02 | V1.28 primary product = structured KB query + context assembly convergence | Compass: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md) |
-| PD-03 | V1.28 mandatory = local SSOT doc refresh | Plan: `2026-05-25-v1.28-local-ssot-refresh` |
-| PD-04 | Agent Host (ACP + native CLI) = local product P0–P1 | V1.28 Batch 1 + V1.29 Batch 2 shipped |
 | PD-05 | Cloud sync is **not** a short-term iteration focus | CLI `sync push/pull` unchanged; orchestration `sync.pull`/`sync.push` stubs remain Open |
-| PD-06 | Memory + SOUL deep build | **Shipped V1.29** (FL-A) |
-| PD-07 | Writing-process KB extraction | **Shipped V1.29** (FL-B) |
 | PD-08 | Preset orchestration + Agentic Design Patterns | See FL-D; research: https://github.com/evoiz/Agentic-Design-Patterns |
-| PD-09 | V1.29 primary = **Author Intelligence Loop** (FL-A + FL-B) | Shipped V1.29 |
-| PD-10 | FL-B **agent-driven**: CLI queue/status only; LLM via preset + capability | Shipped V1.29 |
-| PD-11 | V1.29 secondary = **Agent Host Batch 2** | Shipped V1.29 |
-| PD-12 | **V1.31 primary = FL-D Agentic Design Patterns** | **Shipped V1.31**: de-stubbed creator memory, judge, summarization, and worker-handle capability paths plus 2 demonstrator presets; **still out**: DF-29, DF-31, conditional routing engine. Compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md) |
 
 ### 3.2 Future product lines (planning backlog)
 
-Cross-version themes. Suggested targets are non-binding until locked in a compass.
+Cross-version themes. Suggested targets are non-binding until locked in a compass. Shipped FL-A/B → archive §2 V1.29.
 
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
-| FL-A | Creator **Memory + SOUL** build-out | **V1.29** ✅ Shipped | Session review, Experience preset, Stage0 delimiters |
-| FL-B | **KB extraction** from writing (work index → World KB) | **V1.29** ✅ Shipped | CLI queue + `kb.extract_work` preset; partial DF-35/36 |
-| FL-D | **Preset orchestration** (Agentic Design Patterns) | **V1.31** ✅ Partial shipped | V1.31 closed creator/judge/summarize de-stub + 2 presets; DF-29/31 remain deferred post-V1.31 |
+| FL-D | **Preset orchestration** (Agentic Design Patterns) | Post-V1.31 | V1.31 partial close shipped; **still open**: DF-29, DF-31, conditional routing engine |
 
 ### 3.3 Open features (deferred from compass "Out" or audit)
 
@@ -102,38 +92,22 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | BL-06 | Independent search microservice | V1.2 | Backlog | L | |
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | ADR-011 elevated. |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | ADR-011/012/013. |
-| BL-09 | V1.17 Prompt + Skills Compass v1 | V1.16 | Done | M | **Shipped V1.17** — see archive §2. |
 
-### 3.5 Open tech-debt residuals (tracked in `status.json`)
+### 3.5 Open tech-debt residuals (SSOT pointer)
 
-Authoritative machine state: **`status.json` root `residual_findings`** (`updated_at` **2026-05-30**). `metadata.tech_debt_summary.total_open` = **15** (TD-V130-01..11 + TD-V131-01..08 + SEC-V131-01 + historical R-V113-005/007).
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`updated_at` **2026-05-30**). Do **not** mirror full rows here — JSON wins on conflict.
 
-| ID | Title | Severity | Decision | `target_date` | Scope |
-|----|-------|----------|----------|----------------|-------|
-| R-V113-005 | UpstreamTimeout e2e test duration varies by OS/proxy | low | accept | backlog | `crates/nexus42/tests/creator_register_e2e.rs` |
-| R-V113-007 | Flaky test `auth::tests::get_returns_none_for_unknown_creator` | low | accept | backlog | `crates/nexus42/src/auth/mod.rs` |
-| TD-V130-01 | SessionCapture RwLock uses write() for all accesses | low | accept | backlog | `crates/nexus42/src/commands/acp_worker/mod.rs` |
-| TD-V130-02 | cleanup_row fire-and-forget — DELETE failure silently lost | low | defer | backlog | `crates/nexus-local-db/src/reference_source.rs` |
-| TD-V130-03 | JobLifecycleGuard FSM — no RAII guard | low | defer | backlog | `crates/nexus-orchestration/.../kb_extract_work.rs` |
-| TD-V130-04 | Drop timeout 150ms may be insufficient | low | defer | backlog | `crates/nexus-agent-host/.../claude.rs` |
-| TD-V130-05 | LIST_BY_WORLD_LIMIT=500 silently truncates | low | accept | backlog | `crates/nexus-local-db/src/kb_store.rs` |
-| TD-V130-06 | mark_running lacks WHERE status guard | low | defer | backlog | `crates/nexus-local-db/src/kb_extract_job.rs` |
-| TD-V130-07 | claim_job re-fetches row after commit | nit | accept | backlog | `crates/nexus-local-db/src/kb_extract_job.rs` |
-| TD-V130-08 | insert_with_retry generic error on collision | nit | accept | backlog | `crates/nexus-local-db/src/kb_extract_job.rs` |
-| TD-V130-09 | Dynamic SQL (format!) not parameterized | low | accept | backlog | `reference_source.rs`, `kb_store.rs` |
-| TD-V130-10 | Extraction prompt format!() doubles memory | nit | accept | backlog | `kb_extract_work.rs` |
-| TD-V130-11 | sqlx prepare CI enforcement | low | defer | backlog | CI pipeline |
-| TD-V131-01 | Non-atomic queue claim race (SELECT-then-UPDATE) | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
-| TD-V131-02 | Keyword LIKE doesn't escape special characters | low | defer | backlog | `crates/nexus-local-db/src/memory_fragment.rs` |
-| TD-V131-03 | Unbounded IN clause in mark_consumed | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
-| TD-V131-04 | Unbounded prompt size in build_summary_prompt | low | defer | backlog | `crates/nexus-orchestration/.../context_summarize.rs` |
-| TD-V131-05 | Missing prompt injection queue cleanup | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
-| TD-V131-06 | JSON LIKE perf degrades at scale | nit | accept | backlog | `crates/nexus-local-db/src/memory_fragment.rs` |
-| **SEC-V131-01** | **judge.llm / context.summarize IDOR — raw creator_id/session_id accepted** | **medium** | **defer** | **V1.32+** | `judge_llm.rs`, `context_summarize.rs` |
-| TD-V131-07 | parse_judge_response keyword false positives | low | defer | backlog | `judge_llm.rs` |
-| TD-V131-08 | memory-augmented preset rule without expression | nit | accept | backlog | `embedded-presets/memory-augmented/preset.yaml` |
+| Bucket | Open count | `residual_findings` key |
+|--------|------------|-------------------------|
+| V1.30 post-QC | 11 | `v1.30-post-qc-tech-debt` |
+| V1.31 post-QC | 9 | `v1.31-post-qc-tech-debt` (incl. **SEC-V131-01** → V1.32+) |
+| **Total** | **20** | See `metadata.tech_debt_summary.total_open` |
 
-V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-convergence.json`.
+**Closed / historical residuals**
+
+- V1.30 convergence (R5–R20 fixed): [`archived/residuals/v1.30-residual-convergence.json`](../archived/residuals/v1.30-residual-convergence.json)
+- V1.13 forward delivery (R-V113-005 waived, R-V113-007 resolved): [`archived/residuals/2026-05-06-v1.13-oss-forward-delivery.json`](../archived/residuals/2026-05-06-v1.13-oss-forward-delivery.json)
+- Cross-cutting accept items (e.g. DEBT-RAND-073): `status.json` → `metadata.tech_debt_summary.cross_cutting`
 
 ---
 
@@ -161,6 +135,7 @@ V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-conve
 **Knowledge & specs**
 
 - Shipped history archive: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
+- Done plans index: [archived/plans-done.json](../archived/plans-done.json)
 - Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Iteration index: [iterations/README.md](../iterations/README.md)
@@ -170,4 +145,4 @@ External (via `.agents/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{pla
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-30**. Status: Active. **V1.31 Shipped** (PR review SEC-V131-01 deferred to V1.32+). **V1.30 Shipped** (2026-05-26). Platform integration paused.*
+*Last updated: 2026-05-30. Status: Active.*

@@ -45,6 +45,7 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-33~~ | `judge.llm` worker-backed GO/NOGO judge | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: executes via `WorkerHandleProvider::call_acp_prompt` with `deny_all` and parses GO/NOGO. |
 | ~~DF-34~~ | `context.summarize` worker-backed summarization | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: executes via `WorkerHandleProvider` and returns `{ summary, prompt_hash }`. |
 | ~~DF-37~~ | Worker-handle plumbing for capability-layer LLM calls | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: `Arc<dyn WorkerHandleProvider>` injected through `CapabilityRegistry::with_runtime_deps()`; fallback limited to explicit standalone/test mode. |
+| ~~BL-09~~ | V1.17 Prompt + Skills Compass v1 | V1.17 | Shipped V1.17 — see archive §2 V1.17 snapshot. |
 
 ### Tech-debt residuals shipped
 
@@ -296,8 +297,8 @@ When a version ships, append new closed rows here and remove them from the activ
 |----------|-------|-----|
 | Features | 1 | DF-03 (Preset registry/publish) |
 | Backlog features | 8 | BL-01 through BL-08 |
-| Tech-debt (accepted backlog) | 2 | R-V113-005, R-V113-007（§3.3） |
-| **Total** | **11** | |
+| Tech-debt (open) | 20 | See active tracker §3.5 → `status.json` `residual_findings` |
+| **Total** | **29** | |
 
 ### Cancelled / Superseded (V1.7 planning, 2026-04-21)
 

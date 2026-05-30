@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-26T16:30:00Z",
+  "updated_at": "2026-05-30T12:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-23-v1.26-local-context-product",
@@ -1177,6 +1177,42 @@
       "working_branch": "feature/v1.30-local-db-hardening",
       "qc_verdict": "Approve (after fix: limit/offset clamping)",
       "qa_verdict": "Pass"
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-creator-memory-capabilities",
+      "title": "V1.31 creator memory capabilities de-stub",
+      "done_at": "2026-05-30T12:00:00Z",
+      "plan_file": ".agents/plans/2026-05-30-v1.31-creator-memory-capabilities.md",
+      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-creator-memory-capabilities.json",
+      "working_branch": "feature/v1.31-creator-memory-capabilities",
+      "tracker_ids": ["DF-30"]
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-judge-and-summarize-capabilities",
+      "title": "V1.31 judge rule/llm and context summarize de-stub",
+      "done_at": "2026-05-30T12:00:00Z",
+      "plan_file": ".agents/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.md",
+      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.json",
+      "working_branch": "feature/v1.31-judge-and-summarize-capabilities",
+      "tracker_ids": ["DF-32", "DF-33", "DF-34", "DF-37"]
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
+      "title": "V1.31 Agentic Design Pattern demonstrator presets",
+      "done_at": "2026-05-30T12:00:00Z",
+      "plan_file": ".agents/plans/2026-05-30-v1.31-agentic-pattern-presets.md",
+      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-agentic-pattern-presets.json",
+      "working_branch": "feature/v1.31-agentic-pattern-presets",
+      "tracker_ids": ["FL-D"]
+    },
+    {
+      "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
+      "title": "V1.31 spec and tracker hygiene",
+      "done_at": "2026-05-30T12:00:00Z",
+      "plan_file": ".agents/plans/2026-05-30-v1.31-spec-tracker-hygiene.md",
+      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-spec-tracker-hygiene.json",
+      "working_branch": "feature/v1.31-spec-tracker-hygiene",
+      "notes": "Profile B compaction + tracker/status SSOT alignment"
     }
   ]
 }
