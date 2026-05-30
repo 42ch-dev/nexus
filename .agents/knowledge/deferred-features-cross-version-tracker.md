@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.31 Shipped** (FL-D Agentic Design Patterns partial close) · **V1.30 Shipped** · Platform **paused** · Open FL-D DF rows: **DF-29, DF-31** · Residual SSOT: `status.json` (11 backlog items)
+**Quick status**: **V1.31 Shipped** (FL-D Agentic Design Patterns partial close) · **V1.30 Shipped** · Platform **paused** · Open FL-D DF rows: **DF-29, DF-31** · Residual SSOT: `status.json` (15 backlog items incl. 1 medium SEC-V131-01)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
@@ -106,7 +106,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 ### 3.5 Open tech-debt residuals (tracked in `status.json`)
 
-Authoritative machine state: **`status.json` root `residual_findings`** (`updated_at` **2026-05-26**). `metadata.tech_debt_summary.total_open` = **11** (TD-V130-01..11 + historical R-V113-005/007).
+Authoritative machine state: **`status.json` root `residual_findings`** (`updated_at` **2026-05-30**). `metadata.tech_debt_summary.total_open` = **15** (TD-V130-01..11 + TD-V131-01..08 + SEC-V131-01 + historical R-V113-005/007).
 
 | ID | Title | Severity | Decision | `target_date` | Scope |
 |----|-------|----------|----------|----------------|-------|
@@ -123,6 +123,15 @@ Authoritative machine state: **`status.json` root `residual_findings`** (`update
 | TD-V130-09 | Dynamic SQL (format!) not parameterized | low | accept | backlog | `reference_source.rs`, `kb_store.rs` |
 | TD-V130-10 | Extraction prompt format!() doubles memory | nit | accept | backlog | `kb_extract_work.rs` |
 | TD-V130-11 | sqlx prepare CI enforcement | low | defer | backlog | CI pipeline |
+| TD-V131-01 | Non-atomic queue claim race (SELECT-then-UPDATE) | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
+| TD-V131-02 | Keyword LIKE doesn't escape special characters | low | defer | backlog | `crates/nexus-local-db/src/memory_fragment.rs` |
+| TD-V131-03 | Unbounded IN clause in mark_consumed | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
+| TD-V131-04 | Unbounded prompt size in build_summary_prompt | low | defer | backlog | `crates/nexus-orchestration/.../context_summarize.rs` |
+| TD-V131-05 | Missing prompt injection queue cleanup | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
+| TD-V131-06 | JSON LIKE perf degrades at scale | nit | accept | backlog | `crates/nexus-local-db/src/memory_fragment.rs` |
+| **SEC-V131-01** | **judge.llm / context.summarize IDOR — raw creator_id/session_id accepted** | **medium** | **defer** | **V1.32+** | `judge_llm.rs`, `context_summarize.rs` |
+| TD-V131-07 | parse_judge_response keyword false positives | low | defer | backlog | `judge_llm.rs` |
+| TD-V131-08 | memory-augmented preset rule without expression | nit | accept | backlog | `embedded-presets/memory-augmented/preset.yaml` |
 
 V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-convergence.json`.
 
@@ -161,4 +170,4 @@ External (via `.agents/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{pla
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-30**. Status: Active. **V1.31 Shipped**. **V1.30 Shipped** (2026-05-26). Platform integration paused.*
+*Created: 2026-04-21. Last updated: **2026-05-30**. Status: Active. **V1.31 Shipped** (PR review SEC-V131-01 deferred to V1.32+). **V1.30 Shipped** (2026-05-26). Platform integration paused.*

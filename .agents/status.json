@@ -79,17 +79,18 @@
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T21:30:00Z",
-      "total_open": 11,
+      "updated_at": "2026-05-30T18:00:00Z",
+      "total_open": 15,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 8,
-        "nit": 3
+        "medium": 1,
+        "low": 10,
+        "nit": 4
       },
       "by_target": {
-        "backlog": 11
+        "backlog": 14,
+        "V1.32+": 1
       },
       "by_plan": {},
       "cross_cutting": [
@@ -102,7 +103,7 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.31 shipped. 11 V1.30 + 6 V1.31 post-QC tech-debt items remain backlog."
+      "note": "V1.31 shipped. 11 V1.30 + 9 V1.31 post-QC/PR-review items (1 medium SEC, 8 low/nit). SEC-V131-01 targeted V1.32+."
     }
   },
   "residual_findings": {
@@ -172,6 +173,39 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Pre-release volumes low. Consider FTS5 or keyword index at scale."
+      },
+      {
+        "id": "SEC-V131-01",
+        "title": "judge.llm and context.summarize still read raw creator_id/session_id — same IDOR pattern as fixed acp_prompt",
+        "severity": "medium",
+        "source": "pr-review O-1 (security follow-up to cursor review)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs, crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.32+",
+        "note": "Same IDOR as fixed in acp_prompt: only _creator_id/_session_id (context-injected) should be accepted. Low urgency because callers are orchestration engine itself, not user preset args — but defense-in-depth says fix it."
+      },
+      {
+        "id": "TD-V131-07",
+        "title": "parse_judge_response keyword matching can produce false positives from LLM output",
+        "severity": "low",
+        "source": "pr-review O-3",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "GO/NOGO word list matches substrings in LLM output. Consider regex anchors or parse first word of response."
+      },
+      {
+        "id": "TD-V131-08",
+        "title": "memory-augmented preset exit_when kind:rule without rule expression — may need explicit always_true",
+        "severity": "nit",
+        "source": "pr-review O-4",
+        "scope": "crates/nexus-orchestration/embedded-presets/memory-augmented/preset.yaml",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Empty rule defaults to always-true (correct for this preset). Verify loader.rs handles gracefully; add explicit rule if loader validation changes."
       }
     ],
     "v1.30-post-qc-tech-debt": [
