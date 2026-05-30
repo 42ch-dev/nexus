@@ -6,6 +6,7 @@ pub mod builtins;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::sync::Arc;
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,43 @@ pub enum CapabilityError {
     Cancelled,
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+// ---------------------------------------------------------------------------
+// WorkerHandleProvider — injected LLM call seam (J0)
+// ---------------------------------------------------------------------------
+
+/// Provider trait for capability-layer LLM calls via worker IPC.
+///
+/// Injected into `JudgeLlm`, `ContextSummarize`, and `AcpPrompt` through
+/// the registry factory. When absent, capabilities operate in standalone/
+/// test mode with clear error messages.
+///
+/// Design: architect note C0/J0, `KbExtractWork::with_pool` pattern.
+#[async_trait]
+pub trait WorkerHandleProvider: Send + Sync {
+    /// Call `worker/acp_prompt` via IPC.
+    ///
+    /// Returns the full JSON-RPC response value on success.
+    async fn call_acp_prompt(
+        &self,
+        creator_id: &str,
+        session_id: &str,
+        prompt: String,
+        tool_policy: &str,
+    ) -> Result<Value, CapabilityError>;
+}
+
+/// Runtime dependencies injected through `CapabilityRegistry::with_runtime_deps`.
+///
+/// Groups pool and worker provider so daemon boot can construct a single
+/// struct and pass it to the registry factory.
+pub struct CapabilityRuntimeDeps {
+    /// Pool for pool-backed capabilities (`kb.extract_work`, etc.).
+    pub pool: Option<sqlx::SqlitePool>,
+    /// Worker handle provider for LLM-backed capabilities (`judge.llm`,
+    /// `context.summarize`, `acp.prompt`).
+    pub worker_provider: Option<std::sync::Arc<dyn WorkerHandleProvider>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -86,26 +124,29 @@ impl CapabilityRegistry {
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh),
-            Box::new(builtins::CreatorReadMemory),
-            Box::new(builtins::CreatorWriteMemory),
-            Box::new(builtins::CreatorInjectPrompt),
+            Box::new(builtins::CreatorReadMemory::new()),
+            Box::new(builtins::CreatorWriteMemory::new()),
+            Box::new(builtins::CreatorInjectPrompt::new()),
             Box::new(builtins::JudgeRule),
-            Box::new(builtins::AcpPrompt),
+            Box::new(builtins::AcpPrompt::new()),
             Box::new(builtins::AcpSessionLoad),
-            Box::new(builtins::JudgeLlm),
-            Box::new(builtins::ContextSummarize),
+            Box::new(builtins::JudgeLlm::new()),
+            Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::new()),
             Box::new(builtins::SoulExperienceAggregate),
         ];
         Self { capabilities: caps }
     }
 
-    /// Create a registry with built-in capabilities and a pool for `kb.extract_work`.
+    /// Create a registry with built-in capabilities and a pool.
     ///
     /// Same as [`with_builtins`] but `kb.extract_work` receives the pool
-    /// for full e2e lifecycle (claim → extract → `KeyBlock` insert → finalize).
+    /// for full e2e lifecycle, and all creator capabilities receive a
+    /// [`builtins::CreatorCapabilityStore`] for real memory I/O
+    /// and prompt injection persistence.
     #[must_use]
     pub fn with_builtins_and_pool(pool: sqlx::SqlitePool) -> Self {
+        let creator_store = Arc::new(builtins::CreatorCapabilityStore::new(pool.clone()));
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
@@ -114,15 +155,98 @@ impl CapabilityRegistry {
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh),
-            Box::new(builtins::CreatorReadMemory),
-            Box::new(builtins::CreatorWriteMemory),
-            Box::new(builtins::CreatorInjectPrompt),
+            Box::new(builtins::CreatorReadMemory::with_store(
+                creator_store.clone(),
+            )),
+            Box::new(builtins::CreatorWriteMemory::with_store(
+                creator_store.clone(),
+            )),
+            Box::new(builtins::CreatorInjectPrompt::with_store(creator_store)),
             Box::new(builtins::JudgeRule),
-            Box::new(builtins::AcpPrompt),
+            Box::new(builtins::AcpPrompt::new()),
             Box::new(builtins::AcpSessionLoad),
-            Box::new(builtins::JudgeLlm),
-            Box::new(builtins::ContextSummarize),
+            Box::new(builtins::JudgeLlm::new()),
+            Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::with_pool(pool)),
+            Box::new(builtins::SoulExperienceAggregate),
+        ];
+        Self { capabilities: caps }
+    }
+
+    /// Create a registry with runtime dependencies injected.
+    ///
+    /// Production daemon boot should use this constructor when both a pool
+    /// and worker provider are available. Capabilities without runtime deps
+    /// are constructed in their default (standalone) form.
+    #[must_use]
+    pub fn with_runtime_deps(deps: &CapabilityRuntimeDeps) -> Self {
+        let kb = deps
+            .pool
+            .as_ref()
+            .map_or_else(builtins::KbExtractWork::new, |pool| {
+                builtins::KbExtractWork::with_pool(pool.clone())
+            });
+
+        let judge_llm = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::JudgeLlm::new, |provider| {
+                builtins::JudgeLlm::with_worker_provider(provider.clone())
+            });
+
+        let context_summarize = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::ContextSummarize::new, |provider| {
+                builtins::ContextSummarize::with_worker_provider(provider.clone())
+            });
+
+        let acp_prompt = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::AcpPrompt::new, |provider| {
+                builtins::AcpPrompt::with_worker_provider(provider.clone())
+            });
+
+        let creator_store = deps.pool.as_ref().map(|pool| {
+            std::sync::Arc::new(builtins::CreatorCapabilityStore::from_arc(
+                std::sync::Arc::new(pool.clone()),
+            ))
+        });
+
+        let creator_read = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorReadMemory::new, |store| {
+                builtins::CreatorReadMemory::with_store(store.clone())
+            });
+        let creator_write = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorWriteMemory::new, |store| {
+                builtins::CreatorWriteMemory::with_store(store.clone())
+            });
+        let creator_inject = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorInjectPrompt::new, |store| {
+                builtins::CreatorInjectPrompt::with_store(store.clone())
+            });
+
+        let caps: Vec<Box<dyn Capability>> = vec![
+            Box::new(builtins::SyncPull),
+            Box::new(builtins::SyncPush),
+            Box::new(builtins::OutboxFlush),
+            Box::new(builtins::OutboxCompact),
+            Box::new(builtins::WorkspaceOpen),
+            Box::new(builtins::WorkspaceCommit),
+            Box::new(builtins::RegistryRefresh),
+            Box::new(creator_read),
+            Box::new(creator_write),
+            Box::new(creator_inject),
+            Box::new(builtins::JudgeRule),
+            Box::new(acp_prompt),
+            Box::new(builtins::AcpSessionLoad),
+            Box::new(judge_llm),
+            Box::new(context_summarize),
+            Box::new(kb),
             Box::new(builtins::SoulExperienceAggregate),
         ];
         Self { capabilities: caps }

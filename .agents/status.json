@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-05-30T00:00:00Z",
+  "updated_at": "2026-05-30T12:00:00Z",
   "plans": [
     {
       "plan_id": "2026-05-30-v1.31-creator-memory-capabilities",
       "title": "V1.31 creator memory capabilities de-stub",
-      "status": "Todo",
+      "status": "Done",
       "working_branch": "feature/v1.31-creator-memory-capabilities",
       "merge_target": "feature/v1.31-agentic-design-patterns",
       "metadata": {
@@ -19,7 +19,7 @@
     {
       "plan_id": "2026-05-30-v1.31-judge-and-summarize-capabilities",
       "title": "V1.31 judge rule/llm and context summarize de-stub",
-      "status": "Todo",
+      "status": "Done",
       "working_branch": "feature/v1.31-judge-and-summarize-capabilities",
       "merge_target": "feature/v1.31-agentic-design-patterns",
       "metadata": {
@@ -33,7 +33,7 @@
     {
       "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
       "title": "V1.31 Agentic Design Pattern demonstrator presets",
-      "status": "Todo",
+      "status": "Done",
       "working_branch": "feature/v1.31-agentic-pattern-presets",
       "merge_target": "feature/v1.31-agentic-design-patterns",
       "depends_on": [
@@ -51,7 +51,7 @@
     {
       "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
       "title": "V1.31 spec and tracker hygiene",
-      "status": "Todo",
+      "status": "Done",
       "working_branch": "feature/v1.31-spec-tracker-hygiene",
       "merge_target": "feature/v1.31-agentic-design-patterns",
       "metadata": {
@@ -73,23 +73,24 @@
     "integration_branch": "feature/v1.31-agentic-design-patterns",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.30",
-    "latest_shipped_at": "2026-05-26T21:30:00Z",
-    "latest_active_iteration": "v1.31",
-    "latest_active_compass": ".agents/iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.31",
+    "latest_shipped_at": "2026-05-30T12:00:00Z",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-26T21:30:00Z",
-      "total_open": 11,
+      "updated_at": "2026-05-30T18:00:00Z",
+      "total_open": 15,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 8,
-        "nit": 3
+        "medium": 1,
+        "low": 10,
+        "nit": 4
       },
       "by_target": {
-        "backlog": 11
+        "backlog": 14,
+        "V1.32+": 1
       },
       "by_plan": {},
       "cross_cutting": [
@@ -102,10 +103,111 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.30 shipped. V1.31 active (FL-D Agentic Design Patterns). 11 post-QC tech-debt items remain backlog."
+      "note": "V1.31 shipped. 11 V1.30 + 9 V1.31 post-QC/PR-review items (1 medium SEC, 8 low/nit). SEC-V131-01 targeted V1.32+."
     }
   },
   "residual_findings": {
+    "v1.31-post-qc-tech-debt": [
+      {
+        "id": "TD-V131-01",
+        "title": "Non-atomic queue claim race — claim_prompt_injections SELECT-then-UPDATE without transaction",
+        "severity": "low",
+        "source": "qc2 C-2-2, qc1 W-002",
+        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Single-process SQLite pre-1.0. Wrap in transaction when concurrent access possible."
+      },
+      {
+        "id": "TD-V131-02",
+        "title": "Keyword LIKE pattern doesn't escape special characters",
+        "severity": "low",
+        "source": "qc1 W-003",
+        "scope": "crates/nexus-local-db/src/memory_fragment.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add escape_sql_like helper for user-supplied keyword values."
+      },
+      {
+        "id": "TD-V131-03",
+        "title": "Unbounded IN clause in mark_prompt_injections_consumed",
+        "severity": "low",
+        "source": "qc3 W-002",
+        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add batch limit (e.g. 100) and chunk if needed."
+      },
+      {
+        "id": "TD-V131-04",
+        "title": "Unbounded prompt size in build_summary_prompt — memory/IPC risk",
+        "severity": "low",
+        "source": "qc3 W-003",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add configurable content size limit before prompt construction."
+      },
+      {
+        "id": "TD-V131-05",
+        "title": "Missing prompt injection queue cleanup — table growth",
+        "severity": "low",
+        "source": "qc3 W-001",
+        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Add daemon maintenance cleanup for expired/consumed rows."
+      },
+      {
+        "id": "TD-V131-06",
+        "title": "JSON LIKE query performance on memory_fragments degrades with scale",
+        "severity": "nit",
+        "source": "qc3 W-004",
+        "scope": "crates/nexus-local-db/src/memory_fragment.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Pre-release volumes low. Consider FTS5 or keyword index at scale."
+      },
+      {
+        "id": "SEC-V131-01",
+        "title": "judge.llm and context.summarize still read raw creator_id/session_id — same IDOR pattern as fixed acp_prompt",
+        "severity": "medium",
+        "source": "pr-review O-1 (security follow-up to cursor review)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs, crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.32+",
+        "note": "Same IDOR as fixed in acp_prompt: only _creator_id/_session_id (context-injected) should be accepted. Low urgency because callers are orchestration engine itself, not user preset args — but defense-in-depth says fix it."
+      },
+      {
+        "id": "TD-V131-07",
+        "title": "parse_judge_response keyword matching can produce false positives from LLM output",
+        "severity": "low",
+        "source": "pr-review O-3",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "GO/NOGO word list matches substrings in LLM output. Consider regex anchors or parse first word of response."
+      },
+      {
+        "id": "TD-V131-08",
+        "title": "memory-augmented preset exit_when kind:rule without rule expression — may need explicit always_true",
+        "severity": "nit",
+        "source": "pr-review O-4",
+        "scope": "crates/nexus-orchestration/embedded-presets/memory-augmented/preset.yaml",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Empty rule defaults to always-true (correct for this preset). Verify loader.rs handles gracefully; add explicit rule if loader validation changes."
+      }
+    ],
     "v1.30-post-qc-tech-debt": [
       {
         "id": "TD-V130-01",

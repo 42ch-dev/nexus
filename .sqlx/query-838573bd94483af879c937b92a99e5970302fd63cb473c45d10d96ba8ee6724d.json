@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO partial_apply_states\n                (outbox_entry_id, state_json, recorded_at, retry_count)\n             VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "838573bd94483af879c937b92a99e5970302fd63cb473c45d10d96ba8ee6724d"
+}

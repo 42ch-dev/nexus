@@ -1,0 +1,75 @@
+# Memory-Augmented Preset — Agentic Design Pattern: Memory Recall + Persist
+#
+# Demonstrates the memory-augmented generation pattern (Compass §2.3):
+# 1. Recall relevant memories using creator.read_memory with a keyword filter
+# 2. Generate new content informed by recalled memories
+# 3. Persist the generated fragment as a new memory entry
+#
+# This is a linear state machine — no conditional routing.
+# Each run: recall → generate → persist → done.
+#
+# Input variables:
+#   keyword:   Keyword to filter memories for recall (required)
+#   topic:     Topic or prompt for content generation (required)
+#
+# Manual run command:
+#   nexus42 schedule add --preset memory-augmented --var keyword "..." --var topic "..."
+
+preset:
+  id: memory-augmented
+  version: 1
+  kind: creator
+  description: "Memory-augmented generation: recall, generate with context, persist as memory"
+  requires_capabilities:
+    - creator.read_memory
+    - acp.prompt
+    - creator.write_memory
+  initial: recall
+  terminal: done
+
+states:
+  - id: recall
+    description: "Recall relevant memories using keyword filter"
+    enter:
+      - kind: capability
+        name: creator.read_memory
+        args:
+          keyword: "{{preset.input.keyword}}"
+          limit: 50
+    exit_when:
+      kind: rule
+    next: generate
+
+  - id: generate
+    description: "Generate new content informed by recalled memories"
+    enter:
+      - kind: inner_graph
+        name: generate_graph
+    exit_when:
+      kind: graph_complete
+    next: persist
+
+  - id: persist
+    description: "Store the generated output as a new memory fragment"
+    enter:
+      - kind: capability
+        name: creator.write_memory
+        args:
+          content: "{{preset.input.topic}}"
+          keywords:
+            - "{{preset.input.keyword}}"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  generate_graph:
+    nodes:
+      - id: generate_with_context
+        kind: acp_prompt
+        template_file: prompts/generate-with-memory.md
+        tool_policy: auto_grant_read_only
+    output_binding: generate_with_context.text

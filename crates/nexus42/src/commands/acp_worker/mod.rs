@@ -376,7 +376,7 @@ async fn handle_initialize(
             let config = AgentConfig::new(session_id.clone(), agent_ref.to_string());
             let slot = AgentSlot::new(config);
             slot.mark_ready();
-            sessions.insert(session_id.clone(), slot);
+            sessions.insert(session_id, slot);
         } else {
             // No agent info provided — create a default session.
             let session_id = "default".to_string();
@@ -384,7 +384,7 @@ async fn handle_initialize(
                 AgentConfig::new(session_id.clone(), "claude-sonnet-4-20250514".to_string());
             let slot = AgentSlot::new(config);
             slot.mark_ready();
-            sessions.insert(session_id.clone(), slot);
+            sessions.insert(session_id, slot);
         }
 
         // R14: Create SessionCapture for each initialized session.
@@ -734,11 +734,10 @@ async fn handle_agent_stop(
     // and submit with populated metrics. Falls back to a fresh capture only
     // if no prior capture exists (e.g., sessions started before this code).
     {
-        let capture = if let Ok(mut captures) = state.session_captures.write() {
-            captures.remove(&session_id)
-        } else {
-            None
-        };
+        let capture = state
+            .session_captures
+            .write()
+            .map_or(None, |mut captures| captures.remove(&session_id));
 
         let capture = capture.unwrap_or_else(|| {
             warn!(

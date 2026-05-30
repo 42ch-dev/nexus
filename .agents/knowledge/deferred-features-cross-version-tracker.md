@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.31 Active** (FL-D Agentic Design Patterns) · **V1.30 Shipped** · Platform **paused** · Open DF rows targeting V1.31: **DF-30, DF-32–34, DF-37** · Residual SSOT: `status.json` (11 backlog items)
+**Quick status**: **V1.31 Shipped** (FL-D Agentic Design Patterns partial close) · **V1.30 Shipped** · Platform **paused** · Open FL-D DF rows: **DF-29, DF-31** · Residual SSOT: `status.json` (15 backlog items incl. 1 medium SEC-V131-01)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
@@ -53,7 +53,7 @@ Recorded product rulings for iteration planning. **Not** implementation tasks �
 | PD-09 | V1.29 primary = **Author Intelligence Loop** (FL-A + FL-B) | Shipped V1.29 |
 | PD-10 | FL-B **agent-driven**: CLI queue/status only; LLM via preset + capability | Shipped V1.29 |
 | PD-11 | V1.29 secondary = **Agent Host Batch 2** | Shipped V1.29 |
-| PD-12 | **V1.31 primary = FL-D Agentic Design Patterns** | De-stub orchestration capabilities (DF-30, DF-32–34, DF-37); 2 demonstrator presets; **out**: DF-29, DF-31, conditional routing engine. Compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md) |
+| PD-12 | **V1.31 primary = FL-D Agentic Design Patterns** | **Shipped V1.31**: de-stubbed creator memory, judge, summarization, and worker-handle capability paths plus 2 demonstrator presets; **still out**: DF-29, DF-31, conditional routing engine. Compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md) |
 
 ### 3.2 Future product lines (planning backlog)
 
@@ -63,7 +63,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 |----|--------------|------------------|-------|
 | FL-A | Creator **Memory + SOUL** build-out | **V1.29** ✅ Shipped | Session review, Experience preset, Stage0 delimiters |
 | FL-B | **KB extraction** from writing (work index → World KB) | **V1.29** ✅ Shipped | CLI queue + `kb.extract_work` preset; partial DF-35/36 |
-| FL-D | **Preset orchestration** (Agentic Design Patterns) | **V1.31** 🔄 Active | Partial scope: judge/creator/summarize de-stub + 2 presets; DF-29/31 remain deferred post-V1.31 |
+| FL-D | **Preset orchestration** (Agentic Design Patterns) | **V1.31** ✅ Partial shipped | V1.31 closed creator/judge/summarize de-stub + 2 presets; DF-29/31 remain deferred post-V1.31 |
 
 ### 3.3 Open features (deferred from compass "Out" or audit)
 
@@ -73,12 +73,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-13 | Entitlements API consumption | V1.3 | V2.0+ | M | V1.3 | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2→V1.3 | ADR-011/012/013. Platform dependency. |
 | DF-29 | `registry.refresh` (synthetic output) | V1.21 audit | Any future | M | V1.21 | **Out of V1.31** — needs network/CDN. `builtins/registry.rs`. |
-| DF-30 | `creator.read_memory` / `write_memory` / `inject_prompt` stubs | V1.21 audit | **V1.31** | M | V1.21 → V1.31 plan `creator-memory-capabilities` | Wire to `nexus-creator-memory`; prompt injection queue. |
 | DF-31 | `workspace.open` / `workspace.commit` stubs | V1.21 audit | Any future | M | V1.21 | **Out of V1.31** — `nexus-home-layout` wiring deferred. |
-| DF-32 | `judge.rule` (only `always_true`/`always_false`) | V1.21 audit | **V1.31** | S | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Real expression engine over `contextData`. |
-| DF-33 | `judge.llm` (heuristic on prompt text) | V1.21 audit | **V1.31** | S | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Real via `acp.prompt` deny_all + parse. |
-| DF-34 | `context.summarize` (`[SUMMARIZE_STUB]` marker) | V1.21 audit | **V1.31** | M | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Real LLM via `acp.prompt`. |
-| DF-37 | InnerGraphNodeTask / AcpPromptTask stub fallback | V1.21 audit | **V1.31** | S | V1.21 → V1.31 plan `judge-and-summarize-capabilities` | Worker-handle plumbing; fold with judge/summarize IPC. |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | Any future | S | V1.21 | `daemon-runtime/lifecycle/actions.rs`. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
 | DF-42 | Full Local API redesign for World/User KB | V1.24 (KCA-003) | Any future | L | V1.24 | `/v1/local/kb/*` full scoping redesign. |
@@ -111,7 +106,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 ### 3.5 Open tech-debt residuals (tracked in `status.json`)
 
-Authoritative machine state: **`status.json` root `residual_findings`** (`updated_at` **2026-05-26**). `metadata.tech_debt_summary.total_open` = **11** (TD-V130-01..11 + historical R-V113-005/007).
+Authoritative machine state: **`status.json` root `residual_findings`** (`updated_at` **2026-05-30**). `metadata.tech_debt_summary.total_open` = **15** (TD-V130-01..11 + TD-V131-01..08 + SEC-V131-01 + historical R-V113-005/007).
 
 | ID | Title | Severity | Decision | `target_date` | Scope |
 |----|-------|----------|----------|----------------|-------|
@@ -128,6 +123,15 @@ Authoritative machine state: **`status.json` root `residual_findings`** (`update
 | TD-V130-09 | Dynamic SQL (format!) not parameterized | low | accept | backlog | `reference_source.rs`, `kb_store.rs` |
 | TD-V130-10 | Extraction prompt format!() doubles memory | nit | accept | backlog | `kb_extract_work.rs` |
 | TD-V130-11 | sqlx prepare CI enforcement | low | defer | backlog | CI pipeline |
+| TD-V131-01 | Non-atomic queue claim race (SELECT-then-UPDATE) | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
+| TD-V131-02 | Keyword LIKE doesn't escape special characters | low | defer | backlog | `crates/nexus-local-db/src/memory_fragment.rs` |
+| TD-V131-03 | Unbounded IN clause in mark_consumed | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
+| TD-V131-04 | Unbounded prompt size in build_summary_prompt | low | defer | backlog | `crates/nexus-orchestration/.../context_summarize.rs` |
+| TD-V131-05 | Missing prompt injection queue cleanup | low | defer | backlog | `crates/nexus-local-db/src/prompt_injection.rs` |
+| TD-V131-06 | JSON LIKE perf degrades at scale | nit | accept | backlog | `crates/nexus-local-db/src/memory_fragment.rs` |
+| **SEC-V131-01** | **judge.llm / context.summarize IDOR — raw creator_id/session_id accepted** | **medium** | **defer** | **V1.32+** | `judge_llm.rs`, `context_summarize.rs` |
+| TD-V131-07 | parse_judge_response keyword false positives | low | defer | backlog | `judge_llm.rs` |
+| TD-V131-08 | memory-augmented preset rule without expression | nit | accept | backlog | `embedded-presets/memory-augmented/preset.yaml` |
 
 V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-convergence.json`.
 
@@ -144,7 +148,7 @@ V1.30 residuals R5–R20 closed — see `archived/residuals/v1.30-residual-conve
 
 ## 5) Related index
 
-**Active iteration**
+**Latest shipped iteration**
 
 - V1.31 delivery compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
 
@@ -166,4 +170,4 @@ External (via `.agents/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{pla
 
 ---
 
-*Created: 2026-04-21. Last updated: **2026-05-30**. Status: Active. **V1.31 Active**. **V1.30 Shipped** (2026-05-26). Platform integration paused.*
+*Created: 2026-04-21. Last updated: **2026-05-30**. Status: Active. **V1.31 Shipped** (PR review SEC-V131-01 deferred to V1.32+). **V1.30 Shipped** (2026-05-26). Platform integration paused.*
