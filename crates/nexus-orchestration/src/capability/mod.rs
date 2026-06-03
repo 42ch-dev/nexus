@@ -99,8 +99,13 @@ pub trait Capability: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// Registry of available capabilities. Built once at daemon startup.
+///
+/// Capabilities are stored in a `Vec` for ordered iteration, with a `HashMap`
+/// index for O(1) lookup by name (built lazily on first `get()` call).
 pub struct CapabilityRegistry {
     capabilities: Vec<Box<dyn Capability>>,
+    /// Lazy index: `name` → position in `capabilities`. Built on first lookup.
+    index: Option<std::collections::HashMap<&'static str, usize>>,
 }
 
 impl CapabilityRegistry {
@@ -135,7 +140,12 @@ impl CapabilityRegistry {
             Box::new(builtins::KbExtractWork::new()),
             Box::new(builtins::SoulExperienceAggregate),
         ];
-        Self { capabilities: caps }
+        let mut reg = Self {
+            capabilities: caps,
+            index: None,
+        };
+        reg.build_index();
+        reg
     }
 
     /// Create a registry with built-in capabilities and a pool.
@@ -170,7 +180,12 @@ impl CapabilityRegistry {
             Box::new(builtins::KbExtractWork::with_pool(pool)),
             Box::new(builtins::SoulExperienceAggregate),
         ];
-        Self { capabilities: caps }
+        let mut reg = Self {
+            capabilities: caps,
+            index: None,
+        };
+        reg.build_index();
+        reg
     }
 
     /// Create a registry with runtime dependencies injected.
@@ -249,24 +264,44 @@ impl CapabilityRegistry {
             Box::new(kb),
             Box::new(builtins::SoulExperienceAggregate),
         ];
-        Self { capabilities: caps }
+        let mut reg = Self {
+            capabilities: caps,
+            index: None,
+        };
+        reg.build_index();
+        reg
     }
 
     /// Create an empty registry (for testing).
     #[must_use]
     pub fn empty() -> Self {
-        Self {
+        let mut reg = Self {
             capabilities: Vec::new(),
+            index: None,
+        };
+        reg.build_index();
+        reg
+    }
+
+    /// Build the name-to-index `HashMap` for O(1) lookups.
+    ///
+    /// Called once during construction. Must be called after `capabilities` is populated.
+    fn build_index(&mut self) {
+        let mut idx = std::collections::HashMap::with_capacity(self.capabilities.len());
+        for (i, cap) in self.capabilities.iter().enumerate() {
+            idx.insert(cap.name(), i);
         }
+        self.index = Some(idx);
     }
 
     /// Look up a capability by its dot-separated name.
+    ///
+    /// Uses the pre-built `HashMap` index for O(1) amortized lookups.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&dyn Capability> {
-        self.capabilities
-            .iter()
-            .find(|c| c.name() == name)
-            .map(std::convert::AsRef::as_ref)
+        let idx = self.index.as_ref()?;
+        let pos = idx.get(name)?;
+        Some(self.capabilities[*pos].as_ref())
     }
 
     /// Iterate over all registered capabilities.
