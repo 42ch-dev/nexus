@@ -1,0 +1,36 @@
+{
+  "plan_id": "2026-06-03-v1.32-orchestration-security-followup",
+  "title": "V1.32 P3 — Close SEC-V131-01 capability identity boundary gap",
+  "status": "Done",
+  "working_branch": "feature/v1.32-orchestration-security-followup",
+  "merge_target": "feature/v1.32-preset-quality-gate",
+  "depends_on": [],
+  "metadata": {
+    "iteration": "v1.32",
+    "primary_spec": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "theme": "P3-security-followup",
+    "tracker_ids": ["SEC-V131-01"]
+  },
+  "qc_summary": {
+    "tri_review_rounds": 2,
+    "final_verdict": "Approve (3/3 after re-check)",
+    "fixes_during_review": [
+      "rev1: 1 Critical C-001 (StateCompositeTask/CapabilityTask did not inject trusted _creator_id/_session_id into args — legitimate internal callers fell to 'default')",
+      "rev2 (targeted): 0 findings, final Approve. Re-checked by same qc-specialist who found C-001, modified qc1 report in place per PM rule."
+    ]
+  },
+  "qa_summary": "judge.llm and context.summarize now read only context-injected _creator_id/_session_id (mirror acp.prompt pattern). StateCompositeTask::run() injects trusted identity at the task boundary so internal callers (orchestration engine) receive correct identity. 6 regression tests (3 per capability × 2 capabilities): raw spoof blocked, context-injected trusted, context wins on mixed input.",
+  "residual_count": 0,
+  "closed_residuals": [
+    {
+      "id": "SEC-V131-01",
+      "title": "judge.llm and context.summarize still read raw creator_id/session_id — same IDOR pattern as fixed acp_prompt",
+      "original_severity": "medium",
+      "closure": "fixed",
+      "closure_note": "Both capabilities now read only context-injected _creator_id/_session_id. Orchestration engine task boundary (StateCompositeTask::run) injects trusted context at invocation. 6 regression tests prove spoofing impossible. Defense-in-depth restored. No behavior change for legitimate (context-injected) callers. See plan 2026-06-03-v1.32-orchestration-security-followup and qc reports."
+    }
+  ],
+  "notes": "SEC-V131-01 closed. Pattern mirrors hardened acp.prompt. Caller-side fix was the critical addition; raw-args parsing in the capabilities was already correct in rev1 but the engine never populated the context.",
+  "archived_at": "2026-06-03T16:30:00+08:00"
+}

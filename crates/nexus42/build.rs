@@ -1,8 +1,8 @@
 //! Build script that generates a compile-time list of embedded preset IDs
 //! by scanning the nexus-orchestration embedded-presets directory.
 //!
-//! This allows `preset list` to show embedded presets without requiring
-//! the daemon to be running (R-M1-W03).
+//! This supports command surfaces that need embedded preset IDs without
+//! requiring the daemon to be running (R-M1-W03).
 //!
 //! ## Cross-crate build-time dependency (QC1 W-A02)
 //!
@@ -10,9 +10,9 @@
 //! Each subdirectory containing a `preset.yaml` file is treated as a preset whose ID
 //! is the directory name.
 //!
-//! **Why:** The CLI's `preset list` subcommand needs to display embedded presets
-//! without connecting to the daemon. Reading at compile time avoids a runtime
-//! dependency on nexus-orchestration's `include_dir!` from the CLI binary.
+//! **Why:** CLI/API presentation code may need to display embedded presets without
+//! connecting to the daemon. Reading at compile time avoids a runtime dependency
+//! on nexus-orchestration's `include_dir!` from the CLI binary.
 //!
 //! **Contract:**
 //! - Expects a flat directory of subdirectories under `embedded-presets/`.

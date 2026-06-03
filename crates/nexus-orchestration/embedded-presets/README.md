@@ -1,125 +1,69 @@
-# Embedded Presets — Agentic Design Pattern Demonstrators
+# Embedded Presets
 
-This directory contains two embedded presets that demonstrate agentic design patterns, composing real capabilities delivered in v1.31 (P1: creator memory, P2: judge/summarize + worker IPC).
+This directory contains embedded presets compiled into the `nexus42` binary at build time. Every subdirectory with a `preset.yaml` is automatically discovered and validated by the loader at startup.
 
-## reflection-loop — Self-Reflection Pattern
+**P1 strict validation gate**: all embedded presets are validated against the shared semantic validator (`validate_preset_semantic` + `validate_path_safety`) at test time via the `all_embedded_presets_pass_strict_validation_gate` smoke test.
 
-A linear state machine that generates, critiques, revises, and summarizes content using an LLM judge for quality gating.
+## Preset Catalog
 
-### State Flow
+| Preset | Pattern | States | Description |
+|--------|---------|--------|-------------|
+| `kb-extract` | Knowledge extraction | loading → extracting → done | Extract structured KeyBlocks from work-scope KB entries |
+| `memory-augmented` | Memory recall + persist | recall → generate → persist → done | Recall memories, generate content, persist as new memory |
+| `novel-writing` | Multi-phase writing | gathering → brainstorming → outlining → drafting → done | Multi-agent novel writing with roles (writer, reviewer) |
+| `reflection-loop` | Self-reflection | draft → revise → summarize → done | Generate, critique, revise, and summarize with LLM judge |
+| `research` | Research workflow | scanning → extracting → synthesizing → done | Scan references, extract content, produce structured reports |
+| `soul-experience-refresh` | SOUL maintenance | aggregate → done | Aggregate long-term memories into SOUL Experience section |
 
-```
-draft → revise → summarize → done
-```
+## Manual Run
 
-| State     | Enter                    | Exit When                     | Next      |
-|-----------|--------------------------|-------------------------------|-----------|
-| draft     | `acp.prompt` (generate)  | `judge.llm` (quality check)   | revise    |
-| revise    | `acp.prompt` (critique)  | `judge.llm` (quality check)   | summarize |
-| summarize | `context.summarize`      | manual                        | done      |
-| done      | *(terminal)*             | —                             | —         |
-
-### Capabilities Required
-
-- `acp.prompt` — LLM generation for draft and revision steps
-- `judge.llm` — Quality evaluation at draft and revise exit gates
-- `context.summarize` — Condense the final refined output
-
-### Input Variables
-
-| Variable | Required | Description                          |
-|----------|----------|--------------------------------------|
-| `topic`  | Yes      | The topic or task to draft about     |
-| `content`| No       | Optional seed content for the draft  |
-
-### Manual Run
+All presets are invoked via the daemon scheduler:
 
 ```bash
-nexus42 schedule add \
+# Example: run reflection-loop
+nexus42 daemon schedule add \
   --preset reflection-loop \
-  --var topic "Explain quantum computing in simple terms" \
-  --var content "Focus on superposition and entanglement"
-```
+  --creator <creator-id> \
+  --seed "Explain quantum computing in simple terms"
 
-### Prompt Templates
-
-| File                            | Purpose                                |
-|---------------------------------|----------------------------------------|
-| `prompts/generate-draft.md`     | Initial draft generation prompt        |
-| `prompts/draft-quality-check.md`| Judge prompt for draft evaluation      |
-| `prompts/apply-critique.md`     | Revision prompt applying feedback      |
-| `prompts/revise-quality-check.md`| Judge prompt for revision evaluation  |
-| `prompts/summarize-output.md`   | Summary generation prompt              |
-
----
-
-## memory-augmented — Memory Recall + Persist Pattern
-
-A linear state machine that recalls relevant memories, generates new content informed by those memories, and persists the result as a new memory fragment.
-
-### State Flow
-
-```
-recall → generate → persist → done
-```
-
-| State    | Enter                         | Exit When   | Next     |
-|----------|-------------------------------|-------------|----------|
-| recall   | `creator.read_memory`         | rule        | generate |
-| generate | `acp.prompt` (with context)   | graph_complete | persist |
-| persist  | `creator.write_memory`        | manual      | done     |
-| done     | *(terminal)*                  | —           | —        |
-
-### Capabilities Required
-
-- `creator.read_memory` — Recall memories by keyword
-- `acp.prompt` — Generate content using recalled memories as context
-- `creator.write_memory` — Store the generated output as a new memory
-
-### Input Variables
-
-| Variable | Required | Description                          |
-|----------|----------|--------------------------------------|
-| `keyword`| Yes      | Keyword to filter memories for recall|
-| `topic`  | Yes      | Topic for content generation         |
-
-### Manual Run
-
-```bash
-nexus42 schedule add \
+# Example: run memory-augmented
+nexus42 daemon schedule add \
   --preset memory-augmented \
-  --var keyword "character-development" \
-  --var topic "Write a character arc for the antagonist"
+  --creator <creator-id> \
+  --seed "Write a character arc for the antagonist"
+
+# Example: run kb-extract
+nexus42 daemon schedule add --preset kb-extract --creator <creator-id>
+
+# Example: run soul-experience-refresh
+nexus42 daemon schedule add --preset soul-experience-refresh --creator <creator-id>
+# Or use the one-shot CLI command:
+nexus42 creator soul refresh-experience
 ```
-
-### Prompt Templates
-
-| File                               | Purpose                                  |
-|------------------------------------|------------------------------------------|
-| `prompts/recall-memory.md`         | Memory recall context description        |
-| `prompts/generate-with-memory.md`  | Generation prompt with recalled memories |
-| `prompts/persist-memory.md`        | Persistence step description             |
-
----
 
 ## Validation
 
-Both presets are embedded at compile time and validated by the loader at startup.
+All presets are embedded at compile time and validated by the loader at startup. The P1 strict validation gate runs at test time:
 
 ```bash
+# Run the embedded preset smoke test (B1/B2)
+cargo test -p nexus-orchestration -- all_embedded_presets_pass
+
 # Run preset-specific tests
 cargo test -p nexus-orchestration -- reflection_loop
 cargo test -p nexus-orchestration -- memory_augmented
+cargo test -p nexus-orchestration -- kb_extract
 
-# Run full validation
+# Run full validation suite
 cargo test -p nexus-orchestration
 cargo clippy -p nexus-orchestration -- -D warnings
 ```
 
 ## Design Notes
 
-- Both presets are **linear state machines** with no conditional routing (`ConditionalNotYetSupported` remains enforced)
-- Neither preset uses multi-agent roles (single-agent mode)
+- All presets are **linear state machines** with no conditional routing (`ConditionalNotYetSupported` remains enforced)
+- Multi-agent presets (novel-writing, research) use the `roles` section; others are single-agent
 - Prompt templates use Handlebars syntax (`{{preset.input.*}}`)
 - The `context.summarize` capability in reflection-loop requires a worker at runtime; in standalone mode it returns `WorkerUnavailable`
 - The `creator.read_memory` / `creator.write_memory` capabilities work in standalone mode (return stubs) and with a pool (real persistence)
+- `exit_when: kind: rule` with no expression is the explicit always-true (immediate transition) form — the state advances as soon as its enter action completes

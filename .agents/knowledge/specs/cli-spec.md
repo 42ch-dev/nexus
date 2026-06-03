@@ -324,7 +324,6 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 - `nexus42 daemon start|stop|restart|status|logs|doctor`
 - `nexus42 daemon schedule add|edit|remove|list|inspect|context|context-history|start|pause|resume|cancel|advance|timeline`
-- `nexus42 daemon orchestrate list|run|pause|resume|cancel|inspect`（Deferred/stubbed until explicit session-control wrappers are implemented）
 
 说明：
 
@@ -332,7 +331,23 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 - `daemon` 负责运行态控制，不承载 ACP 协议协商职责。
 - **Shipped:** `daemon schedule ...` is wired to the daemon orchestration schedules Local API (`/v1/local/orchestration/schedules/*`) via `commands/daemon/schedule.rs`.
 - **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
-- **Deferred:** `daemon orchestrate ...` remains a stubbed compatibility surface until explicit session-control wrappers are implemented; scripts should prefer `daemon schedule ...` for shipped orchestration control.
+- **Removed:** `daemon orchestrate ...` is not a shipped compatibility surface. Do not document `daemon orchestrate run` in new plans or runbooks; use `daemon schedule ...` for shipped orchestration control unless a future plan intentionally introduces a new session-control wrapper.
+
+### 6.3A Preset management and validation surfaces
+
+Current shipped CLI surface:
+
+- `nexus42 system preset list` — lists registered `_system.*` presets only.
+- `nexus42 daemon schedule add --preset <id> --creator <id>` — starts preset-driven workflows through schedules.
+
+Current shipped Local API surface:
+
+- `GET /v1/local/presets`
+- `POST /v1/local/presets`
+- `POST /v1/local/presets:validate`
+- `POST /v1/local/presets/{id}:reload`
+
+There is currently **no** top-level `nexus42 preset ...` command group and no shipped `nexus42 preset validate <path>` command. New docs must not present those as current commands. If V1.32 or later reintroduces an agent-friendly preset validation CLI, update this section and the command-surface contract tests in the same plan.
 
 ### 6.4 `nexus42 acp`（能力协议命令组）
 

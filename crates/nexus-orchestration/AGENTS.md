@@ -39,9 +39,11 @@ User-installed presets are fully supported. The composable search order (highest
 - Maximum nesting depth (default 10, `DEFAULT_MAX_YAML_DEPTH`)
 - Violations produce `PresetLoadError::YamlSizeExceeded` / `PresetLoadError::YamlDepthExceeded`
 
-### CLI Validation
+### Validation Surfaces
 
-`nexus42 preset validate <path>` checks a preset YAML file for:
+The current shipped CLI has **no** top-level `nexus42 preset validate <path>` command. Preset validation is available through the daemon Local API (`POST /v1/local/presets:validate`) and through loader/tests in `nexus-orchestration`. If a future plan adds a CLI wrapper, update `cli-spec.md`, command-surface tests, and this file in the same change.
+
+The validation path should check a preset YAML/bundle for:
 - Valid YAML syntax
 - Size and depth limit compliance
 - Structural correctness (required fields, valid state references)
