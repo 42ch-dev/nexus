@@ -43,7 +43,7 @@ generated_at: 2026-04-10T23:59:59Z
 
 - Finding ID: W-TD9-SCOPE
 - Source Type: manual-reasoning
-- Source Reference: `.agents/archived/knowledge/daemon-lifecycle-api-legacy.md` (archived 2026-04-17), `crates/nexus42d/src/api/handlers/runtime.rs`
+- Source Reference: `.mstar/archived/knowledge/daemon-lifecycle-api-legacy.md` (archived 2026-04-17), `crates/nexus42d/src/api/handlers/runtime.rs`
 - Confidence: High
 
 ## Summary
@@ -79,4 +79,4 @@ generated_at: 2026-04-10T23:59:59Z
 
 ## Postscript (2026-04-11)
 
-`v1-tech-debt-cleanup` is a **long-lived** V1.x plan. Marking it **Done** after Batch D was incorrect for program intent: **V1.2 (Batch E) remains part of V1**, not a separate plan exit. **Restored** `status` to **InProgress**, removed `archived_record` from the live row, and renamed the C+D snapshot to `archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json` (audit/history only). See `notes.json` and updated `.agents/plans/v1-tech-debt-cleanup.md`.
+`v1-tech-debt-cleanup` is a **long-lived** V1.x plan. Marking it **Done** after Batch D was incorrect for program intent: **V1.2 (Batch E) remains part of V1**, not a separate plan exit. **Restored** `status` to **InProgress**, removed `archived_record` from the live row, and renamed the C+D snapshot to `archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json` (audit/history only). See `notes.json` and updated `.mstar/plans/v1-tech-debt-cleanup.md`.

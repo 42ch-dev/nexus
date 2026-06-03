@@ -4,8 +4,8 @@
 **Supersedes (API inventory only)**: [v1.20-delivery-compass-v1.md](../../iterations/v1.20-delivery-compass-v1.md) §3–§7 (shipped 2026-05-19) — authoritative for `/v1/local/*` routes, auth (`X-API-Key`), agent-host namespace, removed world/explore daemon proxies
 **Created**: 2026-05-10
 **Author**: fullstack-dev (research + design task)
-**Plan ref**: `.agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md`
-**Compass ref**: `.agents/iterations/v1.15-delivery-compass-v1.md`
+**Plan ref**: `.mstar/plans/2026-05-10-v1.15-orchestration-first-pipeline.md`
+**Compass ref**: `.mstar/iterations/v1.15-delivery-compass-v1.md`
 
 > **Route inventory warning**: §1 tables describe the **pre-V1.20** daemon surface (`/acp/*`, `/world/*`, `/explore/*`). After V1.20, use the compass §3 inventory and `crates/nexus-daemon-runtime/src/api/mod.rs`. D1–D7 (agent-mediated workspace writes) remain valid.
 

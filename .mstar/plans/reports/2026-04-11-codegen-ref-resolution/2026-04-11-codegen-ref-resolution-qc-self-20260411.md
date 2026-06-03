@@ -56,7 +56,7 @@ generated_at: "2026-04-11"
 | Regenerated output only (no hand edits under `*/generated/`) | Done | `pnpm run codegen` drives TS/Rust output |
 | Downstream compiles | Done | `cargo clippy --all -- -D warnings` |
 | Close PUBLISH-CODEGEN-01 & FORK-SNAP-01 | Done | `archived/residuals/2026-04-10-cli-publish-workflow-parity.json`, `archived/residuals/2026-04-10-cli-fork-world-snapshot-parity.json`; `residual_findings` cleared |
-| Plan SSOT | Done | `.agents/status.json`, `notes.json`, this report |
+| Plan SSOT | Done | `.mstar/status.json`, `notes.json`, this report |
 
 ## Verification
 

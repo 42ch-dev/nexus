@@ -7,7 +7,7 @@
 **Scope**: `crates/nexus-contracts`, `nexus-domain`, `nexus-local-db`, `nexus-sync`, `nexus42` (CLI), `nexus42d` (daemon)  
 **Benchmark**: `v1-spec/` (architecture/v1.md, domain/data-model-v1.md, cli-sync/cli-spec-v1.md, acp-runtime/acp-client-tech-spec-legacy.md, cli-sync/sync-contract-v1.md)
 
-**Authoritative execution SSOT**: Open **residual rows** and plan lifecycle live in [`.agents/status.json`](../status.json) (**root** `residual_findings`, `plans[]`). This document states **intent and narrative**; if a statement here disagrees with `status.json`, **fix this document** in the same change set that updates the SSOT file.
+**Authoritative execution SSOT**: Open **residual rows** and plan lifecycle live in [`.mstar/status.json`](../status.json) (**root** `residual_findings`, `plans[]`). This document states **intent and narrative**; if a statement here disagrees with `status.json`, **fix this document** in the same change set that updates the SSOT file.
 
 **Related Documents**:
 

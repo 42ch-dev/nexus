@@ -7,7 +7,7 @@ Engineering reference and **spec index** for the Nexus OSS repo.
 | **[`specs/`](specs/README.md)** | Functional & normative specifications (CLI, daemon, ACP, orchestration, **`specs/`** v1 frozen module) |
 | **This directory (root files)** | Cross-cutting rules and trackers — not feature specs |
 
-Iteration compasses: [`.agents/iterations/`](../iterations/README.md). Conventions: [AGENTS.md](AGENTS.md). Harness: [`.agents/AGENTS.md`](../AGENTS.md).
+Iteration compasses: [`.mstar/iterations/`](../iterations/README.md). Conventions: [AGENTS.md](AGENTS.md). Harness: [`.mstar/AGENTS.md`](../AGENTS.md).
 
 ## Index (knowledge root — rules & reference)
 
@@ -24,5 +24,5 @@ All feature and local normative documents: **[`specs/README.md`](specs/README.md
 
 ## Archived
 
-- Implementation knowledge supersession: [`.agents/archived/knowledge/`](../archived/knowledge/README.md)
-- Shipped / closed feature tracker: [`.agents/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md)
+- Implementation knowledge supersession: [`.mstar/archived/knowledge/`](../archived/knowledge/README.md)
+- Shipped / closed feature tracker: [`.mstar/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md)

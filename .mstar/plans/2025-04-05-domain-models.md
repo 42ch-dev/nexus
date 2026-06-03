@@ -991,10 +991,10 @@ Expected: Full workspace builds (contracts + domain)
 ## Completion
 
 After all tasks complete:
-- [ ] Update `.agents/status.json` - mark domain-models as `completed`
+- [ ] Update `.mstar/status.json` - mark domain-models as `completed`
 - [ ] Push feature branch: `git push origin feature/v1.0-domain-models`
 - [ ] Create PR or merge (user decision)
 
 ---
 
-**Plan saved to:** `.agents/plans/2025-04-05-domain-models.md`
+**Plan saved to:** `.mstar/plans/2025-04-05-domain-models.md`

@@ -565,8 +565,8 @@ These items must be resolved before starting V1.0-phase2 feature work:
 - `packages/nexus-contracts/` (full structure — via subagent)
 
 **Plans and Status:**
-- `.agents/status.json` (792 lines — full residual findings)
-- `.agents/knowledge/README.md`
+- `.mstar/status.json` (792 lines — full residual findings)
+- `.mstar/knowledge/README.md`
 
 ### Finding Summary
 

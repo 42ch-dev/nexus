@@ -290,7 +290,7 @@ let config: Config = figment.extract()?;
 When a decision in §2 needs to change (new requirement, crate EOL, security advisory, etc.):
 
 1. **Problem statement + candidates** — describe what the current decision fails to cover; enumerate at least two candidates (may include "keep current").
-2. **Comparison** — evaluate across the same dimensions used in this document's research log (dep footprint, safety, async fit, error quality, test cost, maintenance risk). Record in a new entry under `.agents/plans/reports/<YYYY-MM-DD-crate-<topic>-research>/research-log.md`.
+2. **Comparison** — evaluate across the same dimensions used in this document's research log (dep footprint, safety, async fit, error quality, test cost, maintenance risk). Record in a new entry under `.mstar/plans/reports/<YYYY-MM-DD-crate-<topic>-research>/research-log.md`.
 3. **Decision** — update the affected row in §2, bump this file to `v<N+1>` if the change is substantive (otherwise in-place amendment with a dated note is fine), and update consumers per §5.
 4. **Impact tracking** — any code / plan changes flow through the normal plan system; they do not bypass this document.
 

@@ -1,7 +1,7 @@
 {
   "id": "2026-04-10-v1-spec-wire-schema-sprint",
   "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
-  "file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
+  "file": ".mstar/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
   "status": "Done",
   "owner": "@project-manager",
   "agents": [
@@ -18,7 +18,7 @@
   "created_at": "2026-04-10",
   "updated_at": "2026-04-10",
   "done_at": "2026-04-10",
-  "notes": "Delivered: wire SSOT for conceptual rows 16–20 — explore-creator-card; social-graph-*; memory-web-list-*; explore-ai-*; notifications-*. Coverage: .agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. Handoff: handoff-note-20260410.md. @42ch/nexus-contracts 0.2.2. TS codegen: array-of-$ref → CommonTypes imports (tooling/codegen). Row 21 (OpenAPI freeze audit) is cross-repo process, not a schema file. Branch: feature/v1-spec-wire-schema-sprint. Merged to main 2026-04-10 (fast-forward).",
+  "notes": "Delivered: wire SSOT for conceptual rows 16–20 — explore-creator-card; social-graph-*; memory-web-list-*; explore-ai-*; notifications-*. Coverage: .mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. Handoff: handoff-note-20260410.md. @42ch/nexus-contracts 0.2.2. TS codegen: array-of-$ref → CommonTypes imports (tooling/codegen). Row 21 (OpenAPI freeze audit) is cross-repo process, not a schema file. Branch: feature/v1-spec-wire-schema-sprint. Merged to main 2026-04-10 (fast-forward).",
   "metadata": {
     "priority": "critical",
     "phase": "contract-ssot",
@@ -33,7 +33,7 @@
       "21-contracts-openapi-freeze-audit"
     ],
     "spec_refs": [
-      ".agents/iterations/v1.1-overview-v2.md"
+      ".mstar/iterations/v1.1-overview-v2.md"
     ],
     "working_branch": "feature/v1-spec-wire-schema-sprint",
     "merge_target": "main",
@@ -47,9 +47,9 @@
       "fmt": "passed (nightly rustfmt)",
       "typecheck": "passed (pnpm)",
       "nexus_contracts_tests": "passed (cargo test -p nexus-contracts; 0 tests)",
-      "coverage_matrix": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md",
-      "handoff": ".agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/handoff-note-20260410.md",
-      "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
+      "coverage_matrix": ".mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md",
+      "handoff": ".mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/handoff-note-20260410.md",
+      "qc_triple_review": "approved (2026-04-10) — .mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
     }
   }
 }

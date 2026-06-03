@@ -118,4 +118,4 @@ None.
 **Issues/Risks**: 4 suggestions (all low severity). No Critical/Warning findings. Lint gate not verified locally.
 **Plan Update**: PM to note lint evidence gap — recommend CI run confirm clippy/fmt clean before merge.
 **Handoff**: @project-manager
-**Git**: Not committed — bash tool was blocked for `git add` / `git commit` operations in this session. Report written to `.agents/plans/reports/2026-04-20-v1.6-ws-c-permission-cli/`. PM should run `git add .agents/plans/reports/2026-04-20-v1.6-ws-c-permission-cli/qc3-ws-c-permission-cli.md && git commit -m "docs(qc): 2026-04-20-v1.6-ws-c-permission-cli qc3 report"` in the repository root.
+**Git**: Not committed — bash tool was blocked for `git add` / `git commit` operations in this session. Report written to `.mstar/plans/reports/2026-04-20-v1.6-ws-c-permission-cli/`. PM should run `git add .mstar/plans/reports/2026-04-20-v1.6-ws-c-permission-cli/qc3-ws-c-permission-cli.md && git commit -m "docs(qc): 2026-04-20-v1.6-ws-c-permission-cli qc3 report"` in the repository root.

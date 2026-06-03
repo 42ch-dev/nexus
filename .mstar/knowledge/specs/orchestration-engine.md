@@ -906,7 +906,7 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 | [daemon-lifecycle-api-legacy.md](../../archived/knowledge/daemon-lifecycle-api-legacy.md) (archived) | [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md)  |
 | [acp-client-tech-spec-legacy.md](../../archived/knowledge/acp-client-tech-spec-legacy.md) (archived) | [acp-client-tech-spec.md](acp-client-tech-spec.md)  |
 
-**Archived 2026-04-17** (historical): v1 lifecycle/ACP companion files moved to `.agents/archived/knowledge/`. This orchestration-engine spec remains **active** under `.agents/knowledge/specs/` (structure paths in §3–§8 may lag implementation; semantics remain authoritative).
+**Archived 2026-04-17** (historical): v1 lifecycle/ACP companion files moved to `.mstar/archived/knowledge/`. This orchestration-engine spec remains **active** under `.mstar/knowledge/specs/` (structure paths in §3–§8 may lag implementation; semantics remain authoritative).
 
 ---
 

@@ -1,10 +1,10 @@
 # Archived Knowledge
 
-Superseded or cold-storage implementation knowledge documents. Active SSOT lives in [`.agents/knowledge/`](../../knowledge/README.md).
+Superseded or cold-storage implementation knowledge documents. Active SSOT lives in [`.mstar/knowledge/`](../../knowledge/README.md).
 
 Paths in archived plan JSON / metadata may still point here for historical reference.
 
-**Not in this directory:** cross-version **shipped feature tracker** history → [`.agents/archived/shipped-features-tracker.md`](../shipped-features-tracker.md).
+**Not in this directory:** cross-version **shipped feature tracker** history → [`.mstar/archived/shipped-features-tracker.md`](../shipped-features-tracker.md).
 
 ## Index
 

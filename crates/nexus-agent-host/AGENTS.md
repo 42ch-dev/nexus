@@ -44,4 +44,4 @@ process adapters. It normalizes ACP providers and native CLI providers behind na
 
 ## Design Reference
 
-See `.agents/iterations/v1.18-delivery-compass-v1.md` for the authoritative design spec.
+See `.mstar/iterations/v1.18-delivery-compass-v1.md` for the authoritative design spec.

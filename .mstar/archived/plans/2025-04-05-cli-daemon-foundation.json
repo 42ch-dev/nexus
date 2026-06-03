@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-cli-daemon-foundation",
     "title": "CLI + Daemon Foundation",
-    "file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
+    "file": ".mstar/plans/2025-04-05-cli-daemon-foundation.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -25,10 +25,10 @@
       "branch_policy": "feature/v1.0-cli-daemon from main",
       "priority": "high",
       "description": "Implement nexus42 CLI and nexus42d daemon with dual-subject auth, Creator/Manuscript/Research command surfaces, HTTP Local API, and SQLite workspace state",
-      "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+      "review_report": ".mstar/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
       "review_verdict": "Request Changes → Resolved (CLI-R1..R4)",
       "qc_status": "APPROVE — CONS-H1 and CONS-H2 fixed",
-      "qc_report": ".agents/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc-consolidated.md",
+      "qc_report": ".mstar/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc-consolidated.md",
       "qc_resolved": [
         "CONS-H1: Formatting violations",
         "CONS-H2: Auth file permissions"

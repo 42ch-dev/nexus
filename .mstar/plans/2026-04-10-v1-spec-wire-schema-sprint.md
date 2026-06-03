@@ -14,7 +14,7 @@
 
 ## Authoritative design input (read order)
 
-Design prose is **not** vendored in this public tree. Contributors resolve paths via `**.agents/local-paths.json`** (gitignored) → private **nexus-platform** checkout:
+Design prose is **not** vendored in this public tree. Contributors resolve paths via `**.mstar/local-paths.json`** (gitignored) → private **nexus-platform** checkout:
 
 
 | Layer                                        | Role                                                                                                                                                            |
@@ -39,7 +39,7 @@ Design prose is **not** vendored in this public tree. Contributors resolve paths
 
 ## Acceptance criteria
 
-- **Coverage matrix** (committed under `.agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`): each **minimal-freeze-set** route family × **schema file** × **v1-spec anchor** × **platform plan id** (16–20) × status (done / gap / N/A).
+- **Coverage matrix** (committed under `.mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`): each **minimal-freeze-set** route family × **schema file** × **v1-spec anchor** × **platform plan id** (16–20) × status (done / gap / N/A).
 - New or updated JSON Schemas under `schemas/` for **all identified gaps** blocking **16–20**, including at minimum the wire envelopes implied by those plans (Explore creators list/detail projections, social graph mutations + feed, memory web read, explore AI Q&A/summary, notifications list/read).
 - `pnpm run validate-schemas` + `pnpm run codegen` clean; `git diff --exit-code` on generated dirs **clean** after commit.
 - `cargo clippy --all -- -D warnings` + `cargo test -p nexus-contracts` (and any crate touched).

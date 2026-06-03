@@ -10,7 +10,7 @@ All spec files live **flat** in this directory (kebab-case filenames, no version
 
 ## Platform cross-repo references
 
-When a spec needs platform architecture, shared contracts, or ADRs, cite **`nexus-platform`** paths (side-by-side checkout: `../nexus-platform/.agents/designs/...`):
+When a spec needs platform architecture, shared contracts, or ADRs, cite **`nexus-platform`** paths (side-by-side checkout: `../nexus-platform/.mstar/designs/...`):
 
 | Need | Platform path |
 | --- | --- |
@@ -33,7 +33,7 @@ When specs overlap, use this order (higher wins on conflict):
 6. **Topology / process** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md).
 7. **Local persistence / stores** — [local-db-schema.md](local-db-schema.md), [reference-store-layout.md](reference-store-layout.md).
 8. **Subsystem specs** — [orchestration-engine.md](orchestration-engine.md), [agent-host.md](agent-host.md), feature contracts (`novel-writing-sync-contract.md`, …).
-9. **Iteration compasses** — [`.agents/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
+9. **Iteration compasses** — [`.mstar/iterations/`](../../iterations/README.md) — delivery milestones only; do not duplicate long-term rules from (2).
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → renamed **2026-05-20** to `local-cloud-crate-architecture.md`.
 

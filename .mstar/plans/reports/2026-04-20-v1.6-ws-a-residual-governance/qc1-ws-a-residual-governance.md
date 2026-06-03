@@ -153,8 +153,8 @@ The `pool` field on `Scheduler` is retained with `#[allow(dead_code)]` and a com
 | `crates/nexus-orchestration/src/scheduler/mod.rs` | R3: -45/+8 lines | Deep — dead code removal verified, doc issues noted |
 | `crates/nexus-orchestration/src/engine.rs` | R6: +147 lines | Deep — reconstruction logic, test coverage, edge cases |
 | `crates/nexus-orchestration/tests/cron_trigger.rs` | R3: -6/+5 lines | Medium — test update consistent with R3 change |
-| `.agents/plans/2026-04-20-v1.6-ws-a-residual-governance.md` | Plan documentation | Medium — evidence claims reviewed |
-| `.agents/iterations/v1.6-delivery-compass-v1.md` | New compass document | Light — scope validation only |
+| `.mstar/plans/2026-04-20-v1.6-ws-a-residual-governance.md` | Plan documentation | Medium — evidence claims reviewed |
+| `.mstar/iterations/v1.6-delivery-compass-v1.md` | New compass document | Light — scope validation only |
 
 ---
 

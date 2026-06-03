@@ -3,7 +3,7 @@
 **Status**: Archived (append-only)  
 **Purpose**: Long-term **append-only** archive for closed deferred-feature tracker rows (shipped, cancelled, superseded) and per-version delivery snapshots. The **active** open/backlog tracker lives in [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md).  
 **Scope**: `nexus` OSS repository only.  
-**Location**: Top-level harness archive (`.agents/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
+**Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
 **Last updated**: 2026-06-03
@@ -140,7 +140,7 @@ When a version ships, append new closed rows here and remove them from the activ
 | Delivery SSOT | [v1.14-delivery-compass-v1.md](../iterations/v1.14-delivery-compass-v1.md)（§0 scope lock **合并于**本 compass） |
 | Machine state | `status.json` `plans[]` **空**；`residual_findings` 仅 **R-V113-005** / **R-V113-007**（accepted / backlog） |
 | Platform execution | **Done** — `nexus-platform` Plans **86–87**（rate-limit/JWKS + OpenAPI doc batch）；详见平台仓 `status.json` `metadata.tech_debt_summary.note` |
-| Cross-repo gates | Canonical: `nexus-platform/.agents/knowledge/v1.14-program-compass-v1.md` §5 |
+| Cross-repo gates | Canonical: `nexus-platform/.mstar/knowledge/v1.14-program-compass-v1.md` §5 |
 
 ### V1.15 delivery snapshot (Done)
 

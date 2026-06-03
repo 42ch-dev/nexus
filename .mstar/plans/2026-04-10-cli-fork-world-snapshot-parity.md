@@ -12,7 +12,7 @@
 
 ## Authoritative design input
 
-- [.agents/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md)
+- [.mstar/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md)
 - Domain: `crates/nexus-domain/src/fork_branch.rs`, `pairing.rs`
 - Residual **DM-R3** (edge tests) may partially overlap — coordinate with `v1-tech-debt-cleanup` to avoid duplicate work.
 

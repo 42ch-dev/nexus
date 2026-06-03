@@ -1,7 +1,7 @@
 {
   "id": "2026-04-10-cli-explore-read-parity",
   "title": "CLI Explore (Read) Parity",
-  "file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
+  "file": ".mstar/plans/2026-04-10-cli-explore-read-parity.md",
   "status": "Done",
   "owner": "@project-manager",
   "agents": [
@@ -17,13 +17,13 @@
   "created_at": "2026-04-10",
   "updated_at": "2026-04-10",
   "done_at": "2026-04-10",
-  "notes": "Delivered: platform Explore schemas (explore-*); SyncClient explore_browse/search (POST /v1/explore/browse|search); daemon POST /v1/local/explore/browse|search; CLI `nexus42 explore browse|search` (--dry-run, global -o json). Wiremock: crates/nexus-sync/tests/explore_client.rs. Sprint matrix: .agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. QC self: .agents/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md. @42ch/nexus-contracts npm 0.2.1 (additive). Branch: feature/cli-explore-read-parity. Merged to main 2026-04-10 via integration branch feature/v1-spec-wire-schema-sprint (fast-forward).",
+  "notes": "Delivered: platform Explore schemas (explore-*); SyncClient explore_browse/search (POST /v1/explore/browse|search); daemon POST /v1/local/explore/browse|search; CLI `nexus42 explore browse|search` (--dry-run, global -o json). Wiremock: crates/nexus-sync/tests/explore_client.rs. Sprint matrix: .mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md. QC self: .mstar/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md. @42ch/nexus-contracts npm 0.2.1 (additive). Branch: feature/cli-explore-read-parity. Merged to main 2026-04-10 via integration branch feature/v1-spec-wire-schema-sprint (fast-forward).",
   "metadata": {
     "priority": "medium",
     "platform_capability_ref": "12-explore-api (conceptual cross-repo id)",
     "dependency": "2026-04-10-v1-spec-wire-schema-sprint",
     "spec_refs": [
-      ".agents/iterations/v1.1-overview-v2.md"
+      ".mstar/iterations/v1.1-overview-v2.md"
     ],
     "working_branch": "feature/cli-explore-read-parity",
     "merge_target": "main",
@@ -35,8 +35,8 @@
       "fmt": "passed (nightly rustfmt)",
       "typecheck": "passed (pnpm)",
       "validate_schemas": "passed (pnpm)",
-      "qc_self_report": ".agents/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md",
-      "qc_triple_review": "approved (2026-04-10) — .agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
+      "qc_self_report": ".mstar/plans/reports/2026-04-10-cli-explore-read-parity/2026-04-10-cli-explore-read-parity-qc-self-20260410.md",
+      "qc_triple_review": "approved (2026-04-10) — .mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc-consolidated.md"
     }
   }
 }

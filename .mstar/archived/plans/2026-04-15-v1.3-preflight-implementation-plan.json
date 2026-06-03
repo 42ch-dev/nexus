@@ -1,7 +1,7 @@
 {
   "id": "2026-04-15-v1.3-preflight-implementation-plan",
   "title": "V1.3 Preflight Implementation Plan",
-  "file": ".agents/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
+  "file": ".mstar/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
   "status": "Done",
   "owner": "@project-manager",
   "agents": [
@@ -25,7 +25,7 @@
     "dependency": [
       "2026-04-14-v1.2-regression-suite"
     ],
-    "plan_source": ".agents/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md",
+    "plan_source": ".mstar/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md",
     "working_branch": "feature/v1.3-preflight",
     "gates": {
       "qc_status": "Approve (C-001 fixed, W-001~W-007 fixed, W-003 ignored)",

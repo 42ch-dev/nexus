@@ -128,7 +128,7 @@ All 9 suggestions (S1-S9) are non-blocking and align with QA observations above.
 
 ## Phase Gate Checklist
 
-- [x] Plan exists at `.agents/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md`
+- [x] Plan exists at `.mstar/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md`
 - [x] Plan contains `tasks` section with task IDs T0-T9
 - [x] QC reports exist: `qc-reviewer-1.md` and `qc-reviewer-3.md`
 - [x] Implementation scope matches plan tasks (no plan-out-of-scope code detected)
@@ -167,7 +167,7 @@ All 9 suggestions (S1-S9) are non-blocking and align with QA observations above.
 **Task**: QA Verification — Multi-Agent Worker (WS-E)  
 **Status**: Partial — 23/24 criteria pass, 1 test failure blocks merge  
 **Scope Delivered**: Full verification of all 24 acceptance criteria across core functionality, DTOs/config, engine integration, CI gates, and QC fixes  
-**Artifacts**: QA report at `.agents/plans/reports/2026-04-21-v1.7-ws-e-multi-agent-worker/qa-report.md`  
+**Artifacts**: QA report at `.mstar/plans/reports/2026-04-21-v1.7-ws-e-multi-agent-worker/qa-report.md`  
 **Validation**: 
 - `cargo build --workspace` — clean
 - `cargo clippy --all -- -D warnings` — clean  

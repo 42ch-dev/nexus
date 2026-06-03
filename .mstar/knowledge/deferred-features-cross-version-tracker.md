@@ -145,7 +145,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 - Iteration index: [iterations/README.md](../iterations/README.md)
 - Machine state: [status.json](../status.json)
 
-External (via `.agents/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{platform-designs}/roadmap.md`
+External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{platform-designs}/roadmap.md`
 
 ---
 

@@ -7,7 +7,7 @@ This directory holds all iteration-scoped specs, including:
 - `*-delivery-compass-*.md` — version delivery compasses (scope, milestones, acceptance, risk)
 - Legacy `v1.*` compass artifacts (overview, matrix, program notes) with non-standard names
 
-Implementation-detail SSOT that is not iteration-scoped stays in [`.agents/knowledge/`](../knowledge/README.md).
+Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowledge/`](../knowledge/README.md).
 
 ## Index
 

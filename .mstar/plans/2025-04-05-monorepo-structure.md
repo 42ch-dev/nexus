@@ -766,10 +766,10 @@ Expected: TypeScript typecheck passes
 ## Completion
 
 After all tasks complete:
-- [ ] Update `.agents/status.json` with completion status
+- [ ] Update `.mstar/status.json` with completion status
 - [ ] Create git tag: `git tag v0.1.0-structure -a -m "Phase 0: Monorepo structure initialized"`
 - [ ] Push to remote: `git push origin main --tags`
 
 ---
 
-**Plan saved to:** `.agents/plans/2025-04-05-monorepo-structure.md`
+**Plan saved to:** `.mstar/plans/2025-04-05-monorepo-structure.md`

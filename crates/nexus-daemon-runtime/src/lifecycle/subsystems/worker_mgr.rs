@@ -12,7 +12,7 @@
 //! - On `shutdown()`: calls `registry.shutdown_all()` for graceful termination.
 //! - Exposes `registry()` for engine/HTTP to spawn and manage workers.
 //!
-//! Design: `.agents/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md` §8 T4.
+//! Design: `.mstar/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md` §8 T4.
 
 use std::sync::Arc;
 use tokio::sync::Mutex;

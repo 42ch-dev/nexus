@@ -122,7 +122,7 @@ CI ignores pushes that only touch paths such as `docs/**` or certain `README.md`
 ## Where to put documentation
 
 - **Stable, clone-ready docs** (install, architecture overview, codegen, contributing): `docs/` and root `README.md`.
-- **Plan-specific design notes and review artifacts**: `.agents/knowledge/` — see [`AGENTS.md`](../AGENTS.md) for boundaries and indexing.
+- **Plan-specific design notes and review artifacts**: `.mstar/knowledge/` — see [`AGENTS.md`](../AGENTS.md) for boundaries and indexing.
 
 ## Questions
 

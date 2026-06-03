@@ -410,10 +410,10 @@ See §4 "Command-by-Command Status Plan" table above.
 
 | Document | Location | Purpose |
 |----------|----------|---------|
-| V1.0-phase1 Product Review | `.agents/archived/knowledge/phase1-product-review.md` | Feature completeness analysis, user journey mapping |
-| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review.md` | Technical findings, bug list, debt items |
-| ACP Client Tech Spec | `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | ACP integration details |
-| status.json | `.agents/status.json` | Residual findings, plan tracking |
+| V1.0-phase1 Product Review | `.mstar/archived/knowledge/phase1-product-review.md` | Feature completeness analysis, user journey mapping |
+| V1.0-phase1 Architecture Review | `.mstar/archived/knowledge/phase1-architecture-review.md` | Technical findings, bug list, debt items |
+| ACP Client Tech Spec | `.mstar/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | ACP integration details |
+| status.json | `.mstar/status.json` | Residual findings, plan tracking |
 | AGENTS.md | Repository root | Development workflow, CI requirements |
 
 ---

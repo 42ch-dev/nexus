@@ -2,7 +2,7 @@
 
 > **Status**: Active — authoritative SSOT for Context Assembly design decisions (responsibility split, strict boundaries, request/response schemas, bundle metadata, V1.0 frozen spec, V1.1 enhancement constraints). Plan 11 references this document.
 > **Scope**: CLI-side only (this repo: `nexus`). Platform-side Context Assembly service belongs in private `nexus-platform` repo.
-> **Superseded**: The original plan at `.agents/plans/2025-04-05-context-assembly.md` which contained fundamental tech stack and responsibility split violations.
+> **Superseded**: The original plan at `.mstar/plans/2025-04-05-context-assembly.md` which contained fundamental tech stack and responsibility split violations.
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### 1.1 Why Restructure
 
-The original Context Assembly implementation plan (`.agents/plans/2025-04-05-context-assembly.md`) contained five critical deviations from frozen specifications. This restructured spec resolves all five:
+The original Context Assembly implementation plan (`.mstar/plans/2025-04-05-context-assembly.md`) contained five critical deviations from frozen specifications. This restructured spec resolves all five:
 
 
 | #   | Conflict                                                                                                                                                                                                                                                           | Severity    | Resolution                                                                                                      |
@@ -733,13 +733,13 @@ The restructured Context Assembly (CLI-side) depends on the sync contract for th
 2. **Delta type `story_manifest`**: Already defined in `bundle.schema.json` `deltas[].delta_type` enum. The context assembly summary is carried as a `story_manifest` delta payload.
 3. **StoryManifest entity**: Defined in `story-manifest.schema.json`. The `summary_text` field is where CLI-generated summaries are stored. The `summary_unit_id` field is platform-assigned after indexing.
 4. **Phase A/B pipeline**: Context Assembly depends on the platform's sync pipeline to persist summaries (Phase A) and index them (Phase B). CLI does not control this — it only pushes bundles and receives assembled context via Local API.
-5. **Prerequisite**: The `sync-contract` plan (`.agents/plans/2025-04-05-sync-contract`) must be at least partially complete (bundle envelope + story_manifest delta support) before Task 3 (Bundle Metadata Integration) can be implemented.
+5. **Prerequisite**: The `sync-contract` plan (`.mstar/plans/2025-04-05-sync-contract`) must be at least partially complete (bundle envelope + story_manifest delta support) before Task 3 (Bundle Metadata Integration) can be implemented.
 
 ---
 
 ## 13. Removed from Original Plan
 
-The following items from the original plan (`.agents/plans/2025-04-05-context-assembly.md`) are explicitly **removed** from CLI-side scope:
+The following items from the original plan (`.mstar/plans/2025-04-05-context-assembly.md`) are explicitly **removed** from CLI-side scope:
 
 
 | Removed Item                                               | Reason                                                    | New Owner                             |

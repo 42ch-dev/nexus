@@ -10,7 +10,7 @@
 | **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → [v1.21-local-platform-isolation-delivery-compass-v1.md](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
 | **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) |
 
-**This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and `.agents/plans/`.
+**This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and `.mstar/plans/`.
 
 **Current-vs-target rule:** sections below explicitly separate **Cargo dependency wiring** from **product integration**. A Cargo edge is not a claim that CLI commands or daemon HTTP handlers use that crate at runtime.
 
@@ -295,4 +295,4 @@ Workspace file writes remain agent-mediated (agent-host internal tool execution)
 
 ---
 
-*Long-term SSOT. Implementation tracking: [v1.21-local-platform-isolation-delivery-compass-v1.md](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) and V1.23 plan `.agents/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md`.*
+*Long-term SSOT. Implementation tracking: [v1.21-local-platform-isolation-delivery-compass-v1.md](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) and V1.23 plan `.mstar/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md`.*

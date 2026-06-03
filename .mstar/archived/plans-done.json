@@ -6,7 +6,7 @@
       "plan_id": "2026-05-23-v1.26-local-context-product",
       "title": "V1.26 local context productization (assemble-moment promoted, deferred UX fix)",
       "done_at": "2026-05-23T18:00:00Z",
-      "plan_file": ".agents/plans/2026-05-23-v1.26-local-context-product.md",
+      "plan_file": ".mstar/plans/2026-05-23-v1.26-local-context-product.md",
       "total_batches": 4,
       "batches_completed": 4,
       "qc": "3× Approve (0 critical, 3 warnings fixed pre-merge: doc_markdown, double pool, map_or_else)",
@@ -18,7 +18,7 @@
       "plan_id": "2026-05-23-v1.26-iteration-hygiene",
       "title": "V1.26 iteration hygiene — compass/plan status alignment",
       "done_at": "2026-05-23T12:00:00Z",
-      "plan_file": ".agents/plans/2026-05-23-v1.26-iteration-hygiene.md",
+      "plan_file": ".mstar/plans/2026-05-23-v1.26-iteration-hygiene.md",
       "total_batches": 1,
       "batches_completed": 1,
       "qc": "N/A (admin)",
@@ -29,7 +29,7 @@
       "plan_id": "2026-05-23-v1.26-narrative-kb-persistence",
       "title": "V1.26 narrative + World KB SQLite",
       "done_at": "2026-05-23T16:00:00Z",
-      "plan_file": ".agents/plans/2026-05-23-v1.26-narrative-kb-persistence.md",
+      "plan_file": ".mstar/plans/2026-05-23-v1.26-narrative-kb-persistence.md",
       "total_batches": 5,
       "batches_completed": 5,
       "qc": "3× review (QC1 Request Changes → fixed C-1/C-2/C-3 → Approve; QC2 Approve; QC3 Approve)",
@@ -41,7 +41,7 @@
       "plan_id": "2026-05-23-v1.26-reference-store-layout",
       "title": "V1.26 reference registry + MD body layout",
       "done_at": "2026-05-23T14:00:00Z",
-      "plan_file": ".agents/plans/2026-05-23-v1.26-reference-store-layout.md",
+      "plan_file": ".mstar/plans/2026-05-23-v1.26-reference-store-layout.md",
       "total_batches": 5,
       "batches_completed": 5,
       "qc": "3× Approve (0 critical, 8 warning accepted, 12 suggestion)",
@@ -53,8 +53,8 @@
       "plan_id": "2026-05-20-v1.21-local-platform-isolation",
       "title": "V1.21 Local Platform Isolation — crate split, daemon API cleanup, cloud-sync extraction",
       "done_at": "2026-05-21T01:28:59Z",
-      "plan_file": ".agents/plans/2026-05-20-v1.21-local-platform-isolation.md",
-      "archived_record": ".agents/archived/plans/2026-05-20-v1.21-local-platform-isolation.json",
+      "plan_file": ".mstar/plans/2026-05-20-v1.21-local-platform-isolation.md",
+      "archived_record": ".mstar/archived/plans/2026-05-20-v1.21-local-platform-isolation.json",
       "total_batches": 7,
       "batches_completed": 7,
       "pr": "#28",
@@ -65,8 +65,8 @@
       "plan_id": "2026-05-18-v1.20-daemon-local-api-redesign",
       "title": "V1.20 Daemon Local API Redesign — auth, route cleanup, agent-host completion, CLI-to-daemon migration",
       "done_at": "2026-05-19T03:00:00Z",
-      "plan_file": ".agents/plans/2026-05-18-v1.20-daemon-local-api-redesign.md",
-      "archived_record": ".agents/archived/plans/2026-05-18-v1.20-daemon-local-api-redesign.json",
+      "plan_file": ".mstar/plans/2026-05-18-v1.20-daemon-local-api-redesign.md",
+      "archived_record": ".mstar/archived/plans/2026-05-18-v1.20-daemon-local-api-redesign.json",
       "total_tasks": 44,
       "batches_completed": 6
     },
@@ -74,8 +74,8 @@
       "plan_id": "2026-05-19-v1.19-residuals-v1.20-fix",
       "title": "V1.19 Residual Findings — V1.20 Fix (6 open residuals from agent-host-hardening)",
       "done_at": "2026-05-19T01:00:00Z",
-      "plan_file": ".agents/plans/2026-05-19-v1.19-residuals-v1.20-fix.md",
-      "archived_record": ".agents/archived/plans/2026-05-19-v1.19-residuals-v1.20-fix.json",
+      "plan_file": ".mstar/plans/2026-05-19-v1.19-residuals-v1.20-fix.md",
+      "archived_record": ".mstar/archived/plans/2026-05-19-v1.19-residuals-v1.20-fix.json",
       "residual_count": 6,
       "residuals_closed": [
         "QC2-F002",
@@ -90,8 +90,8 @@
       "plan_id": "2026-05-15-v1.19-agent-host-hardening",
       "title": "V1.19 Agent Host Hardening — D-001~D-011 + V1.18 residual closure",
       "done_at": "2026-05-15T21:30:00Z",
-      "plan_file": ".agents/plans/2026-05-15-v1.19-agent-host-hardening.md",
-      "archived_record": ".agents/archived/plans/2026-05-15-v1.19-agent-host-hardening.json",
+      "plan_file": ".mstar/plans/2026-05-15-v1.19-agent-host-hardening.md",
+      "archived_record": ".mstar/archived/plans/2026-05-15-v1.19-agent-host-hardening.json",
       "residual_count": 6,
       "residual_target": "v1.20"
     },
@@ -99,615 +99,615 @@
       "plan_id": "2026-05-15-v1.18-agent-host-core",
       "title": "V1.18: Agent Host Core — Hybrid managed-only host subsystem",
       "done_at": "2026-05-15T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-15-v1.18-agent-host-core.md",
-      "archived_record": ".agents/archived/plans/2026-05-15-v1.18-agent-host-core.json"
+      "plan_file": ".mstar/plans/2026-05-15-v1.18-agent-host-core.md",
+      "archived_record": ".mstar/archived/plans/2026-05-15-v1.18-agent-host-core.json"
     },
     {
       "id": "2026-05-15-v1.17-b4-naming-hardening",
       "title": "V1.17 B4: Naming and Hardening",
       "done_at": "2026-05-15T16:00:00Z",
-      "plan_file": ".agents/plans/2026-05-15-v1.17-b4-naming-hardening.md",
-      "archived_record": ".agents/archived/plans/2026-05-15-v1.17-b4-naming-hardening.json"
+      "plan_file": ".mstar/plans/2026-05-15-v1.17-b4-naming-hardening.md",
+      "archived_record": ".mstar/archived/plans/2026-05-15-v1.17-b4-naming-hardening.json"
     },
     {
       "id": "2026-05-15-v1.17-b3-remove-daemon-crate",
       "title": "V1.17 B3: Remove Old Daemon Crate — delete nexus42d",
       "done_at": "2026-05-15T15:00:00Z",
-      "plan_file": ".agents/plans/2026-05-15-v1.17-b3-remove-daemon-crate.md",
-      "archived_record": ".agents/archived/plans/2026-05-15-v1.17-b3-remove-daemon-crate.json"
+      "plan_file": ".mstar/plans/2026-05-15-v1.17-b3-remove-daemon-crate.md",
+      "archived_record": ".mstar/archived/plans/2026-05-15-v1.17-b3-remove-daemon-crate.json"
     },
     {
       "id": "2026-05-15-v1.17-b2-single-binary-wiring",
       "title": "V1.17 B2: Single-Binary Wiring — wire CLI to runtime",
       "done_at": "2026-05-15T14:00:00Z",
-      "plan_file": ".agents/plans/2026-05-15-v1.17-b2-single-binary-wiring.md",
-      "archived_record": ".agents/archived/plans/2026-05-15-v1.17-b2-single-binary-wiring.json"
+      "plan_file": ".mstar/plans/2026-05-15-v1.17-b2-single-binary-wiring.md",
+      "archived_record": ".mstar/archived/plans/2026-05-15-v1.17-b2-single-binary-wiring.json"
     },
     {
       "id": "2026-05-15-v1.17-b1-runtime-extraction",
       "title": "V1.17 B1: Runtime Extraction — create nexus-daemon-runtime crate",
       "done_at": "2026-05-15T13:00:00Z",
-      "plan_file": ".agents/plans/2026-05-15-v1.17-b1-runtime-extraction.md",
-      "archived_record": ".agents/archived/plans/2026-05-15-v1.17-b1-runtime-extraction.json"
+      "plan_file": ".mstar/plans/2026-05-15-v1.17-b1-runtime-extraction.md",
+      "archived_record": ".mstar/archived/plans/2026-05-15-v1.17-b1-runtime-extraction.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-command-surface-contract",
       "title": "V1.16 command surface contract and regression matrix",
       "done_at": "2026-05-12T18:30:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-command-surface-contract.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-command-surface-contract.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-command-surface-contract.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-command-surface-contract.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-daemon-acp-topology",
       "title": "V1.16 daemon and ACP top-level command topology",
       "done_at": "2026-05-12T19:00:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-daemon-acp-topology.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-daemon-acp-topology.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-daemon-acp-topology.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-daemon-acp-topology.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-creator-knowledge-topology",
       "title": "V1.16 creator knowledge topology (soul/memory/kb convergence)",
       "done_at": "2026-05-12T20:00:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-creator-knowledge-topology.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-creator-knowledge-topology.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-creator-knowledge-topology.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-creator-knowledge-topology.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-system-platform-topology",
       "title": "V1.16 system and platform top-level command topology",
       "done_at": "2026-05-12T20:30:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-system-platform-topology.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-system-platform-topology.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-system-platform-topology.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-system-platform-topology.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-acp-execution-consolidation",
       "title": "V1.16 ACP execution consolidation",
       "done_at": "2026-05-12T21:00:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-acp-execution-consolidation.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-acp-execution-consolidation.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-acp-execution-consolidation.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-acp-execution-consolidation.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-creator-kb-multiscope",
       "title": "V1.16 creator KB multi-scope baseline",
       "done_at": "2026-05-12T21:30:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-creator-kb-multiscope.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-creator-kb-multiscope.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-creator-kb-multiscope.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-creator-kb-multiscope.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-trace-correlation",
       "title": "V1.16 trace correlation",
       "done_at": "2026-05-12T22:00:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-trace-correlation.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-trace-correlation.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-trace-correlation.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-trace-correlation.json"
     },
     {
       "plan_id": "2026-05-12-v1.16-creator-identity-auth-compat",
       "title": "V1.16 creator identity cache and auth compat",
       "done_at": "2026-05-12T22:30:00Z",
-      "plan_file": ".agents/plans/2026-05-12-v1.16-creator-identity-auth-compat.md",
-      "archived_record": ".agents/archived/plans/2026-05-12-v1.16-creator-identity-auth-compat.json"
+      "plan_file": ".mstar/plans/2026-05-12-v1.16-creator-identity-auth-compat.md",
+      "archived_record": ".mstar/archived/plans/2026-05-12-v1.16-creator-identity-auth-compat.json"
     },
     {
       "plan_id": "2026-05-10-v1.15-orchestration-first-pipeline",
       "title": "V1.15 orchestration-first pipeline execution plan",
       "done_at": "2026-05-11T12:30:00Z",
-      "plan_file": ".agents/plans/2026-05-10-v1.15-orchestration-first-pipeline.md",
-      "archived_record": ".agents/archived/plans/2026-05-10-v1.15-orchestration-first-pipeline.json"
+      "plan_file": ".mstar/plans/2026-05-10-v1.15-orchestration-first-pipeline.md",
+      "archived_record": ".mstar/archived/plans/2026-05-10-v1.15-orchestration-first-pipeline.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-a-schedule-fsm",
       "title": "V1.5 WS-A — Schedule FSM hardening",
       "done_at": "2026-04-19",
-      "plan_file": ".agents/plans/2026-04-18-v1.5-ws-a-schedule-fsm.md",
+      "plan_file": ".mstar/plans/2026-04-18-v1.5-ws-a-schedule-fsm.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-a-schedule-fsm.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-b-orch-db-residuals",
       "title": "V1.5 WS-B — Orchestration + DB residual cleanup",
       "done_at": "2026-04-19",
-      "plan_file": ".agents/plans/2026-04-18-v1.5-ws-b-orch-db-residuals.md",
+      "plan_file": ".mstar/plans/2026-04-18-v1.5-ws-b-orch-db-residuals.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-b-orch-db-residuals.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-c-context-summarize",
       "title": "V1.5 WS-C — context.summarize capability",
       "done_at": "2026-04-19",
-      "plan_file": ".agents/plans/2026-04-18-v1.5-ws-c-context-summarize.md",
+      "plan_file": ".mstar/plans/2026-04-18-v1.5-ws-c-context-summarize.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-c-context-summarize.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-d-cron-triggers",
       "title": "V1.5 WS-D — Cron / wall-clock triggers",
       "done_at": "2026-04-19",
-      "plan_file": ".agents/plans/2026-04-18-v1.5-ws-d-cron-triggers.md",
+      "plan_file": ".mstar/plans/2026-04-18-v1.5-ws-d-cron-triggers.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-d-cron-triggers.json"
     },
     {
       "id": "2026-04-18-v1.5-ws-e-platform-coordination",
       "title": "V1.5 WS-E — Platform coordination",
       "done_at": "2026-04-19",
-      "plan_file": ".agents/plans/2026-04-18-v1.5-ws-e-platform-coordination.md",
+      "plan_file": ".mstar/plans/2026-04-18-v1.5-ws-e-platform-coordination.md",
       "archived_record": "archived/plans/2026-04-18-v1.5-ws-e-platform-coordination.json"
     },
     {
       "id": "2026-04-18-sqlx-compile-time-migration",
       "title": "V1.4 — sqlx compile-time macro migration + .sqlx/ workflow",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-18-sqlx-compile-time-migration.md",
+      "plan_file": ".mstar/plans/2026-04-18-sqlx-compile-time-migration.md",
       "archived_record": "archived/plans/2026-04-18-sqlx-compile-time-migration.json"
     },
     {
       "id": "2026-04-17-v1.4-ws1-acp-host-extraction",
       "title": "V1.4 WS1 — nexus-acp-host crate extraction",
       "done_at": "2026-04-17",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws1-acp-host-extraction.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws1-acp-host-extraction.json"
     },
     {
       "id": "2025-04-05-monorepo-structure",
       "title": "Monorepo Structure Implementation",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-monorepo-structure.md",
+      "plan_file": ".mstar/plans/2025-04-05-monorepo-structure.md",
       "archived_record": "archived/plans/2025-04-05-monorepo-structure.json"
     },
     {
       "id": "2025-04-05-json-schema-foundation",
       "title": "JSON Schema Foundation",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-json-schema-foundation.md",
+      "plan_file": ".mstar/plans/2025-04-05-json-schema-foundation.md",
       "archived_record": "archived/plans/2025-04-05-json-schema-foundation.json"
     },
     {
       "id": "2025-04-05-codegen-pipeline",
       "title": "Codegen Pipeline",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-codegen-pipeline.md",
+      "plan_file": ".mstar/plans/2025-04-05-codegen-pipeline.md",
       "archived_record": "archived/plans/2025-04-05-codegen-pipeline.json"
     },
     {
       "id": "2025-04-05-domain-models",
       "title": "Domain Models Implementation",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-domain-models.md",
+      "plan_file": ".mstar/plans/2025-04-05-domain-models.md",
       "archived_record": "archived/plans/2025-04-05-domain-models.json"
     },
     {
       "id": "2025-04-05-cli-daemon-foundation",
       "title": "CLI + Daemon Foundation",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-cli-daemon-foundation.md",
+      "plan_file": ".mstar/plans/2025-04-05-cli-daemon-foundation.md",
       "archived_record": "archived/plans/2025-04-05-cli-daemon-foundation.json"
     },
     {
       "id": "2025-04-05-sync-contract",
       "title": "Sync Contract Implementation",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-sync-contract.md",
+      "plan_file": ".mstar/plans/2025-04-05-sync-contract.md",
       "archived_record": "archived/plans/2025-04-05-sync-contract.json"
     },
     {
       "id": "2025-04-05-acp-client",
       "title": "ACP Client Integration",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-acp-client.md",
+      "plan_file": ".mstar/plans/2025-04-05-acp-client.md",
       "archived_record": "archived/plans/2025-04-05-acp-client.json"
     },
     {
       "id": "2025-04-05-context-assembly",
       "title": "Context Assembly Basic",
       "done_at": "2026-04-06",
-      "plan_file": ".agents/plans/2025-04-05-context-assembly.md",
+      "plan_file": ".mstar/plans/2025-04-05-context-assembly.md",
       "archived_record": "archived/plans/2025-04-05-context-assembly.json"
     },
     {
       "id": "2026-04-06-foundation-hardening",
       "title": "Foundation Hardening",
       "done_at": "2026-04-07",
-      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "plan_file": ".mstar/plans/2026-04-06-pre-phase2.md",
       "archived_record": "archived/plans/2026-04-06-foundation-hardening.json"
     },
     {
       "id": "2026-04-06-acp-sdk-bridge",
       "title": "ACP SDK Bridge Implementation",
       "done_at": "2026-04-07",
-      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "plan_file": ".mstar/plans/2026-04-06-pre-phase2.md",
       "archived_record": "archived/plans/2026-04-06-acp-sdk-bridge.json"
     },
     {
       "id": "2026-04-06-daemon-manuscript-ops",
       "title": "Daemon + Manuscript Operations",
       "done_at": "2026-04-07",
-      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "plan_file": ".mstar/plans/2026-04-06-pre-phase2.md",
       "archived_record": "archived/plans/2026-04-06-daemon-manuscript-ops.json"
     },
     {
       "id": "2026-04-06-auth-flow",
       "title": "Auth Flow Completion",
       "done_at": "2026-04-07",
-      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "plan_file": ".mstar/plans/2026-04-06-pre-phase2.md",
       "archived_record": "archived/plans/2026-04-06-auth-flow.json"
     },
     {
       "id": "2026-04-06-codegen-alignment",
       "title": "Codegen & Contract Alignment",
       "done_at": "2026-04-07",
-      "plan_file": ".agents/plans/2026-04-06-pre-phase2.md",
+      "plan_file": ".mstar/plans/2026-04-06-pre-phase2.md",
       "archived_record": "archived/plans/2026-04-06-codegen-alignment.json"
     },
     {
       "id": "2026-04-07-json-schema-update-phase2",
       "title": "JSON Schema Update for V1.0-phase2 Alignment",
       "done_at": "2026-04-08",
-      "plan_file": ".agents/plans/2026-04-07-json-schema-update-phase2.md",
+      "plan_file": ".mstar/plans/2026-04-07-json-schema-update-phase2.md",
       "archived_record": "archived/plans/2026-04-07-json-schema-update-phase2.json"
     },
     {
       "id": "2026-04-08-v1.1-tech-debt-mitigation",
       "title": "V1.1 Tech Debt Mitigation + Feature Gap Resolution",
       "done_at": "2026-04-09",
-      "plan_file": ".agents/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
+      "plan_file": ".mstar/plans/2026-04-08-v1.1-tech-debt-mitigation.md",
       "archived_record": "archived/plans/2026-04-08-v1.1-tech-debt-mitigation.json"
     },
     {
       "id": "2026-04-09-v1.1-arch-alignment-blockers",
       "title": "V1.1 Architecture Alignment Blockers (TD-1~TD-6)",
       "done_at": "2026-04-09",
-      "plan_file": ".agents/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "plan_file": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
       "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-blockers.json"
     },
     {
       "id": "2026-04-09-v1.1-arch-alignment-closure",
       "title": "V1.1 Architecture Alignment — Final Closure",
       "done_at": "2026-04-09",
-      "plan_file": ".agents/plans/2026-04-09-v1.1-arch-alignment-closure.md",
+      "plan_file": ".mstar/plans/2026-04-09-v1.1-arch-alignment-closure.md",
       "archived_record": "archived/plans/2026-04-09-v1.1-arch-alignment-closure.json"
     },
     {
       "id": "2026-04-09-v1.1-cli-daemon-hardening",
       "title": "CLI/Daemon Reliability Hardening",
       "done_at": "2026-04-08",
-      "plan_file": ".agents/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
+      "plan_file": ".mstar/plans/2026-04-09-v1.1-cli-daemon-hardening.md",
       "archived_record": "archived/plans/2026-04-09-v1.1-cli-daemon-hardening.json"
     },
     {
       "id": "2026-04-09-v1.1-context-assembly-enhancement",
       "title": "Context Assembly Enhancement (V1.1 Safety & Validation)",
       "done_at": "2026-04-08",
-      "plan_file": ".agents/plans/2026-04-09-v1.1-context-assembly-enhancement.md",
+      "plan_file": ".mstar/plans/2026-04-09-v1.1-context-assembly-enhancement.md",
       "archived_record": "archived/plans/2026-04-09-v1.1-context-assembly-enhancement.json"
     },
     {
       "id": "2026-04-09-v1.1-acp-ux-permissions",
       "title": "ACP UX & Permission Policy",
       "done_at": "2026-04-08",
-      "plan_file": ".agents/plans/2026-04-09-v1.1-acp-ux-permissions.md",
+      "plan_file": ".mstar/plans/2026-04-09-v1.1-acp-ux-permissions.md",
       "archived_record": "archived/plans/2026-04-09-v1.1-acp-ux-permissions.json"
     },
     {
       "id": "v1-tech-debt-cleanup",
       "title": "V1 Tech Debt Cleanup (Long-term)",
       "done_at": "2026-04-15",
-      "plan_file": ".agents/plans/v1-tech-debt-cleanup.md",
+      "plan_file": ".mstar/plans/v1-tech-debt-cleanup.md",
       "archived_record": "archived/plans/v1-tech-debt-cleanup.json"
     },
     {
       "id": "2026-04-08-local-db-refactor",
       "title": "Local DB Refactor — Single Ownership Module",
       "done_at": "2026-04-08",
-      "plan_file": ".agents/plans/2026-04-08-local-db-refactor.md",
+      "plan_file": ".mstar/plans/2026-04-08-local-db-refactor.md",
       "archived_record": "archived/plans/2026-04-08-local-db-refactor.json"
     },
     {
       "id": "2026-04-10-cli-sync-bidirectional-parity",
       "title": "CLI Bidirectional Sync Parity (platform sync)",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-cli-sync-bidirectional-parity.md",
+      "plan_file": ".mstar/plans/2026-04-10-cli-sync-bidirectional-parity.md",
       "archived_record": "archived/plans/2026-04-10-cli-sync-bidirectional-parity.json"
     },
     {
       "id": "2026-04-10-cli-fork-world-snapshot-parity",
       "title": "CLI Fork & World Snapshot Parity",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
+      "plan_file": ".mstar/plans/2026-04-10-cli-fork-world-snapshot-parity.md",
       "archived_record": "archived/plans/2026-04-10-cli-fork-world-snapshot-parity.json"
     },
     {
       "id": "2026-04-10-v1-spec-wire-schema-sprint",
       "title": "V1-Spec Wire Schema Sprint — Platform Contract Unblock",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
+      "plan_file": ".mstar/plans/2026-04-10-v1-spec-wire-schema-sprint.md",
       "archived_record": "archived/plans/2026-04-10-v1-spec-wire-schema-sprint.json"
     },
     {
       "id": "2026-04-10-cli-explore-read-parity",
       "title": "CLI Explore (Read) Parity",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-cli-explore-read-parity.md",
+      "plan_file": ".mstar/plans/2026-04-10-cli-explore-read-parity.md",
       "archived_record": "archived/plans/2026-04-10-cli-explore-read-parity.json"
     },
     {
       "id": "2026-04-10-cli-publish-workflow-parity",
       "title": "CLI Publish Workflow Parity",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-cli-publish-workflow-parity.md",
+      "plan_file": ".mstar/plans/2026-04-10-cli-publish-workflow-parity.md",
       "archived_record": "archived/plans/2026-04-10-cli-publish-workflow-parity.json"
     },
     {
       "id": "2026-04-10-explore-creator-card-field-gap",
       "title": "ExploreCreatorCard Schema Field Gap Fix",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-explore-creator-card-field-gap.md",
+      "plan_file": ".mstar/plans/2026-04-10-explore-creator-card-field-gap.md",
       "archived_record": "archived/plans/2026-04-10-explore-creator-card-field-gap.json"
     },
     {
       "id": "2026-04-11-codegen-ref-resolution",
       "title": "Codegen $ref resolution (common IDs + whole-schema refs)",
       "done_at": "2026-04-11",
-      "plan_file": ".agents/plans/2026-04-11-codegen-ref-resolution.md",
+      "plan_file": ".mstar/plans/2026-04-11-codegen-ref-resolution.md",
       "archived_record": "archived/plans/2026-04-11-codegen-ref-resolution.json"
     },
     {
       "id": "2026-04-10-v1.1-specs-alignment-remediation",
       "title": "v1.1 Specs Alignment Remediation (entitlements wire + knowledge refresh)",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-v1.1-specs-alignment-remediation.md",
+      "plan_file": ".mstar/plans/2026-04-10-v1.1-specs-alignment-remediation.md",
       "archived_record": "archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json"
     },
     {
       "id": "2026-04-10-platform-http-schema-alignment",
       "title": "Platform HTTP request schema alignment (publish / fork / snapshot)",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-platform-http-schema-alignment.md",
+      "plan_file": ".mstar/plans/2026-04-10-platform-http-schema-alignment.md",
       "archived_record": "archived/plans/2026-04-10-platform-http-schema-alignment.json"
     },
     {
       "id": "2026-04-10-local-fs-layout-ssot-and-implementation",
       "title": "Local FS layout (ADR-014) — CLI/daemon paths & creator workspace",
       "done_at": "2026-04-10",
-      "plan_file": ".agents/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
+      "plan_file": ".mstar/plans/2026-04-10-local-fs-layout-ssot-and-implementation.md",
       "archived_record": "archived/plans/2026-04-10-local-fs-layout-ssot-and-implementation.json"
     },
     {
       "id": "2026-04-14-v1.2-reclassification-baseline",
       "title": "V1.2 WS1: Version Reclassification Baseline",
       "done_at": "2026-04-14",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-reclassification-baseline.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-reclassification-baseline.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-reclassification-baseline.json"
     },
     {
       "id": "2026-04-14-v1.2-local-only-identity",
       "title": "V1.2 WS2a: local_only Dual Identity Strategy",
       "done_at": "2026-04-14",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-local-only-identity.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-local-only-identity.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-local-only-identity.json"
     },
     {
       "id": "2026-04-14-v1.2-local-only-runtime",
       "title": "V1.2 WS2b: local_only Runtime & Minimal Runnable Flow",
       "done_at": "2026-04-14",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-local-only-runtime.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-local-only-runtime.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-local-only-runtime.json"
     },
     {
       "id": "2026-04-14-v1.2-soul-lifecycle",
       "title": "V1.2 WS3a: Local SOUL Lifecycle",
       "done_at": "2026-04-14",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-soul-lifecycle.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-soul-lifecycle.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-soul-lifecycle.json"
     },
     {
       "id": "2026-04-14-v1.2-local-memory-pipeline",
       "title": "V1.2 WS3b: Local Memory + KB + Output Pipeline",
       "done_at": "2026-04-14",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-local-memory-pipeline.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-local-memory-pipeline.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-local-memory-pipeline.json"
     },
     {
       "id": "2026-04-14-v1.2-runtime-compatibility",
       "title": "V1.2 WS4: Runtime Compatibility",
       "done_at": "2026-04-15",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-runtime-compatibility.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-runtime-compatibility.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-runtime-compatibility.json"
     },
     {
       "id": "2026-04-14-v1.2-regression-suite",
       "title": "V1.2 M3: Minimum Automated Regression Suite (R1–R5)",
       "done_at": "2026-04-15",
-      "plan_file": ".agents/plans/2026-04-14-v1.2-regression-suite.md",
+      "plan_file": ".mstar/plans/2026-04-14-v1.2-regression-suite.md",
       "archived_record": "archived/plans/2026-04-14-v1.2-regression-suite.json"
     },
     {
       "id": "2026-04-15-v1.3-preflight-implementation-plan",
       "title": "V1.3 Preflight Implementation Plan",
       "done_at": "2026-04-15",
-      "plan_file": ".agents/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
+      "plan_file": ".mstar/plans/2026-04-15-v1.3-preflight-implementation-plan.md",
       "archived_record": "archived/plans/2026-04-15-v1.3-preflight-implementation-plan.json"
     },
     {
       "id": "2026-04-16-v1.3-creator-register-and-residuals",
       "title": "V1.3 Creator Register CLI + V1.2 Residual Governance",
       "done_at": "2026-04-17",
-      "plan_file": ".agents/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
+      "plan_file": ".mstar/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
       "archived_record": "archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json"
     },
     {
       "id": "2026-04-17-v1.4-ws8-local-db-sqlx-migration",
       "title": "V1.4 WS8 — nexus-local-db sqlx migration (unified DB engine)",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.json"
     },
     {
       "id": "2026-04-17-v1.4-ws4-statig-lifecycle",
       "title": "V1.4 WS4 — statig daemon lifecycle HSM (TD-9 closure)",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws4-statig-lifecycle.json"
     },
     {
       "id": "2026-04-17-v1.4-ws5-schemas-boundary",
       "title": "V1.4 WS5 — schemas/ boundary refactor (wire vs local)",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws5-schemas-boundary.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws5-schemas-boundary.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws5-schemas-boundary.json"
     },
     {
       "id": "2026-04-17-v1.4-ws2-orchestration-skeleton",
       "title": "V1.4 WS2 — Orchestration skeleton (engine + capability registry + worker manager + _system.maintenance)",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws2-orchestration-skeleton.json"
     },
     {
       "id": "2026-04-17-v1.4-ws3-preset-loader-novel-writing",
       "title": "V1.4 WS3 — Preset loader + novel-writing end-to-end",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws3-preset-loader-novel-writing.json"
     },
     {
       "id": "2026-04-17-v1.4-ws7-creator-schedule-core-context",
       "title": "V1.4 WS7 — Creator Schedule + immutable versioned core_context",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws7-creator-schedule-core-context.json"
     },
     {
       "id": "2026-04-17-v1.4-ws6-creator-register-e2e-tests",
       "title": "V1.4 WS6 — V1.3 Creator Register E2E integration tests (backlog closure)",
       "done_at": "2026-04-18",
-      "plan_file": ".agents/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
+      "plan_file": ".mstar/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.md",
       "archived_record": "archived/plans/2026-04-17-v1.4-ws6-creator-register-e2e-tests.json"
     },
     {
       "id": "2026-04-20-v1.6-ws-a-residual-governance",
       "title": "V1.6 WS-A — Residual Governance (R1/R2/R3/R6)",
       "done_at": "2026-04-20",
-      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-a-residual-governance.md",
-      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-a-residual-governance.json"
+      "plan_file": ".mstar/plans/2026-04-20-v1.6-ws-a-residual-governance.md",
+      "archived_record": ".mstar/archived/plans/2026-04-20-v1.6-ws-a-residual-governance.json"
     },
     {
       "id": "2026-04-20-v1.6-ws-b-acp-sdk-dto",
       "title": "V1.6 WS-B — ACP SDK DTO Decoupling",
       "done_at": "2026-04-20",
-      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
-      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.json"
+      "plan_file": ".mstar/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md",
+      "archived_record": ".mstar/archived/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.json"
     },
     {
       "id": "2026-04-20-v1.6-ws-c-permission-cli",
       "title": "V1.6 WS-C — Permission Policy CLI",
       "done_at": "2026-04-20",
-      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-c-permission-cli.md",
-      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-c-permission-cli.json"
+      "plan_file": ".mstar/plans/2026-04-20-v1.6-ws-c-permission-cli.md",
+      "archived_record": ".mstar/archived/plans/2026-04-20-v1.6-ws-c-permission-cli.json"
     },
     {
       "id": "2026-04-20-v1.6-ws-d-multi-preset",
       "title": "V1.6 WS-D — Multi-Preset Scheduler",
       "done_at": "2026-04-20",
-      "plan_file": ".agents/plans/2026-04-20-v1.6-ws-d-multi-preset.md",
-      "archived_record": ".agents/archived/plans/2026-04-20-v1.6-ws-d-multi-preset.json"
+      "plan_file": ".mstar/plans/2026-04-20-v1.6-ws-d-multi-preset.md",
+      "archived_record": ".mstar/archived/plans/2026-04-20-v1.6-ws-d-multi-preset.json"
     },
     {
       "id": "2026-04-21-v1.7-ws-abc-residual-closure",
       "title": "WS-A/B/C — Residual Closure (V1.7)",
       "done_at": "2026-04-21",
-      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-abc-residual-closure.md",
-      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-abc-residual-closure.json"
+      "plan_file": ".mstar/plans/2026-04-21-v1.7-ws-abc-residual-closure.md",
+      "archived_record": ".mstar/archived/plans/2026-04-21-v1.7-ws-abc-residual-closure.json"
     },
     {
       "id": "2026-04-21-v1.7-ws-d-acp-sdk-migration",
       "title": "WS-D — ACP SDK Migration to v0.11.0 (V1.7)",
       "done_at": "2026-04-21",
-      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.md",
-      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.json"
+      "plan_file": ".mstar/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.md",
+      "archived_record": ".mstar/archived/plans/2026-04-21-v1.7-ws-d-acp-sdk-migration.json"
     },
     {
       "id": "2026-04-21-v1.7-ws-e-multi-agent-worker",
       "title": "WS-E — Multi-Agent Worker (V1.7)",
       "done_at": "2026-04-22",
-      "plan_file": ".agents/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md",
-      "archived_record": ".agents/archived/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.json"
+      "plan_file": ".mstar/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.md",
+      "archived_record": ".mstar/archived/plans/2026-04-21-v1.7-ws-e-multi-agent-worker.json"
     },
     {
       "id": "2026-04-23-v1.8-ws-a-challenge-llm-fallback",
       "title": "WS-A — Challenge Solver LLM Fallback (V1.8)",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-23-v1.8-ws-a-challenge-llm-fallback.md",
-      "archived_record": ".agents/archived/plans/2026-04-23-v1.8-ws-a-challenge-llm-fallback.json"
+      "plan_file": ".mstar/plans/2026-04-23-v1.8-ws-a-challenge-llm-fallback.md",
+      "archived_record": ".mstar/archived/plans/2026-04-23-v1.8-ws-a-challenge-llm-fallback.json"
     },
     {
       "id": "2026-04-23-v1.8-ws-c-name-positional-to-flag",
       "title": "WS-C — `--name` Positional to Flag (V1.8)",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-23-v1.8-ws-c-name-positional-to-flag.md",
-      "archived_record": ".agents/archived/plans/2026-04-23-v1.8-ws-c-name-positional-to-flag.json"
+      "plan_file": ".mstar/plans/2026-04-23-v1.8-ws-c-name-positional-to-flag.md",
+      "archived_record": ".mstar/archived/plans/2026-04-23-v1.8-ws-c-name-positional-to-flag.json"
     },
     {
       "id": "2026-04-23-v1.8-ws-b-creator-handle-param",
       "title": "WS-B — Creator Handle CLI Parameter (V1.8)",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
-      "archived_record": ".agents/archived/plans/2026-04-23-v1.8-ws-b-creator-handle-param.json"
+      "plan_file": ".mstar/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
+      "archived_record": ".mstar/archived/plans/2026-04-23-v1.8-ws-b-creator-handle-param.json"
     },
     {
       "id": "2026-04-24-v1.9-ws-a-third-party-preset",
       "title": "V1.9 WS-A: Third-Party Preset Loading + CLI",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-24-v1.9-ws-a-third-party-preset.md",
-      "archived_record": ".agents/archived/plans/2026-04-24-v1.9-ws-a-third-party-preset.json"
+      "plan_file": ".mstar/plans/2026-04-24-v1.9-ws-a-third-party-preset.md",
+      "archived_record": ".mstar/archived/plans/2026-04-24-v1.9-ws-a-third-party-preset.json"
     },
     {
       "id": "2026-04-24-v1.9-ws-c-starting-lifecycle-edges",
       "title": "V1.9 WS-C: Starting Lifecycle Edges",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-24-v1.9-ws-c-starting-lifecycle-edges.md",
-      "archived_record": ".agents/archived/plans/2026-04-24-v1.9-ws-c-starting-lifecycle-edges.json"
+      "plan_file": ".mstar/plans/2026-04-24-v1.9-ws-c-starting-lifecycle-edges.md",
+      "archived_record": ".mstar/archived/plans/2026-04-24-v1.9-ws-c-starting-lifecycle-edges.json"
     },
     {
       "id": "2026-04-24-v1.9-ws-d-schema-drift-detection",
       "title": "V1.9 WS-D: Wire/Local Schema Drift Detection",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-24-v1.9-ws-d-schema-drift-detection.md",
-      "archived_record": ".agents/archived/plans/2026-04-24-v1.9-ws-d-schema-drift-detection.json"
+      "plan_file": ".mstar/plans/2026-04-24-v1.9-ws-d-schema-drift-detection.md",
+      "archived_record": ".mstar/archived/plans/2026-04-24-v1.9-ws-d-schema-drift-detection.json"
     },
     {
       "id": "2026-04-24-v1.9-ws-b-template-path-hardening",
       "title": "V1.9 WS-B: Template Path Hardening",
       "done_at": "2026-04-24",
-      "plan_file": ".agents/plans/2026-04-24-v1.9-ws-b-template-path-hardening.md",
-      "archived_record": ".agents/archived/plans/2026-04-24-v1.9-ws-b-template-path-hardening.json"
+      "plan_file": ".mstar/plans/2026-04-24-v1.9-ws-b-template-path-hardening.md",
+      "archived_record": ".mstar/archived/plans/2026-04-24-v1.9-ws-b-template-path-hardening.json"
     },
     {
       "plan_id": "2026-04-27-v1.10-device-flow-login",
       "title": "V1.10 — Device Flow Login + DeviceID Header + Daemon Cleanup",
       "done_at": "2026-04-27T23:59:00Z",
-      "plan_file": ".agents/plans/2026-04-27-v1.10-device-flow-login.md",
-      "archived_record": ".agents/archived/plans/2026-04-27-v1.10-device-flow-login.json"
+      "plan_file": ".mstar/plans/2026-04-27-v1.10-device-flow-login.md",
+      "archived_record": ".mstar/archived/plans/2026-04-27-v1.10-device-flow-login.json"
     },
     {
       "plan_id": "2026-04-27-v1.11-daemon-cleanup-toctou",
       "title": "V1.11 — Daemon Stub Cleanup + DeviceID TOCTOU Fix",
       "done_at": "2026-04-28T15:00:00Z",
-      "plan_file": ".agents/plans/2026-04-27-v1.11-daemon-cleanup-toctou.md",
-      "archived_record": ".agents/archived/plans/2026-04-27-v1.11-daemon-cleanup-toctou.json"
+      "plan_file": ".mstar/plans/2026-04-27-v1.11-daemon-cleanup-toctou.md",
+      "archived_record": ".mstar/archived/plans/2026-04-27-v1.11-daemon-cleanup-toctou.json"
     },
     {
       "plan_id": "2026-04-28-v1.11-cli-refresh-token",
       "title": "V1.11 — CLI refresh_token Support",
       "done_at": "2026-04-28T15:00:00Z",
-      "plan_file": ".agents/plans/2026-04-28-v1.11-cli-refresh-token.md",
-      "archived_record": ".agents/archived/plans/2026-04-28-v1.11-cli-refresh-token.json"
+      "plan_file": ".mstar/plans/2026-04-28-v1.11-cli-refresh-token.md",
+      "archived_record": ".mstar/archived/plans/2026-04-28-v1.11-cli-refresh-token.json"
     },
     {
       "plan_id": "2026-05-06-v1.13-oss-forward-delivery",
       "title": "V1.13 OSS-forward delivery (DF-11/DF-14 + DF-15 governance)",
       "done_at": "2026-05-07T00:00:00Z",
-      "plan_file": ".agents/plans/2026-05-06-v1.13-oss-forward-delivery.md",
-      "archived_record": ".agents/archived/plans/2026-05-06-v1.13-oss-forward-delivery.json"
+      "plan_file": ".mstar/plans/2026-05-06-v1.13-oss-forward-delivery.md",
+      "archived_record": ".mstar/archived/plans/2026-05-06-v1.13-oss-forward-delivery.json"
     },
     {
       "id": "2026-05-22-v1.24-knowledge-crates-alignment",
       "title": "V1.24 Knowledge ↔ Crates Alignment — normative spec refresh and Local API / KB semantics",
-      "file": ".agents/plans/2026-05-22-v1.24-knowledge-crates-alignment.md",
+      "file": ".mstar/plans/2026-05-22-v1.24-knowledge-crates-alignment.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -737,15 +737,15 @@
         "description": "Refresh normative knowledge specs to match 2026-05-22 crates; align Local API docs with daemon router; resolve context/assemble and work-KB vs World-KB naming.",
         "working_branch": "feature/v1.24-knowledge-crates-alignment",
         "merge_target": "main",
-        "primary_spec": ".agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md",
+        "primary_spec": ".mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md",
         "spec_refs": [
-          ".agents/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md",
-          ".agents/knowledge/specs/local-cloud-crate-architecture.md",
-          ".agents/knowledge/specs/entity-scope-model.md",
-          ".agents/knowledge/specs/local-runtime-boundary.md",
-          ".agents/knowledge/specs/cli-spec.md",
-          ".agents/knowledge/specs/local-db-schema.md",
-          ".agents/knowledge/deferred-features-cross-version-tracker.md",
+          ".mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md",
+          ".mstar/knowledge/specs/local-cloud-crate-architecture.md",
+          ".mstar/knowledge/specs/entity-scope-model.md",
+          ".mstar/knowledge/specs/local-runtime-boundary.md",
+          ".mstar/knowledge/specs/cli-spec.md",
+          ".mstar/knowledge/specs/local-db-schema.md",
+          ".mstar/knowledge/deferred-features-cross-version-tracker.md",
           "docs/ARCHITECTURE.md"
         ],
         "gates": {
@@ -830,7 +830,7 @@
     {
       "id": "2026-05-22-v1.25-knowledge-product-wiring",
       "title": "V1.25 Knowledge ↔ Crates Product Wiring — post-V1.24 hygiene (Theme A)",
-      "file": ".agents/plans/2026-05-22-v1.25-knowledge-product-wiring.md",
+      "file": ".mstar/plans/2026-05-22-v1.25-knowledge-product-wiring.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -856,12 +856,12 @@
         "description": "Post-V1.24 hygiene: fix stale schema descriptions, clap help, deferred tracker, cli-spec orchestrate/schedule labels, and Stage-0 vs Moment wording.",
         "working_branch": "feature/v1.25-knowledge-product-wiring",
         "merge_target": "main",
-        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "primary_spec": ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
         "spec_refs": [
-          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
-          ".agents/knowledge/specs/cli-spec.md",
-          ".agents/knowledge/specs/local-cloud-crate-architecture.md",
-          ".agents/knowledge/deferred-features-cross-version-tracker.md",
+          ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".mstar/knowledge/specs/cli-spec.md",
+          ".mstar/knowledge/specs/local-cloud-crate-architecture.md",
+          ".mstar/knowledge/deferred-features-cross-version-tracker.md",
           "schemas/platform/context-assembly-v1.schema.json"
         ],
         "gates": {
@@ -913,7 +913,7 @@
     {
       "id": "2026-05-22-v1.25-theme-d-orchestration-parity",
       "title": "V1.25 Theme D — Remove daemon orchestrate stubs + cross-link docs",
-      "file": ".agents/plans/2026-05-22-v1.25-theme-d-orchestration-parity.md",
+      "file": ".mstar/plans/2026-05-22-v1.25-theme-d-orchestration-parity.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -938,10 +938,10 @@
         "description": "Remove legacy daemon orchestrate * CLI surface (Coming soon stubs) and add cross-link prose documenting daemon schedule as the sole orchestration control surface.",
         "working_branch": "feature/v1.25-knowledge-product-wiring",
         "merge_target": "main",
-        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "primary_spec": ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
         "spec_refs": [
-          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
-          ".agents/knowledge/specs/cli-spec.md"
+          ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".mstar/knowledge/specs/cli-spec.md"
         ],
         "gates": {
           "specify": "pass",
@@ -988,7 +988,7 @@
     {
       "id": "2026-05-22-v1.25-theme-b-moment-four-domain",
       "title": "V1.25 Theme B — Moment four-domain product path (assemble_moment CLI entry)",
-      "file": ".agents/plans/2026-05-22-v1.25-theme-b-moment-four-domain.md",
+      "file": ".mstar/plans/2026-05-22-v1.25-theme-b-moment-four-domain.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -1015,10 +1015,10 @@
         "description": "Add platform context assemble-moment CLI command calling assemble_moment with InMemory stores; update cli-spec; add integration test.",
         "working_branch": "feature/v1.25-knowledge-product-wiring",
         "merge_target": "main",
-        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "primary_spec": ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
         "spec_refs": [
-          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
-          ".agents/knowledge/specs/cli-spec.md"
+          ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".mstar/knowledge/specs/cli-spec.md"
         ],
         "gates": {
           "specify": "pass",
@@ -1032,7 +1032,7 @@
     {
       "id": "2026-05-22-v1.25-theme-c-domain-crate-wiring",
       "title": "V1.25 Theme C — Domain crate product wiring (narrative/kb/knowledge surfaces)",
-      "file": ".agents/plans/2026-05-22-v1.25-theme-c-domain-crate-wiring.md",
+      "file": ".mstar/plans/2026-05-22-v1.25-theme-c-domain-crate-wiring.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -1060,12 +1060,12 @@
         "description": "Add minimal narrative read surface via NarrativeGateway; wire creator kb --scope world to nexus-kb; write reference_sources persistence ADR.",
         "working_branch": "feature/v1.25-knowledge-product-wiring",
         "merge_target": "main",
-        "primary_spec": ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+        "primary_spec": ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
         "spec_refs": [
-          ".agents/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
-          ".agents/knowledge/specs/entity-scope-model.md",
-          ".agents/knowledge/specs/cli-spec.md",
-          ".agents/knowledge/deferred-features-cross-version-tracker.md"
+          ".mstar/iterations/v1.25-knowledge-crates-product-wiring-audit-compass-v1.md",
+          ".mstar/knowledge/specs/entity-scope-model.md",
+          ".mstar/knowledge/specs/cli-spec.md",
+          ".mstar/knowledge/deferred-features-cross-version-tracker.md"
         ],
         "gates": {
           "specify": "pass",
@@ -1080,7 +1080,7 @@
       "plan_id": "2026-05-26-v1.29-memory-session-review-loop",
       "title": "FL-A1 — session capture → pending-review → CLI review loop",
       "done_at": "2026-05-26T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.29-memory-session-review-loop.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.29-memory-session-review-loop.md",
       "category": "logic",
       "working_branch": "feature/v1.29-memory-session-review-loop",
       "qc_verdict": "Approve",
@@ -1090,7 +1090,7 @@
       "plan_id": "2026-05-26-v1.29-stage0-structured-delimiters",
       "title": "FL-A3 — Stage0 structured delimiters (R13)",
       "done_at": "2026-05-26T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.29-stage0-structured-delimiters.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.29-stage0-structured-delimiters.md",
       "category": "logic",
       "working_branch": "feature/v1.29-stage0-structured-delimiters",
       "qc_verdict": "Approve",
@@ -1101,7 +1101,7 @@
       "plan_id": "2026-05-26-v1.29-soul-experience-preset",
       "title": "FL-A2 — SOUL Experience preset + refresh-experience CLI",
       "done_at": "2026-05-26T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.29-soul-experience-preset.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.29-soul-experience-preset.md",
       "category": "logic",
       "working_branch": "feature/v1.29-soul-experience-preset",
       "qc_verdict": "Approve",
@@ -1111,7 +1111,7 @@
       "plan_id": "2026-05-26-v1.29-kb-extract-queue-preset",
       "title": "FL-B — KB extract queue + kb.extract_work preset (agent-driven)",
       "done_at": "2026-05-26T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.29-kb-extract-queue-preset.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.29-kb-extract-queue-preset.md",
       "category": "logic",
       "working_branch": "feature/v1.29-kb-extract-queue-preset",
       "qc_verdict": "Approve",
@@ -1121,7 +1121,7 @@
       "plan_id": "2026-05-26-v1.29-agent-host-batch2-hardening",
       "title": "Agent Host Batch 2 — DF-21–23, 27–28",
       "done_at": "2026-05-26T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.29-agent-host-batch2-hardening.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.29-agent-host-batch2-hardening.md",
       "category": "logic",
       "working_branch": "feature/v1.29-agent-host-batch2-hardening",
       "qc_verdict": "Approve",
@@ -1132,7 +1132,7 @@
       "plan_id": "2026-05-26-v1.29-spec-tracker-hygiene",
       "title": "V1.29 spec + tracker hygiene (V1.28 backfill + V1.29 normative)",
       "done_at": "2026-05-26T16:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.29-spec-tracker-hygiene.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.29-spec-tracker-hygiene.md",
       "category": "docs",
       "working_branch": "feature/v1.29-spec-tracker-hygiene",
       "qc_verdict": "Approve",
@@ -1142,7 +1142,7 @@
       "plan_id": "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
       "title": "KB extract atomic claim, UUID job IDs, bounded status, full e2e lifecycle",
       "done_at": "2026-05-26T21:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-kb-extract-lifecycle-hardening.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.30-kb-extract-lifecycle-hardening.md",
       "category": "logic",
       "working_branch": "feature/v1.30-kb-extract-lifecycle-hardening",
       "qc_verdict": "Approve (after fix: rows_affected check)",
@@ -1152,7 +1152,7 @@
       "plan_id": "2026-05-26-v1.30-agent-session-quality",
       "title": "SessionCapture from session start + persistent child Drop hardening",
       "done_at": "2026-05-26T21:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-agent-session-quality.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.30-agent-session-quality.md",
       "category": "logic",
       "working_branch": "feature/v1.30-agent-session-quality",
       "qc_verdict": "Approve (after fix: PID existence check)",
@@ -1162,7 +1162,7 @@
       "plan_id": "2026-05-26-v1.30-creator-module-refactor",
       "title": "Extract KB command handlers to creator/kb.rs",
       "done_at": "2026-05-26T21:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-creator-module-refactor.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.30-creator-module-refactor.md",
       "category": "logic",
       "working_branch": "feature/v1.30-creator-module-refactor",
       "qc_verdict": "Approve",
@@ -1172,7 +1172,7 @@
       "plan_id": "2026-05-26-v1.30-local-db-hardening",
       "title": "Reference store, narrative errors, and KB query hygiene (R5–R9)",
       "done_at": "2026-05-26T21:30:00Z",
-      "plan_file": ".agents/plans/2026-05-26-v1.30-local-db-hardening.md",
+      "plan_file": ".mstar/plans/2026-05-26-v1.30-local-db-hardening.md",
       "category": "logic",
       "working_branch": "feature/v1.30-local-db-hardening",
       "qc_verdict": "Approve (after fix: limit/offset clamping)",
@@ -1182,8 +1182,8 @@
       "plan_id": "2026-05-30-v1.31-creator-memory-capabilities",
       "title": "V1.31 creator memory capabilities de-stub",
       "done_at": "2026-05-30T12:00:00Z",
-      "plan_file": ".agents/plans/2026-05-30-v1.31-creator-memory-capabilities.md",
-      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-creator-memory-capabilities.json",
+      "plan_file": ".mstar/plans/2026-05-30-v1.31-creator-memory-capabilities.md",
+      "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-creator-memory-capabilities.json",
       "working_branch": "feature/v1.31-creator-memory-capabilities",
       "tracker_ids": ["DF-30"]
     },
@@ -1191,8 +1191,8 @@
       "plan_id": "2026-05-30-v1.31-judge-and-summarize-capabilities",
       "title": "V1.31 judge rule/llm and context summarize de-stub",
       "done_at": "2026-05-30T12:00:00Z",
-      "plan_file": ".agents/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.md",
-      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.json",
+      "plan_file": ".mstar/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.md",
+      "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.json",
       "working_branch": "feature/v1.31-judge-and-summarize-capabilities",
       "tracker_ids": ["DF-32", "DF-33", "DF-34", "DF-37"]
     },
@@ -1200,8 +1200,8 @@
       "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
       "title": "V1.31 Agentic Design Pattern demonstrator presets",
       "done_at": "2026-05-30T12:00:00Z",
-      "plan_file": ".agents/plans/2026-05-30-v1.31-agentic-pattern-presets.md",
-      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-agentic-pattern-presets.json",
+      "plan_file": ".mstar/plans/2026-05-30-v1.31-agentic-pattern-presets.md",
+      "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-agentic-pattern-presets.json",
       "working_branch": "feature/v1.31-agentic-pattern-presets",
       "tracker_ids": ["FL-D"]
     },
@@ -1209,8 +1209,8 @@
       "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
       "title": "V1.31 spec and tracker hygiene",
       "done_at": "2026-05-30T12:00:00Z",
-      "plan_file": ".agents/plans/2026-05-30-v1.31-spec-tracker-hygiene.md",
-      "archived_record": ".agents/archived/plans/2026-05-30-v1.31-spec-tracker-hygiene.json",
+      "plan_file": ".mstar/plans/2026-05-30-v1.31-spec-tracker-hygiene.md",
+      "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-spec-tracker-hygiene.json",
       "working_branch": "feature/v1.31-spec-tracker-hygiene",
       "notes": "Profile B compaction + tracker/status SSOT alignment"
     },
@@ -1218,8 +1218,8 @@
       "plan_id": "2026-06-03-v1.32-preset-validator-core-and-cli",
       "title": "V1.32 P1 — Shared preset validator core + CLI/API parity",
       "done_at": "2026-06-03T16:30:00+08:00",
-      "plan_file": ".agents/plans/2026-06-03-v1.32-preset-validator-core-and-cli.md",
-      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-preset-validator-core-and-cli.json",
+      "plan_file": ".mstar/plans/2026-06-03-v1.32-preset-validator-core-and-cli.md",
+      "archived_record": ".mstar/archived/plans/2026-06-03-v1.32-preset-validator-core-and-cli.json",
       "working_branch": "feature/v1.32-preset-validator-core-and-cli",
       "category": "logic",
       "qc_verdict": "Approve (rev3, 3/3)",
@@ -1231,8 +1231,8 @@
       "plan_id": "2026-06-03-v1.32-embedded-presets-usability-hardening",
       "title": "V1.32 P2 — Embedded preset completeness, smoke tests, and usability repairs",
       "done_at": "2026-06-03T16:30:00+08:00",
-      "plan_file": ".agents/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.md",
-      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.json",
+      "plan_file": ".mstar/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.md",
+      "archived_record": ".mstar/archived/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.json",
       "working_branch": "feature/v1.32-embedded-presets-usability-hardening",
       "category": "logic",
       "qc_verdict": "Approve (rev2, 3/3)",
@@ -1244,8 +1244,8 @@
       "plan_id": "2026-06-03-v1.32-orchestration-security-followup",
       "title": "V1.32 P3 — Close SEC-V131-01 capability identity boundary gap",
       "done_at": "2026-06-03T16:30:00+08:00",
-      "plan_file": ".agents/plans/2026-06-03-v1.32-orchestration-security-followup.md",
-      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-orchestration-security-followup.json",
+      "plan_file": ".mstar/plans/2026-06-03-v1.32-orchestration-security-followup.md",
+      "archived_record": ".mstar/archived/plans/2026-06-03-v1.32-orchestration-security-followup.json",
       "working_branch": "feature/v1.32-orchestration-security-followup",
       "category": "logic",
       "qc_verdict": "Approve (rev2, 3/3)",
@@ -1258,8 +1258,8 @@
       "plan_id": "2026-06-03-v1.32-spec-tracker-hygiene",
       "title": "V1.32 P4 — Spec, tracker, and status hygiene for V1.32 close (docs-only)",
       "done_at": "2026-06-03T16:30:00+08:00",
-      "plan_file": ".agents/plans/2026-06-03-v1.32-spec-tracker-hygiene.md",
-      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-spec-tracker-hygiene.json",
+      "plan_file": ".mstar/plans/2026-06-03-v1.32-spec-tracker-hygiene.md",
+      "archived_record": ".mstar/archived/plans/2026-06-03-v1.32-spec-tracker-hygiene.json",
       "working_branch": "feature/v1.32-spec-tracker-hygiene",
       "category": "docs",
       "qc_verdict": "Approve (rev2, 3/3 after rebase + SSOT close)",

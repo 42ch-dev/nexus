@@ -14,7 +14,7 @@
 
 **Branch Strategy:** Feature branch `feature/v1.0-sync-contract` from `main`
 
-**Architecture Review:** See `.agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md` for detailed review and constraints.
+**Architecture Review:** See `.mstar/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md` for detailed review and constraints.
 
 ---
 
@@ -172,5 +172,5 @@
 
 ---
 
-**Plan saved to:** `.agents/plans/2025-04-05-sync-contract.md`  
+**Plan saved to:** `.mstar/plans/2025-04-05-sync-contract.md`  
 **Last updated:** 2026-04-06 (Architecture Review: Request Changes → Expanded per §6.2)

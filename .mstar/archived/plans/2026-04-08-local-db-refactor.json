@@ -4,7 +4,7 @@
   "snapshot": {
     "id": "2026-04-08-local-db-refactor",
     "title": "Local DB Refactor — Single Ownership Module",
-    "file": ".agents/plans/2026-04-08-local-db-refactor.md",
+    "file": ".mstar/plans/2026-04-08-local-db-refactor.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -30,7 +30,7 @@
       "merge_commit": "9301529",
       "dependency": null,
       "spec_refs": [
-        ".agents/knowledge/local-db-refactor-legacy.md"
+        ".mstar/knowledge/local-db-refactor-legacy.md"
       ],
       "effort": "M (~8 sessions across 6 phases)",
       "gates": {

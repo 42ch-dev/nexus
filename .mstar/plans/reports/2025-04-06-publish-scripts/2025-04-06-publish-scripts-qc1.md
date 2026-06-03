@@ -4,7 +4,7 @@
 **Branch**: feature/publish-scripts
 **Reviewer**: @qc-specialist
 **Date**: 2026-04-06
-**Report Path**: `.agents/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc1.md`
+**Report Path**: `.mstar/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc1.md`
 
 ## Summary
 

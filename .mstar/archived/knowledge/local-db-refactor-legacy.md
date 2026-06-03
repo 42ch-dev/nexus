@@ -4,7 +4,7 @@
 **Status**: Active design baseline
 **Plan**: 2026-04-08-local-db-refactor
 
-**On-disk path (per-workspace):** Defined only in **v1-spec** — `adr/adr-014-…`, `cli-sync/local-db-schema-v1.md` §0, `cli-sync/cli-spec-v1.md` §13 (resolve `specs_root.v1-spec` via `.agents/local-paths.json`). [local-fs-layout-creator-workspace.md](local-fs-layout-creator-workspace.md) is a non-normative pointer. Module ownership and schema rules **in this document** are unchanged.
+**On-disk path (per-workspace):** Defined only in **v1-spec** — `adr/adr-014-…`, `cli-sync/local-db-schema-v1.md` §0, `cli-sync/cli-spec-v1.md` §13 (resolve `specs_root.v1-spec` via `.mstar/local-paths.json`). [local-fs-layout-creator-workspace.md](local-fs-layout-creator-workspace.md) is a non-normative pointer. Module ownership and schema rules **in this document** are unchanged.
 
 ---
 

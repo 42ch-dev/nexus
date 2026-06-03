@@ -5,7 +5,7 @@
   "snapshot": {
     "id": "v1-tech-debt-cleanup",
     "title": "V1 Tech Debt Cleanup (Long-term)",
-    "file": ".agents/plans/v1-tech-debt-cleanup.md",
+    "file": ".mstar/plans/v1-tech-debt-cleanup.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": ["@fullstack-dev"],
@@ -29,10 +29,10 @@
         "batch_e": "deferred to V1.2 — TD-11, TD-13"
       },
       "spec_refs": [
-        ".agents/archived/knowledge/fork-branch-contract-alignment.md",
-        ".agents/knowledge/dual-outbox-architecture.md",
-        ".agents/archived/knowledge/daemon-lifecycle-api-legacy.md",
-        ".agents/knowledge/device-flow-oauth-scope-v1.md"
+        ".mstar/archived/knowledge/fork-branch-contract-alignment.md",
+        ".mstar/knowledge/dual-outbox-architecture.md",
+        ".mstar/archived/knowledge/daemon-lifecycle-api-legacy.md",
+        ".mstar/knowledge/device-flow-oauth-scope-v1.md"
       ],
       "gates": {
         "tests": "passed — cargo test -p nexus-domain, cargo test -p nexus42d (Batch D slice 2026-04-10)",

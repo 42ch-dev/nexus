@@ -2,7 +2,7 @@
   "id": "2026-04-16-v1.3-creator-register-and-residuals",
   "title": "V1.3 Creator Register CLI + V1.2 Residual Governance",
   "status": "Done",
-  "file": ".agents/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
+  "file": ".mstar/plans/2026-04-16-v1.3-creator-register-and-residuals.md",
   "owner": "fullstack-dev",
   "agents": ["fullstack-dev", "qa-engineer"],
   "progress": 100,
@@ -20,8 +20,8 @@
       "qa_verification": "PASS - 1872 tests, clippy clean, fmt clean, 0 open V1.2 residuals"
     },
     "spec_refs": [
-      ".agents/iterations/v1.3-delivery-compass-v1.md",
-      ".agents/archived/knowledge/challenge-solver-design.md"
+      ".mstar/iterations/v1.3-delivery-compass-v1.md",
+      ".mstar/archived/knowledge/challenge-solver-design.md"
     ],
     "description": "V1.3 nexus-side: implement creator register CLI command with challenge-verify flow and govern all 35 V1.2 residual findings to zero open.",
     "commits": [

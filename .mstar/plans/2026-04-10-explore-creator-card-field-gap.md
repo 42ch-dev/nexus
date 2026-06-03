@@ -176,7 +176,7 @@ Check `crates/nexus-contracts/src/generated/explore_creator_card.rs` — it shou
 
 - [ ] **Step 4: Update sprint coverage matrix**
 
-Edit `.agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`:
+Edit `.mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`:
 - Update the ExploreCreatorCard row to show 10 fields (was 7), all complete.
 - Add a note: "2026-04-10: gap fix — added is_platform_owned, created_at, public_world_count per platform Plan 16 spec matrix."
 

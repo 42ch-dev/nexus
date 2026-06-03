@@ -7,7 +7,7 @@
 **CLI Spec**: [`cli-spec.md`](./cli-spec.md) §6.2B  
 **集成边界**: [`local-cloud-crate-architecture.md`](./local-cloud-crate-architecture.md) §6 — registration via **`nexus-cloud-sync`** (CLI → platform HTTP), **not** daemon Local API.
 
-> **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**（原 V1.3 程序提取；历史计划见 `.agents/archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json`）。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。
+> **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**（原 V1.3 程序提取；历史计划见 `.mstar/archived/plans/2026-04-16-v1.3-creator-register-and-residuals.json`）。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。
 
 ---
 

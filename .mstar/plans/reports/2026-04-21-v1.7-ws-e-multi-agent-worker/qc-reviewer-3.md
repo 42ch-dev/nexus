@@ -330,7 +330,7 @@ All references use `creator_id` (snake_case). No mixed naming.
 **Task**: QC Code Review #3 — Multi-Agent Worker (WS-E) — Architecture & Maintainability Focus
 **Status**: Done
 **Scope Delivered**: Reviewed 15 files across `nexus-orchestration`, `nexus42`, `nexus-contracts`, and `nexus42d`. Focused on architecture, file organization, API design, test quality, and naming conventions.
-**Artifacts**: QC report at `.agents/plans/reports/2026-04-21-v1.7-ws-e-multi-agent-worker/qc-reviewer-3.md`
+**Artifacts**: QC report at `.mstar/plans/reports/2026-04-21-v1.7-ws-e-multi-agent-worker/qc-reviewer-3.md`
 **Validation**: Source read + diff analysis + structural review. Clippy and rustfmt not run (bash blocked by permissions), but code is syntactically and semantically sound based on source reading.
 **Source Attribution**:
 - Primary Evidence: source code reads (mod.rs, config.rs, ipc.rs, transport.rs, manager.rs, registry.rs, agent_slot.rs, tasks/mod.rs, preset/loader.rs, preset.rs, worker_mgr.rs, test files)
@@ -339,4 +339,4 @@ All references use `creator_id` (snake_case). No mixed naming.
 **Issues/Risks**: 1 Warning (doc comment duplication in manager.rs), 9 Suggestions. No blocking issues.
 **Plan Update**: PM to note W1 (doc comment duplication) for cleanup before merge, and S3 (handlebars technical debt) for future backlog.
 **Handoff**: @project-manager
-**Git**: N/A — report written to `.agents/plans/reports/` (git bash blocked by permissions, report is documentation-only change)
+**Git**: N/A — report written to `.mstar/plans/reports/` (git bash blocked by permissions, report is documentation-only change)

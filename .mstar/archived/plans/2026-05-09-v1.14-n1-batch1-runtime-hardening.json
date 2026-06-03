@@ -6,7 +6,7 @@
   "archived_at": "2026-05-10",
   "metadata": {
     "version": "v1.14",
-    "plan_path": ".agents/plans/2026-05-09-v1.14-n1-batch1-runtime-hardening.md",
+    "plan_path": ".mstar/plans/2026-05-09-v1.14-n1-batch1-runtime-hardening.md",
     "task_category": "logic",
     "working_branch": "feature/v1.14-n1-batch1-runtime-hardening"
   },

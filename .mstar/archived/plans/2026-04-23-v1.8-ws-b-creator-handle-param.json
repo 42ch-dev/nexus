@@ -5,7 +5,7 @@
   "status": "Done",
   "phase": "v1.8",
   "done_at": "2026-04-24",
-  "plan_file": ".agents/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
+  "plan_file": ".mstar/plans/2026-04-23-v1.8-ws-b-creator-handle-param.md",
   "milestone": "M2",
   "working_branch": "feature/v1.8",
   "integration_branch": "feature/v1.8",

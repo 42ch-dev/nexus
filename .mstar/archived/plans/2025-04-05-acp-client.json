@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-acp-client",
     "title": "ACP Client Integration",
-    "file": ".agents/plans/2025-04-05-acp-client.md",
+    "file": ".mstar/plans/2025-04-05-acp-client.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -31,12 +31,12 @@
       "priority": "high",
       "description": "Integrate ACP Rust SDK, Registry, and Local API minimum contract",
       "working_branch": "feature/v1.0-acp-client",
-      "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+      "review_report": ".mstar/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
       "review_verdict": "Approve with Residuals (ACP-R1, R2 deferred to implementation-start)",
-      "wave_0_spec": ".agents/archived/knowledge/acp-client-tech-spec-legacy.md",
+      "wave_0_spec": ".mstar/archived/knowledge/acp-client-tech-spec-legacy.md",
       "qc_status": "APPROVE — ACP-C1, ACP-C2, ACP-H1 fixed and verified",
-      "qc_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qc-consolidated.md",
-      "qa_report": ".agents/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qa.md",
+      "qc_report": ".mstar/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qc-consolidated.md",
+      "qa_report": ".mstar/plans/reports/2025-04-05-acp-client/2025-04-05-acp-client-qa.md",
       "qa_status": "CONDITIONAL PASS — CI clean, 312+ tests pass, CLI commands work",
       "residual_summary": "ACP-R1/R2 resolved. 9 V1.1+ residuals (ACP-R3..R11). 10 QC residuals (QC-ACP-1..10).",
       "tests": {

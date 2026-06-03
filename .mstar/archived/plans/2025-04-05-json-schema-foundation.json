@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-json-schema-foundation",
     "title": "JSON Schema Foundation",
-    "file": ".agents/plans/2025-04-05-json-schema-foundation.md",
+    "file": ".mstar/plans/2025-04-05-json-schema-foundation.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [

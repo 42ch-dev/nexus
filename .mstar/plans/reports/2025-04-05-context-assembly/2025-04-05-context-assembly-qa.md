@@ -19,7 +19,7 @@
 | 9 | No new crate created | `ls crates/` | **PASS** | Crates: nexus-contracts, nexus-domain, nexus-sync, nexus42, nexus42d — no nexus-context |
 | 10 | Clippy clean | `cargo clippy -p nexus42 -- -D warnings` | **PASS** | "Finished `test` profile... 0 warnings" (only test file warnings for unused imports, not in lib) |
 | 11 | All workspace tests pass | `cargo test --all` | **PASS** | See detailed counts below |
-| 12 | status.json is valid JSON | `python3 -c "import json; json.load(open('.agents/status.json'))"` | **PASS** | "status.json is valid JSON" |
+| 12 | status.json is valid JSON | `python3 -c "import json; json.load(open('.mstar/status.json'))"` | **PASS** | "status.json is valid JSON" |
 
 ## Workspace Test Summary
 
@@ -42,7 +42,7 @@
 
 | Item | Expected State | Actual State | Evidence |
 |------|---------------|--------------|----------|
-| status.json duplicate key | Fixed — JSON parses correctly | **FIXED** | `python3 -c "import json; json.load(open('.agents/status.json'))"` returned no error |
+| status.json duplicate key | Fixed — JSON parses correctly | **FIXED** | `python3 -c "import json; json.load(open('.mstar/status.json'))"` returned no error |
 | cargo fmt violations | Fixed — `cargo fmt --check` passes | **CONDITIONAL PASS** | Diff shown only in `crates/nexus-contracts/src/generated/` directory which is supposed to be ignored per AGENTS.md. No violations in hand-written code. |
 | Import path in client.rs | Fixed — uses `crate::api::DaemonClient` | **FIXED** | `grep` found `use crate::api::DaemonClient;` in `crates/nexus42/src/context/client.rs:5` |
 

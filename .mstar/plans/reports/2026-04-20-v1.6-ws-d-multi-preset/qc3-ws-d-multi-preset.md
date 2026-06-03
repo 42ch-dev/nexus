@@ -209,13 +209,13 @@ PM to update `status.json` with:
         "id": "R1",
         "severity": "Critical",
         "title": "exit_when rule causes state machine to block",
-        "detail_doc": ".agents/plans/reports/2026-04-20-v1.6-ws-d-multi-preset/qc3-ws-d-multi-preset.md"
+        "detail_doc": ".mstar/plans/reports/2026-04-20-v1.6-ws-d-multi-preset/qc3-ws-d-multi-preset.md"
       },
       {
         "id": "W1",
         "severity": "Warning",
         "title": "Integration tests weakened — _system.maintenance not asserted",
-        "detail_doc": ".agents/plans/reports/2026-04-20-v1.6-ws-d-multi-preset/qc3-ws-d-multi-preset.md"
+        "detail_doc": ".mstar/plans/reports/2026-04-20-v1.6-ws-d-multi-preset/qc3-ws-d-multi-preset.md"
       }
     ]
   }

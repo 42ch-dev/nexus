@@ -189,9 +189,9 @@
 
 ## 10. Individual QC Reports
 
-- **QC #1**: `.agents/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc1.md`
-- **QC #2**: `.agents/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc2.md`
-- **QC #3**: `.agents/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc3.md`
+- **QC #1**: `.mstar/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc1.md`
+- **QC #2**: `.mstar/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc2.md`
+- **QC #3**: `.mstar/plans/reports/2025-04-05-cli-daemon-foundation/2025-04-05-cli-daemon-foundation-qc3.md`
 
 ---
 

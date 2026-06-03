@@ -480,7 +480,7 @@ All other findings are based on direct code inspection and can be verified by QC
 | QC-W7 | ✅ Fully addressed | Close and archive |
 
 **Action for @project-manager**:
-1. Archive all 4 residuals to `.agents/archived/residuals/2026-04-08-v1.1-tech-debt-mitigation.json`
+1. Archive all 4 residuals to `.mstar/archived/residuals/2026-04-08-v1.1-tech-debt-mitigation.json`
 2. Remove entries from `status.json` `residual_findings["2026-04-08-v1.1-tech-debt-mitigation"]`
 3. Update `tech_debt_summary` counts (12 → 8 open)
 4. Mark Batch B as completed in plan file

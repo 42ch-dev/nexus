@@ -304,7 +304,7 @@ Findings CTX-M1 through CTX-L3 are recommendations for improved robustness and m
 **Status**: Done  
 **Scope Delivered**: Full diff review of 10 files (1271 insertions, 19 deletions) across `crates/nexus42/src/context/`, `crates/nexus42/src/commands/context.rs`, `schemas/platform/context-assembly-v1.schema.json`, and related integration points  
 **Artifacts**: 
-- Review report at `.agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc2.md`
+- Review report at `.mstar/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc2.md`
 - 3 Critical, 3 High, 3 Medium, 3 Low findings
 - `cargo fmt --check` output showing formatting violations  
 **Validation**: 

@@ -3,7 +3,7 @@
 //! Immutable versioned prompt state that the engine reads at execution
 //! boundaries. Per spec §3.2 and §6.
 //!
-//! Design: `.agents/archived/knowledge/creator-schedule-and-core-context.md`
+//! Design: `.mstar/archived/knowledge/creator-schedule-and-core-context.md`
 
 use serde::{Deserialize, Serialize};
 

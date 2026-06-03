@@ -1,7 +1,7 @@
 {
   "id": "2026-04-24-v1.9-ws-a-third-party-preset",
   "title": "V1.9 WS-A: Third-Party Preset Loading + CLI",
-  "file": ".agents/plans/2026-04-24-v1.9-ws-a-third-party-preset.md",
+  "file": ".mstar/plans/2026-04-24-v1.9-ws-a-third-party-preset.md",
   "status": "Done",
   "owner": "@project-manager",
   "agents": ["@fullstack-dev", "@fullstack-dev-2"],
@@ -13,10 +13,10 @@
   "notes": "Third-party preset loading from ~/.nexus42/presets/<name>/ + nexus42 preset init/list CLI (DF-17). QC wave1: Request Changes (3 Critical). QC wave2: Approve. QA: PASS.",
   "metadata": {
     "qc_reports": [
-      ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc1.md",
-      ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc1-wave2.md"
+      ".mstar/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc1.md",
+      ".mstar/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qc1-wave2.md"
     ],
-    "qa_report": ".agents/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qa.md",
+    "qa_report": ".mstar/plans/reports/2026-04-24-v1.9-m1/2026-04-24-v1.9-m1-qa.md",
     "branch": "feature/v1.9-ws-a",
     "residuals": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"]
   }

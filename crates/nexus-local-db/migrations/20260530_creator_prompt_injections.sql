@@ -1,5 +1,5 @@
 -- Prompt injection queue for creator.inject_prompt
--- Design: `.agents/plans/reports/2026-05-30-v1.31-creator-memory-capabilities/architect-c0-j0-injection-design.md`
+-- Design: `.mstar/plans/reports/2026-05-30-v1.31-creator-memory-capabilities/architect-c0-j0-injection-design.md`
 -- Lifecycle: queued → claimed → consumed | expired
 
 CREATE TABLE IF NOT EXISTS creator_prompt_injections (

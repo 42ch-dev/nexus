@@ -131,5 +131,5 @@
 
 **Next Steps**: 
 1. Merge `feature/v2.0-acp-sdk-bridge` to `main`
-2. Update plan status to `Done` in `.agents/status.json`
+2. Update plan status to `Done` in `.mstar/status.json`
 3. Delete worktree after merge (optional cleanup)

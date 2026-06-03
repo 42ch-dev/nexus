@@ -1,7 +1,7 @@
 {
   "id": "2026-04-17-v1.4-ws4-statig-lifecycle",
   "status": "Done",
-  "file": ".agents/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
+  "file": ".mstar/plans/2026-04-17-v1.4-ws4-statig-lifecycle.md",
   "title": "V1.4 WS4 — statig daemon lifecycle HSM (TD-9 closure)",
   "owner": "fullstack-dev-2",
   "tags": [
@@ -20,11 +20,11 @@
     "working_branch": "feature/v1.4-ws4-statig-lifecycle",
     "merge_target": "feature/v1.4",
     "description": "Replace nexus42d's single-state 'running-probe' with the full 6-state statig HSM (Stopped/Starting/Running/Degraded/Stopping/Failed). Expose the v2 GET /v1/local/daemon/status superset response (schema_version: 2, subsystems{}, degraded{}) wire-compatible with the v1 probe. Closes TD-9.",
-    "wave_0_spec": ".agents/knowledge/daemon-lifecycle-api.md",
+    "wave_0_spec": ".mstar/knowledge/daemon-lifecycle-api.md",
     "spec_refs": [
-      ".agents/knowledge/daemon-lifecycle-api.md",
-      ".agents/iterations/v1.4-delivery-compass-v1.md",
-      ".agents/knowledge/architecture-alignment-review.md"
+      ".mstar/knowledge/daemon-lifecycle-api.md",
+      ".mstar/iterations/v1.4-delivery-compass-v1.md",
+      ".mstar/knowledge/architecture-alignment-review.md"
     ],
     "parallelism": "parallel with WS2 (no file overlap except crates/nexus42d/src/main.rs touch)",
     "effort_agent_oriented": "S+ (1 agent session)",

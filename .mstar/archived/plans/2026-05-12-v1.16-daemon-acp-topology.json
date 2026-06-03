@@ -14,9 +14,9 @@
   "working_branch": "feature/v1.16-daemon-acp-topology",
   "qa_verdict": "Approve with residuals",
   "metadata": {
-    "primary_spec": ".agents/iterations/v1.16-delivery-compass-v1.md",
+    "primary_spec": ".mstar/iterations/v1.16-delivery-compass-v1.md",
     "spec_refs": [
-      "nexus-platform/.agents/designs/v1-spec/cli-sync/cli-spec-v1.md"
+      "nexus-platform/.mstar/designs/v1-spec/cli-sync/cli-spec-v1.md"
     ]
   },
   "archived_at": "2026-05-13T08:00:00Z",

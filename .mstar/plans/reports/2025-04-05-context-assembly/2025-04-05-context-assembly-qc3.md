@@ -24,7 +24,7 @@ The Context Assembly implementation is functionally complete with good test cove
 ### Critical (must fix before merge)
 
 **CTX-C1: status.json has duplicate keys in plan metadata**
-- **File**: `.agents/status.json`
+- **File**: `.mstar/status.json`
 - **Location**: Lines 253-256 in plan "2025-04-05-context-assembly" metadata
 - **Issue**: The metadata object contains duplicate keys `tests` (lines 253-254 and 255) and `clippy` (lines 255-256), which violates JSON spec (RFC 8259). While JSON parsers may accept this, behavior is undefined (last value wins in some parsers, first in others).
 - **Evidence**:
@@ -117,7 +117,7 @@ The Context Assembly implementation is functionally complete with good test cove
 **Task**: QC Review #3 for Context Assembly Implementation
 **Status**: Done
 **Scope Delivered**: Full diff review of 10 changed files (1 schema + 9 Rust), status.json audit, dependency analysis, test quality assessment
-**Artifacts**: This report at `.agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc3.md`
+**Artifacts**: This report at `.mstar/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc3.md`
 **Validation**: Manual code review (cargo commands blocked by permissions, but code structure reviewed manually)
 **Source Attribution**:
 - Primary Evidence: `git diff main...HEAD`, `status.json`, individual Rust source files

@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-monorepo-structure",
     "title": "Monorepo Structure Implementation",
-    "file": ".agents/plans/2025-04-05-monorepo-structure.md",
+    "file": ".mstar/plans/2025-04-05-monorepo-structure.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [

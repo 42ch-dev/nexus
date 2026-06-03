@@ -38,7 +38,7 @@ The GA residual fix is a well-executed, targeted change that resolves 3 non-bloc
    - Added 16 Display tests covering all 18 error variants
    - Added `#[allow(dead_code)]` annotations to 2 unused variants
    
-4. **.agents/status.json** (17 lines changed)
+4. **.mstar/status.json** (17 lines changed)
    - Updated residual findings lifecycle status
    - Updated tech_debt_summary counts
 

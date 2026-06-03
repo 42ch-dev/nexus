@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 > **Scope**: CLI-side only. Platform-side Context Assembly service belongs in private nexus-platform repo.
 > **Supersedes**: Original plan which contained Neo4j/pgvector scope violations.
-> **Spec**: `.agents/knowledge/restructured-context-assembly.md`
+> **Spec**: `.mstar/knowledge/restructured-context-assembly.md`
 
 **Goal:** Implement CLI-side context assembly — summary generation from local manuscript files, Local API client for `POST /v1/local/context/assemble`, bundle metadata wiring, CLI command, and JSON Schema registration.
 
@@ -1466,4 +1466,4 @@ git commit -m "feat(cli): implement nexus42 context assemble command"
 
 ---
 
-*Plan saved to:* `.agents/plans/2025-04-05-context-assembly.md`
+*Plan saved to:* `.mstar/plans/2025-04-05-context-assembly.md`

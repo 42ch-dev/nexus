@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-codegen-pipeline",
     "title": "Codegen Pipeline",
-    "file": ".agents/plans/2025-04-05-codegen-pipeline.md",
+    "file": ".mstar/plans/2025-04-05-codegen-pipeline.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [

@@ -4,7 +4,7 @@
   "plan": {
     "id": "2026-04-06-auth-flow",
     "title": "Auth Flow Completion",
-    "file": ".agents/plans/2026-04-06-pre-phase2.md",
+    "file": ".mstar/plans/2026-04-06-pre-phase2.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -32,7 +32,7 @@
       "description": "Complete device code OAuth flow, token refresh, daemon auth middleware, CLI auth client update",
       "dependency": "2026-04-06-foundation-hardening, 2026-04-06-daemon-manuscript-ops (soft)",
       "spec_refs": [
-        ".agents/archived/knowledge/phase2-architecture-plan.md"
+        ".mstar/archived/knowledge/phase2-architecture-plan.md"
       ],
       "effort": "M — ~2-3 agent sessions",
       "residual_summary": "3 addressed (1 HIGH, 2 MEDIUM resolved)"

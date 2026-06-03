@@ -1,7 +1,7 @@
 {
   "id": "2026-05-21-v1.23-architecture-crate-wiring-alignment",
   "title": "V1.23 Architecture & Crate Wiring Alignment — align knowledge specs, entity scopes, and actual crate graph",
-  "file": ".agents/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
+  "file": ".mstar/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
   "status": "Done",
   "owner": "@project-manager",
   "agents": ["@product-manager", "@architect", "@fullstack-dev", "@qa-engineer", "@qc-specialist", "@qc-specialist-2", "@qc-specialist-3"],
@@ -20,15 +20,15 @@
     "description": "Reconcile OSS knowledge specs with actual crates, define entity scope ownership, wire previously split domain crates into product paths, and add drift guards.",
     "working_branch": "feature/v1.23-architecture-crate-wiring-alignment",
     "merge_target": "main",
-    "primary_spec": ".agents/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
+    "primary_spec": ".mstar/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
     "spec_refs": [
-      ".agents/knowledge/specs/entity-scope-model.md",
-      ".agents/knowledge/specs/local-cloud-crate-architecture.md",
-      ".agents/knowledge/specs/cli-spec.md",
-      ".agents/knowledge/specs/daemon-runtime.md",
-      ".agents/knowledge/specs/orchestration-engine.md",
-      ".agents/knowledge/specs/local-db-schema.md",
-      ".agents/knowledge/deferred-features-cross-version-tracker.md",
+      ".mstar/knowledge/specs/entity-scope-model.md",
+      ".mstar/knowledge/specs/local-cloud-crate-architecture.md",
+      ".mstar/knowledge/specs/cli-spec.md",
+      ".mstar/knowledge/specs/daemon-runtime.md",
+      ".mstar/knowledge/specs/orchestration-engine.md",
+      ".mstar/knowledge/specs/local-db-schema.md",
+      ".mstar/knowledge/deferred-features-cross-version-tracker.md",
       "docs/ARCHITECTURE.md"
     ],
     "gates": {

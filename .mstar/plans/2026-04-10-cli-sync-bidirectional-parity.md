@@ -12,8 +12,8 @@
 
 ## Authoritative design input
 
-- [.agents/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md) — program overview (capability symmetry **B**).
-- [.agents/knowledge/architecture-alignment-review.md](knowledge/architecture-alignment-review.md) — alignment narrative.
+- [.mstar/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md) — program overview (capability symmetry **B**).
+- [.mstar/knowledge/architecture-alignment-review.md](knowledge/architecture-alignment-review.md) — alignment narrative.
 - In-repo: `schemas/*sync*`, `crates/nexus-sync/`, `crates/nexus42/src/commands/sync*.rs` (paths may vary — locate with `rg 'sync' crates/nexus42`).
 
 **Cross-repo:** Platform HTTP routes and error semantics are defined in the private **v1-spec** / platform API docs. Do not paste out-of-repo paths into committed artifacts; copy minimal acceptance bullets into this plan when locked.

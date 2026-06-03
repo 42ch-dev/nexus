@@ -5,7 +5,7 @@
   "status": "Done",
   "phase": "done",
   "done_at": "2026-04-21",
-  "plan_file": ".agents/plans/2026-04-21-v1.7-ws-abc-residual-closure.md",
+  "plan_file": ".mstar/plans/2026-04-21-v1.7-ws-abc-residual-closure.md",
   "milestone": "M1",
   "working_branch": "fix/v1.7-ws-abc",
   "integration_branch": "feature/v1.7",

@@ -74,7 +74,7 @@ The `verify-sqlx-offline` CI job runs `cargo sqlx prepare` but does not follow w
 
 ## Phase Gate Checklist verification
 
-- Plan file exists at `.agents/plans/2026-04-18-sqlx-compile-time-migration.md`
+- Plan file exists at `.mstar/plans/2026-04-18-sqlx-compile-time-migration.md`
 - `status.json` has plan entry with status `InReview`
 - QC trio completed (qc1, qc2, qc3 reports present in `reports/2026-04-18-sqlx-compile-time-migration/`)
 - All QC blocking items addressed (verified by `git diff 1f4f251..HEAD` — includes fix commit `35f62f9`)

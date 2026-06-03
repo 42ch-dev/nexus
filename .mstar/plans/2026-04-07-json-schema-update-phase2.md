@@ -4,7 +4,7 @@
 
 **Goal:** Update nexus JSON Schemas to align with ADR-002 domain model field renaming and structure changes from nexus-platform Phase 2.
 
-**Architecture:** This plan coordinates with nexus-platform V1.0-phase2 Domain Model Alignment (`.agents/plans/phase2-domain-model-alignment.md`). JSON Schema updates must precede or run in parallel with nexus-platform implementation to unblock Task 8 (contract consumption).
+**Architecture:** This plan coordinates with nexus-platform V1.0-phase2 Domain Model Alignment (`.mstar/plans/phase2-domain-model-alignment.md`). JSON Schema updates must precede or run in parallel with nexus-platform implementation to unblock Task 8 (contract consumption).
 
 **Tech Stack:** JSON Schema (Draft 2020-12), TypeScript codegen, Rust codegen
 

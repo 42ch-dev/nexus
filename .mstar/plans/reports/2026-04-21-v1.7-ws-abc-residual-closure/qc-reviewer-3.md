@@ -94,7 +94,7 @@ All 8 residuals (DTO-C1, DTO-C2, DTO-W1, PERM-W1, PERM-W2, PERM-W3, R4, R7) are 
 **Task**: QC code review of `2026-04-21-v1.7-ws-abc-residual-closure` — 8 residuals across 3 workstreams
 **Status**: Done
 **Scope Delivered**: All 7 files in diff; all 8 residuals reviewed
-**Artifacts**: QC review report at `.agents/plans/reports/2026-04-21-v1.7-ws-abc-residual-closure/qc-reviewer-3.md`
+**Artifacts**: QC review report at `.mstar/plans/reports/2026-04-21-v1.7-ws-abc-residual-closure/qc-reviewer-3.md`
 **Validation**: Manual code review + git diff analysis; cargo clippy/fmt blocked by permission
 **Source Attribution**:
 - Primary Evidence: git diff `feature/v1.7...fix/v1.7-ws-abc`

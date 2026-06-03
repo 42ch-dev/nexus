@@ -252,7 +252,7 @@ All 8 residuals are correctly addressed with appropriate tests. No critical or w
 **Task**: QC code review of `2026-04-21-v1.7-ws-abc-residual-closure` — 8 residuals across 3 workstreams, security & correctness focus
 **Status**: Done
 **Scope Delivered**: All 7 files in diff; all 8 residuals reviewed with security, concurrency, and state consistency deep-dive
-**Artifacts**: QC review report at `.agents/plans/reports/2026-04-21-v1.7-ws-abc-residual-closure/qc-reviewer-2.md`
+**Artifacts**: QC review report at `.mstar/plans/reports/2026-04-21-v1.7-ws-abc-residual-closure/qc-reviewer-2.md`
 **Validation**: Manual code review + git diff analysis; concurrency safety analysis of `cleanup_guard`; input validation audit; module boundary review
 **Source Attribution**:
 - Primary Evidence: git diff `feature/v1.7...fix/v1.7-ws-abc` + full file reads

@@ -363,7 +363,7 @@ Internal:
 - [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §5.3 — capability schemas are local per this doc
 - [architecture-alignment-review.md](architecture-alignment-review.md) — live TD resolution matrix
 
-External (v1-spec, read via `.agents/local-paths.json → specs_root.v1-spec`):
+External (v1-spec, read via `.mstar/local-paths.json → specs_root.v1-spec`):
 
 - `{v1-spec}/schema/codegen-strategy-v1.md` — parent principle (JSON Schema as shared truth source); §3 delegates boundary to this doc
 - `{v1-spec}/schema/openapi-export-policy-v1.md` — OpenAPI shape (separate concern)

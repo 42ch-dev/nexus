@@ -13,9 +13,9 @@
   "qc_verdict": "Approve (single review — docs+tests only)",
   "qa_verdict": "Pass",
   "metadata": {
-    "primary_spec": ".agents/iterations/v1.16-delivery-compass-v1.md",
+    "primary_spec": ".mstar/iterations/v1.16-delivery-compass-v1.md",
     "spec_refs": [
-      "nexus-platform/.agents/designs/v1-spec/cli-sync/cli-spec-v1.md"
+      "nexus-platform/.mstar/designs/v1-spec/cli-sync/cli-spec-v1.md"
     ]
   },
   "archived_at": "2026-05-13T08:00:00Z",

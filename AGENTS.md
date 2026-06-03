@@ -9,7 +9,7 @@ This is the **public open-source monorepo** containing `nexus42` CLI (Rust, with
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
-**Harness `status.json`:** Open QC residual rows are stored under **root** `residual_findings` in `.agents/status.json`. Details: [`.agents/AGENTS.md`](.agents/AGENTS.md).
+**Harness `status.json`:** Open QC residual rows are stored under **root** `residual_findings` in `.mstar/status.json`. Details: [`.mstar/AGENTS.md`](.mstar/AGENTS.md).
 
 ## Tech Stack & Protocol Decisions
 
@@ -49,7 +49,10 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-narrative/` | Worlds, forks, timelines, manuscripts | [`crates/nexus-narrative/AGENTS.md`](crates/nexus-narrative/AGENTS.md) |
 | `crates/nexus-cloud-domain/` | User + pairing (cloud sync domain) | [`crates/nexus-cloud-domain/AGENTS.md`](crates/nexus-cloud-domain/AGENTS.md) |
 | `crates/nexus-moment-context-assembly/` | Per-moment context assembly | [`crates/nexus-moment-context-assembly/AGENTS.md`](crates/nexus-moment-context-assembly/AGENTS.md) |
-| `.agents/` | Harness infrastructure | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
+| `.mstar/` | Harness infrastructure | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) |
+| `.agents/` | Code-agent skills only (ACP workspace skill root) | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
+
+**Directory split:** `{HARNESS_DIR}` = `.mstar/`. `.agents/` holds optional `.agents/skills/` for IDE/ACP — not harness SSOT.
 
 **New crate policy:** when adding a new package or crate to the monorepo, create an `AGENTS.md` in that directory — even if minimal — documenting its purpose, key rules, and dependencies.
 

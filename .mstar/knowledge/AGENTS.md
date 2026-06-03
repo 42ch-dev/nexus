@@ -9,9 +9,9 @@ Harness knowledge directory for the Nexus OSS repo.
 | **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon runtime, ACP, orchestration, sync feature contracts (flat under `specs/`) |
 | **Knowledge (root)** | This directory (files directly under `knowledge/`, not under `specs/`) | **Rules and reference**: dependency conventions, schema↔platform boundary, cross-version trackers, maintenance indexes |
 
-**Not here:** iteration compasses → [`.agents/iterations/`](../iterations/README.md). End-user docs → `docs/`.
+**Not here:** iteration compasses → [`.mstar/iterations/`](../iterations/README.md). End-user docs → `docs/`.
 
-**Index:** specs in [`specs/README.md`](specs/README.md); knowledge-root docs in [`README.md`](README.md). Archived implementation knowledge: [`.agents/archived/knowledge/`](../archived/knowledge/README.md). Shipped feature tracker archive: [`.agents/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md).
+**Index:** specs in [`specs/README.md`](specs/README.md); knowledge-root docs in [`README.md`](README.md). Archived implementation knowledge: [`.mstar/archived/knowledge/`](../archived/knowledge/README.md). Shipped feature tracker archive: [`.mstar/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md).
 
 ## Where to add new documents
 
@@ -37,7 +37,7 @@ Two linked documents; **do not** merge into one file.
 | Document | Path | Role |
 | --- | --- | --- |
 | **Active tracker** | [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) | **Open** DF/BL rows, PD-* decisions, FL-* product lines, backlog, residual mirror. Scope authority for planning is still the active iteration compass. |
-| **Shipped archive** | [`.agents/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md) | **Append-only** closed rows (shipped / cancelled / superseded) and per-version delivery snapshots. Top-level under `.agents/archived/` — not `archived/knowledge/`. |
+| **Shipped archive** | [`.mstar/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md) | **Append-only** closed rows (shipped / cancelled / superseded) and per-version delivery snapshots. Top-level under `.mstar/archived/` — not `archived/knowledge/`. |
 
 ### Maintenance rules (active tracker)
 
@@ -60,7 +60,7 @@ When a **spec** (under `specs/`) is superseded, follow §Archiving below — tha
 
 When a spec is superseded:
 
-1. `git mv` to `.agents/archived/knowledge/`.
+1. `git mv` to `.mstar/archived/knowledge/`.
 2. Update [`specs/README.md`](specs/README.md) or [`README.md`](README.md) indexes.
 3. Fix in-repo links in plans and other specs.
 

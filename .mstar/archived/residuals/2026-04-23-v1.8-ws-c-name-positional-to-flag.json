@@ -8,7 +8,7 @@
     "decision": "closed",
     "owner": "fullstack-dev",
     "target_date": "M2/WS-B",
-    "tracking_link": ".agents/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md",
+    "tracking_link": ".mstar/plans/reports/2026-04-23-v1.8-m1-qc/2026-04-23-v1.8-m1-qc-consolidated.md",
     "closure_note": "Fixed in WS-B T4. Added MAX_CREATOR_NAME_LENGTH=64 check in register_creator(). Verified by QA.",
     "closed_at": "2026-04-24",
     "closed_by": "@fullstack-dev"

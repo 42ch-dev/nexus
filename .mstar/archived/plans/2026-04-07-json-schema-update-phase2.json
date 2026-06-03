@@ -4,7 +4,7 @@
   "plan": {
     "id": "2026-04-07-json-schema-update-phase2",
     "title": "JSON Schema Update for V1.0-phase2 Alignment",
-    "file": ".agents/plans/2026-04-07-json-schema-update-phase2.md",
+    "file": ".mstar/plans/2026-04-07-json-schema-update-phase2.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -29,7 +29,7 @@
       "description": "Update JSON Schemas to align with nexus-platform V1.0-phase2 domain model changes (ADR-002)",
       "dependency": "nexus-platform V1.0-phase2 Tasks 1-7 can run in parallel; Task 8 (contract consumption) blocked on this plan",
       "spec_refs": [
-        "nexus-platform/.agents/designs/v1-spec/adr/adr-002-domain-models-g1-g6-fixes.md"
+        "nexus-platform/.mstar/designs/v1-spec/adr/adr-002-domain-models-g1-g6-fixes.md"
       ],
       "effort": "S — ~1 agent session",
       "blocking": [

@@ -9,7 +9,7 @@ Tracks conceptual platform plans from `2026-04-10-v1-spec-wire-schema-sprint` vs
 | 18 — memory web read | `memory-web-list-request`, `memory-web-list-response` | Yes | — | **Done** (wire SSOT); list **item** uses inline enums aligned with `common` Memory* (codegen import limitation for nested `$ref`) |
 | 19 — explore AI | `explore-ai-answer-request`, `explore-ai-answer-response`, `explore-ai-summary-request`, `explore-ai-summary-response` | Yes | — | **Done** (wire SSOT) |
 | 20 — notifications | `notifications-inbox-item`, `notifications-list-request`, `notifications-list-response`, `notifications-mark-read-request`, `notifications-mark-read-response` | Yes | — | **Done** (wire SSOT) |
-| 21 — contracts / OpenAPI freeze audit | — | — | — | **Checklist** — `.agents/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md` (process; not a JSON SSOT file) |
+| 21 — contracts / OpenAPI freeze audit | — | — | — | **Checklist** — `.mstar/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md` (process; not a JSON SSOT file) |
 
 ## Tooling notes
 

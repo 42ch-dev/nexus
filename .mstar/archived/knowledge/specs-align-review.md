@@ -3,10 +3,10 @@
 **Date**: 2026-04-10  
 **Last expanded**: 2026-04-10 — **post-remediation** narrative + **「V1.1 是否全部完成」边界分析**（本节不替代 `status.json` 机器 SSOT）。  
 **Status**: Active — alignment audit + completion-boundary reference. **Remediation** (`2026-04-10-v1.1-specs-alignment-remediation`) is **Done**; see [`../archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json`](../archived/plans/2026-04-10-v1.1-specs-alignment-remediation.json).  
-**Scope**: Frozen **v1-spec** tree (resolve locally via `.agents/local-paths.json` → private design checkout; **do not** paste that path into committed artifacts) vs **this repository** (`schemas/`, `crates/`, `packages/`, CLI/daemon).  
+**Scope**: Frozen **v1-spec** tree (resolve locally via `.mstar/local-paths.json` → private design checkout; **do not** paste that path into committed artifacts) vs **this repository** (`schemas/`, `crates/`, `packages/`, CLI/daemon).  
 **Non-scope**: `nexus-platform` runtime code, production OpenAPI YAML, Web UI — except **explicit cross-repo caveats** in §6.
 
-**Related**: [architecture-alignment-review.md](architecture-alignment-review.md) (§2.2 refreshed 2026-04-10), [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md), [canonical-hash.md](canonical-hash.md), [`.agents/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`](../reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md), [`.agents/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md`](../reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md).
+**Related**: [architecture-alignment-review.md](architecture-alignment-review.md) (§2.2 refreshed 2026-04-10), [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md), [canonical-hash.md](canonical-hash.md), [`.mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`](../reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md), [`.mstar/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md`](../reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md).
 
 ---
 
@@ -31,7 +31,7 @@
 1. Indexed v1-spec via frozen `README.md` module list.  
 2. Compared contract expectations (`codegen-strategy-v1.md` §6, `entitlements-wire-v1.md`, `data-model-v1.md`, `cli-sync/*`) to **`schemas/`** — **59** `*.schema.json` files validated by repo tooling (count may grow; re-run `pnpm run validate-schemas`).  
 3. Spot-checked: `nexus-domain` modules, `fork-branch` / `user` schemas, `nexus42::config::state_db_path`, integration test warnings, `v1-tech-debt-cleanup.md` Batch E scope.  
-4. Cross-checked `.agents/status.json` (`plans[].status`, `residual_findings`, `metadata.tech_debt_summary`).
+4. Cross-checked `.mstar/status.json` (`plans[].status`, `residual_findings`, `metadata.tech_debt_summary`).
 
 ---
 

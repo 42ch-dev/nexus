@@ -6,10 +6,10 @@
 
 | Symbol | Meaning | Path |
 |--------|---------|------|
-| `{HARNESS_DIR}` | Root of agent/engineering infrastructure | `.agents/` |
-| `{PLAN_DIR}` | Plan documents and QC/QA reports | `.agents/plans/` |
-| `{ITERATION_DIR}` | Iteration-level compass specs (version scope/acceptance/risk) | `.agents/iterations/` |
-| `{KNOWLEDGE_DIR}` | Knowledge root (rules, trackers) + [`knowledge/specs/`](knowledge/specs/README.md) (functional/normative specs) | `.agents/knowledge/` |
+| `{HARNESS_DIR}` | Root of agent/engineering infrastructure | `.mstar/` |
+| `{PLAN_DIR}` | Plan documents and QC/QA reports | `.mstar/plans/` |
+| `{ITERATION_DIR}` | Iteration-level compass specs (version scope/acceptance/risk) | `.mstar/iterations/` |
+| `{KNOWLEDGE_DIR}` | Knowledge root (rules, trackers) + [`knowledge/specs/`](knowledge/specs/README.md) (functional/normative specs) | `.mstar/knowledge/` |
 
 ## Upstream Harness
 
@@ -21,12 +21,12 @@ This repo follows the **[Morning Star (mstar-harness)](https://github.com/btspoo
 
 Git-tracked docs and plans must be openable after a fresh `git clone`: no `.gitignore`-d paths, machine-specific absolute paths, or untracked sibling directories as sole authorities. Use repo-relative paths or stable public URLs.
 
-## Content Boundary: `docs/` vs `.agents/iterations/` vs `.agents/knowledge/`
+## Content Boundary: `docs/` vs `.mstar/iterations/` vs `.mstar/knowledge/`
 
 - **`docs/`**: end-user and contributor documentation (installation, quickstart, architecture overview, contributing). **Do NOT** place architecture review reports, per-plan design decisions, or plan inputs/outputs here.
-- **`.agents/iterations/`**: iteration-level specs for a delivery version — including `*-delivery-compass-*.md` and legacy `v1.*` compass artifacts (overview, matrix, program notes). Indexed in [`.agents/iterations/README.md`](iterations/README.md).
-- **`.agents/knowledge/specs/`**: functional and normative OSS specs (including [`specs/`](knowledge/specs/README.md) migrated from platform `v1-spec/local/`). Index: [`knowledge/specs/README.md`](knowledge/specs/README.md).
-- **`.agents/knowledge/`** (root files): cross-cutting rules and trackers only — see [`knowledge/README.md`](knowledge/README.md). Layout: [`knowledge/AGENTS.md`](knowledge/AGENTS.md).
+- **`.mstar/iterations/`**: iteration-level specs for a delivery version — including `*-delivery-compass-*.md` and legacy `v1.*` compass artifacts (overview, matrix, program notes). Indexed in [`.mstar/iterations/README.md`](iterations/README.md).
+- **`.mstar/knowledge/specs/`**: functional and normative OSS specs (including [`specs/`](knowledge/specs/README.md) migrated from platform `v1-spec/local/`). Index: [`knowledge/specs/README.md`](knowledge/specs/README.md).
+- **`.mstar/knowledge/`** (root files): cross-cutting rules and trackers only — see [`knowledge/README.md`](knowledge/README.md). Layout: [`knowledge/AGENTS.md`](knowledge/AGENTS.md).
 
 ## Pre-merge Checklist (this repository)
 

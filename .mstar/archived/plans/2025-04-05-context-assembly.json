@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-context-assembly",
     "title": "Context Assembly Basic",
-    "file": ".agents/plans/2025-04-05-context-assembly.md",
+    "file": ".mstar/plans/2025-04-05-context-assembly.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -31,11 +31,11 @@
       "priority": "high",
       "description": "Implement Context Assembly basic version — CLI-side only (summary generation + Local API call + bundle metadata). Platform-side service belongs in private nexus-platform repo.",
       "working_branch": "feature/v1.0-context-assembly",
-      "wave_0_spec": ".agents/knowledge/restructured-context-assembly.md",
+      "wave_0_spec": ".mstar/knowledge/restructured-context-assembly.md",
       "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
       "qc_status": "APPROVE — status.json key, fmt, import path fixed",
-      "qc_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc-consolidated.md",
-      "qa_report": ".agents/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qa.md",
+      "qc_report": ".mstar/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc-consolidated.md",
+      "qa_report": ".mstar/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qa.md",
       "qa_status": "PASS — all 12 acceptance criteria met, 425 workspace tests pass",
       "residual_summary": "11 V1.1+ residuals (QC-#1 L1-L7, QC-#2 H2-H3, QC-#3 M3-M4)",
       "tests": {

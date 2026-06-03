@@ -699,13 +699,13 @@ All P0 features must be functional and tested:
 
 | Document                        | Location                                                            | Purpose                                                  |
 | ------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
-| V1.0-phase1 Product Review      | `.agents/archived/knowledge/phase1-product-review.md`      | Feature completeness analysis, user journey mapping      |
-| V1.0-phase1 Architecture Review | `.agents/archived/knowledge/phase1-architecture-review.md` | Technical findings, bug list, debt items                 |
-| ACP Client Tech Spec            | `.agents/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | ACP integration details                                  |
-| V1.0-phase2 Product Plan        | `.agents/archived/knowledge/phase2-product-plan.md`        | Product features, priorities, user stories               |
-| V1.0-phase2 Architecture Plan   | `.agents/archived/knowledge/phase2-architecture-plan.md`   | Architecture decisions, residual matrix, risk mitigation |
-| Plan Status                     | `.agents/status.json`                                         | Residual findings, plan tracking                         |
-| Knowledge Index                 | `.agents/knowledge/README.md`                                 | Index of all knowledge documents                         |
+| V1.0-phase1 Product Review      | `.mstar/archived/knowledge/phase1-product-review.md`      | Feature completeness analysis, user journey mapping      |
+| V1.0-phase1 Architecture Review | `.mstar/archived/knowledge/phase1-architecture-review.md` | Technical findings, bug list, debt items                 |
+| ACP Client Tech Spec            | `.mstar/archived/knowledge/acp-client-tech-spec-legacy.md` (archived 2026-04-17) | ACP integration details                                  |
+| V1.0-phase2 Product Plan        | `.mstar/archived/knowledge/phase2-product-plan.md`        | Product features, priorities, user stories               |
+| V1.0-phase2 Architecture Plan   | `.mstar/archived/knowledge/phase2-architecture-plan.md`   | Architecture decisions, residual matrix, risk mitigation |
+| Plan Status                     | `.mstar/status.json`                                         | Residual findings, plan tracking                         |
+| Knowledge Index                 | `.mstar/knowledge/README.md`                                 | Index of all knowledge documents                         |
 | AGENTS.md                       | Repository root                                                     | Development workflow, constraints, CI                    |
 
 

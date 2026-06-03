@@ -110,7 +110,7 @@ The changes are ready to merge. The package manager consistency issue can be add
 - This is a configuration-only change (no Rust/TypeScript code modifications)
 - QC Review #2 focuses on security, correctness, and convention compliance
 - For full validation, team should manually run `pnpm run publish:dry` from `packages/nexus-contracts/` directory before first actual publish
-- Report to be saved to: `.agents/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc2.md`
+- Report to be saved to: `.mstar/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc2.md`
 
 ---
 

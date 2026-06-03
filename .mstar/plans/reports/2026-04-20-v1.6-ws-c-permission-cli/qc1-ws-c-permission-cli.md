@@ -26,8 +26,8 @@ generated_at: "2026-04-20"
 | `crates/nexus-acp-host/Cargo.toml` | +1 | `toml_edit` dep |
 | `crates/nexus42/Cargo.toml` | +1 | `toml_edit` dep |
 | `Cargo.lock` | +2 | Lockfile update |
-| `.agents/plans/2026-04-20-v1.6-ws-c-permission-cli.md` | plan updated | T1–T6 marked done |
-| `.agents/status.json` | +1 / −1 | Status → InReview |
+| `.mstar/plans/2026-04-20-v1.6-ws-c-permission-cli.md` | plan updated | T1–T6 marked done |
+| `.mstar/status.json` | +1 / −1 | Status → InReview |
 
 ---
 

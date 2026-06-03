@@ -129,8 +129,8 @@ Both INFO items have **zero impact** on current production use because:
 ## Diff Scope Confirmation
 
 **WS-B changes only** (from `git diff 47bfc51..95ce3d2 --name-only`):
-- `.agents/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md` — plan status update
-- `.agents/status.json` — plan row status
+- `.mstar/plans/2026-04-20-v1.6-ws-b-acp-sdk-dto.md` — plan status update
+- `.mstar/status.json` — plan row status
 - `crates/nexus-contracts/src/local/acp/types.rs` — **new** 530-line DTO file
 - `crates/nexus-contracts/src/local/acp/mod.rs` — **new** module re-export
 - `crates/nexus-contracts/src/local/mod.rs` — added `acp` module

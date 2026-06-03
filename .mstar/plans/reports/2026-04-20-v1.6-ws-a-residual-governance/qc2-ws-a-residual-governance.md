@@ -89,7 +89,7 @@ The 4 residual fixes (R1, R2, R3, R6) are **structurally correct** and address t
 | `crates/nexus-orchestration/src/scheduler/mod.rs` | `3b0464b` | R3 | Dead code removal, `tick()` delegation, import cleanup |
 | `crates/nexus-orchestration/src/engine.rs` | `68a9367` | R6 | `reconstruct_runner`, FlowRunner lifecycle, terminal session handling |
 | `crates/nexus-orchestration/tests/cron_trigger.rs` | `3b0464b` | R3 | Test updates for `tick()` behavior change |
-| `.agents/plans/2026-04-20-v1.6-ws-a-residual-governance.md` | `2182cbf` | — | Plan documentation accuracy |
+| `.mstar/plans/2026-04-20-v1.6-ws-a-residual-governance.md` | `2182cbf` | — | Plan documentation accuracy |
 
 ---
 

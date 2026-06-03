@@ -4,7 +4,7 @@
 > **Date**: 2026-04-06
 > **Status**: Superseded by implementation (Wave 1 complete) — all 15 domain aggregates implemented per this spec.
 > **Inputs**: `schemas/domain/*.schema.json`, `schemas/common/*.schema.json`
-> **Relationship**: This spec serves as the **authoritative revision input** for `.agents/plans/2025-04-05-domain-models.md`. It does NOT modify the plan file directly.
+> **Relationship**: This spec serves as the **authoritative revision input** for `.mstar/plans/2025-04-05-domain-models.md`. It does NOT modify the plan file directly.
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### 1.1 Revision Goal
 
-The existing plan (`.agents/plans/2025-04-05-domain-models.md`) was written against an earlier understanding of the domain model. Architecture review identified **6 P1 critical gaps** and **2 P2 gaps**, this document provides a comprehensive field-by-field revision that:
+The existing plan (`.mstar/plans/2025-04-05-domain-models.md`) was written against an earlier understanding of the domain model. Architecture review identified **6 P1 critical gaps** and **2 P2 gaps**, this document provides a comprehensive field-by-field revision that:
 
 1. **Aligns every field definition** with the canonical JSON Schema truth source (`schemas/domain/`, `schemas/common/`)
 2. **Replaces all wrong enum values** with spec-correct ones from the domain model specification (§7)

@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-sync-contract",
     "title": "Sync Contract Implementation",
-    "file": ".agents/plans/2025-04-05-sync-contract.md",
+    "file": ".mstar/plans/2025-04-05-sync-contract.md",
     "status": "Done",
     "tags": [
       "V1.0-phase1",
@@ -20,7 +20,7 @@
       "branch_policy": "feature/v1.0-sync-contract from main",
       "priority": "high",
       "description": "Implement sync mechanism (Command, DeltaBundle, Outbox) with bundle metadata fields, partial apply semantics, local precheck, and conflict resolution",
-      "review_report": ".agents/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
+      "review_report": ".mstar/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md",
       "review_verdict": "Request Changes → Resolved (SYNC-R1..R3)",
       "tasks_added": [
         "Task 6: Partial Apply Semantics",
@@ -31,7 +31,7 @@
       "tests": "70 nexus-sync tests, 226 workspace total — all passing",
       "clippy": "clean — 0 warnings with -D warnings",
       "qc_status": "APPROVE — 10 blocking issues fixed (SYNC-C1..C5, SYNC-H1..H5)",
-      "qc_report": ".agents/plans/reports/2025-04-05-sync-contract/2025-04-05-sync-contract-qc-consolidated.md",
+      "qc_report": ".mstar/plans/reports/2025-04-05-sync-contract/2025-04-05-sync-contract-qc-consolidated.md",
       "qc_fixed": [
         "SYNC-C1: Formatting violations fixed",
         "SYNC-C2: Fragile conflict detection replaced with JSON parsing",

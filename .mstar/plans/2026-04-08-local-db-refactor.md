@@ -4,7 +4,7 @@
 
 **Goal**: Refactor local SQLite (`state.db`) into independent module `nexus-local-db` with single ownership, decoupled version lines, and unified API for CLI/daemon.
 
-**Source**: Inline design spec (see `.agents/archived/knowledge/local-db-refactor.md`)
+**Source**: Inline design spec (see `.mstar/archived/knowledge/local-db-refactor.md`)
 
 **Priority**: P1 — Foundational refactor to eliminate schema drift and duplicated logic
 
@@ -28,7 +28,7 @@ Design spec requirements:
 
 ## Design Baseline
 
-See `.agents/archived/knowledge/local-db-refactor.md` for:
+See `.mstar/archived/knowledge/local-db-refactor.md` for:
 - Two version lines separation
 - Table classification (Shared vs Daemon-only)
 - API shape specification

@@ -77,4 +77,4 @@
 
 ---
 
-**Plan saved to:** `.agents/plans/2025-04-05-acp-client.md`
+**Plan saved to:** `.mstar/plans/2025-04-05-acp-client.md`

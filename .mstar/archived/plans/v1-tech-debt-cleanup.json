@@ -1,7 +1,7 @@
 {
   "id": "v1-tech-debt-cleanup",
   "title": "V1 Tech Debt Cleanup (Long-term)",
-  "file": ".agents/plans/v1-tech-debt-cleanup.md",
+  "file": ".mstar/plans/v1-tech-debt-cleanup.md",
   "status": "Done",
   "owner": "@project-manager",
   "agents": [

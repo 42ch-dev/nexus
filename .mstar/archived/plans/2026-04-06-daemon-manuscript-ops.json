@@ -4,7 +4,7 @@
   "plan": {
     "id": "2026-04-06-daemon-manuscript-ops",
     "title": "Daemon + Manuscript Operations",
-    "file": ".agents/plans/2026-04-06-pre-phase2.md",
+    "file": ".mstar/plans/2026-04-06-pre-phase2.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -28,13 +28,13 @@
       "description": "Daemon lifecycle (stop, timeout), manuscript file operations, sync status with real data, research list/extract",
       "dependency": "2026-04-06-foundation-hardening",
       "spec_refs": [
-        ".agents/archived/knowledge/phase2-architecture-plan.md",
-        ".agents/archived/knowledge/phase2-product-plan.md"
+        ".mstar/archived/knowledge/phase2-architecture-plan.md",
+        ".mstar/archived/knowledge/phase2-product-plan.md"
       ],
       "effort": "L — ~4-8 agent sessions (2 milestones)",
       "residual_summary": "9 addressed (2 CRITICAL, 2 HIGH resolved; 1 HIGH, 1 MEDIUM partially; 3 LOW deferred)",
       "qc_status": "PASS",
-      "qa_report": ".agents/plans/reports/2026-04-06-daemon-manuscript-ops/2026-04-06-daemon-manuscript-ops-qa.md",
+      "qa_report": ".mstar/plans/reports/2026-04-06-daemon-manuscript-ops/2026-04-06-daemon-manuscript-ops-qa.md",
       "fix_commit": "5438842"
     }
   }

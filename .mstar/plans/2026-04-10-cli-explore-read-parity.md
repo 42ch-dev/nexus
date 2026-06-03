@@ -12,7 +12,7 @@
 
 ## Authoritative design input
 
-- [.agents/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md)
+- [.mstar/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md)
 - **Program ref:** Explore API (platform plan id `12-explore-api`, conceptual). Visibility: align with v1-spec Explore / world visibility chapters when available to the implementer.
 
 ---

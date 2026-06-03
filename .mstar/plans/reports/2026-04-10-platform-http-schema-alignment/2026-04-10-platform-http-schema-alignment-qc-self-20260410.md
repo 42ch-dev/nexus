@@ -44,7 +44,7 @@ generated_at: 2026-04-10
 
 - Finding ID: F-001
 - Source Type: manual-reasoning
-- Source Reference: plan `.agents/plans/2026-04-10-platform-http-schema-alignment.md` + `git diff` scope above
+- Source Reference: plan `.mstar/plans/2026-04-10-platform-http-schema-alignment.md` + `git diff` scope above
 - Confidence: High
 
 ## Summary

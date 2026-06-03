@@ -1,6 +1,6 @@
 # Local FS + workspace context — OSS pointer (non-normative)
 
-**Normative definitions live only in v1-spec** (private `nexus-platform` design tree). Resolve `specs_root.v1-spec` via `.agents/local-paths.json` (see `.agents/local-paths.json.example` and repository `AGENTS.md` *External Design Specs*).
+**Normative definitions live only in v1-spec** (private `nexus-platform` design tree). Resolve `specs_root.v1-spec` via `.mstar/local-paths.json` (see `.mstar/local-paths.json.example` and repository `AGENTS.md` *External Design Specs*).
 
 **Read in this order:**
 

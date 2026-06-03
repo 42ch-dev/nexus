@@ -152,8 +152,8 @@ Residual findings 将在首次 npm publish 前或后续优化中解决。
 
 ## Source Attribution
 
-- QC-#1 Report: `.agents/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc1.md`
-- QC-#2 Report: `.agents/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc2.md`
-- QC-#3 Report: `.agents/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc3.md`
+- QC-#1 Report: `.mstar/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc1.md`
+- QC-#2 Report: `.mstar/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc2.md`
+- QC-#3 Report: `.mstar/plans/reports/2025-04-06-publish-scripts/2025-04-06-publish-scripts-qc3.md`
 - CI Workflow: `.github/workflows/ci.yml` (validate-schemas job present)
 - AGENTS.md: Line 242 (schema constraint), Line 49 (workflow reference)

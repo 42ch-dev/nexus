@@ -5,9 +5,9 @@ plan_id: "multi-plan-v1-cli-sprint-20260410"
 verdict: "Approve with residuals"
 generated_at: "2026-04-10"
 source_reports:
-  - ".agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc1.md"
-  - ".agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc2.md"
-  - ".agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc3.md"
+  - ".mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc1.md"
+  - ".mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc2.md"
+  - ".mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc3.md"
 ---
 
 # QC Consolidated Decision — V1 CLI Sprint (Multi-Plan)
@@ -170,9 +170,9 @@ The following items should be added to `residual_findings[multi-plan-v1-cli-spri
 
 | Check | Result | Evidence |
 |-------|--------|----------|
-| QC1 report | ✅ Approved | `.agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc1.md` |
-| QC2 report | ✅ Approved | `.agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc2.md` |
-| QC3 report | ✅ Approved | `.agents/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc3.md` |
+| QC1 report | ✅ Approved | `.mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc1.md` |
+| QC2 report | ✅ Approved | `.mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc2.md` |
+| QC3 report | ✅ Approved | `.mstar/plans/reports/2026-04-10-cli-v1/2026-04-10-cli-v1-qc3.md` |
 | Git diff range verified | ✅ | `git diff --stat 14adb30..abf712b` → 157 files |
 | Tests passed | ✅ | 9 wiremock tests (explore:3, publish:3, world:3) |
 | Clippy/Typecheck | ✅ | Per QC-self reports |

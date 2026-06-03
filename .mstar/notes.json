@@ -140,7 +140,7 @@
     },
     {
       "updated_at": "2026-04-14",
-      "message": "Policy update: avoid metadata.*_note fields in .agents/status.json. Moved previous tech_debt_summary severity_note and archival_note narrative into notes.json. Keep status.json focused on machine-readable structured fields; write timeline/context notes here."
+      "message": "Policy update: avoid metadata.*_note fields in .mstar/status.json. Moved previous tech_debt_summary severity_note and archival_note narrative into notes.json. Keep status.json focused on machine-readable structured fields; write timeline/context notes here."
     },
     {
       "updated_at": "2026-04-14",
@@ -160,7 +160,7 @@
     },
     {
       "updated_at": "2026-04-17",
-      "message": "V1.4 plans registered: 7 plan rows (WS1-WS7) replacing the single legacy V1.3 E2E backlog Todo. The prior 2026-04-17-v1.3-creator-register-e2e-tests row is superseded by 2026-04-17-v1.4-ws6-creator-register-e2e-tests (same work, promoted into V1.4 scope). Each plan file committed at .agents/plans/2026-04-17-v1.4-wsN-*.md; plan-convention.md metadata fields populated (wave_0_spec, spec_refs, dependency/parallelism, effort_agent_oriented). Execution ordering: WS1 -> {WS2 || WS4 || WS5 || WS6} -> WS3 -> WS7; M1 through M4 + M3b per compass §5."
+      "message": "V1.4 plans registered: 7 plan rows (WS1-WS7) replacing the single legacy V1.3 E2E backlog Todo. The prior 2026-04-17-v1.3-creator-register-e2e-tests row is superseded by 2026-04-17-v1.4-ws6-creator-register-e2e-tests (same work, promoted into V1.4 scope). Each plan file committed at .mstar/plans/2026-04-17-v1.4-wsN-*.md; plan-convention.md metadata fields populated (wave_0_spec, spec_refs, dependency/parallelism, effort_agent_oriented). Execution ordering: WS1 -> {WS2 || WS4 || WS5 || WS6} -> WS3 -> WS7; M1 through M4 + M3b per compass §5."
     },
     {
       "updated_at": "2026-04-18",

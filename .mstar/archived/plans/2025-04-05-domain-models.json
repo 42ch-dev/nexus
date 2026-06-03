@@ -4,7 +4,7 @@
   "plan": {
     "id": "2025-04-05-domain-models",
     "title": "Domain Models Implementation",
-    "file": ".agents/plans/2025-04-05-domain-models.md",
+    "file": ".mstar/plans/2025-04-05-domain-models.md",
     "status": "Done",
     "owner": "@project-manager",
     "agents": [
@@ -28,7 +28,7 @@
       "branch_policy": "feature/v1.0-domain-models from main",
       "priority": "high",
       "description": "Implement domain models (15 aggregates) with consistency rules and gates",
-      "wave_0_spec": ".agents/archived/knowledge/revised-domain-models-spec.md",
+      "wave_0_spec": ".mstar/archived/knowledge/revised-domain-models-spec.md",
       "qc_status": "APPROVE — C-1 and C-2 fixed and verified",
       "tests": "133 passed, 0 failed",
       "commits": "8 commits (a22a2cd..e0b9e8c)",

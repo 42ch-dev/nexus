@@ -3,7 +3,7 @@
 //! Multi-Schedule lifecycle per creator — queue of planned preset runs,
 //! user-visible, CRUD-able. Per spec §3.1.
 //!
-//! Design: `.agents/archived/knowledge/creator-schedule-and-core-context.md`
+//! Design: `.mstar/archived/knowledge/creator-schedule-and-core-context.md`
 
 pub mod core_context;
 pub mod http;
