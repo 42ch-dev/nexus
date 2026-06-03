@@ -1232,4 +1232,113 @@ states:
             result.diagnostics
         );
     }
+
+    // ── C4: Bundle dir id vs manifest id ────────────────────────────────
+
+    #[test]
+    fn c4_bundle_id_matches_directory() {
+        let manifest = minimal_manifest(); // id = "tiny"
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("tiny"); // matches id
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let result = validate_assets_in_bundle(&manifest, &bundle_root);
+        assert!(
+            !result.has_errors(),
+            "expected no errors when id matches dir: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn c4_bundle_id_mismatch_directory_is_error() {
+        let manifest = minimal_manifest(); // id = "tiny"
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("other-name"); // does NOT match id
+        std::fs::create_dir_all(&bundle_root).unwrap();
+        let result = validate_assets_in_bundle(&manifest, &bundle_root);
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::IdMismatch
+                    && d.message.contains("does not match bundle directory")
+            }),
+            "expected id mismatch error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    // ── W2: Path safety regression tests ────────────────────────────────
+
+    #[test]
+    fn w2_dotdot_in_template_file_is_error() {
+        let yaml = r#"preset:
+  id: dotdot-test
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "../../etc/passwd"
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let result = validate_path_safety(&manifest);
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::PathSafety && d.message.contains("..")
+            }),
+            "expected path safety error for '..': {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn w2_absolute_path_in_template_file_is_error() {
+        let yaml = r#"preset:
+  id: abs-test
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: append }
+      template_file: "/etc/shadow"
+  - id: b
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let result = validate_path_safety(&manifest);
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::PathSafety && d.message.contains("absolute")
+            }),
+            "expected path safety error for absolute path: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn w2_valid_relative_path_passes_safety() {
+        let manifest = minimal_manifest();
+        let result = validate_path_safety(&manifest);
+        assert!(
+            !result.has_errors(),
+            "expected no errors for valid manifest: {:?}",
+            result.diagnostics
+        );
+    }
 }
