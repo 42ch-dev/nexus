@@ -38,7 +38,7 @@
           "tests": [
             "cargo test -p nexus-orchestration preset",
             "cargo test -p nexus-daemon-runtime preset",
-            "cargo test -p nexus42 preset"
+            "cargo test -p nexus42 command_surface_contract"
           ],
           "lint": "cargo clippy -p nexus-orchestration -p nexus-daemon-runtime -p nexus42 -- -D warnings"
         }
@@ -80,8 +80,8 @@
           "qa": "required",
           "tests": [
             "cargo test -p nexus-orchestration preset",
-            "nexus42 preset validate crates/nexus-orchestration/embedded-presets/kb-extract/preset.yaml",
-            "nexus42 preset validate crates/nexus-orchestration/embedded-presets/memory-augmented/preset.yaml"
+            "Validate kb-extract through the shipped P1 validation surface",
+            "Validate memory-augmented through the shipped P1 validation surface"
           ],
           "lint": "cargo clippy -p nexus-orchestration -- -D warnings"
         }
