@@ -504,6 +504,7 @@ impl StateCompositeTask {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 #[async_trait]
 impl Task for StateCompositeTask {
     fn id(&self) -> &str {
@@ -535,9 +536,26 @@ impl Task for StateCompositeTask {
             match action {
                 EnterAction::Capability { name, args } => {
                     context.set("_capability_name", name.clone()).await;
-                    context
-                        .set("_capability_input", args.clone().unwrap_or(Value::Null))
-                        .await;
+
+                    // Security (SEC-V131-01): inject trusted identity from engine
+                    // context into capability args. Capabilities read `_creator_id`
+                    // / `_session_id` from their input; the orchestration engine
+                    // must set them at the invocation boundary so preset YAML
+                    // cannot spoof these values (prevents cross-creator IPC IDOR).
+                    let mut cap_input = args.clone().unwrap_or(Value::Null);
+                    if cap_input.is_null() {
+                        cap_input = Value::Object(serde_json::Map::new());
+                    }
+                    if let Some(obj) = cap_input.as_object_mut() {
+                        // Engine context overwrites any spoofed values from preset args.
+                        if let Some(creator_id) = context.get::<String>("_creator_id").await {
+                            obj.insert("_creator_id".into(), Value::String(creator_id));
+                        }
+                        if let Some(session_id) = context.get::<String>("_session_id").await {
+                            obj.insert("_session_id".into(), Value::String(session_id));
+                        }
+                    }
+                    context.set("_capability_input", cap_input).await;
                     let registry = self.registry.clone().unwrap_or_else(|| {
                         std::sync::Arc::new(CapabilityRegistry::with_builtins())
                     });
@@ -1473,5 +1491,112 @@ mod tests {
 
         assert_eq!(first, "World: Nexus");
         assert_eq!(second, first);
+    }
+
+    // ── SEC-V131-01: Caller-boundary identity injection regression ────
+    //
+    // Proves that when the orchestration engine invokes a capability via
+    // StateCompositeTask, the trusted `_creator_id` / `_session_id` from
+    // the engine context are injected into the capability's input args.
+    // Without this fix, capabilities receive "default" for both fields.
+
+    #[tokio::test]
+    async fn sec_v131_01_state_composite_injects_trusted_identity_into_capability() {
+        use crate::preset::manifest::EnterAction;
+
+        // Build a StateCompositeTask with one enter action: acp.prompt
+        // (standalone mode — no worker IPC needed for this regression).
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![EnterAction::Capability {
+                name: "acp.prompt".into(),
+                args: Some(serde_json::json!({
+                    "prompt": "Hello from orchestration engine"
+                })),
+            }],
+            exit_when: None,
+            next: None,
+            terminal: true,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+
+        // Simulate the engine setting identity in context (as start_session does).
+        let ctx = graph_flow::Context::new();
+        ctx.set("_creator_id", "creator_alice").await;
+        ctx.set("_session_id", "sess_42ch_001").await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::End),
+            "terminal state should End"
+        );
+
+        // Verify the capability received the injected identity.
+        // acp.prompt in standalone mode echoes session_id in its output.
+        let output: serde_json::Value = ctx.get("_capability_output").await.unwrap_or(Value::Null);
+        let full_text = output
+            .get("full_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            full_text.contains("sess_42ch_001"),
+            "capability should receive injected session_id, got: {full_text}"
+        );
+        assert!(
+            !full_text.contains("default"),
+            "capability should NOT receive 'default' session_id, got: {full_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sec_v131_01_engine_overwrites_spoofed_identity_in_preset_args() {
+        use crate::preset::manifest::EnterAction;
+
+        // Preset YAML tries to spoof _creator_id / _session_id in args.
+        // The engine MUST overwrite these with trusted values from context.
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "spoof_test".into(),
+            description: None,
+            enter: vec![EnterAction::Capability {
+                name: "acp.prompt".into(),
+                args: Some(serde_json::json!({
+                    "prompt": "test",
+                    "_creator_id": "spoofed_creator",
+                    "_session_id": "spoofed_session"
+                })),
+            }],
+            exit_when: None,
+            next: None,
+            terminal: true,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+
+        let ctx = graph_flow::Context::new();
+        ctx.set("_creator_id", "real_creator").await;
+        ctx.set("_session_id", "real_session").await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(matches!(result.next_action, NextAction::End));
+
+        let output: serde_json::Value = ctx.get("_capability_output").await.unwrap_or(Value::Null);
+        let full_text = output
+            .get("full_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            full_text.contains("real_session"),
+            "engine must overwrite spoofed session_id with real value, got: {full_text}"
+        );
+        assert!(
+            !full_text.contains("spoofed_session"),
+            "spoofed session_id must not reach capability, got: {full_text}"
+        );
     }
 }
