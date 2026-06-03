@@ -949,11 +949,14 @@ states:
                 match d.severity {
                     validation::DiagnosticSeverity::Error => {
                         // Known false positive: orchestration-layer args
-                        // (prompt_file, vars) that don't appear in the
-                        // capability's input_schema because the engine resolves
-                        // them before calling the capability. These are
-                        // CapabilityArgDrift warnings in practice.
-                        if d.category == validation::DiagnosticCategory::CapabilityArgDrift {
+                        // (prompt_file, vars) that don't appear in
+                        // creator.inject_prompt's input_schema because the
+                        // engine resolves them before calling the capability.
+                        // Only downgrade creator.inject_prompt drift; all
+                        // other CapabilityArgDrift errors are real.
+                        if d.category == validation::DiagnosticCategory::CapabilityArgDrift
+                            && d.message.contains("capability 'creator.inject_prompt'")
+                        {
                             all_warnings.push(format!(
                                 "preset '{preset_id}' capability arg drift at {}: {}",
                                 d.path, d.message
@@ -1108,6 +1111,56 @@ states:
                 .iter()
                 .any(|d| { d.category == validation::DiagnosticCategory::MissingCapability }),
             "expected MissingCapability error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn unknown_capability_arg_drift_is_not_downgraded() {
+        // W-002: Prove the smoke test's CapabilityArgDrift downgrade is
+        // scoped to creator.inject_prompt only. A synthetic preset that omits
+        // a required arg for a different capability must still surface as an
+        // error (not silently downgraded to a warning).
+        let yaml = r#"
+preset:
+  id: drift-probe
+  version: 1
+  kind: creator
+  description: synthetic preset to verify drift narrowing
+  requires_capabilities:
+    - kb.extract_work
+  initial: start
+  terminal: done
+states:
+  - id: start
+    enter:
+      - kind: capability
+        name: kb.extract_work
+        args:
+          bogus_extra: "not_in_schema"
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: manifest::PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validation::validate_preset_semantic(&manifest, &caps);
+
+        // kb.extract_work requires creator_id (omitted) → Error-severity
+        // CapabilityArgDrift. Must NOT be downgraded (only creator.inject_prompt
+        // gets the downgrade).
+        let drift_errors: Vec<_> = result
+            .errors()
+            .filter(|d| {
+                d.category == validation::DiagnosticCategory::CapabilityArgDrift
+                    && d.message.contains("capability 'kb.extract_work'")
+            })
+            .collect();
+
+        assert!(
+            !drift_errors.is_empty(),
+            "kb.extract_work CapabilityArgDrift should NOT be downgraded; expected at least one error, got: {:?}",
             result.diagnostics
         );
     }
