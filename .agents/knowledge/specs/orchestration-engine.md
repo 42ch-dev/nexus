@@ -685,7 +685,7 @@ pub fn load_preset(
 ### 8.3 Caching and reloading
 
 - Loader caches `LoadedPreset` keyed by `source_hash`.
-- On `registry.refresh` capability call or user CLI `nexus42 preset reload <id>`, loader recomputes hash; if changed, invalidates cache and rebuilds.
+- On `registry.refresh` capability call or the shipped Local API `POST /v1/local/presets/{id}:reload`, loader recomputes hash; if changed, invalidates cache and rebuilds. There is currently no top-level `nexus42 preset reload` CLI.
 - Running sessions continue on the previous graph (snapshot semantics); new sessions pick up the new graph.
 
 ---
