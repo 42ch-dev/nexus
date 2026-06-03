@@ -630,6 +630,38 @@ Error format:
 }
 ```
 
+#### 7.6.1 Shared semantic validation facade (V1.32)
+
+V1.32 introduces a **shared semantic validation facade** used by both the CLI/API validate endpoint (`POST /v1/local/presets:validate`) and the orchestration loader. The facade is the single quality gate; there are no parallel weaker checks.
+
+The facade is composed of three layers:
+
+1. **`validate_preset_semantic`** — logical completeness checks:
+   - **Reachability**: `initial_state` must reach at least one terminal state via forward edges. Unreachable states from `initial` are errors.
+   - **Terminal marker consistency**: every state declared as `terminal` in the YAML must be reachable and must not have a `next` transition.
+   - **Bundle id vs directory match**: for user/system bundles (not embedded), the `preset.id` field must match the bundle directory name.
+   - **Orphan inner graph detection**: inner graphs defined but not referenced by any state's `enter` produce a **warning** (not an error) — this is an architect-level decision allowing preset authors to draft graphs before wiring them. Inner graphs referenced by states but not defined remain errors.
+
+2. **`validate_assets_in_bundle`** — asset existence checks:
+   - `template_file`, `prompt_file`, `system_prompt_file`, and `prompt` references must resolve to existing files within the bundle sandbox.
+   - Missing files are errors.
+
+3. **`validate_path_safety`** — filesystem sandbox enforcement:
+   - Rejects `..` path traversal, absolute paths, and symlink escapes from the bundle root.
+   - All asset paths are canonicalized and verified to remain within the bundle directory.
+
+#### 7.6.2 Capability compatibility checks (V1.32)
+
+The validation facade checks capability references against the registry:
+
+- **Capability existence**: every capability name in `enter`, `exit_when`, and `requires_capabilities` must exist in the `CapabilityRegistry`. The registry provides O(1) lookup by name.
+- **Argument drift detection**: capability argument keys in the preset are compared against the capability's declared `input_schema` properties. Unknown or missing keys produce warnings.
+- **Schema check skipped fallback**: when a capability does not declare an `input_schema` (or the schema is empty), the argument drift check is skipped gracefully rather than failing. This preserves compatibility with built-in capabilities that predate formal schema declarations.
+
+#### 7.6.3 Embedded presets and normative semantics
+
+Embedded presets under `crates/nexus-orchestration/embedded-presets/` are **runtime assets compiled into the binary**; they are validated through the same shared facade at build/test time. They are **not** normative examples — the normative preset semantics remain in this spec (§7–§8). Preset authors should refer to this spec, not to embedded presets, as the authoritative contract.
+
 ### 7.7 Embedded preset index (V1.31)
 
 The binary includes the following Agentic Design Pattern demonstrators under `crates/nexus-orchestration/embedded-presets/`:
@@ -647,6 +679,8 @@ Both presets intentionally use linear `next` transitions; the conditional routin
 
 ### 8.1 Loader contract
 
+The loader consumes YAML bundles and produces `LoadedPreset` structs ready for graph-flow execution. As of V1.32, the loader runs the shared semantic validation facade (§7.6.1–§7.6.2) as a mandatory pre-step before graph construction. The CLI/API `validate` endpoint calls the same facade independently, ensuring loader and diagnostic parity.
+
 ```rust
 // crates/nexus-orchestration/src/loader.rs
 pub struct LoadedPreset {
@@ -663,6 +697,17 @@ pub fn load_preset(
     caps: &CapabilityRegistry,
 ) -> Result<LoadedPreset, PresetLoadError> { … }
 ```
+
+The validation facade is exposed separately for diagnostic use:
+
+```rust
+// crates/nexus-orchestration/src/validation.rs
+pub fn validate_preset_semantic(bundle: &PresetBundle) -> Vec<ValidationProblem> { … }
+pub fn validate_assets_in_bundle(bundle_root: &Path, bundle: &PresetBundle) -> Vec<ValidationProblem> { … }
+pub fn validate_path_safety(bundle_root: &Path, bundle: &PresetBundle) -> Vec<ValidationProblem> { … }
+```
+
+CLI and daemon `POST /v1/local/presets:validate` call these functions directly without constructing a graph, so validation diagnostics are available without full loader overhead.
 
 ### 8.2 Mapping rules (YAML → graph-flow)
 
