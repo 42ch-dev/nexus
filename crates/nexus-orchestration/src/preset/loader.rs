@@ -199,13 +199,49 @@ pub fn load_preset_from_str_with_limits(
     let manifest: PresetManifest =
         serde_yaml::from_value(yaml_value).map_err(PresetLoadError::from)?;
 
-    // 2. Validate.
+    // 2. Structural validation (legacy §7.6 rules).
     let problems = validate_manifest(&manifest, caps);
     if !problems.is_empty() {
         return Err(PresetLoadError::Validation {
             len: problems.len(),
             problems,
         });
+    }
+
+    // 2b. Semantic validation (V1.32 P1 facade — reachability, terminal consistency,
+    //     id match, orphan inner graphs). Only certain error categories are fatal for
+    //     the loader; capability arg drift is reported as warnings because existing
+    //     embedded presets may not perfectly match schema metadata.
+    let sem = super::validation::validate_preset_semantic(&manifest, caps);
+    let fatal_errors: Vec<_> = sem
+        .errors()
+        .filter(|d| {
+            matches!(
+                d.category,
+                super::validation::DiagnosticCategory::Reachability
+                    | super::validation::DiagnosticCategory::TerminalConsistency
+                    | super::validation::DiagnosticCategory::IdMismatch
+                    | super::validation::DiagnosticCategory::Structural
+                    | super::validation::DiagnosticCategory::MissingAsset
+                    | super::validation::DiagnosticCategory::PathSafety
+                    | super::validation::DiagnosticCategory::MissingCapability
+            )
+        })
+        .collect();
+    if !fatal_errors.is_empty() {
+        let all_problems: Vec<ValidationProblem> = sem.to_problems();
+        return Err(PresetLoadError::Validation {
+            len: all_problems.len(),
+            problems: all_problems,
+        });
+    }
+    // Log all warnings + capability arg drift errors as warnings.
+    for d in sem.diagnostics.iter().filter(|d| {
+        d.severity == super::validation::DiagnosticSeverity::Warning
+            || d.category == super::validation::DiagnosticCategory::CapabilityArgDrift
+            || d.category == super::validation::DiagnosticCategory::SchemaCheckSkipped
+    }) {
+        tracing::warn!(path = %d.path, message = %d.message, category = ?d.category, "preset validation warning");
     }
 
     // 3. Build outer graph per §8.2 mapping table.
@@ -424,6 +460,21 @@ fn validate_template_files_in_sandbox(
 // ---------------------------------------------------------------------------
 // Validation (§7.6)
 // ---------------------------------------------------------------------------
+
+/// Public wrapper around the private `validate_manifest` for callers that
+/// have already parsed a manifest and need loader-equivalent structural checks
+/// without loading the full preset (e.g. the daemon validate endpoint).
+///
+/// This is the same set of checks that `load_preset_from_str_with_limits` runs
+/// at step 2. It does NOT include semantic checks (use
+/// `validation::validate_preset_semantic` for those).
+#[must_use]
+pub fn loader_validate_manifest_compat(
+    manifest: &PresetManifest,
+    caps: &CapabilityRegistry,
+) -> Vec<ValidationProblem> {
+    validate_manifest(manifest, caps)
+}
 
 /// Run all §7.6 validation rules against a parsed manifest.
 ///

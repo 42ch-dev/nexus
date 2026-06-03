@@ -45,13 +45,13 @@ pub mod manifest;
 pub mod validation;
 
 pub use loader::{
-    load_preset, load_preset_from_str, load_preset_from_str_with_limits, yaml_value_depth,
-    LoadedPreset, PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH,
-    DEFAULT_MAX_YAML_SIZE,
+    load_preset, load_preset_from_str, load_preset_from_str_with_limits,
+    loader_validate_manifest_compat, yaml_value_depth, LoadedPreset, PresetLoadError,
+    ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };
 pub use validation::{
-    validate_assets_in_bundle, validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity,
-    ValidationDiagnostic, ValidationResult,
+    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
+    DiagnosticSeverity, ValidationDiagnostic, ValidationResult,
 };
 
 // ---------------------------------------------------------------------------

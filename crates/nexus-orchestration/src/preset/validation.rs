@@ -171,8 +171,21 @@ pub fn validate_assets_in_bundle(
     bundle_root: &Path,
 ) -> ValidationResult {
     let mut result = ValidationResult::default();
+    check_bundle_id_vs_directory(manifest, bundle_root, &mut result);
     check_asset_file_existence(manifest, bundle_root, &mut result);
     check_symlink_escapes(manifest, bundle_root, &mut result);
+    result
+}
+
+/// Run path-safety structural checks against a manifest (A3 — shared with loader).
+///
+/// Validates that all `template_file`, `prompt_file`, and `system_prompt_file`
+/// references are safe relative paths (no `..`, no absolute paths, no backslashes,
+/// no null bytes, no control characters). Returns diagnostics for each unsafe path.
+#[must_use]
+pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
+    let mut result = ValidationResult::default();
+    check_path_safety(manifest, &mut result);
     result
 }
 
@@ -538,6 +551,50 @@ fn check_symlink_escapes(
                     category: DiagnosticCategory::PathSafety,
                 });
             }
+        }
+    }
+}
+
+/// Check that the manifest `preset.id` matches the bundle directory basename.
+///
+/// When loading from a bundle directory (e.g. `~/.nexus42/presets/my-preset/`),
+/// the `preset.id` field in the YAML must match the directory name. This prevents
+/// identity spoofing and ensures filesystem-level consistency.
+fn check_bundle_id_vs_directory(
+    manifest: &PresetManifest,
+    bundle_root: &Path,
+    result: &mut ValidationResult,
+) {
+    if let Some(dir_name) = bundle_root.file_name().and_then(|n| n.to_str()) {
+        let manifest_id = &manifest.preset.id;
+        if manifest_id != dir_name {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: "preset.id".to_string(),
+                message: format!(
+                    "preset.id '{manifest_id}' does not match bundle directory name '{dir_name}'"
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::IdMismatch,
+            });
+        }
+    }
+}
+
+/// Check that all asset file references use safe relative paths.
+///
+/// Reuses `loader::assert_template_file_safe` to validate each path is free of
+/// `..` traversal, absolute paths, backslashes, null bytes, and control characters.
+fn check_path_safety(manifest: &PresetManifest, result: &mut ValidationResult) {
+    let refs = collect_asset_file_references(manifest);
+    for (dot_path, rel_path) in &refs {
+        if let Err(reason) = super::loader::assert_template_file_safe(rel_path) {
+            // Sanitize: don't leak the full path in the error, just the relative portion.
+            result.diagnostics.push(ValidationDiagnostic {
+                path: dot_path.clone(),
+                message: reason,
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::PathSafety,
+            });
         }
     }
 }
