@@ -38,7 +38,7 @@ pub async fn create_session(
 
     // Start session with the loaded preset.
     let session_id = engine
-        .start_session_with_preset(&loaded)
+        .start_session_with_preset_for_creator(&loaded, &body.creator_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
