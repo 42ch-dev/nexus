@@ -57,15 +57,16 @@ impl Capability for JudgeLlm {
         "judge.llm"
     }
 
+    // Identity fields ("_creator_id", "_session_id") are injected by
+    // orchestration context, NOT accepted from user input (security:
+    // prevents cross-creator IPC routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "required": ["prompt"],
             "properties": {
-                "prompt": { "type": "string", "description": "The evaluation prompt for the judge" },
-                "creator_id": { "type": "string", "description": "Optional creator ID for the judge agent" },
-                "session_id": { "type": "string", "description": "Optional session ID" }
+                "prompt": { "type": "string", "description": "The evaluation prompt for the judge" }
             }
         }"#
     }
@@ -88,13 +89,16 @@ impl Capability for JudgeLlm {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
 
+        // Security: only accept context-injected identity fields (prefixed _).
+        // Raw `creator_id`/`session_id` from user/preset input are ignored
+        // to prevent cross-creator IPC routing (IDOR). See SEC-V131-01.
         let creator_id = input
-            .get("creator_id")
+            .get("_creator_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
         let session_id = input
-            .get("session_id")
+            .get("_session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
@@ -209,25 +213,37 @@ mod tests {
 
     // ── J2: With mock provider — GO response ──────────────────────────
 
-    /// Mock provider that returns a canned GO response.
-    struct MockGoProvider;
+    /// Mock provider that records the creator_id it was called with,
+    /// enabling identity-spoof regression tests.
+    struct MockGoProvider {
+        captured_creator_id: std::sync::Mutex<String>,
+    }
+
+    impl MockGoProvider {
+        fn new() -> Self {
+            Self {
+                captured_creator_id: std::sync::Mutex::new(String::new()),
+            }
+        }
+    }
 
     #[async_trait]
     impl WorkerHandleProvider for MockGoProvider {
         async fn call_acp_prompt(
             &self,
-            _creator_id: &str,
+            creator_id: &str,
             _session_id: &str,
             _prompt: String,
             _tool_policy: &str,
         ) -> Result<Value, CapabilityError> {
+            *self.captured_creator_id.lock().unwrap() = creator_id.to_string();
             Ok(json!({ "full_text": "GO — the evaluation passes." }))
         }
     }
 
     #[tokio::test]
     async fn judge_llm_with_mock_worker_go() {
-        let cap = JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
+        let cap = JudgeLlm::with_worker_provider(Arc::new(MockGoProvider::new()));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
@@ -262,9 +278,71 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_missing_prompt_errors() {
-        let cap = JudgeLlm::with_worker_provider(Arc::new(MockGoProvider));
+        let cap = JudgeLlm::with_worker_provider(Arc::new(MockNogoProvider));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
+    }
+
+    // ── SEC-V131-01: Identity boundary regression tests ────────────────
+
+    /// Proves that raw `creator_id` / `session_id` from preset args are
+    /// NOT forwarded to the worker — only context-injected `_creator_id`
+    /// and `_session_id` are trusted.
+    #[tokio::test]
+    async fn judge_llm_raw_creator_id_ignored_on_spoof_attempt() {
+        let provider = Arc::new(MockGoProvider::new());
+        let cap = JudgeLlm::with_worker_provider(provider.clone());
+        let input = json!({
+            "prompt": "evaluate",
+            // Spoof attempt: raw preset args should be ignored
+            "creator_id": "spoofed_creator",
+            "session_id": "spoofed_session"
+        });
+        let result = cap.run(input).await.unwrap();
+        assert_eq!(result["result"], true);
+        // The worker must have received "default", NOT "spoofed_creator"
+        let captured = provider.captured_creator_id.lock().unwrap();
+        assert_eq!(
+            *captured, "default",
+            "SEC-V131-01: raw creator_id leaked through"
+        );
+    }
+
+    /// Proves context-injected `_creator_id` / `_session_id` are used.
+    #[tokio::test]
+    async fn judge_llm_context_injected_identity_trusted() {
+        let provider = Arc::new(MockGoProvider::new());
+        let cap = JudgeLlm::with_worker_provider(provider.clone());
+        let input = json!({
+            "prompt": "evaluate",
+            "_creator_id": "legit_creator",
+            "_session_id": "legit_session"
+        });
+        let result = cap.run(input).await.unwrap();
+        assert_eq!(result["result"], true);
+        let captured = provider.captured_creator_id.lock().unwrap();
+        assert_eq!(*captured, "legit_creator");
+    }
+
+    /// Proves context-injected identity wins even when raw args are present.
+    #[tokio::test]
+    async fn judge_llm_context_identity_overrides_raw_spoof() {
+        let provider = Arc::new(MockGoProvider::new());
+        let cap = JudgeLlm::with_worker_provider(provider.clone());
+        let input = json!({
+            "prompt": "evaluate",
+            "creator_id": "spoofed_creator",
+            "session_id": "spoofed_session",
+            "_creator_id": "legit_creator",
+            "_session_id": "legit_session"
+        });
+        let result = cap.run(input).await.unwrap();
+        assert_eq!(result["result"], true);
+        let captured = provider.captured_creator_id.lock().unwrap();
+        assert_eq!(
+            *captured, "legit_creator",
+            "SEC-V131-01: context ID must win over raw spoof"
+        );
     }
 }
