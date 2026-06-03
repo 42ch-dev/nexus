@@ -56,6 +56,9 @@ impl Capability for ContextSummarize {
         "context.summarize"
     }
 
+    // Identity fields ("_creator_id", "_session_id") are injected by
+    // orchestration context, NOT accepted from user input (security:
+    // prevents cross-creator IPC routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -73,14 +76,6 @@ impl Capability for ContextSummarize {
                 "template": {
                     "type": "string",
                     "description": "Optional summarization template/instructions"
-                },
-                "creator_id": {
-                    "type": "string",
-                    "description": "Optional creator ID"
-                },
-                "session_id": {
-                    "type": "string",
-                    "description": "Optional session ID"
                 }
             }
         }"#
@@ -115,13 +110,16 @@ impl Capability for ContextSummarize {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
+        // Security: only accept context-injected identity fields (prefixed _).
+        // Raw `creator_id`/`session_id` from user/preset input are ignored
+        // to prevent cross-creator IPC routing (IDOR). See SEC-V131-01.
         let creator_id = input
-            .get("creator_id")
+            .get("_creator_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
         let session_id = input
-            .get("session_id")
+            .get("_session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
@@ -223,17 +221,28 @@ mod tests {
 
     // ── J3: With mock provider ────────────────────────────────────────
 
-    struct MockSummaryProvider;
+    struct MockSummaryProvider {
+        captured_creator_id: std::sync::Mutex<String>,
+    }
+
+    impl MockSummaryProvider {
+        fn new() -> Self {
+            Self {
+                captured_creator_id: std::sync::Mutex::new(String::new()),
+            }
+        }
+    }
 
     #[async_trait]
     impl WorkerHandleProvider for MockSummaryProvider {
         async fn call_acp_prompt(
             &self,
-            _creator_id: &str,
+            creator_id: &str,
             _session_id: &str,
             _prompt: String,
             _tool_policy: &str,
         ) -> Result<Value, CapabilityError> {
+            *self.captured_creator_id.lock().unwrap() = creator_id.to_string();
             Ok(json!({
                 "full_text": "A concise summary of the content."
             }))
@@ -242,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_with_mock_worker() {
-        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider));
+        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider::new()));
         let input = json!({
             "content": "The story is about a brave knight who saves the kingdom from a dragon."
         });
@@ -255,7 +264,7 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_with_trace_and_template() {
-        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider));
+        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider::new()));
         let input = json!({
             "content": "Some context",
             "trace": "User entered state X, performed action Y",
@@ -268,12 +277,73 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_missing_content_errors() {
-        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider));
+        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider::new()));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("missing 'content' field"));
+    }
+
+    // ── SEC-V131-01: Identity boundary regression tests ────────────────
+
+    /// Proves that raw `creator_id` / `session_id` from preset args are
+    /// NOT forwarded to the worker — only context-injected `_creator_id`
+    /// and `_session_id` are trusted.
+    #[tokio::test]
+    async fn context_summarize_raw_creator_id_ignored_on_spoof_attempt() {
+        let provider = Arc::new(MockSummaryProvider::new());
+        let cap = ContextSummarize::with_worker_provider(provider.clone());
+        let input = json!({
+            "content": "Some text",
+            // Spoof attempt: raw preset args should be ignored
+            "creator_id": "spoofed_creator",
+            "session_id": "spoofed_session"
+        });
+        let result = cap.run(input).await.unwrap();
+        assert!(result.get("summary").is_some());
+        let captured = provider.captured_creator_id.lock().unwrap();
+        assert_eq!(
+            *captured, "default",
+            "SEC-V131-01: raw creator_id leaked through"
+        );
+    }
+
+    /// Proves context-injected `_creator_id` / `_session_id` are used.
+    #[tokio::test]
+    async fn context_summarize_context_injected_identity_trusted() {
+        let provider = Arc::new(MockSummaryProvider::new());
+        let cap = ContextSummarize::with_worker_provider(provider.clone());
+        let input = json!({
+            "content": "Some text",
+            "_creator_id": "legit_creator",
+            "_session_id": "legit_session"
+        });
+        let result = cap.run(input).await.unwrap();
+        assert!(result.get("summary").is_some());
+        let captured = provider.captured_creator_id.lock().unwrap();
+        assert_eq!(*captured, "legit_creator");
+    }
+
+    /// Proves context-injected identity wins even when raw args are present.
+    #[tokio::test]
+    async fn context_summarize_context_identity_overrides_raw_spoof() {
+        let provider = Arc::new(MockSummaryProvider::new());
+        let cap = ContextSummarize::with_worker_provider(provider.clone());
+        let input = json!({
+            "content": "Some text",
+            "creator_id": "spoofed_creator",
+            "session_id": "spoofed_session",
+            "_creator_id": "legit_creator",
+            "_session_id": "legit_session"
+        });
+        let result = cap.run(input).await.unwrap();
+        assert!(result.get("summary").is_some());
+        let captured = provider.captured_creator_id.lock().unwrap();
+        assert_eq!(
+            *captured, "legit_creator",
+            "SEC-V131-01: context ID must win over raw spoof"
+        );
     }
 
     // ── J3: Prompt builder unit tests ─────────────────────────────────
