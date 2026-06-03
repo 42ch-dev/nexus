@@ -6,7 +6,7 @@
       "id": "2026-06-03-v1.32-preset-validator-core-and-cli",
       "title": "P1 — Shared preset validator core + CLI/API parity",
       "file": ".agents/plans/2026-06-03-v1.32-preset-validator-core-and-cli.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@architect",
@@ -14,7 +14,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 85,
       "tags": [
         "v1.32",
         "orchestration",
@@ -23,7 +23,7 @@
       "created_at": "2026-06-03",
       "updated_at": "2026-06-03",
       "done_at": null,
-      "notes": "Locked V1.32 P1 plan. Defines shared preset validation quality gate before embedded preset repairs.",
+      "notes": "Locked V1.32 P1 plan. Defines shared preset validation quality gate before embedded preset repairs. QC tri-review rev1-rev3 all Approve; merged to feature/v1.32-preset-quality-gate as 0968dfb. Pending QA sign-off and iteration close.",
       "metadata": {
         "working_branch": "feature/v1.32-preset-validator-core-and-cli",
         "merge_target": "feature/v1.32-preset-quality-gate",
@@ -91,7 +91,7 @@
       "id": "2026-06-03-v1.32-orchestration-security-followup",
       "title": "P3 — Close SEC-V131-01 capability identity boundary gap",
       "file": ".agents/plans/2026-06-03-v1.32-orchestration-security-followup.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@architect",
@@ -99,7 +99,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 70,
       "tags": [
         "v1.32",
         "orchestration",
@@ -108,7 +108,7 @@
       "created_at": "2026-06-03",
       "updated_at": "2026-06-03",
       "done_at": null,
-      "notes": "Locked V1.32 P3 plan. Targets SEC-V131-01 only; residual remains open until QA/PM closure.",
+      "notes": "Locked V1.32 P3 plan. Targets SEC-V131-01 only. QC rev1: qc2/qc3 Approve, qc1 Request Changes (C-001: StateCompositeTask/CapabilityTask does not inject trusted _creator_id/_session_id into args). PM worktree: .worktrees/p3-security. Awaiting implementer fix + QC re-review.",
       "metadata": {
         "working_branch": "feature/v1.32-orchestration-security-followup",
         "merge_target": "feature/v1.32-preset-quality-gate",
