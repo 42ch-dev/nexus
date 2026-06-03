@@ -15,7 +15,7 @@
 #   content:   Optional seed content or context for the draft
 #
 # Manual run command:
-#   nexus42 schedule add --preset reflection-loop --var topic "..." --var content "..."
+#   nexus42 daemon schedule add --preset reflection-loop --var topic "..." --var content "..."
 
 preset:
   id: reflection-loop
