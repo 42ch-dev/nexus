@@ -283,7 +283,7 @@ impl CapabilityRegistry {
         reg
     }
 
-    /// Build the name→index HashMap for O(1) lookups.
+    /// Build the name-to-index `HashMap` for O(1) lookups.
     ///
     /// Called once during construction. Must be called after `capabilities` is populated.
     fn build_index(&mut self) {

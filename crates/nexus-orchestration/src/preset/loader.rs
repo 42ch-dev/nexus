@@ -213,22 +213,18 @@ pub fn load_preset_from_str_with_limits(
     //     the loader; capability arg drift is reported as warnings because existing
     //     embedded presets may not perfectly match schema metadata.
     let sem = super::validation::validate_preset_semantic(&manifest, caps);
-    let fatal_errors: Vec<_> = sem
-        .errors()
-        .filter(|d| {
-            matches!(
-                d.category,
-                super::validation::DiagnosticCategory::Reachability
-                    | super::validation::DiagnosticCategory::TerminalConsistency
-                    | super::validation::DiagnosticCategory::IdMismatch
-                    | super::validation::DiagnosticCategory::Structural
-                    | super::validation::DiagnosticCategory::MissingAsset
-                    | super::validation::DiagnosticCategory::PathSafety
-                    | super::validation::DiagnosticCategory::MissingCapability
-            )
-        })
-        .collect();
-    if !fatal_errors.is_empty() {
+    if sem.errors().any(|d| {
+        matches!(
+            d.category,
+            super::validation::DiagnosticCategory::Reachability
+                | super::validation::DiagnosticCategory::TerminalConsistency
+                | super::validation::DiagnosticCategory::IdMismatch
+                | super::validation::DiagnosticCategory::Structural
+                | super::validation::DiagnosticCategory::MissingAsset
+                | super::validation::DiagnosticCategory::PathSafety
+                | super::validation::DiagnosticCategory::MissingCapability
+        )
+    }) {
         let all_problems: Vec<ValidationProblem> = sem.to_problems();
         return Err(PresetLoadError::Validation {
             len: all_problems.len(),
@@ -461,9 +457,11 @@ fn validate_template_files_in_sandbox(
 // Validation (§7.6)
 // ---------------------------------------------------------------------------
 
-/// Public wrapper around the private `validate_manifest` for callers that
-/// have already parsed a manifest and need loader-equivalent structural checks
-/// without loading the full preset (e.g. the daemon validate endpoint).
+/// Public wrapper around private `validate_manifest`.
+///
+/// For callers that have already parsed a manifest and need
+/// loader-equivalent structural checks without loading the full preset
+/// (e.g. the daemon validate endpoint).
 ///
 /// This is the same set of checks that `load_preset_from_str_with_limits` runs
 /// at step 2. It does NOT include semantic checks (use
