@@ -1,7 +1,176 @@
 {
   "version": 1,
-  "updated_at": "2026-05-30T12:00:00Z",
-  "plans": [],
+  "updated_at": "2026-06-03T11:26:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-03-v1.32-preset-validator-core-and-cli",
+      "title": "P1 — Shared preset validator core + CLI/API parity",
+      "file": ".agents/plans/2026-06-03-v1.32-preset-validator-core-and-cli.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.32",
+        "orchestration",
+        "preset-validator"
+      ],
+      "created_at": "2026-06-03",
+      "updated_at": "2026-06-03",
+      "done_at": null,
+      "notes": "Locked V1.32 P1 plan. Defines shared preset validation quality gate before embedded preset repairs.",
+      "metadata": {
+        "working_branch": "feature/v1.32-preset-validator-core-and-cli",
+        "merge_target": "feature/v1.32-preset-quality-gate",
+        "spec_integration_branch": "feature/v1.32-preset-quality-gate",
+        "primary_spec": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "iteration_compass": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "phase": "v1.32-active-planning",
+        "priority": "high",
+        "gates": {
+          "qc": "required",
+          "qa": "required",
+          "tests": [
+            "cargo test -p nexus-orchestration preset",
+            "cargo test -p nexus-daemon-runtime preset",
+            "cargo test -p nexus42 preset"
+          ],
+          "lint": "cargo clippy -p nexus-orchestration -p nexus-daemon-runtime -p nexus42 -- -D warnings"
+        }
+      }
+    },
+    {
+      "id": "2026-06-03-v1.32-embedded-presets-usability-hardening",
+      "title": "P2 — Embedded preset completeness, smoke tests, and usability repairs",
+      "file": ".agents/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev",
+        "@architect",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.32",
+        "orchestration",
+        "embedded-presets"
+      ],
+      "created_at": "2026-06-03",
+      "updated_at": "2026-06-03",
+      "done_at": null,
+      "notes": "Locked V1.32 P2 plan. Runs after P1 to repair embedded presets against the stricter gate.",
+      "metadata": {
+        "working_branch": "feature/v1.32-embedded-presets-usability-hardening",
+        "merge_target": "feature/v1.32-preset-quality-gate",
+        "spec_integration_branch": "feature/v1.32-preset-quality-gate",
+        "primary_spec": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "iteration_compass": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "phase": "v1.32-active-planning",
+        "priority": "high",
+        "dependency": "2026-06-03-v1.32-preset-validator-core-and-cli",
+        "gates": {
+          "qc": "required",
+          "qa": "required",
+          "tests": [
+            "cargo test -p nexus-orchestration preset",
+            "nexus42 preset validate crates/nexus-orchestration/embedded-presets/kb-extract/preset.yaml",
+            "nexus42 preset validate crates/nexus-orchestration/embedded-presets/memory-augmented/preset.yaml"
+          ],
+          "lint": "cargo clippy -p nexus-orchestration -- -D warnings"
+        }
+      }
+    },
+    {
+      "id": "2026-06-03-v1.32-orchestration-security-followup",
+      "title": "P3 — Close SEC-V131-01 capability identity boundary gap",
+      "file": ".agents/plans/2026-06-03-v1.32-orchestration-security-followup.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.32",
+        "orchestration",
+        "security"
+      ],
+      "created_at": "2026-06-03",
+      "updated_at": "2026-06-03",
+      "done_at": null,
+      "notes": "Locked V1.32 P3 plan. Targets SEC-V131-01 only; residual remains open until QA/PM closure.",
+      "metadata": {
+        "working_branch": "feature/v1.32-orchestration-security-followup",
+        "merge_target": "feature/v1.32-preset-quality-gate",
+        "spec_integration_branch": "feature/v1.32-preset-quality-gate",
+        "primary_spec": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "iteration_compass": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "phase": "v1.32-active-planning",
+        "priority": "high",
+        "gates": {
+          "qc": "required",
+          "qa": "required",
+          "tests": [
+            "cargo test -p nexus-orchestration judge_llm",
+            "cargo test -p nexus-orchestration context_summarize"
+          ],
+          "lint": "cargo clippy -p nexus-orchestration -- -D warnings"
+        }
+      }
+    },
+    {
+      "id": "2026-06-03-v1.32-spec-tracker-hygiene",
+      "title": "P4 — Orchestration spec, tracker, and status hygiene for V1.32 close",
+      "file": ".agents/plans/2026-06-03-v1.32-spec-tracker-hygiene.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@writing-specialist",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.32",
+        "docs",
+        "tracker"
+      ],
+      "created_at": "2026-06-03",
+      "updated_at": "2026-06-03",
+      "done_at": null,
+      "notes": "Locked V1.32 P4 plan. Merge last after P1-P3 outcomes stabilize.",
+      "metadata": {
+        "working_branch": "feature/v1.32-spec-tracker-hygiene",
+        "merge_target": "feature/v1.32-preset-quality-gate",
+        "spec_integration_branch": "feature/v1.32-preset-quality-gate",
+        "primary_spec": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "iteration_compass": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+        "phase": "v1.32-active-planning",
+        "priority": "medium",
+        "dependency": "P1-P3 merged to integration branch",
+        "gates": {
+          "qc": "required",
+          "qa": "required",
+          "json": "python3 -m json.tool .agents/status.json",
+          "docs": [
+            "rg 'V1.32|v1.32' .agents/iterations/README.md .agents/knowledge/deferred-features-cross-version-tracker.md .agents/status.json",
+            "rg 'DF-29|DF-31|DF-42|DF-44' .agents/knowledge/deferred-features-cross-version-tracker.md"
+          ]
+        }
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,14 +178,14 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": null,
+    "integration_branch": "feature/v1.32-preset-quality-gate",
     "last_integration_branch": "feature/v1.31-agentic-design-patterns",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.31",
     "latest_shipped_at": "2026-05-30T12:00:00Z",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.32",
+    "latest_active_compass": ".agents/iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-05-30T12:00:00Z",
