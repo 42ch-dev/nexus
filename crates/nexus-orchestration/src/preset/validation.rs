@@ -413,7 +413,7 @@ fn check_inner_graph_references(manifest: &PresetManifest, result: &mut Validati
 ///
 /// Returns `(dot_path, relative_path)` pairs for `template_file`, `prompt_file`,
 /// and `system_prompt_file` references.
-fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(String, String)> {
+pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(String, String)> {
     let mut refs: Vec<(String, String)> = Vec::new();
 
     // Template file references (exit_when, context_update, inner_graph nodes, initial_action)
