@@ -13,7 +13,7 @@
 #   topic:     Topic or prompt for content generation (required)
 #
 # Manual run command:
-#   nexus42 daemon schedule add --preset memory-augmented --var keyword "..." --var topic "..."
+#   nexus42 daemon schedule add --preset memory-augmented --creator <creator-id> --seed "<topic>"
 
 preset:
   id: memory-augmented

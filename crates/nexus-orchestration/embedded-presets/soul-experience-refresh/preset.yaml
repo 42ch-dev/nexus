@@ -9,7 +9,7 @@
 # If LLM polish is desired, chain `context.summarize` in a subsequent step.
 #
 # Trigger: schedule via daemon cron, or manually with:
-#   nexus42 daemon schedule add --preset soul-experience-refresh --var creator_id "<id>" --var home_dir "<path>"
+#   nexus42 daemon schedule add --preset soul-experience-refresh --creator <creator-id>
 #
 # Or use the one-shot CLI command:
 #   nexus42 creator soul refresh-experience
