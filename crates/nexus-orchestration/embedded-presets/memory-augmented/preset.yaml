@@ -13,7 +13,7 @@
 #   topic:     Topic or prompt for content generation (required)
 #
 # Manual run command:
-#   nexus42 schedule add --preset memory-augmented --var keyword "..." --var topic "..."
+#   nexus42 daemon schedule add --preset memory-augmented --var keyword "..." --var topic "..."
 
 preset:
   id: memory-augmented
@@ -36,6 +36,9 @@ states:
         args:
           keyword: "{{preset.input.keyword}}"
           limit: 50
+    # TD-V131-08 resolution: bare `rule` with no expression = always-true
+    # (immediate transition). This is explicit: ExitWhen::Rule is a unit variant
+    # whose semantic contract is "transition as soon as the enter action completes".
     exit_when:
       kind: rule
     next: generate
