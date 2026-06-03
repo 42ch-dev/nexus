@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.agents/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-05-30
+**Last updated**: 2026-06-03
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -271,6 +271,19 @@ When a version ships, append new closed rows here and remove them from the activ
 | Shipped DF items | DF-30, DF-32, DF-33, DF-34, DF-37 |
 | Embedded presets | `reflection-loop`, `memory-augmented` |
 | Explicit deferrals | DF-29 `registry.refresh`, DF-31 `workspace.*`, conditional routing engine, platform HTTP unpause |
+
+### V1.32 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md) |
+| Shipped at | 2026-06-03 |
+| Scope | Preset validator quality gate (shared semantic validation facade, asset/path safety, capability compat checks), embedded preset smoke coverage, SEC-V131-01 closure, spec/tracker hygiene |
+| Plans | `2026-06-03-v1.32-preset-validator-core-and-cli` (P1), `2026-06-03-v1.32-embedded-presets-usability-hardening` (P2), `2026-06-03-v1.32-orchestration-security-followup` (P3), `2026-06-03-v1.32-spec-tracker-hygiene` (P4) |
+| Closed residuals | SEC-V131-01 (medium — IDOR defense-in-depth fix: judge.llm + context.summarize now read only context-injected IDs) |
+| Key changes | Shared `validate_preset_semantic` + `validate_assets_in_bundle` + `validate_path_safety` facade; CLI/API validate endpoint uses same facade as loader; reachability/terminal/bundle-id/orphan inner graph checks; O(1) capability registry lookup with arg drift detection; kb-extract inner graph wiring fixed; all 6 embedded presets pass strict validation; stale `--var` CLI removed |
+| Known residuals deferred | R-P2-01 (creator.inject_prompt schema gap, Medium), R-P2-02 (same root cause, Low) |
+| Explicit deferrals | DF-29, DF-31, DF-42, DF-44 remain open; platform pause (PD-05) preserved; conditional routing engine deferred |
 
 ### V1.16+ horizon (program)
 
