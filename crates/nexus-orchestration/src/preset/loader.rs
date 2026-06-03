@@ -301,12 +301,31 @@ pub fn load_preset(
 
     // WS-B T3: parse first, then sandbox-validate template_file paths
     let manifest: PresetManifest = serde_yaml::from_str(&yaml)?;
-    let sandbox_problems = validate_template_files_in_sandbox(&manifest, bundle_root);
-    if !sandbox_problems.is_empty() {
-        return Err(PresetLoadError::Validation {
-            len: sandbox_problems.len(),
-            problems: sandbox_problems,
+
+    // A3 parity: use the same shared validation surface as the daemon endpoint.
+    // validate_path_safety() checks structural safety (no '..' traversal, no absolute paths).
+    // validate_assets_in_bundle() checks file existence + symlink escape + id vs directory.
+    let a3_path_result = super::validation::validate_path_safety(&manifest);
+    let a3_asset_result = super::validation::validate_assets_in_bundle(&manifest, bundle_root);
+
+    // Collect all A3 error-severity diagnostics as validation problems.
+    let mut a3_problems: Vec<ValidationProblem> = Vec::new();
+    for d in a3_path_result.errors().chain(a3_asset_result.errors()) {
+        a3_problems.push(ValidationProblem {
+            path: d.path.clone(),
+            error: d.message.clone(),
         });
+    }
+    if !a3_problems.is_empty() {
+        return Err(PresetLoadError::Validation {
+            len: a3_problems.len(),
+            problems: a3_problems,
+        });
+    }
+
+    // Log A3 warnings (informational; do not block loading).
+    for d in a3_path_result.warnings().chain(a3_asset_result.warnings()) {
+        tracing::warn!(path = %d.path, message = %d.message, category = ?d.category, "A3 loader warning");
     }
 
     load_preset_from_str(&yaml, caps)
@@ -402,55 +421,6 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
     }
 
     entries
-}
-
-/// Verify all `template_file` paths resolve within the given `bundle_root`
-/// (defense-in-depth sandbox check).
-///
-/// This is called from [`load_preset`] after YAML parsing. Each `template_file`
-/// is joined to `bundle_root`, canonicalized, and checked that the result
-/// starts with the canonical `bundle_root`. Errors from `canonicalize` (e.g.
-/// nonexistent files, symlinks) are gracefully reported as validation problems.
-fn validate_template_files_in_sandbox(
-    manifest: &PresetManifest,
-    bundle_root: &Path,
-) -> Vec<ValidationProblem> {
-    let mut problems = Vec::new();
-    let canonical_root = match bundle_root.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            // bundle_root itself doesn't exist — not a path traversal issue,
-            // but still fatal. Return a single problem.
-            problems.push(ValidationProblem {
-                path: "bundle_root".to_string(),
-                error: format!("cannot canonicalize bundle root: {e}"),
-            });
-            return problems;
-        }
-    };
-
-    let entries = collect_template_file_entries(manifest);
-
-    // Validate each path resolves within bundle_root
-    for (dot_path, template_file) in &entries {
-        let resolved = bundle_root.join(template_file);
-        if let Ok(canonical) = resolved.canonicalize() {
-            if !canonical.starts_with(&canonical_root) {
-                problems.push(ValidationProblem {
-                    path: (*dot_path).clone(),
-                    error: format!(
-                        "template_file '{template_file}' resolves outside the bundle root"
-                    ),
-                });
-            }
-        } else {
-            // File doesn't exist yet — this is fine for validation.
-            // The structural check (no .., no absolute) already happened
-            // in assert_template_file_safe. Skip canonicalize failures.
-        }
-    }
-
-    problems
 }
 
 // ---------------------------------------------------------------------------
@@ -1779,7 +1749,7 @@ states:
     #[test]
     fn load_preset_from_directory_loads_valid_preset() {
         let tmp = tempfile::tempdir().unwrap();
-        let bundle_root = tmp.path().join("my-preset");
+        let bundle_root = tmp.path().join("tiny");
         std::fs::create_dir_all(&bundle_root).unwrap();
         let yaml_path = bundle_root.join("preset.yaml");
         std::fs::write(&yaml_path, minimal_valid_yaml()).unwrap();
@@ -1826,7 +1796,7 @@ states:
     #[test]
     fn load_preset_from_directory_rejects_validation_errors() {
         let tmp = tempfile::tempdir().unwrap();
-        let bundle_root = tmp.path().join("invalid-preset");
+        let bundle_root = tmp.path().join("invalid");
         std::fs::create_dir_all(&bundle_root).unwrap();
         let yaml = r"
 preset:
@@ -2315,6 +2285,91 @@ states:
         assert!(
             loaded.is_ok(),
             "should pass with generous limits: {loaded:?}"
+        );
+    }
+
+    // ── C-001 (rev2): A3 loader parity regression tests ───────────
+
+    /// C-001 regression: `load_preset()` must reject a preset that references
+    /// a template file which does not exist in the bundle directory.
+    /// This exercises the `validate_assets_in_bundle()` A3 surface.
+    #[test]
+    fn a3_loader_rejects_missing_template_file_in_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("missing-asset");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+
+        let yaml = r#"preset:
+  id: missing-asset
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/nonexistent.md
+    next: b
+  - id: b
+    terminal: true
+"#;
+        std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("nonexistent.md") && p.error.contains("does not exist")),
+            "expected missing asset error from A3 surface: {problems:?}"
+        );
+    }
+
+    /// C-001 regression: `load_preset()` must reject a preset that uses `..`
+    /// traversal in `system_prompt_file` (role definition). This exercises
+    /// the `validate_path_safety()` A3 surface for prompt/system_prompt paths.
+    #[test]
+    fn a3_loader_rejects_dotdot_in_system_prompt_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("traversal-role");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+
+        let yaml = r#"preset:
+  id: traversal-role
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+roles:
+  - id: writer
+    description: "Primary content writer"
+    recommended_skills: [novel-writing-assistant]
+    system_prompt_file: "../../etc/passwd"
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
+
+        let caps = test_capability_registry();
+        let err = load_preset(&bundle_root, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("system_prompt_file") && p.error.contains("..")),
+            "expected '..' path safety error from A3 surface on system_prompt_file: {problems:?}"
         );
     }
 }
