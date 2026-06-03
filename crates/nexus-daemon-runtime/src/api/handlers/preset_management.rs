@@ -290,8 +290,30 @@ pub async fn validate_preset(
     // Parse + depth check
     let manifest = parse_and_check_manifest(&yaml)?;
 
-    // A5: Run shared semantic validation (the same surface used by the loader).
+    // C2: Run loader-equivalent structural validation so the daemon endpoint
+    //     rejects the same defects the runtime loader would reject.
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let structural_problems =
+        nexus_orchestration::preset::loader_validate_manifest_compat(&manifest, &caps);
+    if !structural_problems.is_empty() {
+        let errors: Vec<String> = structural_problems
+            .iter()
+            .map(|p| format!("{}: {}", p.path, p.error))
+            .collect();
+        return Ok(Json(ValidatePresetResponse {
+            valid: false,
+            id: Some(manifest.preset.id.clone()),
+            version: Some(manifest.preset.version),
+            state_count: Some(manifest.states.len()),
+            errors,
+            warnings: Vec::new(),
+        }));
+    }
+
+    // C3: Shared path-safety check (same `assert_template_file_safe` the loader uses).
+    let path_result = nexus_orchestration::preset::validate_path_safety(&manifest);
+
+    // A5: Run shared semantic validation (the same surface used by the loader).
     let sem_result = nexus_orchestration::preset::validate_preset_semantic(&manifest, &caps);
 
     // A3: If the path points into a bundle directory, also run asset checks.
@@ -302,21 +324,24 @@ pub async fn validate_preset(
         },
     );
 
-    // Combine diagnostics
+    // Combine diagnostics from path safety + semantic + asset checks
     let mut errors: Vec<String> = Vec::new();
-    for d in sem_result
+    for d in path_result
         .diagnostics
         .iter()
+        .chain(sem_result.diagnostics.iter())
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Error)
     {
+        // Sanitize: use only the relative path, not full host FS path
         errors.push(format!("{}: {}", d.path, d.message));
     }
 
     // Warnings are reported separately in the response (informational).
-    let warnings: Vec<String> = sem_result
+    let warnings: Vec<String> = path_result
         .diagnostics
         .iter()
+        .chain(sem_result.diagnostics.iter())
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Warning)
         .map(|d| format!("{}: {}", d.path, d.message))
@@ -514,7 +539,10 @@ mod tests {
     #[tokio::test]
     async fn validate_accepts_valid_preset() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml_path = tmp.path().join("preset.yaml");
+        // Create a properly-named bundle directory so the id-vs-directory check passes.
+        let bundle_dir = tmp.path().join("test");
+        std::fs::create_dir_all(&bundle_dir).expect("mkdir");
+        let yaml_path = bundle_dir.join("preset.yaml");
         std::fs::write(
             &yaml_path,
             r#"preset:
@@ -542,7 +570,11 @@ states:
         let result = validate_preset(Json(req)).await;
         assert!(result.is_ok());
         let resp = result.expect("ok");
-        assert!(resp.valid);
+        assert!(
+            resp.valid,
+            "expected valid: errors={:?}, warnings={:?}",
+            resp.errors, resp.warnings
+        );
         assert_eq!(resp.id.as_deref(), Some("test"));
     }
 
