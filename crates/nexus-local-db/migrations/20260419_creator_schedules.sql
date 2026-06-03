@@ -1,5 +1,5 @@
 -- Creator Schedules + Dependencies + Core Context Versions
--- Design: `.agents/archived/knowledge/creator-schedule-and-core-context.md` §10
+-- Design: `.mstar/archived/knowledge/creator-schedule-and-core-context.md` §10
 -- WS7 T1: additive-only migration; no existing tables touched.
 
 CREATE TABLE IF NOT EXISTS creator_schedules (

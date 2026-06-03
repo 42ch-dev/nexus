@@ -162,7 +162,7 @@ jobs:
         run: |
           set -e
           if rg -n '^\s*(nexus-acp-host|agent-client-protocol)\s*=' crates/nexus-daemon-runtime/Cargo.toml; then
-            echo "::error::nexus-daemon-runtime/Cargo.toml must not depend on nexus-acp-host or agent-client-protocol — see .agents/archived/knowledge/acp-client-tech-spec.md §11.3"
+            echo "::error::nexus-daemon-runtime/Cargo.toml must not depend on nexus-acp-host or agent-client-protocol — see .mstar/archived/knowledge/acp-client-tech-spec.md §11.3"
             exit 1
           fi
           echo "Linkage gate OK"

@@ -5,7 +5,7 @@
 //!
 //! **This is NOT `nexus-kb` (World-scoped narrative KB graph) or `nexus-knowledge`
 //! (User-scoped global knowledge).** Only `scope=work` is implemented. See
-//! [entity-scope-model.md §5.3](../../../../../.agents/knowledge/specs/entity-scope-model.md#53-cli-creator-kb--local-work-scope-file-index)
+//! [entity-scope-model.md §5.3](../../../../../.mstar/knowledge/specs/entity-scope-model.md#53-cli-creator-kb--local-work-scope-file-index)
 //! for the canonical scope definitions.
 //!
 //! # Scope validation (V1.27 H3)

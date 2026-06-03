@@ -2,11 +2,11 @@
 
 This directory is the **single truth source** for **wire** types (CLI ↔ platform sync and platform HTTP). All Rust and TypeScript types here are generated from JSON Schema.
 
-**Layout (folders):** [`.agents/knowledge/specs/schemas-directory-layout.md`](../.agents/knowledge/specs/schemas-directory-layout.md) — tree index in [README.md](README.md).
+**Layout (folders):** [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md) — tree index in [README.md](README.md).
 
-**Not in `schemas/`**: local-only types (`/v1/local/*`, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. See [`.agents/knowledge/schemas-wire-platform-sync-boundary.md`](../.agents/knowledge/schemas-wire-platform-sync-boundary.md).
+**Not in `schemas/`**: local-only types (`/v1/local/*`, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. See [`.mstar/knowledge/schemas-wire-platform-sync-boundary.md`](../.mstar/knowledge/schemas-wire-platform-sync-boundary.md).
 
-**Cloud line only:** daemon Local API must not add schemas here; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.agents/knowledge/specs/local-cloud-crate-architecture.md).
+**Cloud line only:** daemon Local API must not add schemas here; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md).
 
 ## Schema URI Placeholder
 

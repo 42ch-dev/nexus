@@ -9,8 +9,8 @@ JSON Schemas for the **structured sync protocol** between OSS CLI (`nexus42 sync
 | `sync-pull-response.schema.json` | Pull response (bundles) |
 | `conflict-response.schema.json` | Conflict payload |
 
-**Consumer:** `nexus-cloud-sync` crate (`legacy-sync` feature). **Not** daemon Local API — `/v1/local/sync/*` is retired per [local-cloud-crate-architecture.md](../../.agents/knowledge/specs/local-cloud-crate-architecture.md).
+**Consumer:** `nexus-cloud-sync` crate (`legacy-sync` feature). **Not** daemon Local API — `/v1/local/sync/*` is retired per [local-cloud-crate-architecture.md](../../.mstar/knowledge/specs/local-cloud-crate-architecture.md).
 
 **Platform protocol docs:** `nexus-platform` `v1-spec/cli-sync/sync-contract-v1.md` (platform repo folder name; OSS wire tree uses `schemas/cloud-sync/`).
 
-**Layout:** [schemas-directory-layout.md](../../.agents/knowledge/specs/schemas-directory-layout.md) §3.2.
+**Layout:** [schemas-directory-layout.md](../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.2.

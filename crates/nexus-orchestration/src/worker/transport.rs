@@ -8,7 +8,7 @@
 //! For `IpcClient` (multiplexed concurrent requests), the transport can be
 //! split into read and write halves via [`RpcTransport::split`].
 //!
-//! Design: `.agents/archived/knowledge/crate-selection-best-practices.md` §3.1.
+//! Design: `.mstar/archived/knowledge/crate-selection-best-practices.md` §3.1.
 
 use async_trait::async_trait;
 use futures_util::SinkExt; // for FramedWrite::send

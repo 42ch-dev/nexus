@@ -1,6 +1,6 @@
 # `schemas/` — Wire JSON Schema Tree
 
-**Authority:** [`.agents/knowledge/specs/schemas-directory-layout.md`](../.agents/knowledge/specs/schemas-directory-layout.md) (folder layout) + [`.agents/knowledge/schemas-wire-platform-sync-boundary.md`](../.agents/knowledge/schemas-wire-platform-sync-boundary.md) (wire vs local rule).
+**Authority:** [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md) (folder layout) + [`.mstar/knowledge/schemas-wire-platform-sync-boundary.md`](../.mstar/knowledge/schemas-wire-platform-sync-boundary.md) (wire vs local rule).
 
 **Local-only types** live in `crates/nexus-contracts/src/local/` — not under `schemas/`.
 
@@ -36,4 +36,4 @@ After any edit under `schemas/`, run **codegen** and commit `crates/nexus-contra
 | **Cloud** (CLI `sync` / `platform`, `nexus-cloud-sync`) | **Yes** — `platform/`, `cloud-sync/`, `domain/`, `common/` |
 | **Local** (daemon `/v1/local/*`, orchestration, ACP) | **No** — `nexus-contracts/src/local/` |
 
-See [local-cloud-crate-architecture.md](../.agents/knowledge/specs/local-cloud-crate-architecture.md).
+See [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md).

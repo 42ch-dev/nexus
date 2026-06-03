@@ -2,7 +2,7 @@
 //!
 //! **Preimage (this crate):** `serde_json::to_vec` bytes of the bundle's **`deltas` JSON array
 //! only** (not the full `Bundle` object). Normative spec: v1-spec **ADR-006**; OSS companion doc:
-//! `.agents/archived/knowledge/canonical-hash.md`. Unit test `golden_alignment_vector_matches_documented_digest`
+//! `.mstar/archived/knowledge/canonical-hash.md`. Unit test `golden_alignment_vector_matches_documented_digest`
 //! locks the ADR §3.3 golden vector. Other stacks must match these bytes for interop.
 //!
 //! Wire format: `sha256:` + 64 lowercase hex digits (see [`is_well_formed_canonical_hash`]).
@@ -92,7 +92,7 @@ mod tests {
     }
 
     /// Frozen cross-stack fixture: changing field values requires updating
-    /// `.agents/archived/knowledge/canonical-hash.md` and any platform golden vectors.
+    /// `.mstar/archived/knowledge/canonical-hash.md` and any platform golden vectors.
     fn golden_alignment_fixture_delta() -> Delta {
         Delta {
             delta_type: DeltaType::KeyBlock,
@@ -113,7 +113,7 @@ mod tests {
         let got = canonical_hash_for_deltas(&[golden_alignment_fixture_delta()]).unwrap();
         assert_eq!(
             got, EXPECTED,
-            "keep in sync with .agents/archived/knowledge/canonical-hash.md"
+            "keep in sync with .mstar/archived/knowledge/canonical-hash.md"
         );
     }
 }

@@ -13,7 +13,7 @@
 //! - [`DuplexTransport`] — in-memory mock for tests.
 //! - [`call_json_rpc`] — convenience function for one-shot RPC calls.
 //!
-//! Design: `.agents/knowledge/specs/orchestration-engine.md` §6.
+//! Design: `.mstar/knowledge/specs/orchestration-engine.md` §6.
 
 pub mod ipc;
 pub mod manager;

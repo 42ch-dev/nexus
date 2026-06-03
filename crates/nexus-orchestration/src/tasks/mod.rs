@@ -1,6 +1,6 @@
 //! Standard `Task` implementations for the orchestration engine.
 //!
-//! Design: `.agents/knowledge/specs/orchestration-engine.md` §4.4.
+//! Design: `.mstar/knowledge/specs/orchestration-engine.md` §4.4.
 //!
 //! # TODO(V1.17): Run and capability-call trace correlation
 //!

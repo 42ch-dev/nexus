@@ -5,7 +5,7 @@
 //!
 //! WS3 will replace this with a preset file loader.
 //!
-//! Design: `.agents/knowledge/specs/orchestration-engine.md` §9.1.
+//! Design: `.mstar/knowledge/specs/orchestration-engine.md` §9.1.
 
 use crate::capability::CapabilityRegistry;
 use async_trait::async_trait;
