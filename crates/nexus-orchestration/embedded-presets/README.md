@@ -23,20 +23,20 @@ All presets are invoked via the daemon scheduler:
 # Example: run reflection-loop
 nexus42 daemon schedule add \
   --preset reflection-loop \
-  --var topic "Explain quantum computing in simple terms" \
-  --var content "Focus on superposition and entanglement"
+  --creator <creator-id> \
+  --seed "Explain quantum computing in simple terms"
 
 # Example: run memory-augmented
 nexus42 daemon schedule add \
   --preset memory-augmented \
-  --var keyword "character-development" \
-  --var topic "Write a character arc for the antagonist"
+  --creator <creator-id> \
+  --seed "Write a character arc for the antagonist"
 
 # Example: run kb-extract
-nexus42 daemon schedule add --preset kb-extract --var creator_id "<id>"
+nexus42 daemon schedule add --preset kb-extract --creator <creator-id>
 
 # Example: run soul-experience-refresh
-nexus42 daemon schedule add --preset soul-experience-refresh --var creator_id "<id>" --var home_dir "<path>"
+nexus42 daemon schedule add --preset soul-experience-refresh --creator <creator-id>
 # Or use the one-shot CLI command:
 nexus42 creator soul refresh-experience
 ```

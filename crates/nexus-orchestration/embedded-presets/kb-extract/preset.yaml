@@ -11,7 +11,7 @@
 # claim → mark_running → build prompt → parse LLM response → insert KeyBlock → mark done/failed
 #
 # Manual run command:
-#   nexus42 daemon schedule add --preset kb-extract --var creator_id "<id>"
+#   nexus42 daemon schedule add --preset kb-extract --creator <creator-id>
 
 preset:
   id: kb-extract
