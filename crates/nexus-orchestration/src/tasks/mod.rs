@@ -547,7 +547,11 @@ impl Task for StateCompositeTask {
                         cap_input = Value::Object(serde_json::Map::new());
                     }
                     if let Some(obj) = cap_input.as_object_mut() {
-                        // Engine context overwrites any spoofed values from preset args.
+                        // Preset args are untrusted. Strip protected identity
+                        // fields first, then inject only trusted context values.
+                        obj.remove("_creator_id");
+                        obj.remove("_session_id");
+
                         if let Some(creator_id) = context.get::<String>("_creator_id").await {
                             obj.insert("_creator_id".into(), Value::String(creator_id));
                         }
@@ -1597,6 +1601,45 @@ mod tests {
         assert!(
             !full_text.contains("spoofed_session"),
             "spoofed session_id must not reach capability, got: {full_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sec_v131_01_strips_spoofed_identity_when_context_missing() {
+        use crate::preset::manifest::EnterAction;
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "spoof_without_context".into(),
+            description: None,
+            enter: vec![EnterAction::Capability {
+                name: "acp.prompt".into(),
+                args: Some(serde_json::json!({
+                    "prompt": "test",
+                    "_creator_id": "victim_creator",
+                    "_session_id": "victim_session"
+                })),
+            }],
+            exit_when: None,
+            next: None,
+            terminal: true,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(matches!(result.next_action, NextAction::End));
+
+        let input: serde_json::Value = ctx.get("_capability_input").await.unwrap_or(Value::Null);
+        assert!(
+            input.get("_creator_id").is_none(),
+            "untrusted _creator_id must be stripped when trusted context is absent: {input}"
+        );
+        assert!(
+            input.get("_session_id").is_none(),
+            "untrusted _session_id must be stripped when trusted context is absent: {input}"
         );
     }
 }
