@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.32 Active planning** · Latest shipped: **V1.31** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 20; `SEC-V131-01` targeted by V1.32)
+**Quick status**: **V1.32 Shipped** · Latest shipped: **V1.32** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 20; `SEC-V131-01` closed in V1.32)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-03
+**Last updated**: 2026-06-03 (V1.32 close)
 
 ---
 
@@ -100,7 +100,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
 | V1.30 post-QC | 11 | `v1.30-post-qc-tech-debt` |
-| V1.31 post-QC | 9 | `v1.31-post-qc-tech-debt` (incl. **SEC-V131-01** → V1.32+) |
+| V1.31 post-QC | 9 | `v1.31-post-qc-tech-debt` (incl. ~~SEC-V131-01~~ → **closed V1.32** via P3) |
 | **Total** | **20** | See `metadata.tech_debt_summary.total_open` |
 
 **Closed / historical residuals**
@@ -124,17 +124,17 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 **Latest shipped iteration**
 
-- V1.31 delivery compass: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
+- V1.32 delivery compass: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
 
 **Latest active iteration**
 
-- V1.32 delivery compass: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
+- _None_ — V1.32 is the latest shipped iteration.
 
 **Recent shipped compasses** (detail in archive §2)
 
+- V1.32: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
+- V1.31: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
 - V1.30: [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md)
-- V1.29: [v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md](../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md)
-- V1.28: [v1.28-context-and-agent-host-delivery-compass-v1.md](../iterations/v1.28-context-and-agent-host-delivery-compass-v1.md)
 
 **Knowledge & specs**
 
@@ -149,4 +149,4 @@ External (via `.agents/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{pla
 
 ---
 
-*Last updated: 2026-06-03. Status: Active.*
+*Last updated: 2026-06-03. Status: Active (V1.32 shipped, no active iteration).*
