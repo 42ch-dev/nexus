@@ -5,7 +5,33 @@
 //!
 //! Types: `nexus-contracts::local::orchestration::preset`.
 //! Loader + validation: this module (`loader.rs`).
+//! Semantic validation facade: `validation.rs` (V1.32 P1).
 //! Embedded presets: `include_dir!` at compile time (§7.1 location #3).
+//!
+//! ## V1.32 Validator boundary notes (A7)
+//!
+//! The `validation.rs` module provides `validate_preset_semantic()` and
+//! `validate_assets_in_bundle()` as the **single shared validation surface**
+//! for both the runtime loader path and the daemon API endpoint. The existing
+//! `loader::validate_manifest()` continues to run during `load_preset_from_str()`
+//! for backward compatibility. The new semantic checks are additive — they
+//! produce `ValidationDiagnostic` values (not `ValidationProblem`) with richer
+//! metadata (severity, category).
+//!
+//! The daemon `POST /v1/local/presets:validate` handler is being updated to
+//! route through the shared validation facade. P4 will own the broader spec
+//! update in `orchestration-engine.md` §7.6/§8 to document the unified
+//! validation contract. Key design decisions:
+//!
+//! - **Orphan inner graphs = WARNING** (not error): allows presets to define
+//!   utility graphs for future use without breaking validation.
+//! - **Capability arg drift** checks are best-effort: the registry exposes
+//!   `input_schema()` as a JSON string; we parse it for top-level `properties`
+//!   and `required` but do not perform full JSON Schema validation.
+//! - **A6 decision: NO new CLI wrapper** — the daemon endpoint is the only
+//!   user-facing validation surface. Adding a CLI subcommand would require
+//!   updating `cli-spec.md` and command-surface contract tests, which is
+//!   deferred to a future plan.
 
 use crate::capability::CapabilityRegistry;
 use crate::system_preset_dir;
@@ -16,11 +42,16 @@ use std::path::Path;
 
 pub mod loader;
 pub mod manifest;
+pub mod validation;
 
 pub use loader::{
-    load_preset, load_preset_from_str, load_preset_from_str_with_limits, yaml_value_depth,
-    LoadedPreset, PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH,
-    DEFAULT_MAX_YAML_SIZE,
+    load_preset, load_preset_from_str, load_preset_from_str_with_limits,
+    loader_validate_manifest_compat, yaml_value_depth, LoadedPreset, PresetLoadError,
+    ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
+};
+pub use validation::{
+    validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
+    DiagnosticSeverity, ValidationDiagnostic, ValidationResult,
 };
 
 // ---------------------------------------------------------------------------
