@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-30T12:00:00Z",
+  "updated_at": "2026-06-03T16:30:00+08:00",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -9,28 +9,33 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": null,
+    "integration_branch": "feature/v1.32-preset-quality-gate",
     "last_integration_branch": "feature/v1.31-agentic-design-patterns",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.31",
-    "latest_shipped_at": "2026-05-30T12:00:00Z",
+    "latest_shipped_iteration": "v1.32",
+    "latest_shipped_at": "2026-06-03T16:30:00+08:00",
     "latest_active_iteration": null,
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-05-30T12:00:00Z",
-      "total_open": 20,
+      "updated_at": "2026-06-03T16:30:00+08:00",
+      "total_open": 21,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 1,
-        "low": 14,
+        "low": 15,
         "nit": 5
       },
       "by_target": {
         "backlog": 19,
-        "V1.32+": 1
+        "V1.33+": 2
+      },
+      "by_plan": {
+        "v1.30-post-qc-tech-debt": 11,
+        "v1.31-post-qc-tech-debt": 8,
+        "v1.32-post-qc-tech-debt": 2
       },
       "cross_cutting": [
         {
@@ -42,10 +47,34 @@
           "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
         }
       ],
-      "note": "V1.31 shipped. 20 open entries in residual_findings (11 v1.30-post-qc + 9 v1.31-post-qc incl. SEC-V131-01 → V1.32+). Cross-cutting accept items in cross_cutting[]. Done plans: archived/plans-done.json."
+      "note": "V1.32 shipped (Preset Quality Gate — P1 shared validator, P2 embedded preset hardening + TD-V131-08, P3 SEC-V131-01 closed, P4 docs hygiene). 21 open entries in residual_findings (11 v1.30-post-qc + 8 v1.31-post-qc + 2 v1.32-post-qc incl. R-P2-01/R-P2-02 creator.inject_prompt schema gap → V1.33+). Cross-cutting accept items in cross_cutting[]. Done plans: archived/plans-done.json."
     }
   },
   "residual_findings": {
+    "v1.32-post-qc-tech-debt": [
+      {
+        "id": "R-P2-01",
+        "title": "creator.inject_prompt input_schema doesn't declare prompt_file/vars orchestration-layer args",
+        "severity": "medium",
+        "source": "P2 implementer proposal (qc2 cross-checked; smoke test downgrades as known)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/creator_inject_prompt.rs (or equivalent)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "Capability's input_schema doesn't reflect that presets can pass prompt_file + vars which the orchestration engine resolves to prompt at runtime. A4 validator correctly flags this as CapabilityArgDrift on novel-writing + research. Fix requires capability semantics change — out of P2 scope."
+      },
+      {
+        "id": "R-P2-02",
+        "title": "research preset uses same creator.inject_prompt drift as novel-writing",
+        "severity": "low",
+        "source": "P2 implementer proposal",
+        "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "Same root cause as R-P2-01."
+      }
+    ],
     "v1.31-post-qc-tech-debt": [
       {
         "id": "TD-V131-01",
@@ -114,17 +143,6 @@
         "note": "Pre-release volumes low. Consider FTS5 or keyword index at scale."
       },
       {
-        "id": "SEC-V131-01",
-        "title": "judge.llm and context.summarize still read raw creator_id/session_id — same IDOR pattern as fixed acp_prompt",
-        "severity": "medium",
-        "source": "pr-review O-1 (security follow-up to cursor review)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs, crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.32+",
-        "note": "Same IDOR as fixed in acp_prompt: only _creator_id/_session_id (context-injected) should be accepted. Low urgency because callers are orchestration engine itself, not user preset args — but defense-in-depth says fix it."
-      },
-      {
         "id": "TD-V131-07",
         "title": "parse_judge_response keyword matching can produce false positives from LLM output",
         "severity": "low",
@@ -144,7 +162,7 @@
         "decision": "accept",
         "owner": "@fullstack-dev",
         "target_date": "backlog",
-        "note": "Empty rule defaults to always-true (correct for this preset). Verify loader.rs handles gracefully; add explicit rule if loader validation changes."
+        "note": "P2 resolved: exit_when kind:rule is explicit always-true, locked by test memory_augmented_rule_exit_is_explicit_always_true. Loader treats empty rule as always-true (correct for this preset). Documented in YAML comments and embedded-presets/README.md."
       }
     ],
     "v1.30-post-qc-tech-debt": [

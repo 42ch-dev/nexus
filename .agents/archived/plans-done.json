@@ -1213,6 +1213,59 @@
       "archived_record": ".agents/archived/plans/2026-05-30-v1.31-spec-tracker-hygiene.json",
       "working_branch": "feature/v1.31-spec-tracker-hygiene",
       "notes": "Profile B compaction + tracker/status SSOT alignment"
+    },
+    {
+      "plan_id": "2026-06-03-v1.32-preset-validator-core-and-cli",
+      "title": "V1.32 P1 — Shared preset validator core + CLI/API parity",
+      "done_at": "2026-06-03T16:30:00+08:00",
+      "plan_file": ".agents/plans/2026-06-03-v1.32-preset-validator-core-and-cli.md",
+      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-preset-validator-core-and-cli.json",
+      "working_branch": "feature/v1.32-preset-validator-core-and-cli",
+      "category": "logic",
+      "qc_verdict": "Approve (rev3, 3/3)",
+      "qa_verdict": "Pass (cargo test preset + clippy clean across 3 crates)",
+      "residual_count": 0,
+      "notes": "Shared validation facade (validation.rs) wiring loader + daemon endpoint + A2/A3/A4 checks. CLI wrapper explicitly NOT added. 3 QC rounds (rev1/rev2/rev3)."
+    },
+    {
+      "plan_id": "2026-06-03-v1.32-embedded-presets-usability-hardening",
+      "title": "V1.32 P2 — Embedded preset completeness, smoke tests, and usability repairs",
+      "done_at": "2026-06-03T16:30:00+08:00",
+      "plan_file": ".agents/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.md",
+      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-embedded-presets-usability-hardening.json",
+      "working_branch": "feature/v1.32-embedded-presets-usability-hardening",
+      "category": "logic",
+      "qc_verdict": "Approve (rev2, 3/3)",
+      "qa_verdict": "Pass (smoke + kb-extract + memory-augmented tests all green)",
+      "residual_count": 2,
+      "notes": "Smoke test added; kb-extract inner graph wiring fixed; TD-V131-08 explicit always-true locked by test; --var CLI removed. R-P2-01/R-P2-02 (creator.inject_prompt schema gap) deferred V1.33+."
+    },
+    {
+      "plan_id": "2026-06-03-v1.32-orchestration-security-followup",
+      "title": "V1.32 P3 — Close SEC-V131-01 capability identity boundary gap",
+      "done_at": "2026-06-03T16:30:00+08:00",
+      "plan_file": ".agents/plans/2026-06-03-v1.32-orchestration-security-followup.md",
+      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-orchestration-security-followup.json",
+      "working_branch": "feature/v1.32-orchestration-security-followup",
+      "category": "logic",
+      "qc_verdict": "Approve (rev2, 3/3)",
+      "qa_verdict": "Pass (6 regression tests across judge_llm + context_summarize)",
+      "residual_count": 0,
+      "closed_residuals": ["SEC-V131-01"],
+      "notes": "judge.llm + context.summarize now read only context-injected _creator_id/_session_id; engine task boundary injects trusted context."
+    },
+    {
+      "plan_id": "2026-06-03-v1.32-spec-tracker-hygiene",
+      "title": "V1.32 P4 — Spec, tracker, and status hygiene for V1.32 close (docs-only)",
+      "done_at": "2026-06-03T16:30:00+08:00",
+      "plan_file": ".agents/plans/2026-06-03-v1.32-spec-tracker-hygiene.md",
+      "archived_record": ".agents/archived/plans/2026-06-03-v1.32-spec-tracker-hygiene.json",
+      "working_branch": "feature/v1.32-spec-tracker-hygiene",
+      "category": "docs",
+      "qc_verdict": "Approve (rev2, 3/3 after rebase + SSOT close)",
+      "qa_verdict": "N/A (docs-only)",
+      "residual_count": 0,
+      "notes": "Spec §7.6.x for shared validation facade; archived shipped tracker has V1.32 snapshot; active tracker Quick status; iterations README; compass status. Initial rev1 had worktree-isolation Critical (P4 created before P1 merged) + SSOT split-brain — both resolved by rebase + iteration-close SSOT update."
     }
   ]
 }

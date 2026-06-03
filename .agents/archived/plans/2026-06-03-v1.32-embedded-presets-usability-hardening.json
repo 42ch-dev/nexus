@@ -1,0 +1,51 @@
+{
+  "plan_id": "2026-06-03-v1.32-embedded-presets-usability-hardening",
+  "title": "V1.32 P2 — Embedded preset completeness, smoke tests, and usability repairs",
+  "status": "Done",
+  "working_branch": "feature/v1.32-embedded-presets-usability-hardening",
+  "merge_target": "feature/v1.32-preset-quality-gate",
+  "depends_on": [
+    "2026-06-03-v1.32-preset-validator-core-and-cli"
+  ],
+  "metadata": {
+    "iteration": "v1.32",
+    "primary_spec": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "theme": "P2-embedded-presets",
+    "tracker_ids": ["TD-V131-08"]
+  },
+  "qc_summary": {
+    "tri_review_rounds": 2,
+    "final_verdict": "Approve (3/3 after re-check)",
+    "fixes_during_review": [
+      "rev1: 2 Warning (stale --var CLI in runbooks, smoke test blanket downgrades all CapabilityArgDrift)",
+      "rev2: 0 findings, final Approve"
+    ]
+  },
+  "qa_summary": "Smoke test all_embedded_presets_pass_strict_validation_gate passes; kb-extract inner graph wiring fixed; memory-augmented rule-gate (TD-V131-08) explicitly resolved as always-true with test lock; soul-experience-refresh same pattern documented; runbook commands verified real (--var removed).",
+  "residual_count": 2,
+  "open_residuals": [
+    {
+      "id": "R-P2-01",
+      "title": "creator.inject_prompt input_schema doesn't declare prompt_file/vars orchestration-layer args",
+      "severity": "medium",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/creator_inject_prompt.rs (or equivalent)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.33+",
+      "note": "P2 smoke test downgrades this known drift on novel-writing and research. Fix is capability semantics change — out of P2 scope."
+    },
+    {
+      "id": "R-P2-02",
+      "title": "research preset uses same creator.inject_prompt drift as novel-writing",
+      "severity": "low",
+      "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.33+",
+      "note": "Same root cause as R-P2-01."
+    }
+  ],
+  "notes": "Smoke test all_embedded_presets_pass_strict_validation_gate added. kb-extract inner graph wiring fixed (extraction_graph now properly entered). TD-V131-08 resolved: explicit always-true locked by test memory_augmented_rule_exit_is_explicit_always_true. CapabilityArgDrift downgrade narrowed to creator.inject_prompt only. Stale --var CLI removed from all runbooks.",
+  "archived_at": "2026-06-03T16:30:00+08:00"
+}

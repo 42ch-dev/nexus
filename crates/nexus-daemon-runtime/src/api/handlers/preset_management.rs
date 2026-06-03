@@ -61,6 +61,9 @@ pub struct ValidatePresetResponse {
     pub version: Option<u32>,
     pub state_count: Option<usize>,
     pub errors: Vec<String>,
+    /// Non-fatal warnings from semantic validation (V1.32 P1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,10 +238,15 @@ pub async fn scaffold_preset(
     }))
 }
 
-/// `POST /v1/local/presets:validate` — validate preset YAML/bundle (T36)
+/// `POST /v1/local/presets:validate` — validate preset YAML/bundle (T36, V1.32 P1)
 ///
 /// Validates a preset YAML file for structural correctness with
-/// field-level detail in the error response.
+/// field-level detail in the error response. Routes through the shared
+/// semantic validation facade (`nexus_orchestration::preset::validate_preset_semantic`)
+/// so the daemon endpoint and the runtime loader reject the same defects.
+///
+/// Asset-path checks (template file existence) run when the path points to a
+/// directory (bundle mode); otherwise only in-memory semantic checks run.
 pub async fn validate_preset(
     Json(req): Json<ValidatePresetRequest>,
 ) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
@@ -279,8 +287,65 @@ pub async fn validate_preset(
         )]));
     }
 
+    // Parse + depth check
     let manifest = parse_and_check_manifest(&yaml)?;
-    let errors = validate_manifest_fields(&manifest);
+
+    // C2: Run loader-equivalent structural validation so the daemon endpoint
+    //     rejects the same defects the runtime loader would reject.
+    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let structural_problems =
+        nexus_orchestration::preset::loader_validate_manifest_compat(&manifest, &caps);
+    if !structural_problems.is_empty() {
+        let errors: Vec<String> = structural_problems
+            .iter()
+            .map(|p| format!("{}: {}", p.path, p.error))
+            .collect();
+        return Ok(Json(ValidatePresetResponse {
+            valid: false,
+            id: Some(manifest.preset.id.clone()),
+            version: Some(manifest.preset.version),
+            state_count: Some(manifest.states.len()),
+            errors,
+            warnings: Vec::new(),
+        }));
+    }
+
+    // C3: Shared path-safety check (same `assert_template_file_safe` the loader uses).
+    let path_result = nexus_orchestration::preset::validate_path_safety(&manifest);
+
+    // A5: Run shared semantic validation (the same surface used by the loader).
+    let sem_result = nexus_orchestration::preset::validate_preset_semantic(&manifest, &caps);
+
+    // A3: If the path points into a bundle directory, also run asset checks.
+    let asset_result = infer_bundle_root(file_path).map_or_else(
+        nexus_orchestration::preset::ValidationResult::default,
+        |bundle_root| {
+            nexus_orchestration::preset::validate_assets_in_bundle(&manifest, &bundle_root)
+        },
+    );
+
+    // Combine diagnostics from path safety + semantic + asset checks
+    let mut errors: Vec<String> = Vec::new();
+    for d in path_result
+        .diagnostics
+        .iter()
+        .chain(sem_result.diagnostics.iter())
+        .chain(asset_result.diagnostics.iter())
+        .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Error)
+    {
+        // Sanitize: use only the relative path, not full host FS path
+        errors.push(format!("{}: {}", d.path, d.message));
+    }
+
+    // Warnings are reported separately in the response (informational).
+    let warnings: Vec<String> = path_result
+        .diagnostics
+        .iter()
+        .chain(sem_result.diagnostics.iter())
+        .chain(asset_result.diagnostics.iter())
+        .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Warning)
+        .map(|d| format!("{}: {}", d.path, d.message))
+        .collect();
 
     let valid = errors.is_empty();
     Ok(Json(ValidatePresetResponse {
@@ -289,7 +354,20 @@ pub async fn validate_preset(
         version: Some(manifest.preset.version),
         state_count: Some(manifest.states.len()),
         errors,
+        warnings,
     }))
+}
+
+/// Infer the bundle root directory from a preset.yaml path.
+///
+/// If `file_path` ends with `preset.yaml`, return its parent directory.
+/// Otherwise return `None` (standalone YAML file, no bundle).
+fn infer_bundle_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if file_path.file_name().is_some_and(|f| f == "preset.yaml") {
+        file_path.parent().map(std::path::Path::to_path_buf)
+    } else {
+        None
+    }
 }
 
 /// Parse YAML text into a `PresetManifest`, checking depth and structure.
@@ -320,38 +398,6 @@ fn parse_and_check_manifest(
     })
 }
 
-/// Validate manifest fields: non-empty id, at least one state, initial/terminal exist.
-fn validate_manifest_fields(
-    manifest: &nexus_contracts::local::orchestration::preset::PresetManifest,
-) -> Vec<String> {
-    let mut errors = Vec::new();
-
-    if manifest.preset.id.is_empty() {
-        errors.push("preset.id must not be empty".to_string());
-    }
-    if manifest.states.is_empty() {
-        errors.push("preset must have at least one state".to_string());
-    }
-
-    let state_ids: std::collections::HashSet<&str> =
-        manifest.states.iter().map(|s| s.id.as_str()).collect();
-
-    if !state_ids.contains(manifest.preset.initial.as_str()) {
-        errors.push(format!(
-            "preset.initial '{}' does not reference a valid state",
-            manifest.preset.initial
-        ));
-    }
-    if !state_ids.contains(manifest.preset.terminal.as_str()) {
-        errors.push(format!(
-            "preset.terminal '{}' does not reference a valid state",
-            manifest.preset.terminal
-        ));
-    }
-
-    errors
-}
-
 impl ValidatePresetResponse {
     /// Build an invalid response with the given errors and no manifest data.
     fn invalid(errors: &[String]) -> Json<Self> {
@@ -361,6 +407,7 @@ impl ValidatePresetResponse {
             version: None,
             state_count: None,
             errors: errors.to_vec(),
+            warnings: Vec::new(),
         })
     }
 }
@@ -492,7 +539,10 @@ mod tests {
     #[tokio::test]
     async fn validate_accepts_valid_preset() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml_path = tmp.path().join("preset.yaml");
+        // Create a properly-named bundle directory so the id-vs-directory check passes.
+        let bundle_dir = tmp.path().join("test");
+        std::fs::create_dir_all(&bundle_dir).expect("mkdir");
+        let yaml_path = bundle_dir.join("preset.yaml");
         std::fs::write(
             &yaml_path,
             r#"preset:
@@ -520,7 +570,11 @@ states:
         let result = validate_preset(Json(req)).await;
         assert!(result.is_ok());
         let resp = result.expect("ok");
-        assert!(resp.valid);
+        assert!(
+            resp.valid,
+            "expected valid: errors={:?}, warnings={:?}",
+            resp.errors, resp.warnings
+        );
         assert_eq!(resp.id.as_deref(), Some("test"));
     }
 
@@ -528,5 +582,380 @@ states:
         user_preset_bundle_dir(nexus_home, name)
             .join("preset.yaml")
             .exists()
+    }
+
+    /// Helper: create a bundle directory with a preset.yaml and return its path.
+    fn create_bundle(tmp: &tempfile::TempDir, id: &str, yaml: &str) -> std::path::PathBuf {
+        let bundle_dir = tmp.path().join(id);
+        std::fs::create_dir_all(&bundle_dir).expect("mkdir");
+        std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write");
+        bundle_dir
+    }
+
+    /// Helper: call validate_preset on a bundle and return the response.
+    async fn validate_bundle(bundle_dir: &std::path::Path) -> ValidatePresetResponse {
+        let yaml_path = bundle_dir.join("preset.yaml");
+        let req = ValidatePresetRequest {
+            path: yaml_path.to_str().expect("path").to_string(),
+        };
+        validate_preset(Json(req)).await.expect("ok").0
+    }
+
+    // ── W1: Invalid P1 parity fixtures ──────────────────────────────────
+
+    #[tokio::test]
+    async fn w1_reject_unreachable_terminal() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: unreachable
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: a
+  - id: c
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "unreachable", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
+        assert!(resp
+            .errors
+            .iter()
+            .any(|e| e.contains("cannot reach any terminal") || e.contains("Reachability")));
+    }
+
+    #[tokio::test]
+    async fn w1_reject_terminal_header_mismatch() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: mismatch
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+"#;
+        let bundle = create_bundle(&tmp, "mismatch", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
+        assert!(resp.errors.iter().any(|e| e.contains("terminal")));
+    }
+
+    #[tokio::test]
+    async fn w1_reject_id_directory_mismatch() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: wrong-name
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        // Directory is "right-name" but manifest says "wrong-name"
+        let bundle = create_bundle(&tmp, "right-name", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
+        assert!(resp
+            .errors
+            .iter()
+            .any(|e| e.contains("does not match bundle directory")));
+    }
+
+    #[tokio::test]
+    async fn w1_reject_missing_inner_graph() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: missing-ig
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: nonexistent
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "missing-ig", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
+        assert!(resp
+            .errors
+            .iter()
+            .any(|e| e.contains("unknown inner_graph") || e.contains("not defined")));
+    }
+
+    #[tokio::test]
+    async fn w1_warn_orphan_inner_graph() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: orphan
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  unused:
+    nodes:
+      - id: n1
+        kind: acp_prompt
+"#;
+        let bundle = create_bundle(&tmp, "orphan", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(
+            resp.valid,
+            "orphan graph is a warning, not error: {:?}",
+            resp.errors
+        );
+        assert!(
+            resp.warnings.iter().any(|w| w.contains("not referenced")),
+            "expected orphan warning: {:?}",
+            resp.warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn w1_reject_missing_template_file_in_bundle() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: missing-file
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/nonexistent.md
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "missing-file", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
+        assert!(resp.errors.iter().any(|e| e.contains("does not exist")));
+    }
+
+    #[tokio::test]
+    async fn w1_reject_capability_drift() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: cap-drift
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities:
+    - totally.fake.capability
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "cap-drift", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
+        assert!(resp
+            .errors
+            .iter()
+            .any(|e| e.contains("not found in registry")));
+    }
+
+    // ── W2: Path safety regression tests ────────────────────────────────
+
+    #[tokio::test]
+    async fn w2_reject_dotdot_traversal() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: dotdot
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "../../etc/passwd"
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "dotdot", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(!resp.valid, "should reject traversal: {:?}", resp.errors);
+        // Verify error message does not leak full host path
+        for e in &resp.errors {
+            assert!(
+                !e.contains("/private/"),
+                "error should not leak host path: {e}"
+            );
+            assert!(!e.contains("/var/"), "error should not leak host path: {e}");
+        }
+    }
+
+    #[tokio::test]
+    async fn w2_reject_absolute_path() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: abspath
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+    context_update:
+      op: { kind: append }
+      template_file: "/etc/shadow"
+  - id: b
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "abspath", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(
+            !resp.valid,
+            "should reject absolute path: {:?}",
+            resp.errors
+        );
+        assert!(resp.errors.iter().any(|e| e.contains("absolute")));
+    }
+
+    #[tokio::test]
+    async fn w2_reject_symlink_escape() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let bundle_dir = tmp.path().join("symlink-escape");
+        std::fs::create_dir_all(&bundle_dir).expect("mkdir");
+
+        // Create a file outside the bundle
+        let outside = tmp.path().join("secret.txt");
+        std::fs::write(&outside, "secret").expect("write");
+
+        // Create a symlink inside the bundle pointing outside
+        let prompts_dir = bundle_dir.join("prompts");
+        std::fs::create_dir_all(&prompts_dir).expect("mkdir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, prompts_dir.join("judge.md")).expect("symlink");
+
+        let yaml = r#"preset:
+  id: symlink-escape
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/judge.md
+    next: b
+  - id: b
+    terminal: true
+"#;
+        std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write");
+        let resp = validate_bundle(&bundle_dir).await;
+        assert!(
+            !resp.valid,
+            "should reject symlink escape: {:?}",
+            resp.errors
+        );
+        assert!(resp
+            .errors
+            .iter()
+            .any(|e| e.contains("symlink") || e.contains("outside")));
+    }
+
+    // ── C4: Bundle dir id match test ────────────────────────────────────
+
+    #[tokio::test]
+    async fn c4_accept_matching_id_and_dirname() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let yaml = r#"preset:
+  id: my-preset
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let bundle = create_bundle(&tmp, "my-preset", yaml);
+        let resp = validate_bundle(&bundle).await;
+        assert!(
+            resp.valid,
+            "id matches dirname: errors={:?}, warnings={:?}",
+            resp.errors, resp.warnings
+        );
     }
 }

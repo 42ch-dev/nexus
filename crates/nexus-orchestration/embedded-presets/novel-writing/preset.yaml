@@ -1,9 +1,9 @@
 # Input variables (passed via core_context when starting a schedule):
 #   story_ref: Story reference identifier used as directory name (e.g., "my-first-novel").
-#              Provided via: nexus42 schedule add --preset novel-writing --var story_ref "my-first-novel"
 #   topic:     Novel topic or description (e.g., "A sci-fi thriller about AI consciousness").
-#              Provided via: nexus42 schedule add --preset novel-writing --var topic "..."
 #   vibe:      Writing style (default: "literary").
+#
+#   Launch: nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed "<topic>"
 
 preset:
   id: novel-writing

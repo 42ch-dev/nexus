@@ -9,7 +9,7 @@
 # If LLM polish is desired, chain `context.summarize` in a subsequent step.
 #
 # Trigger: schedule via daemon cron, or manually with:
-#   nexus42 schedule add --preset soul-experience-refresh --var creator_id "<id>" --var home_dir "<path>"
+#   nexus42 daemon schedule add --preset soul-experience-refresh --creator <creator-id>
 #
 # Or use the one-shot CLI command:
 #   nexus42 creator soul refresh-experience
@@ -33,6 +33,8 @@ states:
         args:
           creator_id: "{{preset.input.creator_id}}"
           home_dir: "{{preset.input.home_dir}}"
+    # Bare `rule` with no expression = always-true (immediate transition).
+    # Deterministic capability: aggregate completes, then we advance.
     exit_when:
       kind: rule
     next: done

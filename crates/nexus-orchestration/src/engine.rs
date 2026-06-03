@@ -228,6 +228,13 @@ pub trait OrchestrationEngine: Send + Sync {
         &self,
         loaded: &crate::preset::LoadedPreset,
     ) -> Result<SessionId, EngineError>;
+
+    /// Start a session using a loaded preset and trusted creator identity.
+    async fn start_session_with_preset_for_creator(
+        &self,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+    ) -> Result<SessionId, EngineError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +500,14 @@ impl OrchestrationEngine for EngineProxy {
     ) -> Result<SessionId, EngineError> {
         Err(EngineError::NoGraphLoaded)
     }
+
+    async fn start_session_with_preset_for_creator(
+        &self,
+        _loaded: &crate::preset::LoadedPreset,
+        _creator_id: &str,
+    ) -> Result<SessionId, EngineError> {
+        Err(EngineError::NoGraphLoaded)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -638,6 +653,16 @@ impl GraphFlowEngine {
         preset_id: &str,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
+        self.start_session_with_creator(preset_id, graph, None)
+            .await
+    }
+
+    async fn start_session_with_creator(
+        &self,
+        preset_id: &str,
+        graph: Arc<Graph>,
+        creator_id: Option<&str>,
+    ) -> Result<SessionId, EngineError> {
         let session_id = format!("{}:{}", preset_id, chrono::Utc::now().timestamp_millis());
 
         // Determine the start task from the graph.
@@ -647,6 +672,12 @@ impl GraphFlowEngine {
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         // Store session ID in context so InnerGraphTask can find it.
         session.context.set("_session_id", session_id.clone()).await;
+        if let Some(creator_id) = creator_id {
+            session
+                .context
+                .set("_creator_id", creator_id.to_string())
+                .await;
+        }
         self.state.storage.save(session).await?;
 
         // WS2 R3: Create and store Arc<FlowRunner>.
@@ -660,7 +691,7 @@ impl GraphFlowEngine {
         // Track in memory.
         let summary = SessionSummary {
             session_id: SessionId(session_id.clone()),
-            creator_id: String::new(),
+            creator_id: creator_id.unwrap_or_default().to_string(),
             preset_id: preset_id.to_string(),
             status: SessionStatus::Running,
             current_task_id: Some(start_task_id),
@@ -841,6 +872,19 @@ impl OrchestrationEngine for GraphFlowEngine {
         let wired = crate::preset::loader::build_wired_outer_graph(loaded, &proxy, &self.caps);
         self.start_session(&loaded.id, Arc::new(wired)).await
     }
+
+    async fn start_session_with_preset_for_creator(
+        &self,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+    ) -> Result<SessionId, EngineError> {
+        let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
+            state: self.state.clone(),
+        });
+        let wired = crate::preset::loader::build_wired_outer_graph(loaded, &proxy, &self.caps);
+        self.start_session_with_creator(&loaded.id, Arc::new(wired), Some(creator_id))
+            .await
+    }
 }
 
 // Re-export EngineSharedState for consumers (e.g., preset loader).
@@ -860,6 +904,34 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
         let caps = Arc::new(CapabilityRegistry::with_builtins());
         GraphFlowEngine::new_with_storage(storage, caps)
+    }
+
+    #[tokio::test]
+    async fn sec_v131_01_creator_start_seeds_trusted_creator_context() {
+        let engine = test_engine();
+        let graph = Arc::new(Graph::new("creator-context"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+
+        let session_id = engine
+            .start_session_with_creator("creator-context", graph, Some("creator_alice"))
+            .await
+            .expect("creator-aware session start should succeed");
+
+        let ctx = engine
+            .get_context(&session_id)
+            .await
+            .expect("session context should be persisted");
+        let creator_id: String = ctx
+            .get("_creator_id")
+            .await
+            .expect("trusted creator id should be seeded");
+        let seeded_session_id: String = ctx
+            .get("_session_id")
+            .await
+            .expect("trusted session id should be seeded");
+
+        assert_eq!(creator_id, "creator_alice");
+        assert_eq!(seeded_session_id, session_id.0);
     }
 
     // ---------- R6: Session recovery reconstructs FlowRunner ----------
