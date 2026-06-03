@@ -61,6 +61,9 @@ pub struct ValidatePresetResponse {
     pub version: Option<u32>,
     pub state_count: Option<usize>,
     pub errors: Vec<String>,
+    /// Non-fatal warnings from semantic validation (V1.32 P1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,10 +238,15 @@ pub async fn scaffold_preset(
     }))
 }
 
-/// `POST /v1/local/presets:validate` — validate preset YAML/bundle (T36)
+/// `POST /v1/local/presets:validate` — validate preset YAML/bundle (T36, V1.32 P1)
 ///
 /// Validates a preset YAML file for structural correctness with
-/// field-level detail in the error response.
+/// field-level detail in the error response. Routes through the shared
+/// semantic validation facade (`nexus_orchestration::preset::validate_preset_semantic`)
+/// so the daemon endpoint and the runtime loader reject the same defects.
+///
+/// Asset-path checks (template file existence) run when the path points to a
+/// directory (bundle mode); otherwise only in-memory semantic checks run.
 pub async fn validate_preset(
     Json(req): Json<ValidatePresetRequest>,
 ) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
@@ -279,8 +287,40 @@ pub async fn validate_preset(
         )]));
     }
 
+    // Parse + depth check
     let manifest = parse_and_check_manifest(&yaml)?;
-    let errors = validate_manifest_fields(&manifest);
+
+    // A5: Run shared semantic validation (the same surface used by the loader).
+    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let sem_result = nexus_orchestration::preset::validate_preset_semantic(&manifest, &caps);
+
+    // A3: If the path points into a bundle directory, also run asset checks.
+    let asset_result = infer_bundle_root(file_path).map_or_else(
+        nexus_orchestration::preset::ValidationResult::default,
+        |bundle_root| {
+            nexus_orchestration::preset::validate_assets_in_bundle(&manifest, &bundle_root)
+        },
+    );
+
+    // Combine diagnostics
+    let mut errors: Vec<String> = Vec::new();
+    for d in sem_result
+        .diagnostics
+        .iter()
+        .chain(asset_result.diagnostics.iter())
+        .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Error)
+    {
+        errors.push(format!("{}: {}", d.path, d.message));
+    }
+
+    // Warnings are reported separately in the response (informational).
+    let warnings: Vec<String> = sem_result
+        .diagnostics
+        .iter()
+        .chain(asset_result.diagnostics.iter())
+        .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Warning)
+        .map(|d| format!("{}: {}", d.path, d.message))
+        .collect();
 
     let valid = errors.is_empty();
     Ok(Json(ValidatePresetResponse {
@@ -289,7 +329,20 @@ pub async fn validate_preset(
         version: Some(manifest.preset.version),
         state_count: Some(manifest.states.len()),
         errors,
+        warnings,
     }))
+}
+
+/// Infer the bundle root directory from a preset.yaml path.
+///
+/// If `file_path` ends with `preset.yaml`, return its parent directory.
+/// Otherwise return `None` (standalone YAML file, no bundle).
+fn infer_bundle_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if file_path.file_name().is_some_and(|f| f == "preset.yaml") {
+        file_path.parent().map(std::path::Path::to_path_buf)
+    } else {
+        None
+    }
 }
 
 /// Parse YAML text into a `PresetManifest`, checking depth and structure.
@@ -320,38 +373,6 @@ fn parse_and_check_manifest(
     })
 }
 
-/// Validate manifest fields: non-empty id, at least one state, initial/terminal exist.
-fn validate_manifest_fields(
-    manifest: &nexus_contracts::local::orchestration::preset::PresetManifest,
-) -> Vec<String> {
-    let mut errors = Vec::new();
-
-    if manifest.preset.id.is_empty() {
-        errors.push("preset.id must not be empty".to_string());
-    }
-    if manifest.states.is_empty() {
-        errors.push("preset must have at least one state".to_string());
-    }
-
-    let state_ids: std::collections::HashSet<&str> =
-        manifest.states.iter().map(|s| s.id.as_str()).collect();
-
-    if !state_ids.contains(manifest.preset.initial.as_str()) {
-        errors.push(format!(
-            "preset.initial '{}' does not reference a valid state",
-            manifest.preset.initial
-        ));
-    }
-    if !state_ids.contains(manifest.preset.terminal.as_str()) {
-        errors.push(format!(
-            "preset.terminal '{}' does not reference a valid state",
-            manifest.preset.terminal
-        ));
-    }
-
-    errors
-}
-
 impl ValidatePresetResponse {
     /// Build an invalid response with the given errors and no manifest data.
     fn invalid(errors: &[String]) -> Json<Self> {
@@ -361,6 +382,7 @@ impl ValidatePresetResponse {
             version: None,
             state_count: None,
             errors: errors.to_vec(),
+            warnings: Vec::new(),
         })
     }
 }
