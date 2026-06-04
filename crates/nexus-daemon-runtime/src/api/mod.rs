@@ -230,10 +230,7 @@ fn memory_routes() -> Router<WorkspaceState> {
             delete(handlers::memory::delete_pending_review),
         )
         // Memory review pipeline (V1.33 P4)
-        .route(
-            "/v1/local/memory/review",
-            post(handlers::memory::review),
-        )
+        .route("/v1/local/memory/review", post(handlers::memory::review))
         // Memory fragments (V1.33 P4)
         .route(
             "/v1/local/memory/fragments",

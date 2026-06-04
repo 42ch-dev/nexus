@@ -61,11 +61,7 @@ async fn review_returns_200_with_counts() {
     seed_pending_review(&ctx, "pending_review_test_1").await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx
-        .server
-        .post("/v1/local/memory/review")
-        .json(&body)
-        .await;
+    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     // The brainstorm entry with high-signal content should be promoted
@@ -76,11 +72,7 @@ async fn review_returns_200_with_counts() {
 async fn review_returns_200_empty_queue() {
     let ctx = test_ctx().await;
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx
-        .server
-        .post("/v1/local/memory/review")
-        .json(&body)
-        .await;
+    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     assert_eq!(body["promoted"], 0);
@@ -92,11 +84,7 @@ async fn review_returns_200_empty_queue() {
 async fn review_returns_400_invalid_creator_id() {
     let ctx = test_ctx().await;
     let body = json!({ "creator_id": "invalid_id" });
-    let resp = ctx
-        .server
-        .post("/v1/local/memory/review")
-        .json(&body)
-        .await;
+    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
     resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
 }
 
@@ -204,8 +192,14 @@ async fn fragments_after_review_has_entries() {
     resp.assert_status(axum::http::StatusCode::OK);
     let frag_body: Value = resp.json();
     let fragments = frag_body["fragments"].as_array().unwrap();
-    assert!(!fragments.is_empty(), "Should have at least one fragment after review");
-    assert!(fragments[0]["fragment_id"].as_str().unwrap().starts_with("frag_"));
+    assert!(
+        !fragments.is_empty(),
+        "Should have at least one fragment after review"
+    );
+    assert!(fragments[0]["fragment_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("frag_"));
 }
 
 // ─── No regression on pending-review CRUD ─────────────────────────────────
