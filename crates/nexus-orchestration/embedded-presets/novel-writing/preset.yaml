@@ -14,6 +14,9 @@ preset:
     - creator.inject_prompt
     - acp.prompt
     - judge.llm
+  run_intents:
+    - work_init
+    - work_continue
   initial: gathering
   terminal: done
 

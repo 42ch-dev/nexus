@@ -21,6 +21,8 @@ preset:
   description: "Aggregate long-term memories into the SOUL ## Experience section (deterministic, no LLM)"
   requires_capabilities:
     - soul.experience.aggregate
+  run_intents:
+    - work_maintenance
   initial: aggregate
   terminal: done
 
