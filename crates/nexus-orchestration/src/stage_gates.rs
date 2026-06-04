@@ -33,6 +33,36 @@ pub fn build_stage_schedule_label(stage: &str, work_id: &str) -> String {
     format!("FL-E stage: {stage} (work: {work_id})")
 }
 
+/// Work fields available for preset input templates (T2, spec §4).
+#[derive(Debug, Clone)]
+pub struct WorkFields {
+    /// Work entity ID (e.g. `wrk_abc123`).
+    pub work_id: String,
+    /// FL-E stage being advanced to.
+    pub fl_e_stage: String,
+    /// Creative brief JSON (may be empty string if intake not completed).
+    pub creative_brief: String,
+    /// Inspiration log JSON array (may be "[]" if empty).
+    pub inspiration_log: String,
+}
+
+/// Build the `presetInput` map for a stage schedule (T2, spec §4).
+///
+/// Returns a `serde_json::Value::Object` containing the Work fields that
+/// stage presets consume via `{{preset.input.*}}` template variables.
+///
+/// All stages receive the same base set; individual presets select the
+/// fields they need from the preset input namespace.
+#[must_use]
+pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
+    serde_json::json!({
+        "work_id": fields.work_id,
+        "fl_e_stage": fields.fl_e_stage,
+        "creative_brief": fields.creative_brief,
+        "inspiration_log": fields.inspiration_log,
+    })
+}
+
 /// Error returned when a stage advance fails validation.
 #[derive(Debug, Clone)]
 pub struct StageGateError {
@@ -295,6 +325,105 @@ mod tests {
         // review → persist
         let review_done = work_state("review", "complete", "complete");
         assert!(check_stage_advance(&review_done, "persist", false).is_ok());
+        assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
+    }
+
+    // ── T2: preset input templates consume Work fields ─────────────────────
+
+    fn demo_work_fields(stage: &str) -> WorkFields {
+        WorkFields {
+            work_id: "wrk_demo123".to_string(),
+            fl_e_stage: stage.to_string(),
+            creative_brief: r#"{"genre":"sci-fi","tone":"literary"}"#.to_string(),
+            inspiration_log: r#"[{"note":"first angle"}]"#.to_string(),
+        }
+    }
+
+    #[test]
+    fn build_preset_input_contains_work_id() {
+        let fields = demo_work_fields("research");
+        let input = build_preset_input(&fields);
+        assert_eq!(input["work_id"], "wrk_demo123");
+    }
+
+    #[test]
+    fn build_preset_input_contains_fl_e_stage() {
+        let fields = demo_work_fields("produce");
+        let input = build_preset_input(&fields);
+        assert_eq!(input["fl_e_stage"], "produce");
+    }
+
+    #[test]
+    fn build_preset_input_contains_creative_brief() {
+        let fields = demo_work_fields("produce");
+        let input = build_preset_input(&fields);
+        assert!(input["creative_brief"].is_string());
+        assert!(!input["creative_brief"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn build_preset_input_contains_inspiration_log() {
+        let fields = demo_work_fields("research");
+        let input = build_preset_input(&fields);
+        // inspiration_log should be a valid JSON array string
+        let log = input["inspiration_log"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(log).unwrap();
+        assert!(parsed.is_array());
+    }
+
+    #[test]
+    fn preset_input_research_consumes_creative_brief_and_inspiration() {
+        // T2 verification: research stage preset receives creative_brief + inspiration_log
+        let fields = demo_work_fields("research");
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("creative_brief").is_some(),
+            "research preset input must include creative_brief"
+        );
+        assert!(
+            input.get("inspiration_log").is_some(),
+            "research preset input must include inspiration_log"
+        );
+        assert_eq!(preset_for_stage("research"), Some("research"));
+    }
+
+    #[test]
+    fn preset_input_produce_consumes_creative_brief_and_inspiration() {
+        // T2 verification: novel-writing (produce) receives creative_brief + inspiration_log
+        let fields = demo_work_fields("produce");
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("creative_brief").is_some(),
+            "produce preset input must include creative_brief"
+        );
+        assert!(
+            input.get("inspiration_log").is_some(),
+            "produce preset input must include inspiration_log"
+        );
+        assert_eq!(preset_for_stage("produce"), Some("novel-writing"));
+    }
+
+    #[test]
+    fn preset_input_review_receives_work_id() {
+        // T2 verification: reflection-loop (review) receives work_id for context
+        let fields = demo_work_fields("review");
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("work_id").is_some(),
+            "review preset input must include work_id"
+        );
+        assert_eq!(preset_for_stage("review"), Some("reflection-loop"));
+    }
+
+    #[test]
+    fn preset_input_persist_receives_work_id() {
+        // T2 verification: kb-extract (persist) receives work_id for KB extraction
+        let fields = demo_work_fields("persist");
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("work_id").is_some(),
+            "persist preset input must include work_id"
+        );
         assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
     }
 }
