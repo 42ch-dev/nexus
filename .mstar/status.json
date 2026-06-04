@@ -1,7 +1,65 @@
 {
   "version": 1,
-  "updated_at": "2026-06-03T16:30:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-04T12:00:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-04-v1.33-work-model-and-creator-run",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.33-work-model-and-creator-run.md",
+      "working_branch": "feature/v1.33-work-model-and-creator-run",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/work-experience-model.md",
+        "description": "P1 — Work model + creator run + system preset + run_intents"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-creative-brief-intake-preset",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.33-creative-brief-intake-preset.md",
+      "working_branch": "feature/v1.33-creative-brief-intake-preset",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "depends_on": ["2026-06-04-v1.33-work-model-and-creator-run", "2026-06-04-v1.33-llm-judge-runtime-fix"],
+        "description": "P2 — Creative Brief Intake preset + novel-writing wiring"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-llm-judge-runtime-fix",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.33-llm-judge-runtime-fix.md",
+      "working_branch": "feature/v1.33-llm-judge-runtime-fix",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "description": "P3 — llm_judge invokes judge.llm"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-memory-review-closed-loop",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.33-memory-review-closed-loop.md",
+      "working_branch": "feature/v1.33-memory-review-closed-loop",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "description": "P4 — memory review + fragments daemon routes"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-spec-tracker-hygiene",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.33-spec-tracker-hygiene.md",
+      "working_branch": "feature/v1.33-spec-tracker-hygiene",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "description": "P5 — spec/tracker/status hygiene (merge last)"
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,14 +67,14 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": "feature/v1.32-preset-quality-gate",
-    "last_integration_branch": "feature/v1.31-agentic-design-patterns",
+    "integration_branch": "feature/v1.33-work-experience-loop",
+    "last_integration_branch": "feature/v1.32-preset-quality-gate",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.32",
     "latest_shipped_at": "2026-06-03T16:30:00+08:00",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.33",
+    "latest_active_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-06-03T16:30:00+08:00",
@@ -44,11 +102,19 @@
           "severity": "low",
           "target_date": "backlog",
           "decision": "accept",
-          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
+          "note": "Blocked by wiremock → http-types upstream."
         }
       ],
-      "note": "V1.32 shipped (Preset Quality Gate — P1 shared validator, P2 embedded preset hardening + TD-V131-08, P3 SEC-V131-01 closed, P4 docs hygiene). 21 open entries in residual_findings (11 v1.30-post-qc + 8 v1.31-post-qc + 2 v1.32-post-qc incl. R-P2-01/R-P2-02 creator.inject_prompt schema gap → V1.33+). Cross-cutting accept items in cross_cutting[]. Done plans: archived/plans-done.json."
-    }
+      "note": "V1.33 planning active (Work experience loop). V1.32 shipped. 21 open residuals unchanged until implement."
+    },
+    "wave_0_spec": ".mstar/knowledge/specs/work-experience-model.md",
+    "spec_refs": [
+      ".mstar/knowledge/specs/work-experience-model.md",
+      ".mstar/knowledge/specs/cli-spec.md",
+      ".mstar/knowledge/specs/orchestration-engine.md",
+      ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
+    ],
+    "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
   },
   "residual_findings": {
     "v1.32-post-qc-tech-debt": [

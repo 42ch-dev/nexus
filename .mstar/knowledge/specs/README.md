@@ -60,6 +60,7 @@ When specs overlap, use this order (higher wins on conflict):
 | Document | Description |
 | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | `nexus-orchestration`, presets, worker IPC |
+| [work-experience-model.md](work-experience-model.md) | Work container, `creator run`, Creative Brief Intake, run_intents |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Schedules and core-context model |
 | [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | Novel-writing sync module |
 | [canonical-hash.md](canonical-hash.md) | Bundle canonical hash (OSS implementation notes) |
