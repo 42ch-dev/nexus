@@ -225,6 +225,65 @@ If P4 completes unification, **do not** register DF-47. If partial, register DF-
 
 ## 10. Test vectors
 
+### TV-1 — happy path `nexus.work.get`
+
+Request:
+
+```json
+{
+  "tool_name": "nexus.work.get",
+  "parameters": { "work_id": "wrk_creator_a_1" },
+  "session_id": "acp_sess_a"
+}
+```
+
+Preconditions: active creator is `creator_a`; `wrk_creator_a_1` belongs to `creator_a` in the active workspace; `permissions.toml` is absent or grants `nexus.work.get`.
+
+Expected result:
+
+```json
+{
+  "success": true,
+  "result": {
+    "work_id": "wrk_creator_a_1",
+    "creator_id": "creator_a",
+    "title": "Demo Work",
+    "current_stage": "research",
+    "stage_status": "ready"
+  }
+}
+```
+
+Required side effects: audit row recorded with `audit_level = "info"`, `caller_kind = "acp_agent"`, and no mutation.
+
+### TV-2 — cross-creator `nexus.work.get` rejected
+
+Request:
+
+```json
+{
+  "tool_name": "nexus.work.get",
+  "parameters": { "work_id": "wrk_creator_b_1" },
+  "session_id": "acp_sess_a"
+}
+```
+
+Preconditions: active creator is `creator_a`; `wrk_creator_b_1` exists but belongs to `creator_b`.
+
+Expected result:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "FORBIDDEN",
+    "reason": "CROSS_CREATOR"
+  }
+}
+```
+
+Required side effects: no Work data returned; audit row recorded with `audit_level = "forbidden"` and redacted `work_id` summary.
+
 ### TV-3 — `nexus.context.assemble` policy-blocked while platform paused
 
 Request:
@@ -276,6 +335,169 @@ Current repo snapshot checked for this spec:
 | Tool-specific parameters for six `nexus.*` ids | **Not codegen'd.** No per-tool parameter schemas in `schemas/`. | Future schemas should cover `whoami`, `workspace.info`, `work.get`, `work.patch`, `schedule_status`, and `context.assemble` minimal params/results. |
 
 Until the gap is closed, P4 must keep the runtime DTO boundary localized in `HostToolExecutor` and avoid creating parallel handwritten DTOs outside the daemon runtime.
+
+---
+
+## 12. P4 implementer handoff
+
+P4 implements this spec; it must not expand into DF-46/47/49/50/55 unless PM opens a separate plan. The minimal handoff is:
+
+### 12.1 Entrypoints
+
+1. **HTTP POST tool execute** — normalize the existing daemon tool-execute request into the registry request shape.
+2. **Internal agent-host route** — continue sharing `HostToolExecutor`; do not add a second dispatch table.
+3. **Worker upcall** — normalize `worker/agent_tool_request { tool_name, args, request_id }` into the same registry request shape; map result/error back to `worker/agent_tool_request_result`.
+
+### 12.2 Tool id allowlist
+
+P4 allowlist is exactly eight ids:
+
+- `nexus.context.whoami`
+- `nexus.workspace.info`
+- `nexus.work.get`
+- `nexus.work.patch`
+- `nexus.orchestration.schedule_status`
+- `nexus.context.assemble`
+- `fs/read_text_file`
+- `fs/write_text_file`
+
+Unknown ids return `NOT_SUPPORTED`. Do not add deferred ids from DF-46.
+
+### 12.3 Rust trait sketch
+
+Names are illustrative; P4 may choose module-local names, but the boundary shape should remain equivalent:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostToolCallerKind {
+    AcpAgent,
+    Schedule,
+}
+
+pub struct HostToolRequest {
+    pub tool_name: String,
+    pub parameters: serde_json::Value,
+    pub session_id: Option<String>,
+    pub request_id: Option<String>,
+    pub caller_kind: HostToolCallerKind,
+}
+
+pub struct ToolResult {
+    pub value: serde_json::Value,
+    pub audit_level: AuditLevel,
+}
+
+pub struct ToolError {
+    pub code: ToolErrorCode,
+    pub reason: Option<String>,
+    pub message: String,
+    pub audit_level: AuditLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolErrorCode {
+    Forbidden,
+    PolicyBlocked,
+    NotSupported,
+    InvalidInput,
+}
+
+pub enum AuditLevel {
+    Info,
+    Write,
+    Forbidden,
+    PolicyBlocked,
+}
+
+#[async_trait::async_trait]
+pub trait HostToolRegistry {
+    async fn execute(
+        &self,
+        req: HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+
+    async fn context_whoami(
+        &self,
+        req: &HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+
+    async fn workspace_info(
+        &self,
+        req: &HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+
+    async fn work_get(
+        &self,
+        req: &HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+
+    async fn work_patch(
+        &self,
+        req: &HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+
+    async fn orchestration_schedule_status(
+        &self,
+        req: &HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+
+    async fn context_assemble(
+        &self,
+        req: &HostToolRequest,
+        state: &WorkspaceState,
+    ) -> Result<ToolResult, ToolError>;
+}
+```
+
+The six `nexus.*` handlers must run after the §4.3 admission pipeline. Existing `fs/*` handlers may remain helper functions but must be invoked through the same top-level `execute` dispatch.
+
+### 12.4 Error code mapping
+
+| Internal enum | Wire code | HTTP suggestion | Worker result |
+| --- | --- | --- | --- |
+| `Forbidden` | `FORBIDDEN` | 403 | `grant = false`, error payload |
+| `PolicyBlocked` | `POLICY_BLOCKED` | 403 or 409 (P4 chooses one consistently) | `grant = false`, error payload |
+| `NotSupported` | `NOT_SUPPORTED` | 400 | `grant = false`, error payload |
+| `InvalidInput` | `INVALID_INPUT` | 400 | `grant = false`, validation error payload |
+
+`policy_blocked` remains the audit/logging classification for `POLICY_BLOCKED` outcomes.
+
+### 12.5 Active creator enforcement
+
+- Resolve active creator before handler dispatch.
+- Entity lookups must include creator/workspace predicates; do not fetch by id and check later if SQL/domain APIs can enforce it directly.
+- Missing active creator, inactive creator, or mismatched creator returns `FORBIDDEN`.
+
+### 12.6 Audit log fields
+
+Each attempt records:
+
+- `tool_name`
+- `caller_kind` (`acp_agent` or `schedule`)
+- `creator_id`
+- workspace slug/root hash (avoid logging machine-specific absolute roots when a stable slug/hash is available)
+- `session_id` and/or `request_id`
+- access class (`read` / `write`)
+- decision (`allowed` / `denied`)
+- error code and reason when denied
+- redacted parameter summary
+- monotonic timestamp
+
+### 12.7 Minimum P4 tests
+
+P4 must cover at least the §10 vectors:
+
+1. Happy path: `nexus.work.get` returns active creator Work stage fields.
+2. Isolation: cross-creator Work id returns `FORBIDDEN` and no data.
+3. Policy: `nexus.context.assemble` platform-required request while paused returns `POLICY_BLOCKED` / `policy_blocked`, with no platform HTTP call.
+
+Add one worker-upcall test proving `worker/agent_tool_request` and HTTP execute hit the same dispatch table for at least `nexus.work.get`.
 
 ---
 
