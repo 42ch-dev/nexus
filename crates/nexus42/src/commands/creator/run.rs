@@ -139,10 +139,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 });
 
                 match client
-                    .post::<serde_json::Value, _>(
-                        "/v1/local/orchestration/schedules",
-                        &intake_body,
-                    )
+                    .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &intake_body)
                     .await
                 {
                     Ok(sched_resp) => {
@@ -162,9 +159,12 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             if json {
                 let mut output = resp;
                 if let Some(sid) = &schedule_id {
-                    output
-                        .as_object_mut()
-                        .map(|o| o.insert("intake_schedule_id".to_string(), serde_json::Value::String(sid.clone())));
+                    output.as_object_mut().map(|o| {
+                        o.insert(
+                            "intake_schedule_id".to_string(),
+                            serde_json::Value::String(sid.clone()),
+                        )
+                    });
                 }
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
