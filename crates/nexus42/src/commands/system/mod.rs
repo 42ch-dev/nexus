@@ -381,7 +381,8 @@ mod tests {
 
         match cmd.command {
             SystemPresetCommand::Preset { command } => match command {
-                SystemPresetSubcommand::List => {} // expected
+                SystemPresetSubcommand::List { intent: _, json: _ } => {} // expected
+                SystemPresetSubcommand::Validate { path: _, json: _ } => {} // expected
             },
         }
     }
