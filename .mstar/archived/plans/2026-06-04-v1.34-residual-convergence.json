@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.34 P0 (residual convergence) plan per Profile B. Moved from status.json on plan closure after QA Pass w/ notes.",
+  "plan_id": "2026-06-04-v1.34-residual-convergence",
+  "title": "V1.34 P0 — V1.33+ residual convergence + V1.33 compass hygiene",
+  "done_at": "2026-06-05T01:50:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-04-v1.34-residual-convergence.md",
+  "total_batches": 2,
+  "batches_completed": 2,
+  "qc": "Wave 1: qc1 Request Changes (C-001 status.json SSOT, W-001 R-P2-01 partial, W-002 list_works silent fallback), qc2 missing, qc3 Approve (2 W non-blocking). Wave 2 (after fix wave 2): qc1 Approve w/ residuals, qc2 fresh Approve (W-001 archive hygiene fixed in harness 8513e6a), qc3 still Approve.",
+  "qa": "Pass w/ notes — 0 unresolved Critical. Notes: diff stat expected 11 files but actual 13 (accounting drift from QC + harness additions), commit count 13 vs expected 11 (also accounting drift), plan markdown still says 'Status: Todo' (status.json SSOT correctly has InReview → now removed post-Done).",
+  "residual_count": 3,
+  "residual_open": [
+    "R-V133P1-03 (defer V1.34+ — 6-status-code matrix literal)",
+    "R-V133P1-08 (defer V1.34+ — system/preset.rs refactor)",
+    "R-V133P1-09 (defer V1.34+ — runtime→compile-time sqlx)"
+  ],
+  "residual_closed": [
+    "R-V133P1-05 (commit cbe5e78)",
+    "R-V133P1-07 (commit 29aa9bf)",
+    "R-V133P1-11 (commits 27df8cb + a724e99 + 2a84e68)",
+    "R-V133P1-12 (commit cbe5e78)",
+    "R-P2-01 (commits a044f94 + 71c10cc)",
+    "R-P2-02 (auto-resolved by R-P2-01 fix)"
+  ],
+  "merge_commits": [
+    "b1738e0 (merge P0 into feature/v1.34-creator-workflow-and-agent-tools)"
+  ],
+  "notes": "V1.33 compass/README Shipped consistency was already correct (T4 verified, no changes). 6 residuals closed (4 v1.33-p1 + 2 v1.32). 3 deferred to V1.34+ backlog. tech_debt_summary refreshed: total_open 29→33 (script-canonical; pre-existing drift flagged)."
+}
