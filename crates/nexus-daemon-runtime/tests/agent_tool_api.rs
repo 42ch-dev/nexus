@@ -14,6 +14,12 @@
 //! - nexus.work.patch happy path (append inspiration_log)
 //! - nexus.work.patch rejects forbidden field (current_stage)
 //! - nexus.orchestration.schedule_status happy path
+//!
+//! Fix wave 2 coverage:
+//! - Error code surface (POLICY_BLOCKED, NOT_SUPPORTED, FORBIDDEN, INVALID_INPUT)
+//! - Audit log on every invocation path
+//! - stage_metadata sub-field allowlist
+//! - Worker upcall equivalence (HTTP and worker hit same dispatch)
 
 #![allow(clippy::unwrap_used)]
 
@@ -229,7 +235,7 @@ async fn work_patch_rejects_current_stage_field() {
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.error_code(), "BAD_REQUEST");
+    assert_eq!(err.error_code(), "INVALID_INPUT");
 }
 
 // ─── TV-3: nexus.context.assemble POLICY_BLOCKED ──────────────────────────
@@ -273,4 +279,325 @@ async fn schedule_status_happy_path() {
     let val = result.unwrap();
     assert_eq!(val["work_id"], work_id);
     assert_eq!(val["count"], 1);
+}
+
+// ─── Fix wave 2: Error code surface tests ──────────────────────────────────
+
+/// Helper: count audit log rows for a given tool_name + outcome prefix.
+async fn count_audit_rows(pool: &sqlx::SqlitePool, tool_name: &str, outcome_prefix: &str) -> i64 {
+    // SAFETY: dynamic SQL for test helper; compile-time macro not applicable.
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM acp_tool_audit_log WHERE tool_name = ? AND outcome LIKE ?",
+    )
+    .bind(tool_name)
+    .bind(format!("{outcome_prefix}%"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+/// Helper: get latest audit row outcome for a given tool_name.
+async fn latest_audit_outcome(pool: &sqlx::SqlitePool, tool_name: &str) -> String {
+    // SAFETY: dynamic SQL for test helper; compile-time macro not applicable.
+    let row: (String,) = sqlx::query_as(
+        "SELECT outcome FROM acp_tool_audit_log WHERE tool_name = ? ORDER BY id DESC LIMIT 1",
+    )
+    .bind(tool_name)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+#[tokio::test]
+async fn error_code_not_supported_for_unknown_tool() {
+    let ctx = test_ctx().await;
+    let req = make_request("nexus.unknown.tool", json!({}));
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+}
+
+#[tokio::test]
+async fn error_code_forbidden_for_missing_work() {
+    let ctx = test_ctx().await;
+    let req = make_request("nexus.work.get", json!({ "work_id": "wrk_nonexistent" }));
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+}
+
+#[tokio::test]
+async fn error_code_invalid_input_for_missing_params() {
+    let ctx = test_ctx().await;
+    let req = make_request("nexus.work.get", json!({}));
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn error_code_policy_blocked_surface_in_assemble() {
+    let ctx = test_ctx().await;
+    let req = make_request(
+        "nexus.context.assemble",
+        json!({ "requires_platform": true }),
+    );
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    // Wire contract: error_code() returns "POLICY_BLOCKED" (spec §12.4)
+    assert_eq!(err.error_code(), "POLICY_BLOCKED");
+}
+
+#[tokio::test]
+async fn worker_upcall_surfaces_forbidden_error_code() {
+    let ctx = test_ctx().await;
+    let other_ctx = test_ctx_other_creator().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let result = HostToolExecutor::dispatch_from_worker(
+        "nexus.work.get",
+        &json!({ "work_id": work_id }),
+        "req-002",
+        &other_ctx.state,
+    )
+    .await;
+
+    assert!(!result.grant);
+    let err = result.error.expect("worker error should be present");
+    assert_eq!(err.code, "FORBIDDEN", "Worker error code must surface FORBIDDEN");
+}
+
+#[tokio::test]
+async fn worker_upcall_surfaces_policy_blocked_error_code() {
+    let ctx = test_ctx().await;
+    let result = HostToolExecutor::dispatch_from_worker(
+        "nexus.context.assemble",
+        &json!({ "requires_platform": true }),
+        "req-003",
+        &ctx.state,
+    )
+    .await;
+
+    assert!(!result.grant);
+    let err = result.error.expect("worker error should be present");
+    assert_eq!(err.code, "POLICY_BLOCKED", "Worker error code must surface POLICY_BLOCKED");
+}
+
+#[tokio::test]
+async fn worker_upcall_surfaces_not_supported_error_code() {
+    let ctx = test_ctx().await;
+    let result = HostToolExecutor::dispatch_from_worker(
+        "nexus.unknown.tool",
+        &json!({}),
+        "req-004",
+        &ctx.state,
+    )
+    .await;
+
+    assert!(!result.grant);
+    let err = result.error.expect("worker error should be present");
+    assert_eq!(err.code, "NOT_SUPPORTED", "Worker error code must surface NOT_SUPPORTED");
+}
+
+// ─── Fix wave 2: Audit log on every invocation path ─────────────────────────
+
+#[tokio::test]
+async fn audit_log_written_on_success() {
+    let ctx = test_ctx().await;
+    let req = make_request("nexus.context.whoami", json!({}));
+    let _ = HostToolExecutor::execute(&req, &ctx.state).await;
+
+    let count = count_audit_rows(ctx.state.pool(), "nexus.context.whoami", "success").await;
+    assert_eq!(count, 1, "Audit log must record success");
+}
+
+#[tokio::test]
+async fn audit_log_written_on_unknown_tool_denial() {
+    let ctx = test_ctx().await;
+    let req = make_request("nexus.unknown.tool", json!({}));
+    let _ = HostToolExecutor::execute(&req, &ctx.state).await;
+
+    let outcome = latest_audit_outcome(ctx.state.pool(), "nexus.unknown.tool").await;
+    assert!(
+        outcome.starts_with("denied:"),
+        "Audit log must record denial, got: {outcome}"
+    );
+    assert!(
+        outcome.contains("NOT_SUPPORTED"),
+        "Audit log must contain NOT_SUPPORTED, got: {outcome}"
+    );
+}
+
+#[tokio::test]
+async fn audit_log_written_on_cross_creator_denial() {
+    let ctx = test_ctx().await;
+    let other_ctx = test_ctx_other_creator().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let req = make_request("nexus.work.get", json!({ "work_id": work_id }));
+    let _ = HostToolExecutor::execute(&req, &other_ctx.state).await;
+
+    let count = count_audit_rows(other_ctx.state.pool(), "nexus.work.get", "denied").await;
+    assert_eq!(count, 1, "Audit log must record cross-creator denial");
+}
+
+#[tokio::test]
+async fn audit_log_written_on_policy_blocked() {
+    let ctx = test_ctx().await;
+    let req = make_request(
+        "nexus.context.assemble",
+        json!({ "requires_platform": true }),
+    );
+    let _ = HostToolExecutor::execute(&req, &ctx.state).await;
+
+    let outcome =
+        latest_audit_outcome(ctx.state.pool(), "nexus.context.assemble").await;
+    assert!(
+        outcome.contains("denied:"),
+        "Audit must record denial, got: {outcome}"
+    );
+}
+
+#[tokio::test]
+async fn audit_log_written_on_invalid_input() {
+    let ctx = test_ctx().await;
+    let req = make_request("nexus.work.get", json!({}));
+    let _ = HostToolExecutor::execute(&req, &ctx.state).await;
+
+    let count = count_audit_rows(ctx.state.pool(), "nexus.work.get", "denied").await;
+    assert_eq!(count, 1, "Audit log must record invalid input denial");
+}
+
+// ─── Fix wave 2: stage_metadata sub-field allowlist ─────────────────────────
+
+#[tokio::test]
+async fn stage_metadata_accepts_allowed_keys() {
+    let ctx = test_ctx().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let req = make_request(
+        "nexus.work.patch",
+        json!({
+            "work_id": work_id,
+            "stage_metadata": {
+                "agent_notes": "some notes",
+                "research_summary_ref": "ref://123"
+            }
+        }),
+    );
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_ok(), "Allowed stage_metadata keys should succeed");
+}
+
+#[tokio::test]
+async fn stage_metadata_rejects_disallowed_sub_key() {
+    let ctx = test_ctx().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let req = make_request(
+        "nexus.work.patch",
+        json!({
+            "work_id": work_id,
+            "stage_metadata": {
+                "current_stage": "writing"
+            }
+        }),
+    );
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn stage_metadata_rejects_unknown_sub_key() {
+    let ctx = test_ctx().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let req = make_request(
+        "nexus.work.patch",
+        json!({
+            "work_id": work_id,
+            "stage_metadata": {
+                "malicious_field": "evil"
+            }
+        }),
+    );
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn stage_metadata_rejects_non_object() {
+    let ctx = test_ctx().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let req = make_request(
+        "nexus.work.patch",
+        json!({
+            "work_id": work_id,
+            "stage_metadata": "not-an-object"
+        }),
+    );
+    let result = HostToolExecutor::execute(&req, &ctx.state).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+}
+
+// ─── Fix wave 2: Worker upcall path equivalence ─────────────────────────────
+
+#[tokio::test]
+async fn worker_upcall_whoami_equivalent_to_http() {
+    let ctx = test_ctx().await;
+
+    let http_result = HostToolExecutor::execute(
+        &make_request("nexus.context.whoami", json!({})),
+        &ctx.state,
+    )
+    .await
+    .expect("HTTP execute");
+
+    let worker_result = HostToolExecutor::dispatch_from_worker(
+        "nexus.context.whoami",
+        &json!({}),
+        "req-eq-001",
+        &ctx.state,
+    )
+    .await;
+
+    assert!(worker_result.grant);
+    assert_eq!(worker_result.request_id, "req-eq-001");
+    let output = worker_result.output.expect("worker should have output");
+    assert_eq!(output, http_result, "HTTP and worker must produce same result");
+}
+
+#[tokio::test]
+async fn worker_upcall_schedule_status_equivalent_to_http() {
+    let ctx = test_ctx().await;
+    let work_id = seed_work(&ctx.state).await;
+
+    let http_result = HostToolExecutor::execute(
+        &make_request("nexus.orchestration.schedule_status", json!({ "work_id": work_id })),
+        &ctx.state,
+    )
+    .await
+    .expect("HTTP execute");
+
+    let worker_result = HostToolExecutor::dispatch_from_worker(
+        "nexus.orchestration.schedule_status",
+        &json!({ "work_id": work_id }),
+        "req-eq-002",
+        &ctx.state,
+    )
+    .await;
+
+    assert!(worker_result.grant);
+    let output = worker_result.output.expect("worker output");
+    assert_eq!(output, http_result, "HTTP and worker must produce same result");
 }
