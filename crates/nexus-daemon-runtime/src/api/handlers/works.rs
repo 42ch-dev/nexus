@@ -233,7 +233,11 @@ pub async fn list_works(
             message: e.to_string(),
         })?;
 
-    let total = records.len();
+    // R-V133P1-11: total reflects the true row count (not page size).
+    let total: usize = works::count_works(state.pool(), &creator_id, &workspace_slug, &filters)
+        .await
+        .map_or(records.len(), |n| n as usize);
+
     let works_list: Vec<WorkSummary> = records
         .into_iter()
         .map(|r| WorkSummary {
