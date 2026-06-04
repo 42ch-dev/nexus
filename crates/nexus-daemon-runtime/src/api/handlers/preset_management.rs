@@ -84,6 +84,7 @@ const PRESET_INIT_TEMPLATE: &str = r#"preset:
   kind: creator
   description: "Custom orchestration strategy"
   requires_capabilities: []
+  run_intents: [work_init]
   initial: start
   terminal: done
 states:
@@ -586,6 +587,7 @@ mod tests {
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -647,6 +649,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: c
 states:
@@ -679,6 +682,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -705,6 +709,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -734,6 +739,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -764,6 +770,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -802,6 +809,7 @@ inner_graphs:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -830,6 +838,7 @@ states:
   description: test
   requires_capabilities:
     - totally.fake.capability
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -860,6 +869,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -894,6 +904,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -939,6 +950,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -975,6 +987,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
