@@ -3,10 +3,10 @@
 //! Validates the full stage advance chain: intake → research → produce → review → persist.
 //! Covers happy path, --force semantics, wrong order rejection, and active schedule uniqueness.
 
+use nexus_contracts::local::orchestration::FL_E_STAGES;
 use nexus_orchestration::stage_gates::{
     build_preset_input, check_stage_advance, preset_for_stage, WorkFields, WorkStageState,
 };
-use nexus_contracts::local::orchestration::FL_E_STAGES;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,8 +49,8 @@ fn fl_e_chain_happy_path_all_stages_advance() {
         );
 
         // Preset resolution should work
-        let _preset = preset_for_stage(target)
-            .unwrap_or_else(|| panic!("No preset for stage '{target}'"));
+        let _preset =
+            preset_for_stage(target).unwrap_or_else(|| panic!("No preset for stage '{target}'"));
 
         // Preset input should contain Work fields
         let fields = demo_work_fields(target);
@@ -192,8 +192,8 @@ fn fl_e_chain_e2e_resolve_presets_and_inputs() {
     ];
 
     for (stage, expected_preset) in &stages_and_presets {
-        let resolved = preset_for_stage(stage)
-            .unwrap_or_else(|| panic!("No preset for stage '{stage}'"));
+        let resolved =
+            preset_for_stage(stage).unwrap_or_else(|| panic!("No preset for stage '{stage}'"));
         assert_eq!(
             resolved, *expected_preset,
             "Stage '{stage}' should map to preset '{expected_preset}'"
@@ -202,9 +202,18 @@ fn fl_e_chain_e2e_resolve_presets_and_inputs() {
         // Build preset input and verify all required fields are present
         let fields = demo_work_fields(stage);
         let input = build_preset_input(&fields);
-        assert!(input.get("work_id").is_some(), "work_id missing for {stage}");
-        assert!(input.get("fl_e_stage").is_some(), "fl_e_stage missing for {stage}");
-        assert!(input.get("creative_brief").is_some(), "creative_brief missing for {stage}");
+        assert!(
+            input.get("work_id").is_some(),
+            "work_id missing for {stage}"
+        );
+        assert!(
+            input.get("fl_e_stage").is_some(),
+            "fl_e_stage missing for {stage}"
+        );
+        assert!(
+            input.get("creative_brief").is_some(),
+            "creative_brief missing for {stage}"
+        );
         assert!(
             input.get("inspiration_log").is_some(),
             "inspiration_log missing for {stage}"

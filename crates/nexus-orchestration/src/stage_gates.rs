@@ -5,8 +5,11 @@
 //!   used by both CLI `stage_advance` and daemon `PATCH /v1/local/works/{id}`.
 //! - `preset_for_stage` — normative stage → preset mapping (spec §4).
 //! - `build_stage_schedule_label` — schedule label for stage advance.
+//! - `build_schedule_for_stage` — builds a correctly-shaped `AddScheduleRequest`
+//!   for the FL-E stage schedule, ensuring contract alignment with the daemon.
 
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
+use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
 /// Normative stage → default preset mapping (spec §4).
 ///
@@ -63,16 +66,57 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
     })
 }
 
+/// Build a correctly-shaped `AddScheduleRequest` for an FL-E stage advance
+/// (R-FL-E-P2-03: shared facade, no CLI-side bespoke DTO).
+///
+/// This is the single place that constructs the schedule creation request
+/// for stage advances. The CLI and any future daemon-side auto-scheduling
+/// should call this function instead of hand-building JSON.
+///
+/// # Arguments
+/// * `stage` — Target FL-E stage (e.g. `"research"`)
+/// * `creator_id` — Creator who owns the work/schedule
+/// * `work_fields` — Work fields for preset input seeding
+///
+/// # Returns
+/// `Some(AddScheduleRequest)` if the stage has a valid preset mapping,
+/// `None` for unknown stages.
+#[must_use]
+pub fn build_schedule_for_stage(
+    stage: &str,
+    creator_id: &str,
+    work_fields: &WorkFields,
+) -> Option<AddScheduleRequest> {
+    let pid = preset_for_stage(stage)?;
+
+    let preset_input = build_preset_input(work_fields);
+
+    Some(AddScheduleRequest {
+        creator_id: creator_id.to_string(),
+        preset_id: pid.to_string(),
+        seed: Some(serde_json::to_string(&preset_input).unwrap_or_default()),
+        label: Some(build_stage_schedule_label(stage, &work_fields.work_id)),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+    })
+}
+
 /// Error returned when a stage advance fails validation.
+///
+/// Carries a machine-readable `code` (stable error code for CLI automation)
+/// and a human-readable `message`.
 #[derive(Debug, Clone)]
 pub struct StageGateError {
+    /// Machine-readable error code (e.g. `UNKNOWN_STAGE`, `ACTIVE_SCHEDULE`).
+    pub code: String,
     /// Human-readable error message.
     pub message: String,
 }
 
 impl std::fmt::Display for StageGateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "[{}] {}", self.code, self.message)
     }
 }
 
@@ -101,6 +145,7 @@ pub fn check_stage_advance(
 ) -> Result<(), StageGateError> {
     // Gate 0: target must be a known stage
     let target_idx = stage_index(target_stage).ok_or_else(|| StageGateError {
+        code: "FL_E_UNKNOWN_STAGE".to_string(),
         message: format!(
             "Unknown stage '{target_stage}'. Valid stages: {}",
             FL_E_STAGES.join(", ")
@@ -113,6 +158,7 @@ pub fn check_stage_advance(
         // Gate 1: cannot advance to same stage
         if target_stage == work.current_stage {
             return Err(StageGateError {
+                code: "FL_E_SAME_STAGE".to_string(),
                 message: format!(
                     "Work is already at stage '{}' ({}). Use a different target stage.",
                     work.current_stage, work.stage_status
@@ -123,6 +169,7 @@ pub fn check_stage_advance(
         // Gate 2: cannot advance backwards
         if target_idx <= current_idx {
             return Err(StageGateError {
+                code: "FL_E_BACKWARDS_ADVANCE".to_string(),
                 message: format!(
                     "Cannot advance backwards from '{}' to '{}'. Stage order: {}",
                     work.current_stage,
@@ -136,6 +183,7 @@ pub fn check_stage_advance(
         if target_idx != current_idx + 1 {
             let next_stage = FL_E_STAGES.get(current_idx + 1).unwrap_or(&"(unknown)");
             return Err(StageGateError {
+                code: "FL_E_STAGE_SKIP".to_string(),
                 message: format!(
                     "Cannot skip from '{}' to '{}'; expected next stage is '{}'. \
                      Use --force to skip stages.",
@@ -148,6 +196,7 @@ pub fn check_stage_advance(
         // Checked before completion gate so active-stage errors are more specific.
         if work.stage_status == "active" {
             return Err(StageGateError {
+                code: "FL_E_ACTIVE_SCHEDULE".to_string(),
                 message: format!(
                     "Work already has an active stage schedule ('{}' is '{}'). \
                      Wait for the current stage to complete or cancel before advancing.",
@@ -159,6 +208,7 @@ pub fn check_stage_advance(
         // Gate 5: current stage must be complete (except intake, handled separately)
         if work.stage_status != "complete" && work.stage_status != "skipped" && current_idx > 0 {
             return Err(StageGateError {
+                code: "FL_E_INCOMPLETE_STAGE".to_string(),
                 message: format!(
                     "Current stage '{}' is '{}', not 'complete'. \
                      Complete the current stage first, or use --force to override.",
@@ -171,6 +221,7 @@ pub fn check_stage_advance(
         // (uses intake_status from V1.33, not stage_status)
         if work.current_stage == "intake" && work.intake_status != "complete" {
             return Err(StageGateError {
+                code: "FL_E_INTAKE_INCOMPLETE".to_string(),
                 message: format!(
                     "Cannot advance past intake: intake_status is '{}'. \
                      Complete intake first, or use --force to override.",
@@ -205,6 +256,7 @@ mod tests {
     fn reject_unknown_target() {
         let work = work_state("intake", "pending", "pending");
         let err = check_stage_advance(&work, "unknown", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_UNKNOWN_STAGE");
         assert!(err.message.contains("Unknown stage"));
     }
 
@@ -212,6 +264,7 @@ mod tests {
     fn reject_same_stage() {
         let work = work_state("research", "active", "complete");
         let err = check_stage_advance(&work, "research", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_SAME_STAGE");
         assert!(err.message.contains("already at stage"));
     }
 
@@ -219,6 +272,7 @@ mod tests {
     fn reject_backwards() {
         let work = work_state("research", "complete", "complete");
         let err = check_stage_advance(&work, "intake", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_BACKWARDS_ADVANCE");
         assert!(err.message.contains("backwards"));
     }
 
@@ -226,6 +280,7 @@ mod tests {
     fn reject_skip_without_force() {
         let work = work_state("intake", "complete", "complete");
         let err = check_stage_advance(&work, "produce", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_STAGE_SKIP");
         assert!(err.message.contains("Cannot skip"));
     }
 
@@ -239,6 +294,7 @@ mod tests {
     fn reject_incomplete_current() {
         let work = work_state("research", "pending", "complete");
         let err = check_stage_advance(&work, "produce", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_INCOMPLETE_STAGE");
         assert!(err.message.contains("not 'complete'"));
     }
 
@@ -246,6 +302,7 @@ mod tests {
     fn reject_intake_not_complete() {
         let work = work_state("intake", "complete", "pending");
         let err = check_stage_advance(&work, "research", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_INTAKE_INCOMPLETE");
         assert!(err.message.contains("intake_status"));
     }
 
@@ -253,6 +310,7 @@ mod tests {
     fn reject_active_schedule_exists() {
         let work = work_state("research", "active", "complete");
         let err = check_stage_advance(&work, "produce", false).unwrap_err();
+        assert_eq!(err.code, "FL_E_ACTIVE_SCHEDULE");
         assert!(err.message.contains("active stage schedule"));
     }
 
@@ -286,10 +344,7 @@ mod tests {
 
     #[test]
     fn preset_for_stage_intake() {
-        assert_eq!(
-            preset_for_stage("intake"),
-            Some("creative-brief-intake")
-        );
+        assert_eq!(preset_for_stage("intake"), Some("creative-brief-intake"));
     }
 
     #[test]
@@ -425,5 +480,65 @@ mod tests {
             "persist preset input must include work_id"
         );
         assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
+    }
+
+    // ── R-FL-E-P2-03: build_schedule_for_stage facade ──────────────────────
+
+    #[test]
+    fn build_schedule_for_stage_research() {
+        let fields = demo_work_fields("research");
+        let req = build_schedule_for_stage("research", "ctr_test", &fields)
+            .expect("research should have a preset");
+        assert_eq!(req.preset_id, "research");
+        assert_eq!(req.creator_id, "ctr_test");
+        assert!(req.seed.is_some());
+        let seed_json: serde_json::Value = serde_json::from_str(&req.seed.unwrap()).unwrap();
+        assert_eq!(seed_json["work_id"], "wrk_demo123");
+        assert_eq!(seed_json["fl_e_stage"], "research");
+        assert!(req.label.unwrap().contains("research"));
+    }
+
+    #[test]
+    fn build_schedule_for_stage_produce() {
+        let fields = demo_work_fields("produce");
+        let req = build_schedule_for_stage("produce", "ctr_test", &fields)
+            .expect("produce should have a preset");
+        assert_eq!(req.preset_id, "novel-writing");
+    }
+
+    #[test]
+    fn build_schedule_for_stage_review() {
+        let fields = demo_work_fields("review");
+        let req = build_schedule_for_stage("review", "ctr_test", &fields)
+            .expect("review should have a preset");
+        assert_eq!(req.preset_id, "reflection-loop");
+    }
+
+    #[test]
+    fn build_schedule_for_stage_persist() {
+        let fields = demo_work_fields("persist");
+        let req = build_schedule_for_stage("persist", "ctr_test", &fields)
+            .expect("persist should have a preset");
+        assert_eq!(req.preset_id, "kb-extract");
+    }
+
+    #[test]
+    fn build_schedule_for_stage_unknown_returns_none() {
+        let fields = demo_work_fields("unknown");
+        assert!(
+            build_schedule_for_stage("unknown", "ctr_test", &fields).is_none(),
+            "unknown stage should return None"
+        );
+    }
+
+    #[test]
+    fn build_schedule_for_stage_seed_contains_all_work_fields() {
+        let fields = demo_work_fields("research");
+        let req = build_schedule_for_stage("research", "ctr_test", &fields).unwrap();
+        let seed: serde_json::Value = serde_json::from_str(&req.seed.unwrap()).unwrap();
+        assert_eq!(seed["work_id"], "wrk_demo123");
+        assert_eq!(seed["fl_e_stage"], "research");
+        assert!(seed["creative_brief"].is_string());
+        assert!(seed["inspiration_log"].is_string());
     }
 }
