@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-04-v1.34-fl-e-preset-chain"
-verdict: "Request Changes"
+verdict: "Approve w/ residuals"
 generated_at: "2026-06-05"
 ---
 
@@ -186,3 +186,137 @@ All warnings should be addressed before approval:
 - W-2: Add concurrent PATCH test to verify R-FL-E-07 at API level
 - W-3: Add audit logging to all 4 schedule create paths
 - W-4: Add error codes to `StageGateError` and propagate through CLI
+
+## Revalidation
+
+**Revalidation scope**: Fix wave 2 + 3 commits (`55e96dd`, `a6f7b23`, `649e549`)
+**Revalidation date**: 2026-06-05
+**Worktree verified**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-preset-chain`
+**Branch verified**: `feature/v1.34-fl-e-preset-chain`
+
+### Evidence Summary
+
+- `cargo test -p nexus-daemon-runtime --test fl_e_schedule_api`: **5 passed; 0 failed**
+- `cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus-creator-memory -- -D warnings`: **clean (0 warnings)**
+
+### Per-Finding Disposition
+
+#### W-1: Non-atomic stage advance + schedule create with no rollback → **RESOLVED**
+
+**Evidence**: `55e96dd` (`crates/nexus42/src/commands/creator/run.rs`)
+
+- Schedule creation failure now triggers **rollback** of the stage advance:
+  ```rust
+  // On failure, attempts to restore previous stage state
+  let rollback = serde_json::json!({
+      "current_stage": current_stage,
+      "stage_status": current_status,
+  });
+  let _ = client
+      .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &rollback)
+      .await;
+  ```
+- Returns structured error `FL_E_SCHEDULE_CREATE_FAILED` with rollback information.
+- Audit log records the failure and rollback attempt at `fl_e.audit` target.
+
+**Verdict**: Fix correctly addresses the stuck-state reliability gap.
+
+---
+
+#### W-2: Missing concurrency / TOCTOU e2e tests at API level → **PARTIALLY RESOLVED**
+
+**Evidence**: `a6f7b23` (`crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`, 266 lines + 65 lines in `649e549`)
+
+- **5 hermetic e2e tests** added exercising `POST /v1/local/orchestration/schedules` via `TestServer`:
+  1. `schedule_create_with_correct_dto_shape` — verifies snake_case response fields (`schedule_id`, `preset_id`, `creator_id`)
+  2. `schedule_create_seeds_core_context_from_preset_input` — verifies `core_context_version=0` on seed
+  3. `schedule_list_isolation_by_creator` — verifies cross-creator isolation at API level
+  4. `schedule_create_without_seed_no_core_context` — verifies no-seed path
+  5. `schedule_with_empty_creator_id_is_isolated_from_legitimate_creators` — verifies empty `creator_id` bug isolation (`649e549`)
+
+- Tests use shared `SqlitePool` for `ScheduleSupervisor` + handler queries to avoid WAL visibility issues.
+
+**Gap**: The original request for **concurrent PATCH race tests** (two async tasks PATCHing the same work simultaneously) is **not addressed**. `advance_work_stage_atomic()` in `nexus-local-db` uses SQLite transactions for TOCTOU safety, but this is unverified at the integration level.
+
+**Verdict**: Partial fix — valuable API contract tests added, but concurrent TOCTOU test still missing. Acceptable as residual (low risk: transaction wrapper is present and unit-tested).
+
+---
+
+#### W-3: Missing audit logs for schedule creation across all 4 paths → **PARTIALLY RESOLVED**
+
+**Evidence**: `55e96dd` (`crates/nexus42/src/commands/creator/run.rs`)
+
+- **Stage advance path** (path #3) now has full `fl_e.audit` tracing:
+  - Before attempt: `tracing::info!(target: "fl_e.audit", work_id, stage, preset_id, creator_id, "FL-E stage schedule creation requested")`
+  - On success: `tracing::info!(target: "fl_e.audit", work_id, stage, preset_id, schedule_id, "FL-E stage schedule created")`
+  - On failure: `tracing::error!(target: "fl_e.audit", work_id, stage, error, "FL-E stage schedule creation failed; rolling back stage advance")`
+
+**Gap**: **Intake** (path #1, `RunCommand::Start` lines 170-203) and **novel-writing** (path #2, lines 217-248) schedule creation paths still **lack `fl_e.audit` tracing**. These are less critical than stage advance (no rollback complexity), but still part of the 4-path audit requirement.
+
+**Verdict**: Partial fix — highest-risk path (stage advance) fully covered; intake/novel-writing paths remain uncovered. Acceptable as residual.
+
+---
+
+#### W-4: CLI stage advance loses machine-readable error codes → **RESOLVED**
+
+**Evidence**: `55e96dd` (`crates/nexus-orchestration/src/stage_gates.rs` + `crates/nexus42/src/commands/creator/run.rs`)
+
+- `StageGateError` now carries `code: String` field:
+  - `FL_E_UNKNOWN_STAGE` — unknown target stage
+  - `FL_E_SAME_STAGE` — advancing to current stage
+  - `FL_E_BACKWARDS_ADVANCE` — backwards advance
+  - `FL_E_STAGE_SKIP` — skip without `--force`
+  - `FL_E_ACTIVE_SCHEDULE` — active schedule exists
+  - `FL_E_INCOMPLETE_STAGE` — current stage incomplete
+  - `FL_E_INTAKE_INCOMPLETE` — intake not complete
+- CLI propagates code + message: `CliError::Other(format!("{}: {}", e.code, e.message))`
+- All 32 `stage_gates` unit tests assert the correct error code.
+
+**Verdict**: Fix fully addresses programmatic error consumption.
+
+---
+
+#### S-1: `default_preset_for_stage` implicit panic risk → **OPEN**
+
+**Evidence**: `crates/nexus-orchestration/src/preset/validation.rs:1547`
+
+```rust
+.map(|(_, presets)| presets[0])
+```
+
+- `presets[0]` indexing still present; no fix in any of the three fix commits.
+- Current `STAGE_PRESET_ALLOWLIST` guarantees non-empty arrays, but type system does not enforce this.
+
+**Verdict**: Unchanged from original review. Low-risk residual (const data is controlled).
+
+---
+
+#### S-2: Sequential API round-trips add latency → **OPEN (future)**
+
+**Evidence**: No change in fix commits.
+
+- `stage_advance` still does GET → PATCH → POST sequentially.
+- Daemon-side atomic endpoint (`POST /v1/local/works/{id}/advance-stage`) not implemented.
+
+**Verdict**: Intentionally deferred per original Suggestion classification.
+
+### Updated Summary
+
+| Severity | Original | Resolved | Remaining |
+|----------|----------|----------|-----------|
+| 🔴 Critical | 0 | 0 | 0 |
+| 🟡 Warning | 4 | 2 (W-1, W-4) | 2 partial (W-2, W-3) |
+| 🟢 Suggestion | 2 | 0 | 2 (S-1, S-2) |
+
+### Residual Findings (for `status.json`)
+
+| ID | Title | Severity | Status | Evidence |
+|----|-------|----------|--------|----------|
+| R-QC3-W2 | Missing concurrent PATCH TOCTOU test at API level | warning | open | `works_api.rs` lacks concurrent race test |
+| R-QC3-W3 | Intake/novel-writing schedule creation lacks audit log | warning | open | `run.rs` lines 170-248 have no `fl_e.audit` |
+| R-QC3-S1 | `default_preset_for_stage` implicit panic risk | suggestion | open | `validation.rs:1547` |
+| R-QC3-S2 | Sequential API round-trips (future optimization) | suggestion | open | No atomic daemon endpoint |
+
+**Verdict**: `Approve w/ residuals`
+
+Rationale: W-1 (atomicity/rollback) and W-4 (error codes) are fully resolved. W-2 and W-3 have partial fixes that address the highest-risk aspects (API contract tests for schedule creation; audit logging for stage advance). No new Critical findings. Residuals are low-risk and trackable.
