@@ -1519,8 +1519,9 @@ states:
 // A6: FL-E stage→preset allowlist (V1.34 §4)
 // ---------------------------------------------------------------------------
 
-/// Ordered FL-E stages (V1.34 creator-workflow-fl-e §3.1).
-pub const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
+/// Ordered FL-E stages — re-exported from `nexus_contracts` (single source of truth).
+pub use nexus_contracts::local::orchestration::FL_E_STAGES;
+pub use nexus_contracts::local::orchestration::stage_index;
 
 /// Normative stage→preset mapping (V1.34 creator-workflow-fl-e §4).
 ///
@@ -1583,14 +1584,6 @@ pub fn validate_preset_for_stage(stage: &str, preset_id: &str) -> std::result::R
             allowed.join(", ")
         ))
     }
-}
-
-/// Returns the index of a stage in the FL-E linear order.
-///
-/// Returns `None` for unknown stage strings.
-#[must_use]
-pub fn stage_index(stage: &str) -> Option<usize> {
-    FL_E_STAGES.iter().position(|&s| s == stage)
 }
 
 #[cfg(test)]

@@ -10,9 +10,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-
-/// FL-E stages in linear order (V1.34 creator-workflow-fl-e §3.1).
-const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
+use nexus_contracts::local::orchestration::{FL_E_STAGES, stage_index};
 
 #[derive(Debug, Subcommand)]
 pub enum RunCommand {

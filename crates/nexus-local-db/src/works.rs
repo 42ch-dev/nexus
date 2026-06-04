@@ -803,15 +803,11 @@ pub async fn get_work_stage(
     Ok(row.map(|r| (r.get("current_stage"), r.get("stage_status"))))
 }
 
-/// Ordered list of FL-E stages (V1.34 creator-workflow-fl-e §3.1).
-pub const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
+/// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
+pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 
-/// Returns the index of a stage in the FL-E linear order.
-/// Returns `None` for unknown stage strings.
-#[must_use]
-pub fn stage_index(stage: &str) -> Option<usize> {
-    FL_E_STAGES.iter().position(|&s| s == stage)
-}
+/// Returns the index of a stage in the FL-E linear order — re-exported from `nexus_contracts`.
+pub use nexus_contracts::local::orchestration::stage_index;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
