@@ -146,7 +146,9 @@ impl NexusApiError {
     pub const fn status_code(&self) -> StatusCode {
         match self {
             Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
-            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat | Self::BadRequest { .. } => StatusCode::BAD_REQUEST,
+            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat | Self::BadRequest { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::AuthRequired | Self::ApiKeyExpired | Self::SessionExpired => {
                 StatusCode::UNAUTHORIZED

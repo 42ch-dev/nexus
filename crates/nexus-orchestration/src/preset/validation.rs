@@ -1519,9 +1519,9 @@ states:
 // A6: FL-E stage→preset allowlist (V1.34 §4)
 // ---------------------------------------------------------------------------
 
+pub use nexus_contracts::local::orchestration::stage_index;
 /// Ordered FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
-pub use nexus_contracts::local::orchestration::stage_index;
 
 /// Normative stage→preset mapping (V1.34 creator-workflow-fl-e §4).
 ///

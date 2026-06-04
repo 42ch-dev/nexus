@@ -967,12 +967,10 @@ async fn patch_work_invalid_stage_value_returns_400() {
         primary_preset_id: None,
         client_request_id: None,
     };
-    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
-        State(state),
-        axum::Json(req),
-    )
-    .await
-    .unwrap();
+    let (_, resp) =
+        nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
+            .await
+            .unwrap();
     let work_id = resp.work_id.clone();
 
     // Need to set up a separate state since we already consumed it

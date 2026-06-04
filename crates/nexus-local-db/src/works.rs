@@ -821,20 +821,113 @@ pub async fn has_active_fl_e_schedule(
     work_id: &str,
 ) -> Result<bool, LocalDbError> {
     // SAFETY: SELECT against works table — runtime query.
-    let row = sqlx::query(
-        "SELECT stage_status FROM works WHERE work_id = ? AND creator_id = ?",
+    let row = sqlx::query("SELECT stage_status FROM works WHERE work_id = ? AND creator_id = ?")
+        .bind(work_id)
+        .bind(creator_id)
+        .fetch_optional(pool)
+        .await?;
+
+    Ok(row.is_some_and(|r: sqlx::sqlite::SqliteRow| {
+        let status: String = r.get("stage_status");
+        status == "active"
+    }))
+}
+
+/// Atomically advance a Work's FL-E stage (V1.34, R-FL-E-07 TOCTOU fix).
+///
+/// Wraps the read-check-update sequence in a single `BEGIN IMMEDIATE` / `COMMIT`
+/// transaction so that concurrent `stage advance` calls cannot race past each
+/// other (spec §2 invariant #4, spec §3.3).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if:
+/// - The work does not exist
+/// - An active FL-E schedule already exists for this work
+/// - The database query fails
+pub async fn advance_work_stage_atomic(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    target_stage: &str,
+    target_status: &str,
+    now: &str,
+) -> Result<WorkRecord, LocalDbError> {
+    let mut tx: Transaction<'_, Sqlite> = pool.begin().await?;
+
+    // Step 1: SELECT current state inside transaction
+    // SAFETY: SELECT against works table — runtime query.
+    let current: Option<WorkRecord> = sqlx::query(
+        "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
+                initial_idea, creative_brief, intake_status, world_id, story_ref,
+                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
+                current_stage, stage_status
+         FROM works WHERE work_id = ? AND creator_id = ?",
     )
     .bind(work_id)
     .bind(creator_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
+    .await?
+    .map(|r| WorkRecord {
+        work_id: r.get("work_id"),
+        creator_id: r.get("creator_id"),
+        workspace_slug: r.get("workspace_slug"),
+        status: r.get("status"),
+        title: r.get("title"),
+        long_term_goal: r.get("long_term_goal"),
+        initial_idea: r.get("initial_idea"),
+        creative_brief: r.get("creative_brief"),
+        intake_status: r.get("intake_status"),
+        world_id: r.get("world_id"),
+        story_ref: r.get("story_ref"),
+        inspiration_log: r.get("inspiration_log"),
+        primary_preset_id: r.get("primary_preset_id"),
+        schedule_ids: r.get("schedule_ids"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+        current_stage: r.get("current_stage"),
+        stage_status: r.get("stage_status"),
+    });
+
+    let current = current.ok_or_else(|| LocalDbError::MissingVersionKey {
+        key: format!("works/{work_id}"),
+    })?;
+
+    // Step 2: Check no active FL-E schedule exists (TOCTOU-safe)
+    if current.stage_status == "active" && target_status == "active" {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "works".to_string(),
+            constraint: format!(
+                "active FL-E stage schedule already exists for work {work_id} \
+                 (stage: {}, status: {})",
+                current.current_stage, current.stage_status
+            ),
+        });
+    }
+
+    // Step 3: UPDATE within the same transaction
+    // SAFETY: UPDATE against works table — runtime query.
+    sqlx::query(
+        "UPDATE works SET current_stage = ?, stage_status = ?, updated_at = ?
+         WHERE work_id = ? AND creator_id = ?",
+    )
+    .bind(target_stage)
+    .bind(target_status)
+    .bind(now)
+    .bind(work_id)
+    .bind(creator_id)
+    .execute(&mut *tx)
     .await?;
 
-    Ok(row
-        .map(|r: sqlx::sqlite::SqliteRow| {
-            let status: String = r.get("stage_status");
-            status == "active"
+    // Step 4: COMMIT
+    tx.commit().await?;
+
+    // Fetch the updated record for return
+    get_work(pool, creator_id, work_id)
+        .await?
+        .ok_or_else(|| LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
         })
-        .unwrap_or(false))
 }
 
 /// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
@@ -1226,7 +1319,10 @@ mod tests {
         let has_active = has_active_fl_e_schedule(&pool, "ctr_test", "wrk_active_002")
             .await
             .unwrap();
-        assert!(has_active, "work with stage_status=active should report active");
+        assert!(
+            has_active,
+            "work with stage_status=active should report active"
+        );
     }
 
     #[tokio::test]
