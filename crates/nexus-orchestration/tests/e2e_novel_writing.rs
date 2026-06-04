@@ -43,8 +43,11 @@ async fn seed_novel_writing_preset_input(
         .get_context(session_id)
         .await
         .expect("get_context for preset.input seed");
-    ctx.set("preset.input.topic", "AI consciousness in a near-future city")
-        .await;
+    ctx.set(
+        "preset.input.topic",
+        "AI consciousness in a near-future city",
+    )
+    .await;
     ctx.set("preset.input.vibe", "literary").await;
     ctx.set("preset.input.story_ref", "e2e-test-story").await;
 }
