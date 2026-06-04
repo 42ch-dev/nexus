@@ -134,6 +134,10 @@ pub enum NexusApiError {
     /// Resource conflict (e.g., duplicate workspace)
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    /// Bad request with code and message (e.g., invalid stage value)
+    #[error("Bad request: {message}")]
+    BadRequest { code: String, message: String },
 }
 
 impl NexusApiError {
@@ -142,7 +146,7 @@ impl NexusApiError {
     pub const fn status_code(&self) -> StatusCode {
         match self {
             Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
-            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
+            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat | Self::BadRequest { .. } => StatusCode::BAD_REQUEST,
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::AuthRequired | Self::ApiKeyExpired | Self::SessionExpired => {
                 StatusCode::UNAUTHORIZED
@@ -167,6 +171,7 @@ impl NexusApiError {
             Self::InvalidApiKeyFormat => "INVALID_API_KEY",
             Self::ApiKeyExpired => "API_KEY_EXPIRED",
             Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
+            Self::BadRequest { .. } => "BAD_REQUEST",
             Self::SessionExpired => "SESSION_EXPIRED",
             Self::Conflict(_) => "CONFLICT",
         }
