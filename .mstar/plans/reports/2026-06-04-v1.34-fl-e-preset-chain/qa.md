@@ -2,7 +2,7 @@
 report_kind: qa
 reviewer: qa-engineer
 plan_id: "2026-06-04-v1.34-fl-e-preset-chain"
-verdict: "Fail"
+verdict: "Pass w/ notes"
 generated_at: "2026-06-05"
 ---
 
@@ -11,54 +11,52 @@ generated_at: "2026-06-05"
 ## Scope
 
 - plan_id: 2026-06-04-v1.34-fl-e-preset-chain
-- Review range / Diff basis: merge-base: origin/main..HEAD on feature/v1.34-fl-e-preset-chain
+- Review range / Diff basis: `merge-base: origin/main..HEAD` on `feature/v1.34-fl-e-preset-chain`; 全部 P2 commits in scope: `6714243`, `6e692cb`, `bd48ddb`, `1115699`, `55e96dd`, `a6f7b23`, `649e549`, `23ea43a`, `bf1ebd4`, plus QC report/revalidation commits.
 - Working branch (verified): `feature/v1.34-fl-e-preset-chain`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-preset-chain`
-- Mode: Default QA (full verification)
-- Assignment scope: all P2 topic-branch changes and fix waves through `HEAD`; no business-code changes made by QA.
+- Mode: Default QA re-verification after previous Fail + PM lifecycle corrections.
+- Assignment scope: P2 topic branch; implementation/fix commits, harness lifecycle commits, canonical QC reports with revalidation updates, residual registration, and required automated verification. QA changed only this report file.
 
 ## Verdict
 
-**Fail**
+**Pass w/ notes.**
 
-The code/test gates and key FL-E schedule functionality passed fresh verification, and QC1/QC2 are now `Approve`. However, final sign-off cannot pass because required harness artifacts and QC/residual lifecycle state are inconsistent with the assignment:
-
-1. The plan file and `status.json` still show this plan as `Todo`, not `InReview`.
-2. Plan tasks T1-T4 remain unchecked in the plan Markdown.
-3. `qc3.md` still has frontmatter `verdict: "Request Changes"` and final `**Verdict**: Request Changes`, not `Approve w/ residuals`.
-4. No P2 residual entries are registered under root `.mstar/status.json` `residual_findings["2026-06-04-v1.34-fl-e-preset-chain"]`.
-5. The report directory currently has three QC reports, not the expected five total report files described by the assignment.
-6. The P2-only git log contains more commits than the assignment's expected 13 because `qc2.md` has multiple repeated hash-fill commits; this is not necessarily functional risk, but it fails the exact commit-count expectation as written.
+Functional verification, required test/lint gates, QC final verdict alignment, residual lifecycle registration, git branch isolation, and spec alignment all pass fresh re-verification. The remaining note is non-blocking for this QA scope: the plan Markdown header still says `Status: Todo` and task checkboxes remain unchecked, but the assignment explicitly marks the plan Markdown update as PM-owned and out of QA scope; `.mstar/status.json` is now corrected to `InReview`.
 
 ## 1. Plan Scope and Scope Consistency
 
 ### Evidence
 
 ```text
+$ git rev-parse --show-toplevel && git branch --show-current && git rev-parse --short HEAD
+/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-preset-chain
+feature/v1.34-fl-e-preset-chain
+bf1ebd4
+```
+
+```text
 $ python3 - <<'PY'
 import json
 from pathlib import Path
-status=json.loads(Path('.mstar/status.json').read_text())
 plan_id='2026-06-04-v1.34-fl-e-preset-chain'
-row=next((p for p in status['plans'] if p.get('id')==plan_id), None)
-print('status row:', json.dumps({k: row.get(k) for k in ['id','status','file','working_branch','merge_target']}, indent=2))
-print('p2 residuals:', json.dumps(status.get('residual_findings', {}).get(plan_id), indent=2))
+status=json.loads(Path('.mstar/status.json').read_text())
+row=next((p for p in status.get('plans',[]) if p.get('id')==plan_id), None)
+print(json.dumps({k: row.get(k) for k in ['id','status','file','working_branch','merge_target']} if row else None, indent=2))
 PY
-...
-status row: {
+{
   "id": "2026-06-04-v1.34-fl-e-preset-chain",
-  "status": "Todo",
+  "status": "InReview",
   "file": ".mstar/plans/2026-06-04-v1.34-fl-e-preset-chain.md",
   "working_branch": "feature/v1.34-fl-e-preset-chain",
   "merge_target": "feature/v1.34-creator-workflow-and-agent-tools"
 }
-p2 residuals: null
+```
 
-Plan task/status lines:
-3: **Plan ID**: `2026-06-04-v1.34-fl-e-preset-chain`  
-6: **Status**: Todo  
-10: **Working branch**: `feature/v1.34-fl-e-preset-chain`  
-11: **Merge target**: `feature/v1.34-creator-workflow-and-agent-tools`  
+Plan Markdown remains PM-owned out-of-scope note:
+
+```text
+.mstar/plans/2026-06-04-v1.34-fl-e-preset-chain.md
+6: **Status**: Todo
 44: - [ ] T1: Stage advance → schedule create with `fl_e_stage` metadata
 45: - [ ] T2: Preset input templates consume Work fields
 46: - [ ] T3: Integration test: full stage chain on demo Work
@@ -67,37 +65,26 @@ Plan task/status lines:
 
 ### Result
 
-**Fail.** The code changes and tests indicate T1-T4 have implementation coverage, but the plan artifact itself still says `Status: Todo`, and all four task checkboxes remain unchecked. `status.json` also says `Todo`, despite the assignment stating PM had updated the status row to `InReview`.
-
-Spec §4 does contain the five-stage preset mapping:
-
-```text
-96: ## 4. Preset chain (normative mapping)
-100: | `intake` | `creative-brief-intake` | Shipped V1.33 |
-101: | `research` | `research` | May append references to Work context |
-102: | `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log` |
-103: | `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
-104: | `persist` | `kb-extract` (via queue) + CLI memory review | No new persist-only preset required V1.34 |
-```
+**Pass w/ notes.** Status row is now `InReview` as required. Plan Markdown still says `Todo`, but the assignment explicitly says PM will update it separately and QA should verify functional scope.
 
 ## 2. CI / Lint / Test Gate
 
-### Command: scoped cargo test
+### Scoped cargo test
 
 ```text
 $ cargo test -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus-creator-memory 2>&1 | tail -30
 test crates/nexus-daemon-runtime/src/test_utils.rs - test_utils::create_test_workspace (line 38) ... ignored
 test crates/nexus-daemon-runtime/src/db/pool.rs - db::pool::PoolConfig (line 42) - compile ... ok
 
-test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.11s
 
    Doc-tests nexus_local_db
 
 running 2 tests
-test crates/nexus-local-db/src/lib.rs - run_migrations (line 175) - compile ... ok
 test crates/nexus-local-db/src/lib.rs - open_pool (line 138) - compile ... ok
+test crates/nexus-local-db/src/lib.rs - run_migrations (line 175) - compile ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
 
    Doc-tests nexus_orchestration
 
@@ -114,10 +101,10 @@ running 2 tests
 test crates/nexus42/src/domain/runtime_guard.rs - domain::runtime_guard (line 7) ... ignored
 test crates/nexus42/src/challenge/mod.rs - challenge::solve_challenge (line 128) ... ok
 
-test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.75s
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.85s
 ```
 
-### Command: scoped clippy
+### Scoped clippy
 
 ```text
 $ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus-creator-memory -- -D warnings 2>&1 | tail -10
@@ -126,7 +113,7 @@ $ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexu
 
 ### Result
 
-**Pass.** Fresh scoped test and clippy gates completed successfully.
+**Pass.** Required scoped cargo test and clippy gates completed successfully.
 
 ## 3. Key Functional Verification
 
@@ -137,14 +124,14 @@ $ cargo test -p nexus-orchestration --test fl_e_chain_demo 2>&1 | tail -15
 running 11 tests
 test fl_e_chain_force_allows_backwards ... ok
 test fl_e_chain_force_allows_incomplete_current ... ok
-test fl_e_chain_e2e_resolve_presets_and_inputs ... ok
 test fl_e_chain_force_allows_skip ... ok
 test fl_e_chain_reject_advance_while_active ... ok
+test fl_e_chain_e2e_resolve_presets_and_inputs ... ok
 test fl_e_chain_reject_backwards_produce_to_research ... ok
+test fl_e_chain_preset_input_fields_propagate_across_stages ... ok
 test fl_e_chain_reject_intake_to_produce_skip ... ok
 test fl_e_chain_reject_same_stage ... ok
 test fl_e_chain_happy_path_all_stages_advance ... ok
-test fl_e_chain_preset_input_fields_propagate_across_stages ... ok
 test fl_e_chain_reject_unknown_stage ... ok
 
 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -156,23 +143,21 @@ test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 $ cargo test -p nexus-daemon-runtime --test fl_e_schedule_api 2>&1 | tail -15
     Blocking waiting for file lock on package cache
     Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on artifact directory
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.30s
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
      Running tests/fl_e_schedule_api.rs (target/debug/deps/fl_e_schedule_api-02f93b2eca43fe36)
 
 running 5 tests
-test schedule_create_with_correct_dto_shape ... ok
-test schedule_create_without_seed_no_core_context ... ok
-test schedule_create_seeds_core_context_from_preset_input ... ok
 test schedule_with_empty_creator_id_is_isolated_from_legitimate_creators ... ok
+test schedule_create_seeds_core_context_from_preset_input ... ok
+test schedule_create_without_seed_no_core_context ... ok
 test schedule_list_isolation_by_creator ... ok
+test schedule_create_with_correct_dto_shape ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 ```
 
-This includes the fix wave 2 cases and the fix wave 3 empty-creator isolation regression.
-
-### nexus42 tests / command surface
+### nexus42 command-surface tests
 
 ```text
 $ cargo test -p nexus42 --tests 2>&1 | tail -5
@@ -184,41 +169,113 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 ### Result
 
-**Pass.** The new tests cover the expected functional surfaces and passed freshly.
+**Pass.** Required key functional tests passed: 11 FL-E chain tests, 5 schedule API tests, and 15 nexus42 tests.
 
 ## 4. QC Consistency
 
-### Evidence from report frontmatter and final verdict sections
+### Report history evidence
 
-- `qc1.md` frontmatter: `verdict: "Approve"`; latest revalidation says `**Verdict: Approve.**`
-- `qc2.md` frontmatter: `verdict: "Approve"`; revalidation says `**Approve**`.
-- `qc3.md` frontmatter: `verdict: "Request Changes"`; final report says `**Verdict**: Request Changes`.
+```text
+$ git log --oneline .mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/ | head -10
+5914163 qc(v1.34-fl-e-preset-chain): qc3 revalidation — Approve w/ residuals
+60944c3 qa(v1.34-fl-e-preset-chain): final verification report
+594ec41 qc(v1.34-fl-e-preset-chain): revalidate qc1 fix wave 3
+0af4a4b qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+ba39562 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+864954f qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+9846f61 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+03e5a43 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+32289d7 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+51d2286 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+```
 
-`qc3.md` contains four warnings and two suggestions, but it was not updated to `Approve w/ residuals` after fix waves.
+Canonical QC files present:
+
+```text
+.mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/qc1.md
+.mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/qc2.md
+.mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/qc3.md
+```
+
+Targeted revalidations were appended to the canonical report files (no `qcN-rev2.md` files), matching Morning Star targeted re-review convention. The report history includes the initial three QC report commits plus revalidation commits for qc1/qc2/qc3, exceeding the assignment's 5+ report-update requirement.
+
+### Final verdict evidence
+
+```text
+$ python3 - <<'PY'
+from pathlib import Path
+for name in ['qc1.md','qc2.md','qc3.md']:
+    p=Path('.mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain')/name
+    text=p.read_text()
+    lines=[line for line in text.splitlines() if 'verdict:' in line.lower() or 'Verdict' in line]
+    print(f'--- {name} ---')
+    for line in lines[-8:]:
+        print(line)
+PY
+--- qc1.md ---
+verdict: "Approve"
+**Verdict**: Request Changes
+### Revalidation Verdict
+**Verdict remains: Request Changes.** The main schedule DTO shape, seed propagation, rollback behavior, error codes, audit logs, and daemon API coverage are improved, and W-001/S-001 are resolved. However, C-001 is not fully closed because CLI `stage_advance` still lacks an authoritative creator identity source for the schedule request.
+### Revalidation Verdict
+**Verdict: Approve.** Fix wave 3 fully resolves the remaining QC1 Critical (`C-001`) by sourcing CLI stage-advance `creator_id` from `config.active_creator_id` instead of `WorkApiDto`, and the daemon-side empty-creator isolation regression is covered by a hermetic API test. Required targeted tests and scoped clippy passed; no new Critical/Warning findings were introduced in the reviewed fix commit.
+--- qc2.md ---
+verdict: "Approve"
+**Verdict**: Request Changes
+**Verdict (post-revalidation)**: All fix wave 2 changes land the required corrections for the original 2 Critical + 3 Warning. 4 hermetic e2e tests pass exercising the real daemon schedule API and `creator_schedules` inserts. No new Criticals. Per `mstar-review-qc` rules (0 unresolved Critical; no high-impact unresolved Warning with disagreement), **Approve**.
+--- qc3.md ---
+**Verdict**: Request Changes
+**Verdict**: Fix correctly addresses the stuck-state reliability gap.
+**Verdict**: Partial fix — valuable API contract tests added, but concurrent TOCTOU test still missing. Acceptable as residual (low risk: transaction wrapper is present and unit-tested).
+**Verdict**: Partial fix — highest-risk path (stage advance) fully covered; intake/novel-writing paths remain uncovered. Acceptable as residual.
+**Verdict**: Fix fully addresses programmatic error consumption.
+**Verdict**: Unchanged from original review. Low-risk residual (const data is controlled).
+**Verdict**: Intentionally deferred per original Suggestion classification.
+**Verdict**: `Approve w/ residuals`
+```
+
+Frontmatter current final verdicts:
+
+```text
+qc1.md: verdict: "Approve"
+qc2.md: verdict: "Approve"
+qc3.md: verdict: "Approve w/ residuals"
+```
+
+Historical `Request Changes` text remains in prior review/revalidation sections, but each canonical report's current frontmatter and latest revalidation verdict are non-blocking.
 
 ### Result
 
-**Fail.** QC1 and QC2 align with approval after revalidation, but QC3 does not match the assignment requirement that it remain `Approve w/ residuals` with only warnings. The current checked-in `qc3.md` still blocks by its own verdict text.
+**Pass.** qc1 final verdict is `Approve`, qc2 final verdict is `Approve`, and qc3 final verdict is `Approve w/ residuals`. No current final QC verdict remains `Request Changes`.
 
 ## 5. Residual Lifecycle
 
 ### Evidence
 
 ```text
-p2 residuals: null
+$ jq '.residual_findings["2026-06-04-v1.34-fl-e-preset-chain"] | length' .mstar/status.json
+4
 ```
 
-Root `.mstar/status.json` has no `residual_findings["2026-06-04-v1.34-fl-e-preset-chain"]` entry.
-
-### Assessment
-
-- QC3's four warnings (`W-1` non-atomic stage advance + schedule create, `W-2` missing concurrency/API test, `W-3` missing schedule audit logs, `W-4` lost CLI error codes) are not registered as P2 residuals.
-- QC1/QC2's minor shared-facade concern appears resolved by fix wave 2 (`build_schedule_for_stage` facade and CLI usage), so no separate open residual is required for S-1 based on current code/test evidence.
-- The fix wave 3 note that `creator run start` may share the active-creator issue should be tracked outside this P2 gate, likely in P5 hygiene or a new V1.33 behavior-bug plan, because this QA scope is P2 stage advance.
+```text
+$ python3 - <<'PY'
+import json
+from pathlib import Path
+plan_id='2026-06-04-v1.34-fl-e-preset-chain'
+status=json.loads(Path('.mstar/status.json').read_text())
+entries=status.get('residual_findings',{}).get(plan_id,[])
+for e in entries:
+    print(f"{e.get('id')}: {e.get('source')} | {e.get('severity')} | {e.get('title')}")
+PY
+R-P2-W2: qc3 reval (P2) | low | Missing concurrent PATCH TOCTOU test (qc3 W-2 partial)
+R-P2-W3: qc3 reval (P2) | low | Intake/novel-writing schedule creation paths lack fl_e.audit tracing (qc3 W-3 partial)
+R-P2-S1: qc3 reval (P2) | low | default_preset_for_stage panic risk on empty array (qc3 S-1)
+R-P2-S2: qc3 reval (P2) | low | Sequential API round-trips could be batched (qc3 S-2)
+```
 
 ### Result
 
-**Fail.** Residual lifecycle is incomplete for QC3 warnings. Per harness rules, open residuals are canonical under root `residual_findings[plan_id]`; they are currently absent.
+**Pass.** Root `.mstar/status.json` now has 4 open residual findings for this plan: W-2 partial, W-3 partial, S-1, and S-2.
 
 ## 6. Git State
 
@@ -226,6 +283,10 @@ Root `.mstar/status.json` has no `residual_findings["2026-06-04-v1.34-fl-e-prese
 
 ```text
 $ git log --oneline feature/v1.34-fl-e-preset-chain ^feature/v1.34-creator-workflow-and-agent-tools
+bf1ebd4 harness(v1.34-p2): register 4 qc3 residuals (W-2 partial, W-3 partial, S-1, S-2)
+5914163 qc(v1.34-fl-e-preset-chain): qc3 revalidation — Approve w/ residuals
+23ea43a harness(v1.34-p2): mark P2 InReview + register 6 work/fix commits + 3 QC reports
+60944c3 qa(v1.34-fl-e-preset-chain): final verification report
 594ec41 qc(v1.34-fl-e-preset-chain): revalidate qc1 fix wave 3
 649e549 fix(fl-e): R-FL-E-P2-05 CLI stage advance uses active_creator from auth context not Work DTO
 0af4a4b qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
@@ -271,9 +332,10 @@ $ git diff --stat $(git merge-base HEAD origin/main)..HEAD
  .mstar/knowledge/specs/agent-nexus-tool-bridge.md  | 349 ++++++++++++-
  .mstar/knowledge/specs/orchestration-engine.md     |   4 +-
  .../2026-06-04-v1.34-agent-tool-registry-spec.md   |  10 +-
+ .../2026-06-04-v1.34-fl-e-preset-chain/qa.md       | 373 ++++++++++++++
  .../2026-06-04-v1.34-fl-e-preset-chain/qc1.md      | 220 ++++++++
  .../2026-06-04-v1.34-fl-e-preset-chain/qc2.md      | 314 ++++++++++++
- .../2026-06-04-v1.34-fl-e-preset-chain/qc3.md      | 188 +++++++
+ .../2026-06-04-v1.34-fl-e-preset-chain/qc3.md      | 322 ++++++++++++
  .../qa.md                                          | 437 ++++++++++++++++
  .../qc1.md                                         | 178 +++++++
  .../qc2.md                                         | 360 ++++++++++++++
@@ -282,7 +344,7 @@ $ git diff --stat $(git merge-base HEAD origin/main)..HEAD
  .../2026-06-04-v1.34-residual-convergence/qc1.md   | 233 +++++++++
  .../2026-06-04-v1.34-residual-convergence/qc2.md   | 140 ++++++
  .../2026-06-04-v1.34-residual-convergence/qc3.md   | 114 +++++
- .mstar/status.json                                 | 366 ++++++--------
+ .mstar/status.json                                 | 433 ++++++++--------
  .../nexus-contracts/src/local/orchestration/mod.rs |  25 +
  crates/nexus-daemon-runtime/src/api/errors.rs      |   9 +-
  .../nexus-daemon-runtime/src/api/handlers/works.rs | 158 +++++-
@@ -301,73 +363,110 @@ $ git diff --stat $(git merge-base HEAD origin/main)..HEAD
  .../nexus-orchestration/tests/fl_e_chain_demo.rs   | 222 +++++++++
  .../tests/run_intents_validation.rs                | 206 ++++++++
  crates/nexus42/src/commands/creator/run.rs         | 399 ++++++++++++++-
- 39 files changed, 6700 insertions(+), 425 deletions(-)
+ 40 files changed, 7273 insertions(+), 426 deletions(-)
 ```
 
 ### Result
 
-**Partial / fail against exact assignment.** The worktree was clean before QA report write, and the branch contains the expected P2 work and fix commits. However, the P2-only commit list contains 22 commits before this QA report, not the expected 13, due to repeated `qc2.md` hash-fill commits. The diff stat also shows broader iteration files inherited from the topic branch base/diff basis; this may be expected for `origin/main..HEAD`, but it means the stat is not P2-only.
+**Pass.** Topic branch contains all expected P2 work/fix/harness/QC artifacts. Worktree was clean before this QA report overwrite. Diff stat reflects the full `origin/main..HEAD` feature-line scope as requested.
 
 ## 7. Integration Branch State
 
 ### Evidence
 
 ```text
-$ git log --oneline -1 feature/v1.34-creator-workflow-and-agent-tools
+$ git log --oneline -1 feature/v1.34-creator-workflow-and-agent-tools && \
+  git merge-base --is-ancestor 6714243 feature/v1.34-creator-workflow-and-agent-tools; printf 'P2 commit 6714243 on integration branch? exit=%s\n' "$?" && \
+  git merge-base --is-ancestor 649e549 feature/v1.34-creator-workflow-and-agent-tools; printf 'P2 fix commit 649e549 on integration branch? exit=%s\n' "$?" && \
+  git merge-base --is-ancestor bf1ebd4 feature/v1.34-creator-workflow-and-agent-tools; printf 'P2 harness residual commit bf1ebd4 on integration branch? exit=%s\n' "$?"
 89f4622 harness(v1.34-p3): mark P3 Done (spec only, no residuals)
-
-$ git merge-base --is-ancestor 6714243 feature/v1.34-creator-workflow-and-agent-tools; printf 'P2 commit 6714243 on integration branch? exit=%s\n' "$?"
 P2 commit 6714243 on integration branch? exit=1
-
-$ git merge-base --is-ancestor 649e549 feature/v1.34-creator-workflow-and-agent-tools; printf 'P2 fix commit 649e549 on integration branch? exit=%s\n' "$?"
 P2 fix commit 649e549 on integration branch? exit=1
+P2 harness residual commit bf1ebd4 on integration branch? exit=1
 ```
 
 ### Result
 
-**Pass.** The integration branch tip is the P3 closeout commit, and sampled P2 work/fix commits are not ancestors of the integration branch.
+**Pass.** The integration branch does not yet contain sampled P2 work/fix/harness commits.
 
-## 8. Spec Alignment (SSOT)
+## 8. Spec Alignment
 
-### Evidence and assessment
+### Spec §4 evidence
 
-- Spec §4 locks the 5-stage mapping:
-  - `intake` → `creative-brief-intake`
-  - `research` → `research`
-  - `produce` → `novel-writing`
-  - `review` → `reflection-loop`
-  - `persist` → `kb-extract` + CLI memory review
-- Fresh `fl_e_chain_demo` passed 11/11, including stage preset resolution and Work-field propagation.
-- Fresh `fl_e_schedule_api` passed 5/5, including `schedule_create_seeds_core_context_from_preset_input` and `schedule_create_with_correct_dto_shape`.
-- QC1 Revalidation 2 states CLI stage advance now sources `creator_id` from `config.active_creator_id`, not from `WorkApiDto`.
+```text
+## 4. Preset chain (normative mapping)
+| `intake` | `creative-brief-intake` | Shipped V1.33 |
+| `research` | `research` | May append references to Work context |
+| `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log` |
+| `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
+| `persist` | `kb-extract` (via queue) + CLI memory review | No new persist-only preset required V1.34 |
+```
+
+Implementation string evidence:
+
+```text
+$ python3 - <<'PY'
+from pathlib import Path
+text=Path('crates/nexus-orchestration/src/stage_gates.rs').read_text()
+for needle in ['creative-brief-intake','research','novel-writing','reflection-loop','kb-extract']:
+    print(f'{needle}:', needle in text)
+PY
+creative-brief-intake: True
+research: True
+novel-writing: True
+reflection-loop: True
+kb-extract: True
+```
+
+Schedule metadata / active-creator evidence:
+
+```text
+$ python3 - <<'PY'
+from pathlib import Path
+files=['crates/nexus-daemon-runtime/src/api/handlers/works.rs','crates/nexus42/src/commands/creator/run.rs']
+for f in files:
+    text=Path(f).read_text()
+    print('---', f)
+    for needle in ['build_schedule_for_stage','fl_e_stage','active_creator_id','creator_id']:
+        print(f'{needle}:', needle in text)
+PY
+--- crates/nexus-daemon-runtime/src/api/handlers/works.rs
+build_schedule_for_stage: False
+fl_e_stage: False
+active_creator_id: True
+creator_id: True
+--- crates/nexus42/src/commands/creator/run.rs
+build_schedule_for_stage: True
+fl_e_stage: True
+active_creator_id: True
+creator_id: True
+```
+
+Additional test evidence:
+
+- `fl_e_chain_demo` passed 11/11, covering 5-stage mapping and preset input propagation.
+- `fl_e_schedule_api` passed 5/5, covering schedule creation DTO shape, persisted schedule rows, seeded core context, and empty-creator isolation.
+- QC1 final revalidation states CLI stage advance now sources `creator_id` from `config.active_creator_id`, not the Work DTO.
 
 ### Result
 
-**Pass for code/test evidence.** The implementation behavior appears aligned with spec §4 and the fix wave requirements, based on the required tests and QC revalidation evidence. The blocker is harness/QC artifact lifecycle, not the functional test evidence.
+**Pass.** The 5-stage preset mapping, schedule creation/metadata behavior, and active-creator sourcing align with spec §4 and the fix-wave requirements.
 
 ## Final Checklist
 
 | Item | Result | Notes |
 | --- | --- | --- |
-| 1. Plan scope and status consistency | Fail | Plan/status still `Todo`; T1-T4 unchecked. |
-| 2. CI/lint/test green | Pass | Scoped cargo test and clippy passed. |
+| 1. Plan scope and status consistency | Pass w/ notes | `status.json` row is `InReview`; plan Markdown still `Todo` as PM-owned non-blocking note. |
+| 2. CI/lint/test green | Pass | Required scoped cargo test and clippy passed. |
 | 3. Key functionality tests | Pass | 11 FL-E chain tests, 5 schedule API tests, 15 nexus42 tests passed. |
-| 4. QC consistency | Fail | `qc3.md` still says `Request Changes`, not `Approve w/ residuals`. |
-| 5. Residual lifecycle | Fail | No P2 root residual entries for QC3 warnings. |
-| 6. Git state | Partial / Fail vs exact count | Clean before QA report write; branch has expected code commits but not expected 13 total commits. |
-| 7. Integration branch state | Pass | P2 commits not in integration; integration tip is P3 closeout. |
-| 8. Spec alignment | Pass | Spec table and required tests align. |
-
-## Required Follow-ups Before P2 → Integration Merge
-
-1. PM (or authorized harness maintainer) should update the P2 plan and `.mstar/status.json` to reflect the real review state (`InReview` if still awaiting QA re-run, or equivalent after fixes).
-2. Update plan task checkboxes T1-T4 or otherwise record completion evidence in the plan.
-3. Either revalidate/update `qc3.md` to `Approve w/ residuals` after fix waves, or explicitly register its warnings as residuals and document the decision.
-4. Add P2 residual entries under root `.mstar/status.json` `residual_findings["2026-06-04-v1.34-fl-e-preset-chain"]` for any accepted QC3 warnings; if PM decides no P2 residuals are needed, record that decision in the plan/status artifacts.
-5. Track the `creator run start` active-creator issue as a V1.33 behavior bug in P5 hygiene or a new plan, outside this P2 merge gate.
+| 4. QC consistency | Pass | Final qc1=`Approve`, qc2=`Approve`, qc3=`Approve w/ residuals`. |
+| 5. Residual lifecycle | Pass | 4 root residual entries registered for P2. |
+| 6. Git state | Pass | Branch contains all scoped P2 commits; worktree clean before report write; diff stat captured. |
+| 7. Integration branch state | Pass | Sampled P2 commits are not ancestors of integration branch. |
+| 8. Spec alignment | Pass | Spec §4 mapping and fix wave requirements verified by tests and source evidence. |
 
 ## Not Tested / Not Changed
 
 - No manual daemon/CLI happy-path demo was run beyond the required automated tests.
-- No business implementation files were modified.
-- No plan/status/residual files were modified by QA because the assignment constrained this turn to writing only this `qa.md` report.
+- No business implementation files were modified by QA.
+- QA changed only `.mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/qa.md`.
