@@ -1346,53 +1346,92 @@ fn insert_nested(
 /// Parse an ISO-8601 duration string (e.g. `"PT6H"`, `"PT1H30M"`) into a
 /// `chrono::Duration`.
 ///
-/// Supports hours (H), minutes (M after T), and seconds (S).
-/// Returns `None` for unparseable inputs.
+/// Supports days (D), hours (H), minutes (M after T), and seconds (S).
+/// Returns `None` for unparseable inputs, logging a warning.
 fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
     let s = s.trim();
     if !s.starts_with('P') {
+        tracing::warn!(input = %s, "min_interval: missing 'P' prefix");
         return None;
     }
     let body = &s[1..];
-    let time_part = body.strip_prefix('T')?;
 
-    // Empty time part (e.g. "PT") is invalid.
-    if time_part.is_empty() {
-        return None;
-    }
-
+    // Parse optional days (before T) and optional time part (after T).
+    let mut days: i64 = 0;
     let mut hours: i64 = 0;
     let mut minutes: i64 = 0;
     let mut seconds: i64 = 0;
-    let mut num_buf = String::new();
 
-    for ch in time_part.chars() {
-        match ch {
-            '0'..='9' => num_buf.push(ch),
-            'H' => {
-                hours = num_buf.parse().ok()?;
-                num_buf.clear();
+    if let Some(time_part) = body.strip_prefix('T') {
+        // Time-only form: PT6H, PT30M, PT1H30M15S
+        if time_part.is_empty() {
+            tracing::warn!(input = %s, "min_interval: empty time part after 'T'");
+            return None;
+        }
+
+        let mut num_buf = String::new();
+        for ch in time_part.chars() {
+            match ch {
+                '0'..='9' => num_buf.push(ch),
+                'H' => {
+                    hours = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                'M' => {
+                    minutes = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                'S' => {
+                    seconds = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                _ => {
+                    tracing::warn!(
+                        input = %s,
+                        char = %ch,
+                        "min_interval: unsupported unit in time part"
+                    );
+                    return None;
+                }
             }
-            'M' => {
-                minutes = num_buf.parse().ok()?;
-                num_buf.clear();
+        }
+        if !num_buf.is_empty() {
+            tracing::warn!(input = %s, "min_interval: trailing digits in time part");
+            return None;
+        }
+    } else {
+        // Date-part only: P1D, P7D (no T separator)
+        let mut num_buf = String::new();
+        for ch in body.chars() {
+            match ch {
+                '0'..='9' => num_buf.push(ch),
+                'D' => {
+                    days = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                _ => {
+                    tracing::warn!(
+                        input = %s,
+                        char = %ch,
+                        "min_interval: unsupported unit (only D/H/M/S supported; months/years not supported)"
+                    );
+                    return None;
+                }
             }
-            'S' => {
-                seconds = num_buf.parse().ok()?;
-                num_buf.clear();
-            }
-            _ => return None,
+        }
+        if !num_buf.is_empty() {
+            tracing::warn!(input = %s, "min_interval: trailing digits in date part");
+            return None;
         }
     }
 
-    // If there's unparsed numeric content, it's malformed.
-    if !num_buf.is_empty() {
+    let total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+    if total_seconds == 0 {
+        tracing::warn!(input = %s, "min_interval: zero duration");
         return None;
     }
 
-    Some(chrono::Duration::seconds(
-        hours * 3600 + minutes * 60 + seconds,
-    ))
+    Some(chrono::Duration::seconds(total_seconds))
 }
 
 #[cfg(test)]
@@ -1858,6 +1897,26 @@ mod tests {
     fn parse_duration_seconds() {
         let dur = parse_iso8601_duration("PT45S").unwrap();
         assert_eq!(dur.num_seconds(), 45);
+    }
+
+    /// R-V133P3-03: P1D (1 day) support.
+    #[test]
+    fn parse_duration_days() {
+        let dur = parse_iso8601_duration("P1D").unwrap();
+        assert_eq!(dur.num_hours(), 24);
+    }
+
+    /// R-V133P3-03: P7D (7 days) support.
+    #[test]
+    fn parse_duration_seven_days() {
+        let dur = parse_iso8601_duration("P7D").unwrap();
+        assert_eq!(dur.num_days(), 7);
+    }
+
+    /// R-V133P3-03: months/years are unsupported with warn.
+    #[test]
+    fn parse_duration_rejects_months() {
+        assert!(parse_iso8601_duration("P1M").is_none());
     }
 
     #[test]
