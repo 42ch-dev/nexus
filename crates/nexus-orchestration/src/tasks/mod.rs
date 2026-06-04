@@ -466,6 +466,13 @@ impl LlmJudgeTask {
                 // No worker IPC available — cannot evaluate LLM judge.
                 // Log and return NOGO so the state waits rather than advancing
                 // without evaluation (safe default).
+                //
+                // R-V133P3-04 (deferred, documented): This creates a liveness/
+                // DoS vector — an attacker who controls worker connectivity can
+                // lock states in NOGO. Acceptable for V1.33 local-only single-user
+                // daemon where the attacker model is the user themselves. For
+                // multi-user or networked deployments, add a circuit-breaker,
+                // timeout, or rule-based fallback.
                 tracing::warn!(
                     capability = %self.capability_name,
                     "judge capability unavailable (no worker); returning NOGO"
@@ -582,21 +589,17 @@ impl StateCompositeTask {
     #[must_use]
     pub fn with_resolved_template(mut self, preset_id: &str) -> Self {
         if let Some(ExitWhen::LlmJudge {
-            ref template_file,
+            template_file: Some(ref path),
             ref judge_capability,
             ref min_interval,
         }) = self.exit_when
         {
-            if let Some(ref path) = template_file {
-                if let Some(content) =
-                    crate::preset::read_embedded_template(preset_id, path)
-                {
-                    self.exit_when = Some(ExitWhen::LlmJudge {
-                        template_file: Some(content),
-                        judge_capability: judge_capability.clone(),
-                        min_interval: min_interval.clone(),
-                    });
-                }
+            if let Some(content) = crate::preset::read_embedded_template(preset_id, path) {
+                self.exit_when = Some(ExitWhen::LlmJudge {
+                    template_file: Some(content),
+                    judge_capability: judge_capability.clone(),
+                    min_interval: min_interval.clone(),
+                });
             }
         }
         self

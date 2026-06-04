@@ -155,12 +155,11 @@ pub fn save_memory(
     let tmp_path = path.with_extension("md.tmp");
     std::fs::write(&tmp_path, &content)
         .map_err(|e| MemoryError::ValidationError(format!("cannot write temp memory file: {e}")))?;
-    std::fs::rename(&tmp_path, &path)
-        .map_err(|e| {
-            // Clean up temp file on rename failure (best effort).
-            let _ = std::fs::remove_file(&tmp_path);
-            MemoryError::ValidationError(format!("cannot rename temp memory file: {e}"))
-        })?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        // Clean up temp file on rename failure (best effort).
+        let _ = std::fs::remove_file(&tmp_path);
+        MemoryError::ValidationError(format!("cannot rename temp memory file: {e}"))
+    })?;
     Ok(())
 }
 ///

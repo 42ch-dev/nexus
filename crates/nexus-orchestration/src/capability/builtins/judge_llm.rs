@@ -18,7 +18,9 @@ use std::sync::Arc;
 const GO_WORDS: &[&str] = &["go", "continue", "yes", "proceed", "pass", "approve", "ok"];
 
 /// Judge response verdicts that count as "no-go" (first-token match only).
-const NOGO_WORDS: &[&str] = &["nogo", "stop", "no", "revise", "wait", "reject", "deny", "fail"];
+const NOGO_WORDS: &[&str] = &[
+    "nogo", "stop", "no", "revise", "wait", "reject", "deny", "fail",
+];
 
 /// The `judge.llm` capability.
 ///
@@ -147,7 +149,9 @@ pub fn parse_judge_response(text: &str) -> (bool, String) {
 
     // Extract the first token (delimited by whitespace or punctuation).
     let first_token = lower
-        .split(|c: char| c.is_whitespace() || c == '.' || c == '!' || c == ',' || c == ';' || c == ':')
+        .split(|c: char| {
+            c.is_whitespace() || c == '.' || c == '!' || c == ',' || c == ';' || c == ':'
+        })
         .next()
         .unwrap_or("")
         .trim();
