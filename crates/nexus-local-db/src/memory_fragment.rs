@@ -192,12 +192,12 @@ pub async fn list_fragments_filtered(
     // SAFETY: keyword and limit are used in a parameterized query (no injection risk).
     // Dynamic SQL is used because the optional keyword filter changes the WHERE clause
     // structure, which cannot be expressed with sqlx compile-time macros alone.
+    // R-V133P4-04: removed `!` suffix from column aliases — those are compile-time
+    // sqlx markers and cause runtime lookup failures with runtime sqlx::query().
     let rows = if let Some(kw) = keyword {
         let pattern = format!("%\"{kw}\"%");
         sqlx::query(
-            "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
-                    creator_id as \"creator_id!\", keywords as \"keywords!\",
-                    summary as \"summary!\", created_at as \"created_at!\", ttl
+            "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl
              FROM memory_fragments
              WHERE creator_id = ? AND keywords LIKE ?
              ORDER BY created_at DESC
@@ -210,9 +210,7 @@ pub async fn list_fragments_filtered(
         .await?
     } else {
         sqlx::query(
-            "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
-                    creator_id as \"creator_id!\", keywords as \"keywords!\",
-                    summary as \"summary!\", created_at as \"created_at!\", ttl
+            "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl
              FROM memory_fragments
              WHERE creator_id = ?
              ORDER BY created_at DESC
