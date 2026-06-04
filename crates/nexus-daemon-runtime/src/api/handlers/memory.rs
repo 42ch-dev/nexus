@@ -675,19 +675,35 @@ pub async fn fragments(
         "Listing memory fragments"
     );
 
-    let limit = u32::try_from(params.limit.clamp(1, MAX_LIMIT)).unwrap_or(u32::MAX);
+    let limit = params.limit.clamp(1, MAX_LIMIT);
 
-    let records = nexus_local_db::memory_fragment::list_fragments_filtered(
-        state.pool(),
-        &params.creator_id,
-        params.keyword.as_deref(),
-        limit,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to list memory fragments: {e}"),
-    })?;
+    let records = if params.keyword.is_some() {
+        // Use filtered query for keyword search
+        let limit_u32 = u32::try_from(limit).unwrap_or(u32::MAX);
+        nexus_local_db::memory_fragment::list_fragments_filtered(
+            state.pool(),
+            &params.creator_id,
+            params.keyword.as_deref(),
+            limit_u32,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to list memory fragments: {e}"),
+        })?
+    } else {
+        // Use compile-time checked query (more reliable) when no keyword filter
+        let all = nexus_local_db::memory_fragment::list_fragments(state.pool(), &params.creator_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to list memory fragments: {e}"),
+            })?;
+        // Apply limit manually
+        let mut truncated = all;
+        truncated.truncate(limit);
+        truncated
+    };
 
     let fragments_list: Vec<FragmentInfo> = records
         .into_iter()
