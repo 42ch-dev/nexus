@@ -284,6 +284,66 @@ impl HostToolExecutor {
 
         Ok(result)
     }
+
+    /// Dispatch a worker upcall `agent_tool_request` through the unified registry.
+    ///
+    /// This normalizes `worker/agent_tool_request { tool_name, args, request_id }`
+    /// (spec §7) into the same `ToolExecuteRequest` shape and calls the same
+    /// admission pipeline + dispatch table as HTTP tool execute.
+    ///
+    /// Returns the result in the worker reply shape:
+    /// `{ request_id, grant, output? }` (spec §7).
+    pub async fn dispatch_from_worker(
+        tool_name: &str,
+        args: &serde_json::Value,
+        request_id: &str,
+        state: &WorkspaceState,
+    ) -> WorkerToolResult {
+        let req = ToolExecuteRequest {
+            tool_name: tool_name.to_string(),
+            parameters: args.clone(),
+            session_id: None,
+            request_id: Some(request_id.to_string()),
+            caller_kind: Some(HostToolCallerKind::AcpAgent),
+        };
+
+        match Self::execute(&req, state).await {
+            Ok(result) => WorkerToolResult {
+                request_id: request_id.to_string(),
+                grant: true,
+                output: Some(result),
+                error: None,
+            },
+            Err(e) => {
+                let code = e.error_code().to_string();
+                let message = e.to_string();
+                WorkerToolResult {
+                    request_id: request_id.to_string(),
+                    grant: false,
+                    output: None,
+                    error: Some(WorkerToolError { code, message }),
+                }
+            }
+        }
+    }
+}
+
+/// Worker upcall result shape (spec §7 — `worker/agent_tool_request_result`).
+#[derive(Debug, Serialize)]
+pub struct WorkerToolResult {
+    pub request_id: String,
+    pub grant: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<WorkerToolError>,
+}
+
+/// Error payload in worker upcall result.
+#[derive(Debug, Serialize)]
+pub struct WorkerToolError {
+    pub code: String,
+    pub message: String,
 }
 
 // ─── Dispatch table (spec §7.1) ───────────────────────────────────────────
@@ -1048,5 +1108,39 @@ mod tests {
             Err(e) => panic!("Expected BadRequest(POLICY_BLOCKED), got: {e:?}"),
             Ok(_) => panic!("Expected error"),
         }
+    }
+
+    /// Worker upcall dispatch hits the same registry as HTTP (spec §7.1).
+    #[tokio::test]
+    async fn worker_upcall_whoami_same_result_as_http() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let http_req = ToolExecuteRequest {
+            tool_name: "nexus.context.whoami".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let http_result = HostToolExecutor::execute(&http_req, &state)
+            .await
+            .expect("HTTP execute");
+
+        let worker_result = HostToolExecutor::dispatch_from_worker(
+            "nexus.context.whoami",
+            &serde_json::json!({}),
+            "req-001",
+            &state,
+        )
+        .await;
+
+        assert!(worker_result.grant, "Worker upcall should succeed");
+        assert_eq!(worker_result.request_id, "req-001");
+        let output = worker_result.output.expect("worker should have output");
+        assert_eq!(
+            output, http_result,
+            "HTTP and worker must produce same result"
+        );
     }
 }
