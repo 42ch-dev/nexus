@@ -799,7 +799,12 @@ mod tests {
     async fn passthrough_summarizer_includes_untrusted_header() {
         let summarizer = PassthroughSummarizer;
         let result = summarizer
-            .summarize("sess_123", "brainstorm", "My brainstorm content", Some("world_1"))
+            .summarize(
+                "sess_123",
+                "brainstorm",
+                "My brainstorm content",
+                Some("world_1"),
+            )
             .await
             .unwrap();
 

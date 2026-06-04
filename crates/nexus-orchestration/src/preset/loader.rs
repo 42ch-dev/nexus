@@ -827,7 +827,7 @@ fn validate_skill_slug_format(s: &str) -> bool {
 ///
 /// Note: template resolution is skipped here because `build_outer_graph` is
 /// used in test contexts where inline template strings are expected. Production
-/// code uses `build_wired_outer_graph` which resolves template_file paths.
+/// code uses `build_wired_outer_graph` which resolves `template_file` paths.
 fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
