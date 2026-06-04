@@ -803,6 +803,40 @@ pub async fn get_work_stage(
     Ok(row.map(|r| (r.get("current_stage"), r.get("stage_status"))))
 }
 
+/// Check whether a Work has an active FL-E stage schedule (V1.34 spec §2 invariant #4).
+///
+/// An "active FL-E stage schedule" is detected by checking if the work's
+/// `stage_status` is `active`. This is a lightweight check that avoids querying
+/// the `creator_schedules` table directly, since the stage advance flow sets
+/// `stage_status = 'active'` only when creating a stage schedule.
+///
+/// Returns `true` if the work has an active stage, `false` otherwise.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn has_active_fl_e_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<bool, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query.
+    let row = sqlx::query(
+        "SELECT stage_status FROM works WHERE work_id = ? AND creator_id = ?",
+    )
+    .bind(work_id)
+    .bind(creator_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row
+        .map(|r: sqlx::sqlite::SqliteRow| {
+            let status: String = r.get("stage_status");
+            status == "active"
+        })
+        .unwrap_or(false))
+}
+
 /// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 
@@ -1155,6 +1189,94 @@ mod tests {
         // Invalid skip: intake → produce (not adjacent)
         assert_ne!(produce_idx, intake_idx + 1);
         assert!(produce_idx > intake_idx + 1);
+    }
+
+    #[tokio::test]
+    async fn test_has_active_fl_e_schedule_false_for_new_work() {
+        // R-FL-E-01: new work has stage_status='pending', not active
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_active_001");
+        create_work(&pool, &record).await.unwrap();
+
+        let has_active = has_active_fl_e_schedule(&pool, "ctr_test", "wrk_active_001")
+            .await
+            .unwrap();
+        assert!(!has_active, "new work should not have active schedule");
+    }
+
+    #[tokio::test]
+    async fn test_has_active_fl_e_schedule_true_after_advance() {
+        // R-FL-E-01: after stage advance (stage_status='active'), should report active
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_active_002");
+        create_work(&pool, &record).await.unwrap();
+
+        // Simulate advance: set stage_status='active'
+        update_work_stage(
+            &pool,
+            "ctr_test",
+            "wrk_active_002",
+            "research",
+            "active",
+            "2026-06-05T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let has_active = has_active_fl_e_schedule(&pool, "ctr_test", "wrk_active_002")
+            .await
+            .unwrap();
+        assert!(has_active, "work with stage_status=active should report active");
+    }
+
+    #[tokio::test]
+    async fn test_reject_double_active_schedule() {
+        // R-FL-E-01 regression: advancing from an active stage to another should
+        // fail at the CLI level. This test validates the DB helper returns the
+        // correct state for the CLI to check.
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_active_003");
+        create_work(&pool, &record).await.unwrap();
+
+        // Advance to research (active)
+        update_work_stage(
+            &pool,
+            "ctr_test",
+            "wrk_active_003",
+            "research",
+            "active",
+            "2026-06-05T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        // The DB helper should report active — CLI would check this before
+        // allowing another advance
+        let has_active = has_active_fl_e_schedule(&pool, "ctr_test", "wrk_active_003")
+            .await
+            .unwrap();
+        assert!(has_active, "should detect existing active schedule");
+
+        // Complete the stage
+        update_work_stage(
+            &pool,
+            "ctr_test",
+            "wrk_active_003",
+            "research",
+            "complete",
+            "2026-06-05T12:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let has_active_after_complete =
+            has_active_fl_e_schedule(&pool, "ctr_test", "wrk_active_003")
+                .await
+                .unwrap();
+        assert!(
+            !has_active_after_complete,
+            "completed stage should not be active"
+        );
     }
 
     #[tokio::test]
