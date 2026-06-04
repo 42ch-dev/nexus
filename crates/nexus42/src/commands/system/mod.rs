@@ -79,8 +79,23 @@ pub enum SystemCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum SystemPresetSubcommand {
-    /// List all registered system presets
-    List,
+    /// List all discoverable presets (embedded + user + system)
+    List {
+        /// Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
+        #[arg(long)]
+        intent: Option<String>,
+        /// Emit machine-readable JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Validate a preset YAML/bundle at a given path
+    Validate {
+        /// Path to preset.yaml (or bundle directory)
+        path: String,
+        /// Emit machine-readable JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[cfg(test)]
@@ -111,7 +126,12 @@ struct SystemPresetCli {
 pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         SystemCommand::Preset { command } => match command {
-            SystemPresetSubcommand::List => list_system_presets(config).await,
+            SystemPresetSubcommand::List { intent, json } => {
+                list_system_presets(config, intent.as_deref(), json).await
+            }
+            SystemPresetSubcommand::Validate { path, json } => {
+                validate_preset(config, &path, json).await
+            }
         },
         SystemCommand::Version => {
             println!("nexus42 {}", env!("CARGO_PKG_VERSION"));
@@ -223,27 +243,123 @@ async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-async fn list_system_presets(config: &CliConfig) -> Result<()> {
+async fn list_system_presets(
+    config: &CliConfig,
+    intent_filter: Option<&str>,
+    json_output: bool,
+) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
     let resp: nexus_contracts::local::orchestration::http::ListPresetsResponse =
         client.get(&format!("{ORCHESTRATION_BASE}/presets")).await?;
 
-    // Filter to system presets only (prefixed with `_system.`).
-    let system_presets: Vec<&String> = resp
-        .presets
-        .iter()
-        .filter(|p| p.starts_with("_system."))
-        .collect();
+    // Build a display list with run_intents from the preset management endpoint
+    let mgmt_resp: serde_json::Value = client
+        .get::<serde_json::Value>("/v1/local/presets")
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
 
-    if system_presets.is_empty() {
-        println!("No system presets found.");
+    let embedded_intents: std::collections::HashMap<String, Vec<String>> = mgmt_resp
+        .get("embedded")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| {
+                    let id = p.get("id")?.as_str()?.to_string();
+                    let intents = p
+                        .get("run_intents")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Some((id, intents))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut presets: Vec<(String, String, Vec<String>)> = Vec::new();
+
+    // Collect embedded presets
+    for id in &resp.presets {
+        let intents = embedded_intents.get(id).cloned().unwrap_or_default();
+        presets.push((id.clone(), "embedded".to_string(), intents));
+    }
+
+    // Filter by intent if specified
+    if let Some(intent) = intent_filter {
+        presets.retain(|(_, _, intents)| intents.iter().any(|i| i == intent));
+    }
+
+    if json_output {
+        let output: Vec<serde_json::Value> = presets
+            .iter()
+            .map(|(id, source, intents)| {
+                serde_json::json!({
+                    "id": id,
+                    "source": source,
+                    "run_intents": intents,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    if presets.is_empty() {
+        println!("No presets found.");
     } else {
-        println!("System presets:");
-        for id in &system_presets {
-            println!("  {id}");
+        println!("Presets:");
+        for (id, source, intents) in &presets {
+            let intents_str = if intents.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", intents.join(", "))
+            };
+            println!("  {id} ({source}){intents_str}");
         }
-        println!("\n{} system preset(s)", system_presets.len());
+        println!("\n{} preset(s)", presets.len());
+    }
+
+    Ok(())
+}
+
+/// Validate a preset YAML/bundle at a given path.
+async fn validate_preset(config: &CliConfig, path: &str, json_output: bool) -> Result<()> {
+    let client = crate::api::DaemonClient::from_config(config);
+
+    let body = serde_json::json!({ "path": path });
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/presets:validate", &body)
+        .await?;
+
+    let valid = resp
+        .get("valid")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+        return Ok(());
+    }
+
+    if valid {
+        println!("✓ Valid preset");
+    } else {
+        let errors = resp
+            .get("diagnostics")
+            .and_then(|v| v.as_array())
+            .map_or(0, std::vec::Vec::len);
+        println!("✗ Invalid preset ({errors} error(s))");
+        if let Some(diagnostics) = resp.get("diagnostics").and_then(|v| v.as_array()) {
+            for d in diagnostics {
+                let msg = d.get("message").and_then(|v| v.as_str()).unwrap_or("?");
+                println!("  - {msg}");
+            }
+        }
     }
 
     Ok(())
@@ -265,7 +381,8 @@ mod tests {
 
         match cmd.command {
             SystemPresetCommand::Preset { command } => match command {
-                SystemPresetSubcommand::List => {} // expected
+                SystemPresetSubcommand::List { intent: _, json: _ } => {} // expected
+                SystemPresetSubcommand::Validate { path: _, json: _ } => {} // expected
             },
         }
     }

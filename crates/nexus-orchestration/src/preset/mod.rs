@@ -193,6 +193,26 @@ pub fn list_embedded_presets() -> Vec<String> {
         .collect()
 }
 
+/// Read a template file from an embedded preset bundle.
+///
+/// Given a preset ID and a relative path (e.g. `prompts/gathering-exit.md`),
+/// attempts to read the file content from the embedded presets directory.
+///
+/// # Errors
+///
+/// Returns `None` if the file doesn't exist in the embedded bundle.
+/// This is intentional — callers should fall back to using the raw path
+/// string (for backward compat with tests that pass inline templates).
+#[must_use]
+pub fn read_embedded_template(preset_id: &str, template_path: &str) -> Option<String> {
+    // SAFETY: path traversal is validated at load time by assert_template_file_safe.
+    // The path is always relative and within the preset bundle root.
+    let full_path = format!("{preset_id}/{template_path}");
+    EMBEDDED_PRESETS
+        .get_file(&full_path)
+        .and_then(|f| f.contents_utf8().map(std::string::ToString::to_string))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

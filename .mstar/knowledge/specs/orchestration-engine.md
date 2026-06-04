@@ -268,12 +268,27 @@ Every preset node compiles into one of these Rust `Task` impls:
 | `CapabilityTask`     | `capability`             | Resolves to a registered `Capability`, calls its `run(ctx)`, stores output |
 | `AcpPromptTask`      | `acp_prompt`             | Dispatches prompt to worker via IPC; streams response back into `Context` |
 | `InnerGraphTask`     | `inner_graph`            | Launches a child `Session` over a named inner graph; awaits completion    |
-| `JudgeTask`          | `llm_judge` exit_when    | Calls a *judge* capability (LLM-backed or rule-backed) to produce go/nogo |
+| `JudgeTask`          | `llm_judge` exit_when    | Calls declared `judge_capability` (default `judge.llm`) via worker IPC — **V1.33** fixes stub-only path; see §4.4.1 |
 | `ManualWaitTask`     | `manual` exit_when       | Returns `NextAction::WaitForInput`; CLI `advance` resumes                 |
 | `RuleCheckTask`      | rule-based exit_when     | Pure function over `Context`; no external calls                           |
 | `TimerWaitTask`      | `timer` exit_when (opt.) | Returns `WaitForInput` plus schedules a clock signal (B-track integration) |
 
 All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations are **pure** over `Context` + well-typed capability handles — no global state.
+
+#### 4.4.1 `llm_judge` runtime contract (V1.33 — Implemented)
+
+**Pre-V1.33 problem (resolved in V1.33 P3):** `StateCompositeTask` used to route `exit_when.kind: llm_judge` through `JudgeTask` that only evaluated stub `_judge_rule` (`always_true` / `always_false`) without calling the declared `judge_capability` or loading `template_file`.
+
+**Required behavior (V1.33+):**
+
+1. Read `judge_capability` from state YAML (default `judge.llm`).
+2. Load `template_file` relative to bundle root; pass rendered template + `contextData` to the capability.
+3. Require worker IPC for `judge.llm` (same as `acp.prompt`); without worker → `CapabilityError` / `WaitForInput` per preset policy.
+4. Parse GO/NOGO from capability output (existing `judge.llm` word-list contract).
+5. Map GO → `NextAction::Continue`; NOGO → `NextAction::WaitForInput` (respect `min_interval` if set).
+6. **Identity**: use schedule-injected `_creator_id` / `_session_id` only — not raw preset args (aligns with V1.32 `SEC-V131-01`).
+
+**Explicit non-goal:** conditional `next` on NOGO (e.g. return to `gathering`) remains deferred until loader accepts `next.kind: conditional`.
 
 ### 4.5 Pausing, cancelling, and signals
 
@@ -662,16 +677,45 @@ The validation facade checks capability references against the registry:
 
 Embedded presets under `crates/nexus-orchestration/embedded-presets/` are **runtime assets compiled into the binary**; they are validated through the same shared facade at build/test time. They are **not** normative examples — the normative preset semantics remain in this spec (§7–§8). Preset authors should refer to this spec, not to embedded presets, as the authoritative contract.
 
-### 7.7 Embedded preset index (V1.31)
+### 7.7 Embedded preset index (V1.31+)
 
-The binary includes the following Agentic Design Pattern demonstrators under `crates/nexus-orchestration/embedded-presets/`:
+The binary includes embedded presets under `crates/nexus-orchestration/embedded-presets/`:
 
-| Preset ID | Pattern | State flow | Primary capabilities exercised |
+| Preset ID | Pattern / role | State flow (summary) | Primary capabilities |
 | --- | --- | --- | --- |
-| `reflection-loop` | Reflection / iterative improvement | `draft` → `revise` → `summarize` → `done` | `acp.prompt`, `judge.llm`, `context.summarize` |
-| `memory-augmented` | Memory-augmented generation with persistence | `recall` → `generate` → `persist` → `done` | `creator.read_memory`, `acp.prompt`, `judge.rule`, `creator.write_memory` |
+| `novel-writing` | Narrative production (primary user path) | gathering → brainstorming → outlining → drafting → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm` |
+| `research` | Reference ingest + synthesis | scanning → extracting → synthesizing → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm` |
+| `kb-extract` | Work → World KB extraction | loading → extracting → done | `kb.extract_work`, `acp.prompt` |
+| `soul-experience-refresh` | SOUL Experience (deterministic) | aggregate → done | `soul.experience.aggregate` |
+| `reflection-loop` | Reflection demonstrator | draft → revise → summarize → done | `acp.prompt`, `judge.llm`, `context.summarize` |
+| `memory-augmented` | Memory demonstrator | recall → generate → persist → done | `creator.*`, `judge.rule` |
+| `creative-brief-intake` | **V1.33 planned** — grill-me intake | TBD in P2 plan | `acp.prompt` |
 
-Both presets intentionally use linear `next` transitions; the conditional routing engine remains deferred.
+All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5).
+
+### 7.8 Preset `run_intents` (V1.33)
+
+Presets declare **how** they may be started from [work-experience-model.md](work-experience-model.md) and `creator run`:
+
+```yaml
+preset:
+  id: novel-writing
+  # ...
+  run_intents:
+    - work_init
+    - work_continue
+```
+
+Closed enum: `work_init` | `work_continue` | `knowledge_ingest` | `work_maintenance` | `system_maintenance`.
+
+Loader rules (V1.33):
+
+- Reject unknown intent strings.
+- `_system.*` presets must include `system_maintenance`.
+- `creator run start` filters presets where `work_init ∈ run_intents`.
+- `creator run continue` filters presets where `work_continue ∈ run_intents`.
+
+Normative classification table: [work-experience-model.md](work-experience-model.md) §5.2.
 
 ---
 

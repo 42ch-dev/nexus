@@ -14,11 +14,13 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// Judge response verdicts that count as "go".
-const GO_WORDS: &[&str] = &["go", "yes", "proceed", "pass", "approve", "ok"];
+/// Judge response verdicts that count as "go" (first-token match only).
+const GO_WORDS: &[&str] = &["go", "continue", "yes", "proceed", "pass", "approve", "ok"];
 
-/// Judge response verdicts that count as "no-go".
-const NOGO_WORDS: &[&str] = &["wait", "no", "stop", "reject", "deny", "fail"];
+/// Judge response verdicts that count as "no-go" (first-token match only).
+const NOGO_WORDS: &[&str] = &[
+    "nogo", "stop", "no", "revise", "wait", "reject", "deny", "fail",
+];
 
 /// The `judge.llm` capability.
 ///
@@ -134,34 +136,56 @@ impl Capability for JudgeLlm {
 
 /// Parse a judge LLM response text into a boolean verdict.
 ///
+/// Uses **first-token matching**: extracts the first whitespace/punctuation-
+/// delimited token from the trimmed, lowercased response and checks it
+/// against explicit GO and NOGO word sets. NOGO is checked first to avoid
+/// false positives (e.g. "nogo" containing "go").
+///
 /// Returns `(result, reason)` where result is true for GO, false for NOGO
-/// or ambiguous.
+/// or ambiguous. Ambiguous responses default to NOGO (safe default) with a
+/// warning log.
 pub fn parse_judge_response(text: &str) -> (bool, String) {
     let lower = text.trim().to_lowercase();
 
-    for word in GO_WORDS {
-        if lower.contains(word) {
+    // Extract the first token (delimited by whitespace or punctuation).
+    let first_token = lower
+        .split(|c: char| {
+            c.is_whitespace() || c == '.' || c == '!' || c == ',' || c == ';' || c == ':'
+        })
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    // Check NOGO first to avoid "nogo" matching "go".
+    for word in NOGO_WORDS {
+        if first_token == *word {
             return (
-                true,
-                format!("judge.llm: go (matched '{word}' in LLM response)"),
+                false,
+                format!("judge.llm: nogo (first-token matched '{word}')"),
             );
         }
     }
 
-    for word in NOGO_WORDS {
-        if lower.contains(word) {
+    for word in GO_WORDS {
+        if first_token == *word {
             return (
-                false,
-                format!("judge.llm: nogo (matched '{word}' in LLM response)"),
+                true,
+                format!("judge.llm: go (first-token matched '{word}')"),
             );
         }
     }
+
+    tracing::warn!(
+        first_token = %first_token,
+        raw_response = %&lower[..lower.len().min(80)],
+        "judge.llm: ambiguous first token — defaulting to NOGO"
+    );
 
     (
         false,
         format!(
-            "judge.llm: ambiguous LLM response — '{}'",
-            &lower[..lower.len().min(50)]
+            "judge.llm: ambiguous LLM response (first token: '{}') — defaulting to NOGO",
+            &first_token[..first_token.len().min(30)]
         ),
     )
 }
@@ -181,12 +205,19 @@ mod tests {
         assert!(parse_judge_response("Yes, proceed with the next step").0);
         assert!(parse_judge_response("Go ahead!").0);
         assert!(parse_judge_response("APPROVE").0);
+        assert!(parse_judge_response("go").0);
+        assert!(parse_judge_response("Continue with the plan").0);
     }
 
     #[test]
     fn parse_nogo_response() {
         assert!(!parse_judge_response("No, wait for more input").0);
         assert!(!parse_judge_response("Stop here").0);
+        // R-V133P3-01: "nogo" must NOT match "go" — first-token parse.
+        assert!(!parse_judge_response("NOGO because of missing data").0);
+        assert!(!parse_judge_response("nogo").0);
+        assert!(!parse_judge_response("I think we should NOGO this.").0);
+        assert!(!parse_judge_response("Revise the draft first").0);
     }
 
     #[test]
@@ -194,6 +225,30 @@ mod tests {
         let (result, reason) = parse_judge_response("maybe we should think about it");
         assert!(!result);
         assert!(reason.contains("ambiguous"));
+    }
+
+    #[test]
+    fn parse_go_with_reason() {
+        let (result, reason) = parse_judge_response("Go — the evaluation passes all checks");
+        assert!(result);
+        assert!(reason.contains("go"));
+    }
+
+    #[test]
+    fn parse_nogo_with_reason() {
+        let (result, reason) = parse_judge_response("NOGO — insufficient evidence");
+        assert!(!result);
+        assert!(reason.contains("nogo"));
+    }
+
+    #[test]
+    fn parse_bare_go() {
+        assert!(parse_judge_response("go").0);
+    }
+
+    #[test]
+    fn parse_bare_nogo() {
+        assert!(!parse_judge_response("nogo").0);
     }
 
     // ── J2: Standalone mode returns WorkerUnavailable ─────────────────

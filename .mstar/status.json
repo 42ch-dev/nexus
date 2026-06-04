@@ -1,7 +1,147 @@
 {
   "version": 1,
-  "updated_at": "2026-06-03T16:30:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-04T12:00:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-04-v1.33-work-model-and-creator-run",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-04-v1.33-work-model-and-creator-run.md",
+      "working_branch": "feature/v1.33-work-model-and-creator-run",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/work-experience-model.md",
+        "description": "P1 \u2014 Work model + creator run + system preset + run_intents",
+        "done_at": "2026-06-04T14:50:00+08:00",
+        "merge_commits": [
+          "3ea9575 (initial P1 merge)",
+          "7551254 (P1 fix wave merge \u2014 7 of 8 in-scope QC findings)",
+          "6b09fd6 (R-V133P1-10 surgical re-fix merge after QA caught premature close)"
+        ],
+        "qc_wave_1": "3ea9575 \u2192 Request Changes (4 Critical)",
+        "qc_wave_2": "7551254 \u2192 Approve with residuals (0 Critical)",
+        "qa_recheck": "6b09fd6 \u2192 Approve (R-V133P1-10 verified fixed)",
+        "open_residuals": 7,
+        "closed_residuals": 5,
+        "qc_reports": [
+          "2026-06-04-v1.33-work-model-and-creator-run-qc1.md (Request Changes)",
+          "2026-06-04-v1.33-work-model-and-creator-run-qc2.md (Request Changes)",
+          "2026-06-04-v1.33-work-model-and-creator-run-qc3.md (Request Changes)",
+          "2026-06-04-v1.33-work-model-and-creator-run-qc1-wave2.md (Request Changes)",
+          "2026-06-04-v1.33-work-model-and-creator-run-qc2-wave2.md (Approve)",
+          "2026-06-04-v1.33-work-model-and-creator-run-qc3-wave2.md (Approve)"
+        ],
+        "qa_reports": [
+          "2026-06-04-v1.33-work-model-and-creator-run-qa-recheck.md (Approve)"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-creative-brief-intake-preset",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-04-v1.33-creative-brief-intake-preset.md",
+      "working_branch": "feature/v1.33-creative-brief-intake-preset",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/work-experience-model.md",
+        "depends_on": [
+          "2026-06-04-v1.33-work-model-and-creator-run",
+          "2026-06-04-v1.33-llm-judge-runtime-fix"
+        ],
+        "done_at": "2026-06-04T17:30:00+08:00",
+        "merge_commits": [
+          "89e9c77 (initial P2 merge)",
+          "641489e (R-V133P2-01 capability_registry count 17->18)",
+          "dd09b5d (C-V133P2-01 engine capability arg template rendering)",
+          "7ed6bae (C-V133P2-02 preset args casing + brief_schema_version)",
+          "fe22746 (C-V133P2-04 --chain-novel-writing flag)"
+        ],
+        "qc_wave_1": "Request Changes (3 Critical: engine arg rendering, 1 Critical: test count)",
+        "qc_re_review": "Approve (all 4 closed; qc2 was Approve; qc3's only Critical was test count)",
+        "open_residuals": 1,
+        "closed_residuals": 4
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-llm-judge-runtime-fix",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-04-v1.33-llm-judge-runtime-fix.md",
+      "working_branch": "feature/v1.33-llm-judge-runtime-fix",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "description": "P3 \u2014 exit_when: llm_judge \u2192 real judge.llm",
+        "done_at": "2026-06-04T16:30:00+08:00",
+        "merge_commits": [
+          "fe8176c (initial P3 merge)",
+          "d271115 (R-V133P3-01 first-token parse)",
+          "c604a2d (R-V133P3-02 template_file pre-load)",
+          "595f328 (R-V133P3-03 min_interval warn + D days)"
+        ],
+        "qc_wave_1": "51ab12e..46a8e3f \u2192 Request Changes (2 Critical, 3 P4 Critical)",
+        "qc_wave_2": "46a8e3f..2217c0a \u2192 Approve w/ residuals; 4 of 5 Criticals closed",
+        "open_residuals": 1,
+        "closed_residuals": 3,
+        "qc_reports": [
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc1.md",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc2.md",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc3.md",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc1-wave2.md (1 new Critical: pending-review)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc2-wave2.md (Approve)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc3-wave2.md (1 unresolved critical: R-02 PARTIAL \u2014 disputed)"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-memory-review-closed-loop",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-04-v1.33-memory-review-closed-loop.md",
+      "working_branch": "feature/v1.33-memory-review-closed-loop",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "description": "P4 \u2014 memory review/fragments daemon + CLI closed loop",
+        "done_at": "2026-06-04T16:30:00+08:00",
+        "merge_commits": [
+          "9cfbdde (initial P4 merge)",
+          "26dc124 (R-V133P4-01,02 active creator + 5 new tests)",
+          "026972d (R-V133P4-03,06 UNTRUSTED header + size cap \u2014 initial, incomplete)",
+          "370a9c6 (R-V133P4-04 ! alias removed)",
+          "20ba4d0 (R-V133P4-05 atomic write)",
+          "fb390c2 (R-V133P4-07 pending-review CRUD \u2014 qc1-wave2 caught gap)",
+          "4455f09 (R-V133P4-03 UNTRUSTED header completeness \u2014 QA caught initial incomplete)"
+        ],
+        "qc_wave_1": "51ab12e..46a8e3f \u2192 Request Changes (3 Critical)",
+        "qc_wave_2": "46a8e3f..2217c0a \u2192 Approve w/ residuals",
+        "qa_final": "fb390c2 \u2192 blocked on R-V133P4-03; 4455f09 re-fix closes the gap",
+        "open_residuals": 1,
+        "closed_residuals": 6,
+        "qc_reports": [
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc1.md (Request Changes)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc2.md (Request Changes)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc3.md (Approve)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc1-wave2.md (1 new Critical)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc2-wave2.md (Approve)",
+          "2026-06-04-v1.33-llm-judge-runtime-fix-qc3-wave2.md (1 unresolved critical \u2014 disputed)"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-04-v1.33-spec-tracker-hygiene",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-04-v1.33-spec-tracker-hygiene.md",
+      "working_branch": "feature/v1.33-spec-tracker-hygiene",
+      "merge_target": "feature/v1.33-work-experience-loop",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+        "description": "P5 — normative spec, tracker, harness hygiene (merge last)",
+        "done_at": "2026-06-04T18:00:00+08:00",
+        "merge_commits": ["e97f458 (P5 closeout)"]
+      }
+    }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,48 +149,292 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": "feature/v1.32-preset-quality-gate",
-    "last_integration_branch": "feature/v1.31-agentic-design-patterns",
+    "integration_branch": "feature/v1.33-work-experience-loop",
+    "last_integration_branch": "feature/v1.32-preset-quality-gate",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.32",
-    "latest_shipped_at": "2026-06-03T16:30:00+08:00",
+    "latest_shipped_iteration": "v1.33",
+    "latest_shipped_at": "2026-06-04T18:00:00+08:00",
     "latest_active_iteration": null,
     "latest_active_compass": null,
-    "platform_integration": "paused — local-only until further notice",
+    "platform_integration": "paused \u2014 local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-03T16:30:00+08:00",
-      "total_open": 21,
+      "updated_at": "2026-06-04T17:30:00+08:00",
+      "total_open": 29,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 15,
+        "medium": 6,
+        "low": 18,
         "nit": 5
       },
       "by_target": {
-        "backlog": 19,
-        "V1.33+": 2
+        "backlog": 22,
+        "V1.33+": 7
       },
       "by_plan": {
         "v1.30-post-qc-tech-debt": 11,
         "v1.31-post-qc-tech-debt": 8,
-        "v1.32-post-qc-tech-debt": 2
+        "v1.32-post-qc-tech-debt": 2,
+        "v1.33-p1-post-qc": 7,
+        "v1.33-p3-post-qc": 1,
+        "v1.33-p4-post-qc": 1
+      },
+      "v1.33_p1_done": {
+        "done_at": "2026-06-04T14:50:00+08:00",
+        "merge_commits": [
+          "3ea9575",
+          "7551254",
+          "6b09fd6"
+        ],
+        "closed_residuals": 5,
+        "open_residuals": 7
+      },
+      "v1.33_p3_p4_done": {
+        "done_at": "2026-06-04T16:30:00+08:00",
+        "merge_commits": [
+          "fe8176c (P3)",
+          "9cfbdde (P4)",
+          "d271115 (R-01)",
+          "c604a2d (R-02)",
+          "595f328 (R-03)",
+          "26dc124 (R-01,02)",
+          "026972d (R-03,06)",
+          "370a9c6 (R-04)",
+          "20ba4d0 (R-05)",
+          "fb390c2 (R-07)",
+          "4455f09 (R-03 header completeness)"
+        ],
+        "closed_residuals": 9,
+        "open_residuals": 2,
+        "evidence": "P3+P4 fix wave (8 commits) + re-QC wave 2 + R-07 surgical fix (qc1-wave2 caught) + R-03 header completeness re-fix (QA caught initial incomplete). 0 Critical remain. 2 open residuals are: R-V133P3-04 (WorkerUnavailable DoS \u2014 documented deferral) + R-V133P3-02 partial (user/system presets template loading; embedded works)."
       },
       "cross_cutting": [
         {
           "id": "DEBT-RAND-073",
-          "title": "rand 0.7.3 cannot be upgraded — blocked by wiremock → http-types upstream",
+          "title": "rand 0.7.3 cannot be upgraded \u2014 blocked by wiremock \u2192 http-types upstream",
           "severity": "low",
           "target_date": "backlog",
           "decision": "accept",
-          "note": "Blocked by wiremock → http-types upstream. Removed from V1.6 scope per V1.6 delivery compass decision."
+          "note": "Blocked by wiremock \u2192 http-types upstream."
         }
       ],
-      "note": "V1.32 shipped (Preset Quality Gate — P1 shared validator, P2 embedded preset hardening + TD-V131-08, P3 SEC-V131-01 closed, P4 docs hygiene). 21 open entries in residual_findings (11 v1.30-post-qc + 8 v1.31-post-qc + 2 v1.32-post-qc incl. R-P2-01/R-P2-02 creator.inject_prompt schema gap → V1.33+). Cross-cutting accept items in cross_cutting[]. Done plans: archived/plans-done.json."
-    }
+      "note": "V1.33 P1+P3+P4 \u2192 Done. 28 total open residuals (0 critical, 5 medium, 18 low, 5 nit). Next: P2 (creative-brief-intake-preset) + P5 (spec-tracker-hygiene) per compass \u00a73."
+    },
+    "wave_0_spec": ".mstar/knowledge/specs/work-experience-model.md",
+    "spec_refs": [
+      ".mstar/knowledge/specs/work-experience-model.md",
+      ".mstar/knowledge/specs/cli-spec.md",
+      ".mstar/knowledge/specs/orchestration-engine.md",
+      ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
+    ],
+    "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
   },
   "residual_findings": {
+    "2026-06-04-v1.33-llm-judge-runtime-fix": [
+      {
+        "id": "R-V133P3-01",
+        "title": "judge.llm parse_judge_response: 'NOGO' contains 'go' as substring, false-positive GO under V1.33 P3 LlmJudgeTask path",
+        "severity": "critical",
+        "source": "qc1 C-001 (V1.33 P3 review); same root cause as TD-V131-07 (V1.31 backlog, was low severity under stub rule path; now elevated because P3 makes judge.llm the real eval path)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask parse logic \u2014 likely delegates to judge_llm.rs / parse_judge_response); existing TD-V131-07 scope was crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave",
+        "note": "Word list 'go'/'nogo' matching can produce false positives from LLM output. The P3 LlmJudgeTask now invokes judge.llm in real path (not stub), so this surface is exercised. Fix per TD-V131-07 note: regex anchors or parse first word of response. P3 fix wave: switch to first-word parse anchored to whitespace/punctuation."
+      },
+      {
+        "id": "R-V133P3-02",
+        "title": "LlmJudgeTask treats template_file as inline template string instead of loading file content from bundle",
+        "severity": "critical",
+        "source": "qc1 C-002 (V1.33 P3 review); also flagged in implementer Completion Report \u00a77 nuance #1",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask template render path) + presets using template_file (novel-writing/preset.yaml:48, reflection-loop/preset.yaml, research/preset.yaml)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave",
+        "note": "YAML presets use paths like 'prompts/gathering-exit.md' for template_file, but runtime treats the value as an inline handlebars string. Preset authors intended file paths; runtime breaks silently. Fix: add file-content loading in the task (read from bundle root relative to preset directory), or add a loader pre-processing step that resolves template_file \u2192 file content at load time. P3 fix wave: pre-load in LlmJudgeTask (read from preset bundle path, with SAFETY: file read)."
+      },
+      {
+        "id": "R-V133P3-03",
+        "title": "min_interval ISO-8601 duration parser silently returns None for unsupported units (P1D, months, years) \u2014 throttle bypassed, no log",
+        "severity": "medium",
+        "source": "qc2 W-P3-02 (V1.33 P3 review); implementer Completion Report \u00a77 nuance #3",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask min_interval parser)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave",
+        "note": "If a preset specifies 'P1D' or 'P1M' or 'P1Y', the parser returns None (silent); LlmJudgeTask then has no throttle \u2192 always re-evaluate. Per ISO 8601 P/P1D should be days. Fix: (a) extend parser to support D/M/Y units, OR (b) explicit log warning + treat unsupported as zero throttle (still bypass), OR (c) error at load time via V1.32 P1 validation. P3 fix wave: (a) for V1.33, (b) as a check."
+      },
+      {
+        "id": "R-V133P3-04",
+        "title": "WorkerUnavailable \u2192 NOGO/WaitForInput is a denial-of-service vector: attacker can lock states in NOGO by denying worker connection",
+        "severity": "medium",
+        "source": "qc2 W-P3-04 (V1.33 P3 review); implementer Completion Report \u00a77 nuance #2",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask worker handle check)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave (or backlog)",
+        "note": "When no worker is connected, judge.llm returns WorkerUnavailable and LlmJudgeTask maps to NOGO/WaitForInput. An attacker (or just a misconfigured daemon) can prevent workers from connecting and lock the state forever. Document and consider: (a) a max-WaitForInput duration that surfaces as a real error, (b) explicit 'WorkerUnavailable' vs 'LLMUnavailable' signal so the user can tell them apart, (c) operator alert. Pre-1.0 single-user local, so severity medium."
+      }
+    ],
+    "2026-06-04-v1.33-memory-review-closed-loop": [
+      {
+        "id": "R-V133P4-01",
+        "title": "POST /v1/local/memory/review + GET /v1/local/memory/fragments don't enforce active creator from auth context (P1 works pattern)",
+        "severity": "critical",
+        "source": "qc2 C-001 (V1.33 P4 review)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review + fragments handlers); pending-review CRUD in same file uses body/query creator_id, not config.toml active_creator_id",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "Memory review/fragments accept arbitrary ctr_* from request body/query without checking against active creator in auth context. Weaker than V1.32 SEC-V131-01 (works handlers now use AuthRequired for missing creator). Fix: extract active_creator_id from request extensions (middleware), compare with request-body creator_id, return 403 on mismatch + 401 on missing. P1 established the pattern in creators.rs/works.rs: read_active_creator_id + AuthRequired."
+      },
+      {
+        "id": "R-V133P4-02",
+        "title": "memory_review_fragments_api.rs tests don't cover 401/403/404 + cross-creator isolation (only 200/400)",
+        "severity": "critical",
+        "source": "qc2 C-002 (V1.33 P4 review)",
+        "scope": "crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs (231 lines, 10 tests)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "P1's 18 works_api.rs tests established the pattern: 401 (no creator) + 403/404 (cross-creator isolation). Memory tests only cover 200/400. Add the missing 4-5 tests to match the works coverage bar. Critical because the auth gap from R-V133P4-01 has no test coverage."
+      },
+      {
+        "id": "R-V133P4-03",
+        "title": "PassthroughSummarizer stores raw digest verbatim as LTM body with no UNTRUSTED/provenance marker \u2014 prompt-injection vector for downstream use",
+        "severity": "critical",
+        "source": "qc2 C-003 (V1.33 P4 review); also implementer Completion Report \u00a77 nuance #2",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review handler) \u2192 calls promote_to_long_term which uses PassthroughSummarizer",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "LTM body = raw_digest (the session capture's extracted text). If the digest contains prompt-injection, downstream LTM consumers (creator.write_memory, ACP context assembly) will see it as trusted user content. Fix: prepend a header marker like '# UNTRUSTED: sourced from session_capture digest (creator=<id>, session=<id>, at=<ts>)\\n\\n' to every LTM body produced via PassthroughSummarizer; downstream consumers can grep the marker to apply extra validation. OR: require explicit user opt-in (interactive confirm) for 'use this digest as LTM' path. V1.33 fix: header marker is minimum bar."
+      },
+      {
+        "id": "R-V133P4-04",
+        "title": "list_fragments_filtered runtime sqlx uses ! column alias suffix \u2014 invalid for runtime queries; handler works around but P4 implementer noted the underlying bug remains",
+        "severity": "medium",
+        "source": "qc2 W-P4-05 (V1.33 P4 review); also implementer Completion Report \u00a77 nuance #1",
+        "scope": "crates/nexus-local-db/src/memory_fragment.rs (list_fragments_filtered function); handler works around at crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "list_fragments_filtered uses sqlx::query with 'as \"fragment_id!\"' column aliases \u2014 the ! suffix is a compile-time macro hint not valid SQL. SQLite returns the column with the literal ! in the name, causing ColumnNotFound at row.get('fragment_id'). Handler currently uses compile-time list_fragments for no-keyword path; keyword-filtered path is unreachable. Fix: remove the ! suffix from runtime SQL column aliases, OR convert list_fragments_filtered to sqlx::query_as! for consistency with the rest of the module."
+      },
+      {
+        "id": "R-V133P4-05",
+        "title": "save_memory uses non-atomic fs::write \u2014 corruption risk on crash/disk-full (P4 review)",
+        "severity": "medium",
+        "source": "qc3 W-P4-01 (V1.33 P4 review)",
+        "scope": "Wherever promote_to_long_term writes the LTM file (likely nexus-creator-memory/src/long_term_memory.rs or similar)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "fs::write is non-atomic; partial write on crash or disk-full leaves truncated LTM file. Fix: write to <file>.tmp first, then rename to <file> (POSIX rename is atomic within a filesystem)."
+      },
+      {
+        "id": "R-V133P4-06",
+        "title": "PassthroughSummarizer has no size guard \u2014 unbounded LTM file growth if raw_digest is large",
+        "severity": "medium",
+        "source": "qc3 W-P4-02 (V1.33 P4 review)",
+        "scope": "Same path as R-V133P4-03",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning."
+      },
+      {
+        "id": "R-V133P4-07",
+        "title": "4 pending-review CRUD handlers (create, list, count, delete) still lack active-creator enforcement \u2014 R-V133P4-01 fix scope incomplete",
+        "severity": "critical",
+        "source": "qc1-wave2 NEW (V1.33 P4 re-check)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs:79 (create_pending_review), :210 (list_pending_reviews), :285 (count_pending_reviews), :332 (delete_pending_review) \u2014 all 4 take creator_id from body/query without checking against active creator in auth context",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave-2",
+        "note": "P4 plan assignment said 'Apply the same fix to the existing pending-review handlers in the same file (consistency)'. P4 implementer applied AuthRequired only to the new review/fragments handlers (lines 477, 701) but did NOT update the 4 legacy pending-review CRUD handlers. qc2-wave2 said this was 'out of scope, as expected' but the original plan explicitly required it. Fix: same pattern as R-V133P4-01 \u2014 extract active_creator_id, return 401 on missing, 403 on body creator_id mismatch, use active creator for the operation. Add 4 new tests covering 401/403 for each handler. Note: V1.32 SEC-V131-01 baseline was already weak here; this fix brings pending-review up to the same standard as the new review/fragments handlers from P4 wave-1."
+      }
+    ],
+    "2026-06-04-v1.33-work-model-and-creator-run": [
+      {
+        "id": "R-V133P1-03",
+        "title": "API contract tests for /v1/local/works endpoints present but not literal 6-status-code matrix per endpoint",
+        "severity": "medium",
+        "source": "qc2-wave2 PARTIAL (also qc1-wave2 W-001)",
+        "scope": "crates/nexus-daemon-runtime/tests/works_api.rs (547 lines, 16 tests, hermetic)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "Fix wave (95470aa) added 16 works_api.rs tests covering 200/201/401/404 + creator isolation + idempotency replay. MISSING literal 400/409 asserts (409 not needed: race resolves to 200; 400 not yet for PATCH enum). T1 \u00a77.5 said cover 200/201/400/401/404/409; coverage is strong but not literal 6/endpoint. CLOSE-as-fixed for 4 Critical (R-03 original = 'no tests'); keep this entry open for the literal-matrix gap."
+      },
+      {
+        "id": "R-V133P1-05",
+        "title": "run_intents validation: empty-creator now Error, but system cross-claim (work_init on system) still Warning not Error",
+        "severity": "medium",
+        "source": "qc1-wave2 W-002, qc2-wave2 PARTIAL (also qc1 W-003 from wave 1)",
+        "scope": "crates/nexus-orchestration/src/preset/validation.rs:765 (check_run_intents)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "Fix wave (1c547f4) promoted empty creator run_intents from Warning to Error + added 3 inline tests in validation.rs:1413. NOT addressed: system+creator cross-claim (system claiming work_init/work_continue, creator claiming system_maintenance) still Warning. Per work-experience-model \u00a75.1 these should be Error. Functional coverage exists for the empty case; cross-claim enforcement is the partial gap. Also: GET /v1/local/presets still returns run_intents:[] for system+user (only embedded parsed)."
+      },
+      {
+        "id": "R-V133P1-07",
+        "title": "creator run list --status builds query string with format! + raw concatenation, no urlencoding",
+        "severity": "low",
+        "source": "qc2 F-007 (re-confirmed in wave 2)",
+        "scope": "crates/nexus42/src/commands/creator/run.rs:150,152 (`format!(\"{path}?status={s}\")`)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "Status value containing &, ?, space produces malformed URL or extra query params. Latent injection vector for query params. Fix: use reqwest::Url or urlencoding::encode for filter values. Low severity (controlled filter set), out of P1 fix wave scope."
+      },
+      {
+        "id": "R-V133P1-08",
+        "title": "system preset list logic inlined in system/mod.rs (151-line edit) and only surfaces embedded presets",
+        "severity": "low",
+        "source": "qc2 F-008 (re-confirmed in wave 2; also qc1 S-001)",
+        "scope": "crates/nexus42/src/commands/system/mod.rs (list_system_presets); T1 contract \u00a77.3 named crates/nexus42/src/commands/system/preset.rs as a new file",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "T1 contract specified new file crates/nexus42/src/commands/system/preset.rs; actual change inlined into system/mod.rs. list_system_presets labels everything 'embedded' even though /v1/local/presets returns embedded+system+user. Fix: refactor to specified file layout + make list merge all 3 groups."
+      },
+      {
+        "id": "R-V133P1-09",
+        "title": "nexus-local-db::works uses runtime sqlx::query for static DML, bypassing compile-time contract",
+        "severity": "medium",
+        "source": "qc1 W-002 (re-confirmed in wave 2; explicitly deferred in plan \u00a78)",
+        "scope": "crates/nexus-local-db/src/works.rs (entire file); nexus-local-db/AGENTS.md, nexus-daemon-runtime/AGENTS.md require compile-time checked queries",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "Static INSERT/SELECT/UPDATE/DELETE use sqlx::query / query_as (runtime) with `// SAFETY:` comments. Conflicts with crate AGENTS.md mandatory compile-time macros. Deferred in P1 fix wave (requires DATABASE_URL workflow for cargo sqlx prepare). Spot check in wave 2 confirmed no SQL injection vectors (only bound params after constant column lists)."
+      },
+      {
+        "id": "R-V133P1-11",
+        "title": "list_works total field returns page size, not total row count \u2014 misleading pagination",
+        "severity": "low",
+        "source": "qc3 W-002 (re-confirmed in wave 2)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (list_works handler returning `total = records.len()`)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Pagination consumers may compute `has_more = total > offset + records.len()` and get wrong answer. Fix: separate COUNT(*) query (or document total as page size if intentional)."
+      },
+      {
+        "id": "R-V133P1-12",
+        "title": "run_intents unit tests landed in validation.rs inline mod, not new run_intents_validation.rs test target (T1 \u00a77.5 contract drift)",
+        "severity": "low",
+        "source": "qc1-wave2 W-001 (NEW finding from re-check)",
+        "scope": "crates/nexus-orchestration/src/preset/validation.rs:1413-1487 (inline #[cfg(test)] mod tests)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "T1 contract \u00a77.5 specified new file crates/nexus-orchestration/tests/run_intents_validation.rs as standalone test binary. Fix wave (1c547f4) added 3 tests inline in validation.rs (creator_preset_without_run_intents_is_error, creator_preset_with_run_intents_passes, system_preset_without_system_maintenance_is_warning) at lines 1413-1487. Functional coverage is present and tests pass; only the file-layout differs from contract. Move to new file in V1.33+ if/when scope permits."
+      }
+    ],
     "v1.32-post-qc-tech-debt": [
       {
         "id": "R-P2-01",
@@ -61,7 +445,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.33+",
-        "note": "Capability's input_schema doesn't reflect that presets can pass prompt_file + vars which the orchestration engine resolves to prompt at runtime. A4 validator correctly flags this as CapabilityArgDrift on novel-writing + research. Fix requires capability semantics change — out of P2 scope."
+        "note": "Capability's input_schema doesn't reflect that presets can pass prompt_file + vars which the orchestration engine resolves to prompt at runtime. A4 validator correctly flags this as CapabilityArgDrift on novel-writing + research. Fix requires capability semantics change \u2014 out of P2 scope."
       },
       {
         "id": "R-P2-02",
@@ -78,7 +462,7 @@
     "v1.31-post-qc-tech-debt": [
       {
         "id": "TD-V131-01",
-        "title": "Non-atomic queue claim race — claim_prompt_injections SELECT-then-UPDATE without transaction",
+        "title": "Non-atomic queue claim race \u2014 claim_prompt_injections SELECT-then-UPDATE without transaction",
         "severity": "low",
         "source": "qc2 C-2-2, qc1 W-002",
         "scope": "crates/nexus-local-db/src/prompt_injection.rs",
@@ -111,7 +495,7 @@
       },
       {
         "id": "TD-V131-04",
-        "title": "Unbounded prompt size in build_summary_prompt — memory/IPC risk",
+        "title": "Unbounded prompt size in build_summary_prompt \u2014 memory/IPC risk",
         "severity": "low",
         "source": "qc3 W-003",
         "scope": "crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
@@ -122,7 +506,7 @@
       },
       {
         "id": "TD-V131-05",
-        "title": "Missing prompt injection queue cleanup — table growth",
+        "title": "Missing prompt injection queue cleanup \u2014 table growth",
         "severity": "low",
         "source": "qc3 W-001",
         "scope": "crates/nexus-local-db/src/prompt_injection.rs",
@@ -155,7 +539,7 @@
       },
       {
         "id": "TD-V131-08",
-        "title": "memory-augmented preset exit_when kind:rule without rule expression — may need explicit always_true",
+        "title": "memory-augmented preset exit_when kind:rule without rule expression \u2014 may need explicit always_true",
         "severity": "nit",
         "source": "pr-review O-4",
         "scope": "crates/nexus-orchestration/embedded-presets/memory-augmented/preset.yaml",
@@ -168,7 +552,7 @@
     "v1.30-post-qc-tech-debt": [
       {
         "id": "TD-V130-01",
-        "title": "SessionCapture RwLock uses write() for all accesses — cosmetic under single-threaded IPC",
+        "title": "SessionCapture RwLock uses write() for all accesses \u2014 cosmetic under single-threaded IPC",
         "severity": "low",
         "source": "qc3 W-002",
         "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
@@ -179,7 +563,7 @@
       },
       {
         "id": "TD-V130-02",
-        "title": "cleanup_row fire-and-forget — DELETE failure silently lost, dangling registry rows possible",
+        "title": "cleanup_row fire-and-forget \u2014 DELETE failure silently lost, dangling registry rows possible",
         "severity": "low",
         "source": "qc2 W-003, qc3 W-003",
         "scope": "crates/nexus-local-db/src/reference_source.rs",
@@ -190,7 +574,7 @@
       },
       {
         "id": "TD-V130-03",
-        "title": "JobLifecycleGuard FSM — no RAII guard to ensure mark_done/mark_failed called exactly once",
+        "title": "JobLifecycleGuard FSM \u2014 no RAII guard to ensure mark_done/mark_failed called exactly once",
         "severity": "low",
         "source": "qc2 S-003",
         "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs",
@@ -201,7 +585,7 @@
       },
       {
         "id": "TD-V130-04",
-        "title": "Drop timeout 150ms may be insufficient for heavy LLM children — make configurable",
+        "title": "Drop timeout 150ms may be insufficient for heavy LLM children \u2014 make configurable",
         "severity": "low",
         "source": "qc3 S-001",
         "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
@@ -212,7 +596,7 @@
       },
       {
         "id": "TD-V130-05",
-        "title": "LIST_BY_WORLD_LIMIT=500 silently truncates — no truncation indicator to caller",
+        "title": "LIST_BY_WORLD_LIMIT=500 silently truncates \u2014 no truncation indicator to caller",
         "severity": "low",
         "source": "qc3 S-002",
         "scope": "crates/nexus-local-db/src/kb_store.rs",
@@ -223,7 +607,7 @@
       },
       {
         "id": "TD-V130-06",
-        "title": "mark_running lacks WHERE status guard — can revert done/failed jobs",
+        "title": "mark_running lacks WHERE status guard \u2014 can revert done/failed jobs",
         "severity": "low",
         "source": "qc3 S-004",
         "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
@@ -245,7 +629,7 @@
       },
       {
         "id": "TD-V130-08",
-        "title": "insert_with_retry returns generic Configuration error on collision — should use dedicated type",
+        "title": "insert_with_retry returns generic Configuration error on collision \u2014 should use dedicated type",
         "severity": "nit",
         "source": "qc2 S-005",
         "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
@@ -256,7 +640,7 @@
       },
       {
         "id": "TD-V130-09",
-        "title": "Dynamic SQL (format!) in reference_source::list and kb_store::list_by_world — not parameterized",
+        "title": "Dynamic SQL (format!) in reference_source::list and kb_store::list_by_world \u2014 not parameterized",
         "severity": "low",
         "source": "qc1 S-001, qc2 S-001",
         "scope": "crates/nexus-local-db/src/reference_source.rs, crates/nexus-local-db/src/kb_store.rs",
@@ -278,7 +662,7 @@
       },
       {
         "id": "TD-V130-11",
-        "title": "sqlx prepare CI enforcement — ensure offline metadata stays green after query changes",
+        "title": "sqlx prepare CI enforcement \u2014 ensure offline metadata stays green after query changes",
         "severity": "low",
         "source": "qc2 S-008",
         "scope": "CI pipeline",

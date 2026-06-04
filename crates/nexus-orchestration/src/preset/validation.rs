@@ -17,7 +17,7 @@
 //! may elevate to error in strict mode (future work).
 
 use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{EnterAction, ExitWhen, PresetManifest};
+use crate::preset::manifest::{EnterAction, ExitWhen, PresetKind, PresetManifest, RunIntent};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -72,6 +72,8 @@ pub enum DiagnosticCategory {
     CapabilityArgDrift,
     /// Schema check could not be performed (registry lacks metadata).
     SchemaCheckSkipped,
+    /// Run intent classification issue (V1.33 §5).
+    RunIntents,
 }
 
 /// Result of semantic validation: a list of diagnostics.
@@ -152,6 +154,9 @@ pub fn validate_preset_semantic(
 
     // A4: Capability compatibility checks
     check_capability_arg_compatibility(manifest, caps, &mut result);
+
+    // A5: Run intents checks (V1.33 §5)
+    check_run_intents(manifest, &mut result);
 
     result
 }
@@ -750,6 +755,51 @@ fn check_args_against_schema(
 }
 
 // ---------------------------------------------------------------------------
+// A5: Run intents checks (V1.33 §5)
+// ---------------------------------------------------------------------------
+
+/// Check run intent declarations (V1.33 §5.1).
+///
+/// - Every `kind: creator` preset must have at least one of `work_init` or `work_continue`.
+/// - `kind: system` presets may have empty `run_intents` or include `system_maintenance`.
+fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
+    let intents: HashSet<RunIntent> = manifest.preset.run_intents.iter().copied().collect();
+
+    match manifest.preset.kind {
+        PresetKind::Creator => {
+            // R-V133P1-05: Creator presets must declare at least one run_intent.
+            // Promoted from Warning to Error — the engine requires at least one
+            // intent to schedule a run; surfacing at load time prevents runtime failures.
+            if intents.is_empty() {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: "preset.run_intents".to_string(),
+                    message: format!(
+                        "creator preset '{}' must declare at least one run_intent (e.g. work_init, work_continue, knowledge_ingest, work_maintenance)",
+                        manifest.preset.id
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::RunIntents,
+                });
+            }
+        }
+        PresetKind::System => {
+            // System presets with run_intents should include system_maintenance.
+            if !intents.is_empty() && !intents.contains(&RunIntent::SystemMaintenance) {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: "preset.run_intents".to_string(),
+                    message: format!(
+                        "system preset '{}' has run_intents but none is system_maintenance",
+                        manifest.preset.id
+                    ),
+                    severity: DiagnosticSeverity::Warning,
+                    category: DiagnosticCategory::RunIntents,
+                });
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -770,6 +820,7 @@ preset:
   kind: creator
   description: minimal
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -806,6 +857,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: c
 states:
@@ -841,6 +893,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -874,6 +927,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -906,6 +960,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -946,6 +1001,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -977,6 +1033,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1008,6 +1065,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1055,6 +1113,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1091,6 +1150,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1128,6 +1188,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1167,6 +1228,7 @@ preset:
   description: test
   requires_capabilities:
     - totally.fake.capability
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1198,6 +1260,7 @@ preset:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1276,6 +1339,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1307,6 +1371,7 @@ states:
   kind: creator
   description: test
   requires_capabilities: []
+  run_intents: [work_init]
   initial: a
   terminal: b
 states:
@@ -1339,6 +1404,122 @@ states:
             !result.has_errors(),
             "expected no errors for valid manifest: {:?}",
             result.diagnostics
+        );
+    }
+
+    // ── R-V133P1-05: run_intents validation tests ──────────────────────────
+
+    #[test]
+    fn creator_preset_without_run_intents_is_error() {
+        let yaml = r"
+preset:
+  id: no-intents
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let result = validate_preset_semantic(&manifest, &test_caps());
+        assert!(
+            result.has_errors(),
+            "empty run_intents on creator should be an error"
+        );
+        let diags: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.category == DiagnosticCategory::RunIntents)
+            .collect();
+        assert_eq!(diags.len(), 1, "expected exactly 1 RunIntents diagnostic");
+        assert_eq!(diags[0].severity, DiagnosticSeverity::Error);
+        assert!(
+            diags[0]
+                .message
+                .contains("must declare at least one run_intent"),
+            "message should say 'must': {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn creator_preset_with_run_intents_passes() {
+        let yaml = r"
+preset:
+  id: with-intents
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init, work_continue]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let result = validate_preset_semantic(&manifest, &test_caps());
+        let run_intent_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.category == DiagnosticCategory::RunIntents)
+            .collect();
+        assert!(
+            run_intent_errors.is_empty(),
+            "creator with run_intents should not generate RunIntents diagnostics: {:?}",
+            run_intent_errors
+        );
+    }
+
+    #[test]
+    fn system_preset_without_system_maintenance_is_warning() {
+        let yaml = r"
+preset:
+  id: sys-no-maint
+  version: 1
+  kind: system
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let result = validate_preset_semantic(&manifest, &test_caps());
+        let diags: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.category == DiagnosticCategory::RunIntents)
+            .collect();
+        assert_eq!(
+            diags.len(),
+            1,
+            "system without system_maintenance should warn"
+        );
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Warning,
+            "system preset without system_maintenance should be a Warning, not Error"
         );
     }
 }

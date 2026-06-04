@@ -207,6 +207,9 @@ fn narrative_routes() -> Router<WorkspaceState> {
 }
 
 /// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
+///
+/// V1.33 P4: Added `POST /v1/local/memory/review` and
+/// `GET /v1/local/memory/fragments` to close the review/fragment loop.
 fn memory_routes() -> Router<WorkspaceState> {
     Router::new()
         // Memory pending review
@@ -225,6 +228,30 @@ fn memory_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/local/memory/pending-review/{id}",
             delete(handlers::memory::delete_pending_review),
+        )
+        // Memory review pipeline (V1.33 P4)
+        .route("/v1/local/memory/review", post(handlers::memory::review))
+        // Memory fragments (V1.33 P4)
+        .route(
+            "/v1/local/memory/fragments",
+            get(handlers::memory::fragments),
+        )
+}
+
+/// Works routes — Work CRUD + inspiration (V1.33 §7.2).
+fn works_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/works",
+            post(handlers::works::create_work).get(handlers::works::list_works),
+        )
+        .route(
+            "/v1/local/works/{work_id}",
+            get(handlers::works::get_work).patch(handlers::works::patch_work),
+        )
+        .route(
+            "/v1/local/works/{work_id}/inspiration",
+            post(handlers::works::append_inspiration),
         )
 }
 /// Create the Local API router
@@ -258,6 +285,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(preset_routes())
         .merge(kb_routes())
         .merge(memory_routes())
+        .merge(works_routes())
         .merge(narrative_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))

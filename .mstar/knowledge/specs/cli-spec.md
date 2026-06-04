@@ -333,21 +333,46 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 - **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
 - **Removed:** `daemon orchestrate ...` is not a shipped compatibility surface. Do not document `daemon orchestrate run` in new plans or runbooks; use `daemon schedule ...` for shipped orchestration control unless a future plan intentionally introduces a new session-control wrapper.
 
+### 6.2D `nexus42 creator run` (Work experience — V1.33 target)
+
+High-level **user-facing** entry for narrative Work lifecycle. Hides `daemon schedule` details for the default product path. Normative model: [work-experience-model.md](./work-experience-model.md).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator run start --idea "<text>"` | Create a **Work** (`work_id`), run Creative Brief Intake, then primary preset (default `novel-writing`) |
+| `nexus42 creator run continue <work_id> [--note "<text>"]` | Append inspiration/direction; optionally resume/attach `work_continue` preset |
+| `nexus42 creator run list` | List Works in active workspace |
+| `nexus42 creator run status <work_id>` | Work status, intake, linked schedules, world binding |
+
+Rules:
+
+- Only presets declaring `run_intents` including `work_init` may be used as the **first** run on a new Work (see [orchestration-engine.md](./orchestration-engine.md) §7.7).
+- `work_continue` presets require completed intake unless `--force` (audited).
+- `creator run` creates/updates schedules via daemon Local API; it does **not** replace `daemon schedule` for power users.
+
+**Shipped (V1.33 P1 + P2):** `creator run start / continue / list / status` are wired in `crates/nexus42/src/commands/creator/run.rs`. `creator run start --idea "..."` creates a Work (`work_id`), auto-schedules Creative Brief Intake, and chains novel-writing (or runs directly with `--chain-novel-writing --skip-intake`). Implementation tracked by plan `2026-06-04-v1.33-work-model-and-creator-run` (Done) + `2026-06-04-v1.33-creative-brief-intake-preset` (Done).
+
 ### 6.3A Preset management and validation surfaces
 
-Current shipped CLI surface:
+**System / maintenance** (not the default user creative entry):
 
-- `nexus42 system preset list` — lists registered `_system.*` presets only.
-- `nexus42 daemon schedule add --preset <id> --creator <id>` — starts preset-driven workflows through schedules.
+| Command | Purpose |
+| --- | --- |
+| `nexus42 system preset list` | List embedded + user + system presets with `run_intents` (V1.33 expands beyond `_system.*` only) |
+| `nexus42 system preset validate <path>` | Validate preset bundle via shared orchestration facade (V1.33) |
 
-Current shipped Local API surface:
+**Power-user orchestration** (unchanged):
+
+- `nexus42 daemon schedule add --preset <id> --creator <id> [--seed "..."]` — starts preset-driven workflows through schedules.
+
+**Local API** (shipped):
 
 - `GET /v1/local/presets`
 - `POST /v1/local/presets`
 - `POST /v1/local/presets:validate`
 - `POST /v1/local/presets/{id}:reload`
 
-There is currently **no** top-level `nexus42 preset ...` command group and no shipped `nexus42 preset validate <path>` command. New docs must not present those as current commands. If V1.32 or later reintroduces an agent-friendly preset validation CLI, update this section and the command-surface contract tests in the same plan.
+There is **no** top-level `nexus42 preset ...` command group. User creative entry is **`creator run`** (V1.33); validation/listing is **`system preset`**.
 
 ### 6.4 `nexus42 acp`（能力协议命令组）
 

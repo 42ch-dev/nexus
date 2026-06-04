@@ -1,0 +1,54 @@
+{
+  "plan_id": "2026-06-04-v1.33-work-model-and-creator-run",
+  "archived_at": "2026-06-04T14:15:00+08:00",
+  "closed_by": "P1 fix wave (commits eca7274, 95470aa, 1c547f4, 4098bc5, bab71b6, 9703e6b) + re-QC wave 2 (reports qc1-wave2, qc2-wave2, qc3-wave2)",
+  "verifier": "qc-specialist-2 (a4d389e)",
+  "items": [
+    {
+      "id": "R-V133P1-01",
+      "title": "Work create idempotency is not atomic and ignores idempotency write failure",
+      "original_severity": "critical",
+      "closed_at": "2026-06-04T14:15:00+08:00",
+      "fix_commit": "eca7274",
+      "evidence": "create_work_atomic (nexus-local-db/src/works.rs:241) wraps find+insert+record in single sqlx transaction; UNIQUE violation maps to 200 OK replay. Handler test create_work_idempotent_replay_returns_200 (works_api.rs:154) confirms.",
+      "decision": "closed"
+    },
+    {
+      "id": "R-V133P1-02",
+      "title": "All 5 new /v1/local/works* endpoints return 409 Conflict instead of required 401 for missing creator context",
+      "original_severity": "critical",
+      "closed_at": "2026-06-04T14:15:00+08:00",
+      "fix_commit": "eca7274",
+      "evidence": "All 5 works handlers (works.rs:139, 141, 203, 205, 245, etc.) use AuthRequired; errors.rs:140 maps AuthRequired to UNAUTHORIZED 401. Tests *_returns_401_without_creator cover the 5 endpoints.",
+      "decision": "closed"
+    },
+    {
+      "id": "R-V133P1-04",
+      "title": "append_inspiration response count is wrong under concurrent appends; substr-based JSON append is fragile",
+      "original_severity": "critical",
+      "closed_at": "2026-06-04T14:15:00+08:00",
+      "fix_commit": "eca7274",
+      "evidence": "append_inspiration (works.rs:558) uses tx + Rust Vec append + full UPDATE inside tx; handler derives count from post-state updated.inspiration_log (no pre len+1).",
+      "decision": "closed"
+    },
+    {
+      "id": "R-V133P1-06",
+      "title": "CLI creator run / system preset yield raw Network error when daemon down, not friendly DaemonNotRunning hint",
+      "original_severity": "medium",
+      "closed_at": "2026-06-04T14:15:00+08:00",
+      "fix_commit": "4098bc5",
+      "evidence": "errors.rs:306 From<reqwest>: is_connect()||is_timeout() → DaemonNotRunning (else Network); display has 'daemon start' suggestion. Tests health_check connection_refused, daemon_not_running_display, replay_delta_daemon_not_running all pass.",
+      "decision": "closed"
+    },
+    {
+      "id": "R-V133P1-10",
+      "title": "Work API response shape drift — creative_brief/inspiration_log/schedule_ids returned as raw JSON strings",
+      "original_severity": "medium",
+      "closed_at": "2026-06-04T14:45:00+08:00",
+      "fix_commit": "da3e1c6 (corrected from initial bab71b6 claim)",
+      "evidence": "QA re-verification at commit da3e1c6 confirmed: WorkApiDto.creative_brief is Option<serde_json::Value> (line 39), inspiration_log is Vec<serde_json::Value> (line 43), schedule_ids is Vec<String> (line 45). From<WorkRecord> impl parses JSON strings with safe fallbacks (lines 55-60). 2 new works_api tests (create_work_response_has_parsed_json_fields, append_inspiration_response_has_parsed_arrays) assert parsed types. Full 18/18 works_api pass. The initial bab71b6 closure was premature — the DTO type was added but field types remained raw String with direct field copy; the prior archive evidence at 14:15 was incorrect and is superseded by this re-verified entry.",
+      "decision": "closed",
+      "qa_recheck_report": ".mstar/plans/2026-06-04-v1.33-work-model-and-creator-run/reports/2026-06-04-v1.33-work-model-and-creator-run-qa-recheck.md (a5816ff)"
+    }
+  ]
+}

@@ -10,9 +10,10 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_sixteen_builtins() {
+async fn registry_has_eighteen_builtins() {
+    // V1.33 P2 added `creator.write_brief`; previously 17, now 18.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 17);
+    assert_eq!(reg.len(), 18);
 }
 
 #[tokio::test]

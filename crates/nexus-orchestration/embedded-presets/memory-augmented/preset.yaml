@@ -24,6 +24,8 @@ preset:
     - creator.read_memory
     - acp.prompt
     - creator.write_memory
+  run_intents:
+    - work_continue
   initial: recall
   terminal: done
 
@@ -58,7 +60,7 @@ states:
       - kind: capability
         name: creator.write_memory
         args:
-          content: "{{preset.input.topic}}"
+          content: "{{state.generate.output}}"
           keywords:
             - "{{preset.input.keyword}}"
     exit_when:
