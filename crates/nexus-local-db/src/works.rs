@@ -427,6 +427,53 @@ pub async fn list_works(
         .collect())
 }
 
+/// Count total Works matching the given filters (ignores limit/offset).
+///
+/// Used by the list handler to return the true total row count for
+/// pagination, independent of the page size.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_works(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+    filters: &WorkListFilters,
+) -> Result<u32, LocalDbError> {
+    let mut where_clauses = vec![
+        "creator_id = ?".to_string(),
+        "workspace_slug = ?".to_string(),
+    ];
+
+    if filters.status.is_some() {
+        where_clauses.push("status = ?".to_string());
+    }
+    if filters.intake_status.is_some() {
+        where_clauses.push("intake_status = ?".to_string());
+    }
+
+    let where_sql = where_clauses.join(" AND ");
+
+    // SAFETY: Dynamic SQL required for optional WHERE filters.
+    // All user inputs are passed as bound parameters, not interpolated.
+    let sql = format!("SELECT COUNT(*) AS cnt FROM works WHERE {where_sql}");
+
+    let mut query = sqlx::query(&sql).bind(creator_id).bind(workspace_slug);
+
+    if let Some(ref s) = filters.status {
+        query = query.bind(s);
+    }
+    if let Some(ref s) = filters.intake_status {
+        query = query.bind(s);
+    }
+
+    let row = query.fetch_one(pool).await?;
+    // COUNT(*) returns non-negative; u32::try_from is safe for all practical row counts.
+    let count: i64 = row.get("cnt");
+    Ok(u32::try_from(count).unwrap_or(0))
+}
+
 /// Partially update a Work.
 ///
 /// Only non-None fields in `patch` are applied.

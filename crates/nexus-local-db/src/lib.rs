@@ -96,8 +96,9 @@ pub use prompt_injection::{
 
 // Re-export works types
 pub use works::{
-    append_inspiration, create_work, find_work_by_client_request_id, get_work, list_works,
-    patch_work, record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
+    append_inspiration, count_works, create_work, find_work_by_client_request_id, get_work,
+    list_works, patch_work, record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch,
+    WorkRecord,
 };
 
 /// Runtime role for database initialization
