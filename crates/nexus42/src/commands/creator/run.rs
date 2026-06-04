@@ -11,6 +11,7 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::orchestration::{FL_E_STAGES, stage_index};
+use nexus_orchestration::preset::validation::default_preset_for_stage;
 
 #[derive(Debug, Subcommand)]
 pub enum RunCommand {
@@ -575,6 +576,15 @@ async fn stage_advance(
                  Complete intake first, or use --force to override."
             )));
         }
+        // Active FL-E schedule protection (spec §2 invariant #4):
+        // At most one active FL-E stage schedule per Work at a time.
+        if current_status == "active" {
+            return Err(crate::errors::CliError::Other(format!(
+                "Work {work_id} already has an active stage schedule \
+                 ('{current_stage}' is '{current_status}'). Wait for the current stage \
+                 to complete or cancel before advancing."
+            )));
+        }
     }
 
     // PATCH the work with new stage
@@ -587,8 +597,61 @@ async fn stage_advance(
         .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
         .await?;
 
+    // Create an FL-E stage schedule (spec §2 invariant #4, §5.3).
+    // stage advance enqueues a schedule for the target stage using the
+    // normative preset mapping, with work_id and fl_e_stage in metadata.
+    let preset_id = default_preset_for_stage(target_stage);
+    let mut schedule_id: Option<String> = None;
+    if let Some(pid) = preset_id {
+        // Read creator_id from the updated work response
+        let creator_id = updated
+            .get("creator_id")
+            .or_else(|| {
+                // WorkApiDto does not expose creator_id; fall back to label-based approach
+                None
+            })
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let schedule_body = serde_json::json!({
+            "creatorId": creator_id,
+            "presetId": pid,
+            "label": format!("FL-E stage: {target_stage} (work: {work_id})"),
+            "presetInput": {
+                "work_id": work_id,
+                "fl_e_stage": target_stage,
+            }
+        });
+
+        match client
+            .post::<serde_json::Value, _>(
+                "/v1/local/orchestration/schedules",
+                &schedule_body,
+            )
+            .await
+        {
+            Ok(sched_resp) => {
+                schedule_id = sched_resp
+                    .get("scheduleId")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+            }
+            Err(e) => {
+                // Schedule creation failure is non-fatal — the Work stage is
+                // already advanced. Report but don't abort.
+                eprintln!("Warning: failed to create stage schedule: {e}");
+            }
+        }
+    }
+
     if json {
-        println!("{}", serde_json::to_string_pretty(&updated)?);
+        let mut output = updated;
+        if let Some(sid) = &schedule_id {
+            output
+                .as_object_mut()
+                .map(|o| o.insert("stage_schedule_id".to_string(), serde_json::Value::String(sid.clone())));
+        }
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         let new_stage = updated
             .get("current_stage")
@@ -609,22 +672,14 @@ async fn stage_advance(
         println!("Work '{title}' advanced to stage: {new_stage} ({new_status})");
         println!("  Work ID: {work_id}");
 
-        // Show what preset would be associated (informational)
-        let preset_hint = match target_stage {
-            "intake" => "creative-brief-intake",
-            "research" => "research",
-            "produce" => "novel-writing",
-            "review" => "reflection-loop",
-            "persist" => "kb-extract",
-            _ => "(unknown)",
-        };
-        println!("  Typical preset: {preset_hint}");
-        println!();
-        println!("To schedule the preset:");
-        println!(
-            "  nexus42 daemon schedule add --preset {preset_hint} \
-             --creator <id> --seed \"<context>\""
-        );
+        if let Some(sid) = &schedule_id {
+            let pid = preset_id.unwrap_or("(unknown)");
+            println!("  Stage schedule: {sid} (preset: {pid})");
+        }
+
+        if let Some(pid) = preset_id {
+            println!("  Typical preset: {pid}");
+        }
     }
 
     Ok(())
