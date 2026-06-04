@@ -227,6 +227,23 @@ fn memory_routes() -> Router<WorkspaceState> {
             delete(handlers::memory::delete_pending_review),
         )
 }
+
+/// Works routes — Work CRUD + inspiration (V1.33 §7.2).
+fn works_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/works",
+            post(handlers::works::create_work).get(handlers::works::list_works),
+        )
+        .route(
+            "/v1/local/works/{work_id}",
+            get(handlers::works::get_work).patch(handlers::works::patch_work),
+        )
+        .route(
+            "/v1/local/works/{work_id}/inspiration",
+            post(handlers::works::append_inspiration),
+        )
+}
 /// Create the Local API router
 ///
 /// **Unguarded routes** (no auth, always reachable):
@@ -258,6 +275,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(preset_routes())
         .merge(kb_routes())
         .merge(memory_routes())
+        .merge(works_routes())
         .merge(narrative_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
