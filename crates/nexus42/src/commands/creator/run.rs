@@ -11,8 +11,8 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
-use nexus_orchestration::preset::validation::default_preset_for_stage;
-use nexus_orchestration::stage_gates::{self, WorkStageState};
+use nexus_contracts::local::schedule::http::AddScheduleRequest;
+use nexus_orchestration::stage_gates::{self, WorkFields, WorkStageState};
 
 #[derive(Debug, Subcommand)]
 pub enum RunCommand {
@@ -171,22 +171,26 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             // Schedule intake preset if not skipped
             let mut schedule_id: Option<String> = None;
             if !skip_intake {
-                let intake_body = serde_json::json!({
-                    "presetId": "creative-brief-intake",
-                    "seed": &idea,
-                    "presetInput": {
-                        "work_id": &work_id,
-                        "initial_idea": &idea,
-                    }
-                });
+                let intake_request = AddScheduleRequest {
+                    creator_id: String::new(),
+                    preset_id: "creative-brief-intake".to_string(),
+                    seed: Some(idea.clone()),
+                    label: None,
+                    depends_on: None,
+                    concurrency: None,
+                    scheduled_at: None,
+                };
 
                 match client
-                    .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &intake_body)
+                    .post::<serde_json::Value, _>(
+                        "/v1/local/orchestration/schedules",
+                        &intake_request,
+                    )
                     .await
                 {
                     Ok(sched_resp) => {
                         schedule_id = sched_resp
-                            .get("scheduleId")
+                            .get("schedule_id")
                             .and_then(|v| v.as_str())
                             .map(String::from);
                     }
@@ -214,21 +218,26 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             if chain_novel_writing && skip_intake {
                 // Intake skipped → schedule novel-writing directly.
                 let production_preset = preset.as_deref().unwrap_or("novel-writing");
-                let novel_body = serde_json::json!({
-                    "presetId": production_preset,
-                    "seed": &idea,
-                    "presetInput": {
-                        "work_id": &work_id,
-                    }
-                });
+                let novel_request = AddScheduleRequest {
+                    creator_id: String::new(),
+                    preset_id: production_preset.to_string(),
+                    seed: Some(idea.clone()),
+                    label: None,
+                    depends_on: None,
+                    concurrency: None,
+                    scheduled_at: None,
+                };
 
                 match client
-                    .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &novel_body)
+                    .post::<serde_json::Value, _>(
+                        "/v1/local/orchestration/schedules",
+                        &novel_request,
+                    )
                     .await
                 {
                     Ok(sched_resp) => {
                         novel_schedule_id = sched_resp
-                            .get("scheduleId")
+                            .get("schedule_id")
                             .and_then(|v| v.as_str())
                             .map(String::from);
                     }
@@ -401,7 +410,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
         }
-        RunCommand::Stage { command } => handle_stage(command, &client).await?,
+        RunCommand::Stage { command } => handle_stage(command, config, &client).await?,
     }
 
     Ok(())
@@ -414,7 +423,11 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if the daemon API call fails or stage validation rejects the advance.
-async fn handle_stage(cmd: StageCommand, client: &crate::api::DaemonClient) -> Result<()> {
+async fn handle_stage(
+    cmd: StageCommand,
+    config: &CliConfig,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
     match cmd {
         StageCommand::List { work_id, json } => stage_list(&work_id, json, client).await,
         StageCommand::Advance {
@@ -422,7 +435,7 @@ async fn handle_stage(cmd: StageCommand, client: &crate::api::DaemonClient) -> R
             stage,
             force,
             json,
-        } => stage_advance(&work_id, &stage, force, json, client).await,
+        } => stage_advance(&work_id, &stage, force, json, config, client).await,
     }
 }
 
@@ -496,6 +509,7 @@ async fn stage_advance(
     target_stage: &str,
     force: bool,
     json: bool,
+    config: &CliConfig,
     client: &crate::api::DaemonClient,
 ) -> Result<()> {
     // Fetch current work state
@@ -528,7 +542,7 @@ async fn stage_advance(
         intake_status: intake_status.to_string(),
     };
     stage_gates::check_stage_advance(&work_state, target_stage, force)
-        .map_err(|e| crate::errors::CliError::Other(e.message))?;
+        .map_err(|e| crate::errors::CliError::Other(format!("{}: {}", e.code, e.message)))?;
 
     // PATCH the work with new stage
     let patch = serde_json::json!({
@@ -555,42 +569,93 @@ async fn stage_advance(
     }
 
     // Create an FL-E stage schedule (spec §2 invariant #4, §5.3).
-    // stage advance enqueues a schedule for the target stage using the
-    // normative preset mapping, with work_id and fl_e_stage in metadata.
-    let preset_id = default_preset_for_stage(target_stage);
+    // Uses the shared facade `build_schedule_for_stage` to construct a
+    // correctly-shaped AddScheduleRequest (R-FL-E-P2-03).
+    //
+    // R-FL-E-P2-05: creator_id comes from CLI config's active_creator_id,
+    // NOT from WorkApiDto (SEC-V131-01 omits creator_id from Work responses).
     let mut schedule_id: Option<String> = None;
-    if let Some(pid) = preset_id {
-        // Read creator_id from the updated work response
-        let creator_id = updated
-            .get("creator_id")
-            // WorkApiDto does not expose creator_id; fall back to empty string
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+    let preset_id = stage_gates::preset_for_stage(target_stage);
 
-        let schedule_body = serde_json::json!({
-            "creatorId": creator_id,
-            "presetId": pid,
-            "label": format!("FL-E stage: {target_stage} (work: {work_id})"),
-            "presetInput": {
-                "work_id": work_id,
-                "fl_e_stage": target_stage,
-            }
-        });
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+    // Build Work fields for the schedule request
+    let creative_brief = resp
+        .get("creative_brief")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let inspiration_log = resp
+        .get("inspiration_log")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+
+    let fields = WorkFields {
+        work_id: work_id.to_string(),
+        fl_e_stage: target_stage.to_string(),
+        creative_brief: creative_brief.to_string(),
+        inspiration_log: inspiration_log.to_string(),
+    };
+
+    if let Some(request) = stage_gates::build_schedule_for_stage(target_stage, creator_id, &fields)
+    {
+        let pid = &request.preset_id;
+
+        // Audit log before schedule creation attempt.
+        tracing::info!(
+            target: "fl_e.audit",
+            work_id = %work_id,
+            stage = %target_stage,
+            preset_id = %pid,
+            creator_id = %creator_id,
+            "FL-E stage schedule creation requested"
+        );
 
         match client
-            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &schedule_body)
+            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
             .await
         {
             Ok(sched_resp) => {
                 schedule_id = sched_resp
-                    .get("scheduleId")
+                    .get("schedule_id")
                     .and_then(|v| v.as_str())
                     .map(String::from);
+
+                tracing::info!(
+                    target: "fl_e.audit",
+                    work_id = %work_id,
+                    stage = %target_stage,
+                    preset_id = %pid,
+                    schedule_id = %schedule_id.as_deref().unwrap_or("?"),
+                    "FL-E stage schedule created"
+                );
             }
             Err(e) => {
-                // Schedule creation failure is non-fatal — the Work stage is
-                // already advanced. Report but don't abort.
-                eprintln!("Warning: failed to create stage schedule: {e}");
+                // Schedule creation failure is blocking — rollback the stage advance
+                // so the Work does not end up in 'active' without a driver.
+                tracing::error!(
+                    target: "fl_e.audit",
+                    work_id = %work_id,
+                    stage = %target_stage,
+                    error = %e,
+                    "FL-E stage schedule creation failed; rolling back stage advance"
+                );
+
+                // Attempt to restore previous stage state
+                let rollback = serde_json::json!({
+                    "current_stage": current_stage,
+                    "stage_status": current_status,
+                });
+                let _ = client
+                    .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &rollback)
+                    .await;
+
+                return Err(crate::errors::CliError::Other(format!(
+                    "FL_E_SCHEDULE_CREATE_FAILED: failed to create stage schedule for '{target_stage}': {e}. \
+                     Stage advance rolled back to '{current_stage}' ({current_status})."
+                )));
             }
         }
     }

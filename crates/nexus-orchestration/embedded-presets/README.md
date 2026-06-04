@@ -84,3 +84,66 @@ cargo clippy -p nexus-orchestration -- -D warnings
 - The `context.summarize` capability in reflection-loop requires a worker at runtime; in standalone mode it returns `WorkerUnavailable`
 - The `creator.read_memory` / `creator.write_memory` capabilities work in standalone mode (return stubs) and with a pool (real persistence)
 - `exit_when: kind: rule` with no expression is the explicit always-true (immediate transition) form — the state advances as soon as its enter action completes
+
+## FL-E Stage Chain (V1.34)
+
+V1.34 introduces the FL-E (Full Lifecycle Experience) stage chain — an explicit, linear progression through preset-driven stages for each Work:
+
+```text
+intake → research → produce → review → persist
+```
+
+### Stage → Preset Mapping
+
+| Stage | Default Preset | `--force` | `run_intents` |
+|-------|---------------|-----------|---------------|
+| `intake` | `creative-brief-intake` | N/A (first stage) | `work_init` |
+| `research` | `research` | Skips research gate | `work_continue` |
+| `produce` | `novel-writing` | Skips produce gate | `work_continue` |
+| `review` | `reflection-loop` | Skips review gate | `work_continue` |
+| `persist` | `kb-extract` | Skips persist gate | `knowledge_ingest` |
+
+### Stage Advance Flow
+
+Each `creator run stage advance --stage <id>` triggers:
+
+1. **Gate validation** — checks linear order, current stage completion, no active schedule (shared by CLI and daemon).
+2. **Work PATCH** — sets `current_stage` and `stage_status = active`.
+3. **Schedule create** — enqueues a schedule for the default preset with `presetInput` containing `work_id`, `fl_e_stage`, `creative_brief`, and `inspiration_log`.
+
+### `--force` Semantics
+
+`--force` bypasses all gate checks (wrong order, incomplete current stage, active schedule). Every forced advance is audit-logged with target `fl_e.audit`.
+
+### Preset Input Variables
+
+All stage schedules receive these preset input fields from the Work entity:
+
+| Variable | Source | Used by |
+|----------|--------|---------|
+| `work_id` | Work entity ID | All stages |
+| `fl_e_stage` | Target stage name | All stages |
+| `creative_brief` | `works.creative_brief` | `research`, `novel-writing` |
+| `inspiration_log` | `works.inspiration_log` (JSON array) | `research`, `novel-writing` |
+
+### Manual Demo
+
+```bash
+# Full FL-E chain on a demo Work:
+nexus42 creator run start --idea "A sci-fi thriller about AI consciousness"
+# After intake completes:
+nexus42 creator run stage advance <work_id> --stage research
+nexus42 creator run stage advance <work_id> --stage produce
+nexus42 creator run stage advance <work_id> --stage review
+nexus42 creator run stage advance <work_id> --stage persist
+```
+
+### Test Coverage
+
+```bash
+# Run the full FL-E chain integration test
+cargo test -p nexus-orchestration -- fl_e_chain
+
+# Run stage gate unit tests
+cargo test -p nexus-orchestration -- stage_gates
+```
