@@ -45,6 +45,10 @@ pub struct WorkApiDto {
     pub schedule_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Current FL-E stage (V1.34).
+    pub current_stage: String,
+    /// Current FL-E stage status (V1.34).
+    pub stage_status: String,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -74,6 +78,8 @@ impl From<WorkRecord> for WorkApiDto {
             schedule_ids,
             created_at: r.created_at,
             updated_at: r.updated_at,
+            current_stage: r.current_stage,
+            stage_status: r.stage_status,
         }
     }
 }
@@ -131,6 +137,10 @@ pub struct PatchWorkRequest {
     pub world_id: Option<Option<String>>,
     pub story_ref: Option<Option<String>>,
     pub primary_preset_id: Option<String>,
+    /// V1.34 FL-E: update the current stage.
+    pub current_stage: Option<String>,
+    /// V1.34 FL-E: update the stage status.
+    pub stage_status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +189,8 @@ pub async fn create_work(
         schedule_ids: String::from("[]"),
         created_at: now.clone(),
         updated_at: now.clone(),
+        current_stage: "intake".to_string(),
+        stage_status: "pending".to_string(),
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -300,6 +312,8 @@ pub async fn patch_work(
         story_ref: req.story_ref,
         primary_preset_id: req.primary_preset_id,
         schedule_ids: None,
+        current_stage: req.current_stage,
+        stage_status: req.stage_status,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)

@@ -43,6 +43,10 @@ pub struct WorkRecord {
     pub created_at: String,
     /// Last update timestamp (ISO 8601).
     pub updated_at: String,
+    /// Current FL-E stage (V1.34 creator-workflow-fl-e §3.1).
+    pub current_stage: String,
+    /// Current stage status (V1.34 creator-workflow-fl-e §3.2).
+    pub stage_status: String,
 }
 
 /// Inspiration log entry — `{at, note}`.
@@ -88,6 +92,10 @@ pub struct WorkPatch {
     pub primary_preset_id: Option<String>,
     /// New `schedule_ids` JSON.
     pub schedule_ids: Option<String>,
+    /// New `current_stage` (V1.34 FL-E).
+    pub current_stage: Option<String>,
+    /// New `stage_status` (V1.34 FL-E).
+    pub stage_status: Option<String>,
 }
 
 /// Create a new Work (simple, non-transactional).
@@ -104,8 +112,8 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     sqlx::query(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
-         primary_preset_id, schedule_ids, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -123,6 +131,8 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     .bind(&record.schedule_ids)
     .bind(&record.created_at)
     .bind(&record.updated_at)
+    .bind(&record.current_stage)
+    .bind(&record.stage_status)
     .execute(pool)
     .await?;
     Ok(())
@@ -138,8 +148,8 @@ async fn insert_work_tx(
     sqlx::query(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
-         primary_preset_id, schedule_ids, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -157,6 +167,8 @@ async fn insert_work_tx(
     .bind(&record.schedule_ids)
     .bind(&record.created_at)
     .bind(&record.updated_at)
+    .bind(&record.current_stage)
+    .bind(&record.stage_status)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -321,7 +333,8 @@ pub async fn get_work(
     let row = sqlx::query(
         "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
                 initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at
+                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
+                current_stage, stage_status
          FROM works WHERE work_id = ? AND creator_id = ?",
     )
     .bind(work_id)
@@ -346,6 +359,8 @@ pub async fn get_work(
         schedule_ids: r.get("schedule_ids"),
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
+        current_stage: r.get("current_stage"),
+        stage_status: r.get("stage_status"),
     }))
 }
 
@@ -432,7 +447,8 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     let sql = format!(
         "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
                 initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at
+                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
+                current_stage, stage_status
          FROM works WHERE {where_sql}
          ORDER BY updated_at DESC
          LIMIT ? OFFSET ?"
@@ -470,6 +486,8 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
             schedule_ids: row.get("schedule_ids"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
+            current_stage: row.get("current_stage"),
+            stage_status: row.get("stage_status"),
         })
         .collect())
 }
@@ -556,6 +574,12 @@ pub async fn patch_work(
     if patch.schedule_ids.is_some() {
         set_clauses.push("schedule_ids = ?");
     }
+    if patch.current_stage.is_some() {
+        set_clauses.push("current_stage = ?");
+    }
+    if patch.stage_status.is_some() {
+        set_clauses.push("stage_status = ?");
+    }
 
     if set_clauses.is_empty() {
         // Nothing to update — just return current record.
@@ -611,6 +635,12 @@ pub async fn patch_work(
     if let Some(ref v) = patch.schedule_ids {
         query = query.bind(v);
     }
+    if let Some(ref v) = patch.current_stage {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.stage_status {
+        query = query.bind(v);
+    }
 
     query = query.bind(now).bind(work_id).bind(creator_id);
 
@@ -649,7 +679,8 @@ pub async fn append_inspiration(
     let row = sqlx::query(
         "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
                 initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at
+                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
+                current_stage, stage_status
          FROM works WHERE work_id = ? AND creator_id = ?",
     )
     .bind(work_id)
@@ -675,6 +706,8 @@ pub async fn append_inspiration(
             schedule_ids: r.get("schedule_ids"),
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
+            current_stage: r.get("current_stage"),
+            stage_status: r.get("stage_status"),
         })
         .ok_or_else(|| LocalDbError::MissingVersionKey {
             key: format!("works/{work_id}"),
@@ -709,6 +742,77 @@ pub async fn append_inspiration(
     Ok(updated)
 }
 
+// ── V1.34 FL-E stage functions ──────────────────────────────────────────────
+
+/// Update the FL-E stage and status on a Work (V1.34).
+///
+/// Returns the updated `WorkRecord`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails or no work is found.
+pub async fn update_work_stage(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    current_stage: &str,
+    stage_status: &str,
+    now: &str,
+) -> Result<WorkRecord, LocalDbError> {
+    // SAFETY: UPDATE with bounded column list — runtime query.
+    sqlx::query(
+        "UPDATE works SET current_stage = ?, stage_status = ?, updated_at = ?
+         WHERE work_id = ? AND creator_id = ?",
+    )
+    .bind(current_stage)
+    .bind(stage_status)
+    .bind(now)
+    .bind(work_id)
+    .bind(creator_id)
+    .execute(pool)
+    .await?;
+
+    get_work(pool, creator_id, work_id)
+        .await?
+        .ok_or_else(|| LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        })
+}
+
+/// Get the FL-E stage info for a Work (V1.34).
+///
+/// Returns `(current_stage, stage_status)` or `None` if the work doesn't exist.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn get_work_stage(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<Option<(String, String)>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query.
+    let row = sqlx::query(
+        "SELECT current_stage, stage_status FROM works WHERE work_id = ? AND creator_id = ?",
+    )
+    .bind(work_id)
+    .bind(creator_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| (r.get("current_stage"), r.get("stage_status"))))
+}
+
+/// Ordered list of FL-E stages (V1.34 creator-workflow-fl-e §3.1).
+pub const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
+
+/// Returns the index of a stage in the FL-E linear order.
+/// Returns `None` for unknown stage strings.
+#[must_use]
+pub fn stage_index(stage: &str) -> Option<usize> {
+    FL_E_STAGES.iter().position(|&s| s == stage)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -740,6 +844,8 @@ mod tests {
             schedule_ids: "[]".to_string(),
             created_at: "2026-06-04T10:00:00Z".to_string(),
             updated_at: "2026-06-04T10:00:00Z".to_string(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
         }
     }
 
@@ -948,5 +1054,118 @@ mod tests {
             .await
             .unwrap();
         assert!(updated.world_id.is_none());
+    }
+
+    // ── V1.34 FL-E stage tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_new_work_has_default_stage() {
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_stage_001");
+        create_work(&pool, &record).await.unwrap();
+
+        let fetched = get_work(&pool, "ctr_test", "wrk_stage_001")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched.current_stage, "intake");
+        assert_eq!(fetched.stage_status, "pending");
+    }
+
+    #[tokio::test]
+    async fn test_get_work_stage() {
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_stage_002");
+        create_work(&pool, &record).await.unwrap();
+
+        let stage = get_work_stage(&pool, "ctr_test", "wrk_stage_002")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stage.0, "intake");
+        assert_eq!(stage.1, "pending");
+    }
+
+    #[tokio::test]
+    async fn test_get_work_stage_nonexistent() {
+        let (pool, _dir) = fresh_pool().await;
+        assert!(get_work_stage(&pool, "ctr_test", "wrk_ghost")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_work_stage() {
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_stage_003");
+        create_work(&pool, &record).await.unwrap();
+
+        let updated = update_work_stage(
+            &pool,
+            "ctr_test",
+            "wrk_stage_003",
+            "research",
+            "active",
+            "2026-06-05T10:00:00Z",
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.current_stage, "research");
+        assert_eq!(updated.stage_status, "active");
+    }
+
+    #[tokio::test]
+    async fn test_update_work_stage_nonexistent_fails() {
+        let (pool, _dir) = fresh_pool().await;
+        let result = update_work_stage(
+            &pool,
+            "ctr_test",
+            "wrk_ghost",
+            "research",
+            "active",
+            "2026-06-05T10:00:00Z",
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stage_index_known_stages() {
+        assert_eq!(stage_index("intake"), Some(0));
+        assert_eq!(stage_index("research"), Some(1));
+        assert_eq!(stage_index("produce"), Some(2));
+        assert_eq!(stage_index("review"), Some(3));
+        assert_eq!(stage_index("persist"), Some(4));
+    }
+
+    #[test]
+    fn test_stage_index_unknown_returns_none() {
+        assert_eq!(stage_index("unknown"), None);
+        assert_eq!(stage_index("INTAKE"), None);
+    }
+
+    #[tokio::test]
+    async fn test_patch_work_stage_fields() {
+        let (pool, _dir) = fresh_pool().await;
+        let record = sample_work("wrk_stage_004");
+        create_work(&pool, &record).await.unwrap();
+
+        let patch = WorkPatch {
+            current_stage: Some("produce".to_string()),
+            stage_status: Some("active".to_string()),
+            ..Default::default()
+        };
+        let updated = patch_work(
+            &pool,
+            "ctr_test",
+            "wrk_stage_004",
+            &patch,
+            "2026-06-05T11:00:00Z",
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.current_stage, "produce");
+        assert_eq!(updated.stage_status, "active");
     }
 }

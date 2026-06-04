@@ -332,6 +332,8 @@ async fn handler_patch_work_updates_record() {
         world_id: None, // Option<Option<String>> — None means "don't change"
         story_ref: None,
         primary_preset_id: None,
+        current_stage: None,
+        stage_status: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -356,6 +358,8 @@ async fn handler_patch_work_returns_404_for_unknown() {
         world_id: None,
         story_ref: None,
         primary_preset_id: None,
+        current_stage: None,
+        stage_status: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -462,6 +466,152 @@ async fn handler_append_inspiration_returns_401_without_creator() {
     assert_eq!(
         result.unwrap_err().status_code(),
         axum::http::StatusCode::UNAUTHORIZED
+    );
+}
+
+// ─── V1.34 FL-E: Stage field tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn get_work_response_includes_stage_fields() {
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "Stage Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    let result = nexus_daemon_runtime::api::handlers::works::get_work(State(state), Path(work_id))
+        .await
+        .unwrap();
+    let dto = result.0;
+    assert_eq!(dto.current_stage, "intake");
+    assert_eq!(dto.stage_status, "pending");
+}
+
+#[tokio::test]
+async fn patch_work_updates_stage_fields() {
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "Stage Patch".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("research".to_string()),
+        stage_status: Some("active".to_string()),
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::Json(patch),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.0.current_stage, "research");
+    assert_eq!(result.0.stage_status, "active");
+
+    // Verify via GET
+    let get_result =
+        nexus_daemon_runtime::api::handlers::works::get_work(State(state), Path(work_id))
+            .await
+            .unwrap();
+    assert_eq!(get_result.0.current_stage, "research");
+    assert_eq!(get_result.0.stage_status, "active");
+}
+
+#[tokio::test]
+async fn patch_work_stage_returns_401_without_creator() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let nexus_home = tmp.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    let db_path = nexus_home.join("state.db");
+    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+    nexus_local_db::run_migrations(&pool).await.unwrap();
+    nexus_local_db::seed_versions(&pool).await.unwrap();
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    std::mem::forget(tmp);
+
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("produce".to_string()),
+        stage_status: Some("active".to_string()),
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path("wrk_any".to_string()),
+        axum::Json(patch),
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(
+        result.unwrap_err().status_code(),
+        axum::http::StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn patch_work_stage_returns_404_for_unknown() {
+    let (state, _tmp) = handler_state().await;
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("research".to_string()),
+        stage_status: Some("active".to_string()),
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path("wrk_nonexistent".to_string()),
+        axum::Json(patch),
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(
+        result.unwrap_err().status_code(),
+        axum::http::StatusCode::NOT_FOUND
     );
 }
 
@@ -636,6 +786,8 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         world_id: None, // Option<Option<String>>
         story_ref: None,
         primary_preset_id: None,
+        current_stage: None,
+        stage_status: None,
     };
     let state_b = WorkspaceState::new_for_testing(nh_b, db_b, None).await;
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
