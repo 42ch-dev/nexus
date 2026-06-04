@@ -1028,4 +1028,204 @@ mod tests {
             .to_string()
             .contains("missing creator identity"));
     }
+
+    // ── creator.write_brief tests ──────────────────────────────────────
+
+    /// Standalone mode: valid brief returns written=true.
+    #[tokio::test]
+    async fn write_brief_standalone_valid_brief() {
+        let cap = CreatorWriteBrief::new();
+        let brief = serde_json::json!({
+            "brief_schema_version": 1,
+            "genre": "literary fiction",
+            "tone": "dark and brooding",
+            "audience": "adult literary readers",
+            "constraints": ["no graphic violence"],
+            "themes": ["identity", "loss"],
+            "non_goals": ["not a romance"],
+            "protagonist_hook": "A retired detective haunted by a cold case",
+            "setting_hook": "A fog-shrouded coastal town in winter",
+            "open_questions_resolved": ["genre confirmed as literary fiction"]
+        });
+        let out = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_test"
+            }))
+            .await
+            .unwrap();
+        assert_eq!(out["written"], true);
+        assert_eq!(out["intakeStatus"], "complete");
+    }
+
+    /// Standalone mode: invalid JSON in brief_text should fail.
+    #[tokio::test]
+    async fn write_brief_standalone_invalid_json() {
+        let cap = CreatorWriteBrief::new();
+        let result = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": "not valid json {{{",
+                "_creator_id": "ctr_test"
+            }))
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not valid JSON"));
+    }
+
+    /// Standalone mode: missing required field should fail.
+    #[tokio::test]
+    async fn write_brief_standalone_missing_field() {
+        let cap = CreatorWriteBrief::new();
+        let brief = serde_json::json!({
+            "genre": "sci-fi",
+            "tone": "tense"
+            // missing audience, constraints, themes, etc.
+        });
+        let result = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_test"
+            }))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("missing required field"),
+            "expected missing field error, got: {err}"
+        );
+    }
+
+    /// Standalone mode: empty string field should fail.
+    #[tokio::test]
+    async fn write_brief_standalone_empty_genre() {
+        let cap = CreatorWriteBrief::new();
+        let brief = serde_json::json!({
+            "brief_schema_version": 1,
+            "genre": "  ",
+            "tone": "dark",
+            "audience": "adults",
+            "constraints": ["none"],
+            "themes": ["loss"],
+            "non_goals": [],
+            "protagonist_hook": "A detective",
+            "setting_hook": "A city",
+            "open_questions_resolved": []
+        });
+        let result = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_test"
+            }))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must not be empty"),
+            "expected empty field error, got: {err}"
+        );
+    }
+
+    /// Standalone mode: empty constraints array should fail.
+    #[tokio::test]
+    async fn write_brief_standalone_empty_constraints() {
+        let cap = CreatorWriteBrief::new();
+        let brief = serde_json::json!({
+            "brief_schema_version": 1,
+            "genre": "sci-fi",
+            "tone": "tense",
+            "audience": "adults",
+            "constraints": [],
+            "themes": ["identity"],
+            "non_goals": [],
+            "protagonist_hook": "A hacker",
+            "setting_hook": "Neo Tokyo",
+            "open_questions_resolved": []
+        });
+        let result = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_test"
+            }))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("at least one entry"),
+            "expected array length error, got: {err}"
+        );
+    }
+
+    /// Integration: write_brief with store writes to Work entity.
+    #[tokio::test]
+    async fn write_brief_with_store_roundtrip() {
+        let (pool, _dir) = fresh_pool().await;
+        let store = Arc::new(CreatorCapabilityStore::new(pool.clone()));
+        let cap = CreatorWriteBrief::with_store(store);
+
+        // Seed a Work
+        nexus_local_db::create_work(
+            &pool,
+            &nexus_local_db::WorkRecord {
+                work_id: "wrk_brief_test".to_string(),
+                creator_id: "ctr_brief_test".to_string(),
+                workspace_slug: "ws".to_string(),
+                status: "active".to_string(),
+                title: "Test Work".to_string(),
+                long_term_goal: "Test".to_string(),
+                initial_idea: "An idea".to_string(),
+                creative_brief: None,
+                intake_status: "pending".to_string(),
+                world_id: None,
+                story_ref: None,
+                inspiration_log: "[]".to_string(),
+                primary_preset_id: "novel-writing".to_string(),
+                schedule_ids: "[]".to_string(),
+                created_at: "2026-06-04T00:00:00Z".to_string(),
+                updated_at: "2026-06-04T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let brief = serde_json::json!({
+            "brief_schema_version": 1,
+            "genre": "literary fiction",
+            "tone": "melancholic",
+            "audience": "adult readers",
+            "constraints": ["no explicit content"],
+            "themes": ["memory", "loss"],
+            "non_goals": ["not a thriller"],
+            "protagonist_hook": "A retired librarian discovers a hidden diary",
+            "setting_hook": "A small New England town in autumn",
+            "open_questions_resolved": ["genre: literary fiction", "tone: melancholic"]
+        });
+
+        let out = cap
+            .run(serde_json::json!({
+                "workId": "wrk_brief_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_brief_test"
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(out["written"], true);
+        assert_eq!(out["intakeStatus"], "complete");
+
+        // Verify the Work was actually updated
+        let updated = nexus_local_db::get_work(&pool, "ctr_brief_test", "wrk_brief_test")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.intake_status, "complete");
+        assert!(updated.creative_brief.is_some());
+        let stored: serde_json::Value =
+            serde_json::from_str(&updated.creative_brief.unwrap()).unwrap();
+        assert_eq!(stored["genre"], "literary fiction");
+    }
 }
