@@ -264,3 +264,68 @@ async fn schedule_create_without_seed_no_core_context() {
     assert_eq!(schedules.len(), 1);
     assert_eq!(schedules[0]["preset_id"], "reflection-loop");
 }
+
+// ── Test 5: Empty creator_id breaks cross-creator isolation (R-FL-E-P2-05) ────
+//
+// Validates that a schedule created with an empty creator_id does NOT appear
+// when filtering by a legitimate creator. The CLI fix (R-FL-E-P2-05) ensures
+// the creator_id comes from `active_creator_id` config, never from WorkApiDto
+// (which omits creator_id per SEC-V131-01). This test confirms the daemon-side
+// isolation so that an empty-string creator_id is detectable as a bug.
+
+#[tokio::test]
+async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
+    let ctx = test_ctx().await;
+
+    // Create a schedule with an empty creator_id (the pre-fix bug scenario)
+    let req_empty = AddScheduleRequest {
+        creator_id: String::new(),
+        preset_id: "research".to_string(),
+        seed: None,
+        label: Some("bug: empty creator_id".to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+    };
+    let resp_empty = ctx
+        .server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req_empty)
+        .await;
+    resp_empty.assert_status(StatusCode::CREATED);
+
+    // Create a schedule with a proper creator_id
+    let req_real = AddScheduleRequest {
+        creator_id: "ctr_real".to_string(),
+        preset_id: "novel-writing".to_string(),
+        seed: None,
+        label: Some("legitimate creator".to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+    };
+    let resp_real = ctx
+        .server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req_real)
+        .await;
+    resp_real.assert_status(StatusCode::CREATED);
+
+    // Listing schedules for "ctr_real" should only return the real one,
+    // not the one with empty creator_id
+    let list_resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_real")
+        .await;
+    list_resp.assert_status(StatusCode::OK);
+    let list_body: Value = list_resp.json();
+    let schedules = list_body["schedules"].as_array().unwrap();
+    assert_eq!(schedules.len(), 1, "Only ctr_real schedule should appear");
+    assert_eq!(schedules[0]["creator_id"], "ctr_real");
+
+    // Listing all schedules shows both (empty creator_id schedule exists)
+    let all_resp = ctx.server.get("/v1/local/orchestration/schedules").await;
+    let all_body: Value = all_resp.json();
+    let all_schedules = all_body["schedules"].as_array().unwrap();
+    assert_eq!(all_schedules.len(), 2, "Both schedules exist in total");
+}

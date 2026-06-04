@@ -410,7 +410,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
         }
-        RunCommand::Stage { command } => handle_stage(command, &client).await?,
+        RunCommand::Stage { command } => handle_stage(command, config, &client).await?,
     }
 
     Ok(())
@@ -423,7 +423,11 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if the daemon API call fails or stage validation rejects the advance.
-async fn handle_stage(cmd: StageCommand, client: &crate::api::DaemonClient) -> Result<()> {
+async fn handle_stage(
+    cmd: StageCommand,
+    config: &CliConfig,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
     match cmd {
         StageCommand::List { work_id, json } => stage_list(&work_id, json, client).await,
         StageCommand::Advance {
@@ -431,7 +435,7 @@ async fn handle_stage(cmd: StageCommand, client: &crate::api::DaemonClient) -> R
             stage,
             force,
             json,
-        } => stage_advance(&work_id, &stage, force, json, client).await,
+        } => stage_advance(&work_id, &stage, force, json, config, client).await,
     }
 }
 
@@ -505,6 +509,7 @@ async fn stage_advance(
     target_stage: &str,
     force: bool,
     json: bool,
+    config: &CliConfig,
     client: &crate::api::DaemonClient,
 ) -> Result<()> {
     // Fetch current work state
@@ -566,14 +571,18 @@ async fn stage_advance(
     // Create an FL-E stage schedule (spec §2 invariant #4, §5.3).
     // Uses the shared facade `build_schedule_for_stage` to construct a
     // correctly-shaped AddScheduleRequest (R-FL-E-P2-03).
+    //
+    // R-FL-E-P2-05: creator_id comes from CLI config's active_creator_id,
+    // NOT from WorkApiDto (SEC-V131-01 omits creator_id from Work responses).
     let mut schedule_id: Option<String> = None;
     let preset_id = stage_gates::preset_for_stage(target_stage);
 
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
     // Build Work fields for the schedule request
-    let creator_id = updated
-        .get("creator_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
     let creative_brief = resp
         .get("creative_brief")
         .and_then(|v| v.as_str())
