@@ -57,6 +57,12 @@ pub struct FragmentRow {
     pub summary: String,
 }
 
+/// Response from `GET /v1/local/memory/fragments`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListFragmentsResponse {
+    pub fragments: Vec<FragmentRow>,
+}
+
 // ─── Pending review models ──────────────────────────────────────────────────
 
 /// Response from `GET /v1/local/memory/pending-review`.
@@ -376,5 +382,19 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].fragment_id, "frag-001");
         assert_eq!(rows[1].fragment_id, "frag-002");
+    }
+
+    #[test]
+    fn test_list_fragments_response_deserialize() {
+        let json = serde_json::json!({
+            "fragments": [
+                { "fragment_id": "frag-001", "summary": "First" },
+                { "fragment_id": "frag-002", "summary": "Second" }
+            ]
+        });
+        let resp: ListFragmentsResponse =
+            serde_json::from_value(json).expect("Failed to deserialize");
+        assert_eq!(resp.fragments.len(), 2);
+        assert_eq!(resp.fragments[0].fragment_id, "frag-001");
     }
 }

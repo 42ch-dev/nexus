@@ -371,49 +371,122 @@ impl Task for InnerGraphTask {
 }
 
 // ---------------------------------------------------------------------------
-// JudgeTask (rule-only stub)
+// LlmJudgeTask — invokes judge.llm (or judge.rule) via capability registry
 // ---------------------------------------------------------------------------
 
-/// Evaluates a judge rule. WS2 supports `judge.rule` only (pure function);
-/// `judge.llm` is deferred to WS3.
-pub struct JudgeTask;
+/// Evaluates an LLM judge exit condition by invoking the `judge.llm`
+/// capability through the [`CapabilityRegistry`].
+///
+/// Flow:
+/// 1. Render `template_file` content using handlebars against the context.
+/// 2. Build capability input: `{ "prompt": <rendered>, _creator_id, _session_id }`.
+/// 3. Call `judge_capability` (default `judge.llm`) via the registry.
+/// 4. Parse the response `{ result: bool, reason: string }` into Continue/WaitForInput.
+///
+/// When the capability returns [`CapabilityError::WorkerUnavailable`] (no
+/// worker IPC), logs a warning and returns `WaitForInput` so the state
+/// machine doesn't silently advance without evaluation.
+///
+/// Design: `orchestration-engine.md` §4.4.1, compass §2.5.
+pub struct LlmJudgeTask {
+    /// Path to the judge prompt template (relative to bundle root).
+    template: String,
+    /// Capability name to invoke (default: `judge.llm`).
+    capability_name: String,
+    /// Shared capability registry.
+    registry: Arc<CapabilityRegistry>,
+}
 
-#[async_trait]
-impl Task for JudgeTask {
-    fn id(&self) -> &'static str {
-        "judge_task"
+impl LlmJudgeTask {
+    /// Create a new `LlmJudgeTask`.
+    #[must_use]
+    pub const fn new(
+        template: String,
+        capability_name: String,
+        registry: Arc<CapabilityRegistry>,
+    ) -> Self {
+        Self {
+            template,
+            capability_name,
+            registry,
+        }
     }
 
-    async fn run(
+    /// Render the template and invoke the judge capability.
+    async fn evaluate(
         &self,
-        context: graph_flow::Context,
-    ) -> Result<TaskResult, graph_flow::GraphError> {
-        let rule: String = context.get("_judge_rule").await.unwrap_or_default();
-        let _context_data: Value = context
-            .get("_judge_context_data")
-            .await
-            .unwrap_or(Value::Null);
+        context: &graph_flow::Context,
+    ) -> Result<(bool, String), graph_flow::GraphError> {
+        // 1. Render the prompt template.
+        let payload = build_nested_payload(context);
+        let prompt = render_core_context_template(&self.template, &payload).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "judge template render failed, using raw template");
+            self.template.clone()
+        });
 
-        // Use a simple stub evaluator for now.
-        let (result, reason) = match rule.as_str() {
-            "always_true" => (true, "judge.rule stub: always_true → go".to_string()),
-            "always_false" => (false, "judge.rule stub: always_false → nogo".to_string()),
-            other => (false, format!("unsupported judge rule: '{other}'")),
-        };
+        // 2. Build capability input with security-injected identity.
+        let creator_id: String = context.get("_creator_id").await.unwrap_or_default();
+        let session_id: String = context.get("_session_id").await.unwrap_or_default();
 
-        context.set("_judge_result", result).await;
-        context.set("_judge_reason", reason.clone()).await;
+        let mut input = serde_json::json!({
+            "prompt": prompt,
+        });
+        if let Some(obj) = input.as_object_mut() {
+            if !creator_id.is_empty() {
+                obj.insert("_creator_id".into(), Value::String(creator_id));
+            }
+            if !session_id.is_empty() {
+                obj.insert("_session_id".into(), Value::String(session_id));
+            }
+        }
 
-        let next_action = if result {
-            NextAction::Continue
-        } else {
-            NextAction::WaitForInput
-        };
+        // 3. Resolve the capability from the registry.
+        let cap = self.registry.get(&self.capability_name).ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(format!(
+                "judge capability '{}' not found in registry",
+                self.capability_name
+            ))
+        })?;
 
-        Ok(TaskResult::new(
-            Some(format!("judge: {reason}")),
-            next_action,
-        ))
+        // 4. Invoke the capability.
+        match cap.run(input).await {
+            Ok(output) => {
+                let result = output
+                    .get("result")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let reason = output
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("judge capability returned no reason")
+                    .to_string();
+                Ok((result, reason))
+            }
+            Err(CapabilityError::WorkerUnavailable) => {
+                // No worker IPC available — cannot evaluate LLM judge.
+                // Log and return NOGO so the state waits rather than advancing
+                // without evaluation (safe default).
+                //
+                // R-V133P3-04 (deferred, documented): This creates a liveness/
+                // DoS vector — an attacker who controls worker connectivity can
+                // lock states in NOGO. Acceptable for V1.33 local-only single-user
+                // daemon where the attacker model is the user themselves. For
+                // multi-user or networked deployments, add a circuit-breaker,
+                // timeout, or rule-based fallback.
+                tracing::warn!(
+                    capability = %self.capability_name,
+                    "judge capability unavailable (no worker); returning NOGO"
+                );
+                Ok((
+                    false,
+                    "judge.llm: worker unavailable — cannot evaluate, waiting".to_string(),
+                ))
+            }
+            Err(e) => Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                "judge capability '{}' failed: {e}",
+                self.capability_name
+            ))),
+        }
     }
 }
 
@@ -433,7 +506,7 @@ impl Task for JudgeTask {
 /// - `enter[*].kind=inner_graph` → `InnerGraphTask` (spawns child session).
 /// - `exit_when.kind=manual` → `ManualWaitTask` (returns `WaitForInput`).
 /// - `exit_when.kind=rule` → `RuleCheckTask`.
-/// - `exit_when.kind=llm_judge` → `JudgeTask`.
+/// - `exit_when.kind=llm_judge` → `LlmJudgeTask` (invokes judge.llm via registry).
 /// - `exit_when.kind=graph_complete` → Continue (inner graph handles it).
 /// - `terminal: true` → End.
 pub struct StateCompositeTask {
@@ -502,6 +575,35 @@ impl StateCompositeTask {
         self.registry = Some(registry);
         self
     }
+
+    /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
+    ///
+    /// For embedded presets, reads the template content from the compiled-in
+    /// bundle. If the file doesn't exist (e.g. test fixtures using inline
+    /// strings), keeps the original value unchanged.
+    ///
+    /// # SAFETY
+    ///
+    /// Path traversal is validated at load time by `assert_template_file_safe`
+    /// in the preset loader. Only relative paths without `..` reach this point.
+    #[must_use]
+    pub fn with_resolved_template(mut self, preset_id: &str) -> Self {
+        if let Some(ExitWhen::LlmJudge {
+            template_file: Some(ref path),
+            ref judge_capability,
+            ref min_interval,
+        }) = self.exit_when
+        {
+            if let Some(content) = crate::preset::read_embedded_template(preset_id, path) {
+                self.exit_when = Some(ExitWhen::LlmJudge {
+                    template_file: Some(content),
+                    judge_capability: judge_capability.clone(),
+                    min_interval: min_interval.clone(),
+                });
+            }
+        }
+        self
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -537,16 +639,30 @@ impl Task for StateCompositeTask {
                 EnterAction::Capability { name, args } => {
                     context.set("_capability_name", name.clone()).await;
 
-                    // Security (SEC-V131-01): inject trusted identity from engine
-                    // context into capability args. Capabilities read `_creator_id`
-                    // / `_session_id` from their input; the orchestration engine
-                    // must set them at the invocation boundary so preset YAML
-                    // cannot spoof these values (prevents cross-creator IPC IDOR).
+                    // C-V133P2-01: Template-render capability args.
+                    // Preset YAML args may contain {{preset.input.*}} or
+                    // {{state.*.output}} placeholders. We render them against
+                    // the engine context BEFORE identity injection, so
+                    // placeholders resolve to actual runtime values.
                     let mut cap_input = args.clone().unwrap_or(Value::Null);
                     if cap_input.is_null() {
                         cap_input = Value::Object(serde_json::Map::new());
                     }
+
+                    // Render every string value in the args through handlebars.
+                    // Fail-closed: if a placeholder references a non-existent
+                    // key, the render will fail and the capability is NOT called
+                    // with literal "{{...}}" placeholders.
+                    let payload = build_nested_payload(&context);
+                    cap_input = render_value_templates(&cap_input, &payload)?;
+
                     if let Some(obj) = cap_input.as_object_mut() {
+                        // Security (SEC-V131-01): inject trusted identity from
+                        // engine context into capability args. Capabilities read
+                        // `_creator_id` / `_session_id` from their input; the
+                        // orchestration engine must set them at the invocation
+                        // boundary so preset YAML cannot spoof these values
+                        // (prevents cross-creator IPC IDOR).
                         // Preset args are untrusted. Strip protected identity
                         // fields first, then inject only trusted context values.
                         obj.remove("_creator_id");
@@ -626,11 +742,97 @@ impl Task for StateCompositeTask {
                 let result = rule_task.run(context.clone()).await?;
                 result.next_action
             }
-            Some(ExitWhen::LlmJudge { .. }) => {
-                // Run judge task inline.
-                let judge_task = JudgeTask;
-                let result = judge_task.run(context.clone()).await?;
-                result.next_action
+            Some(ExitWhen::LlmJudge {
+                ref template_file,
+                ref judge_capability,
+                ref min_interval,
+            }) => {
+                // V1.33: invoke judge.llm capability through the registry.
+                // Render template_file → build prompt → call capability → GO/NOGO.
+                let template = template_file.as_deref().unwrap_or("");
+                if template.is_empty() {
+                    tracing::warn!(
+                        state_id = %self.id,
+                        "llm_judge exit_when has no template_file; returning WaitForInput"
+                    );
+                    context.set("_judge_result", false).await;
+                    context
+                        .set(
+                            "_judge_reason",
+                            "llm_judge: no template_file configured".to_string(),
+                        )
+                        .await;
+                    NextAction::WaitForInput
+                } else {
+                    let cap_name = judge_capability.as_deref().unwrap_or("judge.llm");
+                    let registry = self
+                        .registry
+                        .clone()
+                        .unwrap_or_else(|| Arc::new(CapabilityRegistry::with_builtins()));
+
+                    // min_interval throttle: skip evaluation if last
+                    // evaluation was too recent.
+                    if let Some(ref interval_str) = min_interval {
+                        let throttle_key = format!("_judge_last_eval_{}", self.id);
+                        let last_eval: Option<String> = context.get(&throttle_key).await;
+                        if let Some(last) = last_eval {
+                            if let Some(duration) = parse_iso8601_duration(interval_str) {
+                                if let Ok(last_time) = last.parse::<chrono::DateTime<chrono::Utc>>()
+                                {
+                                    let now = chrono::Utc::now();
+                                    if now - last_time < duration {
+                                        tracing::debug!(
+                                            state_id = %self.id,
+                                            interval = %interval_str,
+                                            "llm_judge: min_interval not elapsed, keeping previous result"
+                                        );
+                                        // Return the previous judge result.
+                                        let prev_result: bool =
+                                            context.get("_judge_result").await.unwrap_or(false);
+                                        let prev_reason: String = context
+                                            .get("_judge_reason")
+                                            .await
+                                            .unwrap_or_else(|| {
+                                                "min_interval throttle: reusing previous result"
+                                                    .to_string()
+                                            });
+                                        return Ok(TaskResult::new(
+                                            Some(format!("judge (throttled): {prev_reason}")),
+                                            if self.terminal {
+                                                NextAction::End
+                                            } else if prev_result {
+                                                NextAction::Continue
+                                            } else {
+                                                NextAction::WaitForInput
+                                            },
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let judge_task =
+                        LlmJudgeTask::new(template.to_string(), cap_name.to_string(), registry);
+                    let (result, reason) = judge_task.evaluate(&context).await?;
+
+                    // Record timestamp for min_interval throttle.
+                    if min_interval.is_some() {
+                        let throttle_key = format!("_judge_last_eval_{}", self.id);
+                        context
+                            .set(throttle_key, chrono::Utc::now().to_rfc3339())
+                            .await;
+                    }
+
+                    context.set("_judge_result", result).await;
+                    context.set("_judge_reason", reason.clone()).await;
+
+                    if result {
+                        NextAction::Continue
+                    } else {
+                        NextAction::WaitForInput
+                    }
+                }
             }
             Some(ExitWhen::GraphComplete) => {
                 // Inner graph completion propagates Continue.
@@ -1105,6 +1307,65 @@ pub fn render_core_context_template(
         .map_err(Into::into)
 }
 
+/// Render a handlebars template in strict mode — missing variables cause
+/// an error instead of silently rendering as empty string.
+///
+/// Used for capability arg template rendering (C-V133P2-01) where silent
+/// substitution of literal "{{...}}" would be a security/correctness bug.
+///
+/// # Errors
+/// Returns an error if the template syntax is invalid, a variable is
+/// missing, or rendering fails for any reason.
+fn render_strict_template(template: &str, payload: &serde_json::Value) -> anyhow::Result<String> {
+    let mut reg = handlebars::Handlebars::new();
+    reg.register_escape_fn(handlebars::no_escape);
+    reg.set_strict_mode(true);
+    reg.render_template(template, payload).map_err(Into::into)
+}
+
+/// Recursively render all string values in a JSON value as handlebars templates.
+///
+/// C-V133P2-01: Walks the JSON tree; for every string value, renders it as a
+/// handlebars template against `payload`. Non-string values (numbers, booleans,
+/// null, arrays of non-strings) are left unchanged.
+///
+/// # Errors
+///
+/// Returns an error if any string value contains a template placeholder that
+/// fails to render (e.g. `{{nonexistent.key}}`). This is fail-closed: the
+/// capability is NOT called with literal "{{...}}" placeholders.
+fn render_value_templates(
+    value: &serde_json::Value,
+    payload: &serde_json::Value,
+) -> Result<serde_json::Value, graph_flow::GraphError> {
+    match value {
+        serde_json::Value::String(s) => {
+            let rendered = render_strict_template(s, payload).map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "capability arg template render failed for '{s}': {e}"
+                ))
+            })?;
+            Ok(serde_json::Value::String(rendered))
+        }
+        serde_json::Value::Object(map) => {
+            let rendered_map: serde_json::Map<String, serde_json::Value> = map
+                .iter()
+                .map(|(k, v)| render_value_templates(v, payload).map(|rv| (k.clone(), rv)))
+                .collect::<Result<_, _>>()?;
+            Ok(serde_json::Value::Object(rendered_map))
+        }
+        serde_json::Value::Array(arr) => {
+            let rendered_arr: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|v| render_value_templates(v, payload))
+                .collect::<Result<_, _>>()?;
+            Ok(serde_json::Value::Array(rendered_arr))
+        }
+        // Numbers, booleans, null — pass through unchanged.
+        other => Ok(other.clone()),
+    }
+}
+
 /// Build a nested JSON object from flat dot-separated context keys.
 ///
 /// For example, keys like `core_context.version` become
@@ -1157,6 +1418,97 @@ fn insert_nested(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/// Parse an ISO-8601 duration string (e.g. `"PT6H"`, `"PT1H30M"`) into a
+/// `chrono::Duration`.
+///
+/// Supports days (D), hours (H), minutes (M after T), and seconds (S).
+/// Returns `None` for unparseable inputs, logging a warning.
+fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
+    let s = s.trim();
+    if !s.starts_with('P') {
+        tracing::warn!(input = %s, "min_interval: missing 'P' prefix");
+        return None;
+    }
+    let body = &s[1..];
+
+    // Parse optional days (before T) and optional time part (after T).
+    let mut days: i64 = 0;
+    let mut hours: i64 = 0;
+    let mut minutes: i64 = 0;
+    let mut seconds: i64 = 0;
+
+    if let Some(time_part) = body.strip_prefix('T') {
+        // Time-only form: PT6H, PT30M, PT1H30M15S
+        if time_part.is_empty() {
+            tracing::warn!(input = %s, "min_interval: empty time part after 'T'");
+            return None;
+        }
+
+        let mut num_buf = String::new();
+        for ch in time_part.chars() {
+            match ch {
+                '0'..='9' => num_buf.push(ch),
+                'H' => {
+                    hours = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                'M' => {
+                    minutes = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                'S' => {
+                    seconds = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                _ => {
+                    tracing::warn!(
+                        input = %s,
+                        char = %ch,
+                        "min_interval: unsupported unit in time part"
+                    );
+                    return None;
+                }
+            }
+        }
+        if !num_buf.is_empty() {
+            tracing::warn!(input = %s, "min_interval: trailing digits in time part");
+            return None;
+        }
+    } else {
+        // Date-part only: P1D, P7D (no T separator)
+        let mut num_buf = String::new();
+        for ch in body.chars() {
+            match ch {
+                '0'..='9' => num_buf.push(ch),
+                'D' => {
+                    days = num_buf.parse().ok()?;
+                    num_buf.clear();
+                }
+                _ => {
+                    tracing::warn!(
+                        input = %s,
+                        char = %ch,
+                        "min_interval: unsupported unit (only D/H/M/S supported; months/years not supported)"
+                    );
+                    return None;
+                }
+            }
+        }
+        if !num_buf.is_empty() {
+            tracing::warn!(input = %s, "min_interval: trailing digits in date part");
+            return None;
+        }
+    }
+
+    let total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+    if total_seconds == 0 {
+        tracing::warn!(input = %s, "min_interval: zero duration");
+        return None;
+    }
+
+    Some(chrono::Duration::seconds(total_seconds))
+}
 
 #[cfg(test)]
 mod tests {
@@ -1218,12 +1570,437 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn judge_task_rule_only_stub() {
-        let task = JudgeTask;
+    async fn llm_judge_task_with_mock_worker_go() {
+        // Prove LlmJudgeTask invokes judge.llm capability and maps GO → Continue.
+        // Use the registry with a mock worker that returns "GO".
+        use crate::capability::CapabilityRuntimeDeps;
+
+        struct MockGoProvider;
+
+        #[async_trait]
+        impl crate::capability::WorkerHandleProvider for MockGoProvider {
+            async fn call_acp_prompt(
+                &self,
+                _creator_id: &str,
+                _session_id: &str,
+                _prompt: String,
+                _tool_policy: &str,
+            ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
+                Ok(serde_json::json!({ "full_text": "GO — evaluation passes." }))
+            }
+        }
+
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: Some(std::sync::Arc::new(MockGoProvider)),
+        };
+        let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
+
+        let judge_task = LlmJudgeTask::new(
+            "Is the task done?".to_string(),
+            "judge.llm".to_string(),
+            registry,
+        );
+
         let ctx = graph_flow::Context::new();
-        ctx.set("_judge_rule", "always_true").await;
-        let result = task.run(ctx).await.unwrap();
-        assert!(matches!(result.next_action, NextAction::Continue));
+        let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
+        assert!(result, "GO response should give true: {reason}");
+        assert!(reason.contains("go"), "reason should mention go: {reason}");
+    }
+
+    #[tokio::test]
+    async fn llm_judge_task_with_mock_worker_nogo() {
+        // Prove LlmJudgeTask maps NOGO → false.
+        use crate::capability::CapabilityRuntimeDeps;
+
+        struct MockNogoProvider;
+
+        #[async_trait]
+        impl crate::capability::WorkerHandleProvider for MockNogoProvider {
+            async fn call_acp_prompt(
+                &self,
+                _creator_id: &str,
+                _session_id: &str,
+                _prompt: String,
+                _tool_policy: &str,
+            ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
+                Ok(serde_json::json!({ "full_text": "NO — stop and review." }))
+            }
+        }
+
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: Some(std::sync::Arc::new(MockNogoProvider)),
+        };
+        let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
+
+        let judge_task = LlmJudgeTask::new(
+            "Is the task done?".to_string(),
+            "judge.llm".to_string(),
+            registry,
+        );
+
+        let ctx = graph_flow::Context::new();
+        let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
+        assert!(!result, "NOGO response should give false: {reason}");
+        assert!(
+            reason.contains("nogo"),
+            "reason should mention nogo: {reason}"
+        );
+    }
+
+    #[tokio::test]
+    async fn llm_judge_task_no_worker_returns_nogo() {
+        // Without a worker, judge.llm returns WorkerUnavailable.
+        // LlmJudgeTask maps this to NOGO (safe default: wait, don't advance).
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let judge_task = LlmJudgeTask::new(
+            "Is the task done?".to_string(),
+            "judge.llm".to_string(),
+            registry,
+        );
+
+        let ctx = graph_flow::Context::new();
+        let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
+        assert!(!result, "no worker → NOGO (safe default)");
+        assert!(reason.contains("unavailable"), "reason: {reason}");
+    }
+
+    #[tokio::test]
+    async fn llm_judge_task_missing_capability_errors() {
+        // Unknown capability name → TaskExecutionFailed.
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let judge_task = LlmJudgeTask::new(
+            "test".to_string(),
+            "judge.nonexistent".to_string(),
+            registry,
+        );
+
+        let ctx = graph_flow::Context::new();
+        let result = judge_task.evaluate(&ctx).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found"), "error: {err}");
+    }
+
+    // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────
+
+    /// Mock worker provider whose response is controlled at runtime.
+    struct ControlledMockProvider {
+        response: std::sync::Mutex<String>,
+    }
+
+    impl ControlledMockProvider {
+        fn new(response: &str) -> Self {
+            Self {
+                response: std::sync::Mutex::new(response.to_string()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl crate::capability::WorkerHandleProvider for ControlledMockProvider {
+        async fn call_acp_prompt(
+            &self,
+            _creator_id: &str,
+            _session_id: &str,
+            _prompt: String,
+            _tool_policy: &str,
+        ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
+            let resp = self.response.lock().unwrap().clone();
+            Ok(serde_json::json!({ "full_text": resp }))
+        }
+    }
+
+    /// T5: novel-writing gathering exit with GO → Continue.
+    #[tokio::test]
+    async fn state_composite_llm_judge_go_continues() {
+        use crate::capability::CapabilityRuntimeDeps;
+
+        let provider = std::sync::Arc::new(ControlledMockProvider::new(
+            "GO — sufficient material gathered.",
+        ));
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: Some(provider),
+        };
+        let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("Evaluate: is gathering complete?".to_string()),
+                judge_capability: Some("judge.llm".to_string()),
+                min_interval: None,
+            }),
+            next: Some(crate::preset::manifest::NextTarget::Linear(
+                "brainstorming".into(),
+            )),
+            terminal: false,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::Continue),
+            "GO → Continue, got {:?}",
+            result.next_action
+        );
+
+        // Verify judge context was stored.
+        let judge_result: bool = ctx.get("_judge_result").await.unwrap();
+        assert!(judge_result, "judge_result should be true for GO");
+    }
+
+    /// T5: novel-writing gathering exit with NOGO → WaitForInput.
+    #[tokio::test]
+    async fn state_composite_llm_judge_nogo_waits() {
+        use crate::capability::CapabilityRuntimeDeps;
+
+        let provider = std::sync::Arc::new(ControlledMockProvider::new(
+            "NO — need more research material.",
+        ));
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: Some(provider),
+        };
+        let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("Evaluate: is gathering complete?".to_string()),
+                judge_capability: Some("judge.llm".to_string()),
+                min_interval: None,
+            }),
+            next: Some(crate::preset::manifest::NextTarget::Linear(
+                "brainstorming".into(),
+            )),
+            terminal: false,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "NOGO → WaitForInput, got {:?}",
+            result.next_action
+        );
+
+        let judge_result: bool = ctx.get("_judge_result").await.unwrap();
+        assert!(!judge_result, "judge_result should be false for NOGO");
+    }
+
+    /// T5: llm_judge without worker IPC → WaitForInput (safe fallback).
+    #[tokio::test]
+    async fn state_composite_llm_judge_no_worker_waits() {
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("Evaluate: is gathering complete?".to_string()),
+                judge_capability: None, // defaults to judge.llm
+                min_interval: None,
+            }),
+            next: Some(crate::preset::manifest::NextTarget::Linear(
+                "brainstorming".into(),
+            )),
+            terminal: false,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "no worker → WaitForInput, got {:?}",
+            result.next_action
+        );
+    }
+
+    /// T5: llm_judge with empty template_file → WaitForInput.
+    #[tokio::test]
+    async fn state_composite_llm_judge_empty_template_waits() {
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: None,
+                judge_capability: None,
+                min_interval: None,
+            }),
+            next: Some(crate::preset::manifest::NextTarget::Linear(
+                "brainstorming".into(),
+            )),
+            terminal: false,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "empty template → WaitForInput, got {:?}",
+            result.next_action
+        );
+    }
+
+    // ── R-V133P3-02: template_file resolution tests ─────────────────────
+
+    /// Proves that `with_resolved_template` loads actual file content from
+    /// the embedded `novel-writing` preset bundle for `prompts/gathering-exit.md`.
+    #[test]
+    fn with_resolved_template_loads_embedded_file() {
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("prompts/gathering-exit.md".to_string()),
+                judge_capability: None,
+                min_interval: None,
+            }),
+            next: None,
+            terminal: false,
+            context_update: None,
+        };
+
+        let task =
+            StateCompositeTask::from_manifest(&state_def).with_resolved_template("novel-writing");
+
+        // After resolution, the template_file should contain actual file content
+        // (not the path string "prompts/gathering-exit.md").
+        if let Some(ExitWhen::LlmJudge {
+            ref template_file, ..
+        }) = task.exit_when
+        {
+            let resolved = template_file.as_deref().unwrap_or("");
+            assert!(
+                !resolved.is_empty(),
+                "template_file should be resolved to non-empty content"
+            );
+            assert!(
+                !resolved.contains("prompts/gathering-exit.md"),
+                "template_file should contain file content, not the path itself"
+            );
+            // The actual file should contain some meaningful template content.
+            assert!(
+                resolved.len() > 50,
+                "resolved template should be substantial (got {} bytes)",
+                resolved.len()
+            );
+        } else {
+            panic!("expected LlmJudge exit_when after resolution");
+        }
+    }
+
+    /// Proves that `with_resolved_template` keeps inline strings for unknown
+    /// preset IDs (backward compat for tests using inline templates).
+    #[test]
+    fn with_resolved_template_preserves_inline_for_unknown_preset() {
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "test_state".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("Evaluate: is gathering complete?".to_string()),
+                judge_capability: None,
+                min_interval: None,
+            }),
+            next: None,
+            terminal: false,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_resolved_template("nonexistent-preset");
+
+        if let Some(ExitWhen::LlmJudge {
+            ref template_file, ..
+        }) = task.exit_when
+        {
+            // Should keep the original inline string.
+            assert_eq!(
+                template_file.as_deref(),
+                Some("Evaluate: is gathering complete?")
+            );
+        } else {
+            panic!("expected LlmJudge exit_when");
+        }
+    }
+
+    // ── parse_iso8601_duration tests ──────────────────────────────────
+
+    #[test]
+    fn parse_duration_hours() {
+        let dur = parse_iso8601_duration("PT6H").unwrap();
+        assert_eq!(dur.num_hours(), 6);
+    }
+
+    #[test]
+    fn parse_duration_minutes() {
+        let dur = parse_iso8601_duration("PT30M").unwrap();
+        assert_eq!(dur.num_minutes(), 30);
+    }
+
+    #[test]
+    fn parse_duration_hours_minutes_seconds() {
+        let dur = parse_iso8601_duration("PT1H30M15S").unwrap();
+        assert_eq!(dur.num_seconds(), 3600 + 1800 + 15);
+    }
+
+    #[test]
+    fn parse_duration_seconds() {
+        let dur = parse_iso8601_duration("PT45S").unwrap();
+        assert_eq!(dur.num_seconds(), 45);
+    }
+
+    /// R-V133P3-03: P1D (1 day) support.
+    #[test]
+    fn parse_duration_days() {
+        let dur = parse_iso8601_duration("P1D").unwrap();
+        assert_eq!(dur.num_hours(), 24);
+    }
+
+    /// R-V133P3-03: P7D (7 days) support.
+    #[test]
+    fn parse_duration_seven_days() {
+        let dur = parse_iso8601_duration("P7D").unwrap();
+        assert_eq!(dur.num_days(), 7);
+    }
+
+    /// R-V133P3-03: months/years are unsupported with warn.
+    #[test]
+    fn parse_duration_rejects_months() {
+        assert!(parse_iso8601_duration("P1M").is_none());
+    }
+
+    #[test]
+    fn parse_duration_invalid_returns_none() {
+        assert!(parse_iso8601_duration("6H").is_none());
+        assert!(parse_iso8601_duration("P6H").is_none());
+        assert!(parse_iso8601_duration("").is_none());
+        assert!(parse_iso8601_duration("PT").is_none());
     }
 
     #[tokio::test]
@@ -1641,5 +2418,145 @@ mod tests {
             input.get("_session_id").is_none(),
             "untrusted _session_id must be stripped when trusted context is absent: {input}"
         );
+    }
+
+    // ── C-V133P2-01: Capability arg template rendering tests ──────────
+
+    /// Proves that `render_value_templates` renders string placeholders
+    /// in a JSON object against the context payload.
+    #[test]
+    fn render_value_templates_renders_nested_placeholders() {
+        let args = serde_json::json!({
+            "workId": "{{preset.input.work_id}}",
+            "briefText": "{{state.synthesizing.output}}",
+            "staticValue": 42,
+            "tags": ["{{preset.input.keyword}}", "hardcoded"]
+        });
+
+        let payload = serde_json::json!({
+            "preset": {
+                "input": {
+                    "work_id": "wrk_test_123",
+                    "keyword": "fantasy"
+                }
+            },
+            "state": {
+                "synthesizing": {
+                    "output": "{\"genre\":\"fantasy\"}"
+                }
+            }
+        });
+
+        let rendered = render_value_templates(&args, &payload).unwrap();
+
+        assert_eq!(rendered["workId"], "wrk_test_123");
+        assert_eq!(rendered["briefText"], "{\"genre\":\"fantasy\"}");
+        assert_eq!(rendered["staticValue"], 42);
+        let tags = rendered["tags"].as_array().unwrap();
+        assert_eq!(tags[0], "fantasy");
+        assert_eq!(tags[1], "hardcoded");
+    }
+
+    /// Proves that `render_value_templates` fails-closed when a placeholder
+    /// references a non-existent key.
+    #[test]
+    fn render_value_templates_fails_closed_on_missing_key() {
+        let args = serde_json::json!({
+            "workId": "{{preset.input.nonexistent}}"
+        });
+
+        let payload = serde_json::json!({
+            "preset": {
+                "input": {
+                    "work_id": "wrk_real"
+                }
+            }
+        });
+
+        let result = render_value_templates(&args, &payload);
+        assert!(result.is_err(), "should fail on missing template key");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("template render failed"),
+            "error should mention template render: {err}"
+        );
+    }
+
+    /// C-V133P2-01 integration: StateCompositeTask renders capability args
+    /// through the template engine before passing to the capability.
+    ///
+    /// This test loads the actual engine context with preset.input and
+    /// state.* values, runs a StateCompositeTask with a capability action
+    /// that uses template placeholders, and verifies the rendered values
+    /// reach the capability input.
+    #[tokio::test]
+    async fn state_composite_renders_capability_args_templates() {
+        use crate::preset::manifest::EnterAction;
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "persisting".into(),
+            description: None,
+            enter: vec![EnterAction::Capability {
+                name: "creator.write_brief".into(),
+                args: Some(serde_json::json!({
+                    "workId": "{{preset.input.work_id}}",
+                    "briefText": "{{state.synthesizing.output}}"
+                })),
+            }],
+            exit_when: None,
+            next: None,
+            terminal: true,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+
+        let ctx = graph_flow::Context::new();
+        ctx.set("_creator_id", "ctr_test").await;
+        ctx.set("_session_id", "sess_test").await;
+        ctx.set("preset.input.work_id", "wrk_rendered_123").await;
+
+        // Simulate what InnerGraphTask would write after synthesizing:
+        // state.synthesizing.output = the JSON string of the brief
+        let brief = serde_json::json!({
+            "brief_schema_version": 1,
+            "genre": "fantasy",
+            "tone": "epic",
+            "audience": "young adult",
+            "constraints": ["no graphic violence"],
+            "themes": ["heroism", "sacrifice"],
+            "non_goals": ["not a romance"],
+            "protagonist_hook": "A farm girl discovers a dragon egg",
+            "setting_hook": "A mountainous kingdom under siege",
+            "open_questions_resolved": ["genre: fantasy"]
+        });
+        ctx.set(
+            "state.synthesizing.output",
+            serde_json::to_string(&brief).unwrap(),
+        )
+        .await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::End),
+            "task should complete successfully"
+        );
+
+        // Verify the capability received RENDERED args
+        let cap_input: serde_json::Value =
+            ctx.get("_capability_input").await.unwrap_or(Value::Null);
+        assert_eq!(
+            cap_input["workId"], "wrk_rendered_123",
+            "workId should be rendered, not literal '{{preset.input.work_id}}': {cap_input}"
+        );
+        assert_eq!(
+            cap_input["briefText"],
+            serde_json::to_string(&brief).unwrap(),
+            "briefText should be rendered, not literal placeholder: {cap_input}"
+        );
+        // Verify identity injection still works after template rendering
+        assert_eq!(cap_input["_creator_id"], "ctr_test");
+        assert_eq!(cap_input["_session_id"], "sess_test");
     }
 }

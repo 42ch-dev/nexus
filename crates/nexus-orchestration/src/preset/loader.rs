@@ -824,6 +824,10 @@ fn validate_skill_slug_format(s: &str) -> bool {
 ///
 /// Each `states[].id` → a composite `Task` that encodes the enter actions,
 /// `exit_when` condition, and terminal semantics.
+///
+/// Note: template resolution is skipped here because `build_outer_graph` is
+/// used in test contexts where inline template strings are expected. Production
+/// code uses `build_wired_outer_graph` which resolves `template_file` paths.
 fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
@@ -857,6 +861,7 @@ pub fn build_wired_outer_graph(
 
     for state in &loaded.manifest.states {
         let task = StateCompositeTask::from_manifest(state)
+            .with_resolved_template(&loaded.id)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())

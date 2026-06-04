@@ -31,6 +31,39 @@ fn setup_engine() -> (
     (engine, loaded)
 }
 
+/// Seed `preset.input.*` required by novel-writing capability arg templates.
+///
+/// Production schedules populate these via core-context derivation; direct
+/// `start_session_with_preset` in tests must seed them explicitly (C-V133P2-01).
+async fn seed_novel_writing_preset_input(
+    engine: &Arc<nexus_orchestration::GraphFlowEngine>,
+    session_id: &nexus_orchestration::engine::SessionId,
+) {
+    let ctx = engine
+        .get_context(session_id)
+        .await
+        .expect("get_context for preset.input seed");
+    ctx.set(
+        "preset.input.topic",
+        "AI consciousness in a near-future city",
+    )
+    .await;
+    ctx.set("preset.input.vibe", "literary").await;
+    ctx.set("preset.input.story_ref", "e2e-test-story").await;
+}
+
+async fn start_novel_writing_session(
+    engine: &Arc<nexus_orchestration::GraphFlowEngine>,
+    loaded: &nexus_orchestration::preset::LoadedPreset,
+) -> nexus_orchestration::engine::SessionId {
+    let session_id = engine
+        .start_session_with_preset(loaded)
+        .await
+        .expect("start_session_with_preset should succeed");
+    seed_novel_writing_preset_input(engine, &session_id).await;
+    session_id
+}
+
 /// Run steps until the session reaches a terminal or waiting-for-input state.
 /// Returns the last step outcome.
 async fn run_until_wait_or_terminal(
@@ -66,10 +99,7 @@ async fn run_until_wait_or_terminal(
 async fn e2e_novel_writing_traverses_all_outer_states() {
     let (engine, loaded) = setup_engine();
 
-    let session_id = engine
-        .start_session_with_preset(&loaded)
-        .await
-        .expect("start_session_with_preset should succeed");
+    let session_id = start_novel_writing_session(&engine, &loaded).await;
 
     // Run until we reach a waiting state or terminal.
     let outcomes = run_until_wait_or_terminal(&engine, &session_id, 64).await;
@@ -99,10 +129,7 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
 async fn e2e_inner_graphs_execute() {
     let (engine, loaded) = setup_engine();
 
-    let session_id = engine
-        .start_session_with_preset(&loaded)
-        .await
-        .expect("start should succeed");
+    let session_id = start_novel_writing_session(&engine, &loaded).await;
 
     let outcomes = run_until_wait_or_terminal(&engine, &session_id, 128).await;
 
@@ -162,10 +189,7 @@ async fn e2e_inner_graphs_execute() {
 async fn e2e_schedule_advance_past_outlining() {
     let (engine, loaded) = setup_engine();
 
-    let session_id = engine
-        .start_session_with_preset(&loaded)
-        .await
-        .expect("start should succeed");
+    let session_id = start_novel_writing_session(&engine, &loaded).await;
 
     let outcomes = run_until_wait_or_terminal(&engine, &session_id, 64).await;
 
@@ -213,10 +237,7 @@ async fn e2e_schedule_advance_past_outlining() {
 async fn e2e_restart_durability_context_persists() {
     let (engine, loaded) = setup_engine();
 
-    let session_id = engine
-        .start_session_with_preset(&loaded)
-        .await
-        .expect("start should succeed");
+    let session_id = start_novel_writing_session(&engine, &loaded).await;
 
     let _ = run_until_wait_or_terminal(&engine, &session_id, 16).await;
 
@@ -267,10 +288,7 @@ async fn e2e_restart_durability_context_persists() {
 async fn e2e_session_list_includes_created() {
     let (engine, loaded) = setup_engine();
 
-    let session_id = engine
-        .start_session_with_preset(&loaded)
-        .await
-        .expect("start should succeed");
+    let session_id = start_novel_writing_session(&engine, &loaded).await;
 
     let sessions = engine
         .list_active(nexus_orchestration::engine::SessionFilter::default())
