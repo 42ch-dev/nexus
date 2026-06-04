@@ -24,6 +24,7 @@ pub use capability::{
 pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use preset::resolve_preset;
 pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
+pub use stage_gates::{build_stage_schedule_label, preset_for_stage};
 pub use worker::WorkerManager;
 
 use std::path::Path;
