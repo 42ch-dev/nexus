@@ -69,6 +69,9 @@ pub struct PresetHeader {
     /// Capabilities this preset requires; loader rejects if any are missing.
     #[serde(default)]
     pub requires_capabilities: Vec<String>,
+    /// Declared run intents for the preset (V1.33 §5.1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_intents: Vec<RunIntent>,
     /// The ID of the initial state (must match a `states[].id`).
     pub initial: String,
     /// The ID of the terminal state (must match a `states[].id`).
@@ -96,6 +99,24 @@ pub enum PresetKind {
     Creator,
     /// Internal system preset (e.g. `_system.maintenance`).
     System,
+}
+
+/// Preset run-intent classification (V1.33 work-experience-model §5.1).
+///
+/// Closed enum — unknown strings cause loader validation errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunIntent {
+    /// May start a new Work (creator preset).
+    WorkInit,
+    /// May run on an existing Work; may append inspiration / context.
+    WorkContinue,
+    /// Reference / KB pipeline presets.
+    KnowledgeIngest,
+    /// Work-adjacent non-narrative upkeep (e.g. soul-experience-refresh).
+    WorkMaintenance,
+    /// `_system.*` only.
+    SystemMaintenance,
 }
 
 // ---------------------------------------------------------------------------
@@ -887,6 +908,7 @@ roles:
                 kind: PresetKind::Creator,
                 description: "test".into(),
                 requires_capabilities: vec![],
+                run_intents: vec![],
                 initial: "a".into(),
                 terminal: "b".into(),
                 author: None,

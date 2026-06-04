@@ -21,6 +21,8 @@ preset:
   requires_capabilities:
     - kb.extract_work
     - acp.prompt
+  run_intents:
+    - knowledge_ingest
   initial: loading
   terminal: done
 
