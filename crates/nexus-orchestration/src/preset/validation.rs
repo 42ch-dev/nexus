@@ -1514,3 +1514,134 @@ states:
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// A6: FL-E stage→preset allowlist (V1.34 §4)
+// ---------------------------------------------------------------------------
+
+/// Ordered FL-E stages (V1.34 creator-workflow-fl-e §3.1).
+pub const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
+
+/// Normative stage→preset mapping (V1.34 creator-workflow-fl-e §4).
+///
+/// Each stage maps to one or more preset IDs that are valid for that stage.
+/// The first entry is the default preset for that stage.
+pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
+    ("intake", &["creative-brief-intake"]),
+    ("research", &["research"]),
+    ("produce", &["novel-writing"]),
+    ("review", &["reflection-loop"]),
+    ("persist", &["kb-extract"]),
+];
+
+/// Returns the default preset ID for a given FL-E stage.
+///
+/// Returns `None` if the stage is not a valid FL-E stage.
+#[must_use]
+pub fn default_preset_for_stage(stage: &str) -> Option<&'static str> {
+    STAGE_PRESET_ALLOWLIST
+        .iter()
+        .find(|(s, _)| *s == stage)
+        .map(|(_, presets)| presets[0])
+}
+
+/// Returns all allowed preset IDs for a given FL-E stage.
+///
+/// Returns `None` if the stage is not a valid FL-E stage.
+#[must_use]
+pub fn allowed_presets_for_stage(stage: &str) -> Option<&'static [&'static str]> {
+    STAGE_PRESET_ALLOWLIST
+        .iter()
+        .find(|(s, _)| *s == stage)
+        .map(|(_, presets)| *presets)
+}
+
+/// Validates that a preset ID is in the allowlist for a given FL-E stage.
+///
+/// Returns `Ok(())` if the preset is allowed for the stage, or a descriptive
+/// error string if not.
+///
+/// # Errors
+///
+/// Returns `Err(String)` with a descriptive message if:
+/// - The stage is not a valid FL-E stage
+/// - The preset is not in the allowlist for that stage
+pub fn validate_preset_for_stage(stage: &str, preset_id: &str) -> std::result::Result<(), String> {
+    let allowed = allowed_presets_for_stage(stage).ok_or_else(|| {
+        format!(
+            "Unknown FL-E stage '{stage}'. Valid stages: {}",
+            FL_E_STAGES.join(", ")
+        )
+    })?;
+
+    if allowed.contains(&preset_id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Preset '{preset_id}' is not in the allowlist for stage '{stage}'. \
+             Allowed presets: {}",
+            allowed.join(", ")
+        ))
+    }
+}
+
+/// Returns the index of a stage in the FL-E linear order.
+///
+/// Returns `None` for unknown stage strings.
+#[must_use]
+pub fn stage_index(stage: &str) -> Option<usize> {
+    FL_E_STAGES.iter().position(|&s| s == stage)
+}
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
+
+    #[test]
+    fn default_preset_for_known_stages() {
+        assert_eq!(
+            default_preset_for_stage("intake"),
+            Some("creative-brief-intake")
+        );
+        assert_eq!(default_preset_for_stage("research"), Some("research"));
+        assert_eq!(default_preset_for_stage("produce"), Some("novel-writing"));
+        assert_eq!(default_preset_for_stage("review"), Some("reflection-loop"));
+        assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
+    }
+
+    #[test]
+    fn default_preset_for_unknown_stage() {
+        assert_eq!(default_preset_for_stage("unknown"), None);
+    }
+
+    #[test]
+    fn validate_known_preset_for_stage() {
+        assert!(validate_preset_for_stage("intake", "creative-brief-intake").is_ok());
+        assert!(validate_preset_for_stage("produce", "novel-writing").is_ok());
+    }
+
+    #[test]
+    fn validate_wrong_preset_for_stage() {
+        assert!(validate_preset_for_stage("intake", "novel-writing").is_err());
+        assert!(validate_preset_for_stage("produce", "creative-brief-intake").is_err());
+    }
+
+    #[test]
+    fn validate_unknown_stage() {
+        assert!(validate_preset_for_stage("unknown", "any-preset").is_err());
+    }
+
+    #[test]
+    fn stage_index_order() {
+        assert_eq!(stage_index("intake"), Some(0));
+        assert_eq!(stage_index("research"), Some(1));
+        assert_eq!(stage_index("produce"), Some(2));
+        assert_eq!(stage_index("review"), Some(3));
+        assert_eq!(stage_index("persist"), Some(4));
+    }
+
+    #[test]
+    fn stage_index_unknown() {
+        assert_eq!(stage_index("unknown"), None);
+    }
+}
