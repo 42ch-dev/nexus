@@ -20,6 +20,49 @@ use uuid::Uuid;
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
+/// Stable API representation of a Work record (R-V133P1-10).
+///
+/// Decoupled from `WorkRecord` (DB row) to prevent leaking internal fields
+/// like `creator_id` and `workspace_slug` to API consumers.
+#[derive(Debug, Serialize)]
+pub struct WorkApiDto {
+    pub work_id: String,
+    pub status: String,
+    pub title: String,
+    pub long_term_goal: String,
+    pub initial_idea: String,
+    pub creative_brief: Option<String>,
+    pub intake_status: String,
+    pub world_id: Option<String>,
+    pub story_ref: Option<String>,
+    pub inspiration_log: String,
+    pub primary_preset_id: String,
+    pub schedule_ids: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<WorkRecord> for WorkApiDto {
+    fn from(r: WorkRecord) -> Self {
+        Self {
+            work_id: r.work_id,
+            status: r.status,
+            title: r.title,
+            long_term_goal: r.long_term_goal,
+            initial_idea: r.initial_idea,
+            creative_brief: r.creative_brief,
+            intake_status: r.intake_status,
+            world_id: r.world_id,
+            story_ref: r.story_ref,
+            inspiration_log: r.inspiration_log,
+            primary_preset_id: r.primary_preset_id,
+            schedule_ids: r.schedule_ids,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkRequest {
     pub title: String,
@@ -197,7 +240,7 @@ pub async fn list_works(
 pub async fn get_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
-) -> Result<Json<WorkRecord>, NexusApiError> {
+) -> Result<Json<WorkApiDto>, NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
@@ -209,14 +252,14 @@ pub async fn get_work(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
 
-    Ok(Json(record))
+    Ok(Json(WorkApiDto::from(record)))
 }
 
 pub async fn patch_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
     Json(req): Json<PatchWorkRequest>,
-) -> Result<Json<WorkRecord>, NexusApiError> {
+) -> Result<Json<WorkApiDto>, NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -245,7 +288,7 @@ pub async fn patch_work(
             },
         })?;
 
-    Ok(Json(updated))
+    Ok(Json(WorkApiDto::from(updated)))
 }
 
 pub async fn append_inspiration(
