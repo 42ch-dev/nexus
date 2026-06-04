@@ -4,7 +4,7 @@
 //! with structured briefs, inspiration logs, and schedule linkage.
 //! Idempotency via separate `works_idempotency` table.
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
@@ -90,10 +90,10 @@ pub struct WorkPatch {
     pub schedule_ids: Option<String>,
 }
 
-/// Create a new Work (with idempotency on `client_request_id`).
+/// Create a new Work (simple, non-transactional).
 ///
-/// If `client_request_id` is provided and a Work already exists for
-/// `(creator_id, client_request_id)`, returns the existing `work_id`.
+/// Prefer [`create_work_tx`] when idempotency is required (single tx
+/// wrapping check + create + idempotency record).
 ///
 /// # Errors
 ///
@@ -128,6 +128,40 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     Ok(())
 }
 
+/// Insert a Work row inside an existing transaction.
+async fn insert_work_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    record: &WorkRecord,
+) -> Result<(), LocalDbError> {
+    // SAFETY: INSERT against works table — runtime query because the table
+    // was added in the same migration cycle and sqlx prepare hasn't run yet.
+    sqlx::query(
+        "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
+         initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
+         primary_preset_id, schedule_ids, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&record.work_id)
+    .bind(&record.creator_id)
+    .bind(&record.workspace_slug)
+    .bind(&record.status)
+    .bind(&record.title)
+    .bind(&record.long_term_goal)
+    .bind(&record.initial_idea)
+    .bind(&record.creative_brief)
+    .bind(&record.intake_status)
+    .bind(&record.world_id)
+    .bind(&record.story_ref)
+    .bind(&record.inspiration_log)
+    .bind(&record.primary_preset_id)
+    .bind(&record.schedule_ids)
+    .bind(&record.created_at)
+    .bind(&record.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// Record an idempotency mapping after creating a Work.
 ///
 /// # Errors
@@ -153,6 +187,92 @@ pub async fn record_idempotency(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Record idempotency mapping inside an existing transaction.
+async fn record_idempotency_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    creator_id: &str,
+    client_request_id: &str,
+    work_id: &str,
+    created_at: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: INSERT against works_idempotency — runtime query.
+    sqlx::query(
+        "INSERT INTO works_idempotency (creator_id, client_request_id, work_id, created_at)
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(creator_id)
+    .bind(client_request_id)
+    .bind(work_id)
+    .bind(created_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Look up idempotency key inside an existing transaction.
+/// Returns the `work_id` if found, `None` otherwise.
+async fn find_idempotency_key_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    creator_id: &str,
+    client_request_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    // SAFETY: SELECT against works_idempotency — runtime query.
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT work_id FROM works_idempotency WHERE creator_id = ? AND client_request_id = ?",
+    )
+    .bind(creator_id)
+    .bind(client_request_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|(wid,)| wid))
+}
+
+/// Atomically create a Work with idempotency check and recording in a single transaction.
+///
+/// Returns `Ok(Ok(existing_record))` if the `(creator_id, client_request_id)` mapping
+/// already exists (idempotent replay), or `Ok(Ok(new_record))` for fresh creation.
+/// Returns `Ok(Err(record))` when no `client_request_id` was provided (simple create).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub async fn create_work_atomic(
+    pool: &SqlitePool,
+    record: &WorkRecord,
+    client_request_id: Option<&str>,
+) -> Result<Result<WorkRecord, WorkRecord>, LocalDbError> {
+    let mut tx = pool.begin().await?;
+
+    if let Some(crid) = client_request_id {
+        // Check idempotency table inside tx
+        if let Some(existing_wid) =
+            find_idempotency_key_tx(&mut tx, &record.creator_id, crid).await?
+        {
+            // Idempotent replay — fetch the existing work and return it
+            let existing = get_work(pool, &record.creator_id, &existing_wid).await?;
+            // We don't need the tx anymore (read-only path found existing)
+            tx.rollback().await?;
+            return Ok(Ok(existing.unwrap_or_else(|| record.clone())));
+        }
+
+        // Not found — create + record atomically
+        insert_work_tx(&mut tx, record).await?;
+        record_idempotency_tx(
+            &mut tx,
+            &record.creator_id,
+            crid,
+            &record.work_id,
+            &record.created_at,
+        )
+        .await?;
+    } else {
+        // No idempotency key — just create
+        insert_work_tx(&mut tx, record).await?;
+    }
+    tx.commit().await?;
+    Ok(Err(record.clone()))
 }
 
 /// Find a Work by its idempotency key.
@@ -417,9 +537,13 @@ pub async fn patch_work(
         })
 }
 
-/// Append an inspiration entry to a Work (atomic).
+/// Append an inspiration entry to a Work (atomic via transaction).
 ///
-/// Uses a single UPDATE that appends to the JSON array.
+/// Reads the current `inspiration_log`, appends the new entry in Rust,
+/// and writes back the full array inside a single transaction. This is
+/// robust to whitespace/non-compact JSON and avoids fragile substr/CASE logic.
+///
+/// Returns the updated `WorkRecord` after the append.
 ///
 /// # Errors
 ///
@@ -431,33 +555,72 @@ pub async fn append_inspiration(
     entry_json: &str,
     now: &str,
 ) -> Result<WorkRecord, LocalDbError> {
-    // SAFETY: Dynamic SQL required for JSON manipulation via sqlite_json functions.
-    // We build the new JSON array by reading the old one and appending.
+    let mut tx = pool.begin().await?;
+
+    // Read current inspiration_log inside tx
+    // SAFETY: Dynamic SQL required for JSON manipulation via transaction.
     // All values are bound parameters.
-    let sql = "UPDATE works SET inspiration_log = \
-               CASE WHEN inspiration_log = '[]' THEN ? \
-               ELSE substr(inspiration_log, 1, length(inspiration_log) - 1) || ',' || substr(?, 2) \
-               END, \
-               updated_at = ? \
-               WHERE work_id = ? AND creator_id = ?";
+    let row = sqlx::query(
+        "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
+                initial_idea, creative_brief, intake_status, world_id, story_ref,
+                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at
+         FROM works WHERE work_id = ? AND creator_id = ?",
+    )
+    .bind(work_id)
+    .bind(creator_id)
+    .fetch_optional(&mut *tx)
+    .await?;
 
-    // entry_json is a single JSON object like {"at":"...","note":"..."}
-    let array_entry = format!("[{entry_json}]");
-
-    sqlx::query(sql)
-        .bind(&array_entry)
-        .bind(&array_entry)
-        .bind(now)
-        .bind(work_id)
-        .bind(creator_id)
-        .execute(pool)
-        .await?;
-
-    get_work(pool, creator_id, work_id)
-        .await?
+    let current = row
+        .map(|r| WorkRecord {
+            work_id: r.get("work_id"),
+            creator_id: r.get("creator_id"),
+            workspace_slug: r.get("workspace_slug"),
+            status: r.get("status"),
+            title: r.get("title"),
+            long_term_goal: r.get("long_term_goal"),
+            initial_idea: r.get("initial_idea"),
+            creative_brief: r.get("creative_brief"),
+            intake_status: r.get("intake_status"),
+            world_id: r.get("world_id"),
+            story_ref: r.get("story_ref"),
+            inspiration_log: r.get("inspiration_log"),
+            primary_preset_id: r.get("primary_preset_id"),
+            schedule_ids: r.get("schedule_ids"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        })
         .ok_or_else(|| LocalDbError::MissingVersionKey {
             key: format!("works/{work_id}"),
-        })
+        })?;
+
+    // Append new entry in Rust
+    let mut log: Vec<serde_json::Value> =
+        serde_json::from_str(&current.inspiration_log).unwrap_or_default();
+    let entry: serde_json::Value =
+        serde_json::from_str(entry_json).unwrap_or_else(|_| serde_json::json!({}));
+    log.push(entry);
+    let new_log = serde_json::to_string(&log).unwrap_or_default();
+
+    // Write back
+    // SAFETY: UPDATE with bounded column list — runtime query.
+    sqlx::query(
+        "UPDATE works SET inspiration_log = ?, updated_at = ? WHERE work_id = ? AND creator_id = ?",
+    )
+    .bind(&new_log)
+    .bind(now)
+    .bind(work_id)
+    .bind(creator_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    // Return updated record (derive from current + new log)
+    let mut updated = current;
+    updated.inspiration_log = new_log;
+    updated.updated_at = now.to_string();
+    Ok(updated)
 }
 
 #[cfg(test)]
