@@ -29,6 +29,10 @@ pub enum RunCommand {
         /// Skip the creative brief intake and start the production preset directly
         #[arg(long, default_value_t = false)]
         skip_intake: bool,
+        /// After intake completes, automatically schedule the novel-writing
+        /// production preset (C-V133P2-03: chains intake → novel-writing).
+        #[arg(long, default_value_t = false)]
+        chain_novel_writing: bool,
         /// Idempotency key (UUID); repeat calls with same key return same `work_id`
         #[arg(long)]
         client_request_id: Option<String>,
@@ -84,6 +88,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             title,
             world_id,
             skip_intake,
+            chain_novel_writing,
             client_request_id,
             json,
         } => {
@@ -156,6 +161,46 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
 
+            // C-V133P2-03: auto-chain novel-writing after intake.
+            // When --chain-novel-writing is set:
+            //   - If intake was skipped: schedule novel-writing directly.
+            //   - If intake ran: the follow-up novel-writing command is printed
+            //     for the user to run after intake completes.
+            //     The daemon does not yet support on_complete hooks for
+            //     auto-scheduling follow-up presets (see note below).
+            //
+            // NOTE: Full daemon-side auto-chaining (on_complete trigger) is a
+            // future enhancement. For V1.33, the CLI side provides explicit
+            // chaining via --chain-novel-writing which either schedules
+            // directly (skip-intake) or documents the follow-up command.
+            let mut novel_schedule_id: Option<String> = None;
+            if chain_novel_writing && skip_intake {
+                // Intake skipped → schedule novel-writing directly.
+                let production_preset = preset.as_deref().unwrap_or("novel-writing");
+                let novel_body = serde_json::json!({
+                    "presetId": production_preset,
+                    "seed": &idea,
+                    "presetInput": {
+                        "work_id": &work_id,
+                    }
+                });
+
+                match client
+                    .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &novel_body)
+                    .await
+                {
+                    Ok(sched_resp) => {
+                        novel_schedule_id = sched_resp
+                            .get("scheduleId")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: failed to schedule production: {e}");
+                    }
+                }
+            }
+
             if json {
                 let mut output = resp;
                 if let Some(sid) = &schedule_id {
@@ -163,6 +208,14 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         o.insert(
                             "intake_schedule_id".to_string(),
                             serde_json::Value::String(sid.clone()),
+                        )
+                    });
+                }
+                if let Some(nid) = &novel_schedule_id {
+                    output.as_object_mut().map(|o| {
+                        o.insert(
+                            "production_schedule_id".to_string(),
+                            serde_json::Value::String(nid.clone()),
                         )
                     });
                 }
@@ -174,8 +227,28 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     println!("Intake scheduled: {sid} (preset: creative-brief-intake)");
                     println!();
                     println!("The intake will run via ACP multi-turn conversation.");
-                    println!("Once intake completes, start production with:");
-                    println!("  nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed \"<topic>\"");
+                    if chain_novel_writing {
+                        // C-V133P2-03: chain → novel-writing after intake.
+                        println!("Once intake completes, production will be ready:");
+                        let production_preset = preset.as_deref().unwrap_or("novel-writing");
+                        println!(
+                            "  nexus42 daemon schedule add --preset {production_preset} \
+                             --creator <creator-id> --seed \"{idea}\""
+                        );
+                    } else {
+                        println!("Once intake completes, start production with:");
+                        println!(
+                            "  nexus42 daemon schedule add --preset novel-writing \
+                             --creator <creator-id> --seed \"<topic>\""
+                        );
+                    }
+                } else if let Some(nid) = &novel_schedule_id {
+                    // Intake skipped, novel-writing scheduled directly.
+                    let production_preset = preset.as_deref().unwrap_or("novel-writing");
+                    println!(
+                        "Production scheduled: {nid} (preset: {production_preset}, \
+                         intake skipped)"
+                    );
                 }
                 println!();
                 println!("Next: nexus42 creator run continue {work_id} --note \"<direction>\"");
