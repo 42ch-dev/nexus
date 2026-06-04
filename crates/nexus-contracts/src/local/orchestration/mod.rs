@@ -220,6 +220,34 @@ pub struct CreatorInjectPromptOutput {
 }
 
 // ---------------------------------------------------------------------------
+// creator.write_brief — validate and persist creative brief on Work
+// ---------------------------------------------------------------------------
+
+/// Input for `creator.write_brief` — validate and persist a creative brief.
+///
+/// The `brief_text` is the raw text output from the synthesizing state,
+/// which should contain valid JSON matching the creative brief schema
+/// (work-experience-model §4). The capability validates before writing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatorWriteBriefInput {
+    /// Work entity ID to write the brief to.
+    pub work_id: String,
+    /// Raw brief text (expected to be JSON matching §4 schema).
+    pub brief_text: String,
+}
+
+/// Output for `creator.write_brief`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatorWriteBriefOutput {
+    /// Whether the brief was successfully validated and written.
+    pub written: bool,
+    /// Updated intake status of the Work.
+    pub intake_status: String,
+}
+
+// ---------------------------------------------------------------------------
 // Judge capabilities
 // ---------------------------------------------------------------------------
 
