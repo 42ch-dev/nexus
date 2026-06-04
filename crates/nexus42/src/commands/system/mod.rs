@@ -81,7 +81,7 @@ pub enum SystemCommand {
 pub enum SystemPresetSubcommand {
     /// List all discoverable presets (embedded + user + system)
     List {
-        /// Filter by run_intent (e.g. work_init, knowledge_ingest)
+        /// Filter by `run_intent` (e.g. `work_init`, `knowledge_ingest`)
         #[arg(long)]
         intent: Option<String>,
         /// Emit machine-readable JSON
@@ -257,7 +257,7 @@ async fn list_system_presets(
     let mgmt_resp: serde_json::Value = client
         .get::<serde_json::Value>("/v1/local/presets")
         .await
-        .unwrap_or(serde_json::json!({}));
+        .unwrap_or_else(|_| serde_json::json!({}));
 
     let embedded_intents: std::collections::HashMap<String, Vec<String>> = mgmt_resp
         .get("embedded")
@@ -336,7 +336,10 @@ async fn validate_preset(config: &CliConfig, path: &str, json_output: bool) -> R
         .post::<serde_json::Value, _>("/v1/local/presets:validate", &body)
         .await?;
 
-    let valid = resp.get("valid").and_then(|v| v.as_bool()).unwrap_or(false);
+    let valid = resp
+        .get("valid")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&resp)?);
@@ -349,8 +352,7 @@ async fn validate_preset(config: &CliConfig, path: &str, json_output: bool) -> R
         let errors = resp
             .get("diagnostics")
             .and_then(|v| v.as_array())
-            .map(|a| a.len())
-            .unwrap_or(0);
+            .map_or(0, std::vec::Vec::len);
         println!("✗ Invalid preset ({errors} error(s))");
         if let Some(diagnostics) = resp.get("diagnostics").and_then(|v| v.as_array()) {
             for d in diagnostics {
