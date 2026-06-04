@@ -451,7 +451,12 @@ impl Capability for CreatorInjectPrompt {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"prompt":{"type":"string"},"priority":{"type":"integer","default":0}},"required":["prompt"],"additionalProperties":false}"#
+        // R-P2-01 v2: prompt is no longer required at the preset YAML level.
+        // The orchestration engine resolves prompt_file → prompt before calling
+        // run(), so the runtime always receives a populated prompt string.
+        // anyOf declares that at least one of prompt / prompt_file must be
+        // provided; the validator checks this semantically.
+        r#"{"type":"object","properties":{"prompt":{"type":"string"},"priority":{"type":"integer","default":0},"prompt_file":{"type":"string"},"vars":{"type":"object","additionalProperties":{"type":"string"}}},"required":[],"anyOf":[{"required":["prompt"]},{"required":["prompt_file"]}],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {

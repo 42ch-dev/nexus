@@ -362,7 +362,54 @@ pub async fn list_works(
     workspace_slug: &str,
     filters: &WorkListFilters,
 ) -> Result<Vec<WorkRecord>, LocalDbError> {
-    // Build dynamic WHERE clause for optional filters
+    list_works_inner(pool, creator_id, workspace_slug, filters).await
+}
+
+/// Count total Works matching the given filters (ignores limit/offset).
+///
+/// Used by the list handler to return the true total row count for
+/// pagination, independent of the page size.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_works(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+    filters: &WorkListFilters,
+) -> Result<u32, LocalDbError> {
+    count_works_inner(pool, creator_id, workspace_slug, filters).await
+}
+
+/// List and count Works in a shared transaction for consistent pagination metadata.
+///
+/// Runs both `SELECT ... FROM works` and `SELECT COUNT(*) FROM works` inside a
+/// single `BEGIN IMMEDIATE` / `COMMIT` so that concurrent writes cannot cause the
+/// `total` to diverge from the actual row set.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the transaction or any query within it fails.
+pub async fn list_and_count_works(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+    filters: &WorkListFilters,
+) -> Result<(Vec<WorkRecord>, u32), LocalDbError> {
+    let mut tx: Transaction<'_, Sqlite> = pool.begin().await?;
+    let records = list_works_inner(&mut *tx, creator_id, workspace_slug, filters).await?;
+    let total = count_works_inner(&mut *tx, creator_id, workspace_slug, filters).await?;
+    tx.commit().await?;
+    Ok((records, total))
+}
+
+async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
+    executor: E,
+    creator_id: &str,
+    workspace_slug: &str,
+    filters: &WorkListFilters,
+) -> Result<Vec<WorkRecord>, LocalDbError> {
     let mut where_clauses = vec![
         "creator_id = ?".to_string(),
         "workspace_slug = ?".to_string(),
@@ -402,7 +449,7 @@ pub async fn list_works(
 
     query = query.bind(limit).bind(offset);
 
-    let rows = query.fetch_all(pool).await?;
+    let rows = query.fetch_all(executor).await?;
 
     Ok(rows
         .iter()
@@ -425,6 +472,45 @@ pub async fn list_works(
             updated_at: row.get("updated_at"),
         })
         .collect())
+}
+
+async fn count_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
+    executor: E,
+    creator_id: &str,
+    workspace_slug: &str,
+    filters: &WorkListFilters,
+) -> Result<u32, LocalDbError> {
+    let mut where_clauses = vec![
+        "creator_id = ?".to_string(),
+        "workspace_slug = ?".to_string(),
+    ];
+
+    if filters.status.is_some() {
+        where_clauses.push("status = ?".to_string());
+    }
+    if filters.intake_status.is_some() {
+        where_clauses.push("intake_status = ?".to_string());
+    }
+
+    let where_sql = where_clauses.join(" AND ");
+
+    // SAFETY: Dynamic SQL required for optional WHERE filters.
+    // All user inputs are passed as bound parameters, not interpolated.
+    let sql = format!("SELECT COUNT(*) AS cnt FROM works WHERE {where_sql}");
+
+    let mut query = sqlx::query(&sql).bind(creator_id).bind(workspace_slug);
+
+    if let Some(ref s) = filters.status {
+        query = query.bind(s);
+    }
+    if let Some(ref s) = filters.intake_status {
+        query = query.bind(s);
+    }
+
+    let row = query.fetch_one(executor).await?;
+    // COUNT(*) returns non-negative; u32::try_from is safe for all practical row counts.
+    let count: i64 = row.get("cnt");
+    Ok(u32::try_from(count).unwrap_or(0))
 }
 
 /// Partially update a Work.

@@ -226,14 +226,25 @@ pub async fn list_works(
         offset: query.offset,
     };
 
-    let records = works::list_works(state.pool(), &creator_id, &workspace_slug, &filters)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    // R-V133P1-11 v2: list + count in a shared transaction so total and
+    // records are consistent even under concurrent writes.
+    // R-V133P1-11 v3: warn on failure for observability before mapping to error response.
+    let (records, total) =
+        works::list_and_count_works(state.pool(), &creator_id, &workspace_slug, &filters)
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    "list_and_count_works failed for creator {creator_id} — \
+                     pagination metadata unavailable"
+                );
+                NexusApiError::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                }
+            })?;
+    let total: usize = total as usize;
 
-    let total = records.len();
     let works_list: Vec<WorkSummary> = records
         .into_iter()
         .map(|r| WorkSummary {
