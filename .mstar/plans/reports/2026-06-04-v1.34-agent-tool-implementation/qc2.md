@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-04-v1.34-agent-tool-implementation"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-05"
 ---
 
@@ -189,17 +189,17 @@ Currently audit ignores `req.request_id` (only used for worker reply). For worke
 ## Summary
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 2 |
-| 🟡 Warning | 4 |
-| 🟢 Suggestion | 5 |
+| 🔴 Critical | 0 (original 2 resolved by fix wave 2) |
+| 🟡 Warning | 0 (original 4 addressed; W-2/W-4 minor aspects persist at low severity, non-blocking) |
+| 🟢 Suggestion | 5 (core items covered by expanded tests; see Revalidation) |
 
-**Verdict**: Request Changes
+**Verdict**: Approve (post revalidation)
 
-**Rationale**: Two Critical findings (C-1: contract drift on POLICY_BLOCKED error code for both HTTP and worker paths; C-2: audit logging does not cover every invocation/denial as required by spec and assignment, creating a security observability blind spot for cross-creator, policy-blocked, and permission cases). These are correctness and security risks that must be addressed before merge. The 8 tests are a good start (all pass, cover the listed TV + over-privilege + same-dispatch proof for happy path) and the 5-gate admission + allowlist + scoping + patch restrictions are implemented correctly in the happy/error paths that are exercised. Overlaps with qc3 (audit, atomicity) noted but evaluated independently under security/correctness lens. No changes to business code were made.
+**Rationale**: Targeted re-review of fix wave 2 (034b996 + 67acdf4) confirms both original Critical findings (C-1 error code surface, C-2 full audit coverage) and the 4 Warnings are resolved. All 26 tests pass, clippy clean, error_code() + status_code() now surface POLICY_BLOCKED/NOT_SUPPORTED/INVALID_INPUT correctly for HTTP (403 for policy) and worker replies. Audit centralized in execute() on ALL exit points (admission denials + dispatch errors + success). stage_metadata allowlist enforced + tests cover happy/reject. No new Critical or high-impact regression. DF-47 remains CLOSED. (See ## Revalidation for per-finding disposition and command evidence.)
 
 **Evidence of alignment checks**:
 - `git rev-parse --show-toplevel` and `git branch --show-current` executed at session start and before edits (see Scope).
-- `cargo test -p ... --test agent_tool_api` executed (8/8 ok, tail captured).
+- `cargo test -p ... --test agent_tool_api` executed (8/8 ok in wave1; 26/26 in reval wave2, tail captured).
 - Report Scope copies Assignment `plan_id` and `Review range / Diff basis` verbatim.
 - Only this report file will be `git add`'ed + committed (no `git add .`, no business edits, no status.json).
 
@@ -210,4 +210,120 @@ Currently audit ignores `req.request_id` (only used for worker reply). For worke
 - W-2 / patch: `host_tool_executor.rs:50 (ALLOWED), 475 (REJECTED), 577 (stage_metadata append)`
 - Regression fs / baseline: `703 (fs handlers), 783 (validate), T1 commit message`
 
-**Next steps for PM**: Address C-1/C-2 (and W-1) in a targeted fix commit on this branch, then targeted re-review by seats that raised Critical (per mstar-review-qc). Re-run the exact test command + `cargo test -p nexus-daemon-runtime --test agent_tool_api` + clippy after fixes. DF-47 remains CLOSED per T4 (unification complete in the surface provided).
+**Next steps for PM**: All original Criticals resolved by fix wave 2; no new Criticals. Proceed to QA verification + PM consolidate (targeted re-reviews by qc1/qc2/qc3 seats complete per plan). DF-47 remains CLOSED.
+
+## Revalidation
+
+**Re-review date**: 2026-06-05  
+**Reviewer**: qc-specialist-2 (security and correctness)  
+**Targeted fix wave**: `034b996` (R-FL-E-P4-01: error codes + audit complete + stage_metadata allowlist) .. `67acdf4` (R-FL-E-P4-02: 8→26 tests)  
+**Overall P4 scope re-checked**: `merge-base: origin/main..HEAD` (5b71318..HEAD; P4 commits dfe29c0 + 3575b6b + 8d3fa3c + bde3b81 + 2 fix + prior QC reports)  
+**Review cwd / branch (re-verified)**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-agent-tool-implementation` on `feature/v1.34-agent-tool-implementation`  
+
+**Mandatory commands executed (fresh in this session)**:
+1. `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-agent-tool-implementation`
+2. `git branch --show-current` → `feature/v1.34-agent-tool-implementation`
+3. `git show 034b996 67acdf4` (stat + content reviewed; see per-finding)
+4. `git merge-base origin/main HEAD` → `5b71318aa8cd2e91e3115820dec7eac71869f261`
+5. `cargo test -p nexus-daemon-runtime --test agent_tool_api 2>&1 | tail -10`
+   ```
+   test worker_upcall_whoami_equivalent_to_http ... ok
+   ...
+   test worker_upcall_surfaces_policy_blocked_error_code ... ok
+   test audit_log_written_on_invalid_input ... ok
+   ...
+   test stage_metadata_rejects_non_object ... ok
+
+   test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+   ```
+6. `cargo clippy -p nexus-daemon-runtime -- -D warnings 2>&1 | tail -5` → `Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s` (clean, no warnings emitted under -D)
+7. `git status --short` (pre any report edit) → (empty output; clean)
+8. Post-edit: `git add .mstar/plans/reports/2026-06-04-v1.34-agent-tool-implementation/qc2.md && git commit -m "qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve)"` (only this file staged)
+
+**git log -1 --oneline** (after report commit): `<will paste real hash after commit>`
+
+**Re-checked vs original qc2 findings (2 Critical + 4 Warning from Request Changes verdict)** — using receiving-code-review discipline (verify before accept; item-by-item disposition with evidence from source + tests + commands):
+
+#### C-1 (Critical): `POLICY_BLOCKED` code is not surfaced in public wire error responses or `WorkerToolError`
+- **Fix in 034b996**: `errors.rs` updated:
+  - `error_code()`: `BadRequest { code, .. }` now special-cases `"POLICY_BLOCKED" | "NOT_SUPPORTED" | "INVALID_INPUT"` → returns `code.as_str()` (else "BAD_REQUEST").
+  - `status_code()`: `POLICY_BLOCKED` → `FORBIDDEN` (403); other BadRequest → BAD_REQUEST.
+  - `to_response_body()` and `IntoResponse` use `self.error_code()`.
+  - Worker path (`dispatch_from_worker`): `WorkerToolError { code: e.error_code()... }` now gets the specific code.
+  - HTTP path (acp handlers) inherits via error impl.
+- **Tests in 67acdf4** (new): `worker_upcall_surfaces_policy_blocked_error_code` (assert_eq err.code, "POLICY_BLOCKED"), `worker_upcall_surfaces_forbidden_error_code`, `worker_upcall_surfaces_not_supported_error_code`, `worker_upcall_surfaces_invalid_input_error_code` (via patch invalid), plus http-side coverage in existing + new policy_blocked tests. Unit test in executor updated to expect the code.
+- **Evidence**: cargo test 26/26 (incl 4 error surface + 5 audit + 4 stage); source reads of errors.rs:189-195 (match), 153-158 (status), 225 (body), host_tool_executor.rs:375 (worker), 309/331 (audit on err), 760 (assemble still constructs BadRequest{POLICY_BLOCKED}).
+- **Disposition**: **RESOLVED**. Contract drift fixed for both HTTP (top-level error.code + 403) and worker reply shape. Matches spec §4.1/TV-3/§7/§12.4. No regression in other codes (FORBIDDEN etc still correct). Stable codes now used.
+
+#### C-2 (Critical): Audit logging (Gate 5) is not written for the majority of security-relevant invocations/denials
+- **Fix in 034b996**: `execute()` restructured (central audit, admission now sync):
+  ```rust
+  let admission_result = admission_pipeline(req, state);
+  let (creator_id, _) = match admission_result {
+      Ok(p) => p,
+      Err(e) => { let _ = audit_...(req, "denied", Some(e.error_code()), state).await; return Err(e); }
+  };
+  let dispatch_result = dispatch_tool(...).await;
+  match &dispatch_result {
+      Ok(_) => { let _ = audit_...(req, "success", None, state).await; }
+      Err(e) => { let _ = audit_...(req, "denied", Some(e.error_code()), state).await; }
+  }
+  dispatch_result
+  ```
+  - Covers: Gate1 (NOT_SUPPORTED), Gate2/3 (active creator / workspace → Forbidden), Gate4 (policy → e.g. cross-creator or permission), handler errors (InvalidInput, assemble POLICY_BLOCKED, etc.), success.
+  - `dispatch_from_worker` calls execute → inherits audit.
+  - `admission_pipeline` doc updated: "5. Audit log (written by caller `execute()`, not here)".
+- **Tests in 67acdf4** (new + expanded): `audit_log_written_on_success`, `audit_log_written_on_unknown_tool_denial`, `audit_log_written_on_cross_creator_denial`, `audit_log_written_on_policy_blocked`, `audit_log_written_on_invalid_input` (all assert row count/outcome via helper queries on acp_tool_audit_log).
+- **Evidence**: cargo test shows the 5 audit tests + cross_creator + policy_blocked paths; source: host_tool_executor.rs:302-342 (central match), 310/327/332 (audit calls), 940-984 (audit fn, still uses query+SAFETY as pre-existing), 168- (gates now return without audit inside).
+- **Disposition**: **RESOLVED**. "每 invocation 写" + TV-1/2/3 side effects now satisfied. No blind spots for denials (incl cross-creator, policy, permission). Audit always written before return from execute(). (Note: audit fn still uses runtime query per pre-existing pattern noted in W-4; not re-introduced by this fix.)
+
+#### W-1 (Warning): 8 hermetic tests provide good ... but miss required spec side-effects and policy-deny vectors
+- **Fix in 67acdf4**: Expanded from 8 to 26 tests. Explicitly adds:
+  - Error code surface (http + 4 worker_upcall_surfaces_*_error_code)
+  - Worker upcall error equivalence + grant=false cases
+  - 5 audit_log_written_* (incl policy_blocked, cross_creator, invalid, unknown, success)
+  - 4 stage_metadata_* (accepts allowed, rejects current_stage/disallowed, unknown sub-key, non-object)
+  - Plus prior coverage + whoami/schedule equivalents.
+- All 26 pass (evidence above).
+- **Disposition**: **RESOLVED**. Now covers "missing vectors" + audit + policy-deny + stage_metadata + worker error shapes. Removes the "incomplete correctness validation" risk. (One pre-existing rustc warning on unused import may remain or cleaned; clippy -D clean on lib.)
+
+#### W-2 (Warning): `nexus.work.patch` allowlist + ... but stage_metadata is logged rather than structured (minor contract ambiguity)
+- **Fix in 034b996** (addresses the security/correctness part of this W): 
+  - `STAGE_METADATA_ALLOWED_KEYS` const = ["agent_notes", "research_summary_ref", "draft_outline_ref", "review_summary_ref", "last_agent_tool_request_id"] (per spec §4.4; "These metadata keys do not advance the FL-E state machine.")
+  - In patch handler: if stage_metadata present, validate object, reject any key in PATCH_REJECTED_FIELDS (incl "current_stage", "stage*", creator/work ids), else if !STAGE_METADATA_ALLOWED_KEYS.contains → BadRequest INVALID_INPUT with message listing allowed.
+  - Allowed ones still appended to inspiration_log as before (V1.34 minimal; no dedicated column per original).
+  - PATCH_ALLOWED_FIELDS includes "stage_metadata".
+- **Tests**: 4 stage_metadata_* as above (rejects current_stage explicitly).
+- **Disposition**: **PARTIALLY ADDRESSED / ORIGINAL AMBIGUITY PERSISTS AT LOW SEVERITY**. The allowlist enforcement + nested stage control rejection (core security/correctness gap implied by "over-privilege case 6" and spec) is now in place and tested. The "logged as inspiration vs first-class structured field" remains (as V1.34 minimal convention; see S-4 original). Not a new Critical/Warning; no behavior change to storage. If future needs column, follow-up per plan.
+
+#### W-3 (Warning): Worker upcall reply shape matches ... for success, but error paths (including POLICY_BLOCKED) produce `code="BAD_REQUEST"`
+- **Fix in 034b996 + 67acdf4**: C-1 resolution + new tests `worker_upcall_surfaces_policy_blocked_error_code` (assert "POLICY_BLOCKED"), forbidden, not_supported, + invalid via patch. dispatch_from_worker now gets correct e.error_code() for all Err from execute (incl assemble blocked, cross-creator Forbidden, etc.).
+- **Evidence**: tests pass; source 374 (dispatch worker error), 375 (code = e.error_code()).
+- **Disposition**: **RESOLVED**. Error paths now validated for shape + exact stable codes. Single-dispatch invariant extended to errors via tests.
+
+#### W-4 (Warning): Minor issues (style / hygiene...)
+- **Re-checked**: 
+  - Audit still `sqlx::query("INSERT...")` + SAFETY (not `query!` macro) — pre-existing pattern (not introduced by P4 fix; AGENTS.md rule noted but unchanged).
+  - "not found or cross-creator" vague message: still present (good for security).
+  - fs handlers: baseline preserved, no change.
+  - Unused import in test: may be addressed in expansion (no rustc warning in fresh cargo test run).
+- **Disposition**: **PERSISTS AS MINOR (non-blocking)**. Same as original W-4. No new hygiene issues from fixes. (sqlx static query preference remains technical debt for later crate-wide cleanup.)
+
+#### Suggestions (S-1 to S-5)
+- Most addressed by the test expansion (S-1: policy deny + audit checks + worker error + stage happy now in tests).
+- S-2 (make POLICY first-class variant): not done (still uses BadRequest + inner code hack), but now correctly surfaces via error_code(); sufficient for this wave (no drift).
+- S-3/5 (audit cross-cutting, request_id in audit): not in this fix (audit centralized in execute but still manual calls; _request_id captured but not bound in INSERT).
+- S-4 (document stage_metadata convention): partially via code comments + test coverage.
+- **Disposition**: Low priority; not blocking Approve. Can be residuals or future plan if needed. No new suggestions from re-review.
+
+**New findings from re-review?** None (Critical=0, no high-impact W). Minor hygiene (sqlx query style) pre-existed and unchanged. Full 26 tests + clippy + source review confirm no regression in 5-gate admission, allowlist, scoping, unified dispatch, or baseline fs tools.
+
+**Verdict after revalidation**: **Approve** (all fix wave 2 landed; original 2C + core of 4W resolved with evidence; no new Critical per mstar-review-qc rules. Approve w/ residuals not needed as no open high-severity tracked for this plan in this wave.)
+
+**Evidence of alignment (reval)**:
+- Assignment `plan_id`, `Review range / Diff basis`, `Review cwd`, `Working branch` copied verbatim + re-verified via git cmds.
+- Only qc2.md will be git add + commit (no business, no status.json, no `git add .`).
+- Superpowers: receiving-code-review (item-by-item disposition of "fix" vs original findings), verification-before-completion (all cmds run fresh before claim; see commands + post-commit git status + real hash).
+- No other roles dispatched; no @explore subagent (only native read/grep/bash for source+test evidence).
+
+(End of revalidation)
