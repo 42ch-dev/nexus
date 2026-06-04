@@ -465,6 +465,111 @@ async fn handler_append_inspiration_returns_401_without_creator() {
     );
 }
 
+// ─── R-V133P1-10: JSON field parsing regression tests ──────────────────────
+
+#[tokio::test]
+async fn create_work_response_has_parsed_json_fields() {
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "JSON Fields Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    // GET the work and inspect the JSON field types
+    let result = nexus_daemon_runtime::api::handlers::works::get_work(State(state), Path(work_id))
+        .await
+        .unwrap();
+    let dto = result.0;
+
+    // creative_brief must be null (no brief set yet), not a string
+    assert!(
+        dto.creative_brief.is_none(),
+        "creative_brief should be null (None) for a newly created work"
+    );
+
+    // inspiration_log must be an empty array, not a string
+    assert!(
+        dto.inspiration_log.is_empty(),
+        "inspiration_log should be an empty array for a newly created work"
+    );
+
+    // schedule_ids must be an empty array, not a string
+    assert!(
+        dto.schedule_ids.is_empty(),
+        "schedule_ids should be an empty array for a newly created work"
+    );
+}
+
+#[tokio::test]
+async fn append_inspiration_response_has_parsed_arrays() {
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "Inspiration Array Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    // Append an inspiration entry
+    let insp = AppendInspirationRequest {
+        note: "A flash of insight".into(),
+    };
+    let _ = nexus_daemon_runtime::api::handlers::works::append_inspiration(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::Json(insp),
+    )
+    .await
+    .unwrap();
+
+    // GET the work and verify inspiration_log is a parsed array
+    let result = nexus_daemon_runtime::api::handlers::works::get_work(State(state), Path(work_id))
+        .await
+        .unwrap();
+    let dto = result.0;
+
+    // inspiration_log must be an array of length 1 with the note
+    assert_eq!(
+        dto.inspiration_log.len(),
+        1,
+        "inspiration_log should have 1 entry after appending"
+    );
+    let entry = &dto.inspiration_log[0];
+    assert_eq!(
+        entry["note"].as_str(),
+        Some("A flash of insight"),
+        "inspiration_log[0].note should match the appended note"
+    );
+
+    // schedule_ids must be an empty array
+    assert!(
+        dto.schedule_ids.is_empty(),
+        "schedule_ids should be an empty array"
+    );
+}
+
 // ─── Creator isolation (handler-level) ──────────────────────────────────────
 
 #[tokio::test]
