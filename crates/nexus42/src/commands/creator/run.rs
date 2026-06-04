@@ -597,6 +597,20 @@ async fn stage_advance(
         .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
         .await?;
 
+    // Audit log for --force usage (spec §3.1: "audited").
+    // Structured log with target "fl_e.audit" for all force-triggered stage skips.
+    if force {
+        tracing::info!(
+            target: "fl_e.audit",
+            work_id = %work_id,
+            from_stage = %current_stage,
+            to_stage = %target_stage,
+            from_status = %current_status,
+            force = true,
+            "FL-E stage advance forced (skipped gate)"
+        );
+    }
+
     // Create an FL-E stage schedule (spec §2 invariant #4, §5.3).
     // stage advance enqueues a schedule for the target stage using the
     // normative preset mapping, with work_id and fl_e_stage in metadata.
@@ -663,10 +677,15 @@ async fn stage_advance(
             .unwrap_or("active");
         let title = updated.get("title").and_then(|v| v.as_str()).unwrap_or("?");
 
-        if force && target_idx <= current_idx {
+        if force {
+            let reason = if target_idx <= current_idx {
+                "out of order"
+            } else {
+                "gate bypass"
+            };
             println!(
                 "Warning: --force used to advance from '{current_stage}' to '{target_stage}' \
-                 (out of order)"
+                 ({reason})"
             );
         }
         println!("Work '{title}' advanced to stage: {new_stage} ({new_status})");

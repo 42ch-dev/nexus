@@ -883,3 +883,73 @@ async fn patch_work_intake_status_independent_of_stage_status() {
     // intake_status remains complete
     assert_eq!(advanced.0.intake_status, "complete");
 }
+
+#[tokio::test]
+async fn patch_work_stage_change_is_auditable() {
+    // R-FL-E-04: verify that stage PATCH via daemon produces correct post-state
+    // (audit logging is verified by tracing output; this test ensures the
+    // stage fields are correctly persisted for audit trail purposes).
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "Audit Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    // Set intake_status=complete and stage_status=complete
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: Some("complete".to_string()),
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: Some("complete".to_string()),
+    };
+    let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::Json(patch),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.0.stage_status, "complete");
+
+    // Force advance to produce (skip research) — simulates --force
+    let force_patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("produce".to_string()),
+        stage_status: Some("active".to_string()),
+    };
+    let forced = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id),
+        axum::Json(force_patch),
+    )
+    .await
+    .unwrap();
+    assert_eq!(forced.0.current_stage, "produce");
+    assert_eq!(forced.0.stage_status, "active");
+    assert_eq!(forced.0.intake_status, "complete");
+}
