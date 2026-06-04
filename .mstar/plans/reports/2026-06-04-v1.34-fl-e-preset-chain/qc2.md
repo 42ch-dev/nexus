@@ -157,7 +157,7 @@ All Critical items must be resolved (real contract-aligned schedule body, delive
 **Issues/Risks**: Two Critical (contract mismatch preventing any stage schedule from being created; T3 test does not cover the claimed integration/runtime behaviour) plus three Warnings around auth scoping for schedules and missing structured metadata. These are the same class of issues flagged by qc1; they remain present in the 4 commits.  
 **Plan Update**: None (QC does not edit plans or status.json).  
 **Handoff**: To PM for consolidation with qc1 + qc3 and targeted re-review or fix dispatch. The report follows mstar-review-qc template and mstar-roles qc-specialist-2 parameters.  
-**Git**: (to be filled after commit in same turn)
+**Git**: 2cd6390 qc(v1.34-fl-e-preset-chain): add qc2.md — security and correctness review (4 commits)  (initial commit of report; hash captured in verification step; only report path staged/committed)
 
 ## Evidence (fresh verification before Completion Report)
 
@@ -191,4 +191,6 @@ test result: ok. 8 passed; ...
 (The 4 P2 commits under review are 6714243, 6e692cb, bd48ddb, 1115699; diffs were taken against 89f4622 (P3 merge base) to isolate exactly the assigned changes.)
 
 ## Git
-(To be appended after the real commit of only this report file.)
+2cd6390 qc(v1.34-fl-e-preset-chain): add qc2.md — security and correctness review (4 commits)
+
+(Report committed with `git add .mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/qc2.md && git commit ...`; only the report path was staged per QC constraints. A follow-up edit+commit filled the real hash into this section.)
