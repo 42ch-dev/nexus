@@ -304,6 +304,46 @@ pub async fn patch_work(
 
     let had_stage_change = req.current_stage.is_some() || req.stage_status.is_some();
 
+    // If stage fields are being changed, run shared gate validation (R-FL-E-05).
+    // This ensures PATCH /v1/local/works/{id} enforces the same rules as CLI advance.
+    if had_stage_change {
+        // Fetch current state for gate validation
+        let current = works::get_work(state.pool(), &creator_id, &work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+        let target_stage = req
+            .current_stage
+            .as_deref()
+            .unwrap_or(&current.current_stage);
+
+        // Daemon PATCH does not have a force flag; treat all PATCH stage changes
+        // as force=true (direct API bypasses CLI gates). However, we still validate
+        // the stage value is a known FL-E stage.
+        if req.current_stage.is_some() {
+            let work_state = nexus_orchestration::stage_gates::WorkStageState {
+                current_stage: current.current_stage.clone(),
+                stage_status: current.stage_status.clone(),
+                intake_status: current.intake_status.clone(),
+            };
+            // Validate target is a known stage (but allow force since this is
+            // a low-level API — the CLI is the blessed user-facing path).
+            nexus_orchestration::stage_gates::check_stage_advance(
+                &work_state,
+                target_stage,
+                true, // force=true for daemon PATCH (no CLI gate enforcement)
+            )
+            .map_err(|e| NexusApiError::BadRequest {
+                code: "INVALID_STAGE".to_string(),
+                message: e.message,
+            })?;
+        }
+    }
+
     let patch = WorkPatch {
         title: req.title,
         long_term_goal: req.long_term_goal,

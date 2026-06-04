@@ -9,6 +9,7 @@ pub mod schedule;
 pub mod scheduler;
 pub mod skill_link;
 pub mod skill_sync;
+pub mod stage_gates;
 pub mod storage;
 pub mod sync_module;
 pub mod system_preset;

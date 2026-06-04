@@ -953,3 +953,67 @@ async fn patch_work_stage_change_is_auditable() {
     assert_eq!(forced.0.stage_status, "active");
     assert_eq!(forced.0.intake_status, "complete");
 }
+
+#[tokio::test]
+async fn patch_work_invalid_stage_value_returns_400() {
+    // R-FL-E-05: PATCH with invalid stage value should return 400
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "Invalid Stage Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    // Need to set up a separate state since we already consumed it
+    let (state, _tmp) = handler_state().await;
+    // Create a work in this new state
+    let req2 = CreateWorkRequest {
+        title: "Invalid Stage Test 2".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp2) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req2),
+    )
+    .await
+    .unwrap();
+    let work_id2 = resp2.work_id.clone();
+
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("invalid_stage".to_string()),
+        stage_status: Some("active".to_string()),
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id2),
+        axum::Json(patch),
+    )
+    .await;
+    assert!(result.is_err(), "PATCH with invalid stage should fail");
+    let err = result.unwrap_err();
+    assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+}

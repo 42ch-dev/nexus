@@ -12,6 +12,7 @@ use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::orchestration::{FL_E_STAGES, stage_index};
 use nexus_orchestration::preset::validation::default_preset_for_stage;
+use nexus_orchestration::stage_gates::{self, WorkStageState};
 
 #[derive(Debug, Subcommand)]
 pub enum RunCommand {
@@ -497,17 +498,6 @@ async fn stage_advance(
     json: bool,
     client: &crate::api::DaemonClient,
 ) -> Result<()> {
-    // Validate target stage
-    let target_idx = FL_E_STAGES
-        .iter()
-        .position(|&s| s == target_stage)
-        .ok_or_else(|| {
-            crate::errors::CliError::Other(format!(
-                "Unknown stage '{target_stage}'. Valid stages: {}",
-                FL_E_STAGES.join(", ")
-            ))
-        })?;
-
     // Fetch current work state
     let resp: serde_json::Value = client
         .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
@@ -527,65 +517,18 @@ async fn stage_advance(
         .and_then(|v| v.as_str())
         .unwrap_or("pending");
 
-    let current_idx = FL_E_STAGES
-        .iter()
-        .position(|&s| s == current_stage)
-        .unwrap_or(0);
+    let current_idx = stage_index(current_stage).unwrap_or(0);
+    let target_idx = stage_index(target_stage).unwrap_or(0);
 
-    // Stage gate validation (V1.34 creator-workflow-fl-e §3.3)
-    if !force {
-        // Cannot advance to the same stage
-        if target_stage == current_stage {
-            return Err(crate::errors::CliError::Other(format!(
-                "Work {work_id} is already at stage '{current_stage}' ({current_status}). \
-                 Use a different target stage."
-            )));
-        }
-        // Cannot advance backwards
-        if target_idx <= current_idx {
-            return Err(crate::errors::CliError::Other(format!(
-                "Cannot advance backwards from '{current_stage}' to '{target_stage}'. \
-                 Stage order: {}",
-                FL_E_STAGES.join(" → ")
-            )));
-        }
-        // Strict linear advance: must advance to the immediate next stage (spec §3.1).
-        // Skipping stages requires --force.
-        if target_idx != current_idx + 1 {
-            let next_stage = FL_E_STAGES
-                .get(current_idx + 1)
-                .unwrap_or(&"(unknown)");
-            return Err(crate::errors::CliError::Other(format!(
-                "Cannot skip from '{current_stage}' to '{target_stage}'; \
-                 expected next stage is '{next_stage}'. Use --force to skip stages."
-            )));
-        }
-        // Current stage must be complete (or skipped) before advancing
-        if current_status != "complete" && current_status != "skipped" && current_idx > 0 {
-            return Err(crate::errors::CliError::Other(format!(
-                "Current stage '{current_stage}' is '{current_status}', not 'complete'. \
-                 Complete the current stage first, or use --force to override."
-            )));
-        }
-        // Intake gate: intake_status (V1.33 field) must be complete (spec §3.3 gate 1).
-        // This is distinct from stage_status (V1.34 field); legacy V1.33 works may have
-        // intake_status=complete but stage_status=pending (migration default).
-        if current_stage == "intake" && intake_status != "complete" {
-            return Err(crate::errors::CliError::Other(format!(
-                "Cannot advance past intake: intake_status is '{intake_status}'. \
-                 Complete intake first, or use --force to override."
-            )));
-        }
-        // Active FL-E schedule protection (spec §2 invariant #4):
-        // At most one active FL-E stage schedule per Work at a time.
-        if current_status == "active" {
-            return Err(crate::errors::CliError::Other(format!(
-                "Work {work_id} already has an active stage schedule \
-                 ('{current_stage}' is '{current_status}'). Wait for the current stage \
-                 to complete or cancel before advancing."
-            )));
-        }
-    }
+    // Shared gate validation (V1.34 creator-workflow-fl-e §3.3)
+    // Uses the same function as daemon PATCH stage path.
+    let work_state = WorkStageState {
+        current_stage: current_stage.to_string(),
+        stage_status: current_status.to_string(),
+        intake_status: intake_status.to_string(),
+    };
+    stage_gates::check_stage_advance(&work_state, target_stage, force)
+        .map_err(|e| crate::errors::CliError::Other(e.message))?;
 
     // PATCH the work with new stage
     let patch = serde_json::json!({
