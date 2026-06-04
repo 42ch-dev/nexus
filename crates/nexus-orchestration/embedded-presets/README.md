@@ -8,6 +8,7 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 
 | Preset | Pattern | States | Description |
 |--------|---------|--------|-------------|
+| `creative-brief-intake` | Grill-me intake | clarifying → synthesizing → persisting → done | Multi-turn ACP clarification to produce a structured creative brief |
 | `kb-extract` | Knowledge extraction | loading → extracting → done | Extract structured KeyBlocks from work-scope KB entries |
 | `memory-augmented` | Memory recall + persist | recall → generate → persist → done | Recall memories, generate content, persist as new memory |
 | `novel-writing` | Multi-phase writing | gathering → brainstorming → outlining → drafting → done | Multi-agent novel writing with roles (writer, reviewer) |
@@ -40,6 +41,22 @@ nexus42 daemon schedule add --preset soul-experience-refresh --creator <creator-
 # Or use the one-shot CLI command:
 nexus42 creator soul refresh-experience
 ```
+
+## Intake → Production Chaining
+
+The `creative-brief-intake` preset is designed to be chained with `novel-writing`:
+
+```bash
+# Via creator run (recommended — chains intake automatically):
+nexus42 creator run start --idea "A sci-fi thriller about AI consciousness"
+
+# Manual chaining:
+nexus42 daemon schedule add --preset creative-brief-intake --creator <creator-id> --seed "<idea>"
+# After intake completes, start production:
+nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed "<topic from brief>"
+```
+
+When `creative-brief-intake` completes, it writes a validated `creative_brief` JSON to the Work entity. The `novel-writing` gathering prompt receives `{{preset.input.*}}` vars derived from the brief (genre, tone, audience, themes, hooks).
 
 ## Validation
 
