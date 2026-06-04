@@ -1,9 +1,37 @@
-//! Shared FL-E stage gate validation (V1.34 creator-workflow-fl-e §3.3).
+//! Shared FL-E stage gate validation and schedule wiring (V1.34 creator-workflow-fl-e §3–4).
 //!
-//! Provides `check_stage_advance` — the single authoritative gate function
-//! used by both CLI `stage_advance` and daemon `PATCH /v1/local/works/{id}`.
+//! Provides:
+//! - `check_stage_advance` — the single authoritative gate function
+//!   used by both CLI `stage_advance` and daemon `PATCH /v1/local/works/{id}`.
+//! - `preset_for_stage` — normative stage → preset mapping (spec §4).
+//! - `build_stage_schedule_label` — schedule label for stage advance.
 
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
+
+/// Normative stage → default preset mapping (spec §4).
+///
+/// Returns the canonical preset ID for a given FL-E stage.
+/// Returns `None` for unknown stages.
+///
+/// This is the authoritative wiring function for the preset chain:
+///
+/// | Stage     | Preset                  |
+/// |-----------|-------------------------|
+/// | intake    | `creative-brief-intake` |
+/// | research  | `research`              |
+/// | produce   | `novel-writing`         |
+/// | review    | `reflection-loop`       |
+/// | persist   | `kb-extract`            |
+#[must_use]
+pub fn preset_for_stage(stage: &str) -> Option<&'static str> {
+    crate::preset::validation::default_preset_for_stage(stage)
+}
+
+/// Build the schedule label for a stage advance (spec §4).
+#[must_use]
+pub fn build_stage_schedule_label(stage: &str, work_id: &str) -> String {
+    format!("FL-E stage: {stage} (work: {work_id})")
+}
 
 /// Error returned when a stage advance fails validation.
 #[derive(Debug, Clone)]
@@ -202,5 +230,71 @@ mod tests {
     fn allow_advance_after_complete() {
         let work = work_state("research", "complete", "complete");
         assert!(check_stage_advance(&work, "produce", false).is_ok());
+    }
+
+    // ── T1: preset_for_stage schedule wiring for all 4 post-intake stages ──────
+
+    #[test]
+    fn preset_for_stage_research() {
+        assert_eq!(preset_for_stage("research"), Some("research"));
+    }
+
+    #[test]
+    fn preset_for_stage_produce() {
+        assert_eq!(preset_for_stage("produce"), Some("novel-writing"));
+    }
+
+    #[test]
+    fn preset_for_stage_review() {
+        assert_eq!(preset_for_stage("review"), Some("reflection-loop"));
+    }
+
+    #[test]
+    fn preset_for_stage_persist() {
+        assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
+    }
+
+    #[test]
+    fn preset_for_stage_intake() {
+        assert_eq!(
+            preset_for_stage("intake"),
+            Some("creative-brief-intake")
+        );
+    }
+
+    #[test]
+    fn preset_for_stage_unknown() {
+        assert_eq!(preset_for_stage("unknown"), None);
+    }
+
+    #[test]
+    fn schedule_label_format() {
+        let label = build_stage_schedule_label("research", "wrk_abc123");
+        assert_eq!(label, "FL-E stage: research (work: wrk_abc123)");
+    }
+
+    /// End-to-end gate + schedule wiring for each stage transition.
+    /// Validates that stage advance gates pass AND the correct preset is resolved.
+    #[test]
+    fn full_chain_gate_and_preset_resolution() {
+        // intake → research
+        let intake_done = work_state("intake", "complete", "complete");
+        assert!(check_stage_advance(&intake_done, "research", false).is_ok());
+        assert_eq!(preset_for_stage("research"), Some("research"));
+
+        // research → produce
+        let research_done = work_state("research", "complete", "complete");
+        assert!(check_stage_advance(&research_done, "produce", false).is_ok());
+        assert_eq!(preset_for_stage("produce"), Some("novel-writing"));
+
+        // produce → review
+        let produce_done = work_state("produce", "complete", "complete");
+        assert!(check_stage_advance(&produce_done, "review", false).is_ok());
+        assert_eq!(preset_for_stage("review"), Some("reflection-loop"));
+
+        // review → persist
+        let review_done = work_state("review", "complete", "complete");
+        assert!(check_stage_advance(&review_done, "persist", false).is_ok());
+        assert_eq!(preset_for_stage("persist"), Some("kb-extract"));
     }
 }
