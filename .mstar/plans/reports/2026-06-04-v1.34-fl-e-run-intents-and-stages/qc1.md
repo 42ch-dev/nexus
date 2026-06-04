@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-04-v1.34-fl-e-run-intents-and-stages"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-05"
 ---
 
@@ -105,3 +105,74 @@ clippy_exit=0
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+### Scope and commands re-run
+
+Targeted re-review of fix wave 2 for the original QC1 findings C-1, C-2, W-1, and S-1.
+
+- Review cwd / Worktree path verified:
+  - `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-run-intents-and-stages`
+  - `git branch --show-current` → `feature/v1.34-fl-e-run-intents-and-stages`
+- Review ranges used:
+  - Fix wave 2: `c3834ce..6cd1409` (8 commits inspected with `git show <hash>`)
+  - Overall P1 context: `merge-base: origin/main..HEAD`
+- Commits inspected:
+  - `c3834ce` — R-FL-E-08 deduplicates `FL_E_STAGES` to `nexus-contracts`.
+  - `e80db53` — R-FL-E-02 changes the intake gate to use `intake_status`.
+  - `bcf3563` — R-FL-E-03 enforces strict `target == current + 1` advancement without `--force`.
+  - `f7f0b59` — R-FL-E-01 creates FL-E stage schedules and adds active-stage protection.
+  - `991e2f8` — R-FL-E-04 adds force/audit logging.
+  - `34fda67` — R-FL-E-05 moves gates into shared `check_stage_advance()`.
+  - `03dbfa5` — R-FL-E-06 persists dual-path allowlist for `persist`.
+  - `6cd1409` — R-FL-E-07 routes daemon stage PATCH through an atomic stage transaction.
+
+Validation evidence:
+
+```text
+$ cargo test -p nexus-daemon-runtime --tests 2>&1 | tail -10
+test creator_isolation_patch_work_returns_404_for_other_creator ... ok
+test patch_work_intake_status_independent_of_stage_status ... ok
+test patch_work_stage_returns_404_for_unknown ... ok
+test patch_work_stage_change_is_auditable ... ok
+test patch_work_updates_stage_fields ... ok
+test list_works_returns_401_without_creator ... ok
+test patch_work_invalid_stage_value_returns_400 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+$ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus-creator-memory -- -D warnings 2>&1 | tail -10
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+```
+
+### Original finding dispositions
+
+- **C-1 / F-QC1-001 — stage advance schedule creation and active protection: Resolved.**
+  - Evidence: `f7f0b59` adds the CLI stage schedule creation path after a successful stage PATCH, using `default_preset_for_stage(target_stage)` and schedule metadata containing `work_id` and `fl_e_stage` (`crates/nexus42/src/commands/creator/run.rs:557-595`).
+  - Evidence: `6cd1409` routes daemon stage PATCH through `patch_work_stage()` and `works::advance_work_stage_atomic(...)` (`crates/nexus-daemon-runtime/src/api/handlers/works.rs:296-420`), while `advance_work_stage_atomic()` performs the active-stage check and stage update inside one transaction (`crates/nexus-local-db/src/works.rs:836-931`).
+  - Evidence: `cargo test -p nexus-daemon-runtime --tests` covers the daemon stage PATCH path (`patch_work_stage_change_is_auditable`, `patch_work_updates_stage_fields`, `patch_work_invalid_stage_value_returns_400`) and passed.
+
+- **C-2 / F-QC1-002 — intake gate used `stage_status` instead of `intake_status`: Resolved.**
+  - Evidence: `e80db53` and `34fda67` make the CLI read `intake_status` separately and pass it into shared gate state (`crates/nexus42/src/commands/creator/run.rs:514-531`).
+  - Evidence: `check_stage_advance()` now gates intake advancement on `work.intake_status != "complete"`, not `stage_status` (`crates/nexus-orchestration/src/stage_gates.rs:112-121`).
+  - Evidence: regression test `patch_work_intake_status_independent_of_stage_status` creates/patches a V1.33-style Work with `intake_status=complete` and default `stage_status=pending`, then advances to `research` successfully (`crates/nexus-daemon-runtime/tests/works_api.rs:808-885`); the required test suite passed.
+
+- **W-1 / F-QC1-003 — non-force stage advance could skip multiple stages: Resolved.**
+  - Evidence: `bcf3563` and `34fda67` centralize the non-force linear gate in `check_stage_advance()`, which now rejects `target_idx != current_idx + 1` unless `force` is true (`crates/nexus-orchestration/src/stage_gates.rs:77-87`).
+  - Evidence: unit coverage includes `reject_skip_without_force` and `allow_skip_with_force` in the shared gate module (`crates/nexus-orchestration/src/stage_gates.rs:167-178`).
+
+- **S-1 / F-QC1-004 — duplicated `FL_E_STAGES` constants: Resolved.**
+  - Evidence: `c3834ce` moves the canonical ordered stage list into `nexus_contracts::local::orchestration` (`crates/nexus-contracts/src/local/orchestration/mod.rs:278-296`).
+  - Evidence: current search found only one `pub const FL_E_STAGES` definition, in `nexus-contracts`; CLI, orchestration, and local DB now import or re-export that single source (`crates/nexus42/src/commands/creator/run.rs:13`, `crates/nexus-orchestration/src/preset/validation.rs:1524`, `crates/nexus-local-db/src/works.rs:933-937`).
+
+### Revalidation summary
+
+| Original finding | Severity | Disposition |
+| --- | --- | --- |
+| C-1 / F-QC1-001 | Critical | Resolved |
+| C-2 / F-QC1-002 | Critical | Resolved |
+| W-1 / F-QC1-003 | Warning | Resolved |
+| S-1 / F-QC1-004 | Suggestion | Resolved |
+
+**Revalidation Verdict**: Approve
