@@ -17,7 +17,7 @@
 //! may elevate to error in strict mode (future work).
 
 use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{EnterAction, ExitWhen, PresetManifest};
+use crate::preset::manifest::{EnterAction, ExitWhen, PresetKind, PresetManifest, RunIntent};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -72,6 +72,8 @@ pub enum DiagnosticCategory {
     CapabilityArgDrift,
     /// Schema check could not be performed (registry lacks metadata).
     SchemaCheckSkipped,
+    /// Run intent classification issue (V1.33 §5).
+    RunIntents,
 }
 
 /// Result of semantic validation: a list of diagnostics.
@@ -152,6 +154,9 @@ pub fn validate_preset_semantic(
 
     // A4: Capability compatibility checks
     check_capability_arg_compatibility(manifest, caps, &mut result);
+
+    // A5: Run intents checks (V1.33 §5)
+    check_run_intents(manifest, &mut result);
 
     result
 }
@@ -743,6 +748,49 @@ fn check_args_against_schema(
                     ),
                     severity: DiagnosticSeverity::Warning,
                     category: DiagnosticCategory::CapabilityArgDrift,
+                });
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A5: Run intents checks (V1.33 §5)
+// ---------------------------------------------------------------------------
+
+/// Check run intent declarations (V1.33 §5.1).
+///
+/// - Every `kind: creator` preset must have at least one of `work_init` or `work_continue`.
+/// - `kind: system` presets may have empty `run_intents` or include `system_maintenance`.
+fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
+    let intents: HashSet<RunIntent> = manifest.preset.run_intents.iter().copied().collect();
+
+    match manifest.preset.kind {
+        PresetKind::Creator => {
+            // Creator presets must declare at least one run_intent.
+            if intents.is_empty() {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: "preset.run_intents".to_string(),
+                    message: format!(
+                        "creator preset '{}' should declare at least one run_intent (e.g. work_init, work_continue, knowledge_ingest, work_maintenance)",
+                        manifest.preset.id
+                    ),
+                    severity: DiagnosticSeverity::Warning,
+                    category: DiagnosticCategory::RunIntents,
+                });
+            }
+        }
+        PresetKind::System => {
+            // System presets with run_intents should include system_maintenance.
+            if !intents.is_empty() && !intents.contains(&RunIntent::SystemMaintenance) {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: "preset.run_intents".to_string(),
+                    message: format!(
+                        "system preset '{}' has run_intents but none is system_maintenance",
+                        manifest.preset.id
+                    ),
+                    severity: DiagnosticSeverity::Warning,
+                    category: DiagnosticCategory::RunIntents,
                 });
             }
         }

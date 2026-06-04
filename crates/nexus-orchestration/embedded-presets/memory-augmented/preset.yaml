@@ -24,6 +24,8 @@ preset:
     - creator.read_memory
     - acp.prompt
     - creator.write_memory
+  run_intents:
+    - work_continue
   initial: recall
   terminal: done
 

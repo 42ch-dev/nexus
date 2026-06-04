@@ -7,6 +7,7 @@ pub mod kb;
 pub mod knowledge;
 pub mod memory;
 pub mod reference;
+pub mod run;
 pub mod soul;
 pub mod world;
 
@@ -537,6 +538,12 @@ pub enum CreatorCommand {
         command: knowledge::KnowledgeCommand,
     },
 
+    /// Work lifecycle — start, continue, list, and inspect Works (V1.33)
+    Run {
+        #[command(subcommand)]
+        command: run::RunCommand,
+    },
+
     /// Seed demo data: creates a demo world, event, KB block, and knowledge entry.
     ///
     /// Idempotent by default — skips if demo world already exists.
@@ -653,6 +660,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
+        CreatorCommand::Run { command } => run::handle_run(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config).await,
     }
