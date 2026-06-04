@@ -1,14 +1,18 @@
-//! `nexus42 creator run` — Work lifecycle CLI (V1.33 §7.3).
+//! `nexus42 creator run` — Work lifecycle CLI (V1.33 §7.3, V1.34 FL-E §3).
 //!
 //! Subcommands:
 //! - `start` — Create a new Work and run the initial preset
 //! - `continue` — Append inspiration / direction to an existing Work
 //! - `list` — List all Works for the active creator
 //! - `status` — Show details of a single Work
+//! - `stage` — FL-E stage management (V1.34): list, advance
 
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
+use nexus_orchestration::preset::validation::default_preset_for_stage;
+use nexus_orchestration::stage_gates::{self, WorkStageState};
 
 #[derive(Debug, Subcommand)]
 pub enum RunCommand {
@@ -66,6 +70,38 @@ pub enum RunCommand {
     /// Show details of a single Work
     Status {
         work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// FL-E stage management (V1.34): list stages, advance stage
+    Stage {
+        #[command(subcommand)]
+        command: StageCommand,
+    },
+}
+
+/// FL-E stage subcommands (V1.34 cli-spec §6.2E).
+#[derive(Debug, Subcommand)]
+pub enum StageCommand {
+    /// List FL-E stages and current status for a Work
+    List {
+        /// Work ID (wrk_...)
+        work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Advance a Work to the next FL-E stage
+    Advance {
+        /// Work ID (wrk_...)
+        work_id: String,
+        /// Target stage: research | produce | review | persist
+        #[arg(long)]
+        stage: String,
+        /// Force advance even if current stage is not complete (audited)
+        #[arg(long, default_value_t = false)]
+        force: bool,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -346,6 +382,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     ("title", "title"),
                     ("status", "status"),
                     ("intake_status", "intake_status"),
+                    ("current_stage", "current_stage"),
+                    ("stage_status", "stage_status"),
                     ("long_term_goal", "long_term_goal"),
                     ("initial_idea", "initial_idea"),
                     ("primary_preset_id", "primary_preset_id"),
@@ -362,6 +400,244 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     println!("{label:>20}: {val}");
                 }
             }
+        }
+        RunCommand::Stage { command } => handle_stage(command, &client).await?,
+    }
+
+    Ok(())
+}
+
+// ── FL-E stage management (V1.34) ───────────────────────────────────────────
+
+/// Handle `creator run stage` subcommands (V1.34 FL-E §3, cli-spec §6.2E).
+///
+/// # Errors
+///
+/// Returns an error if the daemon API call fails or stage validation rejects the advance.
+async fn handle_stage(cmd: StageCommand, client: &crate::api::DaemonClient) -> Result<()> {
+    match cmd {
+        StageCommand::List { work_id, json } => stage_list(&work_id, json, client).await,
+        StageCommand::Advance {
+            work_id,
+            stage,
+            force,
+            json,
+        } => stage_advance(&work_id, &stage, force, json, client).await,
+    }
+}
+
+/// List FL-E stages and current status for a Work.
+///
+/// Fetches the Work from the daemon and displays all stages with
+/// markers for the current stage and status.
+async fn stage_list(work_id: &str, json: bool, client: &crate::api::DaemonClient) -> Result<()> {
+    let resp: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .await?;
+
+    let current_stage = resp
+        .get("current_stage")
+        .and_then(|v| v.as_str())
+        .unwrap_or("intake");
+    let stage_status = resp
+        .get("stage_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending");
+
+    if json {
+        let output = serde_json::json!({
+            "work_id": work_id,
+            "current_stage": current_stage,
+            "stage_status": stage_status,
+            "stages": FL_E_STAGES,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!("FL-E stages for Work {work_id}:");
+        println!();
+        for &s in FL_E_STAGES {
+            let marker = if s == current_stage {
+                format!("→ {s}")
+            } else {
+                format!("  {s}")
+            };
+            let status_label = if s == current_stage {
+                format!("({stage_status})")
+            } else if let Some(idx) = FL_E_STAGES.iter().position(|&x| x == current_stage) {
+                let stage_idx = FL_E_STAGES.iter().position(|&x| x == s).unwrap_or(0);
+                if stage_idx < idx {
+                    "(complete)".to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            println!("{marker:<20} {status_label}");
+        }
+        println!();
+        println!("Current: {current_stage} ({stage_status}) — Work {work_id}");
+    }
+
+    Ok(())
+}
+
+/// Advance a Work to the next FL-E stage.
+///
+/// Validates:
+/// 1. Target stage is a known FL-E stage
+/// 2. Target stage is ahead of current stage (unless `--force`)
+/// 3. Current `stage_status` is `complete` (unless `--force`)
+///
+/// Then `PATCH`es the work via daemon API with the new stage/status.
+#[allow(clippy::too_many_lines)]
+async fn stage_advance(
+    work_id: &str,
+    target_stage: &str,
+    force: bool,
+    json: bool,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
+    // Fetch current work state
+    let resp: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .await?;
+
+    let current_stage = resp
+        .get("current_stage")
+        .and_then(|v| v.as_str())
+        .unwrap_or("intake");
+    let current_status = resp
+        .get("stage_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending");
+    // V1.33 intake_status field — needed for intake gate (spec §3.3 gate 1).
+    let intake_status = resp
+        .get("intake_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending");
+
+    let current_idx = stage_index(current_stage).unwrap_or(0);
+    let target_idx = stage_index(target_stage).unwrap_or(0);
+
+    // Shared gate validation (V1.34 creator-workflow-fl-e §3.3)
+    // Uses the same function as daemon PATCH stage path.
+    let work_state = WorkStageState {
+        current_stage: current_stage.to_string(),
+        stage_status: current_status.to_string(),
+        intake_status: intake_status.to_string(),
+    };
+    stage_gates::check_stage_advance(&work_state, target_stage, force)
+        .map_err(|e| crate::errors::CliError::Other(e.message))?;
+
+    // PATCH the work with new stage
+    let patch = serde_json::json!({
+        "current_stage": target_stage,
+        "stage_status": "active",
+    });
+
+    let updated: serde_json::Value = client
+        .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+        .await?;
+
+    // Audit log for --force usage (spec §3.1: "audited").
+    // Structured log with target "fl_e.audit" for all force-triggered stage skips.
+    if force {
+        tracing::info!(
+            target: "fl_e.audit",
+            work_id = %work_id,
+            from_stage = %current_stage,
+            to_stage = %target_stage,
+            from_status = %current_status,
+            force = true,
+            "FL-E stage advance forced (skipped gate)"
+        );
+    }
+
+    // Create an FL-E stage schedule (spec §2 invariant #4, §5.3).
+    // stage advance enqueues a schedule for the target stage using the
+    // normative preset mapping, with work_id and fl_e_stage in metadata.
+    let preset_id = default_preset_for_stage(target_stage);
+    let mut schedule_id: Option<String> = None;
+    if let Some(pid) = preset_id {
+        // Read creator_id from the updated work response
+        let creator_id = updated
+            .get("creator_id")
+            // WorkApiDto does not expose creator_id; fall back to empty string
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let schedule_body = serde_json::json!({
+            "creatorId": creator_id,
+            "presetId": pid,
+            "label": format!("FL-E stage: {target_stage} (work: {work_id})"),
+            "presetInput": {
+                "work_id": work_id,
+                "fl_e_stage": target_stage,
+            }
+        });
+
+        match client
+            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &schedule_body)
+            .await
+        {
+            Ok(sched_resp) => {
+                schedule_id = sched_resp
+                    .get("scheduleId")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+            }
+            Err(e) => {
+                // Schedule creation failure is non-fatal — the Work stage is
+                // already advanced. Report but don't abort.
+                eprintln!("Warning: failed to create stage schedule: {e}");
+            }
+        }
+    }
+
+    if json {
+        let mut output = updated;
+        if let Some(sid) = &schedule_id {
+            output.as_object_mut().map(|o| {
+                o.insert(
+                    "stage_schedule_id".to_string(),
+                    serde_json::Value::String(sid.clone()),
+                )
+            });
+        }
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let new_stage = updated
+            .get("current_stage")
+            .and_then(|v| v.as_str())
+            .unwrap_or(target_stage);
+        let new_status = updated
+            .get("stage_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("active");
+        let title = updated.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+
+        if force {
+            let reason = if target_idx <= current_idx {
+                "out of order"
+            } else {
+                "gate bypass"
+            };
+            println!(
+                "Warning: --force used to advance from '{current_stage}' to '{target_stage}' \
+                 ({reason})"
+            );
+        }
+        println!("Work '{title}' advanced to stage: {new_stage} ({new_status})");
+        println!("  Work ID: {work_id}");
+
+        if let Some(sid) = &schedule_id {
+            let pid = preset_id.unwrap_or("(unknown)");
+            println!("  Stage schedule: {sid} (preset: {pid})");
+        }
+
+        if let Some(pid) = preset_id {
+            println!("  Typical preset: {pid}");
         }
     }
 

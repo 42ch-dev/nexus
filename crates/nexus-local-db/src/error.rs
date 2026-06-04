@@ -32,6 +32,8 @@ pub enum LocalDbError {
     Sqlx(sqlx::Error),
     /// sqlx migration failed
     Migrate(sqlx::migrate::MigrateError),
+    /// A database constraint was violated (e.g., TOCTOU race detected)
+    ConstraintViolation { table: String, constraint: String },
 }
 
 impl fmt::Display for LocalDbError {
@@ -81,6 +83,9 @@ impl fmt::Display for LocalDbError {
             }
             Self::Migrate(err) => {
                 write!(f, "database migration failed: {err}")
+            }
+            Self::ConstraintViolation { table, constraint } => {
+                write!(f, "constraint violation on '{table}': {constraint}")
             }
         }
     }
