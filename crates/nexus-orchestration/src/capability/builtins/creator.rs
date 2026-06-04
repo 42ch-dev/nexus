@@ -1266,6 +1266,8 @@ mod tests {
                 schedule_ids: "[]".to_string(),
                 created_at: "2026-06-04T00:00:00Z".to_string(),
                 updated_at: "2026-06-04T00:00:00Z".to_string(),
+                current_stage: "intake".to_string(),
+                stage_status: "pending".to_string(),
             },
         )
         .await
