@@ -1,0 +1,95 @@
+# Creative Brief Intake Preset — grill-me multi-turn clarification
+#
+# Structured intake that elicits genre, tone, audience, constraints,
+# themes, non-goals, and hooks before production begins.
+#
+# Output: validated `creative_brief` JSON written to Work via
+# `creator.write_brief` capability on the `persisting` state.
+#
+# This preset is a linear state machine — no conditional routing.
+# Flow: clarifying → synthesizing → persisting → done.
+#
+# Input variables (passed via core_context / preset.input):
+#   work_id:     Work entity ID being intaked (required)
+#   initial_idea: Raw user idea text (required)
+#
+# Launch:
+#   nexus42 daemon schedule add \
+#     --preset creative-brief-intake \
+#     --creator <creator-id> \
+#     --seed "<initial_idea>"
+
+preset:
+  id: creative-brief-intake
+  version: 1
+  kind: creator
+  description: "Grill-me style multi-turn intake: elicit genre, tone, audience, constraints, and synthesize a structured creative brief"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - creator.write_brief
+  run_intents:
+    - work_init
+  initial: clarifying
+  terminal: done
+
+states:
+  - id: clarifying
+    description: "Multi-turn ACP conversation to gather creative direction"
+    enter:
+      - kind: inner_graph
+        name: clarify_graph
+    exit_when:
+      kind: manual
+    next: synthesizing
+
+  - id: synthesizing
+    description: "Synthesize multi-turn conversation into structured brief JSON"
+    enter:
+      - kind: inner_graph
+        name: synthesize_graph
+    exit_when:
+      kind: graph_complete
+    next: persisting
+
+  - id: persisting
+    description: "Validate and persist the structured brief on the Work entity"
+    enter:
+      - kind: capability
+        name: creator.write_brief
+        args:
+          work_id: "{{preset.input.work_id}}"
+          brief_text: "{{state.synthesizing.output}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  clarify_graph:
+    nodes:
+      - id: clarify_genre_and_tone
+        kind: acp_prompt
+        template_file: prompts/clarify-genre-tone.md
+        tool_policy: auto_grant_read_only
+      - id: clarify_audience_and_constraints
+        kind: acp_prompt
+        depends_on: [clarify_genre_and_tone]
+        template_file: prompts/clarify-audience-constraints.md
+        tool_policy: auto_grant_read_only
+      - id: clarify_themes_and_hooks
+        kind: acp_prompt
+        depends_on: [clarify_audience_and_constraints]
+        template_file: prompts/clarify-themes-hooks.md
+        tool_policy: auto_grant_read_only
+    output_binding: clarify_themes_and_hooks.text
+
+  synthesize_graph:
+    nodes:
+      - id: synthesize_brief
+        kind: acp_prompt
+        template_file: prompts/synthesize-brief.md
+        tool_policy: auto_grant_read_only
+    output_binding: synthesize_brief.text

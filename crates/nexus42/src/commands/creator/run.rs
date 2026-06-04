@@ -26,6 +26,9 @@ pub enum RunCommand {
         /// Optional world binding
         #[arg(long)]
         world_id: Option<String>,
+        /// Skip the creative brief intake and start the production preset directly
+        #[arg(long, default_value_t = false)]
+        skip_intake: bool,
         /// Idempotency key (UUID); repeat calls with same key return same `work_id`
         #[arg(long)]
         client_request_id: Option<String>,
@@ -80,6 +83,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             preset,
             title,
             world_id,
+            skip_intake,
             client_request_id,
             json,
         } => {
@@ -116,12 +120,63 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 .post::<serde_json::Value, _>("/v1/local/works", &body)
                 .await?;
 
+            let work_id = resp
+                .get("work_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string();
+
+            // Schedule intake preset if not skipped
+            let mut schedule_id: Option<String> = None;
+            if !skip_intake {
+                let intake_body = serde_json::json!({
+                    "presetId": "creative-brief-intake",
+                    "seed": &idea,
+                    "presetInput": {
+                        "work_id": &work_id,
+                        "initial_idea": &idea,
+                    }
+                });
+
+                match client
+                    .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &intake_body)
+                    .await
+                {
+                    Ok(sched_resp) => {
+                        schedule_id = sched_resp
+                            .get("scheduleId")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                    }
+                    Err(e) => {
+                        // Schedule creation failure is non-fatal — the Work is
+                        // still created. Report the error but don't abort.
+                        eprintln!("Warning: failed to schedule intake: {e}");
+                    }
+                }
+            }
+
             if json {
-                println!("{}", serde_json::to_string_pretty(&resp)?);
+                let mut output = resp;
+                if let Some(sid) = &schedule_id {
+                    output.as_object_mut().map(|o| {
+                        o.insert(
+                            "intake_schedule_id".to_string(),
+                            serde_json::Value::String(sid.clone()),
+                        )
+                    });
+                }
+                println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
-                let work_id = resp.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
                 let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                 println!("Work created: {work_id} (status: {status})");
+                if let Some(sid) = &schedule_id {
+                    println!("Intake scheduled: {sid} (preset: creative-brief-intake)");
+                    println!();
+                    println!("The intake will run via ACP multi-turn conversation.");
+                    println!("Once intake completes, start production with:");
+                    println!("  nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed \"<topic>\"");
+                }
                 println!();
                 println!("Next: nexus42 creator run continue {work_id} --note \"<direction>\"");
             }

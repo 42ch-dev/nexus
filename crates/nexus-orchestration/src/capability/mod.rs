@@ -114,8 +114,9 @@ impl CapabilityRegistry {
     /// Built-ins: `sync.pull`, `sync.push`, `outbox.flush`, `outbox.compact`,
     /// `workspace.open`, `workspace.commit`, `registry.refresh`,
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
-    /// `judge.rule`, `acp.prompt`, `acp.session_load`, `judge.llm`,
-    /// `context.summarize`, `kb.extract_work`, `soul.experience.aggregate`.
+    /// `creator.write_brief`, `judge.rule`, `acp.prompt`, `acp.session_load`,
+    /// `judge.llm`, `context.summarize`, `kb.extract_work`,
+    /// `soul.experience.aggregate`.
     ///
     /// `kb.extract_work` is created without a pool (placeholder mode).
     /// Use [`with_builtins_and_pool`] for full e2e support.
@@ -132,6 +133,7 @@ impl CapabilityRegistry {
             Box::new(builtins::CreatorReadMemory::new()),
             Box::new(builtins::CreatorWriteMemory::new()),
             Box::new(builtins::CreatorInjectPrompt::new()),
+            Box::new(builtins::CreatorWriteBrief::new()),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt::new()),
             Box::new(builtins::AcpSessionLoad),
@@ -171,7 +173,10 @@ impl CapabilityRegistry {
             Box::new(builtins::CreatorWriteMemory::with_store(
                 creator_store.clone(),
             )),
-            Box::new(builtins::CreatorInjectPrompt::with_store(creator_store)),
+            Box::new(builtins::CreatorInjectPrompt::with_store(
+                creator_store.clone(),
+            )),
+            Box::new(builtins::CreatorWriteBrief::with_store(creator_store)),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt::new()),
             Box::new(builtins::AcpSessionLoad),
@@ -244,6 +249,11 @@ impl CapabilityRegistry {
             .map_or_else(builtins::CreatorInjectPrompt::new, |store| {
                 builtins::CreatorInjectPrompt::with_store(store.clone())
             });
+        let creator_write_brief = creator_store
+            .as_ref()
+            .map_or_else(builtins::CreatorWriteBrief::new, |store| {
+                builtins::CreatorWriteBrief::with_store(store.clone())
+            });
 
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
@@ -256,6 +266,7 @@ impl CapabilityRegistry {
             Box::new(creator_read),
             Box::new(creator_write),
             Box::new(creator_inject),
+            Box::new(creator_write_brief),
             Box::new(builtins::JudgeRule),
             Box::new(acp_prompt),
             Box::new(builtins::AcpSessionLoad),
@@ -327,9 +338,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_sixteen_builtins() {
+    fn registry_has_eighteen_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 17);
+        assert_eq!(reg.len(), 18);
     }
 
     #[test]
@@ -346,6 +357,7 @@ mod tests {
             "creator.read_memory",
             "creator.write_memory",
             "creator.inject_prompt",
+            "creator.write_brief",
             "judge.rule",
             "acp.prompt",
             "acp.session_load",
@@ -371,7 +383,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 17);
+        assert_eq!(names.len(), 18);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
