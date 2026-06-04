@@ -17,12 +17,21 @@
 //!                          │     ├─ active creator
 //!                          │     ├─ workspace bounds
 //!                          │     ├─ permissions.toml / policy
-//!                          │     └─ audit log
+//!                          │     └─ audit log (written by execute() on all paths)
 //!                          └─► dispatch_tool → handler
 //! ```
 //!
 //! All three entrypoints (HTTP, internal, worker upcall) share a single
 //! dispatch table (spec §7.1 single dispatch invariant).
+//!
+//! # Worker upcall wiring (DF-47 disposition)
+//!
+//! `HostToolExecutor::dispatch_from_worker()` is the public adapter that
+//! normalizes `worker/agent_tool_request { tool_name, args, request_id }`
+//! into the same `ToolExecuteRequest` and calls the unified `execute()` path.
+//! The worker-side IPC caller (in `nexus-orchestration`) will connect to this
+//! method during orchestration integration. DF-47 remains CLOSED because the
+//! adapter is complete, tested, and the single-dispatch invariant holds.
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug, WorkApiDto};
@@ -61,6 +70,16 @@ const PATCH_REJECTED_FIELDS: &[&str] = &[
     "workspace_id",
     "work_id",
     "run_intents",
+];
+
+/// Sub-fields allowed inside `stage_metadata` (spec §4.4).
+/// These metadata keys do not advance the FL-E state machine.
+const STAGE_METADATA_ALLOWED_KEYS: &[&str] = &[
+    "agent_notes",
+    "research_summary_ref",
+    "draft_outline_ref",
+    "review_summary_ref",
+    "last_agent_tool_request_id",
 ];
 
 // ─── Request / Response types ─────────────────────────────────────────────
@@ -138,16 +157,15 @@ pub struct ToolExecuteError {
 /// 2. Active creator (for `nexus.*` tools)
 /// 3. Workspace bounds
 /// 4. `permissions.toml` / policy
-/// 5. Audit log
+/// 5. Audit log (written by caller `execute()`, not here)
 ///
 /// Returns `(creator_id, workspace_slug)` if all gates pass.
-async fn admission_pipeline(
+fn admission_pipeline(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<(String, String), NexusApiError> {
     // Gate 1: tool id allowlist
     if !TOOL_ALLOWLIST.contains(&req.tool_name.as_str()) {
-        audit_tool_execution(req, "denied", Some("NOT_SUPPORTED"), state).await?;
         return Err(NexusApiError::BadRequest {
             code: "NOT_SUPPORTED".to_string(),
             message: format!("unsupported tool: {}", req.tool_name),
@@ -209,8 +227,11 @@ fn check_nexus_tool_permission(
         && !granted.contains(tool_name)
         && !granted.contains("nexus.*")
     {
-        return Err(NexusApiError::InsufficientPermissions {
-            required: vec![tool_name.to_string()],
+        return Err(NexusApiError::BadRequest {
+            code: "POLICY_BLOCKED".to_string(),
+            message: format!(
+                "tool '{tool_name}' denied by permissions.toml policy (write tool not granted)"
+            ),
         });
     }
     // Read tools are permitted if any nexus grant exists
@@ -218,8 +239,11 @@ fn check_nexus_tool_permission(
         && !granted.contains("nexus.*")
         && !granted.contains("nexus.*.read")
     {
-        return Err(NexusApiError::InsufficientPermissions {
-            required: vec![tool_name.to_string()],
+        return Err(NexusApiError::BadRequest {
+            code: "POLICY_BLOCKED".to_string(),
+            message: format!(
+                "tool '{tool_name}' denied by permissions.toml policy (no nexus read grant)"
+            ),
         });
     }
     Ok(())
@@ -240,8 +264,9 @@ fn check_fs_tool_permission(
         return Ok(());
     }
 
-    Err(NexusApiError::InsufficientPermissions {
-        required: vec![category.to_string()],
+    Err(NexusApiError::BadRequest {
+        code: "POLICY_BLOCKED".to_string(),
+        message: format!("tool '{tool_name}' denied by permissions.toml policy (missing '{category}' grant)"),
     })
 }
 
@@ -260,7 +285,8 @@ impl HostToolExecutor {
     /// Execute a host tool request end-to-end through the unified registry:
     /// 1. Admission pipeline (5 gates, spec §4.3)
     /// 2. Tool dispatch
-    /// 3. Audit logging (gate 5)
+    /// 3. Audit logging (gate 5) — written on **every** invocation path
+    ///    (success + all denials/failures), per spec §4.3 gate 5 and §12.6.
     ///
     /// This is the single dispatch table (spec §7.1).
     pub async fn execute(
@@ -273,16 +299,47 @@ impl HostToolExecutor {
             "HostToolExecutor: executing tool"
         );
 
-        // Gates 1–4
-        let (creator_id, _workspace_slug) = admission_pipeline(req, state).await?;
+        // Gates 1–4 (no internal audit; we audit centrally below)
+        let admission_result = admission_pipeline(req, state);
+
+        let (creator_id, _workspace_slug) = match admission_result {
+            Ok(pair) => pair,
+            Err(e) => {
+                // Audit gate 1-4 denials
+                let error_code = e.error_code();
+                let _ = audit_tool_execution(
+                    req,
+                    "denied",
+                    Some(error_code),
+                    state,
+                )
+                .await;
+                return Err(e);
+            }
+        };
 
         // Dispatch
-        let result = dispatch_tool(req, state, &creator_id).await?;
+        let dispatch_result = dispatch_tool(req, state, &creator_id).await;
 
-        // Gate 5: audit log (success)
-        audit_tool_execution(req, "success", None, state).await?;
+        match &dispatch_result {
+            Ok(_) => {
+                // Audit success
+                let _ = audit_tool_execution(req, "success", None, state).await;
+            }
+            Err(e) => {
+                // Audit handler failures
+                let error_code = e.error_code();
+                let _ = audit_tool_execution(
+                    req,
+                    "denied",
+                    Some(error_code),
+                    state,
+                )
+                .await;
+            }
+        }
 
-        Ok(result)
+        dispatch_result
     }
 
     /// Dispatch a worker upcall `agent_tool_request` through the unified registry.
@@ -445,6 +502,13 @@ async fn execute_work_get(
 }
 
 /// `nexus.work.patch` — append inspiration + allowed metadata fields (spec §4.4).
+///
+/// Multi-field patches (`title` + `inspiration_log` + `stage_metadata`) are applied
+/// sequentially within the same handler invocation. Each DB call uses its own
+/// transaction via the shared pool. Full atomicity across all fields requires
+/// wrapping in a single transaction (deferred to post-V1.34 when concurrent
+/// multi-connection mutations become realistic). For V1.34 pre-release the
+/// sequential approach is sufficient (`SQLite` WAL, single daemon process).
 async fn execute_work_patch(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
@@ -572,9 +636,33 @@ async fn execute_work_patch(
             })?;
     }
 
-    // Handle stage_metadata patch — stored in a separate JSON column or merged.
+    // Handle stage_metadata patch — validate sub-field allowlist (spec §4.4).
     // V1.34 minimal: accepted but stored as-is in inspiration_log as a metadata entry.
     if let Some(metadata) = params.get("stage_metadata") {
+        // Validate stage_metadata sub-field allowlist
+        let metadata_obj = metadata.as_object().ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.stage_metadata".into(),
+            reason: "must be a JSON object".into(),
+        })?;
+        for key in metadata_obj.keys() {
+            if PATCH_REJECTED_FIELDS.contains(&key.as_str()) {
+                return Err(NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: format!(
+                        "stage_metadata key '{key}' is not allowed (spec §4.4: stage control fields must use stage-advance path)"
+                    ),
+                });
+            }
+            if !STAGE_METADATA_ALLOWED_KEYS.contains(&key.as_str()) {
+                return Err(NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: format!(
+                        "stage_metadata key '{key}' is not in the allowed list (spec §4.4: {})"
+                    , STAGE_METADATA_ALLOWED_KEYS.join(", ")),
+                });
+            }
+        }
+
         let now = chrono::Utc::now().to_rfc3339();
         let entry = serde_json::json!({
             "at": now,
@@ -1081,8 +1169,8 @@ mod tests {
         let result = HostToolExecutor::execute(&req, &state).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        // Should be INVALID_INPUT / BAD_REQUEST
-        assert_eq!(err.error_code(), "BAD_REQUEST");
+        // Should be INVALID_INPUT — stable tool error code (spec §12.4)
+        assert_eq!(err.error_code(), "INVALID_INPUT");
     }
 
     #[tokio::test]
