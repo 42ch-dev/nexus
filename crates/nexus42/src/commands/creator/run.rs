@@ -78,6 +78,7 @@ pub enum RunCommand {
 ///
 /// Returns an error if the daemon API call fails.
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::missing_panics_doc)] // expect on constant URL string; never panics
 pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
@@ -275,10 +276,19 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             }
         }
         RunCommand::List { status, json } => {
-            let mut path = "/v1/local/works".to_string();
-            if let Some(ref s) = status {
-                path = format!("{path}?status={s}");
-            }
+            // R-V133P1-07: build query via url::Url to properly encode the
+            // status filter value, preventing query-string injection.
+            let base = "/v1/local/works";
+            let path = status.as_ref().map_or_else(
+                || base.to_string(),
+                |s| {
+                    let mut url = url::Url::parse("http://localhost").expect("valid base");
+                    url.set_path(base);
+                    url.query_pairs_mut().append_pair("status", s);
+                    let q = url.query().unwrap_or("");
+                    format!("{base}?{q}")
+                },
+            );
 
             let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
 
