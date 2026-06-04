@@ -71,7 +71,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
-| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.34+ | M | V1.34 | P4 in-scope; **remove row when P4 closes** (conditional deferred). |
+| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.34+ | M | V1.34 | P4 shipped adapter; **production caller wiring OPEN** (deferred to P5/future). Remove when wired end-to-end. |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
