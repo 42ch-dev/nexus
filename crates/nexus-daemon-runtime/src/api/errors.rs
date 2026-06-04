@@ -142,12 +142,20 @@ pub enum NexusApiError {
 
 impl NexusApiError {
     /// Get the HTTP status code for this error variant.
+    ///
+    /// `BadRequest` with canonical tool-bridge code `POLICY_BLOCKED` maps to
+    /// 403 (spec §12.4: "403 or 409, P4 chooses one consistently").
     #[must_use]
-    pub const fn status_code(&self) -> StatusCode {
+    pub fn status_code(&self) -> StatusCode {
         match self {
             Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
-            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat | Self::BadRequest { .. } => {
-                StatusCode::BAD_REQUEST
+            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
+            Self::BadRequest { code, .. } => {
+                // POLICY_BLOCKED is a policy denial, not a generic bad request
+                match code.as_str() {
+                    "POLICY_BLOCKED" => StatusCode::FORBIDDEN,
+                    _ => StatusCode::BAD_REQUEST,
+                }
             }
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::AuthRequired | Self::ApiKeyExpired | Self::SessionExpired => {
@@ -160,8 +168,13 @@ impl NexusApiError {
     }
 
     /// Get the error code string (`UPPER_SNAKE_CASE`).
+    ///
+    /// For `BadRequest`, the inner `code` is returned when it matches one of
+    /// the tool-bridge canonical codes (spec §12.4), so that HTTP and worker
+    /// wire responses surface the *specific* code (e.g. `POLICY_BLOCKED`,
+    /// `NOT_SUPPORTED`, `INVALID_INPUT`) instead of the generic `BAD_REQUEST`.
     #[must_use]
-    pub const fn error_code(&self) -> &str {
+    pub fn error_code(&self) -> &str {
         match self {
             Self::Uninitialized => "UNINITIALIZED",
             Self::InvalidInput { .. } => "INVALID_INPUT",
@@ -173,7 +186,13 @@ impl NexusApiError {
             Self::InvalidApiKeyFormat => "INVALID_API_KEY",
             Self::ApiKeyExpired => "API_KEY_EXPIRED",
             Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
-            Self::BadRequest { .. } => "BAD_REQUEST",
+            Self::BadRequest { code, .. } => {
+                // Surface canonical tool-bridge codes (spec §12.4).
+                match code.as_str() {
+                    "POLICY_BLOCKED" | "NOT_SUPPORTED" | "INVALID_INPUT" => code.as_str(),
+                    _ => "BAD_REQUEST",
+                }
+            }
             Self::SessionExpired => "SESSION_EXPIRED",
             Self::Conflict(_) => "CONFLICT",
         }

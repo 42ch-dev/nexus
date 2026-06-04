@@ -494,7 +494,7 @@ pub async fn append_inspiration(
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Read active `creator_id` from CLI config.
-fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
+pub fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
     let config_path = nexus_home.join("config.toml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     let config: toml::Value = toml::from_str(&content).ok()?;
@@ -505,7 +505,10 @@ fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
 }
 
 /// Read active workspace slug from CLI config.
-fn read_active_workspace_slug(nexus_home: &std::path::Path, creator_id: &str) -> Option<String> {
+pub fn read_active_workspace_slug(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+) -> Option<String> {
     let config_path = nexus_home.join("config.toml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     let config: toml::Value = toml::from_str(&content).ok()?;

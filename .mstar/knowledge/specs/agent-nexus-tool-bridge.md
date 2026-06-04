@@ -206,6 +206,16 @@ Worker sessions must not cache or reuse tool grants across creators. A worker st
 
 If P4 completes unification, **do not** register DF-47. If partial, register DF-47 in deferred tracker.
 
+### 7.3 DF-47 Disposition (P4 outcome)
+
+**Status: OPEN** (partial unification).
+
+P4 shipped the unified dispatch adapter (`HostToolExecutor::execute` normalizes both HTTP tool execute and `dispatch_from_worker` paths into the same dispatch table), and hermetic unit tests confirm the adapter works. However, the **production caller** in `nexus-orchestration` — the code that actually sends `worker/agent_tool_request` IPC to the daemon — is **not wired**. No orchestration-side call site invokes `dispatch_from_worker` at runtime.
+
+Per §7 rule above, this is "partial" unification: the registry adapter is complete, but the end-to-end worker upcall path from orchestration through daemon remains deferred.
+
+DF-47 row in the deferred tracker is retained. Production caller wiring belongs to a future plan (P5 or V1.34+ hygiene plan).
+
 ---
 
 ## 8. Skills export (L1)
