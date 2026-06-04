@@ -4,7 +4,7 @@
 //! with structured briefs, inspiration logs, and schedule linkage.
 //! Idempotency via separate `works_idempotency` table.
 
-use sqlx::{Row, SqlitePool, Transaction, Sqlite};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
@@ -129,7 +129,10 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
 }
 
 /// Insert a Work row inside an existing transaction.
-async fn insert_work_tx(tx: &mut Transaction<'_, Sqlite>, record: &WorkRecord) -> Result<(), LocalDbError> {
+async fn insert_work_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    record: &WorkRecord,
+) -> Result<(), LocalDbError> {
     // SAFETY: INSERT against works table — runtime query because the table
     // was added in the same migration cycle and sqlx prepare hasn't run yet.
     sqlx::query(
@@ -244,7 +247,9 @@ pub async fn create_work_atomic(
 
     if let Some(crid) = client_request_id {
         // Check idempotency table inside tx
-        if let Some(existing_wid) = find_idempotency_key_tx(&mut tx, &record.creator_id, crid).await? {
+        if let Some(existing_wid) =
+            find_idempotency_key_tx(&mut tx, &record.creator_id, crid).await?
+        {
             // Idempotent replay — fetch the existing work and return it
             let existing = get_work(pool, &record.creator_id, &existing_wid).await?;
             // We don't need the tx anymore (read-only path found existing)
@@ -254,15 +259,20 @@ pub async fn create_work_atomic(
 
         // Not found — create + record atomically
         insert_work_tx(&mut tx, record).await?;
-        record_idempotency_tx(&mut tx, &record.creator_id, crid, &record.work_id, &record.created_at).await?;
-        tx.commit().await?;
-        Ok(Ok(record.clone()))
+        record_idempotency_tx(
+            &mut tx,
+            &record.creator_id,
+            crid,
+            &record.work_id,
+            &record.created_at,
+        )
+        .await?;
     } else {
         // No idempotency key — just create
         insert_work_tx(&mut tx, record).await?;
-        tx.commit().await?;
-        Ok(Err(record.clone()))
     }
+    tx.commit().await?;
+    Ok(Err(record.clone()))
 }
 
 /// Find a Work by its idempotency key.

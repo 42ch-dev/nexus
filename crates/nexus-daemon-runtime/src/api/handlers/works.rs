@@ -233,22 +233,19 @@ pub async fn patch_work(
         schedule_ids: None,
     };
 
-    works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
+    let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
+        .map_err(|e| match &e {
+            nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                NexusApiError::NotFound(format!("work {work_id}"))
+            }
+            _ => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            },
         })?;
 
-    let record = works::get_work(state.pool(), &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    Ok(Json(record))
+    Ok(Json(updated))
 }
 
 pub async fn append_inspiration(
@@ -270,15 +267,20 @@ pub async fn append_inspiration(
     // R-V133P1-04: append_inspiration now uses tx + Rust append and returns updated record
     let updated = works::append_inspiration(state.pool(), &creator_id, &work_id, &entry_json, &now)
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
+        .map_err(|e| match &e {
+            nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                NexusApiError::NotFound(format!("work {work_id}"))
+            }
+            _ => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            },
         })?;
 
     // Derive count from post-state (not pre-fetch + 1)
     let count = serde_json::from_str::<serde_json::Value>(&updated.inspiration_log)
         .ok()
-        .and_then(|v| v.as_array().map(|a| a.len()))
+        .and_then(|v| v.as_array().map(Vec::len))
         .unwrap_or(0);
 
     Ok(Json(AppendInspirationResponse {
