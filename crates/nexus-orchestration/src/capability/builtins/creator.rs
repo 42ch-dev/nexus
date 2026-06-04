@@ -575,7 +575,7 @@ fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
 
     // non_goals and open_questions_resolved should be arrays (may be empty)
     for key in &["non_goals", "open_questions_resolved"] {
-        if !obj.get(*key).map_or(false, |v| v.is_array()) {
+        if !obj.get(*key).is_some_and(serde_json::Value::is_array) {
             return Err(format!("field '{key}' must be an array"));
         }
     }
@@ -637,12 +637,9 @@ impl Capability for CreatorWriteBrief {
             })?;
 
         // Parse brief_text as JSON
-        let brief: serde_json::Value =
-            serde_json::from_str(&parsed.brief_text).map_err(|e| {
-                CapabilityError::InputInvalid(format!(
-                    "brief_text is not valid JSON: {e}"
-                ))
-            })?;
+        let brief: serde_json::Value = serde_json::from_str(&parsed.brief_text).map_err(|e| {
+            CapabilityError::InputInvalid(format!("brief_text is not valid JSON: {e}"))
+        })?;
 
         // Validate against §4 schema
         validate_creative_brief(&brief).map_err(CapabilityError::InputInvalid)?;
@@ -676,9 +673,7 @@ impl Capability for CreatorWriteBrief {
             &now,
         )
         .await
-        .map_err(|e| {
-            CapabilityError::Internal(format!("write_brief patch_work: {e}"))
-        })?;
+        .map_err(|e| CapabilityError::Internal(format!("write_brief patch_work: {e}")))?;
 
         let output = CreatorWriteBriefOutput {
             written: true,
