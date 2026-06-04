@@ -275,9 +275,9 @@ Every preset node compiles into one of these Rust `Task` impls:
 
 All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations are **pure** over `Context` + well-typed capability handles — no global state.
 
-#### 4.4.1 `llm_judge` runtime contract (V1.33)
+#### 4.4.1 `llm_judge` runtime contract (V1.33 — Implemented)
 
-**Problem (pre-V1.33):** `StateCompositeTask` may route `exit_when.kind: llm_judge` through `JudgeTask` that only evaluates stub `_judge_rule` (`always_true` / `always_false`) without calling the declared `judge_capability` or loading `template_file`.
+**Pre-V1.33 problem (resolved in V1.33 P3):** `StateCompositeTask` used to route `exit_when.kind: llm_judge` through `JudgeTask` that only evaluated stub `_judge_rule` (`always_true` / `always_false`) without calling the declared `judge_capability` or loading `template_file`.
 
 **Required behavior (V1.33+):**
 

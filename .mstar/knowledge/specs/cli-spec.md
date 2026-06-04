@@ -350,7 +350,7 @@ Rules:
 - `work_continue` presets require completed intake unless `--force` (audited).
 - `creator run` creates/updates schedules via daemon Local API; it does **not** replace `daemon schedule` for power users.
 
-**Shipped baseline (pre-V1.33):** Work commands are **not** yet in the CLI tree — use `daemon schedule add --preset novel-writing --seed "..."` as interim. V1.33 plan `2026-06-04-v1.33-work-model-and-creator-run` owns implementation.
+**Shipped (V1.33 P1 + P2):** `creator run start / continue / list / status` are wired in `crates/nexus42/src/commands/creator/run.rs`. `creator run start --idea "..."` creates a Work (`work_id`), auto-schedules Creative Brief Intake, and chains novel-writing (or runs directly with `--chain-novel-writing --skip-intake`). Implementation tracked by plan `2026-06-04-v1.33-work-model-and-creator-run` (Done) + `2026-06-04-v1.33-creative-brief-intake-preset` (Done).
 
 ### 6.3A Preset management and validation surfaces
 
