@@ -568,6 +568,39 @@ impl StateCompositeTask {
         self.registry = Some(registry);
         self
     }
+
+    /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
+    ///
+    /// For embedded presets, reads the template content from the compiled-in
+    /// bundle. If the file doesn't exist (e.g. test fixtures using inline
+    /// strings), keeps the original value unchanged.
+    ///
+    /// # SAFETY
+    ///
+    /// Path traversal is validated at load time by `assert_template_file_safe`
+    /// in the preset loader. Only relative paths without `..` reach this point.
+    #[must_use]
+    pub fn with_resolved_template(mut self, preset_id: &str) -> Self {
+        if let Some(ExitWhen::LlmJudge {
+            ref template_file,
+            ref judge_capability,
+            ref min_interval,
+        }) = self.exit_when
+        {
+            if let Some(ref path) = template_file {
+                if let Some(content) =
+                    crate::preset::read_embedded_template(preset_id, path)
+                {
+                    self.exit_when = Some(ExitWhen::LlmJudge {
+                        template_file: Some(content),
+                        judge_capability: judge_capability.clone(),
+                        min_interval: min_interval.clone(),
+                    });
+                }
+            }
+        }
+        self
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1715,6 +1748,90 @@ mod tests {
             "empty template → WaitForInput, got {:?}",
             result.next_action
         );
+    }
+
+    // ── R-V133P3-02: template_file resolution tests ─────────────────────
+
+    /// Proves that `with_resolved_template` loads actual file content from
+    /// the embedded `novel-writing` preset bundle for `prompts/gathering-exit.md`.
+    #[test]
+    fn with_resolved_template_loads_embedded_file() {
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "gathering".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("prompts/gathering-exit.md".to_string()),
+                judge_capability: None,
+                min_interval: None,
+            }),
+            next: None,
+            terminal: false,
+            context_update: None,
+        };
+
+        let task =
+            StateCompositeTask::from_manifest(&state_def).with_resolved_template("novel-writing");
+
+        // After resolution, the template_file should contain actual file content
+        // (not the path string "prompts/gathering-exit.md").
+        if let Some(ExitWhen::LlmJudge {
+            ref template_file, ..
+        }) = task.exit_when
+        {
+            let resolved = template_file.as_deref().unwrap_or("");
+            assert!(
+                !resolved.is_empty(),
+                "template_file should be resolved to non-empty content"
+            );
+            assert!(
+                !resolved.contains("prompts/gathering-exit.md"),
+                "template_file should contain file content, not the path itself"
+            );
+            // The actual file should contain some meaningful template content.
+            assert!(
+                resolved.len() > 50,
+                "resolved template should be substantial (got {} bytes)",
+                resolved.len()
+            );
+        } else {
+            panic!("expected LlmJudge exit_when after resolution");
+        }
+    }
+
+    /// Proves that `with_resolved_template` keeps inline strings for unknown
+    /// preset IDs (backward compat for tests using inline templates).
+    #[test]
+    fn with_resolved_template_preserves_inline_for_unknown_preset() {
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "test_state".into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(ExitWhen::LlmJudge {
+                template_file: Some("Evaluate: is gathering complete?".to_string()),
+                judge_capability: None,
+                min_interval: None,
+            }),
+            next: None,
+            terminal: false,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_resolved_template("nonexistent-preset");
+
+        if let Some(ExitWhen::LlmJudge {
+            ref template_file, ..
+        }) = task.exit_when
+        {
+            // Should keep the original inline string.
+            assert_eq!(
+                template_file.as_deref(),
+                Some("Evaluate: is gathering complete?")
+            );
+        } else {
+            panic!("expected LlmJudge exit_when");
+        }
     }
 
     // ── parse_iso8601_duration tests ──────────────────────────────────
