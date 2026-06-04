@@ -87,6 +87,21 @@ pub async fn create_pending_review(
         "Creating pending review entry"
     );
 
+    // R-V133P4-07: enforce active creator from auth context (consistency with
+    // review/fragments handlers from R-V133P4-01 fix).
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if req.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "pending_review".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                req.creator_id, active_creator
+            ),
+        });
+    }
+
     // Validate input fields (includes creator_id format validation)
     validate_pending_review_input(&req)?;
 
@@ -103,7 +118,7 @@ pub async fn create_pending_review(
     // Use INSERT OR IGNORE for idempotent behavior on retries
     let pending_id = req.pending_id.clone();
     let session_id = req.session_id.clone();
-    let creator_id = req.creator_id.clone();
+    let creator_id = active_creator; // R-V133P4-07: use active creator, not body
     let world_id = &req.world_id;
     let raw_digest = req.raw_digest.clone();
 
@@ -213,6 +228,20 @@ pub async fn list_pending_reviews(
 ) -> Result<Json<ListPendingReviewsResponse>, NexusApiError> {
     info!(creator_id = %params.creator_id, "Listing pending reviews");
 
+    // R-V133P4-07: enforce active creator from auth context.
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if params.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "pending_review".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                params.creator_id, active_creator
+            ),
+        });
+    }
+
     // Validate creator_id format
     if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
@@ -222,7 +251,7 @@ pub async fn list_pending_reviews(
     }
 
     let limit = params.limit.clamp(1, MAX_LIMIT);
-    let creator_id_filter = params.creator_id.clone();
+    let creator_id_filter = active_creator; // R-V133P4-07: use active creator
     let all_reviews = sqlx::query_as!(
         PendingReviewInfo,
         r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
@@ -288,6 +317,20 @@ pub async fn count_pending_reviews(
 ) -> Result<Json<CountPendingReviewsResponse>, NexusApiError> {
     info!(creator_id = %params.creator_id, "Counting pending reviews");
 
+    // R-V133P4-07: enforce active creator from auth context.
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if params.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "pending_review".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                params.creator_id, active_creator
+            ),
+        });
+    }
+
     // Validate creator_id format
     if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
@@ -296,7 +339,7 @@ pub async fn count_pending_reviews(
         });
     }
 
-    let creator_id_filter = params.creator_id.clone();
+    let creator_id_filter = active_creator; // R-V133P4-07: use active creator
     let row = sqlx::query_scalar!(
         "SELECT COUNT(*) as \"count!\" FROM memory_pending_review WHERE creator_id = ?",
         creator_id_filter
@@ -339,6 +382,20 @@ pub async fn delete_pending_review(
         creator_id = %params.creator_id,
         "Deleting pending review"
     );
+
+    // R-V133P4-07: enforce active creator from auth context.
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if params.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "pending_review".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                params.creator_id, active_creator
+            ),
+        });
+    }
 
     // Validate creator_id format
     if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {

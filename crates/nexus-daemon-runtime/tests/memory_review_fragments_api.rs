@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 
 struct TestCtx {
     _tmp: TestTempRoot,
+    pool: sqlx::SqlitePool,
     server: TestServer,
 }
 
@@ -37,13 +38,18 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
         .expect("failed to write config.toml");
 
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let pool = state.pool().clone();
     let auth_config = DaemonApiConfig {
         api_key: None,
         auth_mode: AuthMode::KeylessLocalhost,
     };
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    TestCtx { _tmp: tmp, server }
+    TestCtx {
+        _tmp: tmp,
+        pool,
+        server,
+    }
 }
 
 /// Seed a pending review entry via the daemon API.
@@ -62,6 +68,23 @@ async fn seed_pending_review(ctx: &TestCtx, pending_id: &str) {
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
+}
+
+/// Seed a pending review entry directly via SQL (bypasses API auth enforcement).
+/// Use for cross-creator isolation tests where the active creator differs.
+async fn seed_pending_review_raw(pool: &sqlx::SqlitePool, pending_id: &str, creator_id: &str) {
+    let session_id = format!("sess_{creator_id}");
+    // SAFETY: test helper using runtime query — compile-time macro not applicable in integration tests.
+    sqlx::query(
+        "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+         VALUES (?, ?, ?, NULL, 'brainstorm', 'Test digest content for cross-creator isolation.', '2026-01-01T00:00:00Z')",
+    )
+    .bind(pending_id)
+    .bind(&session_id)
+    .bind(creator_id)
+    .execute(pool)
+    .await
+    .expect("raw seed insert");
 }
 
 // ─── POST /v1/local/memory/review ────────────────────────────────────────
@@ -248,17 +271,7 @@ async fn pending_review_list_still_works() {
 /// Review returns 401 when no active creator is configured (no config.toml).
 #[tokio::test]
 async fn review_returns_401_without_creator() {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    // Remove config.toml → no active creator → 401.
-    std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
-    let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
-    let ctx = TestCtx { _tmp: tmp, server };
+    let ctx = test_ctx_without_creator().await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
     let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
@@ -268,17 +281,7 @@ async fn review_returns_401_without_creator() {
 /// Fragments returns 401 when no active creator is configured.
 #[tokio::test]
 async fn fragments_returns_401_without_creator() {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    // Remove config.toml → no active creator → 401.
-    std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
-    let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
-    let ctx = TestCtx { _tmp: tmp, server };
+    let ctx = test_ctx_without_creator().await;
 
     let resp = ctx
         .server
@@ -315,22 +318,10 @@ async fn cross_creator_isolation_review_other_creator_returns_403() {
     // Set up with ctr_alice as active creator.
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
 
-    // Seed a pending review as ctr_bob (via create endpoint, which doesn't enforce active creator).
-    let body = json!({
-        "pending_id": "pending_bob_entry",
-        "session_id": "sess_bob",
-        "creator_id": "ctr_bob",
-        "task_kind": "brainstorm",
-        "raw_digest": "This is Bob's brainstorming content about character arcs and world building."
-    });
-    let resp = ctx
-        .server
-        .post("/v1/local/memory/pending-review")
-        .json(&body)
-        .await;
-    resp.assert_status(axum::http::StatusCode::OK);
+    // Seed a pending review as ctr_bob directly via SQL (bypasses API auth).
+    seed_pending_review_raw(&ctx.pool, "pending_bob_entry", "ctr_bob").await;
 
-    // Alice tries to review — but she's not ctr_bob → 403.
+    // Alice tries to review — active_creator filters to ctr_alice.
     let review_body = json!({ "creator_id": "ctr_alice" });
     let resp = ctx
         .server
@@ -343,4 +334,132 @@ async fn cross_creator_isolation_review_other_creator_returns_403() {
     assert_eq!(result["promoted"], 0);
     assert_eq!(result["fragmented"], 0);
     assert_eq!(result["dropped"], 0);
+}
+
+// ─── R-V133P4-07: Pending-review CRUD auth enforcement ─────────────────────
+
+/// Helper: create TestCtx without active creator (no config.toml).
+async fn test_ctx_without_creator() -> TestCtx {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    // Remove config.toml → no active creator.
+    std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let pool = state.pool().clone();
+    let auth_config = DaemonApiConfig {
+        api_key: None,
+        auth_mode: AuthMode::KeylessLocalhost,
+    };
+    let app = api::create_router(state, auth_config);
+    let server = TestServer::new(app).expect("failed to create test server");
+    TestCtx {
+        _tmp: tmp,
+        pool,
+        server,
+    }
+}
+
+/// Pending review create returns 401 when no active creator is configured.
+#[tokio::test]
+async fn pending_review_create_returns_401_without_creator() {
+    let ctx = test_ctx_without_creator().await;
+    let body = json!({
+        "pending_id": "pending_no_auth",
+        "session_id": "sess_no_auth",
+        "creator_id": "ctr_testuser",
+        "raw_digest": "Should not be created"
+    });
+    let resp = ctx
+        .server
+        .post("/v1/local/memory/pending-review")
+        .json(&body)
+        .await;
+    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+}
+
+/// Pending review list returns 401 when no active creator is configured.
+#[tokio::test]
+async fn pending_review_list_returns_401_without_creator() {
+    let ctx = test_ctx_without_creator().await;
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/pending-review?creator_id=ctr_testuser")
+        .await;
+    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+}
+
+/// Pending review count returns 401 when no active creator is configured.
+#[tokio::test]
+async fn pending_review_count_returns_401_without_creator() {
+    let ctx = test_ctx_without_creator().await;
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/pending-review/count?creator_id=ctr_testuser")
+        .await;
+    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+}
+
+/// Pending review delete returns 401 when no active creator is configured.
+///
+/// Uses direct handler invocation (bypasses axum-test routing issue with
+/// `{id}` path segments for DELETE — same pattern as works_api tests).
+#[tokio::test]
+async fn pending_review_delete_returns_401_without_creator() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    // Remove config.toml → no active creator → 401.
+    std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+    use axum::extract::{Path, Query, State};
+    let result = nexus_daemon_runtime::api::handlers::memory::delete_pending_review(
+        State(state),
+        Path("pending_noauth".to_string()),
+        Query(
+            nexus_daemon_runtime::api::handlers::memory::DeletePendingReviewQuery {
+                creator_id: "ctr_testuser".to_string(),
+            },
+        ),
+    )
+    .await;
+
+    match result {
+        Err(err) => {
+            assert_eq!(
+                err.status_code(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Expected 401, got {}",
+                err.status_code()
+            );
+        }
+        Ok(_) => panic!("Expected 401 AuthRequired, got success"),
+    }
+    drop(tmp);
+}
+
+/// Pending review create returns 403 when body creator_id does not match active creator.
+#[tokio::test]
+async fn pending_review_create_returns_403_on_creator_id_mismatch() {
+    let ctx = test_ctx_with_active_creator("ctr_alice").await;
+    let body = json!({
+        "pending_id": "pending_bob_attempt",
+        "session_id": "sess_bob",
+        "creator_id": "ctr_bob",
+        "raw_digest": "Bob trying to create under Alice's session"
+    });
+    let resp = ctx
+        .server
+        .post("/v1/local/memory/pending-review")
+        .json(&body)
+        .await;
+    resp.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+/// Pending review list returns 403 when query creator_id does not match active creator.
+#[tokio::test]
+async fn pending_review_list_returns_403_on_creator_id_mismatch() {
+    let ctx = test_ctx_with_active_creator("ctr_alice").await;
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/pending-review?creator_id=ctr_bob")
+        .await;
+    resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
