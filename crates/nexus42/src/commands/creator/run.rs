@@ -10,7 +10,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_contracts::local::orchestration::{FL_E_STAGES, stage_index};
+use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
 use nexus_orchestration::preset::validation::default_preset_for_stage;
 use nexus_orchestration::stage_gates::{self, WorkStageState};
 
@@ -563,10 +563,7 @@ async fn stage_advance(
         // Read creator_id from the updated work response
         let creator_id = updated
             .get("creator_id")
-            .or_else(|| {
-                // WorkApiDto does not expose creator_id; fall back to label-based approach
-                None
-            })
+            // WorkApiDto does not expose creator_id; fall back to empty string
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
@@ -581,10 +578,7 @@ async fn stage_advance(
         });
 
         match client
-            .post::<serde_json::Value, _>(
-                "/v1/local/orchestration/schedules",
-                &schedule_body,
-            )
+            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &schedule_body)
             .await
         {
             Ok(sched_resp) => {
@@ -604,9 +598,12 @@ async fn stage_advance(
     if json {
         let mut output = updated;
         if let Some(sid) = &schedule_id {
-            output
-                .as_object_mut()
-                .map(|o| o.insert("stage_schedule_id".to_string(), serde_json::Value::String(sid.clone())));
+            output.as_object_mut().map(|o| {
+                o.insert(
+                    "stage_schedule_id".to_string(),
+                    serde_json::Value::String(sid.clone()),
+                )
+            });
         }
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {

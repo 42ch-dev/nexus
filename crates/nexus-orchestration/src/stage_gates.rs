@@ -3,7 +3,7 @@
 //! Provides `check_stage_advance` — the single authoritative gate function
 //! used by both CLI `stage_advance` and daemon `PATCH /v1/local/works/{id}`.
 
-use nexus_contracts::local::orchestration::{FL_E_STAGES, stage_index};
+use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
 
 /// Error returned when a stage advance fails validation.
 #[derive(Debug, Clone)]
@@ -25,9 +25,9 @@ impl std::error::Error for StageGateError {}
 pub struct WorkStageState {
     /// Current stage name (e.g. "intake").
     pub current_stage: String,
-    /// Current stage_status (e.g. "complete").
+    /// Current `stage_status` (e.g. "complete").
     pub stage_status: String,
-    /// V1.33 intake_status (e.g. "complete").
+    /// V1.33 `intake_status` (e.g. "complete").
     pub intake_status: String,
 }
 
@@ -42,13 +42,11 @@ pub fn check_stage_advance(
     force: bool,
 ) -> Result<(), StageGateError> {
     // Gate 0: target must be a known stage
-    let target_idx = stage_index(target_stage).ok_or_else(|| {
-        StageGateError {
-            message: format!(
-                "Unknown stage '{target_stage}'. Valid stages: {}",
-                FL_E_STAGES.join(", ")
-            ),
-        }
+    let target_idx = stage_index(target_stage).ok_or_else(|| StageGateError {
+        message: format!(
+            "Unknown stage '{target_stage}'. Valid stages: {}",
+            FL_E_STAGES.join(", ")
+        ),
     })?;
 
     let current_idx = stage_index(&work.current_stage).unwrap_or(0);
@@ -78,9 +76,7 @@ pub fn check_stage_advance(
 
         // Gate 3: strict linear advance (+1 only)
         if target_idx != current_idx + 1 {
-            let next_stage = FL_E_STAGES
-                .get(current_idx + 1)
-                .unwrap_or(&"(unknown)");
+            let next_stage = FL_E_STAGES.get(current_idx + 1).unwrap_or(&"(unknown)");
             return Err(StageGateError {
                 message: format!(
                     "Cannot skip from '{}' to '{}'; expected next stage is '{}'. \
@@ -103,10 +99,7 @@ pub fn check_stage_advance(
         }
 
         // Gate 5: current stage must be complete (except intake, handled separately)
-        if work.stage_status != "complete"
-            && work.stage_status != "skipped"
-            && current_idx > 0
-        {
+        if work.stage_status != "complete" && work.stage_status != "skipped" && current_idx > 0 {
             return Err(StageGateError {
                 message: format!(
                     "Current stage '{}' is '{}', not 'complete'. \
