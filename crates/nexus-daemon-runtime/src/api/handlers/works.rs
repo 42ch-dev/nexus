@@ -45,6 +45,10 @@ pub struct WorkApiDto {
     pub schedule_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Current FL-E stage (V1.34).
+    pub current_stage: String,
+    /// Current FL-E stage status (V1.34).
+    pub stage_status: String,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -74,6 +78,8 @@ impl From<WorkRecord> for WorkApiDto {
             schedule_ids,
             created_at: r.created_at,
             updated_at: r.updated_at,
+            current_stage: r.current_stage,
+            stage_status: r.stage_status,
         }
     }
 }
@@ -131,6 +137,10 @@ pub struct PatchWorkRequest {
     pub world_id: Option<Option<String>>,
     pub story_ref: Option<Option<String>>,
     pub primary_preset_id: Option<String>,
+    /// V1.34 FL-E: update the current stage.
+    pub current_stage: Option<String>,
+    /// V1.34 FL-E: update the stage status.
+    pub stage_status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +189,8 @@ pub async fn create_work(
         schedule_ids: String::from("[]"),
         created_at: now.clone(),
         updated_at: now.clone(),
+        current_stage: "intake".to_string(),
+        stage_status: "pending".to_string(),
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -281,6 +293,118 @@ pub async fn get_work(
     Ok(Json(WorkApiDto::from(record)))
 }
 
+/// Handle PATCH with stage changes: gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
+async fn patch_work_stage(
+    state: &WorkspaceState,
+    creator_id: &str,
+    work_id: &str,
+    req: &PatchWorkRequest,
+    now: &str,
+) -> Result<WorkRecord, NexusApiError> {
+    let current = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    let target_stage = req
+        .current_stage
+        .as_deref()
+        .unwrap_or(&current.current_stage);
+
+    // Daemon PATCH does not have a force flag; treat all PATCH stage changes
+    // as force=true (direct API bypasses CLI gates). Still validate known stage.
+    if req.current_stage.is_some() {
+        let work_state = nexus_orchestration::stage_gates::WorkStageState {
+            current_stage: current.current_stage.clone(),
+            stage_status: current.stage_status.clone(),
+            intake_status: current.intake_status.clone(),
+        };
+        nexus_orchestration::stage_gates::check_stage_advance(
+            &work_state,
+            target_stage,
+            true, // force=true for daemon PATCH
+        )
+        .map_err(|e| NexusApiError::BadRequest {
+            code: "INVALID_STAGE".to_string(),
+            message: e.message,
+        })?;
+    }
+
+    let target_status = req.stage_status.as_deref().unwrap_or(&current.stage_status);
+
+    // Apply non-stage fields first if present
+    let has_non_stage = req.title.is_some()
+        || req.long_term_goal.is_some()
+        || req.creative_brief.is_some()
+        || req.intake_status.is_some()
+        || req.status.is_some()
+        || req.world_id.is_some()
+        || req.story_ref.is_some()
+        || req.primary_preset_id.is_some();
+
+    if has_non_stage {
+        let non_stage_patch = WorkPatch {
+            title: req.title.clone(),
+            long_term_goal: req.long_term_goal.clone(),
+            creative_brief: req.creative_brief.clone().map(Some),
+            intake_status: req.intake_status.clone(),
+            status: req.status.clone(),
+            world_id: req.world_id.clone(),
+            story_ref: req.story_ref.clone(),
+            primary_preset_id: req.primary_preset_id.clone(),
+            schedule_ids: None,
+            current_stage: None,
+            stage_status: None,
+        };
+        works::patch_work(state.pool(), creator_id, work_id, &non_stage_patch, now)
+            .await
+            .map_err(|e| match &e {
+                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                    NexusApiError::NotFound(format!("work {work_id}"))
+                }
+                _ => NexusApiError::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                },
+            })?;
+    }
+
+    let updated = works::advance_work_stage_atomic(
+        state.pool(),
+        creator_id,
+        work_id,
+        target_stage,
+        target_status,
+        now,
+    )
+    .await
+    .map_err(|e| match &e {
+        nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+            NexusApiError::NotFound(format!("work {work_id}"))
+        }
+        nexus_local_db::LocalDbError::ConstraintViolation { constraint, .. } => {
+            NexusApiError::Conflict(constraint.clone())
+        }
+        _ => NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    })?;
+
+    tracing::info!(
+        target: "fl_e.audit",
+        work_id = %work_id,
+        current_stage = %updated.current_stage,
+        stage_status = %updated.stage_status,
+        "FL-E stage updated via PATCH (atomic)"
+    );
+
+    Ok(updated)
+}
+
 pub async fn patch_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -290,6 +414,13 @@ pub async fn patch_work(
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
+    if req.current_stage.is_some() || req.stage_status.is_some() {
+        let updated = patch_work_stage(&state, &creator_id, &work_id, &req, &now).await?;
+        return Ok(Json(WorkApiDto::from(updated)));
+    }
+
+    // Non-stage PATCH: use regular patch
     let patch = WorkPatch {
         title: req.title,
         long_term_goal: req.long_term_goal,
@@ -300,6 +431,8 @@ pub async fn patch_work(
         story_ref: req.story_ref,
         primary_preset_id: req.primary_preset_id,
         schedule_ids: None,
+        current_stage: None,
+        stage_status: None,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
