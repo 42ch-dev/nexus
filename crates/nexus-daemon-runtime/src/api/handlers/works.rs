@@ -93,9 +93,9 @@ pub async fn create_work(
     Json(req): Json<CreateWorkRequest>,
 ) -> Result<(StatusCode, Json<CreateWorkResponse>), NexusApiError> {
     let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::Uninitialized)?;
+        .ok_or(NexusApiError::AuthRequired)?;
 
     let work_id = format!("wrk_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
@@ -103,25 +103,6 @@ pub async fn create_work(
         .primary_preset_id
         .clone()
         .unwrap_or_else(|| "novel-writing".to_string());
-
-    // Idempotency check
-    if let Some(ref crid) = req.client_request_id {
-        let existing = works::find_work_by_client_request_id(state.pool(), &creator_id, crid)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
-        if let Some(record) = existing {
-            return Ok((
-                StatusCode::OK,
-                Json(CreateWorkResponse {
-                    work_id: record.work_id,
-                    status: record.status,
-                }),
-            ));
-        }
-    }
 
     let record = WorkRecord {
         work_id: work_id.clone(),
@@ -142,25 +123,33 @@ pub async fn create_work(
         updated_at: now.clone(),
     };
 
-    works::create_work(state.pool(), &record)
+    // R-V133P1-01: Atomic create + idempotency in single transaction
+    let crid = req.client_request_id.as_deref();
+    let result = works::create_work_atomic(state.pool(), &record, crid)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?;
 
-    // Record idempotency if client_request_id provided
-    if let Some(ref crid) = req.client_request_id {
-        let _ = works::record_idempotency(state.pool(), &creator_id, crid, &work_id, &now).await;
+    match result {
+        // Idempotent replay — existing Work found
+        Ok(existing) => Ok((
+            StatusCode::OK,
+            Json(CreateWorkResponse {
+                work_id: existing.work_id,
+                status: existing.status,
+            }),
+        )),
+        // New Work created (no client_request_id)
+        Err(new) => Ok((
+            StatusCode::CREATED,
+            Json(CreateWorkResponse {
+                work_id: new.work_id,
+                status: new.status,
+            }),
+        )),
     }
-
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateWorkResponse {
-            work_id,
-            status: "active".to_string(),
-        }),
-    ))
 }
 
 pub async fn list_works(
@@ -168,9 +157,9 @@ pub async fn list_works(
     Query(query): Query<ListWorksQuery>,
 ) -> Result<Json<ListWorksResponse>, NexusApiError> {
     let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::Uninitialized)?;
+        .ok_or(NexusApiError::AuthRequired)?;
 
     let filters = WorkListFilters {
         status: query.status,
@@ -210,7 +199,7 @@ pub async fn get_work(
     Path(work_id): Path<String>,
 ) -> Result<Json<WorkRecord>, NexusApiError> {
     let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
     let record = works::get_work(state.pool(), &creator_id, &work_id)
         .await
@@ -229,7 +218,7 @@ pub async fn patch_work(
     Json(req): Json<PatchWorkRequest>,
 ) -> Result<Json<WorkRecord>, NexusApiError> {
     let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
 
     let patch = WorkPatch {
@@ -268,17 +257,8 @@ pub async fn append_inspiration(
     Json(req): Json<AppendInspirationRequest>,
 ) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
     let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
-
-    // Verify work exists
-    let record = works::get_work(state.pool(), &creator_id, &work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
 
     // Build JSON for inspiration entry
     let entry = serde_json::json!({
@@ -287,17 +267,19 @@ pub async fn append_inspiration(
     });
     let entry_json = serde_json::to_string(&entry).unwrap_or_default();
 
-    works::append_inspiration(state.pool(), &creator_id, &work_id, &entry_json, &now)
+    // R-V133P1-04: append_inspiration now uses tx + Rust append and returns updated record
+    let updated = works::append_inspiration(state.pool(), &creator_id, &work_id, &entry_json, &now)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?;
 
-    // Count existing inspirations
-    let count = serde_json::from_str::<serde_json::Value>(&record.inspiration_log)
-        .map(|v| v.as_array().map_or(1, |a| a.len() + 1))
-        .unwrap_or(1);
+    // Derive count from post-state (not pre-fetch + 1)
+    let count = serde_json::from_str::<serde_json::Value>(&updated.inspiration_log)
+        .ok()
+        .and_then(|v| v.as_array().map(|a| a.len()))
+        .unwrap_or(0);
 
     Ok(Json(AppendInspirationResponse {
         work_id,
