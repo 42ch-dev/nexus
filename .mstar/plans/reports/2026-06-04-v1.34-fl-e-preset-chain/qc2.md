@@ -303,7 +303,7 @@ $ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexu
 **Issues/Risks**: None blocking. Original Criticals resolved; W-001 mitigated by test coverage (isolation asserted) + audit. Recommend Approve.
 **Plan Update**: None (QC only edits its report).
 **Handoff**: To PM for consolidation / QA scheduling. This is targeted re-review per mstar-review-qc (same file, ## Revalidation, frontmatter update).
-**Git**: 09e5791 qc(v1.34-fl-e-preset-chain): revalidate qc2 (fix wave 2: R-FL-E-P2-01/03/04 + R-FL-E-P2-02) — 2C+3W resolved; Approve  (only qc2.md staged/committed per constraints; follow-up 32289d7 filled hash)
+**Git**: 09e5791 qc(v1.34-fl-e-preset-chain): revalidate qc2 (fix wave 2: R-FL-E-P2-01/03/04 + R-FL-E-P2-02) — 2C+3W resolved; Approve  (only qc2.md staged/committed per constraints; follow-up 03e5a43 filled hash)
 
 ## Git (revalidation commit)
 09e5791 qc(v1.34-fl-e-preset-chain): revalidate qc2 (fix wave 2: R-FL-E-P2-01/03/04 + R-FL-E-P2-02) — 2C+3W resolved; Approve
@@ -311,4 +311,4 @@ $ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexu
 (Report revalidated + committed with `git add .mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/qc2.md && git commit ...`; **only** the report path was staged per QC constraints + mstar-roles qc-specialist-2 NEVER rules. Follow-up fill commits captured latest hash. Post-commit `git status --short` was empty after each.)
 
 ## Git (latest)
-32289d7 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
+03e5a43 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)
