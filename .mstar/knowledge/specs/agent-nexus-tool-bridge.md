@@ -177,6 +177,8 @@ Audit: append row to tool audit log (existing ACP tool audit table pattern).
 
 ## 7. Worker upcall unification
 
+Cross-reference with [orchestration-engine.md](orchestration-engine.md) §6.4: `worker/agent_tool_request` carries `{ tool_name, args, request_id }` from the worker to the daemon, and **every** `tool_name` in the `nexus.*` namespace or V1.33 `fs/*` baseline must be admitted through this spec's registry. The worker upcall is an entrypoint into the registry, not a second registry.
+
 `worker/agent_tool_request` parameters:
 
 ```json
@@ -184,6 +186,23 @@ Audit: append row to tool audit log (existing ACP tool audit table pattern).
 ```
 
 P4 **must** map `tool_name` through the same registry as `POST /v1/local/acp/tool/execute` and internal agent-host route.
+
+### 7.1 Single dispatch table invariant
+
+There is exactly one normative dispatch table for P4: `HostToolExecutor` owns tool id admission and handler lookup for all eight V1.34 ids (six `nexus.*` plus two `fs/*`). Whether the request arrives through daemon HTTP tool execute, the internal agent-host route, or `worker/agent_tool_request`, the entrypoint must normalize request fields into the same internal request shape and call the same dispatch table.
+
+Required consequences:
+
+- No duplicate `match tool_name` table in worker IPC handling.
+- No CLI subprocess fallback for any `nexus.*` id.
+- No schedule-only handler path that bypasses `permissions.toml`, active-creator checks, workspace bounds, or audit logging.
+- If a handler is not in the table, every entrypoint returns `NOT_SUPPORTED` consistently.
+
+### 7.2 Cross-creator isolation
+
+The registry applies the V1.32 `SEC-V131-01` pattern: caller-supplied ids are never sufficient authorization. For every `nexus.*` request, the daemon must bind the request to the active creator context first, then verify referenced Works, schedules, workspace roots, and context assembly inputs belong to that same creator/workspace boundary.
+
+Worker sessions must not cache or reuse tool grants across creators. A worker started for creator A cannot invoke `nexus.work.get`, `nexus.work.patch`, `nexus.orchestration.schedule_status`, or `nexus.context.assemble` against creator B's entities, even when it supplies a syntactically valid id. Cross-creator attempts fail with `FORBIDDEN` and produce an audit row.
 
 If P4 completes unification, **do not** register DF-47. If partial, register DF-47 in deferred tracker.
 
