@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 use crate::error::LocalDbError;
 
 /// Work record — mirrors DB row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkRecord {
     /// Unique identifier (e.g. `wrk_<uuid>`).
     pub work_id: String,
