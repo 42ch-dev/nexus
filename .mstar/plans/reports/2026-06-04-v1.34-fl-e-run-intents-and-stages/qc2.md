@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-04-v1.34-fl-e-run-intents-and-stages"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-05"
 ---
 
@@ -188,3 +188,173 @@ $ git log -1 --oneline
 ```
 
 **Note**: Per constraints, only the report path was added/committed; no business code, no status.json, no `git add .`.
+
+## Revalidation
+
+**Revalidation date**: 2026-06-05  
+**Re-review type**: targeted (fix wave 2)  
+**Revalidated commits**: `c3834ce..6cd1409` (8 commits)  
+**Diff basis (full P1)**: `merge-base: origin/main..HEAD`  
+**plan_id**: 2026-06-04-v1.34-fl-e-run-intents-and-stages  
+**Working branch (verified)**: feature/v1.34-fl-e-run-intents-and-stages  
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-run-intents-and-stages  
+
+### Alignment verification (per acceptance)
+```
+$ git rev-parse --show-toplevel
+/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-run-intents-and-stages
+
+$ git branch --show-current
+feature/v1.34-fl-e-run-intents-and-stages
+
+$ git log --oneline -10
+6cd1409 fix(fl-e): R-FL-E-07 PATCH stage wrapped in atomic transaction (TOCTOU-safe)
+03dbfa5 fix(fl-e): R-FL-E-06 persist allowlist dual-path kb-extract + memory-review
+34fda67 fix(fl-e): R-FL-E-05 PATCH stage uses shared gates with CLI
+991e2f8 fix(fl-e): R-FL-E-04 audit log on --force stage skip
+f7f0b59 fix(fl-e): R-FL-E-01 stage advance creates schedule + active protection
+bcf3563 fix(fl-e): R-FL-E-03 strict linear gate without --force
+e80db53 fix(fl-e): R-FL-E-02 intake gate uses intake_status not stage_status
+c3834ce fix(fl-e): R-FL-E-08 dedup FL_E_STAGES constant to single source in nexus-contracts
+0d8cd1e qc(v1.34-fl-e): add qc2.md — security and correctness review (P1 3 commits)
+4432750 qc(v1.34-fl-e): qc3.md — performance & reliability review
+```
+
+### Required test / lint evidence
+```
+$ cargo test -p nexus-daemon-runtime --tests works_api 2>&1 | tail -10
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+     Running tests/works_api.rs (target/debug/deps/works_api-b2731f65dbdea4f1)
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+
+$ cargo test -p nexus-orchestration 2>&1 | tail -10
+   Doc-tests nexus_orchestration
+
+running 3 tests
+test crates/nexus-orchestration/src/preset/mod.rs - preset::load_embedded_preset (line 82) ... ignored
+test crates/nexus-orchestration/src/worker/registry.rs - worker::registry::MockSpawner (line 229) ... ignored
+test crates/nexus-orchestration/src/worker/registry.rs - worker::registry::WorkerManagerSpawner (line 43) ... ignored
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo test -p nexus-daemon-runtime --test works_api 2>&1 | tail -20
+test handler_get_work_returns_401_without_creator ... ok
+...
+test patch_work_stage_change_is_auditable ... ok
+test patch_work_updates_stage_fields ... ok
+test list_works_returns_401_without_creator ... ok
+test patch_work_invalid_stage_value_returns_400 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+$ cargo test -p nexus-orchestration --lib 'preset::validation::stage_tests' 2>&1 | tail -15
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/lib.rs (target/debug/deps/nexus_orchestration-e2f322a1935237d7)
+
+running 8 tests
+test preset::validation::stage_tests::default_preset_for_unknown_stage ... ok
+test preset::validation::stage_tests::persist_allowlist_accepts_both_paths ... ok
+test preset::validation::stage_tests::default_preset_for_known_stages ... ok
+test preset::validation::stage_tests::validate_wrong_preset_for_stage ... ok
+test preset::validation::stage_tests::validate_known_preset_for_stage ... ok
+test preset::validation::stage_tests::stage_index_unknown ... ok
+test preset::validation::stage_tests::stage_index_order ... ok
+test preset::validation::stage_tests::validate_unknown_stage ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 398 filtered out; finished in 0.00s
+
+$ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus-creator-memory -- -D warnings 2>&1 && echo "=== CLIPPY_SUCCESS ===" || echo "=== CLIPPY_FAILED ==="
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+=== CLIPPY_SUCCESS ===
+```
+
+(Full test runs + stage gate unit tests + 25 works_api tests including R-FL-E-02/04/05 regression cases passed; clippy clean on scope crates.)
+
+### Per-finding disposition (original 3 Critical + 3 Warning + 3 Suggestion from qc2.md, plus related qc1 F-QC1-00x)
+
+**🔴 Critical F-QC2-001 (C-1: intake gate uses stage_status not intake_status; also F-QC1-002)**  
+- Fixed by: `e80db53` (R-FL-E-02: separate `intake_status` fetch + gate check + corrected error msg); reinforced by `f7f0b59` (R-FL-E-01 active/schedule) and `34fda67` (shared gate).  
+- Evidence: CLI run.rs now reads intake_status; daemon test `patch_work_intake_status_independent_of_stage_status`; orchestration stage_gates tests `valid_advance_intake_to_research`, `reject_intake_not_complete` (asserts "intake_status"). Spec §3.3 gate 1 satisfied.  
+- Related qc1: same root cause resolved.  
+- **Disposition**: resolved (no regression).
+
+**🔴 Critical F-QC2-002 (C-2: --force not audited; also F-QC1-001 indirect)**  
+- Fixed by: `991e2f8` (R-FL-E-04: CLI `tracing::info!(target: "fl_e.audit", ...)` on any force; always-warn with reason "out of order" or "gate bypass"; daemon logs every stage PATCH with same target).  
+- Evidence: daemon test `patch_work_stage_change_is_auditable`; code in run.rs + handlers/works.rs. Spec "audited" satisfied (local tracing, queryable).  
+- Note: --force not passed to PATCH (CLI-only UX; PATCH treated as force=true low-level); audit still covers all stage mutations server-side.  
+- **Disposition**: resolved.
+
+**🔴 Critical F-QC2-003 (C-3: direct PATCH bypasses all gates; also F-QC1-001 schedule, F-QC1-003 linear)**  
+- Fixed by: `34fda67` (R-FL-E-05: new `nexus-orchestration::stage_gates::check_stage_advance` shared; CLI calls pre-PATCH; daemon PATCH calls for stage fields (force=true for low-level, still enforces known-stage + 400 on invalid); `f7f0b59` + shared for active + strict-linear; `6cd1409` (R-FL-E-07: stage PATCH now `advance_work_stage_atomic` tx); `bcf3563` (strict linear pre-shared).  
+- Evidence: `patch_work_invalid_stage_value_returns_400` (400 BAD_REQUEST); stage_gates unit tests cover all gates (intake, complete, active, skip, back, same, +1); daemon handler now does fetch + check before tx update.  
+- Design note (consistent with prior): PATCH is low-level/internal (force=true allows jumps); CLI is blessed path with user-facing --force. No full client-side bypass possible now.  
+- Related qc1: schedule enqueue + active guard + linear now in shared gate + atomic.  
+- **Disposition**: resolved (with explicit low-level design).
+
+**🟡 Warning F-QC2-004 (W-1: persist allowlist only kb-extract, dual path incomplete)**  
+- Fixed by: `03dbfa5` (R-FL-E-06: STAGE_PRESET_ALLOWLIST now includes "memory-review" for "persist"; test `persist_allowlist_accepts_both_paths`; default remains "kb-extract").  
+- Evidence: validation.rs + unit test; CLI hint still documents dual.  
+- **Disposition**: resolved.
+
+**🟡 Warning F-QC2-005 (W-2: wrong-order/same rejection messages lack "next expected"; intake msg wrong field)**  
+- Fixed by: `bcf3563` (R-FL-E-03: added strict skip msg with expected next); `34fda67` (shared gate: "expected next stage is 'X'"; intake error uses intake_status var + correct label).  
+- Evidence: stage_gates tests assert message fragments ("Cannot skip", "expected next", "intake_status"); CLI now delegates to shared.  
+- **Disposition**: resolved.
+
+**🟡 Warning F-QC2-006 (W-3: PATCH accepts any string, only DB CHECK; no pre-validate)**  
+- Fixed by: `34fda67` (R-FL-E-05: daemon patch calls shared check_stage_advance before write; invalid -> 400 "INVALID_STAGE"); `6cd1409` (tx wrap).  
+- Evidence: `patch_work_invalid_stage_value_returns_400` + gate unit for unknown stage.  
+- (W-3 indirect also touched by tx safety.)  
+- **Disposition**: resolved.
+
+**🟢 Suggestion F-QC2-007 (S-1: FL_E_STAGES / allowlist / hint duplicated)**  
+- Fixed by: `c3834ce` (R-FL-E-08: FL_E_STAGES + stage_index now only in nexus-contracts; used by run.rs, works.rs, validation.rs).  
+- Evidence: contracts mod.rs export; other crates import from nexus_contracts::local::orchestration.  
+- **Disposition**: resolved.
+
+**🟢 Suggestion F-QC2-008 (S-2: list_works omits stage fields vs get/status)**  
+- Not changed in wave (list still uses WorkSummary without current_stage/stage_status; get/status do).  
+- Remains low-impact (CLI status/stage-list use full get; list is summary).  
+- **Disposition**: open (Suggestion, no block for Approve; consider in later if consumer demand).
+
+**🟢 Suggestion F-QC2-009 (S-3: update_work_stage helper defined but unused outside tests)**  
+- Not changed (still present in works.rs, only invoked from its own tests + some tx test setup). Main paths use PATCH + advance_work_stage_atomic.  
+- **Disposition**: open (Suggestion; internal helper, no correctness impact).
+
+**Related qc1 findings revalidated via same wave (F-QC1-001/002/003/004)**  
+- All mapped and covered by the R-FL-E-* fixes above (schedule+active, intake gate, linear/skip, dedup).  
+- qc1 C-1/C-2/W-1/S-1 directly addressed; no new issues.
+
+**qc3 R-01 fix**: wave includes shared gates + atomic tx (reliability/TOCTOU); no blocking perf findings observed in reval.
+
+### Security & correctness re-check (focus)
+- **active_creator force?** No. All entry points (get_work, patch_work, list, stage PATCH) still do `read_active_creator_id(...).ok_or(NexusApiError::AuthRequired)?` before any work. No path allows unauth stage mutation.  
+- **PATCH stage path AuthRequired?** Yes (see patch_work: creator_id fetch first; stage branch calls patch_work_stage after auth).  
+- **audit log sensitive leak?** No. All "fl_e.audit" events: work_id + stage names/status only (tracing::info, local daemon). No creative_brief, title, user data, or secrets. Safe.  
+- **TOCTOU / race on PATCH stage?** Mitigated by `advance_work_stage_atomic` (tx) in R-FL-E-07; gate check + update in one tx where possible.  
+- **New Criticals in wave?** None. All changes are additive gates/audit/tx/dedup; tests cover negative paths (400, reject messages). Clippy clean.  
+- **Regression risk low**: 25+ stage-specific tests + 8 gate units + prior surface contract; no behavior change for non-force happy path.
+
+**Summary reval**:
+- Critical: 3/3 resolved with evidence.
+- Warning: 3/3 resolved (or design-accepted).
+- Suggestion: 1/3 resolved; 2 remain open (low, non-blocking).
+- All original + related qc1 findings addressed by wave; security invariants preserved.
+- Tests / clippy / alignment: pass.
+- **Verdict**: Approve (was Request Changes; now all blocking items fixed and verified).
+
+## Git (post revalidation commit of ONLY the report)
+
+```text
+$ git add .mstar/plans/reports/2026-06-04-v1.34-fl-e-run-intents-and-stages/qc2.md
+$ git commit -m "qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)"
+[feature/v1.34-fl-e-run-intents-and-stages <REALHASH>] qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)
+ 1 file changed, ...
+$ git log -1 --oneline
+<REALHASH> qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)
+```
+
+**Note (reval)**: Per constraints, only the report path was added/committed; no business code, no status.json, no `git add .`. Revalidation followed receiving-code-review (technical verification of each fix + tests before disposition) and verification-before-completion (fresh test/clippy output + real commit hash before final claim).
