@@ -639,16 +639,30 @@ impl Task for StateCompositeTask {
                 EnterAction::Capability { name, args } => {
                     context.set("_capability_name", name.clone()).await;
 
-                    // Security (SEC-V131-01): inject trusted identity from engine
-                    // context into capability args. Capabilities read `_creator_id`
-                    // / `_session_id` from their input; the orchestration engine
-                    // must set them at the invocation boundary so preset YAML
-                    // cannot spoof these values (prevents cross-creator IPC IDOR).
+                    // C-V133P2-01: Template-render capability args.
+                    // Preset YAML args may contain {{preset.input.*}} or
+                    // {{state.*.output}} placeholders. We render them against
+                    // the engine context BEFORE identity injection, so
+                    // placeholders resolve to actual runtime values.
                     let mut cap_input = args.clone().unwrap_or(Value::Null);
                     if cap_input.is_null() {
                         cap_input = Value::Object(serde_json::Map::new());
                     }
+
+                    // Render every string value in the args through handlebars.
+                    // Fail-closed: if a placeholder references a non-existent
+                    // key, the render will fail and the capability is NOT called
+                    // with literal "{{...}}" placeholders.
+                    let payload = build_nested_payload(&context);
+                    cap_input = render_value_templates(&cap_input, &payload)?;
+
                     if let Some(obj) = cap_input.as_object_mut() {
+                        // Security (SEC-V131-01): inject trusted identity from
+                        // engine context into capability args. Capabilities read
+                        // `_creator_id` / `_session_id` from their input; the
+                        // orchestration engine must set them at the invocation
+                        // boundary so preset YAML cannot spoof these values
+                        // (prevents cross-creator IPC IDOR).
                         // Preset args are untrusted. Strip protected identity
                         // fields first, then inject only trusted context values.
                         obj.remove("_creator_id");
@@ -1291,6 +1305,65 @@ pub fn render_core_context_template(
     handlebars_registry()
         .render_template(template, payload)
         .map_err(Into::into)
+}
+
+/// Render a handlebars template in strict mode — missing variables cause
+/// an error instead of silently rendering as empty string.
+///
+/// Used for capability arg template rendering (C-V133P2-01) where silent
+/// substitution of literal "{{...}}" would be a security/correctness bug.
+///
+/// # Errors
+/// Returns an error if the template syntax is invalid, a variable is
+/// missing, or rendering fails for any reason.
+fn render_strict_template(template: &str, payload: &serde_json::Value) -> anyhow::Result<String> {
+    let mut reg = handlebars::Handlebars::new();
+    reg.register_escape_fn(handlebars::no_escape);
+    reg.set_strict_mode(true);
+    reg.render_template(template, payload).map_err(Into::into)
+}
+
+/// Recursively render all string values in a JSON value as handlebars templates.
+///
+/// C-V133P2-01: Walks the JSON tree; for every string value, renders it as a
+/// handlebars template against `payload`. Non-string values (numbers, booleans,
+/// null, arrays of non-strings) are left unchanged.
+///
+/// # Errors
+///
+/// Returns an error if any string value contains a template placeholder that
+/// fails to render (e.g. `{{nonexistent.key}}`). This is fail-closed: the
+/// capability is NOT called with literal "{{...}}" placeholders.
+fn render_value_templates(
+    value: &serde_json::Value,
+    payload: &serde_json::Value,
+) -> Result<serde_json::Value, graph_flow::GraphError> {
+    match value {
+        serde_json::Value::String(s) => {
+            let rendered = render_strict_template(s, payload).map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "capability arg template render failed for '{s}': {e}"
+                ))
+            })?;
+            Ok(serde_json::Value::String(rendered))
+        }
+        serde_json::Value::Object(map) => {
+            let rendered_map: serde_json::Map<String, serde_json::Value> = map
+                .iter()
+                .map(|(k, v)| render_value_templates(v, payload).map(|rv| (k.clone(), rv)))
+                .collect::<Result<_, _>>()?;
+            Ok(serde_json::Value::Object(rendered_map))
+        }
+        serde_json::Value::Array(arr) => {
+            let rendered_arr: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|v| render_value_templates(v, payload))
+                .collect::<Result<_, _>>()?;
+            Ok(serde_json::Value::Array(rendered_arr))
+        }
+        // Numbers, booleans, null — pass through unchanged.
+        other => Ok(other.clone()),
+    }
 }
 
 /// Build a nested JSON object from flat dot-separated context keys.
@@ -2345,5 +2418,145 @@ mod tests {
             input.get("_session_id").is_none(),
             "untrusted _session_id must be stripped when trusted context is absent: {input}"
         );
+    }
+
+    // ── C-V133P2-01: Capability arg template rendering tests ──────────
+
+    /// Proves that `render_value_templates` renders string placeholders
+    /// in a JSON object against the context payload.
+    #[test]
+    fn render_value_templates_renders_nested_placeholders() {
+        let args = serde_json::json!({
+            "workId": "{{preset.input.work_id}}",
+            "briefText": "{{state.synthesizing.output}}",
+            "staticValue": 42,
+            "tags": ["{{preset.input.keyword}}", "hardcoded"]
+        });
+
+        let payload = serde_json::json!({
+            "preset": {
+                "input": {
+                    "work_id": "wrk_test_123",
+                    "keyword": "fantasy"
+                }
+            },
+            "state": {
+                "synthesizing": {
+                    "output": "{\"genre\":\"fantasy\"}"
+                }
+            }
+        });
+
+        let rendered = render_value_templates(&args, &payload).unwrap();
+
+        assert_eq!(rendered["workId"], "wrk_test_123");
+        assert_eq!(rendered["briefText"], "{\"genre\":\"fantasy\"}");
+        assert_eq!(rendered["staticValue"], 42);
+        let tags = rendered["tags"].as_array().unwrap();
+        assert_eq!(tags[0], "fantasy");
+        assert_eq!(tags[1], "hardcoded");
+    }
+
+    /// Proves that `render_value_templates` fails-closed when a placeholder
+    /// references a non-existent key.
+    #[test]
+    fn render_value_templates_fails_closed_on_missing_key() {
+        let args = serde_json::json!({
+            "workId": "{{preset.input.nonexistent}}"
+        });
+
+        let payload = serde_json::json!({
+            "preset": {
+                "input": {
+                    "work_id": "wrk_real"
+                }
+            }
+        });
+
+        let result = render_value_templates(&args, &payload);
+        assert!(result.is_err(), "should fail on missing template key");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("template render failed"),
+            "error should mention template render: {err}"
+        );
+    }
+
+    /// C-V133P2-01 integration: StateCompositeTask renders capability args
+    /// through the template engine before passing to the capability.
+    ///
+    /// This test loads the actual engine context with preset.input and
+    /// state.* values, runs a StateCompositeTask with a capability action
+    /// that uses template placeholders, and verifies the rendered values
+    /// reach the capability input.
+    #[tokio::test]
+    async fn state_composite_renders_capability_args_templates() {
+        use crate::preset::manifest::EnterAction;
+
+        let state_def = crate::preset::manifest::StateDefinition {
+            id: "persisting".into(),
+            description: None,
+            enter: vec![EnterAction::Capability {
+                name: "creator.write_brief".into(),
+                args: Some(serde_json::json!({
+                    "workId": "{{preset.input.work_id}}",
+                    "briefText": "{{state.synthesizing.output}}"
+                })),
+            }],
+            exit_when: None,
+            next: None,
+            terminal: true,
+            context_update: None,
+        };
+
+        let task = StateCompositeTask::from_manifest(&state_def)
+            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+
+        let ctx = graph_flow::Context::new();
+        ctx.set("_creator_id", "ctr_test").await;
+        ctx.set("_session_id", "sess_test").await;
+        ctx.set("preset.input.work_id", "wrk_rendered_123").await;
+
+        // Simulate what InnerGraphTask would write after synthesizing:
+        // state.synthesizing.output = the JSON string of the brief
+        let brief = serde_json::json!({
+            "brief_schema_version": 1,
+            "genre": "fantasy",
+            "tone": "epic",
+            "audience": "young adult",
+            "constraints": ["no graphic violence"],
+            "themes": ["heroism", "sacrifice"],
+            "non_goals": ["not a romance"],
+            "protagonist_hook": "A farm girl discovers a dragon egg",
+            "setting_hook": "A mountainous kingdom under siege",
+            "open_questions_resolved": ["genre: fantasy"]
+        });
+        ctx.set(
+            "state.synthesizing.output",
+            serde_json::to_string(&brief).unwrap(),
+        )
+        .await;
+
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::End),
+            "task should complete successfully"
+        );
+
+        // Verify the capability received RENDERED args
+        let cap_input: serde_json::Value =
+            ctx.get("_capability_input").await.unwrap_or(Value::Null);
+        assert_eq!(
+            cap_input["workId"], "wrk_rendered_123",
+            "workId should be rendered, not literal '{{preset.input.work_id}}': {cap_input}"
+        );
+        assert_eq!(
+            cap_input["briefText"],
+            serde_json::to_string(&brief).unwrap(),
+            "briefText should be rendered, not literal placeholder: {cap_input}"
+        );
+        // Verify identity injection still works after template rendering
+        assert_eq!(cap_input["_creator_id"], "ctr_test");
+        assert_eq!(cap_input["_session_id"], "sess_test");
     }
 }
