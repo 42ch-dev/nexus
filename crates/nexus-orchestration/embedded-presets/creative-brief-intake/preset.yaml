@@ -58,8 +58,8 @@ states:
       - kind: capability
         name: creator.write_brief
         args:
-          work_id: "{{preset.input.work_id}}"
-          brief_text: "{{state.synthesizing.output}}"
+          workId: "{{preset.input.work_id}}"
+          briefText: "{{state.synthesizing.output}}"
     exit_when:
       kind: rule
     next: done
