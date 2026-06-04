@@ -2,7 +2,7 @@
 //!
 //! Endpoints:
 //! - `POST   /v1/local/works` — Create Work (idempotent on `client_request_id`)
-//! - `GET    /v1/local/works` — List Works (filters: status, intake_status, limit, offset)
+//! - `GET    /v1/local/works` — List Works (filters: status, `intake_status`, limit, offset)
 //! - `GET    /v1/local/works/{work_id}` — Get one Work
 //! - `PATCH  /v1/local/works/{work_id}` — Partial update
 //! - `POST   /v1/local/works/{work_id}/inspiration` — Append inspiration log entry
@@ -28,8 +28,8 @@ pub struct CreateWorkRequest {
     pub world_id: Option<String>,
     pub story_ref: Option<String>,
     pub primary_preset_id: Option<String>,
-    /// If provided and a Work with the same creator + client_request_id exists,
-    /// return the existing work_id (idempotent).
+    /// If provided and a Work with the same creator + `client_request_id` exists,
+    /// return the existing `work_id` (idempotent).
     pub client_request_id: Option<String>,
 }
 
@@ -92,8 +92,8 @@ pub async fn create_work(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreateWorkRequest>,
 ) -> Result<(StatusCode, Json<CreateWorkResponse>), NexusApiError> {
-    let creator_id = read_active_creator_id(state.nexus_home())
-        .ok_or(NexusApiError::Uninitialized)?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::Uninitialized)?;
 
@@ -167,8 +167,8 @@ pub async fn list_works(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListWorksQuery>,
 ) -> Result<Json<ListWorksResponse>, NexusApiError> {
-    let creator_id = read_active_creator_id(state.nexus_home())
-        .ok_or(NexusApiError::Uninitialized)?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::Uninitialized)?;
 
@@ -209,8 +209,8 @@ pub async fn get_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
 ) -> Result<Json<WorkRecord>, NexusApiError> {
-    let creator_id = read_active_creator_id(state.nexus_home())
-        .ok_or(NexusApiError::Uninitialized)?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
 
     let record = works::get_work(state.pool(), &creator_id, &work_id)
         .await
@@ -228,8 +228,8 @@ pub async fn patch_work(
     Path(work_id): Path<String>,
     Json(req): Json<PatchWorkRequest>,
 ) -> Result<Json<WorkRecord>, NexusApiError> {
-    let creator_id = read_active_creator_id(state.nexus_home())
-        .ok_or(NexusApiError::Uninitialized)?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
     let now = chrono::Utc::now().to_rfc3339();
 
     let patch = WorkPatch {
@@ -267,8 +267,8 @@ pub async fn append_inspiration(
     Path(work_id): Path<String>,
     Json(req): Json<AppendInspirationRequest>,
 ) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
-    let creator_id = read_active_creator_id(state.nexus_home())
-        .ok_or(NexusApiError::Uninitialized)?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
     let now = chrono::Utc::now().to_rfc3339();
 
     // Verify work exists
@@ -319,10 +319,7 @@ fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
 }
 
 /// Read active workspace slug from CLI config.
-fn read_active_workspace_slug(
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-) -> Option<String> {
+fn read_active_workspace_slug(nexus_home: &std::path::Path, creator_id: &str) -> Option<String> {
     let config_path = nexus_home.join("config.toml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     let config: toml::Value = toml::from_str(&content).ok()?;

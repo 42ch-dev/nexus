@@ -26,7 +26,7 @@ pub enum RunCommand {
         /// Optional world binding
         #[arg(long)]
         world_id: Option<String>,
-        /// Idempotency key (UUID); repeat calls with same key return same work_id
+        /// Idempotency key (UUID); repeat calls with same key return same `work_id`
         #[arg(long)]
         client_request_id: Option<String>,
         /// Emit machine-readable JSON instead of human text
@@ -40,7 +40,7 @@ pub enum RunCommand {
         /// New inspiration / direction note
         #[arg(long)]
         note: String,
-        /// Optional preset to run (default: same primary_preset_id)
+        /// Optional preset to run (default: same `primary_preset_id`)
         #[arg(long)]
         preset: Option<String>,
         /// Emit machine-readable JSON instead of human text
@@ -66,6 +66,11 @@ pub enum RunCommand {
 }
 
 /// Run the `creator run` command.
+///
+/// # Errors
+///
+/// Returns an error if the daemon API call fails.
+#[allow(clippy::too_many_lines)]
 pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
@@ -158,7 +163,10 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         println!("No works found.");
                     }
                     Some(works) => {
-                        println!("{:<36} {:30} {:12} {:12} {}", "WORK_ID", "TITLE", "STATUS", "INTAKE", "UPDATED");
+                        println!(
+                            "{:<36} {:30} {:12} {:12} UPDATED",
+                            "WORK_ID", "TITLE", "STATUS", "INTAKE"
+                        );
                         for w in works {
                             let id = w.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
                             let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("?");
@@ -167,16 +175,16 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                                 .get("intake_status")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("?");
-                            let updated = w
-                                .get("updated_at")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?");
+                            let updated =
+                                w.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
                             let display_title = if title.len() > 28 {
                                 format!("{}…", &title[..28])
                             } else {
                                 title.to_string()
                             };
-                            println!("{id:<36} {display_title:30} {status:12} {intake:12} {updated}");
+                            println!(
+                                "{id:<36} {display_title:30} {status:12} {intake:12} {updated}"
+                            );
                         }
                         println!("\n{} work(s)", works.len());
                     }

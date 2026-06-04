@@ -59,7 +59,7 @@ pub struct InspirationLogEntry {
 pub struct WorkListFilters {
     /// Filter by status.
     pub status: Option<String>,
-    /// Filter by intake_status.
+    /// Filter by `intake_status`.
     pub intake_status: Option<String>,
     /// Maximum number of results.
     pub limit: Option<u32>,
@@ -72,21 +72,21 @@ pub struct WorkListFilters {
 pub struct WorkPatch {
     /// New title.
     pub title: Option<String>,
-    /// New long_term_goal.
+    /// New `long_term_goal`.
     pub long_term_goal: Option<String>,
     /// New creative brief JSON.
     pub creative_brief: Option<Option<String>>,
-    /// New intake_status.
+    /// New `intake_status`.
     pub intake_status: Option<String>,
     /// New status.
     pub status: Option<String>,
-    /// New world_id.
+    /// New `world_id`.
     pub world_id: Option<Option<String>>,
-    /// New story_ref.
+    /// New `story_ref`.
     pub story_ref: Option<Option<String>>,
-    /// New primary_preset_id.
+    /// New `primary_preset_id`.
     pub primary_preset_id: Option<String>,
-    /// New schedule_ids JSON.
+    /// New `schedule_ids` JSON.
     pub schedule_ids: Option<String>,
 }
 
@@ -169,12 +169,13 @@ pub async fn find_work_by_client_request_id(
 ) -> Result<Option<WorkRecord>, LocalDbError> {
     // SAFETY: SELECT against works_idempotency table — runtime query because
     // the table was added in the same migration cycle and sqlx prepare hasn't run yet.
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT work_id FROM works_idempotency WHERE creator_id = ? AND client_request_id = ?")
-            .bind(creator_id)
-            .bind(client_request_id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT work_id FROM works_idempotency WHERE creator_id = ? AND client_request_id = ?",
+    )
+    .bind(creator_id)
+    .bind(client_request_id)
+    .fetch_optional(pool)
+    .await?;
 
     let Some((work_id,)) = row else {
         return Ok(None);
@@ -353,7 +354,9 @@ pub async fn patch_work(
     if set_clauses.is_empty() {
         // Nothing to update — just return current record.
         return get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
-            LocalDbError::MissingVersionKey { key: format!("works/{work_id}") }
+            LocalDbError::MissingVersionKey {
+                key: format!("works/{work_id}"),
+            }
         });
     }
 
@@ -362,9 +365,7 @@ pub async fn patch_work(
 
     // SAFETY: Dynamic SQL required for partial update.
     // All values are bound parameters, not interpolated.
-    let sql = format!(
-        "UPDATE works SET {set_sql} WHERE work_id = ? AND creator_id = ?"
-    );
+    let sql = format!("UPDATE works SET {set_sql} WHERE work_id = ? AND creator_id = ?");
 
     let mut query = sqlx::query(&sql);
 
@@ -411,7 +412,9 @@ pub async fn patch_work(
 
     get_work(pool, creator_id, work_id)
         .await?
-        .ok_or_else(|| LocalDbError::MissingVersionKey { key: format!("works/{work_id}") })
+        .ok_or_else(|| LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        })
 }
 
 /// Append an inspiration entry to a Work (atomic).
@@ -452,7 +455,9 @@ pub async fn append_inspiration(
 
     get_work(pool, creator_id, work_id)
         .await?
-        .ok_or_else(|| LocalDbError::MissingVersionKey { key: format!("works/{work_id}") })
+        .ok_or_else(|| LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        })
 }
 
 #[cfg(test)]
@@ -591,13 +596,17 @@ mod tests {
         };
         let entry_json = serde_json::to_string(&entry).unwrap();
 
-        let updated =
-            append_inspiration(&pool, "ctr_test", "wrk_001", &entry_json, "2026-06-04T12:00:00Z")
-                .await
-                .unwrap();
+        let updated = append_inspiration(
+            &pool,
+            "ctr_test",
+            "wrk_001",
+            &entry_json,
+            "2026-06-04T12:00:00Z",
+        )
+        .await
+        .unwrap();
 
-        let log: Vec<InspirationLogEntry> =
-            serde_json::from_str(&updated.inspiration_log).unwrap();
+        let log: Vec<InspirationLogEntry> = serde_json::from_str(&updated.inspiration_log).unwrap();
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].note, "New direction");
     }
@@ -640,8 +649,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let log: Vec<InspirationLogEntry> =
-            serde_json::from_str(&fetched.inspiration_log).unwrap();
+        let log: Vec<InspirationLogEntry> = serde_json::from_str(&fetched.inspiration_log).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].note, "First");
         assert_eq!(log[1].note, "Second");
@@ -652,9 +660,15 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let record = sample_work("wrk_001");
         create_work(&pool, &record).await.unwrap();
-        record_idempotency(&pool, "ctr_test", "req_abc", "wrk_001", "2026-06-04T10:00:00Z")
-            .await
-            .unwrap();
+        record_idempotency(
+            &pool,
+            "ctr_test",
+            "req_abc",
+            "wrk_001",
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .unwrap();
 
         let found = find_work_by_client_request_id(&pool, "ctr_test", "req_abc")
             .await

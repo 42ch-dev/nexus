@@ -161,29 +161,29 @@ pub async fn list_presets(
     let caps = state.capability_registry();
 
     // Build a map of preset id -> run_intents from the capability registry
-    let intent_map: std::collections::HashMap<String, Vec<String>> = if let Some(registry) = caps {
-        nexus_orchestration::preset::list_embedded_presets()
-            .into_iter()
-            .filter_map(|id| {
-                let loaded = nexus_orchestration::preset::load_embedded_preset(&id, &registry).ok()?;
-                let intents = loaded
-                    .manifest
-                    .preset
-                    .run_intents
-                    .iter()
-                    .map(|ri| {
-                        serde_json::to_value(ri)
-                            .ok()
-                            .and_then(|v| v.as_str().map(String::from))
-                            .unwrap_or_default()
-                    })
-                    .collect();
-                Some((id, intents))
-            })
-            .collect()
-    } else {
-        std::collections::HashMap::new()
-    };
+    let intent_map: std::collections::HashMap<String, Vec<String>> =
+        caps.map_or_else(std::collections::HashMap::new, |registry| {
+            nexus_orchestration::preset::list_embedded_presets()
+                .into_iter()
+                .filter_map(|id| {
+                    let loaded =
+                        nexus_orchestration::preset::load_embedded_preset(&id, &registry).ok()?;
+                    let intents = loaded
+                        .manifest
+                        .preset
+                        .run_intents
+                        .iter()
+                        .map(|ri| {
+                            serde_json::to_value(ri)
+                                .ok()
+                                .and_then(|v| v.as_str().map(String::from))
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    Some((id, intents))
+                })
+                .collect()
+        });
 
     let embedded = list_embedded_ids()
         .into_iter()
