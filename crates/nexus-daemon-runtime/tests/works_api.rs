@@ -802,3 +802,84 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         axum::http::StatusCode::NOT_FOUND
     );
 }
+
+// ── V1.34 FL-E stage gate regression tests ────────────────────────────────
+
+#[tokio::test]
+async fn patch_work_intake_status_independent_of_stage_status() {
+    // R-FL-E-02 regression: verify that a V1.33 work with intake_status=complete
+    // but stage_status=pending (migration default) can have its stage patched.
+    // The CLI stage_advance reads intake_status (not stage_status) for the
+    // intake gate; this test verifies the daemon returns both fields so the
+    // CLI can distinguish them.
+    let (state, _tmp) = handler_state().await;
+    let req = CreateWorkRequest {
+        title: "Intake Status Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    // Patch intake_status to complete (simulating V1.33 intake completion),
+    // leaving stage_status at the default "pending"
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: Some("complete".to_string()),
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: None,
+    };
+    let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::Json(patch),
+    )
+    .await
+    .unwrap();
+
+    // Verify both fields are independently set:
+    // intake_status=complete, stage_status=pending (default unchanged)
+    assert_eq!(updated.0.intake_status, "complete");
+    assert_eq!(updated.0.stage_status, "pending");
+    assert_eq!(updated.0.current_stage, "intake");
+
+    // Now advance the stage (simulating what CLI would do after intake gate passes)
+    let advance_patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("research".to_string()),
+        stage_status: Some("active".to_string()),
+    };
+    let advanced = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id),
+        axum::Json(advance_patch),
+    )
+    .await
+    .unwrap();
+    assert_eq!(advanced.0.current_stage, "research");
+    assert_eq!(advanced.0.stage_status, "active");
+    // intake_status remains complete
+    assert_eq!(advanced.0.intake_status, "complete");
+}
