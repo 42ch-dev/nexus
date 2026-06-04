@@ -1369,6 +1369,20 @@
       "merge_commits": [
         "P4 merge into integration"
       ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-spec-tracker-hygiene",
+      "title": "V1.34 P5 — Spec and tracker hygiene (closeout, merge last)",
+      "done_at": "2026-06-05T05:10:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-spec-tracker-hygiene.md",
+      "total_batches": 1,
+      "batches_completed": 1,
+      "qc": "Skipped per PM routing \"Tech spec only\" exception (docs only); PM-direct verify via acceptance 3 项 (compass §6 + DF-45 + iterations/README sync)",
+      "qa": "PM-direct verified: deferred tracker updated (V1.34 Active → Latest shipped; DF-51/54 closed; DF-47 still OPEN); shipped archive has V1.33 + V1.34 snapshots; iterations/README V1.34 row Active → Shipped; status.json latest_shipped_iteration=v1.34; spec drafts (creator-workflow-fl-e + agent-nexus-tool-bridge) → Shipped; V1.34 compass Status Active → Shipped (2026-06-05). 0 Out rows missing tracker ID; DF-45 absent (no duplicate).",
+      "residual_count": 0,
+      "merge_commits": [
+        "P5 merge into feature/v1.34-creator-workflow-and-agent-tools"
+      ]
     }
   ]
 }
