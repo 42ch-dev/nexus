@@ -618,7 +618,9 @@ async fn process_review_queue(
 
         match decision.action {
             nexus_creator_memory::review::ReviewAction::PromoteToLongTerm => {
-                let summarizer = PassthroughSummarizer;
+                let summarizer = PassthroughSummarizer {
+                    creator_id: creator_id.to_string(),
+                };
                 match nexus_creator_memory::review::promote_to_long_term(
                     nexus_home,
                     creator_id,
@@ -713,7 +715,11 @@ async fn delete_pending_by_id(pool: &sqlx::SqlitePool, pending_id: &str) {
 ///
 /// **Safety (R-V133P4-06):** Caps the raw digest at `MAX_DIGEST_BYTES` (256 KiB).
 /// Larger digests are truncated with a warning log.
-struct PassthroughSummarizer;
+struct PassthroughSummarizer {
+    /// Active creator ID — injected at construction time so the UNTRUSTED
+    /// header is self-contained for downstream consumers (R-V133P4-03).
+    creator_id: String,
+}
 
 /// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
 const MAX_DIGEST_BYTES: usize = 256 * 1024;
@@ -740,8 +746,12 @@ impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummar
 
         // R-V133P4-03: Prepend UNTRUSTED provenance header so downstream
         // consumers (context assembly, moment prompts) can apply extra validation.
+        // Header must be self-contained: creator_id binds the LTM to the active
+        // creator (not body-supplied), captured_at provides RFC 3339 provenance.
+        let captured_at = chrono::Utc::now().to_rfc3339();
         let header = format!(
-            "# UNTRUSTED: sourced from session_capture digest\n# session_id: {session_id}\n# task_kind: {task_kind}\n# world_id: {}\n\n",
+            "# UNTRUSTED: sourced from session_capture digest\n# creator_id: {}\n# session_id: {session_id}\n# task_kind: {task_kind}\n# world_id: {}\n# captured_at: {captured_at}\n\n",
+            self.creator_id,
             world_id.unwrap_or("(none)")
         );
         Ok(format!("{header}{digest}"))
@@ -854,7 +864,9 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_summarizer_includes_untrusted_header() {
-        let summarizer = PassthroughSummarizer;
+        let summarizer = PassthroughSummarizer {
+            creator_id: "ctr_test_creator".to_string(),
+        };
         let result = summarizer
             .summarize(
                 "sess_123",
@@ -871,6 +883,10 @@ mod tests {
             &result[..result.len().min(50)]
         );
         assert!(
+            result.contains("# creator_id: ctr_test_creator"),
+            "Header should include creator_id (active creator)"
+        );
+        assert!(
             result.contains("# session_id: sess_123"),
             "Header should include session_id"
         );
@@ -883,6 +899,10 @@ mod tests {
             "Header should include world_id"
         );
         assert!(
+            result.contains("# captured_at: "),
+            "Header should include captured_at (RFC 3339)"
+        );
+        assert!(
             result.contains("My brainstorm content"),
             "Body should contain the raw digest after the header"
         );
@@ -890,7 +910,9 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_summarizer_truncates_large_digest() {
-        let summarizer = PassthroughSummarizer;
+        let summarizer = PassthroughSummarizer {
+            creator_id: "ctr_big".to_string(),
+        };
         // Create a digest larger than 256 KiB.
         let large_digest = "x".repeat(MAX_DIGEST_BYTES + 1000);
         let result = summarizer
@@ -912,7 +934,9 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_summarizer_small_digest_unchanged() {
-        let summarizer = PassthroughSummarizer;
+        let summarizer = PassthroughSummarizer {
+            creator_id: "ctr_small".to_string(),
+        };
         let small = "Hello world";
         let result = summarizer
             .summarize("sess_small", "test", small, None)
