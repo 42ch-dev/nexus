@@ -274,6 +274,17 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.33 P4 fix wave",
         "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning."
+      },
+      {
+        "id": "R-V133P4-07",
+        "title": "4 pending-review CRUD handlers (create, list, count, delete) still lack active-creator enforcement — R-V133P4-01 fix scope incomplete",
+        "severity": "critical",
+        "source": "qc1-wave2 NEW (V1.33 P4 re-check)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs:79 (create_pending_review), :210 (list_pending_reviews), :285 (count_pending_reviews), :332 (delete_pending_review) — all 4 take creator_id from body/query without checking against active creator in auth context",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave-2",
+        "note": "P4 plan assignment said 'Apply the same fix to the existing pending-review handlers in the same file (consistency)'. P4 implementer applied AuthRequired only to the new review/fragments handlers (lines 477, 701) but did NOT update the 4 legacy pending-review CRUD handlers. qc2-wave2 said this was 'out of scope, as expected' but the original plan explicitly required it. Fix: same pattern as R-V133P4-01 — extract active_creator_id, return 401 on missing, 403 on body creator_id mismatch, use active creator for the operation. Add 4 new tests covering 401/403 for each handler. Note: V1.32 SEC-V131-01 baseline was already weak here; this fix brings pending-review up to the same standard as the new review/fragments handlers from P4 wave-1."
       }
     ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
