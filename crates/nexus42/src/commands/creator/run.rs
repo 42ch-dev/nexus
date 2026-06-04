@@ -548,6 +548,17 @@ async fn stage_advance(
                 FL_E_STAGES.join(" → ")
             )));
         }
+        // Strict linear advance: must advance to the immediate next stage (spec §3.1).
+        // Skipping stages requires --force.
+        if target_idx != current_idx + 1 {
+            let next_stage = FL_E_STAGES
+                .get(current_idx + 1)
+                .unwrap_or(&"(unknown)");
+            return Err(crate::errors::CliError::Other(format!(
+                "Cannot skip from '{current_stage}' to '{target_stage}'; \
+                 expected next stage is '{next_stage}'. Use --force to skip stages."
+            )));
+        }
         // Current stage must be complete (or skipped) before advancing
         if current_status != "complete" && current_status != "skipped" && current_idx > 0 {
             return Err(crate::errors::CliError::Other(format!(

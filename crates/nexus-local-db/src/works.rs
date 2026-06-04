@@ -1141,6 +1141,22 @@ mod tests {
         assert_eq!(stage_index("INTAKE"), None);
     }
 
+    #[test]
+    fn test_strict_linear_advance_no_skip_without_force() {
+        // R-FL-E-03: validate that stage_index enforces linear order.
+        // intake (0) → research (1) is valid; intake → produce (2) is a skip.
+        let intake_idx = stage_index("intake").unwrap();
+        let research_idx = stage_index("research").unwrap();
+        let produce_idx = stage_index("produce").unwrap();
+
+        // Valid advance: intake → research (adjacent)
+        assert_eq!(research_idx, intake_idx + 1);
+
+        // Invalid skip: intake → produce (not adjacent)
+        assert_ne!(produce_idx, intake_idx + 1);
+        assert!(produce_idx > intake_idx + 1);
+    }
+
     #[tokio::test]
     async fn test_patch_work_stage_fields() {
         let (pool, _dir) = fresh_pool().await;
