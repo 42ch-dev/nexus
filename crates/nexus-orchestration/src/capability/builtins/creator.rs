@@ -451,7 +451,10 @@ impl Capability for CreatorInjectPrompt {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"prompt":{"type":"string"},"priority":{"type":"integer","default":0}},"required":["prompt"],"additionalProperties":false}"#
+        // R-P2-01: include prompt_file + vars in the schema so that the
+        // A4 capability-arg validator no longer flags CapabilityArgDrift
+        // when presets pass these orchestration-layer args.
+        r#"{"type":"object","properties":{"prompt":{"type":"string"},"priority":{"type":"integer","default":0},"prompt_file":{"type":"string"},"vars":{"type":"object","additionalProperties":{"type":"string"}}},"required":["prompt"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
