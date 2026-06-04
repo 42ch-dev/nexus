@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.34 Active** · Latest shipped: **V1.33** · Latest active compass: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) · FL-E **In V1.34** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31, conditional routing** · New §3.3: **DF-46–56** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 29)
+**Quick status**: **V1.35 Active (TBD)** · Latest shipped: **V1.34** · Latest active compass: TBD · FL-E **Shipped in V1.34** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31, conditional routing (DF-56)** · V1.34 deferred: **DF-46, 47, 48, 49, 50, 52, 53, 55, 56** (DF-51, 54 closed in V1.34) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 39)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-04 (V1.34 Prepare; FL-E locked In; DF-46–56 registered)
+**Last updated**: 2026-06-05 (V1.34 Shipped; FL-E closed; DF-51/54 removed; DF-47 still OPEN — production caller wiring)
 
 ---
 
@@ -54,7 +54,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
 | FL-D | **Preset orchestration** (Agentic Design Patterns) | Post-V1.34 | V1.31–32 shipped capabilities + quality gate; **still open**: DF-29, DF-31, **conditional routing** (DF-56; OUT of V1.34) |
-| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | **V1.34** | **In V1.34** — [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) + compass [v1.34](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md). Builds on V1.33 Work + `creator run` + explicit `stage advance`. |
+| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | **V1.34** | **Shipped in V1.34** — [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) (Status: Shipped V1.34) + compass [v1.34](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md). FL-E closed in V1.34 with 5 plan P0–P5; minimal preset chain (research → produce → review → persist) + Work `stage`/`stage_status` + linear gates + active schedule uniqueness (P1) + preset chain wiring (P2). `--auto-chain` default still DF-53. |
 
 ### 3.3 Open features (deferred from compass "Out" or audit)
 
@@ -75,10 +75,10 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
-| DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | P0 in-scope; **remove row when P0 closes** (conditional deferred). |
+| DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 P0** (commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`). Schema now declares `prompt_file` + `vars` with `anyOf`. |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | Any future | S | V1.33 | Use `creator run` + `system preset`. |
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | Post-V1.34 | S | V1.34 | V1.34 uses explicit `creator run stage advance`. |
-| DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | P1 in-scope; **remove row when P1 closes** (conditional deferred). |
+| DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
 | DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34; see FL-D. |
 
@@ -140,7 +140,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 **Latest active iteration**
 
-- V1.34: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E stages + Agent `nexus.*` tools; 6 plans P0–P5 Todo
+- **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E stage workflow + Agent `nexus.*` tool bridge (8 tools in registry) + 5 plans P0–P5 Done. Closed: DF-51 (P0), DF-54 (P1). FL-E shipped. DF-47 (production caller wiring) remains OPEN. DF-46/48/49/50/52/53/55/56 carry-forward.
 
 **Recent shipped compasses** (detail in archive §2)
 

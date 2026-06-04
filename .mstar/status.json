@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-05T04:40:00+08:00",
+  "updated_at": "2026-06-05T05:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-work-model-and-creator-run",
@@ -201,13 +201,13 @@
     "last_integration_branch": "feature/v1.33-work-experience-loop",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.33",
-    "latest_shipped_at": "2026-06-04T18:00:00+08:00",
-    "latest_active_iteration": "v1.34",
-    "latest_active_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.34",
+    "latest_shipped_at": "2026-06-05T05:00:00+08:00",
+    "latest_active_iteration": "v1.34 (Shipped 2026-06-05; awaiting PR to main)",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-05T04:45:00+08:00",
+      "updated_at": "2026-06-05T05:00:00+08:00",
       "total_open": 39,
       "by_severity": {
         "critical": 6,
@@ -235,10 +235,9 @@
       ".mstar/knowledge/specs/agent-nexus-tool-bridge.md",
       ".mstar/knowledge/specs/work-experience-model.md",
       ".mstar/knowledge/specs/cli-spec.md",
-      ".mstar/knowledge/specs/orchestration-engine.md",
-      ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md"
+      ".mstar/knowledge/specs/orchestration-engine.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md"
+    "iteration_compass": null
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
