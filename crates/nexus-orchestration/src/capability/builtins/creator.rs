@@ -10,7 +10,8 @@ use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_contracts::local::orchestration::{
     CreatorInjectPromptInput, CreatorInjectPromptOutput, CreatorReadMemoryInput,
-    CreatorReadMemoryOutput, CreatorWriteMemoryInput, CreatorWriteMemoryOutput,
+    CreatorReadMemoryOutput, CreatorWriteBriefInput, CreatorWriteBriefOutput,
+    CreatorWriteMemoryInput, CreatorWriteMemoryOutput,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -492,6 +493,197 @@ impl Capability for CreatorInjectPrompt {
             .await?;
 
         let output = CreatorInjectPromptOutput { queued: true };
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// creator.write_brief
+// ---------------------------------------------------------------------------
+
+/// Required keys in a valid creative brief (work-experience-model §4).
+const BRIEF_REQUIRED_KEYS: &[&str] = &[
+    "genre",
+    "tone",
+    "audience",
+    "constraints",
+    "themes",
+    "non_goals",
+    "protagonist_hook",
+    "setting_hook",
+    "open_questions_resolved",
+];
+
+/// Required string keys that must be non-empty after trim.
+const BRIEF_REQUIRED_NONEMPTY_KEYS: &[&str] = &[
+    "genre",
+    "tone",
+    "audience",
+    "protagonist_hook",
+    "setting_hook",
+];
+
+/// Required array keys that must have at least one entry.
+const BRIEF_REQUIRED_ARRAY_KEYS: &[&str] = &["constraints", "themes"];
+
+/// Validate a creative brief JSON against §4 schema.
+///
+/// Returns `Ok(())` if valid, or an error message describing what's wrong.
+fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
+    let obj = brief
+        .as_object()
+        .ok_or_else(|| "brief must be a JSON object".to_string())?;
+
+    // Check all required keys present
+    for key in BRIEF_REQUIRED_KEYS {
+        if !obj.contains_key(*key) {
+            return Err(format!("missing required field '{key}'"));
+        }
+    }
+
+    // Check string fields non-empty
+    for key in BRIEF_REQUIRED_NONEMPTY_KEYS {
+        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+            if val.trim().is_empty() {
+                return Err(format!("field '{key}' must not be empty"));
+            }
+        } else {
+            return Err(format!("field '{key}' must be a non-empty string"));
+        }
+    }
+
+    // Check array fields have at least one entry
+    for key in BRIEF_REQUIRED_ARRAY_KEYS {
+        if let Some(arr) = obj.get(*key).and_then(|v| v.as_array()) {
+            if arr.is_empty() {
+                return Err(format!("field '{key}' must have at least one entry"));
+            }
+            // Each entry must be a non-empty string
+            for (i, entry) in arr.iter().enumerate() {
+                let s = entry
+                    .as_str()
+                    .ok_or_else(|| format!("{key}[{i}] must be a string"))?;
+                if s.trim().is_empty() {
+                    return Err(format!("{key}[{i}] must not be empty"));
+                }
+            }
+        } else {
+            return Err(format!("field '{key}' must be an array"));
+        }
+    }
+
+    // non_goals and open_questions_resolved should be arrays (may be empty)
+    for key in &["non_goals", "open_questions_resolved"] {
+        if !obj.get(*key).map_or(false, |v| v.is_array()) {
+            return Err(format!("field '{key}' must be an array"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate and persist a creative brief on a Work entity.
+///
+/// Parses `brief_text` as JSON, validates against §4 schema, and writes
+/// to the Work via `patch_work` in `nexus_local_db`. Sets
+/// `intake_status=complete` only when the brief is valid.
+///
+/// In standalone/test mode (no store), returns a stub success response
+/// after validating the brief.
+pub struct CreatorWriteBrief {
+    store: Option<Arc<CreatorCapabilityStore>>,
+}
+
+impl CreatorWriteBrief {
+    /// Create without a store (placeholder mode).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { store: None }
+    }
+
+    /// Create with a store for real persistence.
+    #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn with_store(store: Arc<CreatorCapabilityStore>) -> Self {
+        Self { store: Some(store) }
+    }
+}
+
+impl Default for CreatorWriteBrief {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Capability for CreatorWriteBrief {
+    fn name(&self) -> &'static str {
+        "creator.write_brief"
+    }
+
+    fn input_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"work_id":{"type":"string"},"brief_text":{"type":"string"}},"required":["work_id","brief_text"],"additionalProperties":false}"#
+    }
+
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"written":{"type":"boolean"},"intakeStatus":{"type":"string"}},"required":["written","intakeStatus"],"additionalProperties":false}"#
+    }
+
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: CreatorWriteBriefInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.write_brief input: {e}"))
+            })?;
+
+        // Parse brief_text as JSON
+        let brief: serde_json::Value =
+            serde_json::from_str(&parsed.brief_text).map_err(|e| {
+                CapabilityError::InputInvalid(format!(
+                    "brief_text is not valid JSON: {e}"
+                ))
+            })?;
+
+        // Validate against §4 schema
+        validate_creative_brief(&brief).map_err(CapabilityError::InputInvalid)?;
+
+        let Some(store) = &self.store else {
+            // Standalone/test mode — return stub
+            let output = CreatorWriteBriefOutput {
+                written: true,
+                intake_status: "complete".to_string(),
+            };
+            return serde_json::to_value(output)
+                .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
+        };
+
+        let creator_id = store.resolve_creator_id(&input).await?;
+        let brief_json = serde_json::to_string(&brief)
+            .map_err(|e| CapabilityError::Internal(format!("serialize brief: {e}")))?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let patch = nexus_local_db::WorkPatch {
+            creative_brief: Some(Some(brief_json)),
+            intake_status: Some("complete".to_string()),
+            ..Default::default()
+        };
+
+        nexus_local_db::patch_work(
+            store.pool.as_ref(),
+            &creator_id,
+            &parsed.work_id,
+            &patch,
+            &now,
+        )
+        .await
+        .map_err(|e| {
+            CapabilityError::Internal(format!("write_brief patch_work: {e}"))
+        })?;
+
+        let output = CreatorWriteBriefOutput {
+            written: true,
+            intake_status: "complete".to_string(),
+        };
         serde_json::to_value(output)
             .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
     }
