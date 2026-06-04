@@ -1532,7 +1532,8 @@ pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
     ("research", &["research"]),
     ("produce", &["novel-writing"]),
     ("review", &["reflection-loop"]),
-    ("persist", &["kb-extract"]),
+    // R-FL-E-06: persist has dual path — kb-extract (via queue) + memory-review (CLI)
+    ("persist", &["kb-extract", "memory-review"]),
 ];
 
 /// Returns the default preset ID for a given FL-E stage.
@@ -1636,5 +1637,20 @@ mod stage_tests {
     #[test]
     fn stage_index_unknown() {
         assert_eq!(stage_index("unknown"), None);
+    }
+
+    #[test]
+    fn persist_allowlist_accepts_both_paths() {
+        // R-FL-E-06: persist stage accepts kb-extract AND memory-review
+        assert!(
+            validate_preset_for_stage("persist", "kb-extract").is_ok(),
+            "persist should accept kb-extract"
+        );
+        assert!(
+            validate_preset_for_stage("persist", "memory-review").is_ok(),
+            "persist should accept memory-review"
+        );
+        // Default should still be kb-extract (first entry)
+        assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
     }
 }
