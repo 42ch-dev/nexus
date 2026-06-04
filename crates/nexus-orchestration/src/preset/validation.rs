@@ -707,7 +707,7 @@ fn check_args_against_schema(
 
     let args_map = args.and_then(|a| a.as_object());
 
-    // Check required args are present.
+    // Check required args are present (top-level `required` field).
     if let Some(ref required_set) = required {
         if let Some(amap) = args_map {
             for req_arg in required_set {
@@ -736,6 +736,11 @@ fn check_args_against_schema(
         }
     }
 
+    // Check anyOf semantics: at least one alternative must be fully satisfied.
+    if let Some(any_of) = schema.get("anyOf").and_then(|a| a.as_array()) {
+        check_any_of_semantics(base_path, cap_name, args_map, any_of, result);
+    }
+
     // Check for unknown args not in schema properties.
     if let (Some(props), Some(amap)) = (properties, args_map) {
         for key in amap.keys() {
@@ -751,6 +756,71 @@ fn check_args_against_schema(
                 });
             }
         }
+    }
+}
+
+/// Check `anyOf` semantics in a capability's JSON Schema.
+///
+/// Each `anyOf` entry may declare its own `required` array. At least one
+/// alternative must have all its required fields present in the provided args.
+fn check_any_of_semantics(
+    base_path: &str,
+    cap_name: &str,
+    args_map: Option<&serde_json::Map<String, serde_json::Value>>,
+    any_of: &[serde_json::Value],
+    result: &mut ValidationResult,
+) {
+    let mut any_satisfied = false;
+    for alt in any_of {
+        let alt_required: HashSet<String> = alt
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if alt_required.is_empty() {
+            continue;
+        }
+        let all_present =
+            args_map.is_some_and(|amap| alt_required.iter().all(|r| amap.contains_key(r)));
+        if all_present {
+            any_satisfied = true;
+            break;
+        }
+    }
+    if !any_satisfied {
+        let alt_labels: Vec<String> = any_of
+            .iter()
+            .filter_map(|alt| {
+                alt.get("required").and_then(|r| {
+                    let keys: Vec<String> = r
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if keys.is_empty() {
+                        None
+                    } else {
+                        Some(format!("{keys:?}"))
+                    }
+                })
+            })
+            .collect();
+        result.diagnostics.push(ValidationDiagnostic {
+            path: format!("{base_path}.args"),
+            message: format!(
+                "capability '{cap_name}' anyOf not satisfied: none of the \
+                 required groups {alt_labels:?} are fully provided"
+            ),
+            severity: DiagnosticSeverity::Error,
+            category: DiagnosticCategory::CapabilityArgDrift,
+        });
     }
 }
 
