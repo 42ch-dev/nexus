@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-04-v1.34-agent-tool-implementation"
-verdict: "Request Changes"
+verdict: "Approve w/ residuals"
 generated_at: "2026-06-05"
 ---
 
@@ -121,3 +121,73 @@ test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ```
 
 **Revalidation Verdict**: Request Changes — C-2, W-1, and W-2 are resolved, S-1/S-2 remain non-blocking suggestions, but original C-1 remains unresolved because fix wave 2 still lacks a production worker/orchestration caller for the worker upcall path or an explicit reopened/deferred DF-47 residual.
+
+## Revalidation 2
+
+### Scope revalidated
+
+- Targeted fix wave 3 commit: `e604a4f` (`R-FL-E-P4-05`), doc-only.
+- Overall P4 basis retained from assignment: `merge-base: origin/main..HEAD`.
+- Verified checkout:
+  - `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-agent-tool-implementation`
+  - `git branch --show-current` → `feature/v1.34-agent-tool-implementation`
+- Diff evidence reviewed:
+  - `git show --stat --name-status e604a4f`
+  - `git show --format=fuller --no-ext-diff e604a4f`
+
+### Fix wave 3 disposition
+
+- **Doc-only scope confirmed.** `e604a4f` modifies exactly three harness documentation files: `.mstar/plans/2026-06-04-v1.34-agent-tool-implementation.md`, `.mstar/knowledge/specs/agent-nexus-tool-bridge.md`, and `.mstar/knowledge/deferred-features-cross-version-tracker.md`. No business implementation or tests changed.
+- **C-001 / original C-1 — Resolved by explicit deferral.** The original blocking condition was not that production worker IPC had to be wired inside P4 unconditionally; it was that P4 could not mark DF-47 closed while production caller wiring remained absent. `e604a4f` corrects the disposition:
+  - Plan markdown changes `## DF-47 Disposition: **CLOSED**` to `## DF-47 Disposition: **OPEN** (partial unification)` and states production caller wiring belongs to P5 or a future V1.34+ plan.
+  - Spec §7.3 now records **Status: OPEN** for the P4 outcome, explains that `HostToolExecutor::execute` / `dispatch_from_worker` shipped only the unified dispatch adapter, and states that no orchestration-side call site invokes it at runtime.
+  - Deferred tracker DF-47 row is retained and updated to `P4 shipped adapter; **production caller wiring OPEN** (deferred to P5/future). Remove when wired end-to-end.`
+- **Residual state accepted.** DF-47 remains an open deferred feature rather than a falsely closed P4 deliverable. That satisfies the accepted resolution path from the first revalidation: reopen/register the deferred worker IPC integration if production caller wiring is intentionally deferred.
+- **No new Critical findings.** The fix is documentation-only and aligns the plan/spec/tracker with the actual implementation boundary; remaining production caller wiring is a tracked residual, not an unresolved blocker for this P4 review.
+
+### Verification evidence
+
+- `git log --oneline -10` showed fix wave 3 at HEAD:
+
+```text
+e604a4f fix(daemon): R-FL-E-P4-05 reopen DF-47 — registry dispatch unified, production caller wiring deferred to V1.34+/P5
+b30d7fc qc(v1.34-agent-tool-implementation): qc3 revalidation — Approve w/ residuals (fix wave 2: R-FL-E-P4-01/02)
+6ab39fb qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve) [hash in text]
+91fbdd8 qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve) [final hash]
+18c6bd8 qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve) [final hash fill]
+5bb60fc qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve) [hash fill]
+9a633fc qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve)
+a2ec68a qc(v1.34-agent-tool-implementation): qc1 revalidate fix wave 2
+67acdf4 test(daemon): R-FL-E-P4-02 expand hermetic tests 8→26 covering all QC findings
+034b996 fix(daemon): R-FL-E-P4-01 surface stable error codes + audit all paths + stage_metadata allowlist
+```
+
+- `git show e604a4f` confirmed doc-only changes:
+
+```text
+M	.mstar/knowledge/deferred-features-cross-version-tracker.md
+M	.mstar/knowledge/specs/agent-nexus-tool-bridge.md
+M	.mstar/plans/2026-06-04-v1.34-agent-tool-implementation.md
+```
+
+- `cargo test -p nexus-daemon-runtime --test agent_tool_api 2>&1 | tail -10`:
+
+```text
+test worker_upcall_surfaces_not_supported_error_code ... ok
+test work_patch_rejects_current_stage_field ... ok
+test worker_upcall_schedule_status_equivalent_to_http ... ok
+test worker_upcall_whoami_equivalent_to_http ... ok
+test workspace_info_returns_workspace_slug ... ok
+test work_get_cross_creator_returns_forbidden ... ok
+test worker_upcall_surfaces_forbidden_error_code ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+```
+
+- `cargo clippy -p nexus-daemon-runtime -- -D warnings 2>&1 | tail -10`:
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+```
+
+**Revalidation 2 Verdict**: Approve w/ residuals — C-001 is fully resolved by reopening DF-47 and documenting the partial P4 outcome in the plan, spec §7.3, and deferred tracker. Production caller wiring remains intentionally deferred and tracked as an open DF-47 residual; no unresolved Critical findings remain for P4.
