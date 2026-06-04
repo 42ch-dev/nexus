@@ -530,10 +530,27 @@ const BRIEF_REQUIRED_ARRAY_KEYS: &[&str] = &["constraints", "themes"];
 /// Validate a creative brief JSON against §4 schema.
 ///
 /// Returns `Ok(())` if valid, or an error message describing what's wrong.
+///
+/// W-V133P2-04: enforces `brief_schema_version: 1` per work-experience-model §4
+/// for forward compatibility.
 fn validate_creative_brief(brief: &serde_json::Value) -> Result<(), String> {
     let obj = brief
         .as_object()
         .ok_or_else(|| "brief must be a JSON object".to_string())?;
+
+    // W-V133P2-04: brief_schema_version must be present and equal to 1
+    let version = obj
+        .get("brief_schema_version")
+        .ok_or_else(|| "missing required field 'brief_schema_version'".to_string())?;
+    match version.as_i64() {
+        Some(1) => {}
+        Some(v) => {
+            return Err(format!("brief_schema_version must be 1, got {v}"));
+        }
+        None => {
+            return Err("field 'brief_schema_version' must be an integer".to_string());
+        }
+    }
 
     // Check all required keys present
     for key in BRIEF_REQUIRED_KEYS {
@@ -623,7 +640,7 @@ impl Capability for CreatorWriteBrief {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"work_id":{"type":"string"},"brief_text":{"type":"string"}},"required":["work_id","brief_text"],"additionalProperties":false}"#
+        r#"{"type":"object","properties":{"workId":{"type":"string"},"briefText":{"type":"string"}},"required":["workId","briefText"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
@@ -1152,6 +1169,68 @@ mod tests {
         assert!(
             err.contains("at least one entry"),
             "expected array length error, got: {err}"
+        );
+    }
+
+    /// W-V133P2-04: missing brief_schema_version should fail.
+    #[tokio::test]
+    async fn write_brief_standalone_missing_schema_version() {
+        let cap = CreatorWriteBrief::new();
+        let brief = serde_json::json!({
+            "genre": "literary fiction",
+            "tone": "dark",
+            "audience": "adults",
+            "constraints": ["none"],
+            "themes": ["loss"],
+            "non_goals": [],
+            "protagonist_hook": "A detective",
+            "setting_hook": "A city",
+            "open_questions_resolved": []
+            // brief_schema_version intentionally omitted
+        });
+        let result = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_test"
+            }))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("brief_schema_version"),
+            "expected brief_schema_version error, got: {err}"
+        );
+    }
+
+    /// W-V133P2-04: wrong brief_schema_version should fail.
+    #[tokio::test]
+    async fn write_brief_standalone_wrong_schema_version() {
+        let cap = CreatorWriteBrief::new();
+        let brief = serde_json::json!({
+            "brief_schema_version": 2,
+            "genre": "literary fiction",
+            "tone": "dark",
+            "audience": "adults",
+            "constraints": ["none"],
+            "themes": ["loss"],
+            "non_goals": [],
+            "protagonist_hook": "A detective",
+            "setting_hook": "A city",
+            "open_questions_resolved": []
+        });
+        let result = cap
+            .run(serde_json::json!({
+                "workId": "wrk_test",
+                "briefText": serde_json::to_string(&brief).unwrap(),
+                "_creator_id": "ctr_test"
+            }))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("brief_schema_version must be 1"),
+            "expected version mismatch error, got: {err}"
         );
     }
 
