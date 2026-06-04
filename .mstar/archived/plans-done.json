@@ -1095,7 +1095,9 @@
       "working_branch": "feature/v1.29-stage0-structured-delimiters",
       "qc_verdict": "Approve",
       "qa_verdict": "Pass",
-      "closed_residuals": ["R13"]
+      "closed_residuals": [
+        "R13"
+      ]
     },
     {
       "plan_id": "2026-05-26-v1.29-soul-experience-preset",
@@ -1126,7 +1128,10 @@
       "working_branch": "feature/v1.29-agent-host-batch2-hardening",
       "qc_verdict": "Approve",
       "qa_verdict": "Pass",
-      "closed_residuals": ["R11", "R12"]
+      "closed_residuals": [
+        "R11",
+        "R12"
+      ]
     },
     {
       "plan_id": "2026-05-26-v1.29-spec-tracker-hygiene",
@@ -1185,7 +1190,9 @@
       "plan_file": ".mstar/plans/2026-05-30-v1.31-creator-memory-capabilities.md",
       "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-creator-memory-capabilities.json",
       "working_branch": "feature/v1.31-creator-memory-capabilities",
-      "tracker_ids": ["DF-30"]
+      "tracker_ids": [
+        "DF-30"
+      ]
     },
     {
       "plan_id": "2026-05-30-v1.31-judge-and-summarize-capabilities",
@@ -1194,7 +1201,12 @@
       "plan_file": ".mstar/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.md",
       "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.json",
       "working_branch": "feature/v1.31-judge-and-summarize-capabilities",
-      "tracker_ids": ["DF-32", "DF-33", "DF-34", "DF-37"]
+      "tracker_ids": [
+        "DF-32",
+        "DF-33",
+        "DF-34",
+        "DF-37"
+      ]
     },
     {
       "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
@@ -1203,7 +1215,9 @@
       "plan_file": ".mstar/plans/2026-05-30-v1.31-agentic-pattern-presets.md",
       "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-agentic-pattern-presets.json",
       "working_branch": "feature/v1.31-agentic-pattern-presets",
-      "tracker_ids": ["FL-D"]
+      "tracker_ids": [
+        "FL-D"
+      ]
     },
     {
       "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
@@ -1251,7 +1265,9 @@
       "qc_verdict": "Approve (rev2, 3/3)",
       "qa_verdict": "Pass (6 regression tests across judge_llm + context_summarize)",
       "residual_count": 0,
-      "closed_residuals": ["SEC-V131-01"],
+      "closed_residuals": [
+        "SEC-V131-01"
+      ],
       "notes": "judge.llm + context.summarize now read only context-injected _creator_id/_session_id; engine task boundary injects trusted context."
     },
     {
@@ -1266,6 +1282,25 @@
       "qa_verdict": "N/A (docs-only)",
       "residual_count": 0,
       "notes": "Spec §7.6.x for shared validation facade; archived shipped tracker has V1.32 snapshot; active tracker Quick status; iterations README; compass status. Initial rev1 had worktree-isolation Critical (P4 created before P1 merged) + SSOT split-brain — both resolved by rebase + iteration-close SSOT update."
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-fl-e-run-intents-and-stages",
+      "title": "V1.34 P1 — Work stage model + creator run stage routing",
+      "done_at": "2026-06-05T02:50:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-fl-e-run-intents-and-stages.md",
+      "total_batches": 2,
+      "batches_completed": 2,
+      "qc": "Wave 1: qc1/qc2/qc3 Request Changes (2/3/2 Critical). Wave 2 (after 8 fix commits): qc1/qc2 Approve, qc3 Approve w/ residuals (R-03 DDL IF NOT EXISTS, R-04 dead code, R-07/08/09 suggestions).",
+      "qa": "Pass w/ notes — 0 unresolved Critical; non-blocking notes on plan markdown status sync + qc3 residuals to be registered in P5 hygiene",
+      "residual_count": 5,
+      "residual_open": [
+        "R-03 DDL IF NOT EXISTS",
+        "R-04 dead code get_work_stage",
+        "R-07/R-08/R-09 suggestions"
+      ],
+      "merge_commits": [
+        "cf29dd1 (merge P1 into feature/v1.34-creator-workflow-and-agent-tools)"
+      ]
     }
   ]
 }
