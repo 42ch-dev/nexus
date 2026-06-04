@@ -255,4 +255,28 @@ Required side effects: no platform HTTP attempt; audit row recorded with `audit_
 
 ---
 
+## 11. Contract gap list
+
+This section is informational for P3 and a handoff input for future contract/codegen work. P3 does **not** add schemas or run codegen.
+
+Current repo snapshot checked for this spec:
+
+- `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs` defines handwritten `ToolExecuteRequest` / `ToolExecuteResponse` for the existing `fs/*` host tool executor.
+- `crates/nexus-contracts/src/generated/context_assembly_v1.rs` already contains generated `ContextAssembleRequestV1` / `ContextAssembleResponseV1` from `schemas/platform/context-assembly-v1.schema.json`, but its comments mark the shape as deferred/direct platform cloud + CLI local assembly, not the V1.34 daemon tool wrapper.
+- `crates/nexus-contracts/src/local/acp/types.rs` contains Nexus-owned ACP session/protocol DTOs, not host tool execution DTOs.
+
+| Spec §5 / handler shape | Current `nexus-contracts` status | Gap / future codegen note |
+| --- | --- | --- |
+| `ToolExecutionRequest` / execute request `{ tool_name, parameters, session_id? }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteRequest`. | Add JSON Schema before replacing handwritten request DTO in P4/P5+ follow-up. Preserve compatibility with existing `fs/*` fields. |
+| `ToolExecutionResponse` / success `{ success, result }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteResponse`. | Add generated wrapper that can carry arbitrary handler result JSON while keeping stable `success`. |
+| `ToolExecutionError` / failure `{ success: false, error: { code, reason?, message?, details? } }` | **Not codegen'd.** Existing Local API error code enums live in runtime error handling, not generated contracts. | Add generated error envelope or reuse a future shared Local API error schema; include `FORBIDDEN`, `POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT`. |
+| `WorkerAgentToolRequest` `{ tool_name, args, request_id }` | **Not codegen'd.** Currently documented only in orchestration-engine §6.4. | Future schema should normalize `args` ↔ `parameters` mapping without creating a second dispatch type. |
+| `WorkerAgentToolRequestResult` `{ request_id, grant, output? }` | **Not codegen'd.** Currently documented only in orchestration-engine §6.4. | Future schema should wrap the same `ToolExecutionResponse` / `ToolExecutionError` result shape. |
+| `nexus.context.assemble` local result subset | **Partially present.** `ContextAssembleRequestV1` / `ContextAssembleResponseV1` exist, but are cloud/deferred and not the daemon tool response envelope. | P4 may reference local assembly domain types internally; generated tool contract still needs the wrapper + `POLICY_BLOCKED` behavior. |
+| Tool-specific parameters for six `nexus.*` ids | **Not codegen'd.** No per-tool parameter schemas in `schemas/`. | Future schemas should cover `whoami`, `workspace.info`, `work.get`, `work.patch`, `schedule_status`, and `context.assemble` minimal params/results. |
+
+Until the gap is closed, P4 must keep the runtime DTO boundary localized in `HostToolExecutor` and avoid creating parallel handwritten DTOs outside the daemon runtime.
+
+---
+
 *Normative agent tool bridge for V1.34. Implementation: P3 (spec/registry design), P4 (code).*
