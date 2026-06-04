@@ -57,6 +57,12 @@ pub struct FragmentRow {
     pub summary: String,
 }
 
+/// Response from `GET /v1/local/memory/fragments`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListFragmentsResponse {
+    pub fragments: Vec<FragmentRow>,
+}
+
 // ─── Pending review models ──────────────────────────────────────────────────
 
 /// Response from `GET /v1/local/memory/pending-review`.
