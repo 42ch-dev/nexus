@@ -24,6 +24,11 @@ use uuid::Uuid;
 ///
 /// Decoupled from `WorkRecord` (DB row) to prevent leaking internal fields
 /// like `creator_id` and `workspace_slug` to API consumers.
+///
+/// JSON columns (`creative_brief`, `inspiration_log`, `schedule_ids`) are
+/// parsed from their stored text form into structured JSON types so that
+/// API consumers receive native JSON values rather than escaped strings
+/// (T1 contract §7.2).
 #[derive(Debug, Serialize)]
 pub struct WorkApiDto {
     pub work_id: String,
@@ -31,32 +36,42 @@ pub struct WorkApiDto {
     pub title: String,
     pub long_term_goal: String,
     pub initial_idea: String,
-    pub creative_brief: Option<String>,
+    pub creative_brief: Option<serde_json::Value>,
     pub intake_status: String,
     pub world_id: Option<String>,
     pub story_ref: Option<String>,
-    pub inspiration_log: String,
+    pub inspiration_log: Vec<serde_json::Value>,
     pub primary_preset_id: String,
-    pub schedule_ids: String,
+    pub schedule_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 impl From<WorkRecord> for WorkApiDto {
     fn from(r: WorkRecord) -> Self {
+        // Parse JSON columns. Best-effort: if a column is malformed, fall back
+        // to a sensible default rather than 500. The DB writes these via Rust
+        // types so they should be valid JSON.
+        let creative_brief = r
+            .creative_brief
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok());
+        let inspiration_log = serde_json::from_str(&r.inspiration_log).unwrap_or_default();
+        let schedule_ids = serde_json::from_str(&r.schedule_ids).unwrap_or_default();
+
         Self {
             work_id: r.work_id,
             status: r.status,
             title: r.title,
             long_term_goal: r.long_term_goal,
             initial_idea: r.initial_idea,
-            creative_brief: r.creative_brief,
+            creative_brief,
             intake_status: r.intake_status,
             world_id: r.world_id,
             story_ref: r.story_ref,
-            inspiration_log: r.inspiration_log,
+            inspiration_log,
             primary_preset_id: r.primary_preset_id,
-            schedule_ids: r.schedule_ids,
+            schedule_ids,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
