@@ -302,6 +302,8 @@ pub async fn patch_work(
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    let had_stage_change = req.current_stage.is_some() || req.stage_status.is_some();
+
     let patch = WorkPatch {
         title: req.title,
         long_term_goal: req.long_term_goal,
@@ -327,6 +329,17 @@ pub async fn patch_work(
                 message: e.to_string(),
             },
         })?;
+
+    // Audit log for FL-E stage changes (spec §3.1: "audited").
+    if had_stage_change {
+        tracing::info!(
+            target: "fl_e.audit",
+            work_id = %work_id,
+            current_stage = %updated.current_stage,
+            stage_status = %updated.stage_status,
+            "FL-E stage updated via PATCH"
+        );
+    }
 
     Ok(Json(WorkApiDto::from(updated)))
 }
