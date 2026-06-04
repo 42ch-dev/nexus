@@ -351,10 +351,10 @@ $ cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexu
 ```text
 $ git add .mstar/plans/reports/2026-06-04-v1.34-fl-e-run-intents-and-stages/qc2.md
 $ git commit -m "qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)"
-[feature/v1.34-fl-e-run-intents-and-stages <REALHASH>] qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)
- 1 file changed, ...
+[feature/v1.34-fl-e-run-intents-and-stages 2869c4d] qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)
+ 1 file changed, 171 insertions(+), 1 deletion(-)
 $ git log -1 --oneline
-<REALHASH> qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)
+2869c4d qc(v1.34-fl-e): revalidate qc2 after fix wave 2 (C-1/2/3 + W-1/2/3 + S-1/2/3 + qc1 related)
 ```
 
 **Note (reval)**: Per constraints, only the report path was added/committed; no business code, no status.json, no `git add .`. Revalidation followed receiving-code-review (technical verification of each fix + tests before disposition) and verification-before-completion (fresh test/clippy output + real commit hash before final claim).
