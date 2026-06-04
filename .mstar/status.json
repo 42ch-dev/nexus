@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-05T03:50:00+08:00",
+  "updated_at": "2026-06-05T04:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-work-model-and-creator-run",
@@ -255,17 +255,17 @@
     "latest_active_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-05T02:55:00+08:00",
-      "total_open": 38,
+      "updated_at": "2026-06-05T04:00:00+08:00",
+      "total_open": 42,
       "by_severity": {
         "critical": 6,
         "high": 0,
         "medium": 7,
-        "low": 20,
+        "low": 24,
         "nit": 5
       },
       "by_target": {
-        "unspecified": 38
+        "unspecified": 42
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 4,
@@ -273,7 +273,8 @@
         "2026-06-04-v1.33-work-model-and-creator-run": 3,
         "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
         "v1.30-post-qc-tech-debt": 11,
-        "v1.31-post-qc-tech-debt": 8
+        "v1.31-post-qc-tech-debt": 8,
+        "2026-06-04-v1.34-fl-e-preset-chain": 4
       }
     },
     "wave_0_spec": ".mstar/knowledge/specs/creator-workflow-fl-e.md",
@@ -716,6 +717,52 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.34+",
         "note": "Dedicated /v1/local/works/{id}/stage/advance endpoint would clarify semantics; non-blocking."
+      }
+    ],
+    "2026-06-04-v1.34-fl-e-preset-chain": [
+      {
+        "id": "R-P2-W2",
+        "title": "Missing concurrent PATCH TOCTOU test (qc3 W-2 partial)",
+        "severity": "low",
+        "source": "qc3 reval (P2)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (PATCH stage path)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.34+",
+        "note": "advance_work_stage_atomic uses SQLite transaction internally; concurrent PATCH race test deferred to V1.34+."
+      },
+      {
+        "id": "R-P2-W3",
+        "title": "Intake/novel-writing schedule creation paths lack fl_e.audit tracing (qc3 W-3 partial)",
+        "severity": "low",
+        "source": "qc3 reval (P2)",
+        "scope": "crates/nexus42/src/commands/creator/run.rs (intake + novel-writing branches)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.34+",
+        "note": "stage advance path fully audited; intake/novel-writing have simpler failure modes."
+      },
+      {
+        "id": "R-P2-S1",
+        "title": "default_preset_for_stage panic risk on empty array (qc3 S-1)",
+        "severity": "low",
+        "source": "qc3 reval (P2)",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.34+",
+        "note": "Edge case for empty stage array; non-blocking."
+      },
+      {
+        "id": "R-P2-S2",
+        "title": "Sequential API round-trips could be batched (qc3 S-2)",
+        "severity": "low",
+        "source": "qc3 reval (P2)",
+        "scope": "P2 schedule create + work stage update",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.34+",
+        "note": "Performance optimization; non-blocking."
       }
     ]
   }
