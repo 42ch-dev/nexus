@@ -99,24 +99,26 @@
     "latest_active_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-04T14:50:00+08:00",
-      "total_open": 28,
+      "updated_at": "2026-06-04T15:30:00+08:00",
+      "total_open": 38,
       "by_severity": {
-        "critical": 0,
+        "critical": 5,
         "high": 0,
-        "medium": 5,
-        "low": 18,
+        "medium": 9,
+        "low": 19,
         "nit": 5
       },
       "by_target": {
-        "backlog": 21,
-        "V1.33+": 7
+        "backlog": 23,
+        "V1.33+": 15
       },
       "by_plan": {
         "v1.30-post-qc-tech-debt": 11,
         "v1.31-post-qc-tech-debt": 8,
         "v1.32-post-qc-tech-debt": 2,
-        "v1.33-p1-post-qc": 7
+        "v1.33-p1-post-qc": 7,
+        "v1.33-p3-post-qc": 4,
+        "v1.33-p4-post-qc": 6
       },
       "v1.33_p1_done": {
         "done_at": "2026-06-04T14:50:00+08:00",
@@ -124,6 +126,19 @@
         "closed_residuals": 5,
         "open_residuals": 7,
         "evidence": "P1 fix wave (5 fix commits) + re-QC wave 2 + R-10 surgical re-fix (QA caught premature close). 0 Critical remain open. All closed residuals have evidence + qa-recheck report."
+      },
+      "v1.33_p3_p4_qc": {
+        "qc_wave_at": "2026-06-04T15:30:00+08:00",
+        "merge_commits": ["fe8176c (P3)", "9cfbdde (P4)"],
+        "qc_verdicts": {
+          "qc1": "Request Changes (2 Critical, 2 Warning, 6 Suggestion)",
+          "qc2": "Request Changes (3 Critical, 6 Warning, 7 Suggestion)",
+          "qc3": "Approve (0 Critical, 5 Warning, 3 Suggestion)"
+        },
+        "consolidated_gate": "Request Changes (5 Critical: 2 P3 + 3 P4)",
+        "critical_residuals": 5,
+        "open_residuals": 10,
+        "next": "PM dispatches P3+P4 fix wave (R-01 to R-06)."
       },
       "cross_cutting": [
         {
@@ -135,7 +150,7 @@
           "note": "Blocked by wiremock → http-types upstream."
         }
       ],
-      "note": "V1.33 P1 → Done (merged into integration at 6b09fd6). 7 P1 residuals remain open (R-03 partial, R-05 partial, R-07/08/09/11 deferred, R-12 contract drift). Next: P3 + P4 in parallel per compass."
+      "note": "V1.33 P1 → Done. P3+P4 merged (fe8176c, 9cfbdde) but tri-review returned Request Changes (5 Critical: 2 P3 + 3 P4). 10 new residuals registered (R-V133P3-01..04, R-V133P4-01..06). Next: fix wave → re-QC → QA → P3+P4 Done."
     },
     "wave_0_spec": ".mstar/knowledge/specs/work-experience-model.md",
     "spec_refs": [
@@ -147,6 +162,120 @@
     "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
   },
   "residual_findings": {
+    "2026-06-04-v1.33-llm-judge-runtime-fix": [
+      {
+        "id": "R-V133P3-01",
+        "title": "judge.llm parse_judge_response: 'NOGO' contains 'go' as substring, false-positive GO under V1.33 P3 LlmJudgeTask path",
+        "severity": "critical",
+        "source": "qc1 C-001 (V1.33 P3 review); same root cause as TD-V131-07 (V1.31 backlog, was low severity under stub rule path; now elevated because P3 makes judge.llm the real eval path)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask parse logic — likely delegates to judge_llm.rs / parse_judge_response); existing TD-V131-07 scope was crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave",
+        "note": "Word list 'go'/'nogo' matching can produce false positives from LLM output. The P3 LlmJudgeTask now invokes judge.llm in real path (not stub), so this surface is exercised. Fix per TD-V131-07 note: regex anchors or parse first word of response. P3 fix wave: switch to first-word parse anchored to whitespace/punctuation."
+      },
+      {
+        "id": "R-V133P3-02",
+        "title": "LlmJudgeTask treats template_file as inline template string instead of loading file content from bundle",
+        "severity": "critical",
+        "source": "qc1 C-002 (V1.33 P3 review); also flagged in implementer Completion Report §7 nuance #1",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask template render path) + presets using template_file (novel-writing/preset.yaml:48, reflection-loop/preset.yaml, research/preset.yaml)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave",
+        "note": "YAML presets use paths like 'prompts/gathering-exit.md' for template_file, but runtime treats the value as an inline handlebars string. Preset authors intended file paths; runtime breaks silently. Fix: add file-content loading in the task (read from bundle root relative to preset directory), or add a loader pre-processing step that resolves template_file → file content at load time. P3 fix wave: pre-load in LlmJudgeTask (read from preset bundle path, with SAFETY: file read)."
+      },
+      {
+        "id": "R-V133P3-03",
+        "title": "min_interval ISO-8601 duration parser silently returns None for unsupported units (P1D, months, years) — throttle bypassed, no log",
+        "severity": "medium",
+        "source": "qc2 W-P3-02 (V1.33 P3 review); implementer Completion Report §7 nuance #3",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask min_interval parser)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave",
+        "note": "If a preset specifies 'P1D' or 'P1M' or 'P1Y', the parser returns None (silent); LlmJudgeTask then has no throttle → always re-evaluate. Per ISO 8601 P/P1D should be days. Fix: (a) extend parser to support D/M/Y units, OR (b) explicit log warning + treat unsupported as zero throttle (still bypass), OR (c) error at load time via V1.32 P1 validation. P3 fix wave: (a) for V1.33, (b) as a check."
+      },
+      {
+        "id": "R-V133P3-04",
+        "title": "WorkerUnavailable → NOGO/WaitForInput is a denial-of-service vector: attacker can lock states in NOGO by denying worker connection",
+        "severity": "medium",
+        "source": "qc2 W-P3-04 (V1.33 P3 review); implementer Completion Report §7 nuance #2",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask worker handle check)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P3 fix wave (or backlog)",
+        "note": "When no worker is connected, judge.llm returns WorkerUnavailable and LlmJudgeTask maps to NOGO/WaitForInput. An attacker (or just a misconfigured daemon) can prevent workers from connecting and lock the state forever. Document and consider: (a) a max-WaitForInput duration that surfaces as a real error, (b) explicit 'WorkerUnavailable' vs 'LLMUnavailable' signal so the user can tell them apart, (c) operator alert. Pre-1.0 single-user local, so severity medium."
+      }
+    ],
+    "2026-06-04-v1.33-memory-review-closed-loop": [
+      {
+        "id": "R-V133P4-01",
+        "title": "POST /v1/local/memory/review + GET /v1/local/memory/fragments don't enforce active creator from auth context (P1 works pattern)",
+        "severity": "critical",
+        "source": "qc2 C-001 (V1.33 P4 review)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review + fragments handlers); pending-review CRUD in same file uses body/query creator_id, not config.toml active_creator_id",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "Memory review/fragments accept arbitrary ctr_* from request body/query without checking against active creator in auth context. Weaker than V1.32 SEC-V131-01 (works handlers now use AuthRequired for missing creator). Fix: extract active_creator_id from request extensions (middleware), compare with request-body creator_id, return 403 on mismatch + 401 on missing. P1 established the pattern in creators.rs/works.rs: read_active_creator_id + AuthRequired."
+      },
+      {
+        "id": "R-V133P4-02",
+        "title": "memory_review_fragments_api.rs tests don't cover 401/403/404 + cross-creator isolation (only 200/400)",
+        "severity": "critical",
+        "source": "qc2 C-002 (V1.33 P4 review)",
+        "scope": "crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs (231 lines, 10 tests)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "P1's 18 works_api.rs tests established the pattern: 401 (no creator) + 403/404 (cross-creator isolation). Memory tests only cover 200/400. Add the missing 4-5 tests to match the works coverage bar. Critical because the auth gap from R-V133P4-01 has no test coverage."
+      },
+      {
+        "id": "R-V133P4-03",
+        "title": "PassthroughSummarizer stores raw digest verbatim as LTM body with no UNTRUSTED/provenance marker — prompt-injection vector for downstream use",
+        "severity": "critical",
+        "source": "qc2 C-003 (V1.33 P4 review); also implementer Completion Report §7 nuance #2",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review handler) → calls promote_to_long_term which uses PassthroughSummarizer",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "LTM body = raw_digest (the session capture's extracted text). If the digest contains prompt-injection, downstream LTM consumers (creator.write_memory, ACP context assembly) will see it as trusted user content. Fix: prepend a header marker like '# UNTRUSTED: sourced from session_capture digest (creator=<id>, session=<id>, at=<ts>)\\n\\n' to every LTM body produced via PassthroughSummarizer; downstream consumers can grep the marker to apply extra validation. OR: require explicit user opt-in (interactive confirm) for 'use this digest as LTM' path. V1.33 fix: header marker is minimum bar."
+      },
+      {
+        "id": "R-V133P4-04",
+        "title": "list_fragments_filtered runtime sqlx uses ! column alias suffix — invalid for runtime queries; handler works around but P4 implementer noted the underlying bug remains",
+        "severity": "medium",
+        "source": "qc2 W-P4-05 (V1.33 P4 review); also implementer Completion Report §7 nuance #1",
+        "scope": "crates/nexus-local-db/src/memory_fragment.rs (list_fragments_filtered function); handler works around at crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "list_fragments_filtered uses sqlx::query with 'as \"fragment_id!\"' column aliases — the ! suffix is a compile-time macro hint not valid SQL. SQLite returns the column with the literal ! in the name, causing ColumnNotFound at row.get('fragment_id'). Handler currently uses compile-time list_fragments for no-keyword path; keyword-filtered path is unreachable. Fix: remove the ! suffix from runtime SQL column aliases, OR convert list_fragments_filtered to sqlx::query_as! for consistency with the rest of the module."
+      },
+      {
+        "id": "R-V133P4-05",
+        "title": "save_memory uses non-atomic fs::write — corruption risk on crash/disk-full (P4 review)",
+        "severity": "medium",
+        "source": "qc3 W-P4-01 (V1.33 P4 review)",
+        "scope": "Wherever promote_to_long_term writes the LTM file (likely nexus-creator-memory/src/long_term_memory.rs or similar)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "fs::write is non-atomic; partial write on crash or disk-full leaves truncated LTM file. Fix: write to <file>.tmp first, then rename to <file> (POSIX rename is atomic within a filesystem)."
+      },
+      {
+        "id": "R-V133P4-06",
+        "title": "PassthroughSummarizer has no size guard — unbounded LTM file growth if raw_digest is large",
+        "severity": "medium",
+        "source": "qc3 W-P4-02 (V1.33 P4 review)",
+        "scope": "Same path as R-V133P4-03",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33 P4 fix wave",
+        "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning."
+      }
+    ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
       {
         "id": "R-V133P1-03",
