@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-04-v1.34-fl-e-preset-chain"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-05"
 ---
 
@@ -159,3 +159,62 @@ The fix wave is mostly surgical: `55e96dd` touches the shared stage-gate facade,
 ### Revalidation Verdict
 
 **Verdict remains: Request Changes.** The main schedule DTO shape, seed propagation, rollback behavior, error codes, audit logs, and daemon API coverage are improved, and W-001/S-001 are resolved. However, C-001 is not fully closed because CLI `stage_advance` still lacks an authoritative creator identity source for the schedule request.
+
+## Revalidation 2
+
+### Revalidation Scope
+
+- Targeted re-review for fix wave 3 commit: `649e549` (`R-FL-E-P2-05`).
+- Overall P2 diff basis remains: `merge-base: origin/main..HEAD`.
+- Working branch verified: `feature/v1.34-fl-e-preset-chain`.
+- Review cwd verified: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-preset-chain`.
+- Focus: original QC1 `C-001` residual from Revalidation 1: CLI `stage_advance` must not derive `creator_id` from `WorkApiDto`.
+
+### Commands / Evidence
+
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-fl-e-preset-chain`
+- `git branch --show-current` → `feature/v1.34-fl-e-preset-chain`
+- `git log --oneline -10` →
+  - `649e549 fix(fl-e): R-FL-E-P2-05 CLI stage advance uses active_creator from auth context not Work DTO`
+  - `0af4a4b qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `ba39562 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `864954f qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `9846f61 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `03e5a43 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `32289d7 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `51d2286 qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `242d82a qc(v1.34-fl-e-preset-chain): fill real commit hash into qc2.md (revalidation post-verification)`
+  - `09e5791 qc(v1.34-fl-e-preset-chain): revalidate qc2 (fix wave 2: R-FL-E-P2-01/03/04 + R-FL-E-P2-02) — 2C+3W resolved; Approve`
+- `git show 649e549` reviewed; commit changes only `crates/nexus42/src/commands/creator/run.rs` and `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs`.
+- `cargo test -p nexus-daemon-runtime --test fl_e_schedule_api 2>&1 | tail -10` →
+  - `running 5 tests`
+  - `test schedule_create_without_seed_no_core_context ... ok`
+  - `test schedule_list_isolation_by_creator ... ok`
+  - `test schedule_with_empty_creator_id_is_isolated_from_legitimate_creators ... ok`
+  - `test schedule_create_with_correct_dto_shape ... ok`
+  - `test schedule_create_seeds_core_context_from_preset_input ... ok`
+  - `test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s`
+- `cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus-creator-memory -- -D warnings 2>&1 | tail -10` → `Finished dev profile [unoptimized + debuginfo] target(s) in 0.23s`.
+
+### Per-finding Disposition
+
+#### C-001 — Resolved
+
+- CLI `stage_advance` now threads `CliConfig` through `handle_stage(...)` into `stage_advance(...)`, so schedule creation has access to the authenticated/selected CLI context instead of relying on daemon `WorkApiDto` fields.
+- The creator identity is now sourced from `config.active_creator_id.as_deref().ok_or(crate::errors::CliError::CreatorNotSelected)?` (`crates/nexus42/src/commands/creator/run.rs:580-583`). This fully removes the prior `updated.get("creator_id")...unwrap_or("")` path from the schedule request construction.
+- The code comment at `run.rs:575-576` explicitly records the invariant: `creator_id` comes from CLI config's `active_creator_id`, not from `WorkApiDto`, which intentionally omits `creator_id` per SEC-V131-01.
+- The typed `AddScheduleRequest` still flows through `stage_gates::build_schedule_for_stage(target_stage, creator_id, &fields)` and the daemon POST uses the typed request, so the wave 2 DTO-shape/facade fixes remain intact.
+
+Disposition: **resolved**. The original C-001 residual is fully addressed; CLI stage advancement can no longer silently create a schedule under an empty owner because of missing `creator_id` on `WorkApiDto`. If no active creator is configured, the path fails with `CreatorNotSelected` before schedule construction.
+
+#### Daemon empty-creator isolation regression — Covered
+
+- New hermetic daemon API test `schedule_with_empty_creator_id_is_isolated_from_legitimate_creators` creates one schedule with `creator_id: String::new()` and one schedule with `creator_id: "ctr_real"`, then verifies `GET /v1/local/orchestration/schedules?creator_id=ctr_real` returns only the legitimate creator schedule (`crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs:276-330`).
+- The same test also verifies the empty-creator schedule still exists when listing all schedules, proving the isolation filter rather than accidental write omission.
+- Required targeted test command now runs 5 tests and includes this regression by name.
+
+Disposition: **covered** for the daemon-side isolation behavior requested by PM. This complements the CLI-side fix by making empty-owner persistence visible and isolated from legitimate creator queries.
+
+### Revalidation Verdict
+
+**Verdict: Approve.** Fix wave 3 fully resolves the remaining QC1 Critical (`C-001`) by sourcing CLI stage-advance `creator_id` from `config.active_creator_id` instead of `WorkApiDto`, and the daemon-side empty-creator isolation regression is covered by a hermetic API test. Required targeted tests and scoped clippy passed; no new Critical/Warning findings were introduced in the reviewed fix commit.
