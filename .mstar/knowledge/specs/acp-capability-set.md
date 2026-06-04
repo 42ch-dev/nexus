@@ -90,6 +90,8 @@ Agents must declare supported `(capability_id, major)` pairs at minimum. Clients
 
 ## 4. Minimal capability set
 
+> **V1.34 implementation subset:** Daemon host tools for `nexus.context.whoami`, `nexus.workspace.info`, `nexus.work.get`, `nexus.work.patch`, `nexus.orchestration.schedule_status`, and `nexus.context.assemble` (local/read-only or `policy_blocked`) are specified in [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md). Remaining IDs in this section remain **logical contract only** until DF-46.
+
 ### 4.1 Context
 
 | Capability ID | Required | Description |

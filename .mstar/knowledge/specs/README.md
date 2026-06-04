@@ -61,6 +61,8 @@ When specs overlap, use this order (higher wins on conflict):
 | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | `nexus-orchestration`, presets, worker IPC |
 | [work-experience-model.md](work-experience-model.md) | Work container, `creator run`, Creative Brief Intake, run_intents |
+| [creator-workflow-fl-e.md](creator-workflow-fl-e.md) | FL-E stage model, preset chain, `creator run stage` (V1.34) |
+| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Agent `nexus.*` tools via daemon HostToolExecutor (V1.34) |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Schedules and core-context model |
 | [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | Novel-writing sync module |
 | [canonical-hash.md](canonical-hash.md) | Bundle canonical hash (OSS implementation notes) |

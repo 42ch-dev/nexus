@@ -18,7 +18,7 @@ Iteration compasses: [`.mstar/iterations/`](../iterations/README.md). Convention
 | [specs/schemas-directory-layout.md](specs/schemas-directory-layout.md) | `schemas/` folder tree, cloud vs local, rename policy | Active |
 | [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) | Open/backlog deferred-feature lifecycle (active tracker) | Active |
 
-Specs index includes [work-experience-model.md](specs/work-experience-model.md) (V1.33).
+Specs index includes [work-experience-model.md](specs/work-experience-model.md) (V1.33), [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) and [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md) (V1.34).
 
 ## Specs
 

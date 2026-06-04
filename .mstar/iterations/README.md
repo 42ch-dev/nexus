@@ -45,6 +45,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.31-agentic-design-patterns-delivery-compass-v1.md](v1.31-agentic-design-patterns-delivery-compass-v1.md) | V1.31 | **Shipped** (2026-05-30) — FL-D partial close: orchestration de-stub + 2 Agentic Design Pattern presets |
 | [v1.32-preset-quality-gate-delivery-compass-v1.md](v1.32-preset-quality-gate-delivery-compass-v1.md) | V1.32 | **Shipped** (2026-06-03) — preset validator quality gate + `SEC-V131-01` |
 | [v1.33-work-experience-loop-delivery-compass-v1.md](v1.33-work-experience-loop-delivery-compass-v1.md) | V1.33 | **Shipped** (2026-06-04) — Work container, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review loop; 5 plans P1–P5 Done |
+| [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) | V1.34 | **Active** (2026-06-04) — FL-E stage workflow, Agent `nexus.*` tool bridge; 6 plans P0–P5 Todo |
 
 ### Reference compasses
 

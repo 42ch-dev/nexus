@@ -243,27 +243,32 @@ Closed loop requires daemon routes for review + fragments (P4).
 
 ---
 
-## 10. Future: generic creator workflow (FL-E)
+## 10. Generic creator workflow (FL-E) — V1.34
 
-V1.33 **does not** implement FL-E. See [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md) §3.2.
+**Normative SSOT**: [creator-workflow-fl-e.md](creator-workflow-fl-e.md) (stages, preset chain, stage advance).
 
-FL-E target shape (documentation only):
+V1.34 extends Work with:
 
-```text
-intake → research → draft → review → persist
-```
+| Field | Type | Description |
+| --- | --- | --- |
+| `current_stage` | enum | `intake` \| `research` \| `produce` \| `review` \| `persist` |
+| `stage_status` | enum or map | Per-stage `pending` \| `active` \| `complete` \| `skipped` \| `failed` |
 
-as a **preset family** with shared Work container — reusing V1.33 Work + run_intents + `creator run`.
+Stage progression is **explicit** via `creator run stage advance` (not default auto-chain — see DF-53).
 
----
-
-## 11. Open implementation questions (for P1/P2 plans)
-
-1. Exact `works` table DDL and migration idempotency.
-2. Whether `creative-brief-intake` is standalone preset vs `novel-writing` sub-state.
-3. How brief JSON is written from orchestration (new capability vs schedule hook).
-4. Default policy: auto-start `novel-writing` after intake vs explicit user confirm.
+FL-E reuses V1.33 `creator run start/continue/list/status` and does not replace `daemon schedule`.
 
 ---
 
-*Normative product model for V1.33 Work experience loop. Implementation details in locked plans under `.mstar/plans/2026-06-04-v1.33-*`.*
+## 11. Resolved / deferred questions
+
+| Topic | Status |
+| --- | --- |
+| `works` DDL | Shipped V1.33 P1; stage columns V1.34 P1 |
+| `creative-brief-intake` standalone preset | Shipped V1.33 P2 |
+| Brief JSON from orchestration | Shipped V1.33 P2 |
+| Auto-start `novel-writing` after intake | V1.33 `--chain-novel-writing`; V1.34 uses **stage advance** for produce |
+
+---
+
+*Normative product model for Work + FL-E. V1.33 plans: `.mstar/plans/2026-06-04-v1.33-*`. V1.34: `.mstar/plans/2026-06-04-v1.34-*`.*

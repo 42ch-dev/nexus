@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-04T12:00:00+08:00",
+  "updated_at": "2026-06-04T23:45:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-work-model-and-creator-run",
@@ -139,7 +139,87 @@
         "done_at": "2026-06-04T18:00:00+08:00",
         "merge_commits": ["e97f458 (P5 closeout)"]
       }
-    }
+    },
+    {
+      "id": "2026-06-04-v1.34-residual-convergence",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.34-residual-convergence.md",
+      "working_branch": "feature/v1.34-residual-convergence",
+      "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+        "description": "P0 — V1.33+ residual convergence + V1.33 compass hygiene"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.34-fl-e-run-intents-and-stages",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.34-fl-e-run-intents-and-stages.md",
+      "working_branch": "feature/v1.34-fl-e-run-intents-and-stages",
+      "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/creator-workflow-fl-e.md",
+        "depends_on": ["2026-06-04-v1.34-residual-convergence"],
+        "description": "P1 — Work stage model + creator run stage routing"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.34-fl-e-preset-chain",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.34-fl-e-preset-chain.md",
+      "working_branch": "feature/v1.34-fl-e-preset-chain",
+      "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/creator-workflow-fl-e.md",
+        "depends_on": ["2026-06-04-v1.34-fl-e-run-intents-and-stages"],
+        "description": "P2 — FL-E preset chain (research, reflection, persist)"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.34-agent-tool-registry-spec",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.34-agent-tool-registry-spec.md",
+      "working_branch": "feature/v1.34-agent-tool-registry-spec",
+      "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/agent-nexus-tool-bridge.md",
+        "depends_on": ["2026-06-04-v1.34-residual-convergence"],
+        "description": "P3 — nexus.* tool registry normative + handler design"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.34-agent-tool-implementation",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.34-agent-tool-implementation.md",
+      "working_branch": "feature/v1.34-agent-tool-implementation",
+      "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/agent-nexus-tool-bridge.md",
+        "depends_on": ["2026-06-04-v1.34-agent-tool-registry-spec"],
+        "description": "P4 — HostToolExecutor + worker upcall + tests"
+      }
+    },
+    {
+      "id": "2026-06-04-v1.34-spec-tracker-hygiene",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-04-v1.34-spec-tracker-hygiene.md",
+      "working_branch": "feature/v1.34-spec-tracker-hygiene",
+      "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
+        "depends_on": [
+          "2026-06-04-v1.34-residual-convergence",
+          "2026-06-04-v1.34-fl-e-run-intents-and-stages",
+          "2026-06-04-v1.34-fl-e-preset-chain",
+          "2026-06-04-v1.34-agent-tool-registry-spec",
+          "2026-06-04-v1.34-agent-tool-implementation"
+        ],
+        "description": "P5 — tracker, status.json, iterations (merge last)"
+      }
     }
   ],
   "metadata": {
@@ -149,14 +229,14 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "feature/{ver}-{iteration-slug}"
     },
-    "integration_branch": "feature/v1.33-work-experience-loop",
-    "last_integration_branch": "feature/v1.32-preset-quality-gate",
+    "integration_branch": "feature/v1.34-creator-workflow-and-agent-tools",
+    "last_integration_branch": "feature/v1.33-work-experience-loop",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.33",
     "latest_shipped_at": "2026-06-04T18:00:00+08:00",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.34",
+    "latest_active_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
     "platform_integration": "paused \u2014 local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-06-04T17:30:00+08:00",
@@ -219,16 +299,18 @@
           "note": "Blocked by wiremock \u2192 http-types upstream."
         }
       ],
-      "note": "V1.33 P1+P3+P4 \u2192 Done. 28 total open residuals (0 critical, 5 medium, 18 low, 5 nit). Next: P2 (creative-brief-intake-preset) + P5 (spec-tracker-hygiene) per compass \u00a73."
+      "note": "V1.33 iteration closed. V1.34 Prepare: 6 plans Todo; P0 residual convergence first."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/work-experience-model.md",
+    "wave_0_spec": ".mstar/knowledge/specs/creator-workflow-fl-e.md",
     "spec_refs": [
+      ".mstar/knowledge/specs/creator-workflow-fl-e.md",
+      ".mstar/knowledge/specs/agent-nexus-tool-bridge.md",
       ".mstar/knowledge/specs/work-experience-model.md",
       ".mstar/knowledge/specs/cli-spec.md",
       ".mstar/knowledge/specs/orchestration-engine.md",
-      ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
+      ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [

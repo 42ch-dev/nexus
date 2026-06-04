@@ -72,6 +72,7 @@ CLI/runtime 在导出清单中必须声明等级，未声明视为 **不兼容**
 ## 4. 与现有规范的关系
 
 - ACP 能力集合：[`acp-capability-set.md`](./acp-capability-set.md)
+- Agent host tool bridge (V1.34 minimal L1 mapping)：[`agent-nexus-tool-bridge.md`](./agent-nexus-tool-bridge.md)
 - 运行时边界：[`local-runtime-boundary.md`](./local-runtime-boundary.md)
 - CLI 能力入口与工作区语义：[`../local/cli-spec.md`](./cli-spec.md)
 - 程序梯映射：[`../pre-freeze-spec-log.md`](../pre-freeze-spec-log.md) §0

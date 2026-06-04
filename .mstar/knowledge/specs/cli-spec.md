@@ -352,6 +352,25 @@ Rules:
 
 **Shipped (V1.33 P1 + P2):** `creator run start / continue / list / status` are wired in `crates/nexus42/src/commands/creator/run.rs`. `creator run start --idea "..."` creates a Work (`work_id`), auto-schedules Creative Brief Intake, and chains novel-writing (or runs directly with `--chain-novel-writing --skip-intake`). Implementation tracked by plan `2026-06-04-v1.33-work-model-and-creator-run` (Done) + `2026-06-04-v1.33-creative-brief-intake-preset` (Done).
 
+### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target)
+
+Normative stage model: [creator-workflow-fl-e.md](./creator-workflow-fl-e.md).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator run stage list <work_id>` | List FL-E stages and `stage_status` for the Work |
+| `nexus42 creator run stage advance <work_id> --stage <id>` | Start the preset chain for stage `research` \| `produce` \| `review` \| `persist` |
+| `nexus42 creator run status <work_id>` | **Extended** — includes `current_stage` and per-stage status |
+
+Rules:
+
+- Stage order: `intake` → `research` → `produce` → `review` → `persist` (linear; no conditional routing).
+- Advance requires prior stage `complete` unless `--force` (audited).
+- At most one active FL-E stage schedule per Work.
+- `--auto-chain` is **not** in V1.34 scope (DF-53).
+
+**Target (V1.34 P1):** implement in `crates/nexus42/src/commands/creator/run.rs` (or `run/stage.rs` submodule). Plan: `2026-06-04-v1.34-fl-e-run-intents-and-stages`.
+
 ### 6.3A Preset management and validation surfaces
 
 **System / maintenance** (not the default user creative entry):
