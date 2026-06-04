@@ -1301,6 +1301,20 @@
       "merge_commits": [
         "cf29dd1 (merge P1 into feature/v1.34-creator-workflow-and-agent-tools)"
       ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-agent-tool-registry-spec",
+      "title": "V1.34 P3 — Agent tool registry spec",
+      "done_at": "2026-06-05T03:10:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-agent-tool-registry-spec.md",
+      "total_batches": 1,
+      "batches_completed": 1,
+      "qc": "Skipped (spec only — PM routing \"Tech spec only\" exception per mstar-dispatch-gates / project-manager.md)",
+      "qa": "PM-direct verified: 3 files, 346 insertions, 17 deletions; spec 504 lines; rg nexus.work. + policy_blocked keywords present; orchestration-engine §6.4 cross-ref added; Status: Shipped",
+      "residual_count": 0,
+      "merge_commits": [
+        "merge P3 into integration"
+      ]
     }
   ]
 }
