@@ -21,6 +21,7 @@ pub mod pending_review;
 pub mod prompt_injection;
 pub mod reference_source;
 pub mod soul_meta;
+pub mod works;
 pub mod world_stories;
 
 mod error;
@@ -91,6 +92,12 @@ pub use kb_extract_job::{
 pub use prompt_injection::{
     claim_prompt_injections, enqueue_prompt_injection, mark_prompt_injections_consumed,
     NewPromptInjection, PromptInjectionRow,
+};
+
+// Re-export works types
+pub use works::{
+    append_inspiration, create_work, find_work_by_client_request_id, get_work, list_works,
+    patch_work, record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
 };
 
 /// Runtime role for database initialization
