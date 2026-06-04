@@ -645,22 +645,49 @@ async fn delete_pending_by_id(pool: &sqlx::SqlitePool, pending_id: &str) {
     }
 }
 
-/// Passthrough summarizer that returns the raw digest as the LTM body.
+/// Passthrough summarizer that returns the raw digest with an UNTRUSTED header.
 ///
 /// In a future iteration, this will be replaced by an ACP-based summarizer
 /// that produces a more structured memory entry. For V1.33, the raw digest
 /// is used directly to close the loop without requiring LLM calls.
+///
+/// **Security (R-V133P4-03):** Prepends a provenance header so downstream
+/// consumers can identify untrusted content from session capture digests.
+///
+/// **Safety (R-V133P4-06):** Caps the raw digest at `MAX_DIGEST_BYTES` (256 KiB).
+/// Larger digests are truncated with a warning log.
 struct PassthroughSummarizer;
+
+/// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
+const MAX_DIGEST_BYTES: usize = 256 * 1024;
 
 impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummarizer {
     async fn summarize(
         &self,
-        _session_id: &str,
-        _task_kind: &str,
+        session_id: &str,
+        task_kind: &str,
         raw_digest: &str,
-        _world_id: Option<&str>,
+        world_id: Option<&str>,
     ) -> Result<String, nexus_creator_memory::errors::MemoryError> {
-        Ok(raw_digest.to_string())
+        // R-V133P4-06: Size guard — truncate if digest exceeds 256 KiB.
+        let digest = if raw_digest.len() > MAX_DIGEST_BYTES {
+            tracing::warn!(
+                original_len = raw_digest.len(),
+                max_bytes = MAX_DIGEST_BYTES,
+                "PassthroughSummarizer: raw_digest exceeds 256 KiB cap, truncating"
+            );
+            &raw_digest[..MAX_DIGEST_BYTES]
+        } else {
+            raw_digest
+        };
+
+        // R-V133P4-03: Prepend UNTRUSTED provenance header so downstream
+        // consumers (context assembly, moment prompts) can apply extra validation.
+        let header = format!(
+            "# UNTRUSTED: sourced from session_capture digest\n# session_id: {session_id}\n# task_kind: {task_kind}\n# world_id: {}\n\n",
+            world_id.unwrap_or("(none)")
+        );
+        Ok(format!("{header}{digest}"))
     }
 }
 
@@ -761,4 +788,78 @@ fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
         .get("active_creator_id")
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_creator_memory::review::SessionDigestSummarizer as _;
+
+    #[tokio::test]
+    async fn passthrough_summarizer_includes_untrusted_header() {
+        let summarizer = PassthroughSummarizer;
+        let result = summarizer
+            .summarize("sess_123", "brainstorm", "My brainstorm content", Some("world_1"))
+            .await
+            .unwrap();
+
+        assert!(
+            result.starts_with("# UNTRUSTED:"),
+            "LTM body should start with UNTRUSTED header, got: {}",
+            &result[..result.len().min(50)]
+        );
+        assert!(
+            result.contains("# session_id: sess_123"),
+            "Header should include session_id"
+        );
+        assert!(
+            result.contains("# task_kind: brainstorm"),
+            "Header should include task_kind"
+        );
+        assert!(
+            result.contains("# world_id: world_1"),
+            "Header should include world_id"
+        );
+        assert!(
+            result.contains("My brainstorm content"),
+            "Body should contain the raw digest after the header"
+        );
+    }
+
+    #[tokio::test]
+    async fn passthrough_summarizer_truncates_large_digest() {
+        let summarizer = PassthroughSummarizer;
+        // Create a digest larger than 256 KiB.
+        let large_digest = "x".repeat(MAX_DIGEST_BYTES + 1000);
+        let result = summarizer
+            .summarize("sess_big", "test", &large_digest, None)
+            .await
+            .unwrap();
+
+        // The result should be capped at MAX_DIGEST_BYTES + header.
+        let body_after_header = result
+            .split_once("\n\n")
+            .map(|(_, body)| body)
+            .unwrap_or("");
+        assert_eq!(
+            body_after_header.len(),
+            MAX_DIGEST_BYTES,
+            "Digest should be truncated to MAX_DIGEST_BYTES"
+        );
+    }
+
+    #[tokio::test]
+    async fn passthrough_summarizer_small_digest_unchanged() {
+        let summarizer = PassthroughSummarizer;
+        let small = "Hello world";
+        let result = summarizer
+            .summarize("sess_small", "test", small, None)
+            .await
+            .unwrap();
+
+        assert!(
+            result.contains(small),
+            "Small digest should be included verbatim"
+        );
+    }
 }
