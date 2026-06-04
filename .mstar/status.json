@@ -77,24 +77,29 @@
     "latest_active_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-04T13:30:00+08:00",
-      "total_open": 32,
+      "updated_at": "2026-06-04T14:15:00+08:00",
+      "total_open": 28,
       "by_severity": {
-        "critical": 4,
+        "critical": 0,
         "high": 0,
-        "medium": 6,
-        "low": 17,
+        "medium": 5,
+        "low": 18,
         "nit": 5
       },
       "by_target": {
-        "backlog": 20,
-        "V1.33+": 12
+        "backlog": 21,
+        "V1.33+": 7
       },
       "by_plan": {
         "v1.30-post-qc-tech-debt": 11,
         "v1.31-post-qc-tech-debt": 8,
         "v1.32-post-qc-tech-debt": 2,
-        "v1.33-p1-post-qc": 11
+        "v1.33-p1-post-qc": 7
+      },
+      "closed_this_wave": {
+        "v1.33-p1": ["R-V133P1-01", "R-V133P1-02", "R-V133P1-04", "R-V133P1-06", "R-V133P1-10"],
+        "closed_at": "2026-06-04T14:15:00+08:00",
+        "evidence": "P1 fix wave (5 fix commits eca7274..9703e6b) + re-QC wave 2 (qc1-wave2, qc2-wave2, qc3-wave2). 0 Critical remain; 4 Warning tracked as open partials (R-03, R-05, R-07, R-08) or deferred (R-09, R-11). R-12 added for test-file-layout contract drift."
       },
       "cross_cutting": [
         {
@@ -106,7 +111,7 @@
           "note": "Blocked by wiremock → http-types upstream."
         }
       ],
-      "note": "V1.33 P1 tri-review complete; gate verdict = Request Changes (4 Critical + key Warnings). 11 new P1 residuals registered. 4 Critical require fix wave before re-QC + QA + Done."
+      "note": "V1.33 P1 fix wave complete; re-QC wave 2: 0 Critical, 4 Warning, 7 Suggestion. Consolidated gate: Approve with residuals (5 closed, 2 partial-keep-open, 4 deferred, 1 new R-12 contract-drift). P1 → QA verification on integration branch (next dispatch)."
     },
     "wave_0_spec": ".mstar/knowledge/specs/work-experience-model.md",
     "spec_refs": [
@@ -120,125 +125,81 @@
   "residual_findings": {
     "2026-06-04-v1.33-work-model-and-creator-run": [
       {
-        "id": "R-V133P1-01",
-        "title": "Work create idempotency is not atomic and ignores idempotency write failure",
-        "severity": "critical",
-        "source": "qc2 F-001 (also qc1 W-001, qc3 W-001 — confirmed across tri-review)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:107-155 (create_work handler); crates/nexus-local-db/src/works.rs (create_work + record_idempotency)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "create_work does SELECT-then-INSERT-then-record_idempotency outside a transaction; record_idempotency result is `let _ =` swallowed. Concurrent POST /v1/local/works with same client_request_id can produce duplicate works rows. Fix: wrap find+create+record in single sqlx transaction (or use INSERT ... ON CONFLICT at app level with proper error mapping to 409)."
-      },
-      {
-        "id": "R-V133P1-02",
-        "title": "All 5 new /v1/local/works* endpoints return 409 Conflict instead of required 401 for missing creator context",
-        "severity": "critical",
-        "source": "qc2 F-002",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:96,171,213,232,271 (Uninitialized); T1 contract §7.2 requires 401 for no-active-creator",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "`read_active_creator_id(...).ok_or(NexusApiError::Uninitialized)?` maps Uninitialized → 409 CONFLICT (per errors.rs:144). T1 contract §7.2 says 401 Unauthorized for missing creator. Fix: use AuthRequired (existing variant, maps to 401) for works handlers. Note: pre-existing pattern in creators.rs:398 — scope to works for P1."
-      },
-      {
         "id": "R-V133P1-03",
-        "title": "Missing API contract tests for new /v1/local/works endpoints (T1 §7.5/T6 required works_api.rs)",
-        "severity": "critical",
-        "source": "qc2 F-003",
-        "scope": "tests/works_api.rs (does not exist) — entire crates/nexus-daemon-runtime/tests/ directory is missing",
+        "title": "API contract tests for /v1/local/works endpoints present but not literal 6-status-code matrix per endpoint",
+        "severity": "medium",
+        "source": "qc2-wave2 PARTIAL (also qc1-wave2 W-001)",
+        "scope": "crates/nexus-daemon-runtime/tests/works_api.rs (547 lines, 16 tests, hermetic)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "T1 contract §7.5 + T6 explicitly required axum Router + ServiceExt::oneshot tests covering 200/201/400/401/404/409, auth boundary, idempotency 200-vs-201, error shapes. Add the file in P1 fix wave; use preset_management.rs test patterns as template."
-      },
-      {
-        "id": "R-V133P1-04",
-        "title": "append_inspiration response count is wrong under concurrent appends; substr-based JSON append is fragile",
-        "severity": "critical",
-        "source": "qc2 F-004",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:275-298; crates/nexus-local-db/src/works.rs:427-450 (append_inspiration)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "Handler fetches record (for verify + count base) *before* calling append_inspiration, returns pre.len()+1. Concurrent appends return wrong (under) counts. JSON append via substr/CASE is atomic (good for no partial loss) but Rust-side count is not; substr logic fragile to non-compact JSON. Fix: re-fetch WorkRecord after successful append, derive count from post state; or use json_array_insert or small Rust append + full UPDATE."
+        "target_date": "V1.33+",
+        "note": "Fix wave (95470aa) added 16 works_api.rs tests covering 200/201/401/404 + creator isolation + idempotency replay. MISSING literal 400/409 asserts (409 not needed: race resolves to 200; 400 not yet for PATCH enum). T1 §7.5 said cover 200/201/400/401/404/409; coverage is strong but not literal 6/endpoint. CLOSE-as-fixed for 4 Critical (R-03 original = 'no tests'); keep this entry open for the literal-matrix gap."
       },
       {
         "id": "R-V133P1-05",
-        "title": "run_intents validation is advisory and does not enforce the locked contract",
+        "title": "run_intents validation: empty-creator now Error, but system cross-claim (work_init on system) still Warning not Error",
         "severity": "medium",
-        "source": "qc2 F-005 (also qc1 W-003)",
-        "scope": "crates/nexus-orchestration/src/preset/validation.rs (check_run_intents); T1 contract §7.4 / work-experience-model §5.1",
+        "source": "qc1-wave2 W-002, qc2-wave2 PARTIAL (also qc1 W-003 from wave 1)",
+        "scope": "crates/nexus-orchestration/src/preset/validation.rs:765 (check_run_intents)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "check_run_intents only warns (not errors) on empty creator run_intents; doesn't require at least one of work_init/work_continue; doesn't reject _system.* claiming work_init/work_continue nor creator claiming system_maintenance; no run_intents_validation tests; GET /v1/local/presets returns run_intents:[] for system+user presets (only embedded parsed). Fix: elevate relevant to Error, tighten predicate per work-experience-model §5.1, parse run_intents for user/system presets too, add the 3 unit tests required by contract §7.5."
-      },
-      {
-        "id": "R-V133P1-06",
-        "title": "CLI creator run / system preset yield raw Network error when daemon down, not friendly DaemonNotRunning hint",
-        "severity": "medium",
-        "source": "qc2 F-006",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:115,136,155 (client.post/get .await?); crates/nexus42/src/errors.rs:306 (From<reqwest>→Network); crates/nexus42/src/api/daemon_client.rs:496 (no connect-error special casing)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "Assignment lens required 'clear message' on daemon-down; currently user sees 'Network error: connection refused'. Fix: special-case connection errors in DaemonClient to map to DaemonNotRunning + 'nexus42 daemon start' suggestion. Defer to P1 fix wave — non-blocking but user-facing."
+        "target_date": "V1.33+",
+        "note": "Fix wave (1c547f4) promoted empty creator run_intents from Warning to Error + added 3 inline tests in validation.rs:1413. NOT addressed: system+creator cross-claim (system claiming work_init/work_continue, creator claiming system_maintenance) still Warning. Per work-experience-model §5.1 these should be Error. Functional coverage exists for the empty case; cross-claim enforcement is the partial gap. Also: GET /v1/local/presets still returns run_intents:[] for system+user (only embedded parsed)."
       },
       {
         "id": "R-V133P1-07",
         "title": "creator run list --status builds query string with format! + raw concatenation, no urlencoding",
         "severity": "low",
-        "source": "qc2 F-007",
+        "source": "qc2 F-007 (re-confirmed in wave 2)",
         "scope": "crates/nexus42/src/commands/creator/run.rs:150,152 (`format!(\"{path}?status={s}\")`)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave (or backlog if scope tight)",
-        "note": "Status value containing &, ?, space produces malformed URL or extra query params. Latent injection vector for query params. Fix: use reqwest::Url or urlencoding::encode for filter values. Low severity (controlled filter set), but cleaner with fix."
+        "target_date": "V1.33+",
+        "note": "Status value containing &, ?, space produces malformed URL or extra query params. Latent injection vector for query params. Fix: use reqwest::Url or urlencoding::encode for filter values. Low severity (controlled filter set), out of P1 fix wave scope."
       },
       {
         "id": "R-V133P1-08",
         "title": "system preset list logic inlined in system/mod.rs (151-line edit) and only surfaces embedded presets",
         "severity": "low",
-        "source": "qc2 F-008 (also qc1 S-001)",
+        "source": "qc2 F-008 (re-confirmed in wave 2; also qc1 S-001)",
         "scope": "crates/nexus42/src/commands/system/mod.rs (list_system_presets); T1 contract §7.3 named crates/nexus42/src/commands/system/preset.rs as a new file",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "T1 contract specified new file crates/nexus42/src/commands/system/preset.rs; actual change inlined into system/mod.rs. list_system_presets labels everything 'embedded' even though /v1/local/presets returns embedded+system+user. Fix: either accept contract drift + add comment, or refactor to specified file layout + make list merge all 3 groups."
+        "target_date": "V1.33+",
+        "note": "T1 contract specified new file crates/nexus42/src/commands/system/preset.rs; actual change inlined into system/mod.rs. list_system_presets labels everything 'embedded' even though /v1/local/presets returns embedded+system+user. Fix: refactor to specified file layout + make list merge all 3 groups."
       },
       {
         "id": "R-V133P1-09",
         "title": "nexus-local-db::works uses runtime sqlx::query for static DML, bypassing compile-time contract",
         "severity": "medium",
-        "source": "qc1 W-002",
+        "source": "qc1 W-002 (re-confirmed in wave 2; explicitly deferred in plan §8)",
         "scope": "crates/nexus-local-db/src/works.rs (entire file); nexus-local-db/AGENTS.md, nexus-daemon-runtime/AGENTS.md require compile-time checked queries",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave (with cargo sqlx prepare)",
-        "note": "Static INSERT/SELECT/UPDATE/DELETE use sqlx::query / query_as (runtime) with `// SAFETY:` comments. Conflicts with crate AGENTS.md mandatory compile-time macros. Implementer flagged: switch to query!/query_as! after `cargo sqlx prepare --workspace --all -- --all-targets` and commit updated .sqlx/."
-      },
-      {
-        "id": "R-V133P1-10",
-        "title": "Work API response shape drift — creative_brief/inspiration_log/schedule_ids returned as raw JSON strings, not parsed structures",
-        "severity": "medium",
-        "source": "qc1 W-004",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (returns nexus_local_db::WorkRecord directly); T1 contract §7.2 WorkRecord example uses Option<serde_json::Value> and Vec<InspirationLogEntry>",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P1 fix wave",
-        "note": "API returns raw WorkRecord where 3 JSON columns are stringified. P2/P4 clients will parse JSON manually or rely on stringified JSON inconsistently. Fix: add API DTO conversion layer that parses JSON columns into the contract shape, or amend the T1 contract and CLI output contract to state these are stringified JSON."
+        "target_date": "V1.33+",
+        "note": "Static INSERT/SELECT/UPDATE/DELETE use sqlx::query / query_as (runtime) with `// SAFETY:` comments. Conflicts with crate AGENTS.md mandatory compile-time macros. Deferred in P1 fix wave (requires DATABASE_URL workflow for cargo sqlx prepare). Spot check in wave 2 confirmed no SQL injection vectors (only bound params after constant column lists)."
       },
       {
         "id": "R-V133P1-11",
         "title": "list_works total field returns page size, not total row count — misleading pagination",
         "severity": "low",
-        "source": "qc3 W-002",
+        "source": "qc3 W-002 (re-confirmed in wave 2)",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (list_works handler returning `total = records.len()`)",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Pagination consumers may compute `has_more = total > offset + records.len()` and get wrong answer. Fix: separate COUNT(*) query (or document total as page size if intentional)."
+      },
+      {
+        "id": "R-V133P1-12",
+        "title": "run_intents unit tests landed in validation.rs inline mod, not new run_intents_validation.rs test target (T1 §7.5 contract drift)",
+        "severity": "low",
+        "source": "qc1-wave2 W-001 (NEW finding from re-check)",
+        "scope": "crates/nexus-orchestration/src/preset/validation.rs:1413-1487 (inline #[cfg(test)] mod tests)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.33+",
+        "note": "T1 contract §7.5 specified new file crates/nexus-orchestration/tests/run_intents_validation.rs as standalone test binary. Fix wave (1c547f4) added 3 tests inline in validation.rs (creator_preset_without_run_intents_is_error, creator_preset_with_run_intents_passes, system_preset_without_system_maintenance_is_warning) at lines 1413-1487. Functional coverage is present and tests pass; only the file-layout differs from contract. Move to new file in V1.33+ if/when scope permits."
       }
     ],
     "v1.32-post-qc-tech-debt": [
