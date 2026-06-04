@@ -8,8 +8,6 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-
-/// Request body for creating a pending review entry.
 #[derive(Debug, Deserialize)]
 pub struct CreatePendingReviewRequest {
     /// Unique identifier for this pending entry.
@@ -474,11 +472,26 @@ pub struct ListFragmentsResponse {
 /// - **`FragmentOnly`**: informational content → keyword fragment record
 /// - **`Drop`**: below threshold → deleted
 ///
-/// Auth: requires active creator (extracted from request body, validated).
+/// Auth: requires active creator from config.toml (R-V133P4-01).
+/// Request body `creator_id` must match the active creator, otherwise 403.
 pub async fn review(
     State(state): State<WorkspaceState>,
     Json(req): Json<ReviewRequest>,
 ) -> Result<Json<ReviewResponse>, NexusApiError> {
+    // R-V133P4-01: Enforce active creator from config (matches works.rs pattern).
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if req.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "memory_review".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                req.creator_id, active_creator
+            ),
+        });
+    }
+
     // Validate creator_id format
     if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
@@ -487,9 +500,9 @@ pub async fn review(
         });
     }
 
-    info!(creator_id = %req.creator_id, "Reviewing pending memories");
+    info!(creator_id = %active_creator, "Reviewing pending memories");
 
-    let creator_id_filter = req.creator_id.clone();
+    let creator_id_filter = active_creator.clone();
     let rows = sqlx::query_as!(
         PendingReviewInfo,
         r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
@@ -506,10 +519,10 @@ pub async fn review(
     let nexus_home = state.nexus_home().to_owned();
     let pool = state.pool().clone();
 
-    let result = process_review_queue(&rows, &nexus_home, &req.creator_id, &pool).await;
+    let result = process_review_queue(&rows, &nexus_home, &active_creator, &pool).await;
 
     info!(
-        creator_id = %req.creator_id,
+        creator_id = %active_creator,
         promoted = result.promoted,
         fragmented = result.fragmented,
         dropped = result.dropped,
@@ -656,11 +669,26 @@ impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummar
 /// Lists memory fragments for a creator with optional keyword filter.
 /// Returns fragment IDs and summaries for the CLI `creator memory fragments` command.
 ///
-/// Auth: `creator_id` validated from query string (required).
+/// Auth: requires active creator from config.toml (R-V133P4-01).
+/// Query `creator_id` must match the active creator, otherwise 403.
 pub async fn fragments(
     State(state): State<WorkspaceState>,
     Query(params): Query<ListFragmentsQuery>,
 ) -> Result<Json<ListFragmentsResponse>, NexusApiError> {
+    // R-V133P4-01: Enforce active creator from config (matches works.rs pattern).
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if params.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "memory_fragments".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                params.creator_id, active_creator
+            ),
+        });
+    }
+
     // Validate creator_id format
     if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
         return Err(NexusApiError::InvalidInput {
@@ -670,7 +698,7 @@ pub async fn fragments(
     }
 
     info!(
-        creator_id = %params.creator_id,
+        creator_id = %active_creator,
         keyword = ?params.keyword,
         "Listing memory fragments"
     );
@@ -682,7 +710,7 @@ pub async fn fragments(
         let limit_u32 = u32::try_from(limit).unwrap_or(u32::MAX);
         nexus_local_db::memory_fragment::list_fragments_filtered(
             state.pool(),
-            &params.creator_id,
+            &active_creator,
             params.keyword.as_deref(),
             limit_u32,
         )
@@ -693,7 +721,7 @@ pub async fn fragments(
         })?
     } else {
         // Use compile-time checked query (more reliable) when no keyword filter
-        let all = nexus_local_db::memory_fragment::list_fragments(state.pool(), &params.creator_id)
+        let all = nexus_local_db::memory_fragment::list_fragments(state.pool(), &active_creator)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
@@ -718,4 +746,19 @@ pub async fn fragments(
     Ok(Json(ListFragmentsResponse {
         fragments: fragments_list,
     }))
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Read active `creator_id` from CLI config (matches works.rs pattern).
+///
+/// Returns `None` if no active creator is configured in `config.toml`.
+fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
+    let config_path = nexus_home.join("config.toml");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    let config: toml::Value = toml::from_str(&content).ok()?;
+    config
+        .get("active_creator_id")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
 }
