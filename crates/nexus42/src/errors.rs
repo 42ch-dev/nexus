@@ -305,6 +305,11 @@ impl From<nexus_creator_memory::errors::MemoryError> for CliError {
 
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
+        // R-V133P1-06: connection-refused / timeout → DaemonNotRunning
+        // for better UX ("Start it with `nexus42 daemon start`").
+        if err.is_connect() || err.is_timeout() {
+            return Self::DaemonNotRunning;
+        }
         Self::Network(err)
     }
 }
@@ -539,5 +544,16 @@ mod tests {
         );
         let cli_err = CliError::verify_creator_error(sync_err);
         assert!(matches!(cli_err, CliError::Config(_)));
+    }
+
+    // R-V133P1-06: verify DaemonNotRunning display includes helpful suggestion
+    #[test]
+    fn daemon_not_running_display_includes_suggestion() {
+        let err = CliError::DaemonNotRunning;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("daemon start"),
+            "DaemonNotRunning message should suggest 'daemon start': {msg}"
+        );
     }
 }
