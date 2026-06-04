@@ -130,6 +130,9 @@ pub fn load_memory(
 /// Creates the memory directory if it doesn't exist. Serializes the
 /// frontmatter and body to the standard Markdown format and writes
 /// to `<memory_dir>/<slug>.md`.
+///
+/// Uses atomic write (write to `.tmp` then rename) to prevent corruption
+/// on crash or disk-full (R-V133P4-05).
 pub fn save_memory(
     home: &Path,
     creator_id: &str,
@@ -146,8 +149,18 @@ pub fn save_memory(
     ensure_memory_dir(home, creator_id)?;
     let content = memory.render()?;
     let path = memory_path(home, creator_id, slug);
-    std::fs::write(&path, &content)
-        .map_err(|e| MemoryError::ValidationError(format!("cannot write memory file: {e}")))?;
+
+    // R-V133P4-05: Atomic write — write to temp file, then rename.
+    // POSIX rename is atomic within a filesystem, preventing partial writes.
+    let tmp_path = path.with_extension("md.tmp");
+    std::fs::write(&tmp_path, &content)
+        .map_err(|e| MemoryError::ValidationError(format!("cannot write temp memory file: {e}")))?;
+    std::fs::rename(&tmp_path, &path)
+        .map_err(|e| {
+            // Clean up temp file on rename failure (best effort).
+            let _ = std::fs::remove_file(&tmp_path);
+            MemoryError::ValidationError(format!("cannot rename temp memory file: {e}"))
+        })?;
     Ok(())
 }
 ///
