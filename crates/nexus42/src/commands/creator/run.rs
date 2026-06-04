@@ -567,13 +567,26 @@ async fn stage_advance(
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
+        // T2: Pass Work fields into presetInput so stage presets can consume
+        // creative_brief, inspiration_log, etc. (spec §4).
+        let creative_brief = resp
+            .get("creative_brief")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let inspiration_log = resp
+            .get("inspiration_log")
+            .and_then(|v| v.as_str())
+            .unwrap_or("[]");
+
         let schedule_body = serde_json::json!({
             "creatorId": creator_id,
             "presetId": pid,
-            "label": format!("FL-E stage: {target_stage} (work: {work_id})"),
+            "label": nexus_orchestration::build_stage_schedule_label(target_stage, work_id),
             "presetInput": {
                 "work_id": work_id,
                 "fl_e_stage": target_stage,
+                "creative_brief": creative_brief,
+                "inspiration_log": inspiration_log,
             }
         });
 
