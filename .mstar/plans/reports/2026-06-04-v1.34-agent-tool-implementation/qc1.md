@@ -73,3 +73,51 @@ generated_at: "2026-06-05"
 | 🟢 Suggestion | 2 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+### Scope revalidated
+
+- Targeted fix wave 2 range: `034b996..67acdf4` (2 commits).
+- Overall P4 basis retained from assignment: `merge-base: origin/main..HEAD`.
+- Verified checkout:
+  - `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.34-agent-tool-implementation`
+  - `git branch --show-current` → `feature/v1.34-agent-tool-implementation`
+- Diff evidence reviewed:
+  - `git show --stat --patch 034b996 67acdf4`
+  - `grep agent_tool_request|dispatch_from_worker` across `*.rs`
+  - Direct reads of `api/errors.rs`, `host_tool_executor.rs`, and `tests/agent_tool_api.rs`
+
+### Fix wave 2 findings disposition
+
+- **C-1 — Still open / Request Changes.** `034b996` documents `dispatch_from_worker()` as the adapter and explicitly says the worker-side IPC caller in `nexus-orchestration` is deferred. `67acdf4` adds worker-path tests for the adapter (`worker_upcall_surfaces_policy_blocked_error_code`, `worker_upcall_whoami_equivalent_to_http`, `worker_upcall_schedule_status_equivalent_to_http`), but repository search still finds `dispatch_from_worker` only in `host_tool_executor.rs` and tests; there is no production worker/orchestration call site for `worker/agent_tool_request`. This does not resolve the original architecture finding that DF-47 was closed without production upcall wiring. Acceptable resolution remains either (a) wire the production caller, or (b) reopen/register the deferred worker IPC integration instead of treating DF-47 as closed end-to-end.
+- **C-2 — Resolved.** `NexusApiError::error_code()` now surfaces canonical tool bridge codes for `BadRequest` (`POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT`) and preserves `FORBIDDEN` via the existing `Forbidden` variant. `status_code()` maps `BadRequest { code: "POLICY_BLOCKED" }` to 403. Worker error serialization uses `e.error_code()`, and tests cover `POLICY_BLOCKED`, `NOT_SUPPORTED`, `FORBIDDEN`, and `INVALID_INPUT` paths.
+- **W-1 — Resolved.** Audit logging is centralized in `HostToolExecutor::execute()`: admission denials, dispatch/handler failures, and success paths each call `audit_tool_execution()` with stable error codes where applicable. Fix wave 2 tests cover success, unknown-tool denial, cross-creator denial, policy-blocked denial, and invalid-input denial.
+- **W-2 — Resolved for the P4 contract.** `stage_metadata` is now required to be an object; nested stage-control keys such as `current_stage` are rejected; unknown metadata keys are rejected; and only the spec §4.4 allowlist (`agent_notes`, `research_summary_ref`, `draft_outline_ref`, `review_summary_ref`, `last_agent_tool_request_id`) is accepted. The value is still recorded as an `inspiration_log` metadata entry, but the P4 implementation comment explicitly narrows this minimal persistence surface and the unsafe state-transition surface is blocked.
+- **S-1 — Still suggested / non-blocking.** `host_tool_executor.rs` remains a large mixed-responsibility module. The fix wave correctly avoided an unrelated split; keep this as follow-up maintainability debt after blocking contract scope is closed.
+- **S-2 — Still suggested / non-blocking.** Active creator/workspace readers still live under `works.rs`. This remains a small architecture cleanup suggestion and is not required to resolve fix wave 2.
+
+### Verification evidence
+
+- `git log --oneline -10` showed fix commits at HEAD: `67acdf4 test(daemon): R-FL-E-P4-02 expand hermetic tests 8→26 covering all QC findings` and `034b996 fix(daemon): R-FL-E-P4-01 surface stable error codes + audit all paths + stage_metadata allowlist`.
+- `cargo test -p nexus-daemon-runtime --test agent_tool_api 2>&1 | tail -10`:
+
+```text
+test audit_log_written_on_cross_creator_denial ... ok
+test worker_upcall_surfaces_not_supported_error_code ... ok
+test worker_upcall_surfaces_policy_blocked_error_code ... ok
+test workspace_info_returns_workspace_slug ... ok
+test worker_upcall_whoami_equivalent_to_http ... ok
+test work_get_cross_creator_returns_forbidden ... ok
+test worker_upcall_surfaces_forbidden_error_code ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+```
+
+- `cargo clippy -p nexus-daemon-runtime -- -D warnings 2>&1 | tail -10`:
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+```
+
+**Revalidation Verdict**: Request Changes — C-2, W-1, and W-2 are resolved, S-1/S-2 remain non-blocking suggestions, but original C-1 remains unresolved because fix wave 2 still lacks a production worker/orchestration caller for the worker upcall path or an explicit reopened/deferred DF-47 residual.
