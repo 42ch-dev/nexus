@@ -26,6 +26,8 @@ preset:
     - acp.prompt
     - judge.llm
     - context.summarize
+  run_intents:
+    - work_continue
   initial: draft
   terminal: done
 

@@ -28,6 +28,9 @@ const VALIDATE_MAX_YAML_DEPTH: usize = 10;
 pub struct PresetSummary {
     pub id: String,
     pub source: String, // "embedded" | "system" | "user"
+    /// Declared run intents (V1.33 §5). Empty if the preset doesn't declare any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_intents: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,12 +158,42 @@ pub async fn list_presets(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ListPresetsGroupedResponse>, NexusApiError> {
     let nexus_home = state.nexus_home();
+    let caps = state.capability_registry();
+
+    // Build a map of preset id -> run_intents from the capability registry
+    let intent_map: std::collections::HashMap<String, Vec<String>> =
+        caps.map_or_else(std::collections::HashMap::new, |registry| {
+            nexus_orchestration::preset::list_embedded_presets()
+                .into_iter()
+                .filter_map(|id| {
+                    let loaded =
+                        nexus_orchestration::preset::load_embedded_preset(&id, &registry).ok()?;
+                    let intents = loaded
+                        .manifest
+                        .preset
+                        .run_intents
+                        .iter()
+                        .map(|ri| {
+                            serde_json::to_value(ri)
+                                .ok()
+                                .and_then(|v| v.as_str().map(String::from))
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    Some((id, intents))
+                })
+                .collect()
+        });
 
     let embedded = list_embedded_ids()
         .into_iter()
-        .map(|id| PresetSummary {
-            id,
-            source: "embedded".to_string(),
+        .map(|id| {
+            let run_intents = intent_map.get(&id).cloned().unwrap_or_default();
+            PresetSummary {
+                id,
+                source: "embedded".to_string(),
+                run_intents,
+            }
         })
         .collect();
 
@@ -169,6 +202,7 @@ pub async fn list_presets(
         .map(|id| PresetSummary {
             id,
             source: "system".to_string(),
+            run_intents: vec![],
         })
         .collect();
 
@@ -177,6 +211,7 @@ pub async fn list_presets(
         .map(|id| PresetSummary {
             id,
             source: "user".to_string(),
+            run_intents: vec![],
         })
         .collect();
 

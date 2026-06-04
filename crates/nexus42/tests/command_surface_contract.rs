@@ -712,3 +712,137 @@ fn daemon_orchestrate_run_is_removed() {
         .assert()
         .failure();
 }
+
+// =============================================================================
+// Part 6: V1.33 Work Experience Loop contract tests (must pass immediately)
+// =============================================================================
+
+/// Verify `creator run --help` shows start, continue, list, status subcommands.
+#[test]
+fn v133_creator_run_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["start", "continue", "list", "status"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V1.33 creator run: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// Verify `creator run start --help` includes required --idea flag.
+#[test]
+fn v133_creator_run_start_requires_idea() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--idea"),
+        "V1.33 creator run start: must have --idea flag"
+    );
+    assert!(
+        help_text.contains("--preset"),
+        "V1.33 creator run start: must have --preset flag"
+    );
+    assert!(
+        help_text.contains("--json"),
+        "V1.33 creator run start: must have --json flag"
+    );
+}
+
+/// Verify `creator run continue --help` includes required --note flag.
+#[test]
+fn v133_creator_run_continue_requires_note() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "continue", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--note"),
+        "V1.33 creator run continue: must have --note flag"
+    );
+}
+
+/// Verify `system preset --help` shows list and validate subcommands.
+#[test]
+fn v133_system_preset_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["system", "preset", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["list", "validate"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V1.33 system preset: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// Verify `system preset list --help` includes --intent and --json flags.
+#[test]
+fn v133_system_preset_list_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["system", "preset", "list", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--intent"),
+        "V1.33 system preset list: must have --intent flag"
+    );
+    assert!(
+        help_text.contains("--json"),
+        "V1.33 system preset list: must have --json flag"
+    );
+}
+
+/// Verify `creator --help` shows `run` as a subcommand.
+#[test]
+fn v133_creator_shows_run() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("run"),
+        "V1.33 creator: expected 'run' subcommand in --help"
+    );
+}
