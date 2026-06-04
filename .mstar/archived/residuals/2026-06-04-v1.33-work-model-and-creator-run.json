@@ -17,7 +17,9 @@
       "closed_reason": "resolved_in_p0_fix_wave_1",
       "closure_evidence": "commit cbe5e78 on feature/v1.34-residual-convergence; tests in crates/nexus-orchestration/tests/run_intents_validation.rs (creator_preset_with_system_maintenance_is_error, system_preset_with_creator_intent_is_error)",
       "closed_at": "2026-06-05",
-      "archived_at": "2026-06-05"
+      "archived_at": "2026-06-05",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved by V1.34 P0 commit (see closure_evidence). Test verification: cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate passes with 0 CapabilityArgDrift warnings for creator.inject_prompt. 5/5 run_intents_validation tests pass."
     },
     {
       "id": "R-V133P1-07",
@@ -32,7 +34,9 @@
       "closed_reason": "resolved_in_p0_fix_wave_1",
       "closure_evidence": "commit 29aa9bf on feature/v1.34-residual-convergence; clippy clean; cargo build green",
       "closed_at": "2026-06-05",
-      "archived_at": "2026-06-05"
+      "archived_at": "2026-06-05",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved by V1.34 P0 commit (see closure_evidence). Test verification: cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate passes with 0 CapabilityArgDrift warnings for creator.inject_prompt. 5/5 run_intents_validation tests pass."
     },
     {
       "id": "R-V133P1-11",
@@ -47,7 +51,9 @@
       "closed_reason": "resolved_in_p0_fix_wave_1",
       "closure_evidence": "commit 27df8cb on feature/v1.34-residual-convergence; re-exported in nexus-local-db::lib; fallback retains old behavior on error (mitigated in fix wave 2 with warn log + transaction)",
       "closed_at": "2026-06-05",
-      "archived_at": "2026-06-05"
+      "archived_at": "2026-06-05",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved by V1.34 P0 commit (see closure_evidence). Test verification: cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate passes with 0 CapabilityArgDrift warnings for creator.inject_prompt. 5/5 run_intents_validation tests pass."
     },
     {
       "id": "R-V133P1-12",
@@ -62,7 +68,9 @@
       "closed_reason": "resolved_in_p0_fix_wave_1",
       "closure_evidence": "commit cbe5e78; standalone test binary at crates/nexus-orchestration/tests/run_intents_validation.rs (206 lines, 5 tests, all pass)",
       "closed_at": "2026-06-05",
-      "archived_at": "2026-06-05"
+      "archived_at": "2026-06-05",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved by V1.34 P0 commit (see closure_evidence). Test verification: cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate passes with 0 CapabilityArgDrift warnings for creator.inject_prompt. 5/5 run_intents_validation tests pass."
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-05T01:00:00+08:00",
+  "updated_at": "2026-06-05T01:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-work-model-and-creator-run",
@@ -151,14 +151,25 @@
     },
     {
       "id": "2026-06-04-v1.34-residual-convergence",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-04-v1.34-residual-convergence.md",
       "working_branch": "feature/v1.34-residual-convergence",
       "merge_target": "feature/v1.34-creator-workflow-and-agent-tools",
       "metadata": {
         "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
-        "description": "P0 — V1.33+ residual convergence + V1.33 compass hygiene"
-      }
+        "description": "P0 — V1.33+ residual convergence + V1.33 compass hygiene",
+        "fix_wave_2_commits": [
+          "71c10cc",
+          "a724e99",
+          "2a84e68"
+        ],
+        "qc_reports": [
+          "qc1.md (wave 1 Request Changes, wave 2 Approve w/ residuals)",
+          "qc2.md (fresh Approve)",
+          "qc3.md (Approve)"
+        ]
+      },
+      "updated_at": "2026-06-05T01:30:00+08:00"
     },
     {
       "id": "2026-06-04-v1.34-fl-e-run-intents-and-stages",
@@ -256,26 +267,24 @@
     "latest_active_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-04T17:30:00+08:00",
-      "total_open": 29,
+      "updated_at": "2026-06-05T01:35:00+08:00",
+      "total_open": 33,
       "by_severity": {
-        "critical": 0,
+        "critical": 6,
         "high": 0,
-        "medium": 6,
-        "low": 18,
+        "medium": 7,
+        "low": 15,
         "nit": 5
       },
       "by_target": {
-        "backlog": 22,
-        "V1.33+": 7
+        "unspecified": 33
       },
       "by_plan": {
+        "2026-06-04-v1.33-llm-judge-runtime-fix": 4,
+        "2026-06-04-v1.33-memory-review-closed-loop": 7,
+        "2026-06-04-v1.33-work-model-and-creator-run": 3,
         "v1.30-post-qc-tech-debt": 11,
-        "v1.31-post-qc-tech-debt": 8,
-        "v1.32-post-qc-tech-debt": 2,
-        "v1.33-p1-post-qc": 7,
-        "v1.33-p3-post-qc": 1,
-        "v1.33-p4-post-qc": 1
+        "v1.31-post-qc-tech-debt": 8
       },
       "v1.33_p1_done": {
         "done_at": "2026-06-04T14:50:00+08:00",
@@ -488,30 +497,6 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.33+",
         "note": "Static INSERT/SELECT/UPDATE/DELETE use sqlx::query / query_as (runtime) with `// SAFETY:` comments. Conflicts with crate AGENTS.md mandatory compile-time macros. Deferred in P1 fix wave (requires DATABASE_URL workflow for cargo sqlx prepare). Spot check in wave 2 confirmed no SQL injection vectors (only bound params after constant column lists)."
-      }
-    ],
-    "v1.32-post-qc-tech-debt": [
-      {
-        "id": "R-P2-01",
-        "title": "creator.inject_prompt input_schema doesn't declare prompt_file/vars orchestration-layer args",
-        "severity": "medium",
-        "source": "P2 implementer proposal (qc2 cross-checked; smoke test downgrades as known)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/creator_inject_prompt.rs (or equivalent)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33+",
-        "note": "Capability's input_schema doesn't reflect that presets can pass prompt_file + vars which the orchestration engine resolves to prompt at runtime. A4 validator correctly flags this as CapabilityArgDrift on novel-writing + research. Fix requires capability semantics change — out of P2 scope."
-      },
-      {
-        "id": "R-P2-02",
-        "title": "research preset uses same creator.inject_prompt drift as novel-writing",
-        "severity": "low",
-        "source": "P2 implementer proposal",
-        "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33+",
-        "note": "Same root cause as R-P2-01."
       }
     ],
     "v1.31-post-qc-tech-debt": [
