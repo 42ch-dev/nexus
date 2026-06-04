@@ -520,6 +520,11 @@ async fn stage_advance(
         .get("stage_status")
         .and_then(|v| v.as_str())
         .unwrap_or("pending");
+    // V1.33 intake_status field — needed for intake gate (spec §3.3 gate 1).
+    let intake_status = resp
+        .get("intake_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending");
 
     let current_idx = FL_E_STAGES
         .iter()
@@ -550,10 +555,12 @@ async fn stage_advance(
                  Complete the current stage first, or use --force to override."
             )));
         }
-        // Intake must be complete before advancing past it
-        if current_stage == "intake" && current_status != "complete" {
+        // Intake gate: intake_status (V1.33 field) must be complete (spec §3.3 gate 1).
+        // This is distinct from stage_status (V1.34 field); legacy V1.33 works may have
+        // intake_status=complete but stage_status=pending (migration default).
+        if current_stage == "intake" && intake_status != "complete" {
             return Err(crate::errors::CliError::Other(format!(
-                "Cannot advance past intake: intake_status is '{current_status}'. \
+                "Cannot advance past intake: intake_status is '{intake_status}'. \
                  Complete intake first, or use --force to override."
             )));
         }
