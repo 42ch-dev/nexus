@@ -240,7 +240,7 @@ Currently audit ignores `req.request_id` (only used for worker reply). For worke
 7. `git status --short` (pre any report edit) → (empty output; clean)
 8. Post-edit: `git add .mstar/plans/reports/2026-06-04-v1.34-agent-tool-implementation/qc2.md && git commit -m "qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve)"` (only this file staged)
 
-**git log -1 --oneline** (after report commit): `5bb60fc qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve) [hash fill]`
+**git log -1 --oneline** (after report commit): `18c6bd8 qc(v1.34-agent-tool-implementation): revalidate qc2 after fix wave 2 (C-1/C-2 + W-1..4 resolved; Approve) [final hash fill]`
 
 **Re-checked vs original qc2 findings (2 Critical + 4 Warning from Request Changes verdict)** — using receiving-code-review discipline (verify before accept; item-by-item disposition with evidence from source + tests + commands):
 
