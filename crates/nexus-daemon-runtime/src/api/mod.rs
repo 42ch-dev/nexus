@@ -207,6 +207,9 @@ fn narrative_routes() -> Router<WorkspaceState> {
 }
 
 /// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
+///
+/// V1.33 P4: Added `POST /v1/local/memory/review` and
+/// `GET /v1/local/memory/fragments` to close the review/fragment loop.
 fn memory_routes() -> Router<WorkspaceState> {
     Router::new()
         // Memory pending review
@@ -225,6 +228,16 @@ fn memory_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/local/memory/pending-review/{id}",
             delete(handlers::memory::delete_pending_review),
+        )
+        // Memory review pipeline (V1.33 P4)
+        .route(
+            "/v1/local/memory/review",
+            post(handlers::memory::review),
+        )
+        // Memory fragments (V1.33 P4)
+        .route(
+            "/v1/local/memory/fragments",
+            get(handlers::memory::fragments),
         )
 }
 

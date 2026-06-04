@@ -413,3 +413,293 @@ pub struct DeletePendingReviewResponse {
     pub success: bool,
     pub pending_id: String,
 }
+
+// ─── Review + Fragments handlers (V1.33 P4) ────────────────────────────────
+
+/// Request body for `POST /v1/local/memory/review`.
+///
+/// Triggers the review pipeline for a creator's pending review queue.
+/// The daemon classifies each pending entry (promote / fragment / drop)
+/// and returns a summary of actions taken.
+#[derive(Debug, Deserialize)]
+pub struct ReviewRequest {
+    /// Creator ID whose pending reviews should be processed.
+    pub creator_id: String,
+}
+
+/// Response body for `POST /v1/local/memory/review`.
+///
+/// Summarizes how many pending entries were promoted to long-term memory,
+/// fragmented, or dropped.
+#[derive(Debug, Serialize)]
+pub struct ReviewResponse {
+    /// Number of entries promoted to long-term memory.
+    pub promoted: usize,
+    /// Number of entries converted to keyword fragments.
+    pub fragmented: usize,
+    /// Number of entries dropped (below quality threshold).
+    pub dropped: usize,
+}
+
+/// Query parameters for `GET /v1/local/memory/fragments`.
+#[derive(Debug, Deserialize)]
+pub struct ListFragmentsQuery {
+    /// Creator ID to filter fragments by (required).
+    pub creator_id: String,
+    /// Optional keyword filter (case-insensitive LIKE match).
+    pub keyword: Option<String>,
+    /// Maximum number of fragments to return (1–250, default 50).
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+}
+
+/// A single fragment row in the list fragments response.
+#[derive(Debug, Serialize)]
+pub struct FragmentInfo {
+    pub fragment_id: String,
+    pub summary: String,
+}
+
+/// Response body for `GET /v1/local/memory/fragments`.
+#[derive(Debug, Serialize)]
+pub struct ListFragmentsResponse {
+    pub fragments: Vec<FragmentInfo>,
+}
+
+/// `POST /v1/local/memory/review`
+///
+/// Triggers the review pipeline for a creator's pending review queue.
+/// Classifies each entry using rule-based heuristics:
+/// - **`PromoteToLongTerm`**: high-signal creative content → long-term memory file
+/// - **`FragmentOnly`**: informational content → keyword fragment record
+/// - **`Drop`**: below threshold → deleted
+///
+/// Auth: requires active creator (extracted from request body, validated).
+pub async fn review(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ReviewRequest>,
+) -> Result<Json<ReviewResponse>, NexusApiError> {
+    // Validate creator_id format
+    if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
+        });
+    }
+
+    info!(creator_id = %req.creator_id, "Reviewing pending memories");
+
+    let creator_id_filter = req.creator_id.clone();
+    let rows = sqlx::query_as!(
+        PendingReviewInfo,
+        r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
+         FROM memory_pending_review WHERE creator_id = ? ORDER BY created_at DESC"#,
+        creator_id_filter
+    )
+    .fetch_all(state.pool())
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to fetch pending reviews for review: {e}"),
+    })?;
+
+    let nexus_home = state.nexus_home().to_owned();
+    let pool = state.pool().clone();
+
+    let result = process_review_queue(&rows, &nexus_home, &req.creator_id, &pool).await;
+
+    info!(
+        creator_id = %req.creator_id,
+        promoted = result.promoted,
+        fragmented = result.fragmented,
+        dropped = result.dropped,
+        "Review completed"
+    );
+
+    Ok(Json(result))
+}
+
+/// Process the review queue for a creator's pending entries.
+///
+/// Classifies each entry, performs the appropriate action (promote, fragment,
+/// or drop), and returns a summary of actions taken.
+async fn process_review_queue(
+    rows: &[PendingReviewInfo],
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    pool: &sqlx::SqlitePool,
+) -> ReviewResponse {
+    let mut promoted: usize = 0;
+    let mut fragmented: usize = 0;
+    let mut dropped: usize = 0;
+
+    for row in rows {
+        let input = nexus_creator_memory::review::PendingReviewInput {
+            pending_id: row.pending_id.clone(),
+            session_id: row.session_id.clone(),
+            creator_id: row.creator_id.clone(),
+            world_id: row.world_id.clone(),
+            task_kind: row.task_kind.clone(),
+            raw_digest: row.raw_digest.clone(),
+            created_at: row.created_at.clone(),
+        };
+
+        let decision = nexus_creator_memory::review::classify_pending_review(&input);
+
+        match decision.action {
+            nexus_creator_memory::review::ReviewAction::PromoteToLongTerm => {
+                let summarizer = PassthroughSummarizer;
+                match nexus_creator_memory::review::promote_to_long_term(
+                    nexus_home,
+                    creator_id,
+                    &input,
+                    &summarizer,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        promoted += 1;
+                        delete_pending_by_id(pool, &row.pending_id).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            pending_id = %row.pending_id,
+                            error = %e,
+                            "Failed to promote pending review; skipping"
+                        );
+                    }
+                }
+            }
+            nexus_creator_memory::review::ReviewAction::FragmentOnly => {
+                let fragment = nexus_creator_memory::review::create_fragment_from_review(&input);
+                let record = nexus_local_db::memory_fragment::MemoryFragmentRecord {
+                    fragment_id: fragment.fragment_id,
+                    session_id: fragment.session_id,
+                    creator_id: fragment.creator_id,
+                    keywords: serde_json::to_string(&fragment.keywords).unwrap_or_default(),
+                    summary: fragment.summary,
+                    created_at: fragment.created_at,
+                    ttl: fragment.ttl,
+                };
+
+                match nexus_local_db::memory_fragment::create_fragment(pool, &record).await {
+                    Ok(()) => {
+                        fragmented += 1;
+                        delete_pending_by_id(pool, &row.pending_id).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            pending_id = %row.pending_id,
+                            error = %e,
+                            "Failed to create fragment; skipping"
+                        );
+                    }
+                }
+            }
+            nexus_creator_memory::review::ReviewAction::Drop => {
+                delete_pending_by_id(pool, &row.pending_id).await;
+                dropped += 1;
+            }
+            // MergeIntoExisting and TriggerSoulExperienceOnly are Phase 2 features
+            _ => {
+                tracing::debug!(
+                    pending_id = %row.pending_id,
+                    action = ?decision.action,
+                    "Skipping unimplemented review action"
+                );
+            }
+        }
+    }
+
+    ReviewResponse {
+        promoted,
+        fragmented,
+        dropped,
+    }
+}
+
+/// Delete a pending review entry by ID (best-effort, logs on failure).
+async fn delete_pending_by_id(pool: &sqlx::SqlitePool, pending_id: &str) {
+    let pid = pending_id.to_string();
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM memory_pending_review WHERE pending_id = ?",
+        pid
+    )
+    .execute(pool)
+    .await
+    {
+        tracing::warn!(pending_id = %pending_id, error = %e, "Failed to delete pending review after processing");
+    }
+}
+
+/// Passthrough summarizer that returns the raw digest as the LTM body.
+///
+/// In a future iteration, this will be replaced by an ACP-based summarizer
+/// that produces a more structured memory entry. For V1.33, the raw digest
+/// is used directly to close the loop without requiring LLM calls.
+struct PassthroughSummarizer;
+
+impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummarizer {
+    async fn summarize(
+        &self,
+        _session_id: &str,
+        _task_kind: &str,
+        raw_digest: &str,
+        _world_id: Option<&str>,
+    ) -> Result<String, nexus_creator_memory::errors::MemoryError> {
+        Ok(raw_digest.to_string())
+    }
+}
+
+/// `GET /v1/local/memory/fragments?creator_id=...&keyword=...&limit=...`
+///
+/// Lists memory fragments for a creator with optional keyword filter.
+/// Returns fragment IDs and summaries for the CLI `creator memory fragments` command.
+///
+/// Auth: `creator_id` validated from query string (required).
+pub async fn fragments(
+    State(state): State<WorkspaceState>,
+    Query(params): Query<ListFragmentsQuery>,
+) -> Result<Json<ListFragmentsResponse>, NexusApiError> {
+    // Validate creator_id format
+    if !nexus_creator::local_identity::is_valid_creator_id(&params.creator_id) {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
+        });
+    }
+
+    info!(
+        creator_id = %params.creator_id,
+        keyword = ?params.keyword,
+        "Listing memory fragments"
+    );
+
+    let limit = u32::try_from(params.limit.clamp(1, MAX_LIMIT)).unwrap_or(u32::MAX);
+
+    let records = nexus_local_db::memory_fragment::list_fragments_filtered(
+        state.pool(),
+        &params.creator_id,
+        params.keyword.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to list memory fragments: {e}"),
+    })?;
+
+    let fragments_list: Vec<FragmentInfo> = records
+        .into_iter()
+        .map(|r| FragmentInfo {
+            fragment_id: r.fragment_id,
+            summary: r.summary,
+        })
+        .collect();
+
+    debug!(count = fragments_list.len(), "Fragments retrieved");
+
+    Ok(Json(ListFragmentsResponse {
+        fragments: fragments_list,
+    }))
+}
