@@ -630,8 +630,8 @@ impl DaemonClient {
             return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
-        let data: Vec<crate::api::models::FragmentRow> = resp.json().await?;
-        Ok(data)
+        let wrapper: crate::api::models::ListFragmentsResponse = resp.json().await?;
+        Ok(wrapper.fragments)
     }
 
     // ─── Pending review methods ──────────────────────────────────────────
