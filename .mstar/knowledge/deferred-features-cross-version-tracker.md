@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.33 Active** · Latest shipped: **V1.32** · Active compass: [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 21)
+**Quick status**: **V1.33 Shipped** · Latest shipped: **V1.33** · Latest shipped compass: [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) (Shipped 2026-06-04) · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 29)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-04 (V1.33 planning)
+**Last updated**: 2026-06-04 (V1.33 closeout; V1.33 shipped, latest_active cleared; next active TBD)
 
 ---
 
@@ -54,7 +54,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
 | FL-D | **Preset orchestration** (Agentic Design Patterns) | Post-V1.33 | V1.31–32 shipped capabilities + quality gate; **still open**: DF-29, DF-31, **conditional routing engine** (explicitly OUT of V1.33) |
-| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | Post-V1.33 | **Not V1.33** — narrative Work + `novel-writing` is V1.33 main path; FL-E builds on Work + `creator run` + run_intents |
+| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | Post-V1.33 | **Not V1.33** — narrative Work + `novel-writing` is V1.33 main path (now Shipped). FL-E builds on Work + `creator run` + run_intents as the next iteration. |
 
 ### 3.3 Open features (deferred from compass "Out" or audit)
 
@@ -129,10 +129,11 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 **Latest active iteration**
 
-- V1.33: [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) — narrative Work loop, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review closed loop
+- _None — V1.33 closeout cleared `latest_active_iteration`; next active TBD_
 
 **Recent shipped compasses** (detail in archive §2)
 
+- V1.33: [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) — narrative Work loop, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review closed loop; **Shipped 2026-06-04** (5 plans P1–P5 all Done)
 - V1.32: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
 - V1.31: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
 - V1.30: [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md)
@@ -150,4 +151,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-04. Status: Active (V1.33 active; V1.32 latest shipped).*
+*Last updated: 2026-06-04. Status: V1.33 Shipped (latest_active cleared); V1.33 latest shipped.*
