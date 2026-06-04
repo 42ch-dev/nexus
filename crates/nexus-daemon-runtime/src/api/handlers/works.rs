@@ -226,17 +226,16 @@ pub async fn list_works(
         offset: query.offset,
     };
 
-    let records = works::list_works(state.pool(), &creator_id, &workspace_slug, &filters)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    // R-V133P1-11: total reflects the true row count (not page size).
-    let total: usize = works::count_works(state.pool(), &creator_id, &workspace_slug, &filters)
-        .await
-        .map_or(records.len(), |n| n as usize);
+    // R-V133P1-11 v2: list + count in a shared transaction so total and
+    // records are consistent even under concurrent writes.
+    let (records, total) =
+        works::list_and_count_works(state.pool(), &creator_id, &workspace_slug, &filters)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+    let total: usize = total as usize;
 
     let works_list: Vec<WorkSummary> = records
         .into_iter()
