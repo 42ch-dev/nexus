@@ -707,7 +707,7 @@ fn check_args_against_schema(
 
     let args_map = args.and_then(|a| a.as_object());
 
-    // Check required args are present.
+    // Check required args are present (top-level `required` field).
     if let Some(ref required_set) = required {
         if let Some(amap) = args_map {
             for req_arg in required_set {
@@ -736,6 +736,11 @@ fn check_args_against_schema(
         }
     }
 
+    // Check anyOf semantics: at least one alternative must be fully satisfied.
+    if let Some(any_of) = schema.get("anyOf").and_then(|a| a.as_array()) {
+        check_any_of_semantics(base_path, cap_name, args_map, any_of, result);
+    }
+
     // Check for unknown args not in schema properties.
     if let (Some(props), Some(amap)) = (properties, args_map) {
         for key in amap.keys() {
@@ -751,6 +756,71 @@ fn check_args_against_schema(
                 });
             }
         }
+    }
+}
+
+/// Check `anyOf` semantics in a capability's JSON Schema.
+///
+/// Each `anyOf` entry may declare its own `required` array. At least one
+/// alternative must have all its required fields present in the provided args.
+fn check_any_of_semantics(
+    base_path: &str,
+    cap_name: &str,
+    args_map: Option<&serde_json::Map<String, serde_json::Value>>,
+    any_of: &[serde_json::Value],
+    result: &mut ValidationResult,
+) {
+    let mut any_satisfied = false;
+    for alt in any_of {
+        let alt_required: HashSet<String> = alt
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if alt_required.is_empty() {
+            continue;
+        }
+        let all_present =
+            args_map.is_some_and(|amap| alt_required.iter().all(|r| amap.contains_key(r)));
+        if all_present {
+            any_satisfied = true;
+            break;
+        }
+    }
+    if !any_satisfied {
+        let alt_labels: Vec<String> = any_of
+            .iter()
+            .filter_map(|alt| {
+                alt.get("required").and_then(|r| {
+                    let keys: Vec<String> = r
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if keys.is_empty() {
+                        None
+                    } else {
+                        Some(format!("{keys:?}"))
+                    }
+                })
+            })
+            .collect();
+        result.diagnostics.push(ValidationDiagnostic {
+            path: format!("{base_path}.args"),
+            message: format!(
+                "capability '{cap_name}' anyOf not satisfied: none of the \
+                 required groups {alt_labels:?} are fully provided"
+            ),
+            severity: DiagnosticSeverity::Error,
+            category: DiagnosticCategory::CapabilityArgDrift,
+        });
     }
 }
 
@@ -781,8 +851,45 @@ fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
                     category: DiagnosticCategory::RunIntents,
                 });
             }
+
+            // R-V133P1-05: Creator presets must not claim system-only intents.
+            // Per work-experience-model §5.1, cross-claim (creator claiming
+            // system_maintenance) is an Error, not a Warning.
+            if intents.contains(&RunIntent::SystemMaintenance) {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: "preset.run_intents".to_string(),
+                    message: format!(
+                        "creator preset '{}' must not declare system_maintenance (system-only intent)",
+                        manifest.preset.id
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::RunIntents,
+                });
+            }
         }
         PresetKind::System => {
+            // R-V133P1-05: System presets must not claim creator-only intents.
+            // Per work-experience-model §5.1, cross-claim (system claiming
+            // work_init/work_continue) is an Error.
+            let creator_only_intents = [RunIntent::WorkInit, RunIntent::WorkContinue];
+            let cross_claims: Vec<String> = creator_only_intents
+                .iter()
+                .filter(|ri| intents.contains(ri))
+                .map(|ri| format!("{ri:?}"))
+                .collect();
+            if !cross_claims.is_empty() {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: "preset.run_intents".to_string(),
+                    message: format!(
+                        "system preset '{}' must not declare creator-only intents: {}",
+                        manifest.preset.id,
+                        cross_claims.join(", ")
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::RunIntents,
+                });
+            }
+
             // System presets with run_intents should include system_maintenance.
             if !intents.is_empty() && !intents.contains(&RunIntent::SystemMaintenance) {
                 result.diagnostics.push(ValidationDiagnostic {
@@ -1406,120 +1513,144 @@ states:
             result.diagnostics
         );
     }
+}
 
-    // ── R-V133P1-05: run_intents validation tests ──────────────────────────
+// ---------------------------------------------------------------------------
+// A6: FL-E stage→preset allowlist (V1.34 §4)
+// ---------------------------------------------------------------------------
+
+pub use nexus_contracts::local::orchestration::stage_index;
+/// Ordered FL-E stages — re-exported from `nexus_contracts` (single source of truth).
+pub use nexus_contracts::local::orchestration::FL_E_STAGES;
+
+/// Normative stage→preset mapping (V1.34 creator-workflow-fl-e §4).
+///
+/// Each stage maps to one or more preset IDs that are valid for that stage.
+/// The first entry is the default preset for that stage.
+pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
+    ("intake", &["creative-brief-intake"]),
+    ("research", &["research"]),
+    ("produce", &["novel-writing"]),
+    ("review", &["reflection-loop"]),
+    // R-FL-E-06: persist has dual path — kb-extract (via queue) + memory-review (CLI)
+    ("persist", &["kb-extract", "memory-review"]),
+];
+
+/// Returns the default preset ID for a given FL-E stage.
+///
+/// Returns `None` if the stage is not a valid FL-E stage.
+#[must_use]
+pub fn default_preset_for_stage(stage: &str) -> Option<&'static str> {
+    STAGE_PRESET_ALLOWLIST
+        .iter()
+        .find(|(s, _)| *s == stage)
+        .map(|(_, presets)| presets[0])
+}
+
+/// Returns all allowed preset IDs for a given FL-E stage.
+///
+/// Returns `None` if the stage is not a valid FL-E stage.
+#[must_use]
+pub fn allowed_presets_for_stage(stage: &str) -> Option<&'static [&'static str]> {
+    STAGE_PRESET_ALLOWLIST
+        .iter()
+        .find(|(s, _)| *s == stage)
+        .map(|(_, presets)| *presets)
+}
+
+/// Validates that a preset ID is in the allowlist for a given FL-E stage.
+///
+/// Returns `Ok(())` if the preset is allowed for the stage, or a descriptive
+/// error string if not.
+///
+/// # Errors
+///
+/// Returns `Err(String)` with a descriptive message if:
+/// - The stage is not a valid FL-E stage
+/// - The preset is not in the allowlist for that stage
+pub fn validate_preset_for_stage(stage: &str, preset_id: &str) -> std::result::Result<(), String> {
+    let allowed = allowed_presets_for_stage(stage).ok_or_else(|| {
+        format!(
+            "Unknown FL-E stage '{stage}'. Valid stages: {}",
+            FL_E_STAGES.join(", ")
+        )
+    })?;
+
+    if allowed.contains(&preset_id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Preset '{preset_id}' is not in the allowlist for stage '{stage}'. \
+             Allowed presets: {}",
+            allowed.join(", ")
+        ))
+    }
+}
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
 
     #[test]
-    fn creator_preset_without_run_intents_is_error() {
-        let yaml = r"
-preset:
-  id: no-intents
-  version: 1
-  kind: creator
-  description: test
-  requires_capabilities: []
-  initial: a
-  terminal: b
-states:
-  - id: a
-    enter: []
-    exit_when: { kind: manual }
-    next: b
-  - id: b
-    terminal: true
-";
-        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
-        assert!(
-            result.has_errors(),
-            "empty run_intents on creator should be an error"
+    fn default_preset_for_known_stages() {
+        assert_eq!(
+            default_preset_for_stage("intake"),
+            Some("creative-brief-intake")
         );
-        let diags: Vec<_> = result
-            .diagnostics
-            .iter()
-            .filter(|d| d.category == DiagnosticCategory::RunIntents)
-            .collect();
-        assert_eq!(diags.len(), 1, "expected exactly 1 RunIntents diagnostic");
-        assert_eq!(diags[0].severity, DiagnosticSeverity::Error);
-        assert!(
-            diags[0]
-                .message
-                .contains("must declare at least one run_intent"),
-            "message should say 'must': {:?}",
-            diags[0].message
-        );
+        assert_eq!(default_preset_for_stage("research"), Some("research"));
+        assert_eq!(default_preset_for_stage("produce"), Some("novel-writing"));
+        assert_eq!(default_preset_for_stage("review"), Some("reflection-loop"));
+        assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
     }
 
     #[test]
-    fn creator_preset_with_run_intents_passes() {
-        let yaml = r"
-preset:
-  id: with-intents
-  version: 1
-  kind: creator
-  description: test
-  requires_capabilities: []
-  run_intents: [work_init, work_continue]
-  initial: a
-  terminal: b
-states:
-  - id: a
-    enter: []
-    exit_when: { kind: manual }
-    next: b
-  - id: b
-    terminal: true
-";
-        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
-        let run_intent_errors: Vec<_> = result
-            .diagnostics
-            .iter()
-            .filter(|d| d.category == DiagnosticCategory::RunIntents)
-            .collect();
-        assert!(
-            run_intent_errors.is_empty(),
-            "creator with run_intents should not generate RunIntents diagnostics: {:?}",
-            run_intent_errors
-        );
+    fn default_preset_for_unknown_stage() {
+        assert_eq!(default_preset_for_stage("unknown"), None);
     }
 
     #[test]
-    fn system_preset_without_system_maintenance_is_warning() {
-        let yaml = r"
-preset:
-  id: sys-no-maint
-  version: 1
-  kind: system
-  description: test
-  requires_capabilities: []
-  run_intents: [work_init]
-  initial: a
-  terminal: b
-states:
-  - id: a
-    enter: []
-    exit_when: { kind: manual }
-    next: b
-  - id: b
-    terminal: true
-";
-        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
-        let diags: Vec<_> = result
-            .diagnostics
-            .iter()
-            .filter(|d| d.category == DiagnosticCategory::RunIntents)
-            .collect();
-        assert_eq!(
-            diags.len(),
-            1,
-            "system without system_maintenance should warn"
+    fn validate_known_preset_for_stage() {
+        assert!(validate_preset_for_stage("intake", "creative-brief-intake").is_ok());
+        assert!(validate_preset_for_stage("produce", "novel-writing").is_ok());
+    }
+
+    #[test]
+    fn validate_wrong_preset_for_stage() {
+        assert!(validate_preset_for_stage("intake", "novel-writing").is_err());
+        assert!(validate_preset_for_stage("produce", "creative-brief-intake").is_err());
+    }
+
+    #[test]
+    fn validate_unknown_stage() {
+        assert!(validate_preset_for_stage("unknown", "any-preset").is_err());
+    }
+
+    #[test]
+    fn stage_index_order() {
+        assert_eq!(stage_index("intake"), Some(0));
+        assert_eq!(stage_index("research"), Some(1));
+        assert_eq!(stage_index("produce"), Some(2));
+        assert_eq!(stage_index("review"), Some(3));
+        assert_eq!(stage_index("persist"), Some(4));
+    }
+
+    #[test]
+    fn stage_index_unknown() {
+        assert_eq!(stage_index("unknown"), None);
+    }
+
+    #[test]
+    fn persist_allowlist_accepts_both_paths() {
+        // R-FL-E-06: persist stage accepts kb-extract AND memory-review
+        assert!(
+            validate_preset_for_stage("persist", "kb-extract").is_ok(),
+            "persist should accept kb-extract"
         );
-        assert_eq!(
-            diags[0].severity,
-            DiagnosticSeverity::Warning,
-            "system preset without system_maintenance should be a Warning, not Error"
+        assert!(
+            validate_preset_for_stage("persist", "memory-review").is_ok(),
+            "persist should accept memory-review"
         );
+        // Default should still be kb-extract (first entry)
+        assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
     }
 }

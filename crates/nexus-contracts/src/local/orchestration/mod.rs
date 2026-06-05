@@ -270,3 +270,28 @@ pub struct JudgeRuleOutput {
     /// Human-readable reason for the decision.
     pub reason: String,
 }
+
+// ---------------------------------------------------------------------------
+// FL-E stages (V1.34 creator-workflow-fl-e §3.1)
+// ---------------------------------------------------------------------------
+
+/// Ordered FL-E stages — single source of truth (V1.34 creator-workflow-fl-e §3.1).
+///
+/// All crates that need the canonical stage list or stage-to-index mapping
+/// must `use` this constant and the associated functions rather than
+/// maintaining local copies.
+pub const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
+
+/// Returns the index of a stage in the FL-E linear order.
+///
+/// Returns `None` for unknown stage strings.
+#[must_use]
+pub fn stage_index(stage: &str) -> Option<usize> {
+    FL_E_STAGES.iter().position(|&s| s == stage)
+}
+
+/// Checks whether a stage string is a known FL-E stage.
+#[must_use]
+pub fn is_valid_stage(stage: &str) -> bool {
+    FL_E_STAGES.contains(&stage)
+}
