@@ -334,6 +334,7 @@ async fn handler_patch_work_updates_record() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: None,
+        force: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -360,6 +361,7 @@ async fn handler_patch_work_returns_404_for_unknown() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: None,
+        force: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -519,6 +521,27 @@ async fn patch_work_updates_stage_fields() {
     .unwrap();
     let work_id = resp.work_id.clone();
 
+    let intake_patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: Some("complete".to_string()),
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: None,
+        force: None,
+    };
+    nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::Json(intake_patch),
+    )
+    .await
+    .unwrap();
+
     let patch = PatchWorkRequest {
         title: None,
         long_term_goal: None,
@@ -530,6 +553,7 @@ async fn patch_work_updates_stage_fields() {
         primary_preset_id: None,
         current_stage: Some("research".to_string()),
         stage_status: Some("active".to_string()),
+        force: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -573,6 +597,7 @@ async fn patch_work_stage_returns_401_without_creator() {
         primary_preset_id: None,
         current_stage: Some("produce".to_string()),
         stage_status: Some("active".to_string()),
+        force: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -601,6 +626,7 @@ async fn patch_work_stage_returns_404_for_unknown() {
         primary_preset_id: None,
         current_stage: Some("research".to_string()),
         stage_status: Some("active".to_string()),
+        force: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -788,6 +814,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: None,
+        force: None,
     };
     let state_b = WorkspaceState::new_for_testing(nh_b, db_b, None).await;
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
@@ -843,6 +870,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: None,
+        force: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -870,6 +898,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         primary_preset_id: None,
         current_stage: Some("research".to_string()),
         stage_status: Some("active".to_string()),
+        force: None,
     };
     let advanced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -919,6 +948,7 @@ async fn patch_work_stage_change_is_auditable() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: Some("complete".to_string()),
+        force: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -941,6 +971,7 @@ async fn patch_work_stage_change_is_auditable() {
         primary_preset_id: None,
         current_stage: Some("produce".to_string()),
         stage_status: Some("active".to_string()),
+        force: Some(true),
     };
     let forced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1004,6 +1035,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         primary_preset_id: None,
         current_stage: Some("invalid_stage".to_string()),
         stage_status: Some("active".to_string()),
+        force: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
