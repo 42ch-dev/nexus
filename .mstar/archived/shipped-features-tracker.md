@@ -46,6 +46,8 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-34~~ | `context.summarize` worker-backed summarization | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: executes via `WorkerHandleProvider` and returns `{ summary, prompt_hash }`. |
 | ~~DF-37~~ | Worker-handle plumbing for capability-layer LLM calls | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: `Arc<dyn WorkerHandleProvider>` injected through `CapabilityRegistry::with_runtime_deps()`; fallback limited to explicit standalone/test mode. |
 | ~~BL-09~~ | V1.17 Prompt + Skills Compass v1 | V1.17 | Shipped V1.17 — see archive §2 V1.17 snapshot. |
+| ~~DF-51~~ | `creator.inject_prompt` wire/schema alignment | V1.34 (P0) | Commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`: input_schema declares `prompt_file` + `vars` with `anyOf`; `R-P2-01` closed. |
+| ~~DF-54~~ | Work `stage` / `stage_status` persistence gap | V1.34 (P1) | Commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`: stage columns + DDL migration + 11 e2e tests + active schedule uniqueness. |
 
 ### Tech-debt residuals shipped
 
@@ -284,6 +286,33 @@ When a version ships, append new closed rows here and remove them from the activ
 | Key changes | Shared `validate_preset_semantic` + `validate_assets_in_bundle` + `validate_path_safety` facade; CLI/API validate endpoint uses same facade as loader; reachability/terminal/bundle-id/orphan inner graph checks; O(1) capability registry lookup with arg drift detection; kb-extract inner graph wiring fixed; all 6 embedded presets pass strict validation; stale `--var` CLI removed |
 | Known residuals deferred | R-P2-01 (creator.inject_prompt schema gap, Medium), R-P2-02 (same root cause, Low) |
 | Explicit deferrals | DF-29, DF-31, DF-42, DF-44 remain open; platform pause (PD-05) preserved; conditional routing engine deferred |
+
+### V1.33 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) |
+| Shipped at | 2026-06-04 |
+| Scope | Narrative **Work** product loop, Creative Brief Intake (grill-me), `creator run` high-level entry, preset run-intent taxonomy, `llm_judge` → `judge.llm` runtime fix, memory review/fragments closed loop |
+| Plans | `2026-06-04-v1.33-work-model-and-creator-run` (P1), `2026-06-04-v1.33-creative-brief-intake-preset` (P2), `2026-06-04-v1.33-llm-judge-runtime-fix` (P3), `2026-06-04-v1.33-memory-review-closed-loop` (P4), `2026-06-04-v1.33-spec-tracker-hygiene` (P5) |
+| Key changes | Work domain model (title, intake_status, inspiration_log, run_intents, stage); `creator run` CLI surface; `creative-brief-intake` + `novel-writing` preset; `judge.llm` parses LLM output (NOGO/GO with first-word anchor); memory review + fragments daemon API + CLI closed loop |
+| Open residuals at close | R-V133P1-03, -05, -07, -08, -09, -11, -12 (7), R-V133P3-01..04 (4), R-V133P4-01..07 (7), R-P2-01, R-P2-02 — all shipped in V1.34 P0 (R-P2-01/02 closed) or V1.34+ |
+| Explicit deferrals | DF-29, DF-31, DF-42, DF-44, DF-46, DF-48, DF-49, DF-50, DF-51 (deferred to V1.34), DF-52, DF-55, DF-56 |
+
+### V1.34 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) |
+| Shipped at | 2026-06-05 |
+| PR | Pending — integration branch `feature/v1.34-creator-workflow-and-agent-tools` ready for PR to `main` |
+| Scope | **FL-E** generic creator workflow on V1.33 Work (5 stages × preset chain) + **Agent `nexus.*` tool bridge** via daemon `HostToolExecutor` (8 tools: 6 `nexus.*` + 2 `fs/*` baseline) |
+| Plans | `2026-06-04-v1.34-residual-convergence` (P0), `2026-06-04-v1.34-fl-e-run-intents-and-stages` (P1), `2026-06-04-v1.34-agent-tool-registry-spec` (P3), `2026-06-04-v1.34-fl-e-preset-chain` (P2), `2026-06-04-v1.34-agent-tool-implementation` (P4), `2026-06-04-v1.34-spec-tracker-hygiene` (P5) |
+| Closed DF items | DF-51 (creator.inject_prompt schema, P0), DF-54 (Work stage persistence, P1) |
+| Key changes | Work `stage`/`stage_status` columns + DDL migration V9→V10 (P1); `creator run stage list|advance --stage <id> [--force]` CLI (P1); shared `check_stage_advance` gates (CLI + daemon PATCH); active FL-E schedule uniqueness invariant; 11 `fl_e_chain_demo` e2e + 5 `fl_e_schedule_api` hermetic; preset chain (research → novel-writing → reflection-loop → kb-extract / memory-review); agent-nexus-tool-bridge.md 504 lines Shipped; 8 tools in registry with 5-step admission pipeline; 26 `agent_tool_api` hermetic tests; error codes (POLICY_BLOCKED, FORBIDDEN, NOT_SUPPORTED, INVALID_INPUT) surface in HTTP + worker replies; audit log on every invocation; V1.33 residuals closed (4 of 7 v1.33-p1 + 2 v1.32 R-P2) |
+| Open residuals at close | R-FL-E-DDL/DEAD/LIST/FNAME/ENDP (5, P1 qc3 + 4 deferred V1.34+); R-P2-W2/W3/S1/S2 (4, P2 qc3 deferred V1.34+); DF-47 (production caller wiring, P4 partial); TD-V130-* (11), TD-V131-* (8), R-V133P1-03/-08/-09 (3), R-V133P3-04 (1), R-V133P4-04 (1) — total 39 in `residual_findings` |
+| Explicit deferrals | DF-29, DF-31, DF-46, DF-47 (still OPEN), DF-48, DF-49, DF-50, DF-52, DF-53 (`--auto-chain`), DF-55, DF-56 (conditional routing) |
+| Platform integration | Paused (PD-05) — `nexus.context.assemble` returns local slice or `policy_blocked` |
 
 ### V1.16+ horizon (program)
 

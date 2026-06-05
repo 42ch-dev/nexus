@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.34 P5 (spec and tracker hygiene) plan per Profile B. Final plan of V1.34 iteration; precedes PR to main.",
+  "plan_id": "2026-06-04-v1.34-spec-tracker-hygiene",
+  "title": "V1.34 P5 — Spec and tracker hygiene",
+  "done_at": "2026-06-05T05:10:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-04-v1.34-spec-tracker-hygiene.md",
+  "total_batches": 1,
+  "batches_completed": 1,
+  "qc": "Skipped per PM routing 'Tech spec only' exception (docs only); PM-direct verified 3 acceptance items: (1) every compass §6 Out row has tracker ID or explicit 'closed in V1.34 P*'; (2) DF-45 absent (no duplicate); (3) iterations/README and tracker quick status agree.",
+  "qa": "PM-direct verify: tracker V1.34 Active → Latest shipped; DF-51 (P0) + DF-54 (P1) marked closed; DF-47 (P4) still OPEN; shipped archive V1.33 + V1.34 snapshots appended; iterations/README V1.34 row Active → Shipped; status.json latest_shipped_iteration=v1.34; 2 spec drafts (creator-workflow-fl-e + agent-nexus-tool-bridge) Draft → Shipped; V1.34 compass Status Active → Shipped (2026-06-05); 1 commit (8 files, 53+ insertions, 25- deletions).",
+  "residual_count": 0,
+  "merge_commits": ["P5 merge into feature/v1.34-creator-workflow-and-agent-tools (next)"],
+  "notes": "V1.34 iteration now complete: 6 plans P0–P5 all Done. Integration branch `feature/v1.34-creator-workflow-and-agent-tools` ready for PR to main. DF-47 (production caller wiring) tracked as future work. Total 39 open residuals in `residual_findings` per status.json tech_debt_summary (canonical)."
+}

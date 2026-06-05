@@ -431,11 +431,11 @@ Notifications (worker → daemon, unsolicited):
 | ------------------------------ | -------------------------------------------------------- |
 | `worker/agent_tool_request`    | `{ tool_name, args, request_id }`                        |
 | `worker/agent_tool_request_result` (reply shape) | `{ request_id, grant, output? }`       |
-
-**V1.34 agent tool bridge:** `tool_name` values under the `nexus.*` namespace (and existing `fs/*` tools) **must** dispatch through the same handler registry as daemon HTTP tool execute. Normative: [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md). Implementation plan: `2026-06-04-v1.34-agent-tool-implementation`.
 | `worker/acp_permission_request`| `{ reason, request_id }`                                 |
 | `worker/log`                   | `{ level, message, fields }`                             |
 | `worker/unrecoverable_error`   | `{ kind, detail }` — worker will exit after this frame   |
+
+> 详见 [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) §7 — single dispatch table invariant. `worker/agent_tool_request` values under `nexus.*` and the existing `fs/*` baseline must dispatch through the same registry as daemon HTTP tool execute; implementation plan: `2026-06-04-v1.34-agent-tool-implementation`.
 
 ### 6.5 Tool policy (connection to permission policy engine)
 

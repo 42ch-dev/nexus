@@ -1095,7 +1095,9 @@
       "working_branch": "feature/v1.29-stage0-structured-delimiters",
       "qc_verdict": "Approve",
       "qa_verdict": "Pass",
-      "closed_residuals": ["R13"]
+      "closed_residuals": [
+        "R13"
+      ]
     },
     {
       "plan_id": "2026-05-26-v1.29-soul-experience-preset",
@@ -1126,7 +1128,10 @@
       "working_branch": "feature/v1.29-agent-host-batch2-hardening",
       "qc_verdict": "Approve",
       "qa_verdict": "Pass",
-      "closed_residuals": ["R11", "R12"]
+      "closed_residuals": [
+        "R11",
+        "R12"
+      ]
     },
     {
       "plan_id": "2026-05-26-v1.29-spec-tracker-hygiene",
@@ -1185,7 +1190,9 @@
       "plan_file": ".mstar/plans/2026-05-30-v1.31-creator-memory-capabilities.md",
       "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-creator-memory-capabilities.json",
       "working_branch": "feature/v1.31-creator-memory-capabilities",
-      "tracker_ids": ["DF-30"]
+      "tracker_ids": [
+        "DF-30"
+      ]
     },
     {
       "plan_id": "2026-05-30-v1.31-judge-and-summarize-capabilities",
@@ -1194,7 +1201,12 @@
       "plan_file": ".mstar/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.md",
       "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-judge-and-summarize-capabilities.json",
       "working_branch": "feature/v1.31-judge-and-summarize-capabilities",
-      "tracker_ids": ["DF-32", "DF-33", "DF-34", "DF-37"]
+      "tracker_ids": [
+        "DF-32",
+        "DF-33",
+        "DF-34",
+        "DF-37"
+      ]
     },
     {
       "plan_id": "2026-05-30-v1.31-agentic-pattern-presets",
@@ -1203,7 +1215,9 @@
       "plan_file": ".mstar/plans/2026-05-30-v1.31-agentic-pattern-presets.md",
       "archived_record": ".mstar/archived/plans/2026-05-30-v1.31-agentic-pattern-presets.json",
       "working_branch": "feature/v1.31-agentic-pattern-presets",
-      "tracker_ids": ["FL-D"]
+      "tracker_ids": [
+        "FL-D"
+      ]
     },
     {
       "plan_id": "2026-05-30-v1.31-spec-tracker-hygiene",
@@ -1251,7 +1265,9 @@
       "qc_verdict": "Approve (rev2, 3/3)",
       "qa_verdict": "Pass (6 regression tests across judge_llm + context_summarize)",
       "residual_count": 0,
-      "closed_residuals": ["SEC-V131-01"],
+      "closed_residuals": [
+        "SEC-V131-01"
+      ],
       "notes": "judge.llm + context.summarize now read only context-injected _creator_id/_session_id; engine task boundary injects trusted context."
     },
     {
@@ -1266,6 +1282,107 @@
       "qa_verdict": "N/A (docs-only)",
       "residual_count": 0,
       "notes": "Spec §7.6.x for shared validation facade; archived shipped tracker has V1.32 snapshot; active tracker Quick status; iterations README; compass status. Initial rev1 had worktree-isolation Critical (P4 created before P1 merged) + SSOT split-brain — both resolved by rebase + iteration-close SSOT update."
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-fl-e-run-intents-and-stages",
+      "title": "V1.34 P1 — Work stage model + creator run stage routing",
+      "done_at": "2026-06-05T02:50:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-fl-e-run-intents-and-stages.md",
+      "total_batches": 2,
+      "batches_completed": 2,
+      "qc": "Wave 1: qc1/qc2/qc3 Request Changes (2/3/2 Critical). Wave 2 (after 8 fix commits): qc1/qc2 Approve, qc3 Approve w/ residuals (R-03 DDL IF NOT EXISTS, R-04 dead code, R-07/08/09 suggestions).",
+      "qa": "Pass w/ notes — 0 unresolved Critical; non-blocking notes on plan markdown status sync + qc3 residuals to be registered in P5 hygiene",
+      "residual_count": 5,
+      "residual_open": [
+        "R-03 DDL IF NOT EXISTS",
+        "R-04 dead code get_work_stage",
+        "R-07/R-08/R-09 suggestions"
+      ],
+      "merge_commits": [
+        "cf29dd1 (merge P1 into feature/v1.34-creator-workflow-and-agent-tools)"
+      ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-agent-tool-registry-spec",
+      "title": "V1.34 P3 — Agent tool registry spec",
+      "done_at": "2026-06-05T03:10:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-agent-tool-registry-spec.md",
+      "total_batches": 1,
+      "batches_completed": 1,
+      "qc": "Skipped (spec only — PM routing \"Tech spec only\" exception per mstar-dispatch-gates / project-manager.md)",
+      "qa": "PM-direct verified: 3 files, 346 insertions, 17 deletions; spec 504 lines; rg nexus.work. + policy_blocked keywords present; orchestration-engine §6.4 cross-ref added; Status: Shipped",
+      "residual_count": 0,
+      "merge_commits": [
+        "merge P3 into integration"
+      ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-fl-e-preset-chain",
+      "title": "V1.34 P2 — FL-E preset chain (research, produce, review, persist)",
+      "done_at": "2026-06-05T04:10:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-fl-e-preset-chain.md",
+      "total_batches": 3,
+      "batches_completed": 3,
+      "qc": "Wave 1: 3 Request Changes (2+2+0 Critical = 4 total). Wave 2 (after fix wave 2 — DTO shape + facade + atomicity + e2e tests): qc1/qc2 still Request Changes (CLI creator_id from Work DTO not auth context), qc3 Request Changes (W-2 partial). Wave 3 (after fix wave 3 — CLI creator_id from config): qc1 Approve, qc2 Approve (from wave 2), qc3 Approve w/ residuals.",
+      "qa": "Pass w/ notes (after PM lifecycle corrections) — 0 unresolved Critical; 4 qc3 residuals registered (W-2 partial, W-3 partial, S-1, S-2)",
+      "residual_count": 4,
+      "residual_open": [
+        "R-P2-W2 (TOCTOU test)",
+        "R-P2-W3 (intake/novel-writing audit)",
+        "R-P2-S1 (panic risk)",
+        "R-P2-S2 (API batching)"
+      ],
+      "merge_commits": [
+        "P2 merge into integration"
+      ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-agent-tool-implementation",
+      "title": "V1.34 P4 — HostToolExecutor + worker upcall + tests",
+      "done_at": "2026-06-05T04:40:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-agent-tool-implementation.md",
+      "total_batches": 3,
+      "batches_completed": 3,
+      "qc": "Wave 1: 3 Request Changes (2+2+0 Critical = 4). Wave 2 (after fix wave 2: error codes + audit + stage_metadata allowlist + 26 tests): qc1 Request Changes (C-1 DF-47 production caller absent), qc2 Approve, qc3 Approve w/ residuals. Wave 3 (after fix wave 3: reopen DF-47): qc1 Approve w/ residuals, qc2 + qc3 维持 Approve.",
+      "qa": "Pass w/ notes — 0 unresolved Critical; DF-47 OPEN in deferred tracker; multi-field patch atomicity deferred to V1.34+",
+      "residual_count": 1,
+      "residual_open": [
+        "DF-47 (production caller wiring)"
+      ],
+      "merge_commits": [
+        "P4 merge into integration"
+      ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-agent-tool-implementation",
+      "title": "V1.34 P4 — HostToolExecutor + worker upcall + tests",
+      "done_at": "2026-06-05T04:40:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-agent-tool-implementation.md",
+      "total_batches": 3,
+      "batches_completed": 3,
+      "qc": "Wave 1: 3 Request Changes (4 Critical). Wave 2 (after fix wave 2: error codes + audit + stage_metadata + 26 tests): qc1 still Request Changes (DF-47 production caller absent), qc2 Approve, qc3 Approve w/ residuals. Wave 3 (after fix wave 3: reopen DF-47 doc): all 3 Approve.",
+      "qa": "Pass w/ notes — DF-47 OPEN in tracker; multi-field patch atomicity deferred to V1.34+",
+      "residual_count": 1,
+      "residual_open": [
+        "DF-47 (production caller wiring)"
+      ],
+      "merge_commits": [
+        "P4 merge into integration"
+      ]
+    },
+    {
+      "plan_id": "2026-06-04-v1.34-spec-tracker-hygiene",
+      "title": "V1.34 P5 — Spec and tracker hygiene (closeout, merge last)",
+      "done_at": "2026-06-05T05:10:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.34-spec-tracker-hygiene.md",
+      "total_batches": 1,
+      "batches_completed": 1,
+      "qc": "Skipped per PM routing \"Tech spec only\" exception (docs only); PM-direct verify via acceptance 3 项 (compass §6 + DF-45 + iterations/README sync)",
+      "qa": "PM-direct verified: deferred tracker updated (V1.34 Active → Latest shipped; DF-51/54 closed; DF-47 still OPEN); shipped archive has V1.33 + V1.34 snapshots; iterations/README V1.34 row Active → Shipped; status.json latest_shipped_iteration=v1.34; spec drafts (creator-workflow-fl-e + agent-nexus-tool-bridge) → Shipped; V1.34 compass Status Active → Shipped (2026-06-05). 0 Out rows missing tracker ID; DF-45 absent (no duplicate).",
+      "residual_count": 0,
+      "merge_commits": [
+        "P5 merge into feature/v1.34-creator-workflow-and-agent-tools"
+      ]
     }
   ]
 }

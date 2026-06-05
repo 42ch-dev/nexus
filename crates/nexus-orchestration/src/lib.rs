@@ -9,6 +9,7 @@ pub mod schedule;
 pub mod scheduler;
 pub mod skill_link;
 pub mod skill_sync;
+pub mod stage_gates;
 pub mod storage;
 pub mod sync_module;
 pub mod system_preset;
@@ -23,6 +24,9 @@ pub use capability::{
 pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use preset::resolve_preset;
 pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
+pub use stage_gates::{
+    build_preset_input, build_stage_schedule_label, preset_for_stage, WorkFields,
+};
 pub use worker::WorkerManager;
 
 use std::path::Path;
