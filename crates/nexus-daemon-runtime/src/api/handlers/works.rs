@@ -141,6 +141,9 @@ pub struct PatchWorkRequest {
     pub current_stage: Option<String>,
     /// V1.34 FL-E: update the stage status.
     pub stage_status: Option<String>,
+    /// V1.34 FL-E: bypass stage-order gates (equivalent to CLI `--force`).
+    #[serde(default)]
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -314,23 +317,18 @@ async fn patch_work_stage(
         .as_deref()
         .unwrap_or(&current.current_stage);
 
-    // Daemon PATCH does not have a force flag; treat all PATCH stage changes
-    // as force=true (direct API bypasses CLI gates). Still validate known stage.
     if req.current_stage.is_some() {
+        let force = req.force.unwrap_or(false);
         let work_state = nexus_orchestration::stage_gates::WorkStageState {
             current_stage: current.current_stage.clone(),
             stage_status: current.stage_status.clone(),
             intake_status: current.intake_status.clone(),
         };
-        nexus_orchestration::stage_gates::check_stage_advance(
-            &work_state,
-            target_stage,
-            true, // force=true for daemon PATCH
-        )
-        .map_err(|e| NexusApiError::BadRequest {
-            code: "INVALID_STAGE".to_string(),
-            message: e.message,
-        })?;
+        nexus_orchestration::stage_gates::check_stage_advance(&work_state, target_stage, force)
+            .map_err(|e| NexusApiError::BadRequest {
+                code: "INVALID_STAGE".to_string(),
+                message: e.message,
+            })?;
     }
 
     let target_status = req.stage_status.as_deref().unwrap_or(&current.stage_status);

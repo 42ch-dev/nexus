@@ -194,8 +194,8 @@ fn admission_pipeline(
         // Gate 4: permissions.toml / policy
         let workspace_path_str = state.workspace_path().unwrap_or_default();
         if !workspace_path_str.is_empty() {
-            if let Some(granted) = load_permission_policy(&workspace_path_str) {
-                check_nexus_tool_permission(&req.tool_name, &granted)?;
+            if let Some(policy) = load_permission_policy(&workspace_path_str) {
+                check_nexus_tool_permission(&req.tool_name, &policy)?;
             }
         }
 
@@ -206,8 +206,8 @@ fn admission_pipeline(
     let workspace_path_str = state.workspace_path().unwrap_or_default();
     if !workspace_path_str.is_empty() {
         // Gate 4: permissions
-        if let Some(granted) = load_permission_policy(&workspace_path_str) {
-            check_fs_tool_permission(&req.tool_name, &granted)?;
+        if let Some(policy) = load_permission_policy(&workspace_path_str) {
+            check_fs_tool_permission(&req.tool_name, &policy)?;
         }
 
         // Gate 3: workspace bounds
@@ -220,39 +220,34 @@ fn admission_pipeline(
 /// Check permission for a `nexus.*` tool against policy (Gate 4).
 fn check_nexus_tool_permission(
     tool_name: &str,
-    granted: &std::collections::HashSet<String>,
+    policy: &WorkspacePermissionPolicy,
 ) -> Result<(), NexusApiError> {
-    // Write tools require explicit grant
-    if tool_name == "nexus.work.patch"
-        && !granted.contains(tool_name)
-        && !granted.contains("nexus.*")
-    {
-        return Err(NexusApiError::BadRequest {
-            code: "POLICY_BLOCKED".to_string(),
-            message: format!(
-                "tool '{tool_name}' denied by permissions.toml policy (write tool not granted)"
-            ),
-        });
+    let allowed = if tool_name == "nexus.work.patch" {
+        is_nexus_write_granted(tool_name, policy)
+    } else {
+        is_nexus_read_granted(tool_name, policy)
+    };
+
+    if allowed {
+        return Ok(());
     }
-    // Read tools are permitted if any nexus grant exists
-    if !granted.contains(tool_name)
-        && !granted.contains("nexus.*")
-        && !granted.contains("nexus.*.read")
-    {
-        return Err(NexusApiError::BadRequest {
-            code: "POLICY_BLOCKED".to_string(),
-            message: format!(
-                "tool '{tool_name}' denied by permissions.toml policy (no nexus read grant)"
-            ),
-        });
-    }
-    Ok(())
+
+    let reason = if tool_name == "nexus.work.patch" {
+        "write tool not granted"
+    } else {
+        "no nexus read grant"
+    };
+
+    Err(NexusApiError::BadRequest {
+        code: "POLICY_BLOCKED".to_string(),
+        message: format!("tool '{tool_name}' denied by permissions.toml policy ({reason})"),
+    })
 }
 
 /// Check permission for `fs/*` tools (V1.33 baseline behavior).
 fn check_fs_tool_permission(
     tool_name: &str,
-    granted: &std::collections::HashSet<String>,
+    policy: &WorkspacePermissionPolicy,
 ) -> Result<(), NexusApiError> {
     let category = match tool_name {
         "fs/read_text_file" => "file_system.read",
@@ -260,13 +255,15 @@ fn check_fs_tool_permission(
         _ => return Ok(()),
     };
 
-    if granted.contains(category) {
+    if is_capability_granted(category, policy) {
         return Ok(());
     }
 
     Err(NexusApiError::BadRequest {
         code: "POLICY_BLOCKED".to_string(),
-        message: format!("tool '{tool_name}' denied by permissions.toml policy (missing '{category}' grant)"),
+        message: format!(
+            "tool '{tool_name}' denied by permissions.toml policy (missing '{category}' grant)"
+        ),
     })
 }
 
@@ -307,13 +304,7 @@ impl HostToolExecutor {
             Err(e) => {
                 // Audit gate 1-4 denials
                 let error_code = e.error_code();
-                let _ = audit_tool_execution(
-                    req,
-                    "denied",
-                    Some(error_code),
-                    state,
-                )
-                .await;
+                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
                 return Err(e);
             }
         };
@@ -329,13 +320,7 @@ impl HostToolExecutor {
             Err(e) => {
                 // Audit handler failures
                 let error_code = e.error_code();
-                let _ = audit_tool_execution(
-                    req,
-                    "denied",
-                    Some(error_code),
-                    state,
-                )
-                .await;
+                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
             }
         }
 
@@ -640,10 +625,12 @@ async fn execute_work_patch(
     // V1.34 minimal: accepted but stored as-is in inspiration_log as a metadata entry.
     if let Some(metadata) = params.get("stage_metadata") {
         // Validate stage_metadata sub-field allowlist
-        let metadata_obj = metadata.as_object().ok_or_else(|| NexusApiError::InvalidInput {
-            field: "parameters.stage_metadata".into(),
-            reason: "must be a JSON object".into(),
-        })?;
+        let metadata_obj = metadata
+            .as_object()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.stage_metadata".into(),
+                reason: "must be a JSON object".into(),
+            })?;
         for key in metadata_obj.keys() {
             if PATCH_REJECTED_FIELDS.contains(&key.as_str()) {
                 return Err(NexusApiError::BadRequest {
@@ -657,8 +644,9 @@ async fn execute_work_patch(
                 return Err(NexusApiError::BadRequest {
                     code: "INVALID_INPUT".to_string(),
                     message: format!(
-                        "stage_metadata key '{key}' is not in the allowed list (spec §4.4: {})"
-                    , STAGE_METADATA_ALLOWED_KEYS.join(", ")),
+                        "stage_metadata key '{key}' is not in the allowed list (spec §4.4: {})",
+                        STAGE_METADATA_ALLOWED_KEYS.join(", ")
+                    ),
                 });
             }
         }
@@ -850,10 +838,79 @@ fn execute_write_file(
 
 // ─── Permission / path helpers ────────────────────────────────────────────
 
+/// Mirrors `nexus-acp-host::PermissionPolicy::evaluate` without linking that crate
+/// (daemon-runtime linkage matrix forbids `nexus-acp-host`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PolicyDecision {
+    Grant,
+    Deny,
+    Ask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum DefaultPolicySetting {
+    #[default]
+    Ask,
+    Grant,
+    Deny,
+}
+
+#[derive(Debug, Clone)]
+struct WorkspacePermissionPolicy {
+    default: DefaultPolicySetting,
+    grant: std::collections::HashSet<String>,
+    deny: std::collections::HashSet<String>,
+}
+
+impl WorkspacePermissionPolicy {
+    fn evaluate(&self, permission_name: &str) -> PolicyDecision {
+        if self.grant.contains(permission_name) {
+            return PolicyDecision::Grant;
+        }
+        if self.deny.contains(permission_name) {
+            return PolicyDecision::Deny;
+        }
+        match self.default {
+            DefaultPolicySetting::Grant => PolicyDecision::Grant,
+            DefaultPolicySetting::Deny => PolicyDecision::Deny,
+            DefaultPolicySetting::Ask => PolicyDecision::Ask,
+        }
+    }
+}
+
+fn table_keys(table: &toml::Table) -> std::collections::HashSet<String> {
+    table.keys().cloned().collect()
+}
+
+fn is_nexus_write_granted(tool_name: &str, policy: &WorkspacePermissionPolicy) -> bool {
+    if matches!(policy.evaluate(tool_name), PolicyDecision::Deny) {
+        return false;
+    }
+    matches!(policy.evaluate(tool_name), PolicyDecision::Grant)
+        || matches!(policy.evaluate("nexus.*"), PolicyDecision::Grant)
+}
+
+fn is_nexus_read_granted(tool_name: &str, policy: &WorkspacePermissionPolicy) -> bool {
+    if matches!(policy.evaluate(tool_name), PolicyDecision::Deny) {
+        return false;
+    }
+    is_capability_granted(tool_name, policy)
+        || is_capability_granted("nexus.*", policy)
+        || is_capability_granted("nexus.*.read", policy)
+}
+
+fn is_capability_granted(capability: &str, policy: &WorkspacePermissionPolicy) -> bool {
+    match policy.evaluate(capability) {
+        PolicyDecision::Grant => true,
+        PolicyDecision::Deny => false,
+        PolicyDecision::Ask => matches!(policy.default, DefaultPolicySetting::Grant),
+    }
+}
+
 /// Load permission policy from workspace if available.
 ///
 /// Returns `None` if no policy file exists (all tools permitted).
-fn load_permission_policy(workspace_path: &str) -> Option<std::collections::HashSet<String>> {
+fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPolicy> {
     let policy_path = Path::new(workspace_path)
         .join(".nexus42")
         .join("permissions.toml");
@@ -864,8 +921,28 @@ fn load_permission_policy(workspace_path: &str) -> Option<std::collections::Hash
     let content = std::fs::read_to_string(&policy_path).ok()?;
     let policy: toml::Value = toml::from_str(&content).ok()?;
 
-    let granted = policy.get("grant")?;
-    granted.as_table().map(|obj| obj.keys().cloned().collect())
+    let default = match policy.get("default").and_then(|v| v.as_str()) {
+        Some("grant") => DefaultPolicySetting::Grant,
+        Some("deny") => DefaultPolicySetting::Deny,
+        _ => DefaultPolicySetting::Ask,
+    };
+
+    let grant = policy
+        .get("grant")
+        .and_then(|v| v.as_table())
+        .map(table_keys)
+        .unwrap_or_default();
+    let deny = policy
+        .get("deny")
+        .and_then(|v| v.as_table())
+        .map(table_keys)
+        .unwrap_or_default();
+
+    Some(WorkspacePermissionPolicy {
+        default,
+        grant,
+        deny,
+    })
 }
 
 /// Validate that file paths are within the workspace root (for fs/* tools).
