@@ -107,18 +107,27 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-03**; `tech_debt_summary.updated_at` **2026-05-30**). Do **not** mirror full rows here — JSON wins on conflict.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-05**; `tech_debt_summary.updated_at` **2026-06-05**). Do **not** mirror full rows here — JSON wins on conflict. Total open: **40**.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
 | V1.30 post-QC | 11 | `v1.30-post-qc-tech-debt` |
-| V1.31 post-QC | 9 | `v1.31-post-qc-tech-debt` (incl. ~~SEC-V131-01~~ → **closed V1.32** via P3) |
-| **Total** | **20** | See `metadata.tech_debt_summary.total_open` |
+| V1.31 post-QC | 8 | `v1.31-post-qc-tech-debt` (incl. ~~SEC-V131-01~~ → **closed V1.32** via P3) |
+| V1.33 work model (P1) | 3 | `2026-06-04-v1.33-work-model-and-creator-run` |
+| V1.33 llm_judge (P3) | 4 | `2026-06-04-v1.33-llm-judge-runtime-fix` |
+| V1.33 memory review (P4) | 7 | `2026-06-04-v1.33-memory-review-closed-loop` |
+| V1.34 FL-E stages (P1) | 5 | `2026-06-04-v1.34-fl-e-run-intents-and-stages` (R-FL-E-DDL/DEAD/LIST/FNAME/ENDP) |
+| V1.34 agent tool (P4) | 1 | `2026-06-04-v1.34-agent-tool-implementation` (DF-47 production caller wiring) |
+| V1.34 PR #42 cursor (R-CURSOR-PR42-03) | 1 | `2026-06-04-v1.34-cursor-pr42-stage-status` (FL-E `stage_status` gate bypass via status-only PATCH) |
+| **Total** | **40** | See `metadata.tech_debt_summary.total_open` |
 
 **Closed / historical residuals**
 
 - V1.30 convergence (R5–R20 fixed): [`archived/residuals/v1.30-residual-convergence.json`](../archived/residuals/v1.30-residual-convergence.json)
 - V1.13 forward delivery (R-V113-005 waived, R-V113-007 resolved): [`archived/residuals/2026-05-06-v1.13-oss-forward-delivery.json`](../archived/residuals/2026-05-06-v1.13-oss-forward-delivery.json)
+- V1.33 P1 (4 closed via fix waves): [`archived/residuals/2026-06-04-v1.33-work-model-and-creator-run.json`](../archived/residuals/2026-06-04-v1.33-work-model-and-creator-run.json)
+- V1.32 (R-P2-01/02 closed via V1.34 P0): [`archived/residuals/v1.32-post-qc-tech-debt.json`](../archived/residuals/v1.32-post-qc-tech-debt.json)
+- **V1.34 PR #42 cursor automation** (2 medium resolved in 3b24aaf: R-CURSOR-PR42-01 permission policy bypass; R-CURSOR-PR42-02 FL-E force default): [`archived/residuals/2026-06-04-v1.34-pr-42-cursor-automation.json`](../archived/residuals/2026-06-04-v1.34-pr-42-cursor-automation.json)
 - Cross-cutting accept items (e.g. DEBT-RAND-073): `status.json` → `metadata.tech_debt_summary.cross_cutting`
 
 ---
@@ -162,4 +171,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-04. Status: V1.34 Active; V1.33 latest shipped.*
+*Last updated: 2026-06-05. Status: V1.34 Shipped (2026-06-05); V1.35 Active (TBD); 40 open residuals including 1 new from Cursor PR #42 revalidation (R-CURSOR-PR42-03).*

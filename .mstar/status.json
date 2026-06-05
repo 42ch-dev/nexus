@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-05T05:10:00+08:00",
+  "updated_at": "2026-06-05T16:55:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-work-model-and-creator-run",
@@ -189,17 +189,17 @@
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-05T05:00:00+08:00",
-      "total_open": 39,
+      "updated_at": "2026-06-05T16:55:00+08:00",
+      "total_open": 40,
       "by_severity": {
         "critical": 6,
         "high": 0,
-        "medium": 8,
+        "medium": 9,
         "low": 20,
         "nit": 5
       },
       "by_target": {
-        "unspecified": 39
+        "unspecified": 40
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 4,
@@ -208,7 +208,9 @@
         "2026-06-04-v1.34-agent-tool-implementation": 1,
         "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
         "v1.30-post-qc-tech-debt": 11,
-        "v1.31-post-qc-tech-debt": 8
+        "v1.31-post-qc-tech-debt": 8,
+        "2026-06-04-v1.34-pr-42-cursor-automation": 1,
+        "2026-06-04-v1.34-cursor-pr42-stage-status": 1
       }
     },
     "wave_0_spec": ".mstar/knowledge/specs/creator-workflow-fl-e.md",
@@ -663,6 +665,19 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.34+/P5",
         "note": "P4 unified the registry dispatch table (HostToolExecutor::execute handles both HTTP and worker upcall via dispatch_from_worker adapter) but did NOT wire the actual production caller (nexus-orchestration sending worker/agent_tool_request). Adapter ready, caller TBD."
+      }
+    ],
+    "2026-06-04-v1.34-cursor-pr42-stage-status": [
+      {
+        "id": "R-CURSOR-PR42-03",
+        "title": "FL-E stage_status gate bypass via status-only PATCH — check_stage_advance gated on current_stage.is_some() only",
+        "severity": "medium",
+        "source": "Cursor security automation #351d19c7 (PR #42 revalidation RUN_ID bc-52739238, 2026-06-05) — NEW post-3b24aaf finding",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work_stage: stage_status update path bypasses check_stage_advance when current_stage absent)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.34+",
+        "note": "NEW finding discovered after 3b24aaf merge. check_stage_advance only runs when req.current_stage.is_some(); a PATCH with only {\"stage_status\":\"complete\"} or {\"skipped\"} skips all FL-E gates (creator-workflow-fl-e §3.3 gate 2: current stage must be complete before advance). Attack path: API key holder PATCHes stage_status=complete while schedule still running, then PATCHes current_stage (passes because status was fraudulently complete). Fix: run gate validation (or dedicated status-transition check) whenever stage_status changes to complete/skipped/active; reject direct status promotion unless driven by schedule completion or explicit audited force. Logged post-merge; fix in V1.34+ follow-up."
       }
     ]
   }

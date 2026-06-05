@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from Cursor security automation #351d19c7 on PR #42. Two medium findings addressed in merge commit 3b24aaf (V1.34). 1 finding (R-CURSOR-PR42-03) remains open and is registered in root status.json under '2026-06-04-v1.34-cursor-pr42-stage-status' key.",
+  "archived_at": "2026-06-05T16:55:00+08:00",
+  "plan_id": "2026-06-04-v1.34-pr-42-cursor-automation",
+  "entries": [
+    {
+      "id": "R-CURSOR-PR42-01",
+      "title": "Permission policy bypass for nexus.* tools — load_permission_policy only honored [grant], ignored [deny]/[default]",
+      "severity": "medium",
+      "source": "Cursor security automation #351d19c7 (PR #42 review, 2026-06-04)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs (load_permission_policy + check_nexus_tool_permission Gate 4)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "RESOLVED in 3b24aaf (merge commit). load_permission_policy now loads grant + deny + default; WorkspacePermissionPolicy::evaluate applies grant-before-deny; explicit [deny] blocks tools even with wildcard [grant]. Mirror of PermissionPolicy::evaluate without linking nexus-acp-host.",
+      "tracking": "https://github.com/42ch-dev/nexus/pull/42#issuecomment-cursor-351d19c7",
+      "closed_reason": "resolved_in_merge_3b24aaf",
+      "lifecycle": "resolved",
+      "closure_note": "Permission policy Gate 4 now enforces grant/deny/default with grant-before-deny precedence. Cursor security automation revalidation (RUN_ID bc-52739238, 2026-06-05) marked this finding as resolved.",
+      "closed_at": "2026-06-05",
+      "archived_at": "2026-06-05"
+    },
+    {
+      "id": "R-CURSOR-PR42-02",
+      "title": "FL-E workflow gate bypass via Local API PATCH /v1/local/works/{id} — check_stage_advance always called with force: true",
+      "severity": "medium",
+      "source": "Cursor security automation #351d19c7 (PR #42 review, 2026-06-04)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work_stage → check_stage_advance)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "RESOLVED in 3b24aaf (merge commit). PATCH /v1/local/works/{id} now uses force: false by default; callers must pass {\"force\": true} to skip stage-order gates (equivalent to CLI --force). Tests updated.",
+      "tracking": "https://github.com/42ch-dev/nexus/pull/42#issuecomment-cursor-351d19c7",
+      "closed_reason": "resolved_in_merge_3b24aaf",
+      "lifecycle": "resolved",
+      "closure_note": "Force default flipped to false; PATCH gate now matches CLI --force semantics. Cursor revalidation (RUN_ID bc-52739238, 2026-06-05) marked this finding as resolved.",
+      "closed_at": "2026-06-05",
+      "archived_at": "2026-06-05"
+    }
+  ]
+}
