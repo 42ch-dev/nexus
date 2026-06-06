@@ -150,7 +150,15 @@ impl Capability for ContextSummarize {
     }
 }
 
+/// Default maximum content size passed to the LLM (256 KiB).
+/// TD-V131-04: Content exceeding this limit is truncated with a marker.
+const DEFAULT_MAX_CONTENT_BYTES: usize = 256 * 1024;
+
 /// Build the summarization prompt from content, trace, and template.
+///
+/// TD-V131-04: If `content` exceeds `DEFAULT_MAX_CONTENT_BYTES` (256 KiB),
+/// it is truncated with a `[truncated at N bytes]` marker to prevent
+/// oversized prompts from blowing up context windows or causing timeouts.
 fn build_summary_prompt(content: &str, trace: &str, template: &str) -> String {
     let instructions = if template.is_empty() {
         "Summarize the following content concisely, preserving key entities, relationships, and state."
@@ -158,7 +166,24 @@ fn build_summary_prompt(content: &str, trace: &str, template: &str) -> String {
         template
     };
 
-    let mut prompt = format!("{instructions}\n\n--- Content ---\n{content}");
+    // TD-V131-04: Truncate oversized content to prevent context window overflow.
+    let content_display = if content.len() > DEFAULT_MAX_CONTENT_BYTES {
+        tracing::warn!(
+            original_len = content.len(),
+            max_bytes = DEFAULT_MAX_CONTENT_BYTES,
+            "context.summarize: content exceeds size limit, truncating"
+        );
+        format!(
+            "{}\n\n[truncated at {} bytes — original was {} bytes]",
+            &content[..DEFAULT_MAX_CONTENT_BYTES],
+            DEFAULT_MAX_CONTENT_BYTES,
+            content.len()
+        )
+    } else {
+        content.to_string()
+    };
+
+    let mut prompt = format!("{instructions}\n\n--- Content ---\n{content_display}");
 
     if !trace.is_empty() {
         prompt.push_str("\n\n--- Execution Trace ---\n");
@@ -367,5 +392,27 @@ mod tests {
         let prompt = build_summary_prompt("Content", "", "Focus on characters.");
         assert!(prompt.contains("Focus on characters."));
         assert!(!prompt.contains("Summarize the following"));
+    }
+
+    // ── TD-V131-04: Content truncation at size limit ────────────────────
+
+    #[test]
+    fn build_summary_prompt_truncates_oversized_content() {
+        let oversized = "x".repeat(DEFAULT_MAX_CONTENT_BYTES + 1000);
+        let prompt = build_summary_prompt(&oversized, "", "");
+        assert!(prompt.contains("[truncated at"));
+        assert!(prompt.contains(&format!("{} bytes", DEFAULT_MAX_CONTENT_BYTES)));
+        assert!(prompt.contains(&format!("original was {} bytes", oversized.len())));
+        // The truncated portion should be exactly DEFAULT_MAX_CONTENT_BYTES of 'x'.
+        let truncated_content = &oversized[..DEFAULT_MAX_CONTENT_BYTES];
+        assert!(prompt.contains(truncated_content));
+    }
+
+    #[test]
+    fn build_summary_prompt_no_truncation_under_limit() {
+        let content = "a".repeat(DEFAULT_MAX_CONTENT_BYTES - 1);
+        let prompt = build_summary_prompt(&content, "", "");
+        assert!(!prompt.contains("[truncated at"));
+        assert!(prompt.contains(&content));
     }
 }
