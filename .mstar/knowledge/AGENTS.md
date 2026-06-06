@@ -6,7 +6,7 @@ Harness knowledge directory for the Nexus OSS repo.
 
 | Subtree | Path | Use for |
 | --- | --- | --- |
-| **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon runtime, ACP, orchestration, sync feature contracts (flat under `specs/`) |
+| **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon runtime, ACP, orchestration, sync feature contracts (flat under `specs/`). Decision rules: [`specs/AGENTS.md`](specs/AGENTS.md). |
 | **Knowledge (root)** | This directory (files directly under `knowledge/`, not under `specs/`) | **Rules and reference**: dependency conventions, schema↔platform boundary, cross-version trackers, maintenance indexes |
 
 **Not here:** iteration compasses → [`.mstar/iterations/`](../iterations/README.md). End-user docs → `docs/`.
