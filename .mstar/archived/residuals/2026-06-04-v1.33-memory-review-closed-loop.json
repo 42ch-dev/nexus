@@ -17,7 +17,10 @@
       "closed_reason": "resolved_in_v1.33_p4_fix_wave",
       "closure_evidence": "commit 26dc124 on feature/v1.33-work-experience-loop integration; nexus_home::read_active_creator_id gate at handler entry.",
       "closed_at": "2026-06-04T16:00:00+08:00",
-      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit 26dc124 on feature/v1.33-work-experience-loop integration; nexus_home::read_active_creator_id gate at handler entry.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     },
     {
       "id": "R-V133P4-02",
@@ -32,7 +35,10 @@
       "closed_reason": "resolved_in_v1.33_p4_fix_wave",
       "closure_evidence": "commit 26dc124 adds memory_review_fragments_api.rs tests; hermetic setup matches works_api.rs pattern.",
       "closed_at": "2026-06-04T16:00:00+08:00",
-      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit 26dc124 adds memory_review_fragments_api.rs tests; hermetic setup matches works_api.rs pattern.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     },
     {
       "id": "R-V133P4-03",
@@ -47,7 +53,10 @@
       "closed_reason": "resolved_in_v1.33_p4_fix_wave_2",
       "closure_evidence": "commits 026972d + 4455f09 on feature/v1.33-work-experience-loop; QA recheck 6b09fd6 verified completeness.",
       "closed_at": "2026-06-04T16:30:00+08:00",
-      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commits 026972d + 4455f09 on feature/v1.33-work-experience-loop; QA recheck 6b09fd6 verified completeness.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     },
     {
       "id": "R-V133P4-07",
@@ -62,7 +71,10 @@
       "closed_reason": "resolved_in_v1.33_p4_fix_wave_2",
       "closure_evidence": "commit fb390c2 on feature/v1.33-work-experience-loop; qc1-wave2 caught the gap and reported it; P4 implementer applied same fix to all 4 handlers.",
       "closed_at": "2026-06-04T16:00:00+08:00",
-      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit fb390c2 on feature/v1.33-work-experience-loop; qc1-wave2 caught the gap and reported it; P4 implementer applied same fix to all 4 handlers.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     }
   ]
 }

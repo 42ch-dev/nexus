@@ -592,7 +592,6 @@
         "target_date": "V1.36",
         "note": "V1.35 P0 assessed: adapter exists, but production wiring requires IPC-layer changes (IpcClient notification handling, WorkerHandleProvider trait extension, worker-side tool request forwarding). Non-surgical across 3+ crates — deferred to V1.36. V1.35 ships dispatch_from_worker adapter + tests only."
       }
-    ],
-    "2026-06-04-v1.34-cursor-pr42-stage-status": []
+    ]
   }
 }

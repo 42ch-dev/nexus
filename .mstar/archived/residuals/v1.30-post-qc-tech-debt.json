@@ -16,7 +16,10 @@
       "tracking": null,
       "closed_reason": "resolved_in_v1.35_p0",
       "closure_evidence": "commit aafe1f8 on feature/v1.35-critical-residual-convergence; tracing error log added to cleanup_row; clippy clean.",
-      "closed_at": "2026-06-07T12:00:00+08:00"
+      "closed_at": "2026-06-07T12:00:00+08:00",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit aafe1f8 on feature/v1.35-critical-residual-convergence; tracing error log added to cleanup_row; clippy clean.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     },
     {
       "id": "TD-V130-06",
@@ -30,7 +33,10 @@
       "tracking": null,
       "closed_reason": "resolved_in_v1.35_p0",
       "closure_evidence": "commit aafe1f8 on feature/v1.35-critical-residual-convergence; kb_extract_job tests cover queued→running transition and reject done/failed.",
-      "closed_at": "2026-06-07T12:00:00+08:00"
+      "closed_at": "2026-06-07T12:00:00+08:00",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit aafe1f8 on feature/v1.35-critical-residual-convergence; kb_extract_job tests cover queued→running transition and reject done/failed.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     }
   ]
 }

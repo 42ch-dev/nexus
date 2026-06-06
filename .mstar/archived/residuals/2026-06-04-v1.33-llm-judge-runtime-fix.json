@@ -17,7 +17,10 @@
       "closed_reason": "resolved_in_v1.33_p3_fix_wave",
       "closure_evidence": "commit d271115 on feature/v1.33-work-experience-loop integration; unit tests in nexus-orchestration testsuite cover go/nogo/hybrid inputs.",
       "closed_at": "2026-06-04T12:00:00+08:00",
-      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit d271115 on feature/v1.33-work-experience-loop integration; unit tests in nexus-orchestration testsuite cover go/nogo/hybrid inputs.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     },
     {
       "id": "R-V133P3-02",
@@ -32,7 +35,10 @@
       "closed_reason": "resolved_in_v1.33_p3_fix_wave",
       "closure_evidence": "commit c604a2d on feature/v1.33-work-experience-loop; presets novel-writing, reflection-loop, research updated.",
       "closed_at": "2026-06-04T12:00:00+08:00",
-      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit c604a2d on feature/v1.33-work-experience-loop; presets novel-writing, reflection-loop, research updated.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     }
   ]
 }
