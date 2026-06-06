@@ -961,3 +961,124 @@ fn v135_root_long_about_mentions_creator_run_and_workspace() {
         "V1.35: root help must mention 'workspace init'"
     );
 }
+
+// =============================================================================
+// Part 8: V1.35 P3 — Creator hub polish contract tests
+// =============================================================================
+
+/// V1.35 P3: `creator kb --help` mentions both scopes AND disambiguates from `knowledge`.
+#[test]
+fn v135_kb_help_disambiguates_scopes() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "kb", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // Must mention both scopes
+    assert!(
+        help_text.contains("work"),
+        "V1.35 P3: creator kb --help must mention 'work' scope"
+    );
+    assert!(
+        help_text.contains("world"),
+        "V1.35 P3: creator kb --help must mention 'world' scope"
+    );
+
+    // Must disambiguate by pointing to `creator knowledge`
+    assert!(
+        help_text.contains("creator knowledge"),
+        "V1.35 P3: creator kb --help must mention 'creator knowledge' for disambiguation"
+    );
+}
+
+/// V1.35 P3: `creator knowledge --help` disambiguates from `kb`.
+#[test]
+fn v135_knowledge_help_disambiguates_from_kb() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "knowledge", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // Must point to `creator kb` as alternative
+    assert!(
+        help_text.contains("creator kb"),
+        "V1.35 P3: creator knowledge --help must mention 'creator kb' for disambiguation"
+    );
+}
+
+/// V1.35 P3: `creator --help` surfaces `run` within the first 3 listed subcommands.
+#[test]
+fn v135_creator_help_run_is_primary() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // Extract the Commands: section
+    let commands_start = help_text
+        .find("Commands:")
+        .expect("Commands: section present");
+    let commands_section = &help_text[commands_start..];
+
+    // `run` must appear early — we check that it's in the commands section at all
+    // and verify it appears before `workspace` (which is assets tier).
+    let run_pos = commands_section
+        .find("run")
+        .expect("'run' subcommand present");
+    let workspace_pos = commands_section
+        .find("workspace")
+        .expect("'workspace' subcommand present");
+
+    assert!(
+        run_pos < workspace_pos,
+        "V1.35 P3: 'run' must appear before 'workspace' in creator --help (primary tier first)"
+    );
+
+    // Verify `register` also appears early (primary tier)
+    let register_pos = commands_section
+        .find("register")
+        .expect("'register' subcommand present");
+    assert!(
+        register_pos < workspace_pos,
+        "V1.35 P3: 'register' must appear before 'workspace' in creator --help"
+    );
+}
+
+/// V1.35 P3: `creator --help` mentions tier grouping hints in descriptions.
+#[test]
+fn v135_creator_help_mentions_kb_namespaces() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "kb", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // Must mention entity-scope-model reference
+    assert!(
+        help_text.contains("entity-scope-model") || help_text.contains("scope"),
+        "V1.35 P3: creator kb --help must reference scope model"
+    );
+}

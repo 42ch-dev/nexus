@@ -27,10 +27,17 @@ pub enum KbScope {
     World,
 }
 
-/// Knowledge base subcommands (local work-scope file index).
+/// Knowledge base subcommands.
+///
+/// Two scopes via `--scope`:
+///   • `work` (default) — local workspace file index under `kb/`
+///   • `world` — narrative KB key blocks (requires `--world-id`)
+///
+/// For User-scoped global knowledge entries, use `creator knowledge` instead.
+/// For reference sources, use `creator reference`.
 #[derive(Debug, clap::Subcommand)]
 pub enum KbCommand {
-    /// List local work-scope knowledge entries
+    /// List entries (work-scope file index by default; use --scope world for key blocks)
     List {
         /// Scope: `work` (local file index, default) or `world` (narrative KB)
         #[arg(long, value_enum, default_value_t = KbScope::default())]

@@ -1,7 +1,12 @@
-//! Creator Command Module
+//! Creator Command Module — the creative hub for Nexus CLI
 //!
-//! Creator is a V1.0 first-class citizen (roadmap §3.1.1, §3.1.2).
-//! Subcommands: register, status, use, list, pair, unpair, credentials rotate, workspace.
+//! `creator` is the primary entry for agent identity, Work lifecycle, and local assets.
+//! Per cli-command-ia.md §3.1, subcommands are organized in tiers:
+//!
+//! - **Primary**: `run`, `register`, `use`, `list`
+//! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `knowledge`, `reference`, `world`
+//! - **Platform bridge**: `status`, `pair`, `unpair`, `credentials`
+//! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod kb;
 pub mod knowledge;
@@ -433,8 +438,19 @@ fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
+    // ── Primary tier (first-run and daily use) ──────────────────────
+    /// Work lifecycle — start, continue, list, and inspect Works
+    ///
+    /// Primary entry for creative Work. Start a new Work with an idea,
+    /// continue an existing Work with new direction, or inspect progress.
+    Run {
+        #[command(subcommand)]
+        command: run::RunCommand,
+    },
+
     /// Register a new Creator entity
     ///
+    /// Creates a Creator identity on the platform and stores credentials locally.
     /// Usage: nexus42 creator register --name "My Agent" [--source `cli|web_agent`] [--handle <handle>]
     Register {
         /// Display name for the Creator (required)
@@ -448,65 +464,60 @@ pub enum CreatorCommand {
         handle: Option<String>,
     },
 
-    /// Show current Creator status
-    Status {
-        /// Specific creator ID to check (default: active creator)
-        creator_id: Option<String>,
-    },
-
-    /// Switch the active Creator
+    /// Switch the active Creator identity
     ///
+    /// All subsequent `creator *` commands bind to the active creator.
     /// Positional `<creator_ref>` is accepted for convenience.
-    /// A future version may require `--creator-id <id>` flag syntax.
     Use {
         /// Creator ID or display name (positional; may become a flag in a future version)
         creator_ref: String,
     },
 
-    /// List all registered Creators
+    /// List all registered Creator identities
     List,
 
-    /// Initiate pairing flow with a Creator
-    ///
-    /// Positional `<creator_id>` is accepted for convenience.
-    /// A future version may require `--creator-id <id>` flag syntax.
-    Pair {
-        /// Creator ID to pair (positional; may become a flag in a future version)
-        creator_id: String,
-    },
-
-    /// Remove pairing with a Creator
-    ///
-    /// Positional `<creator_id>` is accepted for convenience.
-    /// A future version may require `--creator-id <id>` flag syntax.
-    Unpair {
-        /// Creator ID to unpair (positional; may become a flag in a future version)
-        creator_id: String,
-    },
-
-    /// Rotate Creator API credentials
-    #[command(name = "credentials")]
-    Credentials {
-        #[command(subcommand)]
-        action: CredentialsAction,
-    },
-
+    // ── Assets tier (scoped knowledge and narrative) ────────────────
     /// Operational workspace slugs for the active creator (local ADR-014 tree)
     Workspace {
         #[command(subcommand)]
         command: CreatorWorkspaceCommand,
     },
 
-    /// SOUL management
+    /// SOUL management (creator personality and behavior configuration)
     Soul {
         #[command(subcommand)]
         command: SoulCommand,
     },
 
-    /// Long-term memory management
+    /// Long-term memory management (creator-scoped episodic memory)
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
+    },
+
+    /// Work-scope file index and World KB key blocks
+    ///
+    /// Manages TWO knowledge scopes:
+    ///   • `--scope work` (default): local workspace file index — per-creator,
+    ///     per-workspace documents stored under `kb/`. NOT the World narrative KB.
+    ///   • `--scope world`: narrative KB key blocks (nexus-kb + nexus-narrative),
+    ///     requires `--world-id`.
+    ///
+    /// For User-scoped global knowledge, use `creator knowledge` instead.
+    /// See entity-scope-model §5.3–5.4 for the three KB namespaces.
+    Kb {
+        #[command(subcommand)]
+        command: KbCommand,
+    },
+
+    /// User-scoped global knowledge entries (add, list, search)
+    ///
+    /// Stores unstructured knowledge entries scoped to the User (not Creator).
+    /// For Work-scope file index or World narrative KB, use `creator kb` instead.
+    /// See entity-scope-model §5.3–5.4 for the three KB namespaces.
+    Knowledge {
+        #[command(subcommand)]
+        command: knowledge::KnowledgeCommand,
     },
 
     /// Reference source management (V1.26 reference store)
@@ -515,36 +526,42 @@ pub enum CreatorCommand {
         command: reference::ReferenceCommand,
     },
 
-    /// Local work-scope knowledge assets (file index; default --scope work).
-    ///
-    /// **This is the CLI local work KB index**, NOT `nexus-kb` (World KB) or
-    /// `nexus-knowledge` (User knowledge). See entity-scope-model §5.3.
-    ///
-    /// `--scope world` reads and writes are implemented (narrative KB via nexus-kb + nexus-narrative).
-    Kb {
-        #[command(subcommand)]
-        command: KbCommand,
-    },
-
-    /// Narrative world management (create worlds, add events, list)
+    /// Narrative world management (create worlds, add events, list timelines)
     World {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
 
-    /// User-scoped knowledge management (add, list, search)
-    Knowledge {
-        #[command(subcommand)]
-        command: knowledge::KnowledgeCommand,
+    // ── Platform bridge tier (optional; requires User login) ────────
+    /// Show current Creator status and authentication state
+    Status {
+        /// Specific creator ID to check (default: active creator)
+        creator_id: Option<String>,
     },
 
-    /// Work lifecycle — start, continue, list, and inspect Works (V1.33)
-    Run {
-        #[command(subcommand)]
-        command: run::RunCommand,
+    /// Initiate pairing flow with a Creator (requires platform User login)
+    ///
+    /// Positional `<creator_id>` is accepted for convenience.
+    Pair {
+        /// Creator ID to pair (positional; may become a flag in a future version)
+        creator_id: String,
     },
 
-    /// Seed demo data: creates a demo world, event, KB block, and knowledge entry.
+    /// Remove pairing with a Creator (requires platform User login)
+    Unpair {
+        /// Creator ID to unpair (positional; may become a flag in a future version)
+        creator_id: String,
+    },
+
+    /// Rotate Creator API credentials (requires platform User login)
+    #[command(name = "credentials")]
+    Credentials {
+        #[command(subcommand)]
+        action: CredentialsAction,
+    },
+
+    // ── Maintenance tier ────────────────────────────────────────────
+    /// Seed demo data: creates a demo world, event, KB block, and knowledge entry
     ///
     /// Idempotent by default — skips if demo world already exists.
     /// Use --force to recreate (deletes existing demo data first).
