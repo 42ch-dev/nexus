@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.35 Active** · Latest shipped: **V1.34** · Latest active compass: [v1.35-cli-ia-and-product-polish](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47/DF-53 partial** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 40)
+**Quick status**: **V1.35 Active** · Latest shipped: **V1.34** · Latest active compass: [v1.35-cli-ia-and-product-polish](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47/DF-53 partial** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 40)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
@@ -54,7 +54,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
 | FL-D | **Preset orchestration** (Agentic Design Patterns) | Post-V1.34 | V1.31–32 shipped capabilities + quality gate; **still open**: DF-29, DF-31, **conditional routing** (DF-56; OUT of V1.34) |
-| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | **V1.34** | **Shipped in V1.34** — [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) (Status: Shipped V1.34) + compass [v1.34](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md). FL-E closed in V1.34 with 5 plan P0–P5; minimal preset chain (research → produce → review → persist) + Work `stage`/`stage_status` + linear gates + active schedule uniqueness (P1) + preset chain wiring (P2). `--auto-chain` default still DF-53. |
+| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | **V1.34** | **Shipped in V1.34** — [creator-workflow.md](specs/creator-workflow.md) (Status: Shipped V1.34) + compass [v1.34](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md). FL-E closed in V1.34 with 5 plan P0–P5; minimal preset chain (research → produce → review → persist) + Work `stage`/`stage_status` + linear gates + active schedule uniqueness (P1) + preset chain wiring (P2). `--auto-chain` default still DF-53. |
 
 ### 3.3 Open features (deferred from compass "Out" or audit)
 
@@ -80,7 +80,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.35 P4** (partial) | S | V1.34→V1.35 | V1.34 explicit `stage advance`; P4 partial UX polish + optional `run next` |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
-| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md). |
+| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing.md](specs/preset-conditional-routing.md). |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -163,7 +163,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 - Shipped history archive: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
 - Done plans index: [archived/plans-done.json](../archived/plans-done.json)
-- CLI IA (V1.35): [specs/cli-command-ia.md](specs/cli-command-ia.md), [specs/creator-centric-entry-model.md](specs/creator-centric-entry-model.md), [specs/preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md); audit evidence in [v1.35 compass Appendix A](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135)
+- CLI IA (V1.35): [specs/cli-command-ia.md](specs/cli-command-ia.md), [specs/creator-centric-entry-model.md](specs/creator-centric-entry-model.md), [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md); audit evidence in [v1.35 compass Appendix A](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135)
 - Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Iteration index: [iterations/README.md](../iterations/README.md)

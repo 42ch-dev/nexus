@@ -10,7 +10,7 @@
 - [agent-host.md](agent-host.md) — Managed-only host, mediation invariants
 - [orchestration-engine.md](orchestration-engine.md) — `worker/agent_tool_request` IPC
 - [local-runtime-boundary.md](local-runtime-boundary.md) — CLI vs daemon vs Agent topology
-- [creator-workflow-fl-e.md](creator-workflow-fl-e.md) — FL-E stages; Work read/patch tools
+- [creator-workflow.md](creator-workflow.md) — FL-E stages; Work read/patch tools
 
 **Iteration compass**: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md)
 
@@ -123,7 +123,7 @@ Allowed patch fields:
 
 Rejected examples:
 
-- `current_stage`, `stage`, `stage_status`, `stage_started_at`, or `stage_completed_at` — direct stage mutation is forbidden; use the stage-advance Local API / CLI path defined by [creator-workflow-fl-e.md](creator-workflow-fl-e.md).
+- `current_stage`, `stage`, `stage_status`, `stage_started_at`, or `stage_completed_at` — direct stage mutation is forbidden; use the stage-advance Local API / CLI path defined by [creator-workflow.md](creator-workflow.md).
 - `creator_id`, `workspace_id`, `work_id`, or ownership fields — cross-creator reassignment is forbidden.
 - `run_intents`, schedule rows, preset ids, or capability grants — preset routing remains under orchestration policy, not an agent patch.
 - Manuscript/body replacement fields outside the `inspiration_log` append surface — full content persistence remains outside P3/P4 minimal tool scope.

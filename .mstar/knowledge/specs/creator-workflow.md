@@ -1,9 +1,9 @@
-# Generic Creator Workflow (FL-E) — Normative Specification v1
+# Creator Workflow — Normative Specification
 
 **Status**: Shipped (V1.34 — 2026-06-05)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
-**Scope**: **FL-E** product line — stage-complete creator journey on **Work**, built on V1.33 `creator run` + `run_intents`  
+**Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  
 **Coordinates with**:
 
 - [work-experience-model.md](work-experience-model.md) — Work entity, intake, run_intents
@@ -17,26 +17,26 @@
 
 ## 1. Purpose
 
-V1.33 delivered a **narrative Work loop** centered on Creative Brief Intake and `novel-writing`. FL-E generalizes the journey to:
+The Work loop shipped in V1.33 centered on Creative Brief Intake and `novel-writing`. This spec generalizes the journey to:
 
 ```text
 intake → research → produce → review → persist
 ```
 
-without introducing a second scheduler or replacing World/KB SSOT. Stages are **explicit** (user or script advances); default auto-chaining is **out of scope** for V1.34 (see DF-53).
+without introducing a second scheduler or replacing World/KB SSOT. Stages are **explicit** (user or script advances); default auto-chaining remains deferred (DF-53).
 
 ---
 
-## 2. Relationship to V1.33 Work
+## 2. Relationship to Work model
 
-| Concept | V1.33 | FL-E (V1.34) |
+| Concept | Work model (V1.33) | Staged workflow (this spec) |
 | --- | --- | --- |
 | Work container | Shipped | Extended with `stage`, `stage_status` |
 | Entry | `creator run start` | Unchanged; intake still `work_init` |
 | Continue inspiration | `creator run continue --note` | Unchanged |
 | Stage progression | N/A | **`creator run stage advance --stage <id>`** |
 | Primary produce preset | `novel-writing` | Default for `produce` stage |
-| Generic workflow | Deferred (tracker FL-E) | **In scope V1.34** |
+| Generic multi-stage workflow | Deferred | **Shipped V1.34** |
 
 **Invariants** (unchanged from work-experience-model):
 
@@ -46,13 +46,13 @@ without introducing a second scheduler or replacing World/KB SSOT. Stages are **
 
 **New invariant (V1.34)**:
 
-4. At most one **active FL-E stage schedule** per Work at a time (no parallel `research` + `novel-writing` stage drivers).
+4. At most one **active stage schedule** per Work at a time (no parallel `research` + `novel-writing` stage drivers).
 
 ---
 
 ## 3. Stage model
 
-### 3.1 Stage identifiers (closed enum v1)
+### 3.1 Stage identifiers (closed enum)
 
 | `stage` | Meaning | Typical preset(s) | `run_intents` |
 | --- | --- | --- | --- |
@@ -102,7 +102,7 @@ creator run status <work_id>    # includes current_stage + stage_status
 | `research` | `research` | May append references to Work context |
 | `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log` |
 | `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
-| `persist` | `kb-extract` (via queue) + CLI memory review | No new persist-only preset required V1.34 |
+| `persist` | `kb-extract` (via queue) + CLI memory review | No dedicated persist-only preset required |
 
 P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 
@@ -130,11 +130,11 @@ creator kb queue-extract  # when applicable
 creator run continue <work_id> --note "new angle"
 ```
 
-Does **not** advance `current_stage`; merges into `inspiration_log` and schedule `core_context` per V1.33.
+Does **not** advance `current_stage`; merges into `inspiration_log` and schedule `core_context` per Work model.
 
 ### 5.3 Power user
 
-`daemon schedule` remains valid; schedules created via `creator run` / stage advance **must** record `work_id` and `fl_e_stage` in schedule metadata.
+`daemon schedule` remains valid; schedules created via `creator run` / stage advance **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
 
 ---
 
@@ -144,9 +144,9 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 | --- | --- |
 | Work vs `creator kb --scope work` | Index entries may tag `work_id`; index does not define Work |
 | Agent tools vs presets | Agent may read/patch Work via `nexus.work.*`; production presets still run via orchestration |
-| Conditional routing | **Not** used for stage selection (DF-56 / FL-D) |
-| `--auto-chain` | Deferred DF-53; V1.34 requires explicit `stage advance` |
-| Platform cloud assemble | Not part of FL-E; see agent-nexus-tool-bridge `policy_blocked` |
+| Conditional routing | **Not** used for stage selection (DF-56) |
+| `--auto-chain` | Deferred DF-53; explicit `stage advance` required |
+| Platform cloud assemble | Not part of this workflow; see agent-nexus-tool-bridge `policy_blocked` |
 
 ---
 
@@ -154,9 +154,9 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 
 1. Stage enum and preset mapping are stable in cli-spec and this document.
 2. `creator run stage advance` rejects wrong stage order without `--force`.
-3. Demo path in compass §4 is achievable on integration branch.
+3. Demo path in V1.34 compass §4 is achievable on integration branch.
 4. No contradiction with [work-experience-model.md](work-experience-model.md) §3–7.
 
 ---
 
-*Normative FL-E model for V1.34. Implementation: plans P1–P2 under `.mstar/plans/2026-06-04-v1.34-*`.*
+*Normative staged creator workflow. Shipped V1.34 via `.mstar/plans/2026-06-04-v1.34-*`.*

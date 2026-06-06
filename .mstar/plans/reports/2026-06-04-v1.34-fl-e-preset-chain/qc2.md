@@ -39,7 +39,7 @@ generated_at: "2026-06-05"
   - `cargo test -p nexus-orchestration --test fl_e_chain_demo 2>&1 | tail -15` → 11 tests passed (see evidence below)
   - `cargo test -p nexus-orchestration --lib preset_for_stage 2>&1 | tail -10` → unit tests for T1/T2 helpers passed
   - `cargo clippy -p nexus-orchestration -- -D warnings 2>&1 | tail -5` → clean (Finished dev profile)
-  - Multiple `read` + `grep` on stage_gates.rs, run.rs, contracts http.rs, daemon works.rs + schedules.rs, local-db migration, spec creator-workflow-fl-e.md §4, plan, qc1.md (for context only)
+  - Multiple `read` + `grep` on stage_gates.rs, run.rs, contracts http.rs, daemon works.rs + schedules.rs, local-db migration, spec creator-workflow.md §4, plan, qc1.md (for context only)
   - `ls .mstar/plans/reports/2026-06-04-v1.34-fl-e-preset-chain/`
 
 ## Findings

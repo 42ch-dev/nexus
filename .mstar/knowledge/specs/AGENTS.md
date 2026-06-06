@@ -22,7 +22,7 @@ Every spec declares **`Document class`** in its header (with **`Status`**).
 | --- | --- | --- |
 | **Master** | Long-lived SSOT for a subsystem or surface (CLI detail, engine, runtime) | Yes, when Status is normative/shipped |
 | **Draft overlay** | Iteration-scoped revision of part of a Master; avoids editing Master mid-flight | Only while active compass + Status: Draft |
-| **Feature line** | Shipped product line (Work loop, FL-E, tool bridge) | Yes |
+| **Feature line** | Shipped product line (Work loop, creator workflow, tool bridge) | Yes |
 | **Exploration** | Future product line or engine capability pre-compass | **No** |
 | **Companion** | OSS notes for a platform ADR or narrow module contract | Yes for OSS scope only |
 | **Legacy scope** | Frozen subdomain still cited; do not expand | Yes for cited scope only |
@@ -92,7 +92,7 @@ After any retire: fix links, update README, never leave duplicate normative para
 ## Naming
 
 - Pattern: `<domain>-<qualifier>.md` or `<product-line>-<feature>.md`
-- Product line codes (**FL-E**, **FL-D**) belong in **body text**, not necessarily filenames
+- Product line codes (**FL-E**, **FL-D**, etc.) belong in **body text** or deferred tracker — **never** in spec filenames or document titles
 - Never encode iteration version in filename (`*-v1.35.md`)
 
 ---

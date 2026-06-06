@@ -1,15 +1,14 @@
-# Preset Conditional Routing (FL-D) — Specification
+# Preset Conditional Routing — Specification
 
 **Status**: Exploration (pre-normative — **not shipped**)  
 **Document class**: Exploration  
 **Created**: 2026-06-06  
-**Product line**: FL-D (Preset orchestration / Agentic Design Patterns)  
-**Tracker**: DF-56 (Conditional routing / branching engine)  
+**Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
 **Coordinates with**:
 
-- [orchestration-engine.md](orchestration-engine.md) §7.5 — current linear-only contract; this doc is the future normative target when FL-D ships
-- [creator-workflow-fl-e.md](creator-workflow-fl-e.md) — linear FL-E stages (shipped V1.34); conditional routing layers beneath, does not replace FL-E enum in first FL-D slice
+- [orchestration-engine.md](orchestration-engine.md) §7.5 — current linear-only contract; this doc is the future normative target when conditional routing ships
+- [creator-workflow.md](creator-workflow.md) — linear creator workflow stages (shipped V1.34); conditional routing layers beneath, does not replace FL-E enum in the first ship slice
 - [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md) — DF-56, DF-29, DF-31
 
 **Historical note**: V1.35 Prepare captured exploration in `archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md`. This file is the long-term SSOT.
@@ -23,7 +22,7 @@ Authors need presets that branch on runtime signals (judge outcome, tool result,
 Today:
 
 - Preset loader rejects `next.kind: conditional` with `ConditionalNotYetSupported`.
-- FL-E ships linear stage enum + explicit `creator run stage advance` (DF-53 auto-chain still open).
+- Shipped creator workflow uses linear stage enum + explicit `creator run stage advance` (DF-53 auto-chain still open).
 - V1.32 validator catches invalid preset graphs at load time for **linear** graphs only.
 
 This spec holds **design axes and dependencies** until a future locked compass authorizes implement. It does **not** authorize code changes while Status remains Exploration.
@@ -35,7 +34,7 @@ This spec holds **design axes and dependencies** until a future locked compass a
 | Area | State |
 | --- | --- |
 | Preset loader | Rejects `next.kind: conditional` → `ConditionalNotYetSupported` |
-| FL-E stages | Linear enum; explicit `creator run stage advance` |
+| Creator workflow stages | Linear enum; explicit `creator run stage advance` |
 | Quality gate | V1.32 validator: reachability, terminal consistency, asset sandbox (linear graphs) |
 | Open deferrals | DF-29 (`registry.refresh`), DF-31 (`workspace.*`), **DF-56** (routing engine) |
 
@@ -68,7 +67,7 @@ next:
 | --- | --- | --- |
 | Graph model | DAG with conditional edges vs FSM vs stage hooks | Defer — needs product + security review |
 | User visibility | Hidden in preset vs exposed `creator run branch` | Prefer hidden first; CLI surface later |
-| Interaction with FL-E | Replace stage enum vs layer beneath stages | **Layer beneath** — do not break V1.34 linear FL-E spec |
+| Interaction with linear stages | Replace stage enum vs layer beneath stages | **Layer beneath** — do not break V1.34 linear creator-workflow spec |
 | Agent tools | Agent chooses branch vs engine chooses | **Engine chooses** |
 | Validation | Extend V1.32 validator (reachability + cycle detection on conditional edges) | Required before any ship |
 
@@ -93,7 +92,7 @@ next:
 | CLI | Optional; prefer preset-driven first |
 | QA | Validator + hermetic e2e branch coverage |
 
-**Target timing:** Post-V1.35 (tentative V1.36+ or dedicated FL-D slice). V1.35 compass explicitly **OUT** for implement — see [v1.35 compass Appendix B](../../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-b-v135-fl-d-scope-lock).
+**Target timing:** Post-V1.35. V1.35 compass explicitly **OUT** for implement — see [v1.35 compass Appendix B](../../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-b-v135-fl-d-scope-lock).
 
 ---
 
@@ -104,13 +103,13 @@ next:
 | V1.35 | No engine or loader code for conditional routing |
 | DF-56 | No tracker closure until implement compass locks |
 | DF-53 | `--auto-chain` / `creator run next` semantics remain separate track (V1.35 P4 partial) |
-| FL-E replacement | First FL-D slice must not break shipped linear FL-E contract |
+| Linear workflow replacement | First conditional-routing slice must not break shipped linear creator-workflow contract |
 
 ---
 
 ## 8. References
 
-- PD-08: Preset orchestration + Agentic Design Patterns
+- PD-08: Preset orchestration + Agentic Design Patterns (deferred tracker product line)
 - [v1.31-agentic-design-patterns-delivery-compass-v1.md](../../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
 - [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) §1.2 OUT: conditional routing
 - External: https://github.com/evoiz/Agentic-Design-Patterns
@@ -121,10 +120,10 @@ next:
 
 | Event | Action |
 | --- | --- |
-| FL-D compass locks implement | Status → Draft; open implement plan; extend orchestration-engine §7.5 |
+| Implement compass locks | Status → Draft; open implement plan; extend orchestration-engine §7.5 |
 | First preset with conditional edges ships | Status → Normative; close DF-56 in deferred tracker |
-| Conflict with active FL-E linear spec | FL-E wins until ADR + compass explicitly supersedes |
+| Conflict with active linear creator-workflow spec | Linear workflow spec wins until ADR + compass explicitly supersedes |
 
 ---
 
-*Exploration SSOT for FL-D / DF-56. Delivery authority remains a future locked compass.*
+*Exploration SSOT for preset conditional routing (DF-56). Delivery authority remains a future locked compass.*

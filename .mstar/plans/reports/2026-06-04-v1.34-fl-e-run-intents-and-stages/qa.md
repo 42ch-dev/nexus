@@ -123,7 +123,7 @@ Line 176: "status": "InReview"
 Line 178: "working_branch": "feature/v1.34-fl-e-run-intents-and-stages"
 Line 179: "merge_target": "feature/v1.34-creator-workflow-and-agent-tools"
 Line 181: "iteration_compass": ".mstar/iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md"
-Line 182: "primary_spec": ".mstar/knowledge/specs/creator-workflow-fl-e.md"
+Line 182: "primary_spec": ".mstar/knowledge/specs/creator-workflow.md"
 Line 187-196: fix_wave_2_commits contains c3834ce, e80db53, bcf3563, f7f0b59, 991e2f8, 34fda67, 03dbfa5, 6cd1409
 Line 197-200: qc_reports list qc1/qc2/qc3 re-review verdicts
 ```

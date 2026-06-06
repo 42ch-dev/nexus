@@ -1,4 +1,4 @@
-//! Shared FL-E stage gate validation and schedule wiring (V1.34 creator-workflow-fl-e §3–4).
+//! Shared FL-E stage gate validation and schedule wiring (V1.34 creator-workflow §3–4).
 //!
 //! Provides:
 //! - `check_stage_advance` — the single authoritative gate function

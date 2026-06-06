@@ -244,9 +244,9 @@ Closed loop requires daemon routes for review + fragments (P4).
 
 ---
 
-## 10. Generic creator workflow (FL-E) — V1.34
+## 10. Generic creator workflow — V1.34
 
-**Normative SSOT**: [creator-workflow-fl-e.md](creator-workflow-fl-e.md) (stages, preset chain, stage advance).
+**Normative SSOT**: [creator-workflow.md](creator-workflow.md) (stages, preset chain, stage advance).
 
 V1.34 extends Work with:
 

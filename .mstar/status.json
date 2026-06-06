@@ -302,8 +302,8 @@
       ".mstar/knowledge/specs/creator-centric-entry-model.md",
       ".mstar/knowledge/specs/cli-spec.md",
       ".mstar/knowledge/specs/work-experience-model.md",
-      ".mstar/knowledge/specs/creator-workflow-fl-e.md",
-      ".mstar/knowledge/specs/preset-conditional-routing-fl-d.md"
+      ".mstar/knowledge/specs/creator-workflow.md",
+      ".mstar/knowledge/specs/preset-conditional-routing.md"
     ],
     "iteration_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md"
   },
@@ -761,7 +761,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.34+",
-        "note": "NEW finding discovered after 3b24aaf merge. check_stage_advance only runs when req.current_stage.is_some(); a PATCH with only {\"stage_status\":\"complete\"} or {\"skipped\"} skips all FL-E gates (creator-workflow-fl-e §3.3 gate 2: current stage must be complete before advance). Attack path: API key holder PATCHes stage_status=complete while schedule still running, then PATCHes current_stage (passes because status was fraudulently complete). Fix: run gate validation (or dedicated status-transition check) whenever stage_status changes to complete/skipped/active; reject direct status promotion unless driven by schedule completion or explicit audited force. Logged post-merge; fix in V1.34+ follow-up."
+        "note": "NEW finding discovered after 3b24aaf merge. check_stage_advance only runs when req.current_stage.is_some(); a PATCH with only {\"stage_status\":\"complete\"} or {\"skipped\"} skips all FL-E gates (creator-workflow §3.3 gate 2: current stage must be complete before advance). Attack path: API key holder PATCHes stage_status=complete while schedule still running, then PATCHes current_stage (passes because status was fraudulently complete). Fix: run gate validation (or dedicated status-transition check) whenever stage_status changes to complete/skipped/active; reject direct status promotion unless driven by schedule completion or explicit audited force. Logged post-merge; fix in V1.34+ follow-up."
       }
     ]
   }

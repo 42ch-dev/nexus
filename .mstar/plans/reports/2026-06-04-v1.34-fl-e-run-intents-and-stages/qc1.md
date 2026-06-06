@@ -38,13 +38,13 @@ generated_at: "2026-06-05"
 - **F-QC1-001 — `creator run stage advance` does not create the required FL-E stage schedule and has no active-schedule invariant protection.**  
   Machine severity: `critical`.  
   The P1 implementation only patches `current_stage` / `stage_status` and prints a manual `daemon schedule add` hint. It does not call `POST /v1/local/orchestration/schedules`, does not add `work_id` / `fl_e_stage` metadata to a schedule, and does not atomically check or prevent another active FL-E stage schedule for the same Work. This misses plan acceptance #1 and the new spec invariant “At most one active FL-E stage schedule per Work.”  
-  Evidence: `crates/nexus42/src/commands/creator/run.rs:564-612`; spec `creator-workflow-fl-e.md:46-49`, `:88-91`, `:136`; plan `2026-06-04-v1.34-fl-e-run-intents-and-stages.md:25-27`, `:49-53`.  
+  Evidence: `crates/nexus42/src/commands/creator/run.rs:564-612`; spec `creator-workflow.md:46-49`, `:88-91`, `:136`; plan `2026-06-04-v1.34-fl-e-run-intents-and-stages.md:25-27`, `:49-53`.  
   Required fix: stage advance should perform the schedule enqueue path (using the normative stage→preset mapping) and guard active FL-E schedules in the daemon/DB layer with an atomic check/insert or equivalent transaction/constraint; update Work stage and schedule linkage consistently.
 
 - **F-QC1-002 — The intake gate checks `stage_status`, not `intake_status`, so “after intake complete” can still be rejected.**  
   Machine severity: `critical`.  
   `stage_advance` fetches `current_stage` and `stage_status` only, stores the latter as `current_status`, and then reports “intake_status is …” based on `stage_status`. New Works default to `current_stage=intake`, `stage_status=pending`; the P1 diff does not link V1.33 intake completion to `stage_status=complete`. Therefore a Work with `intake_status=complete` but default `stage_status=pending` can fail `creator run stage advance --stage research`, contradicting spec acceptance #2 and plan acceptance #1.  
-  Evidence: `crates/nexus42/src/commands/creator/run.rs:517-559`; defaults in `crates/nexus-local-db/migrations/20260606_works_stage_columns.sql:4-8`; plan acceptance `:51`; spec `creator-workflow-fl-e.md:80-83`, `:154-156`.  
+  Evidence: `crates/nexus42/src/commands/creator/run.rs:517-559`; defaults in `crates/nexus-local-db/migrations/20260606_works_stage_columns.sql:4-8`; plan acceptance `:51`; spec `creator-workflow.md:80-83`, `:154-156`.  
   Required fix: fetch and validate `intake_status` separately for the intake gate, or explicitly synchronize `stage_status` with intake completion before allowing research; add a regression test for `intake_status=complete` with `stage_status=pending/default`.
 
 ### 🟡 Warning
@@ -52,7 +52,7 @@ generated_at: "2026-06-05"
 - **F-QC1-003 — Non-force stage advance can skip multiple stages.**  
   Machine severity: `high`.  
   The gate rejects same/backward targets but accepts any target with `target_idx > current_idx`. That permits `research -> persist` without `--force` when research is complete, while the spec states stages are linear and advance from `S` to `S+1` unless `--force`.  
-  Evidence: `crates/nexus42/src/commands/creator/run.rs:540-547`; spec `creator-workflow-fl-e.md:64`, `:80-84`.  
+  Evidence: `crates/nexus42/src/commands/creator/run.rs:540-547`; spec `creator-workflow.md:64`, `:80-84`.  
   Required fix: require `target_idx == current_idx + 1` when `--force` is absent; reserve larger jumps for `--force` with audit/log output and tests.
 
 ### 🟢 Suggestion

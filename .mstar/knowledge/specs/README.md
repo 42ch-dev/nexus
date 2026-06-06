@@ -91,14 +91,14 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | Master | Active |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
-| [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) | Exploration | Exploration |
+| [preset-conditional-routing.md](preset-conditional-routing.md) | Exploration | Exploration |
 
 ### Creator product lines
 
 | Document | Class | Status |
 | --- | --- | --- |
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
-| [creator-workflow-fl-e.md](creator-workflow-fl-e.md) | Feature line | Shipped (V1.34) |
+| [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration
@@ -142,10 +142,10 @@ When specs disagree, higher row wins:
 | Top-level CLI groups | cli-command-ia (Draft) | cli-spec §6 until P5 merge |
 | First-run / local vs platform | creator-centric-entry-model (Draft) + cli-spec §7 | Compass audit appendix |
 | Work / `creator run` | work-experience-model | cli-spec §6.2, orchestration run_intents |
-| FL-E stages / chain | creator-workflow-fl-e | work-experience-model |
+| Creator workflow stages / chain | creator-workflow | work-experience-model |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
 | Schedule / core_context | creator-schedule-and-core-context | orchestration-engine sessions |
-| Conditional routing | preset-conditional-routing-fl-d | orchestration-engine §7.5 stub |
+| Conditional routing | preset-conditional-routing | orchestration-engine §7.5 stub |
 | Agent `nexus.*` tools | agent-nexus-tool-bridge | acp-capability-set, agent-host |
 | ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 | KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
@@ -157,7 +157,7 @@ When specs disagree, higher row wins:
 | Trigger | Required action |
 | --- | --- |
 | **V1.35 P5** (or iteration close) | Merge cli-command-ia + creator-centric-entry-model into cli-spec; archive overlays |
-| **FL-D compass locks implement** | Promote preset-conditional-routing-fl-d; update orchestration-engine §7.5 |
+| **FL-D compass locks implement** | Promote preset-conditional-routing; update orchestration-engine §7.5 |
 | **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix |
 | **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract |
 
@@ -186,7 +186,7 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 | [local-fs-layout-creator-workspace.md](../../archived/knowledge/local-fs-layout-creator-workspace.md) | Pointer stub |
 | `nexus42-single-binary-daemon-runtime-architecture.md` | [daemon-runtime.md](daemon-runtime.md) |
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
-| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) |
+| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 

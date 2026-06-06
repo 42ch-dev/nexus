@@ -364,7 +364,7 @@ Rules:
 
 ### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target)
 
-Normative stage model: [creator-workflow-fl-e.md](./creator-workflow-fl-e.md).
+Normative stage model: [creator-workflow.md](./creator-workflow.md).
 
 | Command | Purpose |
 | --- | --- |
