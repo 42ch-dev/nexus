@@ -1,10 +1,11 @@
 # CLI Command Information Architecture — Normative Specification v1
 
-**Status**: Draft (V1.35)  
-**Document class**: Draft overlay  
+**Status**: Shipped (V1.35)  
+**Document class**: Master (V1.35 lock effective)  
 **Created**: 2026-06-06  
-**Supersedes**: [cli-spec.md](cli-spec.md) §6.0B (six-group lock) — effective when merged at iteration P5  
-**Merge target**: cli-spec.md §6.0B
+**Shipped**: 2026-06-07 (V1.35 P5 spec-tracker-hygiene)  
+**Supersedes**: [cli-spec.md](cli-spec.md) §6.0B (six-group lock) — V1.35 P5 merges IA into CLI Master  
+**Merge target**: cli-spec.md §6.0B (merged in V1.35 P5)  
 **Scope**: Top-level `nexus42` command groups, deprecation rules, creator-centric entry  
 **Coordinates with**:
 

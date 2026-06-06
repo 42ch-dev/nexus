@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.35 Active** · Latest shipped: **V1.34** · Latest active compass: [v1.35-cli-ia-and-product-polish](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47/DF-53 partial** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 40)
+**Quick status**: **V1.36 Active** · Latest shipped: **V1.35** · Latest active compass: TBD · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47/DF-53 partial** → all Done · V1.36 focus: **DF-47 production caller + remaining V1.33/V1.30/V1.31 backlog** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 28, `critical`: 0)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-05 (V1.34 Shipped; FL-E closed; DF-51/54 removed; DF-47 still OPEN — production caller wiring)
+**Last updated**: 2026-06-07 (V1.35 Shipped; 6 critical residuals closed; DF-47/DF-53 still OPEN — DF-47 → V1.36 P0)
 
 ---
 
@@ -71,13 +71,13 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
-| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.35 P0** | M | V1.34→V1.35 | P4 shipped adapter; **production caller wiring OPEN** — compass P0 target |
+| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.36 P0** | M | V1.34→V1.35→V1.36 | V1.34 P4 shipped adapter (`HostToolExecutor::execute` + `dispatch_from_worker`); V1.35 P0 closed deferred carry-forward: **production caller wiring OPEN** — requires IPC-layer changes across 3+ crates (non-surgical for V1.35 P0); V1.36 P0 target |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
 | DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 P0** (commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`). Schema now declares `prompt_file` + `vars` with `anyOf`. |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | Any future | S | V1.33 | Use `creator run` + `system preset`. |
-| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.35 P4** (partial) | S | V1.34→V1.35 | V1.34 explicit `stage advance`; V1.35 P4 partial: `--chain-novel-writing` defaults true (intake → produce); full multi-stage auto-chain deferred |
+| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.35 P4** (partial → closed) | S | V1.34→V1.35 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce); clap opt-out syntax `--chain-novel-writing=false` works. Full multi-stage auto-chain remains a V1.36+ exploration; DF-53 stays open until full chain landed |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
 | DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing.md](specs/preset-conditional-routing.md). |
