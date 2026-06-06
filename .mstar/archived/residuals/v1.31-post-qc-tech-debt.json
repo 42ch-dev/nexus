@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from V1.31 post-QC tech-debt batch. V1.35 P0 (commits aafe1f8, 26b2fa8) closed TD-V131-01, TD-V131-03, TD-V131-04.",
+  "archived_at": "2026-06-07T12:30:00+08:00",
+  "plan_id": "v1.31-post-qc-tech-debt",
+  "entries": [
+    {
+      "id": "TD-V131-01",
+      "title": "Non-atomic queue claim race — claim_prompt_injections SELECT-then-UPDATE without transaction",
+      "severity": "low",
+      "source": "qc2 C-2-2, qc1 W-002 (V1.31 review)",
+      "scope": "crates/nexus-local-db/src/prompt_injection.rs (claim_prompt_injections)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.35 P0 (commit aafe1f8) — claim_prompt_injections now wraps SELECT + UPDATE in a SQLite transaction.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.35_p0",
+      "closure_evidence": "commit aafe1f8 on feature/v1.35-critical-residual-convergence; prompt_injection tests cover concurrent claim path.",
+      "closed_at": "2026-06-07T12:00:00+08:00"
+    },
+    {
+      "id": "TD-V131-03",
+      "title": "Unbounded IN clause in mark_prompt_injections_consumed",
+      "severity": "low",
+      "source": "qc3 W-002 (V1.31 review)",
+      "scope": "crates/nexus-local-db/src/prompt_injection.rs (mark_prompt_injections_consumed)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.35 P0 (commit aafe1f8) — batch limit 100 with chunking; runtime SQL guarded by constant column lists and bound params.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.35_p0",
+      "closure_evidence": "commit aafe1f8 on feature/v1.35-critical-residual-convergence; mark_prompt_injections_consumed tests cover >100 ids input.",
+      "closed_at": "2026-06-07T12:00:00+08:00"
+    },
+    {
+      "id": "TD-V131-04",
+      "title": "Unbounded prompt size in build_summary_prompt — memory/IPC risk",
+      "severity": "low",
+      "source": "qc3 W-003 (V1.31 review)",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/context_summarize.rs (build_summary_prompt)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.35 P0 (commit 26b2fa8) — content size truncation at 256 KiB with explicit [truncated at N bytes] marker; 2 new tests cover normal and oversized input.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.35_p0",
+      "closure_evidence": "commit 26b2fa8 on feature/v1.35-critical-residual-convergence; context_summarize tests assert 256 KiB cap.",
+      "closed_at": "2026-06-07T12:00:00+08:00"
+    }
+  ]
+}

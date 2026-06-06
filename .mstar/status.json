@@ -153,7 +153,9 @@
       "merge_target": "iteration/v1.35",
       "metadata": {
         "iteration_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
-        "depends_on": ["2026-06-06-v1.35-cli-ia-spec-and-audit"],
+        "depends_on": [
+          "2026-06-06-v1.35-cli-ia-spec-and-audit"
+        ],
         "description": "P2 — platform sync migration + help alignment"
       }
     },
@@ -165,7 +167,9 @@
       "merge_target": "iteration/v1.35",
       "metadata": {
         "iteration_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
-        "depends_on": ["2026-06-06-v1.35-cli-ia-implement"],
+        "depends_on": [
+          "2026-06-06-v1.35-cli-ia-implement"
+        ],
         "description": "P3 — kb/knowledge disambiguation, run discoverability"
       }
     },
@@ -209,27 +213,50 @@
     "latest_active_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-07T12:00:00+08:00",
-      "total_open": 27,
+      "updated_at": "2026-06-07T12:30:00+08:00",
+      "total_open": 28,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 8,
-        "low": 14,
+        "low": 15,
         "nit": 5
       },
       "by_target": {
-        "unspecified": 27
+        "v1.36": 5,
+        "backlog": 23
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
         "2026-06-04-v1.33-memory-review-closed-loop": 3,
         "2026-06-04-v1.33-work-model-and-creator-run": 3,
-        "2026-06-04-v1.34-agent-tool-implementation": 1,
-        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
-        "v1.30-post-qc-tech-debt": 7,
+        "v1.30-post-qc-tech-debt": 9,
         "v1.31-post-qc-tech-debt": 5,
-        "2026-06-04-v1.34-pr-42-cursor-automation": 1
+        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
+        "2026-06-04-v1.34-agent-tool-implementation": 1
+      },
+      "v1.35-p0_closed": {
+        "critical": [
+          "R-V133P3-01",
+          "R-V133P3-02",
+          "R-V133P4-01",
+          "R-V133P4-02",
+          "R-V133P4-03",
+          "R-V133P4-07"
+        ],
+        "medium": [
+          "R-CURSOR-PR42-03"
+        ],
+        "low": [
+          "TD-V130-02",
+          "TD-V130-06",
+          "TD-V131-01",
+          "TD-V131-03",
+          "TD-V131-04"
+        ],
+        "deferred_to_v1.36": [
+          "DF-47"
+        ]
       }
     },
     "wave_0_spec": ".mstar/knowledge/specs/cli-command-ia.md",
@@ -245,28 +272,6 @@
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
-      {
-        "id": "R-V133P3-01",
-        "title": "judge.llm parse_judge_response: first-token parse — CLOSED V1.33 P3",
-        "severity": "critical",
-        "source": "qc1 C-001 (V1.33 P3 review)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P3",
-        "note": "CLOSED in V1.33 P3 fix wave. Switched to first-token parse anchored to whitespace/punctuation. Verified present in iteration/v1.35 base."
-      },
-      {
-        "id": "R-V133P3-02",
-        "title": "LlmJudgeTask template_file bundle pre-load — CLOSED V1.33 P3",
-        "severity": "critical",
-        "source": "qc1 C-002 (V1.33 P3 review)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P3",
-        "note": "CLOSED in V1.33 P3 fix wave. Added template_file pre-load from preset bundle path. Verified present in iteration/v1.35 base."
-      },
       {
         "id": "R-V133P3-03",
         "title": "min_interval ISO-8601 duration parser silently returns None for unsupported units (P1D, months, years) — throttle bypassed, no log",
@@ -291,39 +296,6 @@
       }
     ],
     "2026-06-04-v1.33-memory-review-closed-loop": [
-      {
-        "id": "R-V133P4-01",
-        "title": "Memory review active-creator enforcement — CLOSED V1.33 P4",
-        "severity": "critical",
-        "source": "qc2 C-001 (V1.33 P4 review)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4",
-        "note": "CLOSED in V1.33 P4 fix wave. Active creator enforcement added to review + fragments handlers. Verified present in iteration/v1.35 base."
-      },
-      {
-        "id": "R-V133P4-02",
-        "title": "Memory API 401/403/404 test coverage — CLOSED V1.33 P4",
-        "severity": "critical",
-        "source": "qc2 C-002 (V1.33 P4 review)",
-        "scope": "crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4",
-        "note": "CLOSED in V1.33 P4 fix wave. Added 401/403/404 + cross-creator isolation tests. Verified present in iteration/v1.35 base."
-      },
-      {
-        "id": "R-V133P4-03",
-        "title": "UNTRUSTED header on PassthroughSummarizer LTM body — CLOSED V1.33 P4",
-        "severity": "critical",
-        "source": "qc2 C-003 (V1.33 P4 review)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4",
-        "note": "CLOSED in V1.33 P4 fix wave. PassthroughSummarizer prepends UNTRUSTED provenance header to LTM body. Verified present in iteration/v1.35 base."
-      },
       {
         "id": "R-V133P4-04",
         "title": "list_fragments_filtered runtime sqlx uses ! column alias suffix — invalid for runtime queries; handler works around but P4 implementer noted the underlying bug remains",
@@ -356,17 +328,6 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.33 P4 fix wave",
         "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning."
-      },
-      {
-        "id": "R-V133P4-07",
-        "title": "Pending-review CRUD auth enforcement — CLOSED V1.33 P4",
-        "severity": "critical",
-        "source": "qc1-wave2 (V1.33 P4 re-check)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4",
-        "note": "CLOSED in V1.33 P4 fix wave-2. All 4 pending-review CRUD handlers now enforce active-creator with 401/403. Verified present in iteration/v1.35 base."
       }
     ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -406,17 +367,6 @@
     ],
     "v1.31-post-qc-tech-debt": [
       {
-        "id": "TD-V131-01",
-        "title": "Non-atomic queue claim race — claim_prompt_injections SELECT-then-UPDATE without transaction",
-        "severity": "low",
-        "source": "qc2 C-2-2, qc1 W-002",
-        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Single-process SQLite pre-1.0. Wrap in transaction when concurrent access possible."
-      },
-      {
         "id": "TD-V131-02",
         "title": "Keyword LIKE pattern doesn't escape special characters",
         "severity": "low",
@@ -426,28 +376,6 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Add escape_sql_like helper for user-supplied keyword values."
-      },
-      {
-        "id": "TD-V131-03",
-        "title": "Unbounded IN clause in mark_prompt_injections_consumed",
-        "severity": "low",
-        "source": "qc3 W-002",
-        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add batch limit (e.g. 100) and chunk if needed."
-      },
-      {
-        "id": "TD-V131-04",
-        "title": "Unbounded prompt size in build_summary_prompt — memory/IPC risk",
-        "severity": "low",
-        "source": "qc3 W-003",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add configurable content size limit before prompt construction."
       },
       {
         "id": "TD-V131-05",
@@ -507,17 +435,6 @@
         "note": "Benign in current single-threaded IPC model. Revisit if worker becomes concurrent. Consider parking_lot::RwLock."
       },
       {
-        "id": "TD-V130-02",
-        "title": "cleanup_row fire-and-forget — DELETE failure silently lost, dangling registry rows possible",
-        "severity": "low",
-        "source": "qc2 W-003, qc3 W-003",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add tracing::error on DELETE failure at minimum. Consider awaiting inline with timeout."
-      },
-      {
         "id": "TD-V130-03",
         "title": "JobLifecycleGuard FSM — no RAII guard to ensure mark_done/mark_failed called exactly once",
         "severity": "low",
@@ -549,17 +466,6 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Pre-release volumes well under 500. Add total_count or has_more field when scale requires it."
-      },
-      {
-        "id": "TD-V130-06",
-        "title": "mark_running lacks WHERE status guard — can revert done/failed jobs",
-        "severity": "low",
-        "source": "qc3 S-004",
-        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add WHERE status='queued' guard to mark_running, mirroring claim_job pattern."
       },
       {
         "id": "TD-V130-07",
@@ -687,18 +593,6 @@
         "note": "V1.35 P0 assessed: adapter exists, but production wiring requires IPC-layer changes (IpcClient notification handling, WorkerHandleProvider trait extension, worker-side tool request forwarding). Non-surgical across 3+ crates — deferred to V1.36. V1.35 ships dispatch_from_worker adapter + tests only."
       }
     ],
-    "2026-06-04-v1.34-cursor-pr42-stage-status": [
-      {
-        "id": "R-CURSOR-PR42-03",
-        "title": "FL-E stage_status gate bypass via status-only PATCH — CLOSED V1.35 P0",
-        "severity": "medium",
-        "source": "Cursor security automation #351d19c7 (PR #42 revalidation RUN_ID bc-52739238, 2026-06-05) — NEW post-3b24aaf finding",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work_stage: stage_status update path bypasses check_stage_advance when current_stage absent)",
-        "decision": "closed",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.35 P0",
-        "note": "CLOSED by commit 59e50bb + 435d18e. Added check_stage_status_transition() that rejects stage_status -> complete/skipped without force=true when no current_stage is provided. 3 new tests + existing audit test updated with force=true."
-      }
-    ]
+    "2026-06-04-v1.34-cursor-pr42-stage-status": []
   }
 }

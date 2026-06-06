@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from V1.33 P4 (memory-review-closed-loop). V1.33 P4 fix waves (commits 26dc124, 026972d, 4455f09, fb390c2) closed the 4 critical residuals; V1.35 P0 (commit 4a4ba9d) recorded closure in status.json SSOT.",
+  "archived_at": "2026-06-07T12:30:00+08:00",
+  "plan_id": "2026-06-04-v1.33-memory-review-closed-loop",
+  "entries": [
+    {
+      "id": "R-V133P4-01",
+      "title": "POST /v1/local/memory/review + GET /v1/local/memory/fragments enforce active creator from auth context",
+      "severity": "critical",
+      "source": "qc2 C-001 (V1.33 P4)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review + fragments handlers at lines 93, 233, 540, 774)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.33 P4 fix wave (commit 26dc124) — handlers use read_active_creator_id + AuthRequired (matches V1.32 SEC-V131-01 baseline).",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.33_p4_fix_wave",
+      "closure_evidence": "commit 26dc124 on feature/v1.33-work-experience-loop integration; nexus_home::read_active_creator_id gate at handler entry.",
+      "closed_at": "2026-06-04T16:00:00+08:00",
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+    },
+    {
+      "id": "R-V133P4-02",
+      "title": "memory_review_fragments_api.rs tests cover 401/403/404 + cross-creator isolation (was 200/400 only)",
+      "severity": "critical",
+      "source": "qc2 C-002 (V1.33 P4)",
+      "scope": "crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.33 P4 fix wave (commit 26dc124) — 5 new tests covering 401 (no creator), 403 (creator mismatch), 404 (cross-creator isolation); matches works_api.rs coverage bar.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.33_p4_fix_wave",
+      "closure_evidence": "commit 26dc124 adds memory_review_fragments_api.rs tests; hermetic setup matches works_api.rs pattern.",
+      "closed_at": "2026-06-04T16:00:00+08:00",
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+    },
+    {
+      "id": "R-V133P4-03",
+      "title": "PassthroughSummarizer prepends UNTRUSTED header (creator_id, session_id, captured_at) + 256 KiB size cap",
+      "severity": "critical",
+      "source": "qc2 C-003 (V1.33 P4); also implementer Completion Report §7 nuance #2",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (promote_to_long_term via PassthroughSummarizer)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.33 P4 fix waves (commits 026972d initial UNTRUSTED header + size cap; 4455f09 completeness fix after QA caught R-V133P4-03 incomplete) — header now includes creator_id + captured_at for downstream consumers.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.33_p4_fix_wave_2",
+      "closure_evidence": "commits 026972d + 4455f09 on feature/v1.33-work-experience-loop; QA recheck 6b09fd6 verified completeness.",
+      "closed_at": "2026-06-04T16:30:00+08:00",
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+    },
+    {
+      "id": "R-V133P4-07",
+      "title": "4 pending-review CRUD handlers (create, list, count, delete) enforce active creator",
+      "severity": "critical",
+      "source": "qc1-wave2 NEW (V1.33 P4 re-check)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (create_pending_review, list_pending_reviews, count_pending_reviews, delete_pending_review)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.33 P4 fix wave 2 (commit fb390c2) — 4 legacy handlers now use read_active_creator_id + AuthRequired + 4 new tests covering 401/403 for each.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.33_p4_fix_wave_2",
+      "closure_evidence": "commit fb390c2 on feature/v1.33-work-experience-loop; qc1-wave2 caught the gap and reported it; P4 implementer applied same fix to all 4 handlers.",
+      "closed_at": "2026-06-04T16:00:00+08:00",
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d)."
+    }
+  ]
+}

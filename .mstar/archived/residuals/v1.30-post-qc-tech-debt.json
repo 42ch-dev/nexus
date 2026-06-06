@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from V1.30 post-QC tech-debt batch. V1.35 P0 (commits aafe1f8, 26b2fa8) closed TD-V130-02 and TD-V130-06.",
+  "archived_at": "2026-06-07T12:30:00+08:00",
+  "plan_id": "v1.30-post-qc-tech-debt",
+  "entries": [
+    {
+      "id": "TD-V130-02",
+      "title": "cleanup_row fire-and-forget — DELETE failure silently lost, dangling registry rows possible",
+      "severity": "low",
+      "source": "qc2 W-003, qc3 W-003 (V1.30 P0 review)",
+      "scope": "crates/nexus-local-db/src/reference_source.rs (cleanup_row)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.35 P0 (commit aafe1f8) — cleanup_row now logs DELETE failures via tracing::error (added tracing dep to nexus-local-db/Cargo.toml).",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.35_p0",
+      "closure_evidence": "commit aafe1f8 on feature/v1.35-critical-residual-convergence; tracing error log added to cleanup_row; clippy clean.",
+      "closed_at": "2026-06-07T12:00:00+08:00"
+    },
+    {
+      "id": "TD-V130-06",
+      "title": "mark_running lacks WHERE status guard — can revert done/failed jobs",
+      "severity": "low",
+      "source": "qc3 S-004 (V1.30 P0 review)",
+      "scope": "crates/nexus-local-db/src/kb_extract_job.rs (mark_running)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.35 P0 (commit aafe1f8) — mark_running now has WHERE status='queued' guard, mirroring claim_job pattern.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.35_p0",
+      "closure_evidence": "commit aafe1f8 on feature/v1.35-critical-residual-convergence; kb_extract_job tests cover queued→running transition and reject done/failed.",
+      "closed_at": "2026-06-07T12:00:00+08:00"
+    }
+  ]
+}
