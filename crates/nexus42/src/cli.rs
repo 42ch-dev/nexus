@@ -16,9 +16,15 @@ use clap::{Parser, Subcommand};
     name = "nexus42",
     version,
     about = "Nexus creative world-building CLI",
-    long_about = "Nexus creative world-building CLI — orchestration-first.\n\n\
-        Use `nexus42 daemon schedule --preset <id>` to start a preset-driven workflow.\n\
-        Run `nexus42 creator workspace init` to set up a new workspace.",
+    long_about = "Nexus creative world-building CLI — creator-first.\n\n\
+        Quick start:\n\
+          nexus42 creator workspace init    Set up a new workspace\n\
+          nexus42 creator run start         Launch a creative run\n\n\
+        Platform sync (requires login):\n\
+          nexus42 platform sync pull        Pull bundles from platform\n\
+          nexus42 platform sync push        Push local changes to platform\n\n\
+        Advanced:\n\
+          nexus42 daemon schedule --preset <id>  Start a preset-driven workflow",
     propagate_version = true
 )]
 pub struct Cli {
@@ -62,7 +68,7 @@ pub enum Commands {
         command: DaemonCommand,
     },
 
-    /// Synchronize workspace with platform
+    /// [deprecated] Use `platform sync` instead. Synchronize workspace with platform.
     Sync {
         #[command(subcommand)]
         command: SyncCommand,
