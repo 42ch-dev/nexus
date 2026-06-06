@@ -16,9 +16,15 @@ use clap::{Parser, Subcommand};
     name = "nexus42",
     version,
     about = "Nexus creative world-building CLI",
-    long_about = "Nexus creative world-building CLI — orchestration-first.\n\n\
-        Use `nexus42 daemon schedule --preset <id>` to start a preset-driven workflow.\n\
-        Run `nexus42 creator workspace init` to set up a new workspace.",
+    long_about = "Nexus creative world-building CLI — creator-first.\n\n\
+        Quick start:\n\
+          nexus42 creator workspace init    Set up a new workspace\n\
+          nexus42 creator run start         Launch a creative run\n\n\
+        Platform sync (requires login):\n\
+          nexus42 platform sync pull        Pull bundles from platform\n\
+          nexus42 platform sync push        Push local changes to platform\n\n\
+        Advanced:\n\
+          nexus42 daemon schedule --preset <id>  Start a preset-driven workflow",
     propagate_version = true
 )]
 pub struct Cli {
@@ -56,28 +62,42 @@ impl Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Manage the daemon runtime
-    Daemon {
-        #[command(subcommand)]
-        command: DaemonCommand,
-    },
-
-    /// Synchronize workspace with platform
-    Sync {
-        #[command(subcommand)]
-        command: SyncCommand,
-    },
-
     /// Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
     Creator {
         #[command(subcommand)]
         command: CreatorCommand,
     },
 
+    /// Manage the daemon runtime
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+
     /// ACP capability plane (agents, registry, skills, connectivity)
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
+    },
+
+    /// Platform interaction (auth, explore, context, publish, **sync**)
+    Platform {
+        #[command(subcommand)]
+        command: PlatformCommand,
+    },
+
+    /// System management (presets, diagnostics, config, identity, etc.)
+    System {
+        #[command(subcommand)]
+        command: SystemCommand,
+    },
+
+    /// Hidden: deprecated top-level sync alias — use `platform sync` instead.
+    /// Kept callable for ≥1 iteration (V1.35) per cli-command-ia.md §5.
+    #[command(hide = true)]
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommand,
     },
 
     /// Hidden: ACP worker subprocess entry point (daemon-managed)
@@ -87,18 +107,6 @@ pub enum Commands {
     /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
     #[command(hide = true)]
     DaemonRun(DaemonRunArgs),
-
-    /// System management (presets, diagnostics, config, identity, etc.)
-    System {
-        #[command(subcommand)]
-        command: SystemCommand,
-    },
-
-    /// Platform interaction (auth, explore, context, publish)
-    Platform {
-        #[command(subcommand)]
-        command: PlatformCommand,
-    },
 }
 
 /// Build the full `nexus42` clap `Command` for completion generation.

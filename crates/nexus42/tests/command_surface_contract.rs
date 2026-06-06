@@ -846,3 +846,118 @@ fn v133_creator_shows_run() {
         "V1.33 creator: expected 'run' subcommand in --help"
     );
 }
+
+// =============================================================================
+// Part 7: V1.35 P2 — platform sync migration & deprecation contract tests
+// =============================================================================
+
+/// V1.35 P2: `platform sync --help` shows pull, push, status subcommands.
+#[test]
+fn v135_platform_sync_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["platform", "sync", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    for subcmd in &["pull", "push", "status", "resolve", "retry", "world"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V1.35 platform sync: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// V1.35 P2: `nexus42 sync status` emits a deprecation warning on stderr.
+#[test]
+fn v135_sync_deprecation_warning() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["sync", "status"])
+        .assert()
+        .get_output()
+        .stderr
+        .clone();
+
+    let stderr_text = String::from_utf8(output).unwrap();
+    assert!(
+        stderr_text.contains("deprecated"),
+        "V1.35: top-level `sync status` must emit deprecation warning on stderr"
+    );
+    assert!(
+        stderr_text.contains("platform sync"),
+        "V1.35: deprecation warning must point to `platform sync`"
+    );
+}
+
+/// V1.35 P2: Root `--help` lists exactly 5 user-visible command groups
+/// (per cli-command-ia.md §2). The deprecated top-level `sync` is hidden
+/// from help but remains callable as an alias.
+#[test]
+fn v135_root_help_shows_five_groups_with_sync_hidden() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // The 5 canonical V1.35 top-level groups MUST all appear.
+    let expected = ["creator", "daemon", "acp", "platform", "system"];
+    for group in &expected {
+        assert!(
+            help_text.contains(group),
+            "V1.35 root help: expected visible group '{group}'"
+        );
+    }
+
+    // The deprecated `sync` group MUST be hidden from help (#[command(hide = true)]).
+    // We assert the absence of the word "sync" in the Commands: list to verify it's
+    // not surfaced as a peer of the 5 canonical groups.
+    //
+    // NOTE: The word "sync" may still appear in long_about examples
+    // ("nexus42 platform sync pull") which is intentional. So we check that
+    // `sync` does NOT appear as a top-level Commands entry — i.e. not in the
+    // "Commands:" section after the long_about examples.
+    let commands_section = help_text
+        .split("Commands:")
+        .nth(1)
+        .expect("Commands: section present in --help");
+    assert!(
+        !commands_section.contains("\n  sync"),
+        "V1.35 root help: top-level 'sync' must be hidden (was visible in Commands list)"
+    );
+}
+
+/// V1.35 P2: Root `--long-about` mentions `creator run start` and `workspace init`.
+#[test]
+fn v135_root_long_about_mentions_creator_run_and_workspace() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("creator run"),
+        "V1.35: root help must mention 'creator run'"
+    );
+    assert!(
+        help_text.contains("workspace init"),
+        "V1.35: root help must mention 'workspace init'"
+    );
+}

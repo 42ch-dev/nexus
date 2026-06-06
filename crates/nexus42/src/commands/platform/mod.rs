@@ -5,11 +5,14 @@
 //! - `explore` — Browse and search platform content (platform-only, not proxied)
 //! - `context` — Context assembly
 //! - `publish` — Publish content (stub, coming soon)
+//! - `sync` — Synchronize workspace with platform (V1.35 canonical location)
 
 pub mod auth;
 pub mod context;
 pub mod explore;
+pub mod sync;
 
+use crate::commands::sync::SyncCommand;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
@@ -34,6 +37,12 @@ pub enum PlatformCommand {
         command: context::ContextCommand,
     },
 
+    /// Synchronize workspace with platform (pull, push, status, resolve, world, retry)
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommand,
+    },
+
     /// Publish content (coming soon)
     Publish,
 }
@@ -48,6 +57,7 @@ pub async fn run(cmd: PlatformCommand, config: &CliConfig, _output_format: &str)
         PlatformCommand::Auth { command } => auth::run(command, config).await,
         PlatformCommand::Explore { command } => explore::run(command).await,
         PlatformCommand::Context { command } => context::run(command, config).await,
+        PlatformCommand::Sync { command } => sync::run(command, config).await,
         PlatformCommand::Publish => {
             println!("publish command coming soon");
             println!("  This feature will be implemented in a follow-up plan.");
