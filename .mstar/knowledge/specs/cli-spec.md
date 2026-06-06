@@ -1,5 +1,9 @@
 # Nexus CLI Spec
 
+**Status**: Normative  
+**Document class**: Master  
+**Draft overlays (until P5 merge):** [cli-command-ia.md](cli-command-ia.md) (§6 IA), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
+
 ## 0. 文档定位
 
 本稿是 nexus-platform `v1-spec/architecture.md` 的下钻文档，聚焦 Nexus 本地 CLI / runtime 的产品行为、运行模型与集成边界。

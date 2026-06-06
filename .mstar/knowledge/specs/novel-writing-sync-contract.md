@@ -1,4 +1,8 @@
-# V1.15 Novel-Writing Sync Module Contract
+# Novel-Writing Sync Module Contract
+
+**Status**: Normative (module contract)  
+**Document class**: Companion  
+**Scope**: Workspace scan rules for novel-writing sync module (V1.15+)
 
 ## 1. Artifact Discovery
 

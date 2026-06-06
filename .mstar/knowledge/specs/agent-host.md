@@ -4,6 +4,8 @@
 
 | Attribute | Value |
 | --- | --- |
+| **Status** | Normative |
+| **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
 | **Related** | [daemon-runtime.md](./daemon-runtime.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [acp-client-tech-spec.md](./acp-client-tech-spec.md) |
 

@@ -1,6 +1,7 @@
 # Work Experience Model — Normative Specification v1
 
 **Status**: Shipped (V1.33 — Work loop + Creative Brief Intake + `creator run` + `run_intents`)  
+**Document class**: Feature line  
 **Created**: 2026-06-04  
 **Shipped**: 2026-06-04 (compass [v1.33-work-experience-loop-delivery-compass-v1.md](../../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) — 5 plans P1–P5 all Done)  
 **Scope**: Product-level **Work** container, user journey, Creative Brief Intake, preset run intents, and relationship to workspace / World / schedules  

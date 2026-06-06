@@ -1,9 +1,12 @@
 # Skills Export Compatibility
 
+**Status**: Normative  
+**Document class**: Master  
+
 ## 0. 文档定位
 
 - **版本**：v1
-- **状态**：Draft（V1.3 facing）
+- **状态**：Normative（skills-export 边界；见 header **Status**）
 - **定位**：定义 ACP-first、skills-second 前提下，skills 能力导出与兼容声明的规范边界。
 - **运行时归属（Normative）**：本规范描述的导出清单、兼容等级与 `nexus.*` 映射适用于 **Nexus CLI / 本地 daemon（`nexus42` / daemon runtime）及 ACP Client 路径**。**Nexus Platform（HTTP / `platform-api-v1`）不实现 ACP 协议**，也 **不** 提供 skills-export 的 HTTP 真源；平台集成方以 **OpenAPI + REST** 为准。对应 **nexus-platform** 侧 plan `43-v1.5-skills-export-l0` 已 **Cancelled**。
 - **对齐文档**：

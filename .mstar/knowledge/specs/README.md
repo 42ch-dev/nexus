@@ -1,158 +1,202 @@
 # Specs (`knowledge/specs/`)
 
-**Functional and normative specifications** for the Nexus OSS repo: CLI, daemon runtime, ACP, orchestration, creator product lines, and feature contracts.
+Functional and normative specifications for the Nexus OSS repo.
 
-**Decision rules:** [AGENTS.md](AGENTS.md) — when to split/merge/archive, status lifecycle, authority on overlap.
+**Rules (invariants):** [AGENTS.md](AGENTS.md)  
+**Machine state (wave-0, spec_refs):** [`.mstar/status.json`](../../status.json)  
+**Not here:** trackers and schema-boundary policy → [knowledge root](../README.md); delivery evidence → [iterations](../../iterations/README.md)
 
-**Not here:** cross-cutting trackers and schema boundary matrices → parent [knowledge/](../README.md). Iteration delivery evidence → [`.mstar/iterations/`](../../iterations/README.md).
+---
+
+## Global narrative (first principles)
+
+Nexus OSS specs describe a **local-first creative runtime** with optional cloud mount:
+
+```text
+Identity & scope          →  who owns data (Creator, User, World, …)
+Architecture & contracts  →  which crate owns which concern; wire vs local types
+Runtime topology          →  CLI → daemon → Local API → ACP workers
+Persistence               →  state.db, reference store, workspace layout
+Orchestration             →  presets, capabilities, schedules, sessions
+Product surface (CLI)     →  command IA, entry paths, per-flag behavior
+Product lines             →  shipped journeys (Work, FL-E, agent tools, …)
+Exploration               →  future engine/product lines without implement authority
+```
+
+**Why flat files:** each layer exposes a few long-lived **Master** documents agents can cite by stable basename. Iteration velocity is handled by **Draft overlays** and **compass appendices**, not by renaming or sharding directories.
+
+**Why not one mega-spec:** CLI command detail, orchestration grammar, and ACP hosting evolve on different cadences; Feature line specs record shipped product contracts without bloating Masters.
+
+**Discovery:** this README is the only maintained index. After adding or retiring a spec, update the tables below — do not duplicate the list in AGENTS.md.
+
+---
+
+## Document classes
+
+| Class | Implement authority | Typical header `Status` |
+| --- | --- | --- |
+| Master | When normative / active | Normative, Active, Accepted |
+| Draft overlay | While active compass + Draft | Draft (Vx.xx) |
+| Feature line | Yes | Shipped (Vx.xx) |
+| Exploration | No | Exploration |
+| Companion | OSS scope only | Normative (companion) |
+| Legacy scope | Cited subdomain only | Active (legacy scope) |
+
+See [AGENTS.md](AGENTS.md) for create/extend/merge rules.
 
 ---
 
 ## Layout
 
-All spec files live **flat** in this directory (kebab-case filenames, no version suffix). Subdirectories are **intentionally not used** — see [AGENTS.md](AGENTS.md) § Layout invariant.
+All spec files live **flat** in this directory (kebab-case, no version suffix). Subdirectories are intentionally unused.
 
 ---
 
 ## Master index (by domain)
 
+*Statuses reflect document headers as of last README maintenance; authoritative per-file header wins on conflict.*
+
 ### Architecture and boundaries
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Normative | Local/cloud split, crate graph, contracts-first |
-| [entity-scope-model.md](entity-scope-model.md) | Normative | Global/User/Creator/World/… hierarchy and crate ownership |
-| [local-runtime-boundary.md](local-runtime-boundary.md) | Normative | CLI / daemon / Local API / ACP topology |
-| [schemas-directory-layout.md](schemas-directory-layout.md) | Normative | `schemas/` tree; cloud vs local folders |
+| [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
+| [entity-scope-model.md](entity-scope-model.md) | Master | Normative |
+| [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
+| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative |
 
-Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) (knowledge root — wire vs local types).
+Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) (knowledge root).
 
 ### Runtime and persistence
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [daemon-runtime.md](daemon-runtime.md) | Normative | Single-binary daemon layering and process model |
-| [local-db-schema.md](local-db-schema.md) | Normative | Local `state.db` tables and migrations |
-| [reference-store-layout.md](reference-store-layout.md) | Normative | Reference registry + `body.md` storage split |
+| [daemon-runtime.md](daemon-runtime.md) | Master | Normative |
+| [local-db-schema.md](local-db-schema.md) | Master | Normative |
+| [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 
 ### CLI product surface
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [cli-spec.md](cli-spec.md) | Normative (§6.0B legacy six-group until P5) | Per-command detail, flags, daemon mode, §7 first-run |
-| [cli-command-ia.md](cli-command-ia.md) | **Draft (V1.35)** | Top-level five-group IA; supersedes cli-spec §6.0B until merge |
-| [creator-centric-entry-model.md](creator-centric-entry-model.md) | **Draft (V1.35)** | Creator hub vs platform vs system entry rules |
+| [cli-spec.md](cli-spec.md) | Master | Normative |
+| [cli-command-ia.md](cli-command-ia.md) | Draft overlay | Draft (V1.35) |
+| [creator-centric-entry-model.md](creator-centric-entry-model.md) | Draft overlay | Draft (V1.35) |
 
-**Read order (CLI):** `cli-command-ia` → `creator-centric-entry-model` → `cli-spec` for flags/subcommands.
+**Read order:** IA overlay → entry overlay → CLI Master (flags/subcommands).
 
 ### Orchestration and presets
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [orchestration-engine.md](orchestration-engine.md) | Active SSOT | Preset loader, capabilities, worker IPC, validator |
-| [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Active (legacy scope) | Schedule lifecycle + `core_context` (WS7); engine primitives in orchestration-engine |
-| [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) | **Exploration** | FL-D / DF-56 conditional `next` — not loadable until future compass |
+| [orchestration-engine.md](orchestration-engine.md) | Master | Active |
+| [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
+| [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) | Exploration | Exploration |
 
-### Creator product lines (shipped features)
+### Creator product lines
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [work-experience-model.md](work-experience-model.md) | Shipped (V1.33) | Work container, Creative Brief Intake, `creator run`, `run_intents` |
-| [creator-workflow-fl-e.md](creator-workflow-fl-e.md) | Shipped (V1.34) | FL-E stages, preset chain, `creator run stage` |
-| [creator-challenge-solver.md](creator-challenge-solver.md) | Normative | Creator registration challenge solver |
+| [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
+| [creator-workflow-fl-e.md](creator-workflow-fl-e.md) | Feature line | Shipped (V1.34) |
+| [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Accepted | Worker-delegated ACP hosting, session model |
-| [acp-capability-set.md](acp-capability-set.md) | Normative | Logical `nexus.*` capability surface |
-| [agent-host.md](agent-host.md) | Normative | Hybrid Managed-only `nexus-agent-host` |
-| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Shipped (V1.34) | Agent tools via daemon `HostToolExecutor` |
-| [registry-integration.md](registry-integration.md) | Normative | ACP Registry integration |
-| [skills-export-compatibility.md](skills-export-compatibility.md) | Normative | Skills export (CLI/local only) |
+| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Master | Accepted |
+| [acp-capability-set.md](acp-capability-set.md) | Master | Normative |
+| [agent-host.md](agent-host.md) | Master | Normative |
+| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Feature line | Shipped (V1.34) |
+| [registry-integration.md](registry-integration.md) | Master | Normative |
+| [skills-export-compatibility.md](skills-export-compatibility.md) | Master | Normative |
 
-### Feature contracts and platform companions
+### Feature contracts and companions
 
-| Document | Status | Role |
+| Document | Class | Status |
 | --- | --- | --- |
-| [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | Normative (V1.15 module) | Novel-writing workspace sync scan rules |
-| [canonical-hash.md](canonical-hash.md) | Companion | OSS implementation notes; platform ADR-006 is authority |
+| [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | Companion | Normative (module contract) |
+| [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
 
 ---
 
-## Normative hierarchy (read order)
+## Normative hierarchy (conflict resolution)
 
-When specs overlap, use this order (higher wins on conflict):
+When specs disagree, higher row wins:
 
-1. **`AGENTS.md`** (repo root) — naming, contracts, release discipline.
-2. **[local-cloud-crate-architecture.md](local-cloud-crate-architecture.md)** — local vs cloud product lines, crate graph.
-3. **[entity-scope-model.md](entity-scope-model.md)** — scope hierarchy and crate ownership.
-4. **[schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)** — `schemas/` vs `nexus-contracts/src/local/`.
-5. **[schemas-directory-layout.md](schemas-directory-layout.md)** — folder tree layout.
-6. **Active iteration compass** — delivery batching only (does not override shipped normative specs except where explicitly marked draft overlay).
-7. **Topology / runtime** — [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), CLI cluster (above).
-8. **Persistence** — [local-db-schema.md](local-db-schema.md), [reference-store-layout.md](reference-store-layout.md).
-9. **Subsystem / feature specs** — orchestration, ACP, creator product lines, feature contracts.
-10. **Exploration specs** — design input only; no implement authority until status promoted.
-
-**Former filename:** `local-platform-isolation-and-crate-architecture.md` → renamed **2026-05-20** to `local-cloud-crate-architecture.md`.
+1. Repo root **AGENTS.md**
+2. Architecture Masters (crate graph, entity scope)
+3. Active **iteration compass** (delivery batching only)
+4. **Draft overlay** over legacy section of same-domain Master until P5 merge
+5. Domain **Master**
+6. **Feature line** spec
+7. **Exploration** (non-binding)
 
 ---
 
 ## Authority matrix (overlapping topics)
 
-| Topic | Primary SSOT | Secondary / historical |
+| Topic | Primary SSOT | Secondary |
 | --- | --- | --- |
-| Top-level CLI groups (5 vs 6) | **cli-command-ia** (draft) | cli-spec §6.0B until V1.35 P5 merge |
-| First-run / local vs platform path | **creator-centric-entry-model** (draft) + cli-spec §7 | Compass Appendix A (audit evidence) |
-| `creator run` / Work entity | **work-experience-model** | cli-spec §6.2, orchestration run_intents |
-| FL-E stages / preset chain | **creator-workflow-fl-e** | work-experience-model § extensions |
-| Preset YAML / loader / validator | **orchestration-engine** | creator-schedule §7 YAML additions |
-| Schedule + core_context semantics | **creator-schedule-and-core-context** | orchestration-engine § sessions |
-| Conditional preset routing | **preset-conditional-routing-fl-d** (exploration) | orchestration-engine §7.5 stub |
-| Agent `nexus.*` tools | **agent-nexus-tool-bridge** | acp-capability-set, agent-host |
-| ACP session / worker process | **acp-client-tech-spec** | daemon-runtime, local-runtime-boundary |
-| KB / knowledge naming (KCA-003) | **entity-scope-model** §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
+| Top-level CLI groups | cli-command-ia (Draft) | cli-spec §6 until P5 merge |
+| First-run / local vs platform | creator-centric-entry-model (Draft) + cli-spec §7 | Compass audit appendix |
+| Work / `creator run` | work-experience-model | cli-spec §6.2, orchestration run_intents |
+| FL-E stages / chain | creator-workflow-fl-e | work-experience-model |
+| Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
+| Schedule / core_context | creator-schedule-and-core-context | orchestration-engine sessions |
+| Conditional routing | preset-conditional-routing-fl-d | orchestration-engine §7.5 stub |
+| Agent `nexus.*` tools | agent-nexus-tool-bridge | acp-capability-set, agent-host |
+| ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
+| KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
 
 ---
 
-## Consolidation roadmap (long-term)
+## Hygiene schedule (consolidation policy)
 
-Planned hygiene — execute at iteration close or dedicated spec plan; details in [AGENTS.md](AGENTS.md).
-
-| When | Action |
+| Trigger | Required action |
 | --- | --- |
-| **V1.35 P5** | Merge `cli-command-ia` + `creator-centric-entry-model` into `cli-spec`; archive draft stubs |
-| **FL-D compass locks** | Promote `preset-conditional-routing-fl-d` → normative; update orchestration-engine §7.5 |
-| **Optional ACP hygiene** | Fold `skills-export-compatibility` into acp-client-tech-spec appendix |
-| **If novel-writing sync retired** | Archive `novel-writing-sync-contract.md` |
+| **V1.35 P5** (or iteration close) | Merge cli-command-ia + creator-centric-entry-model into cli-spec; archive overlays |
+| **FL-D compass locks implement** | Promote preset-conditional-routing-fl-d; update orchestration-engine §7.5 |
+| **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix |
+| **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract |
 
-**Not recommended:** merge `creator-schedule-and-core-context` into orchestration-engine (568 lines, distinct WS7 scope); merge ACP cluster into one file (independent evolution).
+**Retained splits (do not merge):** creator-schedule-and-core-context (schedule domain); ACP cluster (independent evolution cadence).
 
 ---
 
 ## Platform cross-repo references
 
-When a spec needs platform architecture, shared contracts, or ADRs, cite **`nexus-platform`** paths (side-by-side checkout: `../nexus-platform/.mstar/designs/...`):
+Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and architecture umbrella. Wire JSON in this repo: `schemas/` → `nexus-contracts`.
 
 | Need | Platform path |
 | --- | --- |
 | Architecture umbrella | `v1-spec/architecture.md` |
-| ADR | `v1-spec/adr/{adr-file-name}.md` |
+| ADR | `v1-spec/adr/{name}.md` |
 | Shared contracts | `v1-spec/shared/...` |
 | Platform HTTP / product | `v1-spec/platform/...` |
 
-**Wire JSON in this repo:** `schemas/` → `nexus-contracts`.
+---
+
+## Archived superseded specs
+
+| Former spec | Superseded by |
+| --- | --- |
+| [daemon-api-workspace-write-architecture.md](../../archived/knowledge/daemon-api-workspace-write-architecture.md) | Stale — historical |
+| [local-fs-layout-creator-workspace.md](../../archived/knowledge/local-fs-layout-creator-workspace.md) | Pointer stub |
+| `nexus42-single-binary-daemon-runtime-architecture.md` | [daemon-runtime.md](daemon-runtime.md) |
+| `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
+| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) |
+
+**Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 
 ---
 
-## Archived (superseded specs)
+## Maintaining this index
 
-| Former spec | Notes |
-| --- | --- |
-| [daemon-api-workspace-write-architecture.md](../../archived/knowledge/daemon-api-workspace-write-architecture.md) | Stale route table |
-| [local-fs-layout-creator-workspace.md](../../archived/knowledge/local-fs-layout-creator-workspace.md) | Pointer stub |
-| `nexus42-single-binary-daemon-runtime-architecture.md` | Merged into [daemon-runtime.md](daemon-runtime.md) |
-| `agent-host-architecture.md` | Merged into [agent-host.md](agent-host.md) §8 |
-| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | Superseded by [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) |
+When adding, renaming, or archiving a spec:
+
+1. Set header **`Status`**, **`Document class`**, and **`Coordinates with`** in the spec file.
+2. Update the domain table in this README.
+3. Update `status.json` `spec_refs` / `wave_0_spec` if wave-0.
+4. Do **not** add file lists to AGENTS.md.

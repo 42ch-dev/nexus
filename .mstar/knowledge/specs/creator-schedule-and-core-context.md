@@ -1,6 +1,7 @@
 # Creator Schedule and Core Context — Specification
 
-**Status**: Active — authoritative design input for V1.4 WS7 (formerly B-track, now folded into V1.4 per 2026-04-17 user direction).
+**Status**: Active — authoritative design input for V1.4 WS7 (formerly B-track, now folded into V1.4 per 2026-04-17 user direction).  
+**Document class**: Legacy scope  
 **Author**: @project-manager (2026-04-17 prep-phase spec); to be co-signed by @architect before WS7 implement.
 **Scope**: Multi-Schedule lifecycle per creator + the immutable versioned `core_context` that stabilises preset execution across edits.
 **Wave-0 design inputs consumed**:

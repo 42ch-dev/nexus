@@ -1,5 +1,8 @@
 # Nexus Local DB Schema Spec
 
+**Status**: Normative  
+**Document class**: Master  
+
 ## 0. 文档定位
 
 本稿是 [`cli-spec.md`](./cli-spec.md) 与 nexus-platform `v1-spec/architecture.md` 的实现下钻，定义 **Nexus 本地 SQLite（`state.db`）** 的职责边界、模块拆分与演进策略。

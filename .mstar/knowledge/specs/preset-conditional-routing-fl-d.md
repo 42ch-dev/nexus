@@ -1,6 +1,7 @@
 # Preset Conditional Routing (FL-D) — Specification
 
 **Status**: Exploration (pre-normative — **not shipped**)  
+**Document class**: Exploration  
 **Created**: 2026-06-06  
 **Product line**: FL-D (Preset orchestration / Agentic Design Patterns)  
 **Tracker**: DF-56 (Conditional routing / branching engine)  

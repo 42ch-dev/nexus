@@ -1,7 +1,9 @@
 # Creator-Centric Entry Model — Normative Supplement v1
 
 **Status**: Draft (V1.35)  
+**Document class**: Draft overlay  
 **Created**: 2026-06-06  
+**Merge target**: cli-spec.md §7
 **Scope**: Product-level rules for **when** users enter via `creator` vs `platform` vs `system`  
 **Coordinates with**:
 

@@ -1,6 +1,7 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Active — orchestration engine SSOT (`nexus-orchestration`, preset loader, worker IPC, capability registry). Primary wave-0 spec for V1.4; still cited by ongoing schedule/cron/multi-agent work.
+**Status**: Active — orchestration engine SSOT (`nexus-orchestration`, preset loader, worker IPC, capability registry). Primary wave-0 spec for V1.4; still cited by ongoing schedule/cron/multi-agent work.  
+**Document class**: Master  
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.

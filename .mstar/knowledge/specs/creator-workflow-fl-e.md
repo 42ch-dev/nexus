@@ -1,6 +1,7 @@
 # Generic Creator Workflow (FL-E) — Normative Specification v1
 
 **Status**: Shipped (V1.34 — 2026-06-05)  
+**Document class**: Feature line  
 **Created**: 2026-06-04  
 **Scope**: **FL-E** product line — stage-complete creator journey on **Work**, built on V1.33 `creator run` + `run_intents`  
 **Coordinates with**:

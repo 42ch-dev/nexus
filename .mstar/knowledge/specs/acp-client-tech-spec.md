@@ -1,6 +1,7 @@
 # ACP Client Integration — Technical Specification
 
-**Status**: Accepted — worker-delegated ACP hosting: daemon runtime does not link `agent-client-protocol`; ACP sessions run in per-creator `nexus42 acp-worker` child processes.
+**Status**: Accepted — worker-delegated ACP hosting: daemon runtime does not link `agent-client-protocol`; ACP sessions run in per-creator `nexus42 acp-worker` child processes.  
+**Document class**: Master  
 
 **Source Plan**: `2025-04-05-acp-client`
 **Date**: 2026-04-06

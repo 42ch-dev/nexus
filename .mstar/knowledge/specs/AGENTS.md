@@ -1,98 +1,102 @@
 # Specs — AGENTS.md
 
-Decision rules for **`.mstar/knowledge/specs/`** — functional and normative OSS specifications.
+Decision rules for normative documents in **`knowledge/specs/`**. **Do not** maintain file lists or domain indexes here — use [`README.md`](README.md) and each spec's header (`Status`, `Document class`, `Coordinates with`).
 
-Parent index: [README.md](README.md). Harness conventions: [`.mstar/knowledge/AGENTS.md`](../AGENTS.md).
+Parent rules: [`knowledge/AGENTS.md`](../AGENTS.md). Repo root: [`AGENTS.md`](../../../AGENTS.md).
 
 ---
 
 ## Layout invariant
 
-- **Flat directory only** — all spec files live directly under `specs/` (kebab-case, **no version suffix** in filenames).
-- **Do not** introduce `specs/cli/`, `specs/orchestration/`, etc. without an ADR + bulk link migration (150+ in-repo references).
-- **Exploration / draft** specs stay in this directory with explicit `Status: Exploration` or `Status: Draft` in the header — not in `knowledge/` root or `iterations/`.
+- **Flat directory only** — one spec file per kebab-case basename; **no version suffix** in filenames.
+- **No subdirectories** unless an ADR authorizes bulk link migration.
+- **Exploration and draft overlays** live here with explicit header status — not under `knowledge/` root or `iterations/`.
 
 ---
 
-## When to create a new spec vs extend an existing one
+## Document classes
 
-| Situation | Action |
+Every spec declares **`Document class`** in its header (with **`Status`**).
+
+| Class | Purpose | Implement authority |
+| --- | --- | --- |
+| **Master** | Long-lived SSOT for a subsystem or surface (CLI detail, engine, runtime) | Yes, when Status is normative/shipped |
+| **Draft overlay** | Iteration-scoped revision of part of a Master; avoids editing Master mid-flight | Only while active compass + Status: Draft |
+| **Feature line** | Shipped product line (Work loop, FL-E, tool bridge) | Yes |
+| **Exploration** | Future product line or engine capability pre-compass | **No** |
+| **Companion** | OSS notes for a platform ADR or narrow module contract | Yes for OSS scope only |
+| **Legacy scope** | Frozen subdomain still cited; do not expand | Yes for cited scope only |
+
+**Anti-pattern:** two Masters restating the same normative surface (e.g. parallel command trees). Extend the Master or add a Draft overlay until merge.
+
+---
+
+## When to create vs extend
+
+| Trigger | Action |
 | --- | --- |
-| New **subsystem** with its own crate boundary and stable API | New spec (e.g. `agent-host.md`) |
-| **Product line** with shipped iteration compass (FL-E, Work loop) | New feature spec; link from orchestration/cli as needed |
-| **CLI top-level IA** or entry-model change | Extend `cli-command-ia.md` / `creator-centric-entry-model.md` during draft; merge into `cli-spec.md` at iteration close |
-| **Preset engine** loader/runtime/validator change | Extend `orchestration-engine.md` |
-| **Future engine feature** not yet implement-authorized | New exploration spec (e.g. `preset-conditional-routing-fl-d.md`) + link from orchestration-engine § |
-| **Small OSS companion** to platform ADR (<80 lines, single concern) | Keep separate only if referenced independently (e.g. `canonical-hash.md`); else appendix in parent spec |
-| **Iteration-scoped audit / evidence** | Compass appendix — **not** a spec |
-
-**Anti-pattern:** parallel specs that restate the same normative rules (e.g. second CLI command list). Use cross-links and a single SSOT per concern.
+| New **crate boundary** with stable public API | New Master spec |
+| **Product line** locked in a shipped compass | New Feature line spec |
+| **Top-level IA or entry model** during active iteration | Draft overlay; merge into CLI Master at P5 hygiene |
+| **Preset engine** loader, validator, runtime | Extend orchestration Master |
+| **Engine capability** not yet compass-authorized | New Exploration spec; link from Master § stub |
+| **Iteration audit / evidence** | Compass appendix — never a spec |
+| **Small platform ADR companion** | Companion spec only if independently cited; else Master appendix |
 
 ---
 
-## Status lifecycle (header field)
-
-Every spec **should** declare `**Status**:` near the top.
+## Status lifecycle
 
 | Status | Meaning | Edit rule |
 | --- | --- | --- |
-| **Normative** / **Active** / **Accepted** | Shipped or authoritative SSOT | Changes need plan or ADR for breaking behavior |
-| **Shipped (V1.xx)** | Feature line delivered; still normative | Extend for forward-compatible additions only |
-| **Draft (V1.xx)** | Locked in active compass; pre-ship | May change until iteration P5 hygiene |
-| **Exploration** | Design only; **no implement authority** | Promote to Draft when a compass locks implement |
-| **Active (legacy scope)** | Still cited; narrow domain frozen | Do not expand scope; prefer orchestration-engine for engine mechanics |
+| **Normative** / **Active** / **Accepted** | Shipped SSOT | Breaking behavior needs plan or ADR |
+| **Shipped (Vx.xx)** | Feature line delivered | Forward-compatible extensions only |
+| **Draft (Vx.xx)** | Overlay locked in active compass | Free until iteration P5 |
+| **Exploration** | Design only | Promote to Draft when compass locks implement |
 
-On promotion **Exploration → Draft → Shipped**: update [README.md](README.md) master index and `status.json` `spec_refs` if wave-0.
-
----
-
-## Authority on overlap (conflict resolution)
-
-Higher row wins when specs disagree without an active compass override:
-
-1. Root [AGENTS.md](../../../AGENTS.md)
-2. [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md)
-3. [entity-scope-model.md](entity-scope-model.md)
-4. Active **iteration compass** (delivery batching only)
-5. Domain SSOT — see [README.md § Authority matrix](README.md#authority-matrix-overlapping-topics)
-6. [cli-spec.md](cli-spec.md) for per-command flags and behavior
-7. Feature specs (`work-experience-model`, `creator-workflow-fl-e`, …)
-
-**V1.35 CLI IA:** [cli-command-ia.md](cli-command-ia.md) supersedes `cli-spec.md` §6.0B until P5 merges IA into cli-spec.
+On **Exploration → Draft → Shipped**: update README index and `status.json` spec_refs if wave-0.
 
 ---
 
-## Merge / archive playbook
+## Authority when specs overlap
 
-Execute at **iteration close (P5 spec hygiene)** or when a dedicated hygiene plan locks.
+Resolve conflicts top-down (higher wins unless active compass explicitly overrides **delivery batching only**):
 
-| Candidate | Trigger | Target |
-| --- | --- | --- |
-| `cli-command-ia.md` | V1.35 shipped | Merge into `cli-spec.md` §6.0B; stub or archive draft file |
-| `creator-centric-entry-model.md` | V1.35 shipped | Merge into `cli-spec.md` §7; stub or archive |
-| `preset-conditional-routing-fl-d.md` | FL-D shipped | Promote to normative; fold § into `orchestration-engine.md` §7.5 or keep if >200 lines |
-| `skills-export-compatibility.md` | Next ACP hygiene | Optional appendix of `acp-client-tech-spec.md` |
-| `novel-writing-sync-contract.md` | If sync module retired | Archive to `archived/knowledge/` |
+1. Repo root **AGENTS.md**
+2. **Architecture Masters** — crate graph, entity scope (foundation layer)
+3. **Active iteration compass** — schedule and scope lock only; does not override shipped normative text except Draft overlays
+4. **Draft overlay** over conflicting **legacy section** in the same-domain Master until P5 merge
+5. **Domain Master** for that subsystem
+6. **Feature line** spec for product behavior built on the Master
+7. **Exploration** — input only; never overrides 5–6
 
-**Archive steps:** `git mv` → `.mstar/archived/knowledge/`; pointer stub with `Superseded by:`; update README + grep fix links.
+**Single concern, single SSOT:** per-command flags live in CLI Master; top-level groups in IA overlay until merged; Work entity in Work feature spec; preset grammar in orchestration Master.
 
-**Do not archive** while any open plan, compass, or crate `AGENTS.md` still cites the path as normative.
+---
+
+## Merge and retire (P5 hygiene)
+
+Execute at **iteration close** or a dedicated spec-hygiene plan.
+
+| Class transition | Rule |
+| --- | --- |
+| **Draft overlay → Master** | Fold overlay sections into Master; archive overlay with `Superseded by:` stub |
+| **Exploration → normative** | Promote Status; fold into Master § if small, else keep Feature/Exploration Master with normative Status |
+| **Companion obsolete** | Archive when platform ADR + code drop the OSS hook |
+| **Legacy scope** | Do not grow; new engine behavior goes to orchestration Master |
+
+After any retire: fix links, update README, never leave duplicate normative paragraphs.
 
 ---
 
 ## Naming
 
 - Pattern: `<domain>-<qualifier>.md` or `<product-line>-<feature>.md`
-- Prefer **product line codes** in body text (FL-E, FL-D), not filenames (`fl-e` OK in feature spec names already shipped)
-- Avoid version suffixes in filenames (`cli-command-ia-v1.35.md` is wrong)
+- Product line codes (**FL-E**, **FL-D**) belong in **body text**, not necessarily filenames
+- Never encode iteration version in filename (`*-v1.35.md`)
 
 ---
 
-## Related (not in `specs/`)
+## AGENTS.md authoring rule (this tree)
 
-| Content | Location |
-| --- | --- |
-| Schema ↔ contracts boundary | [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) |
-| Deferred features | [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md) |
-| Iteration delivery scope | [`.mstar/iterations/`](../../iterations/README.md) |
-| Platform ADRs | `nexus-platform/.mstar/designs/v1-spec/adr/` |
+Specs `AGENTS.md` holds **classes, lifecycle, and conflict rules** only. Filenames, domain tables, authority matrices, and consolidation schedules belong in **README.md** or spec headers — they change every iteration.

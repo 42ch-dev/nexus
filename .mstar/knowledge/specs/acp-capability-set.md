@@ -1,5 +1,8 @@
 # Nexus ACP Capability Set
 
+**Status**: Normative  
+**Document class**: Master  
+
 ## 0. Document position
 
 This document defines the **minimal ACP-facing capability contract** between **Nexus CLI runtime (ACP Client)** and **user-owned local agents (ACP Agent)**. It is a functional contract layer; it does not freeze ACP wire-level RPC method names or JSON shapes.

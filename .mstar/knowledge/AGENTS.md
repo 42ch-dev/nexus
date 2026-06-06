@@ -1,69 +1,75 @@
 # Knowledge — AGENTS.md
 
-Harness knowledge directory for the Nexus OSS repo.
+Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file indexes here — discover documents via [`README.md`](README.md), [`specs/README.md`](specs/README.md), or directory listing.
 
-## Two subtrees
+> Project and crate rules: root [`AGENTS.md`](../../AGENTS.md). Harness layout: [`.mstar/AGENTS.md`](../AGENTS.md).
 
-| Subtree | Path | Use for |
+---
+
+## What belongs where
+
+**Principle:** separate **durable normative truth** (specs) from **cross-cutting policy** (knowledge root) from **time-boxed delivery** (iterations) from **machine state** (`status.json`).
+
+| Kind of content | Where | Must not |
 | --- | --- | --- |
-| **Specs** | [`specs/`](specs/README.md) | **Functional / normative** documents: CLI, daemon runtime, ACP, orchestration, sync feature contracts (flat under `specs/`). Decision rules: [`specs/AGENTS.md`](specs/AGENTS.md). |
-| **Knowledge (root)** | This directory (files directly under `knowledge/`, not under `specs/`) | **Rules and reference**: dependency conventions, schema↔platform boundary, cross-version trackers, maintenance indexes |
+| CLI / daemon / ACP / orchestration **behavior contracts** | `specs/` | Live in knowledge root or compass long-term |
+| Schema ↔ contracts boundary, crate policy, trackers | `knowledge/` root | Restate normative command/API detail |
+| Iteration scope, grill decisions, audit evidence | `iterations/` | Become permanent spec without P5 merge |
+| Open plans, residuals, branch names | `status.json` | Drift from compass without explicit update |
 
-**Not here:** iteration compasses → [`.mstar/iterations/`](../iterations/README.md). End-user docs → `docs/`.
+End-user docs stay in repo-root `docs/`.
 
-**Index:** specs in [`specs/README.md`](specs/README.md); knowledge-root docs in [`README.md`](README.md). Archived implementation knowledge: [`.mstar/archived/knowledge/`](../archived/knowledge/README.md). Shipped feature tracker archive: [`.mstar/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md).
+---
 
-## Where to add new documents
+## Specs subtree
 
-| Document kind | Location | Naming |
-| --- | --- | --- |
-| CLI / daemon / ACP / local DB **normative** | `specs/` | kebab-case `.md` (no version suffix in filename) |
-| Feature or subsystem **architecture / contract** | `specs/` | `<topic>-<qualifier>.md` (kebab-case) |
-| Workspace dependency / codegen boundary / trackers | `knowledge/` (root) | same kebab-case pattern |
+All normative OSS specs are **flat** under `specs/`. Rules for creating, merging, and retiring specs: [`specs/AGENTS.md`](specs/AGENTS.md).
 
-Put `Status`, `Supersedes`, or `Revision` in the document header — not in the directory name.
+When implementing runtime behavior, read **`status.json`** wave-0 / spec_refs first, then the cited spec bodies. Platform ADRs live in **`nexus-platform`** when this repo points outward.
 
-## Reading during implementation
+**Do not silently diverge** from a cited spec; record change via spec revision, plan residual, or ADR.
 
-1. Read `status.json` `metadata.wave_0_spec` / `metadata.spec_refs` (paths may point to `knowledge/specs/` or `iterations/`).
-2. For OSS runtime behavior, start with **`specs/`** (e.g. `cli-spec.md`, `daemon-runtime.md`); platform ADRs live under **`nexus-platform`** `v1-spec/adr/` when needed.
-3. Use **knowledge-root** docs for schema boundary and crate policy only.
-4. Do not silently diverge; escalate via plan residual or spec update.
+---
 
-## Cross-version deferred feature trackers
+## Deferred-feature trackers (two-document model)
 
-Two linked documents; **do not** merge into one file.
+**Principle:** one **active** tracker holds open/backlog rows only; one **append-only archive** holds closed history and per-iteration snapshots. Never merge them.
 
-| Document | Path | Role |
-| --- | --- | --- |
-| **Active tracker** | [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) | **Open** DF/BL rows, PD-* decisions, FL-* product lines, backlog, residual mirror. Scope authority for planning is still the active iteration compass. |
-| **Shipped archive** | [`.mstar/archived/shipped-features-tracker.md`](../archived/shipped-features-tracker.md) | **Append-only** closed rows (shipped / cancelled / superseded) and per-version delivery snapshots. Top-level under `.mstar/archived/` — not `archived/knowledge/`. |
+### Active tracker — maintenance discipline
 
-### Maintenance rules (active tracker)
+1. **Open only** — no long-lived “shipped” strikethrough rows in open tables.
+2. **Closing** — remove row from active; append same id to archive with version, plan, and brief note.
+3. **Iteration close** — add delivery snapshot to archive; refresh active quick-status line; hygiene plan merges **last**.
+4. **Re-defer** — keep row active; update target and history; archive only on ship or cancel.
+5. **Conflicts** — active delivery compass wins on scope; `status.json` `residual_findings` wins over tracker mirror for machine-state residuals.
 
-1. **Open only** — §3 tables list items not yet closed. Remove shipped rows from the active file; do not leave strikethrough “✅ Shipped” rows in §3.3 long-term.
-2. **Closing an item** — Delete the row from §3.3 (or relevant open table). Append the same ID to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 with `Shipped in`, plan-id, and a brief note.
-3. **Iteration close** — Add a V1.* delivery snapshot to archive §2. Update the active tracker Quick status line and PD/FL rows. Spec/tracker hygiene plans (e.g. P4) merge **last** after implementation.
-4. **Re-defer** — Keep the row in §3.3; update `Target` and `Deferral history`. Do not move to archive until shipped or cancelled.
-5. **Conflicts** — Active delivery compass wins over tracker targets. `status.json` `residual_findings` wins over §3.5 mirror for machine-state residuals.
+### Shipped archive — maintenance discipline
 
-### Maintenance rules (shipped archive)
+1. **Append-only** — never delete closed rows or snapshots.
+2. **No open backlog** — new deferrals go to active tracker only.
 
-1. **Append-only** — Never delete historical closed rows or snapshots.
-2. **§1 Closed items** — One table row per closed DF/BL/residual tracker id; include version and plan reference.
-3. **§2 Per-version snapshots** — One subsection per shipped iteration (compass link, plans, key tracker ids closed).
-4. **No open backlog** — Do not add new open/deferred rows here; use the active tracker.
+Spec supersession uses the archiving rules below — independent from feature-tracker lifecycle.
 
-When a **spec** (under `specs/`) is superseded, follow §Archiving below — that path is separate from the feature tracker pair.
+---
 
-## Archiving
+## Archiving superseded knowledge
 
-When a spec is superseded:
+When any knowledge or spec document is superseded:
 
-1. `git mv` to `.mstar/archived/knowledge/`.
-2. Update [`specs/README.md`](specs/README.md) or [`README.md`](README.md) indexes.
-3. Fix in-repo links in plans and other specs.
+1. Move to `.mstar/archived/knowledge/` (or appropriate archived subtree).
+2. Leave a **pointer stub** at the old path or fix all in-repo links in the same change.
+3. Update **README indexes only** — not AGENTS files.
 
-## OSS local normative SSOT (2026-05-20)
+Do not archive while an active plan, compass, or crate AGENTS still treats the path as normative authority.
 
-OSS local normative specs live **flat** under **`specs/`** (SSOT for this repo). Platform `v1-spec/local/` was removed; see nexus-platform `v1-spec/adr/adr-029-oss-local-specs-in-nexus-knowledge-v1.md` for migration context.
+---
+
+## OSS local normative SSOT
+
+Platform `v1-spec/local/` was retired in favor of **`specs/` in this repo** (see platform ADR-029). Specs here are authoritative for OSS implementation; platform `v1-spec/` remains authoritative for cloud product and shared ADRs.
+
+---
+
+## AGENTS.md authoring rule (this tree)
+
+Knowledge `AGENTS.md` files record **invariants, decision procedures, and anti-patterns** — not inventories of filenames, version lists, or tables that duplicate README / `status.json` / glob results. If content goes stale when a file is added or renamed, it belongs in README or in the spec header, not in AGENTS.
