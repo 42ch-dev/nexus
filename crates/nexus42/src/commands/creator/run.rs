@@ -534,7 +534,7 @@ async fn stage_advance(
     let current_idx = stage_index(current_stage).unwrap_or(0);
     let target_idx = stage_index(target_stage).unwrap_or(0);
 
-    // Shared gate validation (V1.34 creator-workflow-fl-e §3.3)
+    // Shared gate validation (V1.34 creator-workflow §3.3)
     // Uses the same function as daemon PATCH stage path.
     let work_state = WorkStageState {
         current_stage: current_stage.to_string(),
