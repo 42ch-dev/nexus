@@ -209,12 +209,12 @@ pub async fn mark_prompt_injections_consumed(
     injection_ids: &[String],
     now: i64,
 ) -> Result<u64, LocalDbError> {
+    /// Maximum number of IDs per batched UPDATE statement.
+    const BATCH_LIMIT: usize = 100;
+
     if injection_ids.is_empty() {
         return Ok(0);
     }
-
-    /// Maximum number of IDs per batched UPDATE statement.
-    const BATCH_LIMIT: usize = 100;
 
     let mut total_affected: u64 = 0;
 

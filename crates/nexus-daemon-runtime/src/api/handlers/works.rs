@@ -499,7 +499,7 @@ pub async fn append_inspiration(
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-/// Validate stage_status transitions to terminal states (R-CURSOR-PR42-03).
+/// Validate `stage_status` transitions to terminal states (R-CURSOR-PR42-03).
 ///
 /// Rejects direct status promotion to `complete`/`skipped` without an explicit
 /// stage change unless `force` is true. This prevents PATCH requests with only
@@ -517,12 +517,12 @@ fn check_stage_status_transition(
     target_status: &str,
     force: bool,
 ) -> Result<(), NexusApiError> {
+    // Terminal status values that require gate validation or explicit force.
+    const TERMINAL_STATUSES: &[&str] = &["complete", "skipped"];
+
     if force {
         return Ok(());
     }
-
-    // Terminal status values that require gate validation or explicit force.
-    const TERMINAL_STATUSES: &[&str] = &["complete", "skipped"];
 
     if TERMINAL_STATUSES.contains(&target_status) && !TERMINAL_STATUSES.contains(&current_status) {
         return Err(NexusApiError::BadRequest {
