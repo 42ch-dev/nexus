@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-06-v1.35-cli-ia-implement"
-verdict: "Request Changes"
-generated_at: "2026-06-07"
+verdict: "Approve"
+generated_at: "2026-06-06T17:37:58Z"
+revalidation: "targeted — F-001 (5-group root help) + F-002 (IA order)"
 ---
 
 # Code Review Report
@@ -79,4 +80,44 @@ generated_at: "2026-06-07"
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 0 |
 
-**Verdict**: Request Changes
+**Initial Verdict**: Request Changes (superseded by the targeted revalidation below)
+
+## Revalidation
+
+### What was re-reviewed
+- Targeted re-review of the fix wave for the two original QC #1 findings:
+  - F-001 (Critical): root help exposed six groups including visible `sync`.
+  - F-002 (Warning): root command order did not match the V1.35 IA order.
+- Review range / Diff basis: merge-base `31b7e4e` (iteration/v1.35 HEAD after P0) through tip `34270c1` (current HEAD after fix wave), equivalent to `git diff 31b7e4e..34270c1`.
+- Working branch verified: `feature/v1.35-cli-ia-implement`.
+- Review cwd verified: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.35-p2`.
+
+### F-001 status: RESOLVED
+- `crates/nexus42/src/cli.rs` now declares visible `Commands` variants as `Creator`, `Daemon`, `Acp`, `Platform`, `System`, followed by hidden aliases/internal entries.
+- `Commands::Sync` has `#[command(hide = true)]` and remains after the five visible groups.
+- `./target/debug/nexus42 --help | head -25` shows exactly the five canonical command entries in the `Commands:` section: `creator`, `daemon`, `acp`, `platform`, `system`; no visible top-level `sync` entry appears.
+- `./target/debug/nexus42 sync --help | head -10` still succeeds and shows the deprecated hidden alias help with sync subcommands.
+- `./target/debug/nexus42 sync status` emits the stderr deprecation warning and reaches the sync status handler (which then reports the local state database migration error in this checkout, confirming handler execution rather than an unrecognized command).
+- `cargo test -p nexus42 --test command_surface_contract v135` passed: 4/4 V1.35 tests, including `v135_root_help_shows_five_groups_with_sync_hidden` and `v135_sync_deprecation_warning`.
+
+### F-002 status: RESOLVED
+- `Commands` enum order is now `Creator`, `Daemon`, `Acp`, `Platform`, `System`, then hidden `Sync`, `AcpWorker`, and `DaemonRun`.
+- `./target/debug/nexus42 --help | grep -A 20 "^Commands:"` shows visible root command order as `creator`, `daemon`, `acp`, `platform`, `system`.
+- The three hidden variants (`Sync`, `AcpWorker`, `DaemonRun`) appear at the end of the enum and are hidden from root help.
+
+### Verification commands
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.35-p2`.
+- `git branch --show-current` → `feature/v1.35-cli-ia-implement`.
+- `git log -1 --oneline` → `34270c1 fix(cli): v1.35-p2 F-001/F-002 hide deprecated top-level sync + IA order`.
+- `git log --oneline 31b7e4e..HEAD` reviewed the implementation and prior QC report commits in the assigned range.
+- `git diff 31b7e4e..HEAD --stat` reviewed the assigned diff scope.
+- `./target/debug/nexus42 --help | head -25` completed with five visible command groups.
+- `./target/debug/nexus42 sync --help | head -10` completed for the hidden alias.
+- `./target/debug/nexus42 sync status` completed far enough to emit the deprecation warning and invoke sync status handling.
+- `cargo test -p nexus42 --test command_surface_contract v135` passed (4/4).
+- `cargo test -p nexus42 --test command_surface_contract` passed (33/33).
+- `cargo clippy -p nexus42 -- -D warnings` passed.
+- `cargo +nightly fmt --all -- --check` passed.
+
+### New verdict
+**Verdict**: Approve. Both original QC #1 findings are resolved, required command-surface tests and scoped clippy/fmt checks passed, and no new architecture/maintainability findings were introduced by the fix.
