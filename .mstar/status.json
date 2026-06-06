@@ -223,14 +223,26 @@
     },
     {
       "id": "2026-06-06-v1.35-spec-tracker-hygiene",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-06-v1.35-spec-tracker-hygiene.md",
       "working_branch": "feature/v1.35-spec-tracker-hygiene",
       "merge_target": "iteration/v1.35",
       "metadata": {
         "iteration_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
-        "description": "P5 — tracker, status, iterations (merge last)"
-      }
+        "description": "P5 — tracker, status, iterations (merge last)",
+        "done_at": "2026-06-07T15:00:00+08:00",
+        "qc": "skipped — docs/tracker hygiene only (no code); per mstar-harness-core §Non-Bypass Constraints (Product-docs-only and tech-spec-only can skip QC tri-review only with explicit `QC: skipped — <reason>`)",
+        "qa": "PM-validated (P5 is PM-domain work: status.json sync, deferred tracker, iterations README, cli-command-ia status → Shipped)",
+        "shipped": [
+          "V1.35 latest_shipped_iteration",
+          "cli-command-ia.md status Draft → Shipped",
+          "iterations/README.md V1.35 row Active → Shipped",
+          "deferred-features tracker DF-47 → V1.36, DF-53 partial closed"
+        ],
+        "open_residuals": 28,
+        "critical_residuals": 0
+      },
+      "updated_at": "2026-06-07T15:00:00+08:00"
     }
   ],
   "metadata": {
@@ -240,14 +252,14 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.35",
+    "integration_branch": "iteration/v1.36",
     "last_integration_branch": "feature/v1.34-creator-workflow-and-agent-tools",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.34",
-    "latest_shipped_at": "2026-06-05T05:00:00+08:00",
-    "latest_active_iteration": "v1.35",
-    "latest_active_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.35",
+    "latest_shipped_at": "2026-06-07T15:00:00+08:00",
+    "latest_active_iteration": "v1.36",
+    "latest_active_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-06-07T12:30:00+08:00",
@@ -305,7 +317,7 @@
       ".mstar/knowledge/specs/creator-workflow.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
