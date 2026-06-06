@@ -225,28 +225,50 @@
     "latest_active_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-06T22:00:00+08:00",
-      "total_open": 40,
+      "updated_at": "2026-06-07T12:30:00+08:00",
+      "total_open": 28,
       "by_severity": {
-        "critical": 6,
+        "critical": 0,
         "high": 0,
-        "medium": 9,
-        "low": 20,
+        "medium": 8,
+        "low": 15,
         "nit": 5
       },
       "by_target": {
-        "unspecified": 40
+        "v1.36": 5,
+        "backlog": 23
       },
       "by_plan": {
-        "2026-06-04-v1.33-llm-judge-runtime-fix": 4,
-        "2026-06-04-v1.33-memory-review-closed-loop": 7,
+        "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
+        "2026-06-04-v1.33-memory-review-closed-loop": 3,
         "2026-06-04-v1.33-work-model-and-creator-run": 3,
-        "2026-06-04-v1.34-agent-tool-implementation": 1,
+        "v1.30-post-qc-tech-debt": 9,
+        "v1.31-post-qc-tech-debt": 5,
         "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
-        "v1.30-post-qc-tech-debt": 11,
-        "v1.31-post-qc-tech-debt": 8,
-        "2026-06-04-v1.34-pr-42-cursor-automation": 1,
-        "2026-06-04-v1.34-cursor-pr42-stage-status": 1
+        "2026-06-04-v1.34-agent-tool-implementation": 1
+      },
+      "v1.35-p0_closed": {
+        "critical": [
+          "R-V133P3-01",
+          "R-V133P3-02",
+          "R-V133P4-01",
+          "R-V133P4-02",
+          "R-V133P4-03",
+          "R-V133P4-07"
+        ],
+        "medium": [
+          "R-CURSOR-PR42-03"
+        ],
+        "low": [
+          "TD-V130-02",
+          "TD-V130-06",
+          "TD-V131-01",
+          "TD-V131-03",
+          "TD-V131-04"
+        ],
+        "deferred_to_v1.36": [
+          "DF-47"
+        ]
       }
     },
     "wave_0_spec": ".mstar/knowledge/specs/cli-command-ia.md",
@@ -262,28 +284,6 @@
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
-      {
-        "id": "R-V133P3-01",
-        "title": "judge.llm parse_judge_response: 'NOGO' contains 'go' as substring, false-positive GO under V1.33 P3 LlmJudgeTask path",
-        "severity": "critical",
-        "source": "qc1 C-001 (V1.33 P3 review); same root cause as TD-V131-07 (V1.31 backlog, was low severity under stub rule path; now elevated because P3 makes judge.llm the real eval path)",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask parse logic — likely delegates to judge_llm.rs / parse_judge_response); existing TD-V131-07 scope was crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P3 fix wave",
-        "note": "Word list 'go'/'nogo' matching can produce false positives from LLM output. The P3 LlmJudgeTask now invokes judge.llm in real path (not stub), so this surface is exercised. Fix per TD-V131-07 note: regex anchors or parse first word of response. P3 fix wave: switch to first-word parse anchored to whitespace/punctuation."
-      },
-      {
-        "id": "R-V133P3-02",
-        "title": "LlmJudgeTask treats template_file as inline template string instead of loading file content from bundle",
-        "severity": "critical",
-        "source": "qc1 C-002 (V1.33 P3 review); also flagged in implementer Completion Report §7 nuance #1",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask template render path) + presets using template_file (novel-writing/preset.yaml:48, reflection-loop/preset.yaml, research/preset.yaml)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P3 fix wave",
-        "note": "YAML presets use paths like 'prompts/gathering-exit.md' for template_file, but runtime treats the value as an inline handlebars string. Preset authors intended file paths; runtime breaks silently. Fix: add file-content loading in the task (read from bundle root relative to preset directory), or add a loader pre-processing step that resolves template_file → file content at load time. P3 fix wave: pre-load in LlmJudgeTask (read from preset bundle path, with SAFETY: file read)."
-      },
       {
         "id": "R-V133P3-03",
         "title": "min_interval ISO-8601 duration parser silently returns None for unsupported units (P1D, months, years) — throttle bypassed, no log",
@@ -308,39 +308,6 @@
       }
     ],
     "2026-06-04-v1.33-memory-review-closed-loop": [
-      {
-        "id": "R-V133P4-01",
-        "title": "POST /v1/local/memory/review + GET /v1/local/memory/fragments don't enforce active creator from auth context (P1 works pattern)",
-        "severity": "critical",
-        "source": "qc2 C-001 (V1.33 P4 review)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review + fragments handlers); pending-review CRUD in same file uses body/query creator_id, not config.toml active_creator_id",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave",
-        "note": "Memory review/fragments accept arbitrary ctr_* from request body/query without checking against active creator in auth context. Weaker than V1.32 SEC-V131-01 (works handlers now use AuthRequired for missing creator). Fix: extract active_creator_id from request extensions (middleware), compare with request-body creator_id, return 403 on mismatch + 401 on missing. P1 established the pattern in creators.rs/works.rs: read_active_creator_id + AuthRequired."
-      },
-      {
-        "id": "R-V133P4-02",
-        "title": "memory_review_fragments_api.rs tests don't cover 401/403/404 + cross-creator isolation (only 200/400)",
-        "severity": "critical",
-        "source": "qc2 C-002 (V1.33 P4 review)",
-        "scope": "crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs (231 lines, 10 tests)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave",
-        "note": "P1's 18 works_api.rs tests established the pattern: 401 (no creator) + 403/404 (cross-creator isolation). Memory tests only cover 200/400. Add the missing 4-5 tests to match the works coverage bar. Critical because the auth gap from R-V133P4-01 has no test coverage."
-      },
-      {
-        "id": "R-V133P4-03",
-        "title": "PassthroughSummarizer stores raw digest verbatim as LTM body with no UNTRUSTED/provenance marker — prompt-injection vector for downstream use",
-        "severity": "critical",
-        "source": "qc2 C-003 (V1.33 P4 review); also implementer Completion Report §7 nuance #2",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs (review handler) → calls promote_to_long_term which uses PassthroughSummarizer",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave",
-        "note": "LTM body = raw_digest (the session capture's extracted text). If the digest contains prompt-injection, downstream LTM consumers (creator.write_memory, ACP context assembly) will see it as trusted user content. Fix: prepend a header marker like '# UNTRUSTED: sourced from session_capture digest (creator=<id>, session=<id>, at=<ts>)\\n\\n' to every LTM body produced via PassthroughSummarizer; downstream consumers can grep the marker to apply extra validation. OR: require explicit user opt-in (interactive confirm) for 'use this digest as LTM' path. V1.33 fix: header marker is minimum bar."
-      },
       {
         "id": "R-V133P4-04",
         "title": "list_fragments_filtered runtime sqlx uses ! column alias suffix — invalid for runtime queries; handler works around but P4 implementer noted the underlying bug remains",
@@ -373,17 +340,6 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.33 P4 fix wave",
         "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning."
-      },
-      {
-        "id": "R-V133P4-07",
-        "title": "4 pending-review CRUD handlers (create, list, count, delete) still lack active-creator enforcement — R-V133P4-01 fix scope incomplete",
-        "severity": "critical",
-        "source": "qc1-wave2 NEW (V1.33 P4 re-check)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs:79 (create_pending_review), :210 (list_pending_reviews), :285 (count_pending_reviews), :332 (delete_pending_review) — all 4 take creator_id from body/query without checking against active creator in auth context",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave-2",
-        "note": "P4 plan assignment said 'Apply the same fix to the existing pending-review handlers in the same file (consistency)'. P4 implementer applied AuthRequired only to the new review/fragments handlers (lines 477, 701) but did NOT update the 4 legacy pending-review CRUD handlers. qc2-wave2 said this was 'out of scope, as expected' but the original plan explicitly required it. Fix: same pattern as R-V133P4-01 — extract active_creator_id, return 401 on missing, 403 on body creator_id mismatch, use active creator for the operation. Add 4 new tests covering 401/403 for each handler. Note: V1.32 SEC-V131-01 baseline was already weak here; this fix brings pending-review up to the same standard as the new review/fragments handlers from P4 wave-1."
       }
     ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -423,17 +379,6 @@
     ],
     "v1.31-post-qc-tech-debt": [
       {
-        "id": "TD-V131-01",
-        "title": "Non-atomic queue claim race — claim_prompt_injections SELECT-then-UPDATE without transaction",
-        "severity": "low",
-        "source": "qc2 C-2-2, qc1 W-002",
-        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Single-process SQLite pre-1.0. Wrap in transaction when concurrent access possible."
-      },
-      {
         "id": "TD-V131-02",
         "title": "Keyword LIKE pattern doesn't escape special characters",
         "severity": "low",
@@ -443,28 +388,6 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Add escape_sql_like helper for user-supplied keyword values."
-      },
-      {
-        "id": "TD-V131-03",
-        "title": "Unbounded IN clause in mark_prompt_injections_consumed",
-        "severity": "low",
-        "source": "qc3 W-002",
-        "scope": "crates/nexus-local-db/src/prompt_injection.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add batch limit (e.g. 100) and chunk if needed."
-      },
-      {
-        "id": "TD-V131-04",
-        "title": "Unbounded prompt size in build_summary_prompt — memory/IPC risk",
-        "severity": "low",
-        "source": "qc3 W-003",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add configurable content size limit before prompt construction."
       },
       {
         "id": "TD-V131-05",
@@ -524,17 +447,6 @@
         "note": "Benign in current single-threaded IPC model. Revisit if worker becomes concurrent. Consider parking_lot::RwLock."
       },
       {
-        "id": "TD-V130-02",
-        "title": "cleanup_row fire-and-forget — DELETE failure silently lost, dangling registry rows possible",
-        "severity": "low",
-        "source": "qc2 W-003, qc3 W-003",
-        "scope": "crates/nexus-local-db/src/reference_source.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add tracing::error on DELETE failure at minimum. Consider awaiting inline with timeout."
-      },
-      {
         "id": "TD-V130-03",
         "title": "JobLifecycleGuard FSM — no RAII guard to ensure mark_done/mark_failed called exactly once",
         "severity": "low",
@@ -566,17 +478,6 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Pre-release volumes well under 500. Add total_count or has_more field when scale requires it."
-      },
-      {
-        "id": "TD-V130-06",
-        "title": "mark_running lacks WHERE status guard — can revert done/failed jobs",
-        "severity": "low",
-        "source": "qc3 S-004",
-        "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Add WHERE status='queued' guard to mark_running, mirroring claim_job pattern."
       },
       {
         "id": "TD-V130-07",
@@ -700,21 +601,8 @@
         "scope": "crates/nexus-orchestration (production caller side)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.34+/P5",
-        "note": "P4 unified the registry dispatch table (HostToolExecutor::execute handles both HTTP and worker upcall via dispatch_from_worker adapter) but did NOT wire the actual production caller (nexus-orchestration sending worker/agent_tool_request). Adapter ready, caller TBD."
-      }
-    ],
-    "2026-06-04-v1.34-cursor-pr42-stage-status": [
-      {
-        "id": "R-CURSOR-PR42-03",
-        "title": "FL-E stage_status gate bypass via status-only PATCH — check_stage_advance gated on current_stage.is_some() only",
-        "severity": "medium",
-        "source": "Cursor security automation #351d19c7 (PR #42 revalidation RUN_ID bc-52739238, 2026-06-05) — NEW post-3b24aaf finding",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work_stage: stage_status update path bypasses check_stage_advance when current_stage absent)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.34+",
-        "note": "NEW finding discovered after 3b24aaf merge. check_stage_advance only runs when req.current_stage.is_some(); a PATCH with only {\"stage_status\":\"complete\"} or {\"skipped\"} skips all FL-E gates (creator-workflow §3.3 gate 2: current stage must be complete before advance). Attack path: API key holder PATCHes stage_status=complete while schedule still running, then PATCHes current_stage (passes because status was fraudulently complete). Fix: run gate validation (or dedicated status-transition check) whenever stage_status changes to complete/skipped/active; reject direct status promotion unless driven by schedule completion or explicit audited force. Logged post-merge; fix in V1.34+ follow-up."
+        "target_date": "V1.36",
+        "note": "V1.35 P0 assessed: adapter exists, but production wiring requires IPC-layer changes (IpcClient notification handling, WorkerHandleProvider trait extension, worker-side tool request forwarding). Non-surgical across 3+ crates — deferred to V1.36. V1.35 ships dispatch_from_worker adapter + tests only."
       }
     ]
   }

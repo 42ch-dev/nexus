@@ -191,16 +191,25 @@ pub async fn register(
 }
 
 /// Best-effort cleanup: delete a just-inserted row when file write fails.
+///
+/// TD-V130-02: Logs an error on DELETE failure instead of silently discarding.
 fn cleanup_row(pool: &SqlitePool, id: &str) {
     let pool = pool.clone();
     let id = id.to_string();
     tokio::spawn(async move {
         // SAFETY: runtime query for best-effort cleanup; compile-time
         // macro not required in fire-and-forget context.
-        let _ = sqlx::query("DELETE FROM reference_sources WHERE reference_source_id = ?")
+        let result = sqlx::query("DELETE FROM reference_sources WHERE reference_source_id = ?")
             .bind(&id)
             .execute(&pool)
             .await;
+        if let Err(e) = result {
+            tracing::error!(
+                reference_source_id = %id,
+                error = %e,
+                "TD-V130-02: cleanup_row DELETE failed — dangling registry row may remain"
+            );
+        }
     });
 }
 

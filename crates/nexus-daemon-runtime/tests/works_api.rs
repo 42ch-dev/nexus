@@ -936,7 +936,7 @@ async fn patch_work_stage_change_is_auditable() {
     .unwrap();
     let work_id = resp.work_id.clone();
 
-    // Set intake_status=complete and stage_status=complete
+    // Set intake_status=complete and stage_status=complete (force to bypass R-CURSOR-PR42-03 gate)
     let patch = PatchWorkRequest {
         title: None,
         long_term_goal: None,
@@ -948,7 +948,7 @@ async fn patch_work_stage_change_is_auditable() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: Some("complete".to_string()),
-        force: None,
+        force: Some(true),
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -1046,4 +1046,165 @@ async fn patch_work_invalid_stage_value_returns_400() {
     assert!(result.is_err(), "PATCH with invalid stage should fail");
     let err = result.unwrap_err();
     assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+}
+
+// ─── R-CURSOR-PR42-03: stage_status gate bypass prevention ────────────────
+
+/// Helper: seed a work via SQL for R-CURSOR-PR42-03 tests.
+async fn seed_work_for_status_test(
+    pool: &sqlx::SqlitePool,
+    work_id: &str,
+    stage: &str,
+    stage_status: &str,
+    intake_status: &str,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    // SAFETY: test helper using runtime query — compile-time macro not applicable.
+    sqlx::query(
+        "INSERT OR IGNORE INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal, initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status) VALUES (?, 'ctr_testuser', 'ws_default', 'active', 'Test Work', 'Test goal', 'Test idea', NULL, ?, NULL, NULL, '[]', 'novel-writing', '[]', ?, ?, ?, ?)",
+    )
+    .bind(work_id)
+    .bind(intake_status)
+    .bind(&now)
+    .bind(&now)
+    .bind(stage)
+    .bind(stage_status)
+    .execute(pool)
+    .await
+    .expect("seed work insert");
+}
+
+/// Create a test context with active creator config for handler-level tests.
+async fn test_ctx_with_creator_config() -> (TestTempRoot, WorkspaceState) {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    // Write config.toml so read_active_creator_id finds "ctr_testuser"
+    let config_content = "active_creator_id = \"ctr_testuser\"\n[active_workspace_slug_by_creator]\n\"ctr_testuser\" = \"ws_default\"\n";
+    std::fs::write(nexus_home.join("config.toml"), config_content).expect("write config.toml");
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    (tmp, state)
+}
+
+/// PATCH with only `stage_status: "complete"` (no current_stage) is rejected.
+/// This proves the gate bypass from R-CURSOR-PR42-03 is fixed.
+#[tokio::test]
+async fn patch_stage_status_complete_without_stage_is_rejected() {
+    let (tmp, state) = test_ctx_with_creator_config().await;
+    let pool = state.pool().clone();
+
+    let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+    seed_work_for_status_test(&pool, &work_id, "intake", "pending", "pending").await;
+
+    // Try to set stage_status to "complete" without current_stage
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: Some("complete".to_string()),
+        force: None,
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id),
+        axum::Json(patch),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "PATCH with only stage_status=complete should be rejected"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::BAD_REQUEST,
+        "Expected 400 INVALID_STATUS_TRANSITION, got {}",
+        err.status_code()
+    );
+    drop(tmp);
+}
+
+/// PATCH with `stage_status: "complete"` and `force: true` is allowed.
+#[tokio::test]
+async fn patch_stage_status_complete_with_force_is_allowed() {
+    let (tmp, state) = test_ctx_with_creator_config().await;
+    let pool = state.pool().clone();
+
+    let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+    seed_work_for_status_test(&pool, &work_id, "intake", "pending", "complete").await;
+
+    // force=true should allow the status transition
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: Some("complete".to_string()),
+        force: Some(true),
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id),
+        axum::Json(patch),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "PATCH with force=true should succeed: {:?}",
+        result.err()
+    );
+    let dto = result.unwrap();
+    assert_eq!(dto.stage_status, "complete");
+    drop(tmp);
+}
+
+/// PATCH with only `stage_status: "active"` (non-terminal) is allowed without force.
+#[tokio::test]
+async fn patch_stage_status_active_without_force_is_allowed() {
+    let (tmp, state) = test_ctx_with_creator_config().await;
+    let pool = state.pool().clone();
+
+    let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+    seed_work_for_status_test(&pool, &work_id, "intake", "pending", "complete").await;
+
+    // Non-terminal status (pending → active) should be allowed without force
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: Some("active".to_string()),
+        force: None,
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id),
+        axum::Json(patch),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "PATCH stage_status=active should be allowed: {:?}",
+        result.err()
+    );
+    let dto = result.unwrap();
+    assert_eq!(dto.stage_status, "active");
+    drop(tmp);
 }

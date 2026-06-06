@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-06-v1.35-critical-residual-convergence"
-verdict: "Request Changes"
-generated_at: "2026-06-07T12:30:00+08:00"
+verdict: "Approve"
+generated_at: "2026-06-07T14:30:00+08:00"
+revalidation: "targeted — C-QC3-001 (UTF-8 fix only)"
 ---
 
 # Code Review Report
@@ -152,14 +153,67 @@ Actual count of items in residual_findings arrays:
   Total: 28 ✓
 ```
 
+## Revalidation
+
+### What was re-reviewed
+
+Targeted re-review of **C-QC3-001 (Critical)** — TD-V131-04 multi-byte UTF-8 panic on `&content[..DEFAULT_MAX_CONTENT_BYTES]` in `context_summarize.rs`. This was the sole blocking finding from the initial QC #3 review.
+
+### C-QC3-001 status: **RESOLVED**
+
+**Evidence:**
+
+1. **`truncate_to_char_boundary()` helper exists** at `crates/nexus-orchestration/src/capability/builtins/context_summarize.rs:164-173`.
+
+2. **Helper uses `str::is_char_boundary`** to walk backwards to a valid UTF-8 boundary (line 169). The loop decrements `idx` at most 4 times (max UTF-8 encoding length), giving O(1) / O(k) where k ≤ 4 performance — confirmed by code inspection:
+   ```rust
+   fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+       if s.len() <= max_bytes {
+           return s;
+       }
+       let mut idx = max_bytes;
+       while idx > 0 && !s.is_char_boundary(idx) {
+           idx -= 1;
+       }
+       &s[..idx]
+   }
+   ```
+
+3. **`build_summary_prompt` no longer uses direct byte slicing** — replaced with `truncate_to_char_boundary(content, DEFAULT_MAX_CONTENT_BYTES)` at line 195.
+
+4. **Regression tests added and passing** (18 total tests, was 15 + 3 new):
+   - `build_summary_prompt_truncates_multibyte_utf8_without_panic` — 256 KiB of 3-byte CJK chars with cap at non-multiple-of-3 boundary; does not panic
+   - `build_summary_prompt_truncates_at_clean_char_boundary` — verifies no truncation when under cap with multi-byte chars
+   - `build_summary_prompt_truncates_mid_cjk_char` — prepends ASCII padding so cap lands mid-3-byte-CJK-char; truncates safely
+
+5. **All existing `context_summarize` tests still pass** — 18 passed, 0 failed.
+
+6. **Clippy clean** — `cargo clippy -p nexus-orchestration -- -D warnings` passes with no warnings.
+
+### New findings
+
+None. No new issues introduced by the fix.
+
+### Performance verification
+
+The `truncate_to_char_boundary` helper is hot-path safe:
+- Early return when `s.len() <= max_bytes` (common case for content under 256 KiB)
+- Backward walk bounded by 4 iterations (max UTF-8 scalar byte length)
+- No allocation, no linear scan of the entire string
+- Total complexity: O(1) amortized
+
+### Updated Verdict
+
+**Approve** — C-QC3-001 is fully resolved. The UTF-8 boundary panic risk is eliminated with a bounded, allocation-free helper and comprehensive regression tests. The 3 non-blocking Suggestions (S-001, S-002, S-003) from the initial review remain deferred to a follow-up wave.
+
 ## Summary
 
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 1 |
+| 🔴 Critical | 0 |
 | 🟡 Warning | 0 |
-| 🟢 Suggestion | 3 |
+| 🟢 Suggestion | 3 (deferred) |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-The sole Critical finding (F-001) is a deterministic panic on the hot path for non-ASCII content exceeding the size cap. It must be fixed before merge. All CI checks pass. No Warnings. Three Suggestions are optional improvements.
+C-QC3-001 (Critical — UTF-8 boundary panic) is fully resolved. No new issues introduced. The fix is minimal, correct, and well-tested.

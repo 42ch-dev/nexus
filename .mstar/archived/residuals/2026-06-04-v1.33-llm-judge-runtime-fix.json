@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from V1.33 P3 (llm-judge-runtime-fix). V1.33 P3 fix waves (commits d271115, c604a2d) closed R-V133P3-01 and R-V133P3-02; V1.35 P0 (commit 4a4ba9d) recorded closure in status.json SSOT.",
+  "archived_at": "2026-06-07T12:30:00+08:00",
+  "plan_id": "2026-06-04-v1.33-llm-judge-runtime-fix",
+  "entries": [
+    {
+      "id": "R-V133P3-01",
+      "title": "parse_judge_response: switch to first-token parse to avoid NOGO/GO substring false positive",
+      "severity": "critical",
+      "source": "qc1 C-001 (V1.33 P3); same root cause as TD-V131-07 (was low, now elevated because P3 made judge.llm the real eval path)",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs (parse_judge_response)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.33 P3 fix wave (commit d271115) — first-token parse anchored to whitespace/punctuation; NOGO check precedes GO to prevent 'nogo' matching 'go'.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.33_p3_fix_wave",
+      "closure_evidence": "commit d271115 on feature/v1.33-work-experience-loop integration; unit tests in nexus-orchestration testsuite cover go/nogo/hybrid inputs.",
+      "closed_at": "2026-06-04T12:00:00+08:00",
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit d271115 on feature/v1.33-work-experience-loop integration; unit tests in nexus-orchestration testsuite cover go/nogo/hybrid inputs.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    },
+    {
+      "id": "R-V133P3-02",
+      "title": "LlmJudgeTask: pre-load template_file from bundle root (paths like prompts/gathering-exit.md)",
+      "severity": "critical",
+      "source": "qc1 C-002 (V1.33 P3); also flagged in implementer Completion Report §7 nuance #1",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask with_resolved_template); nexus-orchestration/src/preset/mod.rs (read_embedded_template)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.33 P3 fix wave (commit c604a2d) — LlmJudgeTask has with_resolved_template() that pre-loads file content from bundle root via read_embedded_template; path safety enforced at preset load time by assert_template_file_safe.",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.33_p3_fix_wave",
+      "closure_evidence": "commit c604a2d on feature/v1.33-work-experience-loop; presets novel-writing, reflection-loop, research updated.",
+      "closed_at": "2026-06-04T12:00:00+08:00",
+      "v1.35_p0_revalidation": "2026-06-07 — code verified at iteration/v1.35 HEAD; closure promoted to status.json SSOT (commit 4a4ba9d).",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit c604a2d on feature/v1.33-work-experience-loop; presets novel-writing, reflection-loop, research updated.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    }
+  ]
+}
