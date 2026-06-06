@@ -33,9 +33,10 @@ pub enum RunCommand {
         /// Skip the creative brief intake and start the production preset directly
         #[arg(long, default_value_t = false)]
         skip_intake: bool,
-        /// After intake completes, automatically schedule the novel-writing
-        /// production preset (C-V133P2-03: chains intake → novel-writing).
-        #[arg(long, default_value_t = false)]
+        /// After intake completes, automatically chain into the production
+        /// stage (C-V133P2-03). Default true; pass --chain-novel-writing=false
+        /// to opt out and control stage advance manually.
+        #[arg(long, default_value_t = true)]
         chain_novel_writing: bool,
         /// Idempotency key (UUID); repeat calls with same key return same `work_id`
         #[arg(long)]
@@ -273,21 +274,11 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     println!("Intake scheduled: {sid} (preset: creative-brief-intake)");
                     println!();
                     println!("The intake will run via ACP multi-turn conversation.");
-                    if chain_novel_writing {
-                        // C-V133P2-03: chain → novel-writing after intake.
-                        println!("Once intake completes, production will be ready:");
-                        let production_preset = preset.as_deref().unwrap_or("novel-writing");
-                        println!(
-                            "  nexus42 daemon schedule add --preset {production_preset} \
-                             --creator <creator-id> --seed \"{idea}\""
-                        );
-                    } else {
-                        println!("Once intake completes, start production with:");
-                        println!(
-                            "  nexus42 daemon schedule add --preset novel-writing \
-                             --creator <creator-id> --seed \"<topic>\""
-                        );
-                    }
+                    // V1.35 P4: default chain_novel_writing=true; both paths
+                    // hint the FL-E stage advance command. Non-chain users
+                    // will see the same hint but can choose not to follow it.
+                    println!("Once intake completes, advance to production with:");
+                    println!("  nexus42 creator run stage advance {work_id} --stage produce");
                 } else if let Some(nid) = &novel_schedule_id {
                     // Intake skipped, novel-writing scheduled directly.
                     let production_preset = preset.as_deref().unwrap_or("novel-writing");
