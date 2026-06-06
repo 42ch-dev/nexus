@@ -895,10 +895,11 @@ fn v135_sync_deprecation_warning() {
     );
 }
 
-/// V1.35 P2: Root `--help` lists 6 user-visible command groups including
-/// `platform` with `sync` now carrying a deprecated tag in its help line.
+/// V1.35 P2: Root `--help` lists exactly 5 user-visible command groups
+/// (per cli-command-ia.md §2). The deprecated top-level `sync` is hidden
+/// from help but remains callable as an alias.
 #[test]
-fn v135_root_help_shows_five_groups_with_sync_deprecated() {
+fn v135_root_help_shows_five_groups_with_sync_hidden() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("--help")
@@ -910,19 +911,30 @@ fn v135_root_help_shows_five_groups_with_sync_deprecated() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // All 6 groups still visible (sync with deprecated tag in help string)
-    let expected = ["creator", "daemon", "acp", "platform", "sync", "system"];
+    // The 5 canonical V1.35 top-level groups MUST all appear.
+    let expected = ["creator", "daemon", "acp", "platform", "system"];
     for group in &expected {
         assert!(
             help_text.contains(group),
-            "V1.35 root help: expected group '{group}'"
+            "V1.35 root help: expected visible group '{group}'"
         );
     }
 
-    // Sync must show deprecation hint via clap doc comment
+    // The deprecated `sync` group MUST be hidden from help (#[command(hide = true)]).
+    // We assert the absence of the word "sync" in the Commands: list to verify it's
+    // not surfaced as a peer of the 5 canonical groups.
+    //
+    // NOTE: The word "sync" may still appear in long_about examples
+    // ("nexus42 platform sync pull") which is intentional. So we check that
+    // `sync` does NOT appear as a top-level Commands entry — i.e. not in the
+    // "Commands:" section after the long_about examples.
+    let commands_section = help_text
+        .split("Commands:")
+        .nth(1)
+        .expect("Commands: section present in --help");
     assert!(
-        help_text.contains("deprecated"),
-        "V1.35 root help: sync entry must indicate deprecation"
+        !commands_section.contains("\n  sync"),
+        "V1.35 root help: top-level 'sync' must be hidden (was visible in Commands list)"
     );
 }
 
