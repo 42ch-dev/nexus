@@ -936,7 +936,7 @@ async fn patch_work_stage_change_is_auditable() {
     .unwrap();
     let work_id = resp.work_id.clone();
 
-    // Set intake_status=complete and stage_status=complete
+    // Set intake_status=complete and stage_status=complete (force to bypass R-CURSOR-PR42-03 gate)
     let patch = PatchWorkRequest {
         title: None,
         long_term_goal: None,
@@ -948,7 +948,7 @@ async fn patch_work_stage_change_is_auditable() {
         primary_preset_id: None,
         current_stage: None,
         stage_status: Some("complete".to_string()),
-        force: None,
+        force: Some(true),
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
