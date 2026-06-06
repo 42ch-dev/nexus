@@ -154,6 +154,24 @@ impl Capability for ContextSummarize {
 /// TD-V131-04: Content exceeding this limit is truncated with a marker.
 const DEFAULT_MAX_CONTENT_BYTES: usize = 256 * 1024;
 
+/// Truncate `s` so the result is at most `max_bytes` bytes AND ends on a
+/// valid UTF-8 char boundary. Walks backwards up to 4 bytes (the maximum
+/// UTF-8 encoding length) to find the boundary.
+///
+/// TD-V131-04 (post-QC fix wave): using `&s[..max_bytes]` directly panics
+/// when `max_bytes` falls inside a multi-byte scalar. This helper preserves
+/// the size cap without violating Rust's `str` invariants.
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut idx = max_bytes;
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    &s[..idx]
+}
+
 /// Build the summarization prompt from content, trace, and template.
 ///
 /// TD-V131-04: If `content` exceeds `DEFAULT_MAX_CONTENT_BYTES` (256 KiB),
@@ -167,16 +185,18 @@ fn build_summary_prompt(content: &str, trace: &str, template: &str) -> String {
     };
 
     // TD-V131-04: Truncate oversized content to prevent context window overflow.
+    // Use char-boundary-aware truncation to avoid panics on multi-byte UTF-8.
     let content_display = if content.len() > DEFAULT_MAX_CONTENT_BYTES {
         tracing::warn!(
             original_len = content.len(),
             max_bytes = DEFAULT_MAX_CONTENT_BYTES,
             "context.summarize: content exceeds size limit, truncating"
         );
+        let truncated = truncate_to_char_boundary(content, DEFAULT_MAX_CONTENT_BYTES);
         format!(
             "{}\n\n[truncated at {} bytes — original was {} bytes]",
-            &content[..DEFAULT_MAX_CONTENT_BYTES],
-            DEFAULT_MAX_CONTENT_BYTES,
+            truncated,
+            truncated.len(),
             content.len()
         )
     } else {
@@ -414,5 +434,56 @@ mod tests {
         let prompt = build_summary_prompt(&content, "", "");
         assert!(!prompt.contains("[truncated at"));
         assert!(prompt.contains(&content));
+    }
+
+    /// Regression test for C-QC1-001 / C-QC3-001: the previous implementation
+    /// used `&content[..DEFAULT_MAX_CONTENT_BYTES]` which panics on multi-byte
+    /// UTF-8 at the byte boundary. This test pads with a 4-byte CJK char
+    /// (each "字" is 3 bytes in UTF-8) so that the byte cap lands inside a
+    /// multi-byte scalar for non-ASCII content. Must NOT panic.
+    #[test]
+    fn build_summary_prompt_truncates_multibyte_utf8_without_panic() {
+        // 256 KiB worth of 3-byte CJK chars. The byte boundary cap is 262144,
+        // which is NOT a multiple of 3, so naive byte slicing would panic.
+        let char_count = DEFAULT_MAX_CONTENT_BYTES / 3 + 100;
+        let cjk_content: String = "字".repeat(char_count);
+        assert!(cjk_content.len() > DEFAULT_MAX_CONTENT_BYTES);
+        // Should not panic.
+        let prompt = build_summary_prompt(&cjk_content, "", "");
+        assert!(prompt.contains("[truncated at"));
+        // The truncated content must be valid UTF-8 (it is, by construction).
+        // Verify the marker reports the actual byte length used.
+        assert!(prompt.contains(&format!(
+            "[truncated at {} bytes",
+            (DEFAULT_MAX_CONTENT_BYTES / 3) * 3
+        )));
+    }
+
+    /// Regression test: oversized content with a multi-byte char exactly
+    /// at the cap boundary should be safe (boundary at the start of a char).
+    #[test]
+    fn build_summary_prompt_truncates_at_clean_char_boundary() {
+        // 3 ASCII bytes + 1 3-byte char = total 6 bytes; under cap.
+        let content = "abc字def";
+        assert_eq!(content.len(), 9);
+        let prompt = build_summary_prompt(content, "", "");
+        assert!(!prompt.contains("[truncated at"));
+        assert!(prompt.contains("abc字def"));
+    }
+
+    /// Regression test: oversized content where cap lands mid-3-byte-char.
+    /// Must truncate to the nearest valid boundary.
+    #[test]
+    fn build_summary_prompt_truncates_mid_cjk_char() {
+        // 2 ASCII + 1 CJK = 5 bytes (cap would be 4 -> mid 3-byte char).
+        let content = "ab字cd"; // bytes: a(1) b(1) 字(3) c(1) d(1) = 7 bytes
+                                // Force truncation by prepending lots of ASCII.
+        let mut oversized = String::with_capacity(DEFAULT_MAX_CONTENT_BYTES + 100);
+        oversized.push_str(&"x".repeat(DEFAULT_MAX_CONTENT_BYTES - 4));
+        oversized.push_str(content);
+        assert!(oversized.len() > DEFAULT_MAX_CONTENT_BYTES);
+        // Should not panic.
+        let prompt = build_summary_prompt(&oversized, "", "");
+        assert!(prompt.contains("[truncated at"));
     }
 }
