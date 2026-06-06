@@ -77,7 +77,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
 | DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 P0** (commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`). Schema now declares `prompt_file` + `vars` with `anyOf`. |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | Any future | S | V1.33 | Use `creator run` + `system preset`. |
-| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.35 P4** (partial) | S | V1.34→V1.35 | V1.34 explicit `stage advance`; P4 partial UX polish + optional `run next` |
+| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.35 P4** (partial) | S | V1.34→V1.35 | V1.34 explicit `stage advance`; V1.35 P4 partial: `--chain-novel-writing` defaults true (intake → produce); full multi-stage auto-chain deferred |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
 | DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing.md](specs/preset-conditional-routing.md). |

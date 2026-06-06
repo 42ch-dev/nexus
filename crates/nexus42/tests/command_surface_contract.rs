@@ -1082,3 +1082,76 @@ fn v135_creator_help_mentions_kb_namespaces() {
         "V1.35 P3: creator kb --help must reference scope model"
     );
 }
+
+/// V1.35 P4: `creator run start --help` shows --chain-novel-writing with default true.
+#[test]
+fn v135_chain_novel_writing_defaults_true() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--chain-novel-writing"),
+        "V1.35 P4: creator run start --help must list --chain-novel-writing"
+    );
+    // Bool flags don't get [default: true] annotation; check description text instead.
+    assert!(
+        help_text.contains("Default true"),
+        "V1.35 P4: --chain-novel-writing help must mention 'Default true'"
+    );
+}
+
+/// V1.35 P4: documented opt-out `--chain-novel-writing=false` is accepted by clap.
+/// Verifies the C-1 fix wave: value parser added to the boolean flag.
+#[test]
+fn v135_chain_novel_writing_opt_out_syntax_accepted() {
+    // `--chain-novel-writing=false` must NOT be a parse error.
+    // We don't need a successful run — the daemon may not be running in the test
+    // env. The key is that arg parsing succeeds (no clap "unexpected value" error).
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args([
+            "creator",
+            "run",
+            "start",
+            "--idea",
+            "test opt-out parse smoke",
+            "--chain-novel-writing=false",
+        ])
+        .assert()
+        .get_output()
+        .clone();
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !stderr.contains("unexpected value 'false'"),
+        "V1.35 P4: --chain-novel-writing=false must be accepted by clap (got: {stderr})"
+    );
+
+    // `--chain-novel-writing=true` (explicit default) is also accepted.
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args([
+            "creator",
+            "run",
+            "start",
+            "--idea",
+            "test opt-in parse smoke",
+            "--chain-novel-writing=true",
+        ])
+        .assert()
+        .get_output()
+        .clone();
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !stderr.contains("unexpected value 'true'"),
+        "V1.35 P4: --chain-novel-writing=true must be accepted by clap (got: {stderr})"
+    );
+}
