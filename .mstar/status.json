@@ -181,7 +181,7 @@
     },
     {
       "id": "2026-06-06-v1.35-creator-hub-polish",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-06-v1.35-creator-hub-polish.md",
       "working_branch": "feature/v1.35-creator-hub-polish",
       "merge_target": "iteration/v1.35",
@@ -190,8 +190,16 @@
         "depends_on": [
           "2026-06-06-v1.35-cli-ia-implement"
         ],
-        "description": "P3 — kb/knowledge disambiguation, run discoverability"
-      }
+        "description": "P3 — kb/knowledge disambiguation, run discoverability",
+        "done_at": "2026-06-07T14:15:00+08:00",
+        "merge_commits": [
+          "518c228 (qc consolidated)",
+          "2f51573 (qa approve)"
+        ],
+        "qc": "qc1 + qc2 + qc3 all Approve on initial wave (no fix round)",
+        "qa": "Approve (3/3 acceptance, 37 tests, KB disambiguation + tier ordering + no P2 regression)"
+      },
+      "updated_at": "2026-06-07T14:15:00+08:00"
     },
     {
       "id": "2026-06-06-v1.35-fl-e-ux-polish",
