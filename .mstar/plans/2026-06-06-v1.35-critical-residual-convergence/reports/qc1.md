@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-06-v1.35-critical-residual-convergence"
-verdict: "Request Changes"
-generated_at: "2026-06-07T00:50:53+08:00"
+verdict: "Approve"
+generated_at: "2026-06-07T00:58:45+08:00"
+revalidation: "targeted — C-QC1-001 (UTF-8 fix) + W-QC1-001 (lifecycle normalization)"
 ---
 
 # Code Review Report
@@ -121,3 +122,31 @@ Result: PASS (no output).
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+### What was re-reviewed
+- Targeted re-review type: `targeted — reviewers: qc-specialist, qc-specialist-3`.
+- Prior QC1 findings rechecked: `C-QC1-001` (TD-V131-04 multi-byte UTF-8 truncation panic) and `W-QC1-001` (residual lifecycle normalization).
+- Review range / Diff basis: `merge-base: 30efd06` + `tip: 8bc7071`; equivalent to `git diff 30efd06..8bc7071`.
+- Working branch (verified): `feature/v1.35-critical-residual-convergence`.
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.35-p0`.
+- Revalidation timestamp: `2026-06-07T00:58:45+08:00`.
+
+### Prior finding dispositions
+
+- **C-QC1-001 — RESOLVED.** `truncate_to_char_boundary()` now exists in `crates/nexus-orchestration/src/capability/builtins/context_summarize.rs` and walks backward with `is_char_boundary` before slicing. `build_summary_prompt()` now calls this helper instead of using `&content[..DEFAULT_MAX_CONTENT_BYTES]` directly. Regression coverage was added for multi-byte UTF-8 truncation, including `build_summary_prompt_truncates_multibyte_utf8_without_panic()` and `build_summary_prompt_truncates_mid_cjk_char()`.
+  - Evidence: required command `cargo test -p nexus-orchestration --lib context_summarize 2>&1 | tail -25` passed with `18 passed; 0 failed; 0 ignored; 415 filtered out`.
+
+- **W-QC1-001 — RESOLVED.** Root `.mstar/status.json` no longer retains the empty `residual_findings["2026-06-04-v1.34-cursor-pr42-stage-status"]` key, and the empty residual-key count is `0`. `.metadata.tech_debt_summary.by_plan` no longer contains `cursor-pr42` or any empty plan key. Each entry in the five new archived residual files now carries `archived_at`, `lifecycle`, and `closure_note`.
+  - Evidence: `jq '.residual_findings | keys' .mstar/status.json` lists seven non-empty open residual plans and excludes `2026-06-04-v1.34-cursor-pr42-stage-status`; `jq '.residual_findings | to_entries | map(select((.value|length)==0)) | length' .mstar/status.json` returned `0`; `jq '.metadata.tech_debt_summary.by_plan | keys' .mstar/status.json` excludes the empty key; per-file archive checks returned `missing_required_fields=0` for all five target archive files.
+
+### Revalidation summary
+| Prior Finding | Status |
+|---------------|--------|
+| C-QC1-001 | RESOLVED |
+| W-QC1-001 | RESOLVED |
+
+**New findings introduced by the fix:** 0
+
+**Revalidation Verdict**: Approve
