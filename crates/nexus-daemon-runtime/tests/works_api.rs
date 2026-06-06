@@ -1051,7 +1051,13 @@ async fn patch_work_invalid_stage_value_returns_400() {
 // ─── R-CURSOR-PR42-03: stage_status gate bypass prevention ────────────────
 
 /// Helper: seed a work via SQL for R-CURSOR-PR42-03 tests.
-async fn seed_work_for_status_test(pool: &sqlx::SqlitePool, work_id: &str, stage: &str, stage_status: &str, intake_status: &str) {
+async fn seed_work_for_status_test(
+    pool: &sqlx::SqlitePool,
+    work_id: &str,
+    stage: &str,
+    stage_status: &str,
+    intake_status: &str,
+) {
     let now = chrono::Utc::now().to_rfc3339();
     // SAFETY: test helper using runtime query — compile-time macro not applicable.
     sqlx::query(
@@ -1109,7 +1115,10 @@ async fn patch_stage_status_complete_without_stage_is_rejected() {
     )
     .await;
 
-    assert!(result.is_err(), "PATCH with only stage_status=complete should be rejected");
+    assert!(
+        result.is_err(),
+        "PATCH with only stage_status=complete should be rejected"
+    );
     let err = result.unwrap_err();
     assert_eq!(
         err.status_code(),
@@ -1150,7 +1159,11 @@ async fn patch_stage_status_complete_with_force_is_allowed() {
     )
     .await;
 
-    assert!(result.is_ok(), "PATCH with force=true should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "PATCH with force=true should succeed: {:?}",
+        result.err()
+    );
     let dto = result.unwrap();
     assert_eq!(dto.stage_status, "complete");
     drop(tmp);
@@ -1186,7 +1199,11 @@ async fn patch_stage_status_active_without_force_is_allowed() {
     )
     .await;
 
-    assert!(result.is_ok(), "PATCH stage_status=active should be allowed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "PATCH stage_status=active should be allowed: {:?}",
+        result.err()
+    );
     let dto = result.unwrap();
     assert_eq!(dto.stage_status, "active");
     drop(tmp);

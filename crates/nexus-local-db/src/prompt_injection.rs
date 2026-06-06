@@ -222,9 +222,7 @@ pub async fn mark_prompt_injections_consumed(
         // SAFETY: `injection_ids` are application-generated ULIDs, not user input.
         // Dynamic SQL is required because sqlx compile-time checking cannot handle
         // variable-length IN clauses. Parameterized placeholders prevent injection.
-        let placeholders: Vec<String> = (1..=chunk.len())
-            .map(|i| format!("?{}", i + 1))
-            .collect();
+        let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{}", i + 1)).collect();
         let sql = format!(
             "UPDATE creator_prompt_injections
              SET status = 'consumed', consumed_at = ?
