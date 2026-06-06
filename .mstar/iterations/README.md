@@ -45,7 +45,8 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.31-agentic-design-patterns-delivery-compass-v1.md](v1.31-agentic-design-patterns-delivery-compass-v1.md) | V1.31 | **Shipped** (2026-05-30) — FL-D partial close: orchestration de-stub + 2 Agentic Design Pattern presets |
 | [v1.32-preset-quality-gate-delivery-compass-v1.md](v1.32-preset-quality-gate-delivery-compass-v1.md) | V1.32 | **Shipped** (2026-06-03) — preset validator quality gate + `SEC-V131-01` |
 | [v1.33-work-experience-loop-delivery-compass-v1.md](v1.33-work-experience-loop-delivery-compass-v1.md) | V1.33 | **Shipped** (2026-06-04) — Work container, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review loop; 5 plans P1–P5 Done |
-| [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) | V1.34 | **Shipped** (2026-06-05) — FL-E stage workflow, Agent `nexus.*` tool bridge (8 tools); 6 plans P0–P5 Done (P0 residual convergence, P1 stage model, P3 spec, P2 preset chain, P4 HostToolExecutor, P5 hygiene); DF-47 still OPEN (production caller wiring) |
+| [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) | V1.34 | **Shipped** (2026-06-05) — FL-E stage workflow, Agent `nexus.*` tool bridge (8 tools); 6 plans P0–P5 Done (P0 residual convergence, P1 stage model, P3 spec, P2 preset chain, P4 HostToolExecutor, P5 hygiene); DF-47 carry-forward to V1.35 |
+| [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) | V1.35 | **Active** (2026-06-06) — CLI IA (5 groups), creator hub, critical residual P0, DF-47/DF-53 partial; prepare + P1 docs Done; P0–P5 implement pending |
 
 ### Reference compasses
 

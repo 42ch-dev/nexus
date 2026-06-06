@@ -42,6 +42,8 @@ When specs overlap, use this order (higher wins on conflict):
 | Document | Description |
 | --- | --- |
 | [cli-spec.md](cli-spec.md) | OSS CLI, daemon runtime mode, commands, ACP-first |
+| [cli-command-ia.md](cli-command-ia.md) | V1.35 top-level command IA (5 groups; sync→platform) |
+| [creator-centric-entry-model.md](creator-centric-entry-model.md) | Creator hub entry rules; local vs platform paths |
 | [daemon-runtime.md](daemon-runtime.md) | Single-binary daemon layering and process model |
 | [agent-host.md](agent-host.md) | Hybrid Managed-only `nexus-agent-host` |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | CLI / daemon / Local API / ACP topology |
@@ -60,6 +62,7 @@ When specs overlap, use this order (higher wins on conflict):
 | Document | Description |
 | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | `nexus-orchestration`, presets, worker IPC |
+| [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) | FL-D conditional `next` routing (Exploration — DF-56) |
 | [work-experience-model.md](work-experience-model.md) | Work container, `creator run`, Creative Brief Intake, run_intents |
 | [creator-workflow-fl-e.md](creator-workflow-fl-e.md) | FL-E stage model, preset chain, `creator run stage` (V1.34) |
 | [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Agent `nexus.*` tools via daemon HostToolExecutor (V1.34) |

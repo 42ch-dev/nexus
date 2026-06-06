@@ -18,7 +18,7 @@ Iteration compasses: [`.mstar/iterations/`](../iterations/README.md). Convention
 | [specs/schemas-directory-layout.md](specs/schemas-directory-layout.md) | `schemas/` folder tree, cloud vs local, rename policy | Active |
 | [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) | Open/backlog deferred-feature lifecycle (active tracker) | Active |
 
-Specs index includes [work-experience-model.md](specs/work-experience-model.md) (V1.33), [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) and [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md) (V1.34).
+Specs index includes [work-experience-model.md](specs/work-experience-model.md) (V1.33), [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) and [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md) (V1.34), [cli-command-ia.md](specs/cli-command-ia.md), [creator-centric-entry-model.md](specs/creator-centric-entry-model.md), and [preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md) (V1.35). V1.35 CLI audit evidence: [v1.35 compass Appendix A](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135).
 
 ## Specs
 

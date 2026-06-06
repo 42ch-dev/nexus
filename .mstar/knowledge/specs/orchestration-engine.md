@@ -609,6 +609,8 @@ Suggest ten concrete research directions, each as a bullet with a one-line justi
 
 ### 7.5 Conditional `next` (optional, deferred semantics)
 
+**Long-term SSOT (exploration):** [preset-conditional-routing-fl-d.md](preset-conditional-routing-fl-d.md) — Status **Exploration**; not loadable until FL-D ships. When normative, this subsection defers to that document for schema and validation rules.
+
 Simple linear `next: <state-id>` covers the first release. Conditional form (future):
 
 ```yaml

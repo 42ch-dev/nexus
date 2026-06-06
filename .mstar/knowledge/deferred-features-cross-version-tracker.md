@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.35 Active (TBD)** · Latest shipped: **V1.34** · Latest active compass: TBD · FL-E **Shipped in V1.34** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31, conditional routing (DF-56)** · V1.34 deferred: **DF-46, 47, 48, 49, 50, 52, 53, 55, 56** (DF-51, 54 closed in V1.34) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 39)
+**Quick status**: **V1.35 Active** · Latest shipped: **V1.34** · Latest active compass: [v1.35-cli-ia-and-product-polish](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47/DF-53 partial** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 40)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
@@ -71,16 +71,16 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
-| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.34+ | M | V1.34 | P4 shipped adapter; **production caller wiring OPEN** (deferred to P5/future). Remove when wired end-to-end. |
+| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.35 P0** | M | V1.34→V1.35 | P4 shipped adapter; **production caller wiring OPEN** — compass P0 target |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
 | DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 P0** (commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`). Schema now declares `prompt_file` + `vars` with `anyOf`. |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | Any future | S | V1.33 | Use `creator run` + `system preset`. |
-| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | Post-V1.34 | S | V1.34 | V1.34 uses explicit `creator run stage advance`. |
+| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.35 P4** (partial) | S | V1.34→V1.35 | V1.34 explicit `stage advance`; P4 partial UX polish + optional `run next` |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
-| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34; see FL-D. |
+| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md). |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -149,7 +149,8 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 **Latest active iteration**
 
-- **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E stage workflow + Agent `nexus.*` tool bridge (8 tools in registry) + 5 plans P0–P5 Done. Closed: DF-51 (P0), DF-54 (P1). FL-E shipped. DF-47 (production caller wiring) remains OPEN. DF-46/48/49/50/52/53/55/56 carry-forward.
+- **V1.35** (Active 2026-06-06): [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) — CLI IA (5 groups; sync→platform), creator hub polish, critical residual P0, DF-47/DF-53 partial; 6 plans P0–P5 + prepare Done
+- **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools; DF-47 remains OPEN → V1.35 P0
 
 **Recent shipped compasses** (detail in archive §2)
 
@@ -162,6 +163,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 - Shipped history archive: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
 - Done plans index: [archived/plans-done.json](../archived/plans-done.json)
+- CLI IA (V1.35): [specs/cli-command-ia.md](specs/cli-command-ia.md), [specs/creator-centric-entry-model.md](specs/creator-centric-entry-model.md), [specs/preset-conditional-routing-fl-d.md](specs/preset-conditional-routing-fl-d.md); audit evidence in [v1.35 compass Appendix A](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135)
 - Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Iteration index: [iterations/README.md](../iterations/README.md)
@@ -171,4 +173,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-05. Status: V1.34 Shipped (2026-06-05); V1.35 Active (TBD); 40 open residuals including 1 new from Cursor PR #42 revalidation (R-CURSOR-PR42-03).*
+*Last updated: 2026-06-06. Status: V1.35 Active (Prepare 2026-06-06); V1.34 Shipped; 40 open residuals; tracker quick status aligned to status.json.*
