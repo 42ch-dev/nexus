@@ -23,7 +23,7 @@ The Work loop shipped in V1.33 centered on Creative Brief Intake and `novel-writ
 intake → research → produce → review → persist
 ```
 
-without introducing a second scheduler or replacing World/KB SSOT. Stages are **explicit** (user or script advances); default auto-chaining remains deferred (DF-53).
+without introducing a second scheduler or replacing World/KB SSOT. Stages are **explicit** (user or script advances); `--auto-chain` across all stages remains deferred (DF-53). After V1.35 P4, `creator run start` chains intake → produce by default (`--chain-novel-writing`, default true); users may opt out with `--chain-novel-writing=false`.
 
 ---
 
@@ -145,7 +145,7 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 | Work vs `creator kb --scope work` | Index entries may tag `work_id`; index does not define Work |
 | Agent tools vs presets | Agent may read/patch Work via `nexus.work.*`; production presets still run via orchestration |
 | Conditional routing | **Not** used for stage selection (DF-56) |
-| `--auto-chain` | Deferred DF-53; explicit `stage advance` required |
+| `--auto-chain` | Deferred DF-53; explicit `stage advance` required (intake → produce chain defaults true since V1.35 P4) |
 | Platform cloud assemble | Not part of this workflow; see agent-nexus-tool-bridge `policy_blocked` |
 
 ---
