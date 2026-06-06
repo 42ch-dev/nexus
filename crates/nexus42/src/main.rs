@@ -41,7 +41,13 @@ async fn main() {
         Some(Commands::Daemon { command }) => {
             nexus42::commands::daemon::run(command, &config).await
         }
-        Some(Commands::Sync { command }) => nexus42::commands::sync::run(command, &config).await,
+        Some(Commands::Sync { command }) => {
+            eprintln!(
+                "Warning: `nexus42 sync` is deprecated. Use `nexus42 platform sync` instead. \
+                 The top-level `sync` alias will be removed in a future version."
+            );
+            nexus42::commands::sync::run(command, &config).await
+        }
         Some(Commands::Creator { command }) => {
             nexus42::commands::creator::run(command, &config).await
         }
