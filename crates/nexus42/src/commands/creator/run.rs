@@ -33,10 +33,12 @@ pub enum RunCommand {
         /// Skip the creative brief intake and start the production preset directly
         #[arg(long, default_value_t = false)]
         skip_intake: bool,
-        /// After intake completes, automatically chain into the production
-        /// stage (C-V133P2-03). Default true; pass --chain-novel-writing=false
-        /// to opt out and control stage advance manually.
-        #[arg(long, default_value_t = true)]
+        /// After intake completes, print the next-stage command for the user
+        /// to run manually (C-V133P2-03 partial). When `--skip-intake` is also
+        /// set, scheduling of the production preset happens directly instead.
+        /// Default true. Opt-out syntax: `--chain-novel-writing=false`. Full
+        /// daemon `on_complete` auto-chain is a future enhancement (DF-53 partial).
+        #[arg(long, default_value_t = true, value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
         chain_novel_writing: bool,
         /// Idempotency key (UUID); repeat calls with same key return same `work_id`
         #[arg(long)]
