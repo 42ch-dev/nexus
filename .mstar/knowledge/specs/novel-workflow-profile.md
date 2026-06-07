@@ -64,10 +64,14 @@ On `works` table / Work API (additive):
       README.md
       work-status.md
       Worldbuilding/          # optional; profile-specific subtree
+        character.md          # optional stub; main characters
+        # additional worldbuilding items are user-authorable .md files
       Outlines/
         volume-outline.md     # optional in V1.36 MVP
         chapters/
           ch<nn>-outline.md
+        foreshadowing.md      # empty stub V1.36 (F### rows; future V1.37+ scaffold)
+        event-index.md        # empty stub V1.36 (E### rows; future V1.37+ scaffold)
       Stories/                # novel正文 ONLY — sync chapter scan root
         ch<nn>-<slug>.md
       Logs/                   # optional process logs
@@ -79,7 +83,10 @@ On `works` table / Work API (additive):
 | --- | --- | --- |
 | `Works/<work_ref>/README.md` | **No** | Human overview; links to status and outlines |
 | `Works/<work_ref>/work-status.md` | **No** | Chapter status table + progress (machine-assist manifest) |
-| `Works/<work_ref>/Outlines/**` | **No** | Planning artifacts |
+| `Works/<work_ref>/Outlines/chapters/*` | **No** | Per-chapter outline |
+| `Works/<work_ref>/Outlines/foreshadowing.md` | **No** | Cross-chapter foreshadowing index (F### rows) |
+| `Works/<work_ref>/Outlines/event-index.md` | **No** | Cross-chapter event index (E### rows) |
+| `Works/<work_ref>/Outlines/volume-outline.md` | **No** | Volume-level outline (optional V1.36) |
 | `Works/<work_ref>/Worldbuilding/**` | **No** | Setting/character bibles |
 | `Works/<work_ref>/Stories/*.md` | **Yes** | Chapter正文 (frontmatter `chapter`, `status`) |
 | `Works/<work_ref>/Logs/**` | **No** | Brainstorm/write/review logs |
@@ -107,11 +114,11 @@ Non-novel `work_profile` values may use different subtrees under `Works/<work_re
 Machine- and human-readable manifest. Minimum sections:
 
 - Frontmatter: `work_id`, `work_ref`, `work_profile: novel`, `status`, `total_planned_chapters`, `current_chapter`, `updated`
-- **Chapter status table** with states: `not_started` | `outlined` | `draft` | `finalized` | `published` (published reserved; OSS does not set in V1.36)
+- **Chapter status table** with six columns: `卷 (volume) | 章节范围 (range) | 预计字数 (planned) | 实际字数 (actual) | 完成度 (progress) | 状态 (status)`. `actual` is auto-derived from each chapter's frontmatter `word_count`; `progress` = `actual/planned` (0% when actual is empty, 100% on `finalized`). State values: `not_started` | `outlined` | `draft` | `finalized` | `published` (`published` reserved; OSS does not set in V1.36). For V1.36 single-chapter MVP, `卷` and `章节范围` collapse to `ch01` and `volume` is empty; multi-volume rows land in V1.37+.
 
 ### 4.2 Chapter outline (`Outlines/chapters/ch<nn>-outline.md`)
 
-Structured outline before正文. Minimum headings: opening scene, core conflict, turning point, climax, ending hook, character state change, foreshadowing (optional).
+Structured outline before正文. **Required headings**: opening scene, core conflict, turning point, climax, ending hook, character state change. **Foreshadowing is required**: the outline must list every foreshadowing item touched (buried or paid-off) in this chapter, referencing `Outlines/foreshadowing.md` F### ids. If the foreshadowing file does not yet exist for a V1.36 single-chapter MVP, the outline body may declare new F### items inline and the next outline is responsible for promoting them to the index.
 
 ### 4.3 Chapter body (`Stories/ch<nn>-<slug>.md`)
 
@@ -119,17 +126,19 @@ Structured outline before正文. Minimum headings: opening scene, core conflict,
 ---
 title: string
 chapter: integer
+volume: integer             # optional; V1.36 single-chapter MVP leaves it empty. Reserved for V1.37+ multi-volume.
 status: draft | finalized   # published reserved; not set by OSS core in V1.36
-word_count: integer         # optional
+word_count: integer         # optional; auto-derived from body length on transition to finalized
 ---
 ```
 
-Body text only (title in frontmatter). Status transitions:
+`volume` is **forward-compatible** for V1.37+ multi-volume expansion. When present, the chapter must also appear in `Outlines/volume-outline.md` chapter range. Sync module does **not** validate cross-reference in V1.36 (intentional — V1.36 single-volume). Body text only (title in frontmatter). Status transitions:
 
 | Transition | Actor |
 | --- | --- |
 | → `draft` | `novel-writing` drafting phase |
-| → `finalized` | `novel-writing` review/refine phase or `reflection-loop` stage |
+| → `finalized` | `novel-writing` finalize phase **only after** `llm_judge` quality gate returns GO (see §5) |
+| → `finalized` (manual override) | user explicit advance on NOGO with logged audit reason; V1.36 escape hatch only |
 
 ### 4.4 Embedded preset templates
 
@@ -143,10 +152,20 @@ V1.36 implement wave ships template stubs under `crates/nexus-orchestration/embe
 | --- | --- | --- |
 | `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, scaffold dirs | Before first `novel-writing` if scaffold missing |
 | `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator run start` |
-| `novel-writing` | Gathering → brainstorm → outline → draft正文 | FL-E `produce` |
-| `reflection-loop` | Optional quality pass | FL-E `review` (optional V1.36) |
+| `novel-writing` | Outline → draft → **finalize (gated by `llm_judge`)** → `finalized` | FL-E `produce` |
+| `reflection-loop` | Optional deeper quality pass; **not** in V1.36 default flow | FL-E `review` (optional V1.36) |
 
 **Separation rule**: `novel-project-init` is **not** auto-chained inside `novel-writing`. User or `creator run` explicitly schedules it when starting a new novel Work.
+
+### 5.1 V1.36 chapter finalize quality gate
+
+`novel-writing`'s `finalize` state has `exit_when: kind: llm_judge` evaluating a **五问质量检验** prompt (opening three lines / conflict resonance / twist recall / new perspective / ending hook). This prevents the "click and finalize" demo feel where any draft becomes `finalized` without scrutiny.
+
+- **GO** → chapter frontmatter `status` flips to `finalized`; `work-status.md` chapter row updates (`actual` from frontmatter `word_count`, `progress` → 100%).
+- **NOGO** → `WaitForInput`; user may `creator run continue <work_id> --note "..."` with additional context, then re-run. Frontmatter `status` stays `draft`.
+- **GO override on NOGO** → user explicit `creator run stage advance --force` with audit-logged reason; frontmatter `status` flips to `finalized` regardless.
+
+The 五问 template file lives at `embedded-presets/novel-writing/prompts/finalize-exit.md` (P3 deliverable). It references [writing-craft-rules.md §2 五问质量检验](writing-craft-rules.md) when present; otherwise the template embeds the five questions inline.
 
 ---
 
@@ -166,6 +185,8 @@ A novel Work is **complete** when **all** hold:
 2. Update `work-status.md` frontmatter `status: completed`
 3. **Stop** enqueueing new `novel-writing` schedules for this Work
 4. Emit user-visible message: Work is complete; start a **new** Work via init flow (no automatic switch)
+
+**Note**: V1.36 single-chapter MVP completion means `ch01` reached `finalized` after the `llm_judge` GO (§5.1). Multi-chapter completion semantics are intentionally V1.37+ scope. The V1.36 "completion" UX is therefore the **chapter-level** finish, not a novel-level finish; the compass calls this the "single-chapter MVP" boundary.
 
 ### 6.3 Explicit non-goals
 

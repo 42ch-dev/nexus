@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T18:00:00+08:00",
+  "updated_at": "2026-06-07T18:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -269,7 +269,24 @@
         "depends_on": [
           "2026-06-07-v1.36-harness-docs-prepare"
         ],
-        "description": "P0 — novel profile spec lock + spec cross-links"
+        "description": "P0 — novel profile spec lock + spec cross-links",
+        "spec_gaps_v1_36": {
+          "expanded_at": "2026-06-07T18:30:00+08:00",
+          "expansion_source": "novels-system V1.36 baseline distill (deferred-features-cross-version-tracker.md §3.6.1)",
+          "new_tasks": [
+            "T8",
+            "T9",
+            "T10",
+            "T11"
+          ],
+          "new_task_summary": "T8: layout §3.1/§3.2 add Outlines/foreshadowing.md + Outlines/event-index.md empty stubs; T9: work-status.md 6-col chapter table; T10: chapter frontmatter volume: integer; T11: §5 llm_judge quality gate on finalize state",
+          "downstream_plan_changes": {
+            "2026-06-07-v1.36-novel-artifact-layout-and-templates": "T7-T10 added (foreshadowing.md + event-index.md empty templates; work-status.md 6-col; chapter body volume field)",
+            "2026-06-07-v1.36-novel-chapter-drafting-pipeline": "T7-T9 added (llm_judge exit_when on finalize; 五问 prompt; F### required in outline)"
+          },
+          "acceptance_added": "rg 5 lines (foreshadowing.md / event-index.md / 实际字数 / volume: integer / llm_judge)",
+          "rationale": "V1.36 PM distill vs novels-system production reference; user approved 4 of 4 recommended gap-fills on 2026-06-07"
+        }
       }
     },
     {
@@ -300,7 +317,18 @@
           "2026-06-07-v1.36-novel-spec-and-compass",
           "2026-06-07-v1.36-novel-project-init-preset"
         ],
-        "description": "P2 — Works/<work_ref>/ scaffold, templates, sync scan migration"
+        "description": "P2 — Works/<work_ref>/ scaffold, templates, sync scan migration",
+        "spec_gaps_v1_36": {
+          "expanded_at": "2026-06-07T18:30:00+08:00",
+          "expansion_source": "novels-system V1.36 baseline distill (deferred-features-cross-version-tracker.md §3.6.1)",
+          "new_tasks": [
+            "T7",
+            "T8",
+            "T9",
+            "T10"
+          ],
+          "new_task_summary": "T7: Outlines/foreshadowing.md empty template; T8: Outlines/event-index.md empty template; T9: work-status.md 6-col template + auto-fill actual/progress; T10: chapter body volume field template"
+        }
       }
     },
     {
@@ -315,7 +343,17 @@
         "depends_on": [
           "2026-06-07-v1.36-novel-artifact-layout-and-templates"
         ],
-        "description": "P3 — single-chapter outline → draft → final正文 pipeline"
+        "description": "P3 — single-chapter outline → draft → final正文 pipeline",
+        "spec_gaps_v1_36": {
+          "expanded_at": "2026-06-07T18:30:00+08:00",
+          "expansion_source": "novels-system V1.36 baseline distill (deferred-features-cross-version-tracker.md §3.6.1)",
+          "new_tasks": [
+            "T7",
+            "T8",
+            "T9"
+          ],
+          "new_task_summary": "T7: llm_judge exit_when on finalize with 五问 prompt; T8: finalize prompt enforces GO-only state transition + audit log on NOGO override; T9: chapter outline requires F### entry per foreshadowing item touched"
+        }
       }
     },
     {
