@@ -238,11 +238,14 @@ impl Capability for NovelProjectScaffold {
         let root = self.works_root.join(&inp.work_ref);
 
         // ── T2a: root directory ────────────────────────────────────────
-        let mut dirs_created = Vec::new();
-        let mut files_created = Vec::new();
+        // F2 (C-002, C-2, W-3): all subsequent FS writes register with
+        // `txn`. On any `?` propagation before `txn.commit()`, the Drop
+        // impl removes only the files/dirs THIS invocation created.
+        let mut txn = ScaffoldTransaction::new();
 
-        create_dir_all_idem(&root)?;
-        dirs_created.push(String::new()); // root itself
+        if create_dir_all_idem(&root)? {
+            txn.dirs_created.push(root.clone());
+        }
 
         // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
@@ -263,17 +266,20 @@ impl Capability for NovelProjectScaffold {
                     ("total_planned_chapters", &total),
                 ],
             )?;
-            write_file_idem(&root.join("README.md"), &rendered, &mut files_created)?;
+            write_file_idem(&root.join("README.md"), &rendered, &mut txn.files_created)?;
         }
 
         // ── T2c–T2g: Outlines/ subtree ────────────────────────────────
         let outlines = root.join("Outlines");
-        create_dir_all_idem(&outlines)?;
-        dirs_created.push("Outlines".to_string());
+        if create_dir_all_idem(&outlines)? {
+            txn.dirs_created.push(outlines.clone());
+        }
 
         // T2d: Outlines/chapters/
-        create_dir_all_idem(&outlines.join("chapters"))?;
-        dirs_created.push("Outlines/chapters".to_string());
+        let outlines_chapters = outlines.join("chapters");
+        if create_dir_all_idem(&outlines_chapters)? {
+            txn.dirs_created.push(outlines_chapters);
+        }
 
         // T2e: volume-outline.md
         if let Some(tmpl) = load_template("volume-outline.md") {
@@ -289,7 +295,7 @@ impl Capability for NovelProjectScaffold {
             write_file_idem(
                 &outlines.join("volume-outline.md"),
                 &rendered,
-                &mut files_created,
+                &mut txn.files_created,
             )?;
         }
 
@@ -299,7 +305,7 @@ impl Capability for NovelProjectScaffold {
             write_file_idem(
                 &outlines.join("foreshadowing.md"),
                 &rendered,
-                &mut files_created,
+                &mut txn.files_created,
             )?;
         }
 
@@ -309,19 +315,33 @@ impl Capability for NovelProjectScaffold {
             write_file_idem(
                 &outlines.join("event-index.md"),
                 &rendered,
-                &mut files_created,
+                &mut txn.files_created,
             )?;
         }
 
         // ── T2h: Stories/ ──────────────────────────────────────────────
-        create_dir_all_idem(&root.join("Stories"))?;
-        dirs_created.push("Stories".to_string());
+        let stories = root.join("Stories");
+        if create_dir_all_idem(&stories)? {
+            txn.dirs_created.push(stories);
+        }
 
         // ── T2i: Logs/ ─────────────────────────────────────────────────
-        create_dir_all_idem(&root.join("Logs"))?;
-        dirs_created.push("Logs".to_string());
+        let logs = root.join("Logs");
+        if create_dir_all_idem(&logs)? {
+            txn.dirs_created.push(logs);
+        }
 
         // ── T3: seed work_chapters rows ────────────────────────────────
+        // Note (F2 follow-up): T3 + T4 each run their own internal sqlx
+        // transaction (single-stmt for patch_work; multi-stmt inside
+        // seed_chapters). Wrapping both in one cross-call DB transaction
+        // requires tx-aware variants of `seed_chapters`/`patch_work` in
+        // `nexus-local-db` and is tracked under R-V133P1-09. If T3 or
+        // T4 fails, the ScaffoldTransaction rolls back FS state; any
+        // rows produced by an earlier T3 will remain. For V1.36
+        // single-user pre-1.0 this is acceptable — re-init is row-level
+        // idempotent (work_chapters seeding ignores existing rows via
+        // INSERT OR IGNORE, and patch_work is itself a single UPDATE).
         let chapters_seeded = if let Some(pool) = &self.pool {
             let now = chrono::Utc::now().to_rfc3339();
             work_chapters::seed_chapters(
@@ -408,6 +428,24 @@ impl Capability for NovelProjectScaffold {
             );
         }
 
+        // ── F2: scaffold succeeded — project the txn-owned paths into
+        //        the output shape, then commit to suppress Drop rollback.
+        let files_created: Vec<String> = txn
+            .files_created
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+            .collect();
+        let dirs_created: Vec<String> = txn
+            .dirs_created
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .map(|rel| rel.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            })
+            .collect();
+        txn.commit();
+
         let output = ScaffoldOutput {
             scaffold_root: root.to_string_lossy().to_string(),
             chapters_seeded,
@@ -424,28 +462,106 @@ impl Capability for NovelProjectScaffold {
 // ---------------------------------------------------------------------------
 
 /// Create a directory and all parents. No-op if it already exists.
-fn create_dir_all_idem(path: &Path) -> Result<(), CapabilityError> {
+///
+/// Returns `Ok(true)` if a fresh directory was created (and is therefore
+/// owned by the in-flight `ScaffoldTransaction`), `Ok(false)` if it was
+/// already present and must NOT be removed on rollback.
+fn create_dir_all_idem(path: &Path) -> Result<bool, CapabilityError> {
+    let pre_existed = path.exists();
     std::fs::create_dir_all(path)
-        .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))
+        .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))?;
+    Ok(!pre_existed)
 }
 
 /// Write file only if it doesn't exist (idempotent per T6).
+///
+/// On rollback, only files this call actually wrote (return value `true`)
+/// will be removed; pre-existing files are preserved.
 fn write_file_idem(
     path: &Path,
     content: &str,
-    files_created: &mut Vec<String>,
-) -> Result<(), CapabilityError> {
+    files_created: &mut Vec<PathBuf>,
+) -> Result<bool, CapabilityError> {
     if path.exists() {
         info!(path = %path.display(), "write_file_idem: skip (exists)");
-        return Ok(());
+        return Ok(false);
     }
     std::fs::write(path, content)
         .map_err(|e| CapabilityError::Internal(format!("write {}: {e}", path.display())))?;
-    // Store relative name (parent dir / filename)
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        files_created.push(name.to_string());
+    files_created.push(path.to_path_buf());
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// ScaffoldTransaction — F2 (C-002, C-2, W-3) — FS rollback guard
+// ---------------------------------------------------------------------------
+//
+// Wraps the in-flight FS scaffold so that, if any subsequent step (template
+// render, chapter seed, works PATCH) returns an error before `commit()` is
+// called, the guard's `Drop` impl removes only the files and directories
+// THIS invocation created. Files/dirs that pre-existed (e.g. re-init over
+// a partially-scaffolded tree) are left untouched.
+//
+// Cross-call DB atomicity (seed_chapters + patch_work in a single SQL
+// transaction) requires transaction-aware variants of those helpers in
+// nexus-local-db and is tracked as a follow-up under R-V133P1-09. The
+// FS-side rollback addresses the primary "partial state on error" risk
+// flagged by QC C-002 / C-2.
+
+struct ScaffoldTransaction {
+    files_created: Vec<PathBuf>,
+    dirs_created: Vec<PathBuf>,
+    committed: bool,
+}
+
+impl ScaffoldTransaction {
+    fn new() -> Self {
+        Self {
+            files_created: Vec::new(),
+            dirs_created: Vec::new(),
+            committed: false,
+        }
     }
-    Ok(())
+
+    /// Mark the scaffold as successfully committed; the Drop impl becomes
+    /// a no-op. Call only after all DB writes succeed.
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for ScaffoldTransaction {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        // Best-effort rollback. We log but do not panic — if the FS state
+        // is inconsistent, the next idempotent re-init will reconcile.
+        for f in &self.files_created {
+            if let Err(e) = std::fs::remove_file(f) {
+                tracing::warn!(
+                    path = %f.display(),
+                    error = %e,
+                    "ScaffoldTransaction rollback: remove_file failed"
+                );
+            }
+        }
+        // Remove dirs in reverse (children before parents).
+        for d in self.dirs_created.iter().rev() {
+            if let Err(e) = std::fs::remove_dir(d) {
+                tracing::warn!(
+                    path = %d.display(),
+                    error = %e,
+                    "ScaffoldTransaction rollback: remove_dir failed (likely non-empty due to pre-existing entries — expected)"
+                );
+            }
+        }
+        tracing::warn!(
+            files = self.files_created.len(),
+            dirs = self.dirs_created.len(),
+            "novel.project_scaffold: rolled back filesystem state"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

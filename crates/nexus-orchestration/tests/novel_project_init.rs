@@ -733,3 +733,49 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
     );
 }
 
+
+// ---------------------------------------------------------------------------
+// T7g: F2 — scaffold is atomic; mid-flight failure rolls back FS state
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
+    // Force T3 (work_chapters seed) to fail by referencing a work_id that
+    // does not exist in `works` (FK violation). Verify the FS scaffold
+    // written before T3 is removed by ScaffoldTransaction's Drop guard.
+    let (pool, dir) = fresh_pool().await;
+    // intentionally do NOT call insert_test_work — work_chapters FK
+    // (work_id -> works.work_id) will fire on seed_chapters.
+
+    let works_root = dir.path().join("Works");
+    let cap = make_cap(pool.clone(), &works_root);
+
+    let input = scaffold_input(
+        "wrk_no_such_row",
+        "atomic-test",
+        "Atomic Test",
+        None,
+        2,
+    );
+
+    let err = cap
+        .run(input)
+        .await
+        .expect_err("seed_chapters must fail on missing work FK");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("seed_chapters") || msg.contains("FOREIGN KEY") || msg.contains("constraint"),
+        "F2: expected FK / seed_chapters error, got: {msg}"
+    );
+
+    // ScaffoldTransaction Drop must have removed the partial scaffold.
+    let scaffold_root = works_root.join("atomic-test");
+    assert!(
+        !scaffold_root.exists(),
+        "F2: ScaffoldTransaction must have removed the partial scaffold at {}",
+        scaffold_root.display()
+    );
+    // Parent Works/ root may persist if it was created by the test
+    // harness or pre-existing — only the work_ref subtree is owned by
+    // this invocation.
+}
