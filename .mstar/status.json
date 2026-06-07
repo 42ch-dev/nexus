@@ -79,27 +79,6 @@
     },
     {
       "id": "2026-06-07-v1.37-novel-multi-chapter-chronology",
-      "status": "InReview",
-      "file": ".mstar/plans/2026-06-07-v1.37-novel-multi-chapter-chronology.md",
-      "working_branch": "feature/v1.37-novel-multi-chapter-chronology",
-      "merge_target": "iteration/v1.37",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-07-v1.37-novel-foundation-first"
-        ],
-        "description": "P1 — multi-chapter and multi-volume chronology roadmap",
-        "updated_at": "2026-06-08T19:30:00+08:00",
-        "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, preset YAML, or CLI implementation in P1",
-        "spec_amendment": ".mstar/knowledge/specs/novel-workflow-profile.md §4.5 and §8.1",
-        "deferred_features": [
-          "DF-62"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-07-v1.37-novel-multi-chapter-chronology",
       "status": "Done",
       "file": ".mstar/plans/2026-06-07-v1.37-novel-multi-chapter-chronology.md",
       "working_branch": "feature/v1.37-novel-multi-chapter-chronology",
@@ -171,7 +150,7 @@
     },
     {
       "id": "2026-06-07-v1.37-novel-quality-loop-roadmap",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-07-v1.37-novel-quality-loop-roadmap.md",
       "working_branch": "feature/v1.37-novel-quality-loop-roadmap",
       "merge_target": "iteration/v1.37",
@@ -189,7 +168,10 @@
           "DF-67"
         ],
         "updated_at": "2026-06-08T22:00:00+08:00",
-        "status_transition": "Todo → InProgress → InReview on 2026-06-08 after T1–T8 spec/tracker amendments",
+        "done_at": "2026-06-08T22:15:00+08:00",
+        "qc": "single qc-specialist review (docs-only) Approve — 5/5 ACs, no V1.36 llm_judge conflict, no Redis/cron/platform reintroduction, Logs/** sync exclusion reaffirmed",
+        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-08 after T1–T8 spec/tracker amendments + single QC review",
         "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, embedded preset, prompt template, daemon scheduled task, CLI subcommand, rules writer, or platform behavior in P3",
         "spec_amendment": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5",
         "shipped": [
@@ -200,7 +182,8 @@
           "Logs/brainstorm|write|review|publish roadmap structure documented; Logs/** sync exclusion reaffirmed (DF-66)",
           "reflection-loop → findings / rule-suggestion integration documented as future implementation",
           "Deferred tracker updated for DF-64, DF-65, DF-66, DF-67 with V1.37 P3 roadmap-only dispositions"
-        ]
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-07-v1.37-novel-quality-loop-roadmap/qc1.md (Approve)"
       }
     }
   ],
